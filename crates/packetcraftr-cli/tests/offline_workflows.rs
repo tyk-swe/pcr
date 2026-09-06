@@ -850,6 +850,128 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
 }
 
 #[test]
+fn recipe_stdin_matches_files_for_yaml_json_and_expressions() {
+    let yaml = include_str!("../../../examples/documents/packet-raw.yaml");
+    let commented = format!("# A packet recipe\n\n{yaml}");
+    let (schema, layers) = yaml.split_once('\n').unwrap();
+    let reordered = format!("{layers}{schema}\n");
+    let json = include_str!("../../../examples/documents/packet-ipv4-udp.json");
+    for (suffix, input) in [
+        (".yaml", yaml),
+        (".yaml", commented.as_str()),
+        (".yaml", reordered.as_str()),
+        (".json", json),
+        (".txt", "raw"),
+        (".txt", "raw(text=hello) / raw(text=world)"),
+        (".txt", "raw(text=\"schema: # ---\")"),
+    ] {
+        let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+        file.write_all(input.as_bytes()).unwrap();
+        file.flush().unwrap();
+        let from_file = run(&[
+            "--output",
+            "json",
+            "build",
+            "--packet-file",
+            path_text(file.path()),
+        ]);
+        let from_stdin = run_with_stdin(&["--output", "json", "build"], input.as_bytes());
+        assert!(from_file.status.success(), "{input}: {from_file:?}");
+        assert!(from_stdin.status.success(), "{input}: {from_stdin:?}");
+        assert_eq!(parse_json(&from_stdin), parse_json(&from_file), "{input}");
+    }
+}
+
+#[test]
+fn malformed_recipe_stdin_retains_document_and_expression_diagnostics() {
+    for (suffix, input) in [
+        (".yaml", "schema: packetcraftr.packet/v1\nlayers: ["),
+        (
+            ".yaml",
+            "# A broken packet\nschema: packetcraftr.packet/v1\nlayers: [",
+        ),
+        (".yaml", "layers: [\nschema: packetcraftr.packet/v1"),
+        (
+            ".json",
+            "{\"schema\": \"packetcraftr.packet/v1\", \"layers\": [",
+        ),
+    ] {
+        let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
+        file.write_all(input.as_bytes()).unwrap();
+        file.flush().unwrap();
+        let from_file = run(&[
+            "--output",
+            "json",
+            "build",
+            "--packet-file",
+            path_text(file.path()),
+        ]);
+        let from_stdin = run_with_stdin(&["--output", "json", "build"], input.as_bytes());
+        assert_eq!(from_file.status.code(), Some(2), "{input}");
+        assert_eq!(from_stdin.status.code(), Some(2), "{input}");
+        let expected = parse_json(&from_file)["error"].clone();
+        let actual = parse_json(&from_stdin)["error"].clone();
+        assert_eq!(expected["code"], "cli.document_syntax");
+        assert!(
+            actual["message"] == expected["message"]
+                || actual["causes"]
+                    .as_array()
+                    .is_some_and(|causes| causes.contains(&expected["message"])),
+            "file document diagnostic must survive on stdin: {expected:?}, {actual:?}",
+        );
+    }
+
+    for expression in ["raw(text=", "raw(unknown=value)", "missing_protocol()"] {
+        let explicit = run(&["--output", "json", "build", "--packet", expression]);
+        let piped = run_with_stdin(&["--output", "json", "build"], expression.as_bytes());
+        assert_eq!(explicit.status.code(), Some(2), "{expression}");
+        assert_eq!(piped.status.code(), explicit.status.code(), "{expression}");
+        let expected = parse_json(&explicit)["error"].clone();
+        let actual = parse_json(&piped)["error"].clone();
+        assert_eq!(actual["code"], expected["code"], "{expression}");
+        assert_eq!(actual["message"], expected["message"], "{expression}");
+    }
+}
+
+#[test]
+fn recipe_stdin_keeps_file_byte_and_build_layer_limits() {
+    let limit = packetcraftr::core::document::DEFAULT_MAX_DOCUMENT_BYTES;
+    let oversized = vec![b' '; limit + 1];
+    let layers = b"# Two layers\nlayers:\n  - protocol: raw\n  - protocol: raw\nschema: packetcraftr.packet/v1\n";
+    for (input, code, message) in [
+        (
+            oversized.as_slice(),
+            2,
+            format!("packet input exceeds {limit} byte limit"),
+        ),
+        (layers.as_slice(), 3, "layer".to_owned()),
+    ] {
+        let mut file = tempfile::Builder::new().suffix(".yaml").tempfile().unwrap();
+        file.write_all(input).unwrap();
+        file.flush().unwrap();
+        let from_file = run(&[
+            "--output",
+            "json",
+            "build",
+            "--max-layers",
+            "1",
+            "--packet-file",
+            path_text(file.path()),
+        ]);
+        let from_stdin = run_with_stdin(&["--output", "json", "build", "--max-layers", "1"], input);
+        assert_eq!(from_file.status.code(), Some(code));
+        assert_eq!(from_stdin.status.code(), Some(code));
+        assert_eq!(parse_json(&from_stdin), parse_json(&from_file));
+        assert!(
+            parse_json(&from_stdin)["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(&message)
+        );
+    }
+}
+
+#[test]
 fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
     let documents = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
     for document in [

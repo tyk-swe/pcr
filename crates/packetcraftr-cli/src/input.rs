@@ -125,8 +125,8 @@ pub(crate) fn read_recipe(
             (trimmed.starts_with("schema:") || trimmed.starts_with("---"))
                 .then_some(core::document::Format::Yaml)
         });
-    if let Some(format) = format {
-        return core::document::Packet::parse_with_limits(
+    let parse_document = |format| {
+        core::document::Packet::parse_with_limits(
             &input,
             format,
             &core::document::DocumentLimits {
@@ -134,10 +134,25 @@ pub(crate) fn read_recipe(
                 ..core::document::DocumentLimits::DEFAULT
             },
         )
-        .and_then(|document| document.to_packet(registry, max_layers))
-        .map_err(CliError::classified);
+    };
+    if let Some(format) = format {
+        return parse_document(format)
+            .and_then(|document| document.to_packet(registry, max_layers))
+            .map_err(CliError::classified);
     }
-    parse_expression(&input, registry, max_layers)
+    let mut expression_error = match parse_expression(&input, registry, max_layers) {
+        Ok(packet) => return Ok(packet),
+        Err(error) => error,
+    };
+    match parse_document(core::document::Format::Yaml) {
+        Ok(document) => document
+            .to_packet(registry, max_layers)
+            .map_err(CliError::classified),
+        Err(error) => {
+            expression_error.causes.push(error.to_string());
+            Err(expression_error)
+        }
+    }
 }
 
 fn parse_expression(

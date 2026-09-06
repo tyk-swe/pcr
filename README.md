@@ -35,6 +35,13 @@ Use `packetcraftr --help`, `packetcraftr <COMMAND> --help`, and
 `packetcraftr protocols [PROTOCOL]` for the authoritative command, option, and
 protocol catalogs.
 
+Recipe commands also accept a packet expression, JSON, or YAML from redirected
+stdin when neither `--packet` nor `--packet-file` is supplied. YAML comments and
+mapping key order work the same as in `.yaml` files. For example,
+`packetcraftr --output hex build < examples/documents/packet-raw.yaml` builds the
+document under the same input byte and build limits. Terminal stdin is rejected
+instead of waiting for interactive input.
+
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |

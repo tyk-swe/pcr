@@ -210,6 +210,9 @@ jobs:
           cp README.md "$staging/README.md"
           cp CHANGELOG.md "$staging/CHANGELOG.md"
           cp -R schemas "$staging/schemas"
+          mkdir -p "$staging/examples/captures" "$staging/examples/documents"
+          cp examples/captures/tls-handshake.pcapng "$staging/examples/captures/"
+          cp examples/documents/packet-ipv4-udp.json "$staging/examples/documents/"
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
             "$ARCHIVE_BASENAME"
       - if: runner.os == 'Windows'
@@ -225,6 +228,11 @@ jobs:
           Copy-Item "README.md" $staging
           Copy-Item "CHANGELOG.md" $staging
           Copy-Item "schemas" (Join-Path $staging "schemas") -Recurse
+          New-Item -ItemType Directory -Path `
+            (Join-Path $staging "examples/captures"), `
+            (Join-Path $staging "examples/documents") | Out-Null
+          Copy-Item "examples/captures/tls-handshake.pcapng" (Join-Path $staging "examples/captures")
+          Copy-Item "examples/documents/packet-ipv4-udp.json" (Join-Path $staging "examples/documents")
           Compress-Archive -Path $staging -DestinationPath $archive
       - if: runner.os != 'Windows'
         name: Smoke-test Unix archive
@@ -241,11 +249,14 @@ jobs:
             README.md \
             CHANGELOG.md \
             schemas/packetcraftr.packet.v1.schema.json \
-            schemas/packetcraftr.output.v1.schema.json
+            schemas/packetcraftr.output.v1.schema.json \
+            examples/captures/tls-handshake.pcapng \
+            examples/documents/packet-ipv4-udp.json
           do
             test -s "$extraction/$ARCHIVE_BASENAME/$document"
           done
-          test "$("$executable" --version)" = "packetcraftr $VERSION"
+          reported_version="$("$executable" --version)"
+          test "${reported_version%%$'\n'*}" = "packetcraftr $VERSION"
           protocols="$("$executable" protocols)"
           test -n "$protocols"
           expected=450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f
@@ -258,6 +269,19 @@ jobs:
             "$executable" --output hex dissect --link-type 228 --hex "$built"
           )"
           test "$dissected" = "$built"
+          cd "$extraction/$ARCHIVE_BASENAME"
+          read_output="$(
+            "$executable" --output ndjson read examples/captures/tls-handshake.pcapng \
+              --max-frames 100
+          )"
+          test -n "$read_output"
+          tls_output="$("$executable" tls examples/captures/tls-handshake.pcapng)"
+          test -n "$tls_output"
+          recipe_build="$(
+            "$executable" --output json build \
+              --packet-file examples/documents/packet-ipv4-udp.json
+          )"
+          test -n "$recipe_build"
       - if: runner.os == 'Windows'
         name: Smoke-test Windows archive
         shell: pwsh
@@ -276,7 +300,9 @@ jobs:
             "README.md",
             "CHANGELOG.md",
             "schemas/packetcraftr.packet.v1.schema.json",
-            "schemas/packetcraftr.output.v1.schema.json"
+            "schemas/packetcraftr.output.v1.schema.json",
+            "examples/captures/tls-handshake.pcapng",
+            "examples/documents/packet-ipv4-udp.json"
           )) {
             $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
             if (
@@ -286,7 +312,7 @@ jobs:
               throw "packaged $document is missing or empty"
             }
           }
-          $reportedVersion = (& $executable --version | Out-String).Trim()
+          $reportedVersion = (& $executable --version | Select-Object -First 1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) {
             throw "packaged executable failed with exit code $LASTEXITCODE"
           }
@@ -312,6 +338,27 @@ jobs:
           ).Trim()
           if ($LASTEXITCODE -ne 0 -or $dissected -ne $built) {
             throw "packaged executable did not preserve exact dissect bytes: $dissected"
+          }
+          Set-Location (Join-Path $extraction $env:ARCHIVE_BASENAME)
+          $readOutput = (
+            & $executable --output ndjson read examples/captures/tls-handshake.pcapng `
+              --max-frames 100 | Out-String
+          ).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($readOutput)) {
+            throw "packaged executable failed the README read example"
+          }
+          $tlsOutput = (
+            & $executable tls examples/captures/tls-handshake.pcapng | Out-String
+          ).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tlsOutput)) {
+            throw "packaged executable failed the README TLS example"
+          }
+          $recipeBuild = (
+            & $executable --output json build `
+              --packet-file examples/documents/packet-ipv4-udp.json | Out-String
+          ).Trim()
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($recipeBuild)) {
+            throw "packaged executable failed the README packet-file build example"
           }
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Verify full Linux binary links libpcap

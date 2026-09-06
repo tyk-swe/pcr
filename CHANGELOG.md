@@ -738,6 +738,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Release archives include the capture and packet document used by the README
+  Quick Start, with their example paths preserved.
 - `tls --stream` reports absent selectors, including empty captures, from its
   first analysis pass. The invocation error names the missing stream without
   rereading the capture to report a valid index range.

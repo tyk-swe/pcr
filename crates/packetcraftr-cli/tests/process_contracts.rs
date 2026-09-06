@@ -896,7 +896,8 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
                     String::from_utf8_lossy(&output.stderr).contains("incomplete"),
                     "{output:?}"
                 );
-                assert!(!output.stdout.is_empty());
+                // A blocked pipe write may expose no bytes before process exit.
+                // Neither an empty stream nor a partial record completes the first record.
                 assert!(
                     !output.stdout.contains(&b'\n'),
                     "the first NDJSON record must remain incomplete: {output:?}"

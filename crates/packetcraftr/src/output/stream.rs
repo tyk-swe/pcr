@@ -301,6 +301,7 @@ mod tests {
     use packetcraftr_core::error::Coordinate;
 
     struct BlockedWriter {
+        entered: mpsc::Sender<()>,
         release: mpsc::Receiver<()>,
         dropped: mpsc::Sender<()>,
         writes: Arc<AtomicUsize>,
@@ -309,6 +310,7 @@ mod tests {
     impl Write for BlockedWriter {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
             self.writes.fetch_add(1, Ordering::SeqCst);
+            self.entered.send(()).map_err(io::Error::other)?;
             self.release
                 .recv_timeout(Duration::from_secs(3))
                 .map_err(io::Error::other)?;
@@ -329,6 +331,7 @@ mod tests {
     #[test]
     fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_worker() {
         for terminal_error in [false, true] {
+            let (entered, writer_entered) = mpsc::channel();
             let (release, wait) = mpsc::channel();
             let (dropped, writer_dropped) = mpsc::channel();
             let writes = Arc::new(AtomicUsize::new(0));
@@ -336,6 +339,7 @@ mod tests {
             let stream = StreamEncoder::new_bounded(
                 Command::Read,
                 BlockedWriter {
+                    entered,
                     release: wait,
                     dropped,
                     writes: Arc::clone(&writes),
@@ -361,6 +365,7 @@ mod tests {
             assert!(!stream.is_terminal());
             assert!(stream.complete((), Vec::new()).is_err());
             assert!(stream.emit_data((), Vec::new()).is_err());
+            writer_entered.recv_timeout(Duration::from_secs(1)).unwrap();
             assert_eq!(writes.load(Ordering::SeqCst), 1);
             drop(stream);
             assert!(Sink::new_in(&runtime, |(): ()| Ok(())).is_err());

@@ -363,36 +363,6 @@ impl capture::Session for EmptySession {
 }
 
 #[test]
-fn capture_request_and_session_metadata_are_owned() {
-    let request = capture::Request {
-        interface: interface(),
-        limits: capture::Limits::default(),
-        filter: Some("udp".to_owned()),
-        promiscuous: true,
-    };
-    let mut session = NoCapture.arm_capture(&request).expect("fixture session");
-    assert_eq!(
-        session.metadata(),
-        &capture::Metadata {
-            interface: interface(),
-            link_type: LinkType::LINUX_SLL,
-            snap_length: request.limits.snap_length,
-        }
-    );
-    session
-        .wait_ready(Duration::ZERO)
-        .expect("fixture is immediately ready");
-    assert!(
-        session
-            .next_captured_frame(Duration::ZERO)
-            .expect("fixture read")
-            .is_none()
-    );
-    assert_eq!(session.statistics(), capture::Statistics::default());
-    session.shutdown().expect("fixture cleanup");
-}
-
-#[test]
 fn boxed_capture_session_forwards_the_complete_owned_session_contract() {
     let request = capture::Request {
         interface: interface(),

@@ -13,8 +13,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 pub const SCHEMA_V1: &str = "packetcraftr.output/v1";
 
 /// Declares the command vocabulary once: the enum, [`Command::ALL`], and
-/// [`Command::as_str`] all come from the single list below, in the canonical
-/// serialized order that `ALL` and the published examples are pinned to.
+/// [`Command::as_str`] all come from the single list below, in canonical order.
 macro_rules! commands {
     (
         $(#[$enum_attribute:meta])*

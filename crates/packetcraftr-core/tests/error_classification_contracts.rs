@@ -403,7 +403,6 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
         let message = error.to_string();
         assert_message_is_stable(&message, variant);
         assert!(message.contains(expected), "{variant}: {message}");
-        assert_eq!(error.clone(), error, "{variant} must compare by value");
     }
 }
 

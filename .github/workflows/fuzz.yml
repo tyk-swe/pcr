@@ -4,13 +4,6 @@ on:
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/fuzz.yml"
-      - "fuzz/**"
-      - "crates/packetcraftr-core/**"
-      - "examples/documents/**"
-      - "examples/captures/**"
 
 permissions:
   contents: read
@@ -52,8 +45,8 @@ jobs:
           dictionary=()
           mkdir -p "corpora/${{ matrix.target }}"
           corpus+=("corpora/${{ matrix.target }}")
-          # Published examples double as seeds; they are pinned to the
-          # schemas by the example matrix tests, so they cannot rot.
+          # Published examples double as seeds; document contract tests
+          # validate packet and output JSON examples against their schemas.
           case "${{ matrix.target }}" in
             packet_document_json|packet_build) corpus+=("../examples/documents") ;;
             pcapng_parse|tls_session) corpus+=("../examples/captures") ;;

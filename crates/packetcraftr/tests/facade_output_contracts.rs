@@ -59,32 +59,35 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
 }
 
 #[test]
-fn current_schema_and_published_examples_use_output_v1() {
+fn schema_retains_output_version_and_broadcast_selection() {
     let schema = output_schema();
     assert_eq!(
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
         SCHEMA_V1
     );
     assert!(
-        schema["$defs"]["baseEnvelope"]["properties"]["sequence"]["description"]
-            .as_str()
-            .is_some_and(|description| description.contains("Zero-based ordinal"))
-    );
-    assert_eq!(schema["$defs"]["sourceFrame"]["allOf"][1]["minimum"], 1);
-    assert!(
-        schema["$defs"]["sourceFrame"]["description"]
-            .as_str()
-            .is_some_and(|description| description.contains("frame.number"))
-    );
-    assert_eq!(
-        schema["$defs"]["readSuccess"]["properties"]["result"]["$ref"],
-        "#/$defs/readStreamResult"
-    );
-    assert!(
         schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]
             .as_array()
             .expect("route selection reasons are an enum")
             .contains(&Value::String("broadcast".to_owned()))
+    );
+}
+
+#[test]
+fn schema_accepts_one_based_source_frames_and_rejects_zero() {
+    let validator = output_schema_validator();
+    let mut document: Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/output-read-dissect-event.json"
+    ))
+    .expect("published read example must be JSON");
+    document["result"]["source_frame"] = json!(1);
+    validator
+        .validate(&document)
+        .expect("source frame 1 is valid");
+    document["result"]["source_frame"] = json!(0);
+    assert!(
+        validator.validate(&document).is_err(),
+        "source frame 0 is invalid"
     );
 }
 
@@ -106,6 +109,7 @@ fn every_published_output_example_validates_against_the_schema() {
         })
         .collect::<Vec<_>>();
     examples.sort();
+    assert!(!examples.is_empty(), "published output examples must exist");
 
     for path in examples {
         let document: Value = serde_json::from_str(

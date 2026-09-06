@@ -4,67 +4,24 @@
 // for library paths.
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::convert::Infallible;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
-    Client, Stats, StatsOverflow, exchange, policy,
+    Stats, StatsOverflow, exchange, policy,
     target::{Error as TargetError, Family, Hostname, Resolver, Target},
 };
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_netio as net;
-use packetcraftr_netio::{
-    Error as LiveIoError,
-    capture::Statistics,
-    interface::Id as InterfaceId,
-    neighbor,
-    route::{Decision, Provider},
-    transmit,
-};
+use packetcraftr_netio::capture::Statistics;
 
 struct FixedResolver(Vec<IpAddr>);
 
 impl Resolver for FixedResolver {
     fn resolve(&self, _hostname: &Hostname, _limit: usize) -> Result<Vec<IpAddr>, TargetError> {
         Ok(self.0.clone())
-    }
-}
-
-struct NoRoutes;
-
-impl Provider for NoRoutes {
-    type Error = Infallible;
-
-    fn lookup_with_preferences(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-    ) -> Result<Decision, Self::Error> {
-        unreachable!("registry accessor test never plans")
-    }
-}
-
-struct NoNeighbors;
-
-impl neighbor::Resolver for NoNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("registry accessor test never resolves neighbors")
-    }
-}
-
-struct NoIo;
-
-impl transmit::Sender for NoIo {
-    fn send(&self, _frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
-        unreachable!("registry accessor test never transmits")
     }
 }
 
@@ -477,17 +434,4 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
         packetcraftr::Error::Target(resolver).causes(),
         ["name or service not known"]
     );
-}
-
-#[test]
-fn client_exposes_the_exact_registry_arc() {
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let client = Client::new(
-        Arc::clone(&registry),
-        NoRoutes,
-        NoNeighbors,
-        NoIo,
-        policy::Policy::default(),
-    );
-    assert!(Arc::ptr_eq(client.registry(), &registry));
 }

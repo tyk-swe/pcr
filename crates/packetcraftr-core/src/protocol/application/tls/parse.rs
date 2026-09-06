@@ -51,14 +51,6 @@ pub enum Outcome<T> {
     Malformed(crate::codec::Error),
 }
 
-impl<T> Outcome<T> {
-    /// Reports whether a complete item was parsed.
-    #[must_use]
-    pub fn is_complete(&self) -> bool {
-        matches!(self, Self::Complete { .. })
-    }
-}
-
 /// Reports whether `input` starts with a plausible TLS record header.
 ///
 /// This is the dissection gate: content type in `20..=23`, legacy version in
@@ -774,7 +766,13 @@ mod tests {
             0x0303,
             &vec![0u8; MAX_RECORD_BODY][..],
         );
-        assert!(parse_record(&at_limit).is_complete());
+        match parse_record(&at_limit) {
+            Outcome::Complete { consumed, value } => {
+                assert_eq!(consumed, at_limit.len());
+                assert_eq!(value.body.as_ref(), &vec![0u8; MAX_RECORD_BODY]);
+            }
+            other => panic!("expected Complete at the record limit, got {other:?}"),
+        }
     }
 
     #[test]

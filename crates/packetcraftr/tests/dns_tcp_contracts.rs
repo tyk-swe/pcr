@@ -16,14 +16,6 @@ use packetcraftr::dns::tcp::{self as dns_tcp, Category};
 
 const QUERY: &[u8] = b"bounded query";
 
-/// Field-by-field equality for an error that retains a system source and so
-/// cannot derive `PartialEq`. `Debug` renders every field, the source
-/// included, so this compares strictly more than a derived `==` did.
-#[track_caller]
-fn assert_same_error(actual: &dns_tcp::Error, expected: &dns_tcp::Error) {
-    assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
-}
-
 const RESPONSE: &[u8] = &[0x12, 0x34, 0x80, 0, 0, 1, 0, 0, 0, 0, 0, 0];
 
 const SERVER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -158,7 +150,20 @@ fn loopback_early_close_reports_prefix_and_body_progress() {
         })
         .expect_err("early close must fail");
         server.join().expect("loopback server");
-        assert_same_error(&error, &expected);
+        match (error, expected) {
+            (
+                dns_tcp::Error::IncompletePrefix { actual },
+                dns_tcp::Error::IncompletePrefix { actual: expected },
+            ) => assert_eq!(actual, expected),
+            (
+                dns_tcp::Error::IncompleteMessage { declared, actual },
+                dns_tcp::Error::IncompleteMessage {
+                    declared: expected_declared,
+                    actual: expected_actual,
+                },
+            ) => assert_eq!((declared, actual), (expected_declared, expected_actual)),
+            (actual, expected) => panic!("expected {expected:?}, got {actual:?}"),
+        }
     }
 }
 

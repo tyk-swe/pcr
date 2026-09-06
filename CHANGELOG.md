@@ -22,8 +22,6 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Optional core `decrypt` feature with RustCrypto AES-GCM, ChaCha20-Poly1305,
   and HKDF dependencies, covered by the supported feature matrix.
-- CI checks public library API compatibility against the PR base or previous
-  main commit with `cargo semver-checks`.
 - `build` and `dissect` expose `--max-layers` and `--max-packet-size`, and
   `traceroute` exposes a validated `--source-port` for UDP and TCP probes.
 - DNS queries and decoded records support CAA (type 257), and streamed scan
@@ -48,12 +46,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - The root `--help` and the README document the exit-code contract (2 cli,
   3 packet, 4 capability, 5 io, 6 policy, 70 internal); a test keeps the help
   table equal to the code that maps error kinds to exit codes.
-- A test that fails when a property in `schemas/packetcraftr.output.v1.schema.json`
-  is serialized by no `examples/documents/output-*.json`, so consumers generating
-  strict types from the examples see every field; the few live-only properties
-  carry a reason in the test. New examples cover `stats --table io`, `--table
-  ports`, `--table protocols` and `--table endpoints`, `read --dissect`, a
-  dissection with a field-level diagnostic, a DNS `any` response with EDNS,
+- New examples cover `stats --table io`, `--table ports`, `--table protocols`
+  and `--table endpoints`, `read --dissect`, a dissection with a field-level
+  diagnostic, and a DNS `any` response with EDNS,
   SOA, NS, MX and unknown-type records plus an undecoded reply, DNS CNAME, PTR
   and SRV record events, scan and traceroute undecoded-frame events, a scan
   probe response, and TLS sessions ended by a fatal alert or a truncated
@@ -142,6 +137,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   repository-backed Quick Start commands.
 
 ### Changed
+
+- CI keeps Linux feature-profile tests and native platform validation while
+  reducing duplicate builds and job setup. Coverage reports are manual-only;
+  fuzzing runs daily or manually instead of on pull requests. Removed the
+  patch-only API compatibility gate during pre-1.0 development and unused
+  JUnit artifact uploads.
 
 - Aggregate output result objects and nested output records accept unknown
   fields, including shared records in NDJSON. Consumers must ignore these
@@ -721,6 +722,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   published `dnsUndecoded.transport` stays the constant `"udp"`.
 
 ### Removed
+
+- **Breaking:** removed `packetcraftr::dns::RecordValue::type_name()`; match
+  `RecordValue` variants for semantic inspection or use `type_code()` for the
+  numeric DNS record type. Removed
+  `packetcraftr_core::protocol::application::tls::Outcome::is_complete()`; match
+  `Outcome::Complete { consumed, value }` to inspect the parsed item and length.
 
 - **Breaking (library):** `output::stream::EncodeError::MissingCommand` and
   `::Writing`. The first existed only because `StreamEncoder::new` accepted an

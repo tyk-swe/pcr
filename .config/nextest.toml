@@ -8,5 +8,3 @@ slow-timeout = { period = "15s", terminate-after = 4 }
 [profile.ci]
 inherits = "default"
 fail-fast = false
-junit.path = "junit.xml"
-junit.report-name = "packetcraftr"

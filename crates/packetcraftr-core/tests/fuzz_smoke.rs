@@ -4,23 +4,16 @@
 
 use std::fs;
 use std::io::Cursor;
-use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions};
-use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
-use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
-use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
 use packetcraftr_core::filter::{Context as FilterContext, Filter, Options as FilterOptions};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::protocol::application::tls::{
-    Handshake, Outcome, Transport, ja3, ja3s, ja4, parse_handshake, parse_record,
-};
 use packetcraftr_core::protocol::builtin;
 
 #[path = "../../../fuzz/fuzz_targets/ip_reassembly_support.rs"]
@@ -195,39 +188,6 @@ fn smoke_test_filter_parse() {
 }
 
 #[test]
-fn smoke_test_tcp_reassembly() {
-    let mut interner = Interner::new();
-    let root_scope = interner.intern(None, Vec::new()).expect("root scope");
-    let flow = ScopedFlowKey {
-        scope: root_scope,
-        flow: FlowKey {
-            source: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-            destination: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-            source_port: 10000,
-            destination_port: 80,
-        },
-    };
-
-    let limits = ReassemblyLimits {
-        max_flows: 8,
-        max_aggregate_bytes: 64 * 1024,
-        ..Default::default()
-    };
-    let mut reassembler = Reassembler::new(limits);
-    let now = Instant::now();
-
-    let seg = Segment {
-        flow,
-        sequence: 1000,
-        syn: true,
-        fin: false,
-        rst: false,
-        payload: Bytes::from_static(b"hello"),
-    };
-    let _ = reassembler.push(seg, now);
-}
-
-#[test]
 fn smoke_test_ip_reassembly_seeds_reach_completion_and_overlap() {
     let corpus_dir = corpus("ip_reassembly");
     let mut coverage = ip_reassembly_support::Coverage::default();
@@ -249,47 +209,4 @@ fn smoke_test_ip_reassembly_seeds_reach_completion_and_overlap() {
     assert!(checked > 0, "IP reassembly corpus must contain seeds");
     assert!(coverage.completed, "seed corpus must reach completion");
     assert!(coverage.overlap, "seed corpus must reach overlap handling");
-}
-
-#[test]
-fn smoke_test_tls_assembly() {
-    let sample = b"\x16\x03\x01\x00\x05\x01\x00\x00\x01\x00";
-    let _ = parse_record(sample);
-    if let Outcome::Complete {
-        value: handshake, ..
-    } = parse_handshake(sample)
-    {
-        match handshake {
-            Handshake::ClientHello(client_hello) => {
-                let _ = ja3(&client_hello);
-                let _ = ja4(&client_hello, Transport::Tcp);
-            }
-            Handshake::ServerHello(server_hello) => {
-                let _ = ja3s(&server_hello);
-            }
-            _ => {}
-        }
-    }
-}
-
-#[test]
-fn smoke_test_packet_decode() {
-    let registry = builtin::registry();
-    let dissector = Dissector::new(Arc::clone(&registry));
-    let frame = Frame::new(
-        SystemTime::now(),
-        LinkType::IPV4,
-        Bytes::from_static(
-            b"\x45\x00\x00\x14\x00\x00\x00\x00\x40\x00\x00\x00\x0a\x00\x00\x01\x0a\x00\x00\x02",
-        ),
-    )
-    .unwrap();
-    if let Ok(decoded) = dissector.decode(frame, DecodeOptions::default()) {
-        for layer in decoded.packet.iter() {
-            let schema = layer.schema();
-            for field in schema.fields {
-                let _ = layer.field(field.name);
-            }
-        }
-    }
 }

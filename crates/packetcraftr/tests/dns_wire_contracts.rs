@@ -538,17 +538,26 @@ fn decoder_supports_every_modeled_rdata_shape() {
     );
     let decoded = decode(&message, "example.test", QueryType::Any);
     assert_eq!(decoded.answers.len(), records.len());
-    let names = decoded
+    let values = decoded
         .answers
         .iter()
-        .map(|record| record.value.type_name())
+        .map(|record| &record.value)
         .collect::<Vec<_>>();
-    assert_eq!(
-        names,
+    assert!(matches!(
+        values.as_slice(),
         [
-            "a", "ns", "cname", "soa", "ptr", "mx", "txt", "aaaa", "srv", "unknown"
+            RecordValue::A(_),
+            RecordValue::Ns(_),
+            RecordValue::Cname(_),
+            RecordValue::Soa { .. },
+            RecordValue::Ptr(_),
+            RecordValue::Mx { .. },
+            RecordValue::Txt(_),
+            RecordValue::Aaaa(_),
+            RecordValue::Srv { .. },
+            RecordValue::Unknown { .. },
         ]
-    );
+    ));
     assert_eq!(decoded.answers[0].value.type_code(), 1);
     assert_eq!(decoded.answers[9].value.type_code(), 65_000);
     assert!(matches!(
@@ -578,7 +587,6 @@ fn caa_record_decodes_flags_tag_and_value() {
     let decoded = decode(&message, "example.test", QueryType::Caa);
     assert_eq!(decoded.answers.len(), 1);
     assert_eq!(decoded.answers[0].value.type_code(), 257);
-    assert_eq!(decoded.answers[0].value.type_name(), "caa");
     assert!(matches!(
         &decoded.answers[0].value,
         RecordValue::Caa { flags, tag, value }

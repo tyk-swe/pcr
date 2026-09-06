@@ -33,29 +33,13 @@ jobs:
             os: ubuntu-latest
             cargo_args: --no-default-features --features native-route,native-layer3
             native_packages: false
-          - name: macos-no-default
-            os: macos-latest
-            cargo_args: --no-default-features
-            native_packages: false
           - name: macos-default
             os: macos-latest
             cargo_args: ""
             native_packages: false
-          - name: macos-pcap-free
-            os: macos-latest
-            cargo_args: --no-default-features --features native-route,native-layer3
-            native_packages: false
-          - name: windows-no-default
-            os: windows-latest
-            cargo_args: --no-default-features
-            native_packages: false
           - name: windows-default
             os: windows-latest
             cargo_args: ""
-            native_packages: false
-          - name: windows-pcap-free
-            os: windows-latest
-            cargo_args: --no-default-features --features native-route,native-layer3
             native_packages: false
           - name: ubuntu-all-features
             os: ubuntu-latest
@@ -73,17 +57,8 @@ jobs:
         with:
           # Keep in step with `nextest-version` in .config/nextest.toml.
           tool: nextest@0.9.143
-      - name: Check workspace
-        run: cargo check --locked --workspace --all-targets ${{ matrix.cargo_args }}
       - name: Run tests
         run: cargo nextest run --locked --workspace --profile ci ${{ matrix.cargo_args }}
-      - name: Upload JUnit report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: junit-${{ matrix.name }}
-          path: target/nextest/ci/junit.xml
-          if-no-files-found: error
 
   native-all-features:
     name: Native all-features check (${{ matrix.name }})
@@ -125,6 +100,8 @@ jobs:
         run: bash scripts/check-dangerous-ranges.sh
       - name: Smoke-test repository Quick Start
         run: bash scripts/check-quick-start.sh
+      - name: Check every supported feature profile
+        run: bash scripts/check-features.sh
       - name: Run Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Build API documentation
@@ -138,30 +115,8 @@ jobs:
           cargo deny check
           cargo deny --manifest-path fuzz/Cargo.toml check advisories
 
-  features:
-    name: Feature matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-      - name: Check every supported feature profile
-        run: bash scripts/check-features.sh
-
   msrv:
-    name: MSRV (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: no-default
-            cargo_args: --no-default-features
-          - name: pcap-free
-            cargo_args: --no-default-features --features native-route,native-layer3
-          - name: all-features
-            cargo_args: --all-features
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -172,27 +127,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.96.0
-      - name: Check workspace
-        run: cargo check --locked --workspace --all-targets ${{ matrix.cargo_args }}
-
-  semver:
-    name: Public API compatibility
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
-        with:
-          tool: cargo-semver-checks@0.50.0
-      - name: Check library API compatibility
-        env:
-          BASELINE_REV: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
-        run: >-
-          cargo semver-checks check-release
-          -p packetcraftr-core -p packetcraftr-netio -p packetcraftr
-          --baseline-rev "$BASELINE_REV" --all-features --release-type patch
+      - name: Check minimum toolchain compatibility
+        run: |
+          cargo check --locked --workspace --all-targets --no-default-features
+          cargo check --locked --workspace --all-targets --all-features

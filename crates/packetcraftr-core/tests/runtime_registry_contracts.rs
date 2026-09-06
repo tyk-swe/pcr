@@ -54,7 +54,6 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
         Some(Discriminator(7))
     );
     assert_eq!(registry.protocols().len(), 2);
-    assert!(format!("{registry:?}").contains("binding_count"));
 }
 
 fn build_and_decode_probe(

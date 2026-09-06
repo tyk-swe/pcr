@@ -210,23 +210,6 @@ impl RecordValue {
         }
     }
 
-    pub const fn type_name(&self) -> &'static str {
-        match self {
-            Self::A(_) => "a",
-            Self::Aaaa(_) => "aaaa",
-            Self::Caa { .. } => "caa",
-            Self::Cname(_) => "cname",
-            Self::Mx { .. } => "mx",
-            Self::Ns(_) => "ns",
-            Self::Ptr(_) => "ptr",
-            Self::Soa { .. } => "soa",
-            Self::Srv { .. } => "srv",
-            Self::Txt(_) => "txt",
-            Self::Opt(_) => "opt",
-            Self::Unknown { .. } => "unknown",
-        }
-    }
-
     pub(in crate::dns) fn referenced_name(&self) -> Option<&Name> {
         match self {
             Self::Cname(value) | Self::Ns(value) => Some(value),

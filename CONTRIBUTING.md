@@ -22,8 +22,12 @@ The `pcap-free` profile (`--no-default-features --features native-route,native-l
 supports routing and raw layer 3 without libpcap. All features enable every native provider.
 Use `./scripts/check-features.sh` to check the supported public feature matrix.
 The [CI workflow](.github/workflows/ci.yml) is the authoritative check set;
-macOS and Windows test `no-default`, `default`, and `pcap-free`, while their
-all-feature builds run `cargo check`.
+Linux tests `no-default`, `default`, `pcap-free`, and all features. macOS and
+Windows test the default profile and compile all features. The quality job
+checks every supported feature profile; MSRV checks cover no-default and all
+features. Pre-1.0 API changes are documented in the changelog without a
+patch-only compatibility gate. Coverage reports run on manual dispatch;
+fuzzing runs daily or on manual dispatch.
 
 The fuzz harness is a standalone workspace. Bounded nightly smoke runs are
 registered in [fuzz.yml](.github/workflows/fuzz.yml). For example, format it

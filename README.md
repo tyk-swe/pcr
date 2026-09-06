@@ -131,6 +131,10 @@ and derived-datagram accounting separately. The shared `--ip-overlap`,
 `--ip-idle-expiry-ms`, and `--max-ip-*` options make overlap behavior, expiry,
 and every retained-state ceiling explicit.
 
+`follow --stream tcp:N` and `follow --stream udp:N` exit with invocation error
+2 when the selected conversation is absent, including in an empty capture.
+Existing conversations with no payload still succeed with zero extracted bytes.
+
 ## Library
 
 Rust users normally depend on the `packetcraftr` facade. It re-exports packet

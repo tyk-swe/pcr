@@ -62,6 +62,17 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         },
     )
     .map_err(CliError::classified)?;
+    // Stream indices are assigned before filtering, including frames without payload.
+    if run_summary.frames_matched == 0 {
+        return Err(CliError::new(
+            Kind::Cli,
+            format!(
+                "--stream {}:{} is not present",
+                selector.transport.as_str(),
+                selector.index
+            ),
+        ));
+    }
     let summary = collector.finish(&run_summary);
 
     match format {

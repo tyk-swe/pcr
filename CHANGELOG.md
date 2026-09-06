@@ -741,6 +741,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `follow --stream` exits with invocation error 2 for absent TCP or UDP
+  conversations, including empty captures, using the first analysis pass.
+  Payload-free TCP streams and empty UDP datagrams still succeed.
 - Aggregate JSON output for `follow` and `tls` skips output conversion for
   items beyond the retention ceiling while preserving omission counts.
 - Release archives include the capture and packet document used by the README

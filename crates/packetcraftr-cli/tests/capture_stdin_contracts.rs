@@ -132,20 +132,27 @@ fn piped_capture_rewrites_preserve_every_source_byte() {
 }
 
 #[test]
-fn piped_missing_tls_selector_fails_after_consuming_the_capture() {
+fn piped_missing_selectors_fail_after_consuming_the_capture() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let bytes = handshake_capture(capture_format);
-        for format in ["json", "ndjson"] {
-            let output =
-                assert_file_stdin_parity(&bytes, "tls", &["--stream", "tcp:999"], format, 2);
-            assert!(
-                String::from_utf8_lossy(&output.stdout).contains("--stream tcp:999 is not present")
-            );
-            if format == "ndjson" {
-                let records = parse_ndjson(&output);
-                assert_contiguous(&records);
-                assert_eq!(records.len(), 1);
-                assert_eq!(records[0]["status"], "error");
+        for (command, selector) in [
+            ("tls", "tcp:999"),
+            ("follow", "tcp:999"),
+            ("follow", "udp:999"),
+        ] {
+            for format in ["json", "ndjson"] {
+                let output =
+                    assert_file_stdin_parity(&bytes, command, &["--stream", selector], format, 2);
+                assert!(
+                    String::from_utf8_lossy(&output.stdout)
+                        .contains(&format!("--stream {selector} is not present"))
+                );
+                if format == "ndjson" {
+                    let records = parse_ndjson(&output);
+                    assert_contiguous(&records);
+                    assert_eq!(records.len(), 1);
+                    assert_eq!(records[0]["status"], "error");
+                }
             }
         }
     }
@@ -182,7 +189,7 @@ fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
 }
 
 #[test]
-fn piped_empty_containers_complete_and_report_absent_tls_selectors() {
+fn piped_empty_containers_complete_or_report_absent_selectors() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let mut bytes = Vec::new();
         Writer::new(&mut bytes, capture_format, LinkType::IPV4)
@@ -191,9 +198,11 @@ fn piped_empty_containers_complete_and_report_absent_tls_selectors() {
             .unwrap();
         for (command, flags) in COMMANDS {
             let format = if command == "stats" { "json" } else { "ndjson" };
-            assert_file_stdin_parity(&bytes, command, flags, format, 0);
+            let exit_code = if command == "follow" { 2 } else { 0 };
+            assert_file_stdin_parity(&bytes, command, flags, format, exit_code);
         }
         assert_file_stdin_parity(&bytes, "tls", &["--stream", "tcp:0"], "ndjson", 2);
+        assert_file_stdin_parity(&bytes, "follow", &["--stream", "udp:0"], "ndjson", 2);
     }
 }
 

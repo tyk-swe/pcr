@@ -395,6 +395,129 @@ fn follow_handles_udp_directions_and_all_output_encodings() {
 }
 
 #[test]
+fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
+    for capture in [write_capture(), write_capture_frames(&[])] {
+        let path = path_text(capture.path());
+        for selector in ["tcp:999", "udp:999"] {
+            let expected = format!("--stream {selector} is not present");
+            for format in ["text", "hex", "raw", "json", "ndjson"] {
+                let output = run(&[
+                    "--output",
+                    format,
+                    "follow",
+                    path,
+                    "--stream",
+                    selector,
+                    "--direction",
+                    "client",
+                ]);
+                assert_eq!(output.status.code(), Some(2), "{format}: {output:?}");
+                if matches!(format, "text" | "hex" | "raw") {
+                    assert!(output.stdout.is_empty(), "no success payload: {output:?}");
+                    assert!(String::from_utf8_lossy(&output.stderr).contains(&expected));
+                    continue;
+                }
+                let error = if format == "ndjson" {
+                    let records = parse_ndjson(&output);
+                    assert_contiguous(&records);
+                    assert_eq!(records.len(), 1, "only one terminal error");
+                    records[0].clone()
+                } else {
+                    parse_json(&output)
+                };
+                assert_eq!(error["status"], "error");
+                assert_eq!(error["error"]["code"], "cli.error");
+                assert_eq!(error["error"]["message"], expected);
+                assert!(error.get("result").is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn follow_missing_stream_terminates_after_preceding_ip_events() {
+    let capture = write_capture_frames(&[IPV4_FRAGMENT_FIRST, IPV4_FRAGMENT_LAST]);
+    for selector in ["tcp:999", "udp:999"] {
+        let output = run(&[
+            "--output",
+            "ndjson",
+            "follow",
+            path_text(capture.path()),
+            "--stream",
+            selector,
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        let records = parse_ndjson(&output);
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+        assert_eq!(records[1]["status"], "error");
+        assert_eq!(records[1]["error"]["code"], "cli.error");
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record["status"] == "error")
+                .count(),
+            1
+        );
+        assert!(
+            records
+                .iter()
+                .all(|record| record["result"].get("frames").is_none())
+        );
+    }
+}
+
+#[test]
+fn follow_accepts_payload_free_tcp_and_empty_udp_datagrams() {
+    const EMPTY_UDP: &str = "4500001c0000000040118e9ac0000201c63364023039000900080000";
+    for (selector, frame, chunks) in [("tcp:0", TCP_SERVER, 0), ("udp:0", EMPTY_UDP, 1)] {
+        let capture = write_capture_frames(&[frame]);
+        for format in ["text", "hex", "raw", "json", "ndjson"] {
+            let output = run_success(&[
+                "--output",
+                format,
+                "follow",
+                path_text(capture.path()),
+                "--stream",
+                selector,
+                "--direction",
+                "client",
+            ]);
+            if format == "raw" {
+                assert!(output.stdout.is_empty());
+            }
+            let report = match format {
+                "json" => {
+                    let value = parse_json(&output);
+                    assert_eq!(value["result"]["chunks"].as_array().unwrap().len(), chunks);
+                    value
+                }
+                "ndjson" => {
+                    let records = parse_ndjson(&output);
+                    assert_contiguous(&records);
+                    assert_eq!(records.len(), chunks + 1);
+                    assert_eq!(
+                        records
+                            .iter()
+                            .filter(|record| record["result"].get("frames").is_some())
+                            .count(),
+                        1,
+                        "exactly one terminal report"
+                    );
+                    records.last().unwrap().clone()
+                }
+                _ => continue,
+            };
+            assert_eq!(report["status"], "success");
+            assert_eq!(report["result"]["frames"], 1);
+            assert_eq!(report["result"]["client_bytes"], 0);
+            assert_eq!(report["result"]["server_bytes"], 0);
+        }
+    }
+}
+
+#[test]
 fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
     let capture = write_capture_frames(&[
         IPV4_FRAGMENT_FIRST,

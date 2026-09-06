@@ -355,7 +355,7 @@ fn selector_failures_exit_two_and_list_what_is_accepted() {
         (&["--stream", "nonsense"], "expected tcp:INDEX or udp:INDEX"),
         (&["--status", "bogus"], "possible values"),
         (&["--sni", "a*b*c"], "only at the start"),
-        (&["--stream", "tcp:9"], "not present (0..1)"),
+        (&["--stream", "tcp:9"], "--stream tcp:9 is not present"),
     ];
     for (arguments, expected) in cases {
         let mut invocation = vec!["tls", path];
@@ -382,16 +382,36 @@ fn selector_failures_exit_two_and_list_what_is_accepted() {
 }
 
 #[test]
-fn a_capture_with_no_tcp_at_all_names_the_absence_rather_than_a_range() {
-    let capture = write_capture(&[]);
-    let path = path_text(capture.path());
-    let output = run(&["tls", path, "--stream", "tcp:0"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("the capture has no TCP streams"),
-        "{:?}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+fn absent_streams_report_invocation_errors_in_every_format_including_empty_captures() {
+    let populated = write_capture(&[Handshake::complete(40_000, 443, "api.example.test")]);
+    let empty = write_capture(&[]);
+    for (capture, selector) in [(&populated, "tcp:9"), (&empty, "tcp:0")] {
+        let path = path_text(capture.path());
+        let expected = format!("--stream {selector} is not present");
+        for format in ["text", "json", "ndjson"] {
+            let output = run(&["--output", format, "tls", path, "--stream", selector]);
+            assert_eq!(output.status.code(), Some(2), "{format}: {selector}");
+            if format == "text" {
+                assert!(output.stdout.is_empty());
+                let rendered = String::from_utf8_lossy(&output.stderr);
+                assert!(rendered.contains(&expected), "{rendered}");
+                assert!(!rendered.contains("(0.."), "{rendered}");
+                continue;
+            }
+            let error = if format == "ndjson" {
+                let records = parse_ndjson(&output);
+                assert_contiguous(&records);
+                assert_eq!(records.len(), 1, "exactly one terminal error");
+                records[0].clone()
+            } else {
+                parse_json(&output)
+            };
+            assert_eq!(error["status"], "error");
+            assert_eq!(error["error"]["code"], "cli.error");
+            assert_eq!(error["error"]["message"], expected);
+            assert!(error.get("result").is_none());
+        }
+    }
 }
 
 #[test]

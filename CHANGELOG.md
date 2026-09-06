@@ -738,6 +738,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `tls --stream` reports absent selectors, including empty captures, from its
+  first analysis pass. The invocation error names the missing stream without
+  rereading the capture to report a valid index range.
 - `routes` and `routes --all` skip interfaces without a usable MTU, so macOS
   devices that cannot supply a route decision do not abort the listing.
 - Scan execution now materializes and validates one correlated probe per batch,

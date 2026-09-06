@@ -38,7 +38,7 @@ protocol catalogs.
 Recipe commands also accept a packet expression, JSON, or YAML from redirected
 stdin when neither `--packet` nor `--packet-file` is supplied. YAML comments and
 mapping key order work the same as in `.yaml` files. For example,
-`packetcraftr --output hex build < examples/documents/packet-raw.yaml` builds the
+`packetcraftr --output hex build < examples/documents/packet-ipv4-udp.json` builds the
 document under the same input byte and build limits. Terminal stdin is rejected
 instead of waiting for interactive input.
 

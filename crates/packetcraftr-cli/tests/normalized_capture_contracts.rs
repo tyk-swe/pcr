@@ -83,7 +83,7 @@ fn normalization_filters_physical_frames_without_reassembly() {
         for (filter, positions) in [
             ("ip", vec![0, 1]),
             ("frame.number == 2", vec![1]),
-            ("udp", vec![0]),
+            ("udp", vec![]),
         ] {
             let output = normalize(&input, &["--filter", filter], 0);
             let (actual, interfaces) = read_frames(&output.stdout);
@@ -96,7 +96,7 @@ fn normalization_filters_physical_frames_without_reassembly() {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(actual, expected);
-            assert_eq!(interfaces.len(), 1);
+            assert_eq!(interfaces.len(), usize::from(!expected.is_empty()));
         }
     }
 }
@@ -317,36 +317,41 @@ fn normalization_fails_on_a_truncated_input_trailer_after_preserving_prior_frame
 }
 
 #[test]
-fn normalization_converts_subnanosecond_binary_ticks_through_capture_time() {
-    let mut writer = Writer::pcapng(Vec::new()).unwrap();
-    writer
-        .add_interface_description(Interface {
-            link_type: LinkType::IPV4,
-            snap_len: 100,
-            timestamp_resolution: TimestampResolution::Binary(10),
-            timestamp_offset: 0,
-        })
-        .unwrap();
-    writer
-        .write_frame(
-            &Frame::new(
-                UNIX_EPOCH + Duration::from_nanos(976_563),
-                LinkType::IPV4,
-                vec![1],
-            )
-            .unwrap(),
-        )
-        .unwrap();
-    let input = writer.into_inner();
-    assert_eq!(
-        read_frames(&input).0[0].timestamp,
-        Some(UNIX_EPOCH + Duration::from_nanos(976_562))
-    );
-    let normalized = normalize(&input, &[], 0);
-    assert_eq!(
-        read_frames(&normalized.stdout).0[0].timestamp,
-        Some(UNIX_EPOCH)
-    );
+fn normalization_obeys_capture_time_precision_and_rejects_unrepresentable_ticks() {
+    for (resolution, nanoseconds, exit_code) in [
+        (TimestampResolution::Binary(10), 976_562, 3),
+        (TimestampResolution::Decimal(10), 0, 0),
+    ] {
+        let mut writer = Writer::pcapng(Vec::new()).unwrap();
+        writer
+            .add_interface_description(Interface {
+                link_type: LinkType::IPV4,
+                snap_len: 100,
+                timestamp_resolution: resolution,
+                timestamp_offset: 0,
+            })
+            .unwrap();
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![1]).unwrap())
+            .unwrap();
+        let mut input = writer.into_inner();
+        // One source tick retains finer precision than the nanosecond Frame model.
+        input[76..80].copy_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(
+            read_frames(&input).0[0].timestamp,
+            Some(UNIX_EPOCH + Duration::from_nanos(nanoseconds))
+        );
+        let normalized = normalize(&input, &[], exit_code);
+        if exit_code == 0 {
+            assert_eq!(
+                read_frames(&normalized.stdout).0[0].timestamp,
+                Some(UNIX_EPOCH)
+            );
+        } else {
+            assert!(String::from_utf8_lossy(&normalized.stderr).contains("timestamp resolution"));
+            assert!(read_frames(&normalized.stdout).0.is_empty());
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

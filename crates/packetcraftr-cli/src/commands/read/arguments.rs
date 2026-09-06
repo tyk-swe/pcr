@@ -19,8 +19,9 @@ and cannot filter. --normalize with --output pcapng instead writes matching phys
 frames into one new section, remapping selected interfaces. It preserves bytes,
 lengths, link types, directions and interface timestamp metadata. Comments, unknown
 blocks/options and original section structure are discarded. Timestamps pass through
-nanosecond capture time and round down to output interface ticks; timestamp-less
-selected frames fail. No matches produce a valid section with no interfaces or packets.
+nanosecond capture time, losing subnanosecond detail. Selected frames without a
+timestamp or with a time not exactly representable at their interface resolution fail.
+No matches produce a valid section with no interfaces or packets.
 Frame/payload limits count all input; block and interface limits also bound output.
 
 NDJSON emits frame events followed by one complete event. Text prefixes each frame,

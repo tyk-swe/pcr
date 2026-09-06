@@ -57,8 +57,9 @@ Normalization writes one new section with remapped selected interfaces, retainin
 packet bytes, captured/original lengths, link types, direction, and interface
 snapshot length, timestamp resolution, and offset. It discards comments, unknown
 blocks/options, and original section structure; it does not reassemble packets.
-Timestamps pass through nanosecond capture time and round down to interface ticks;
-selected frames without timestamps fail instead of receiving invented times.
+Timestamps pass through nanosecond capture time, losing subnanosecond detail.
+Selected frames without timestamps, or with times not exactly representable at
+their interface resolution, fail instead of receiving invented times.
 Zero matches produce a valid section with no interfaces or packets. Input limits
 count filtered-out frames too; the same block and interface ceilings bound output.
 

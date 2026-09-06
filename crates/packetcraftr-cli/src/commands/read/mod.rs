@@ -76,9 +76,6 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         Format::PcapNg => Some(capture::Format::PcapNg),
         _ => None,
     };
-    if rewrite_format.is_some() && filter.is_some() && !normalize {
-        return Err(capture_rewrite_filter_error());
-    }
     let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
     let mut reader = open_capture(&path, limits.reader)?;
     if normalize {
@@ -89,7 +86,13 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             max_frames: limits.max_frames,
             max_bytes: limits.max_bytes,
         };
-        return rewrite_capture(&mut reader, rewrite_format, stream_limits);
+        return rewrite_capture(
+            &mut reader,
+            rewrite_format,
+            stream_limits,
+            decoding.as_ref(),
+            limits.reader.max_frame_bytes,
+        );
     }
     read_records(&mut reader, limits, decoding.as_ref(), format, stream)
 }
@@ -107,18 +110,6 @@ fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError
         ));
     }
     Ok(())
-}
-
-fn capture_rewrite_filter_error() -> CliError {
-    CliError::from_classification(
-        Classification::new(
-            "cli.capture_rewrite_filter",
-            Kind::Cli,
-            Some("use text, hex, ndjson, or --normalize --output pcapng to filter frames"),
-        ),
-        "capture rewriting cannot filter records without discarding source structure",
-        Vec::new(),
-    )
 }
 
 fn prepare_decoding(
@@ -144,6 +135,8 @@ fn rewrite_capture(
     reader: &mut Reader<impl Read>,
     format: capture::Format,
     limits: Limits,
+    decoding: Option<&Decoding>,
+    max_packet_size: usize,
 ) -> Result<(), CliError> {
     if format != reader.format() {
         return Err(CliError::from_classification(
@@ -160,6 +153,15 @@ fn rewrite_capture(
         ));
     }
     let stdout = io::stdout();
+    if let Some(decoding) = decoding {
+        return capture::select(reader, stdout.lock(), limits, |number, frame| {
+            decode_selected(frame, number, decoding, max_packet_size)
+                .map(|decoded| decoded.is_some())
+                .map_err(CliError::into_boundary_error)
+        })
+        .map(|_| ())
+        .map_err(CliError::classified);
+    }
     rewrite(reader, stdout.lock(), limits)
         .map(|_| ())
         .map_err(CliError::classified)
@@ -218,7 +220,13 @@ fn normalize_capture(
     while let Some(mut frame) = reader.next_frame().map_err(CliError::classified)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
         if let Some(decoding) = decoding
-            && decode_matching_frame(&frame, source_frame, decoding, limits)?.is_none()
+            && decode_selected(
+                &frame,
+                source_frame,
+                decoding,
+                limits.reader.max_frame_bytes,
+            )?
+            .is_none()
         {
             continue;
         }
@@ -281,7 +289,13 @@ fn convert_frame(
             .map(Some)
             .map_err(CliError::classified);
     };
-    let Some(decoded) = decode_matching_frame(&frame, source_frame, decoding, limits)? else {
+    let Some(decoded) = decode_selected(
+        &frame,
+        source_frame,
+        decoding,
+        limits.reader.max_frame_bytes,
+    )?
+    else {
         return Ok(None);
     };
     if decoding.publish_layers {
@@ -293,18 +307,18 @@ fn convert_frame(
     .map_err(CliError::classified)
 }
 
-fn decode_matching_frame(
+fn decode_selected(
     frame: &core::frame::Frame,
     source_frame: u64,
     decoding: &Decoding,
-    limits: OfflineCaptureLimitsArgs,
+    max_packet_size: usize,
 ) -> Result<Option<core::decode::DecodedPacket>, CliError> {
     let decoded = decoding
         .decoder
         .decode(
             frame.clone(),
             core::decode::Options {
-                max_packet_size: limits.reader.max_frame_bytes,
+                max_packet_size,
                 ..core::decode::Options::default()
             },
         )

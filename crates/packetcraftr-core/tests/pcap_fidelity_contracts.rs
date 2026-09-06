@@ -441,3 +441,124 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
         packetcraftr_core::analysis::Error::TimestampUnavailable { number: 1 }
     ));
 }
+
+#[test]
+fn selection_preserves_raw_packets_and_metadata_across_sections() {
+    use packetcraftr_core::analysis::pcap::select;
+    let input = adversarial_pcapng();
+    for selected in [vec![], vec![1, 3], vec![2, 4], vec![1, 2, 3, 4]] {
+        let mut source = Reader::new(Cursor::new(&input)).unwrap();
+        let mut expected = section(Endianness::Little, b"first section");
+        let mut number = 0;
+        let mut bytes = 0;
+        let mut metadata = 0;
+        while let Some(record) = source.next_record().unwrap() {
+            if let Some(frame) = &record.frame {
+                number += 1;
+                if !selected.contains(&number) {
+                    continue;
+                }
+                bytes += u64::from(frame.captured_length());
+            } else {
+                metadata += 1;
+            }
+            expected.extend_from_slice(record.raw_bytes());
+        }
+        let mut source = Reader::new(Cursor::new(&input)).unwrap();
+        let mut visited = Vec::new();
+        let (output, report) = select(&mut source, Vec::new(), Limits::default(), |number, _| {
+            visited.push(number);
+            Ok(selected.contains(&number))
+        })
+        .unwrap();
+        assert_eq!(visited, [1, 2, 3, 4]);
+        assert_eq!(output, expected);
+        assert_eq!(report.frames_read, 4);
+        assert_eq!(report.frames_selected, selected.len() as u64);
+        assert_eq!(report.captured_bytes_selected, bytes);
+        assert_eq!(report.metadata_records, metadata);
+        assert_eq!(report.interfaces, 2);
+        let mut reread = Reader::new(Cursor::new(output)).unwrap();
+        let mut count = 0;
+        while reread.next_frame().unwrap().is_some() {
+            count += 1;
+        }
+        assert_eq!(count, selected.len());
+    }
+}
+
+#[test]
+fn selection_updates_finite_section_lengths_including_empty_sections() {
+    use packetcraftr_core::analysis::pcap::select;
+    let mut input = Vec::new();
+    let mut expected = Vec::new();
+    for endian in [Endianness::Little, Endianness::Big] {
+        for empty in [false, true] {
+            let mut body = Vec::new();
+            if !empty {
+                body.extend(idb(endian));
+                body.extend(epb(endian, 0));
+                body.extend(simple_packet(endian));
+            }
+            let header = section(endian, b"finite");
+            let mut finite = header.clone();
+            finite[16..24].copy_from_slice(&i64_bytes(endian, i64::try_from(body.len()).unwrap()));
+            input.extend(finite);
+            input.extend(body);
+            expected.extend(header);
+            if !empty {
+                expected.extend(idb(endian));
+            }
+        }
+    }
+    let mut reader = Reader::new(Cursor::new(&input)).unwrap();
+    let (copy, _) = rewrite(&mut reader, Vec::new(), Limits::default()).unwrap();
+    assert_eq!(copy, input);
+    let mut reader = Reader::new(Cursor::new(&input)).unwrap();
+    let (output, report) =
+        select(&mut reader, Vec::new(), Limits::default(), |_, _| Ok(false)).unwrap();
+    assert_eq!(report.frames_read, 4);
+    assert_eq!(output, expected);
+    let mut reader = Reader::new(Cursor::new(output)).unwrap();
+    assert!(reader.next_frame().unwrap().is_none());
+    assert_eq!(reader.interfaces().len(), 2);
+}
+
+#[test]
+fn selection_preserves_classic_precision_endianness_and_fcs() {
+    use packetcraftr_core::analysis::pcap::select;
+    for endian in [Endianness::Little, Endianness::Big] {
+        for nanos in [false, true] {
+            let mut input = classic(endian, 0xa400_0001);
+            if nanos {
+                input[..4].copy_from_slice(match endian {
+                    Endianness::Little => &[0x4d, 0x3c, 0xb2, 0xa1],
+                    Endianness::Big => &[0xa1, 0xb2, 0x3c, 0x4d],
+                });
+            }
+            let packet = input[24..].to_vec();
+            input.extend(&packet);
+            for selected in [vec![], vec![2], vec![1, 2]] {
+                let mut expected = input[..24].to_vec();
+                for _ in &selected {
+                    expected.extend(&packet);
+                }
+                let mut reader = Reader::new(Cursor::new(&input)).unwrap();
+                let (output, report) =
+                    select(&mut reader, Vec::new(), Limits::default(), |n, _| {
+                        Ok(selected.contains(&n))
+                    })
+                    .unwrap();
+                assert_eq!(output, expected);
+                assert_eq!(report.frames_read, 2);
+                assert_eq!(report.captured_bytes_read, 2);
+                let mut reader = Reader::new(Cursor::new(output)).unwrap();
+                let mut count = 0;
+                while reader.next_frame().unwrap().is_some() {
+                    count += 1;
+                }
+                assert_eq!(count, selected.len());
+            }
+        }
+    }
+}

@@ -132,6 +132,28 @@ fn piped_capture_rewrites_preserve_every_source_byte() {
 }
 
 #[test]
+fn piped_filtered_capture_exports_match_files_and_keep_source_frame_numbers() {
+    for (capture_format, output_format) in [(Format::Pcap, "pcap"), (Format::PcapNg, "pcapng")] {
+        let bytes = handshake_capture(capture_format);
+        let output = assert_file_stdin_parity(
+            &bytes,
+            "read",
+            &["--filter", "frame.number == 4"],
+            output_format,
+            0,
+        );
+        let mut source = Reader::new(Cursor::new(&bytes)).unwrap();
+        for _ in 0..3 {
+            source.next_frame().unwrap().unwrap();
+        }
+        let expected = source.next_frame().unwrap().unwrap();
+        let mut selected = Reader::new(Cursor::new(&output.stdout)).unwrap();
+        assert_eq!(selected.next_frame().unwrap().unwrap(), expected);
+        assert!(selected.next_frame().unwrap().is_none());
+    }
+}
+
+#[test]
 fn piped_missing_selectors_fail_after_consuming_the_capture() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let bytes = handshake_capture(capture_format);

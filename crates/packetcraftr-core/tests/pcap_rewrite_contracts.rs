@@ -144,3 +144,96 @@ fn capture_errors_expose_stable_classifications_and_causes() {
     assert_eq!(Format::Pcap.to_string(), "pcap");
     assert_eq!(Format::PcapNg.to_string(), "pcapng");
 }
+
+#[test]
+fn selection_validates_rejected_input_and_preserves_predicate_failures() {
+    use packetcraftr_core::analysis::pcap::{SelectionError, select};
+    use packetcraftr_core::error::{BoundaryError, Classification, Coordinate};
+    let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one");
+    let frames = [frame.clone(), frame];
+    let input = pcap_bytes(PcapOptions::default(), &frames);
+    for limits in [
+        Limits {
+            max_frames: 1,
+            max_bytes: 99,
+        },
+        Limits {
+            max_frames: 99,
+            max_bytes: 3,
+        },
+    ] {
+        let mut reader = Reader::new(Cursor::new(&input)).unwrap();
+        let mut visited = 0;
+        let error = select(&mut reader, Vec::new(), limits, |_, _| {
+            visited += 1;
+            Ok(false)
+        })
+        .unwrap_err();
+        assert_eq!(error.classification().kind, Kind::Policy);
+        assert_eq!(visited, 1);
+    }
+    let mut malformed = input.clone();
+    malformed.push(0);
+    let mut reader = Reader::new(Cursor::new(malformed)).unwrap();
+    let error = select(&mut reader, Vec::new(), Limits::default(), |_, _| Ok(false)).unwrap_err();
+    assert!(matches!(
+        error,
+        SelectionError::Capture(Error::Truncated { .. })
+    ));
+    let mut reader = Reader::new(Cursor::new(input)).unwrap();
+    let error = select(&mut reader, Vec::new(), Limits::default(), |number, _| {
+        if number == 1 {
+            return Ok(false);
+        }
+        Err(BoundaryError::new(
+            "predicate failed",
+            Classification::new("fixture.policy", Kind::Policy, None),
+            vec!["root cause".into()],
+        ))
+    })
+    .unwrap_err();
+    assert_eq!(error.classification().code, "fixture.policy");
+    assert_eq!(error.context(), Some(Coordinate::SourceFrame(2)));
+    assert_eq!(error.causes(), ["predicate failed", "root cause"]);
+}
+
+#[test]
+fn selection_stops_on_write_and_flush_failures() {
+    use packetcraftr_core::analysis::pcap::select;
+    let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one");
+    let input = pcap_bytes(PcapOptions::default(), &[frame.clone(), frame]);
+    let mut reader = Reader::new(Cursor::new(&input)).unwrap();
+    let mut visited = 0;
+    let error = select(
+        &mut reader,
+        FailAfter {
+            bytes: Vec::new(),
+            remaining: 24,
+        },
+        Limits::default(),
+        |_, _| {
+            visited += 1;
+            Ok(true)
+        },
+    )
+    .unwrap_err();
+    assert_eq!(visited, 1);
+    assert_eq!(error.classification().code, "io.capture_file");
+    #[derive(Debug)]
+    struct FlushFailure;
+    impl Write for FlushFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("flush failed"))
+        }
+    }
+    let mut reader = Reader::new(Cursor::new(input)).unwrap();
+    let error = select(&mut reader, FlushFailure, Limits::default(), |_, _| {
+        Ok(false)
+    })
+    .unwrap_err();
+    assert_eq!(error.classification().kind, Kind::Io);
+    assert!(error.to_string().contains("flush failed"));
+}

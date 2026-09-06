@@ -281,14 +281,18 @@ fn normalization_requires_explicit_pcapng_and_preserves_default_rewrite_rules() 
     let rejected = run_with_stdin(&["--output", "pcapng", "read", "-"], &source);
     assert_eq!(rejected.status.code(), Some(2));
     assert!(rejected.stdout.is_empty());
-    for format in ["pcap", "pcapng"] {
-        let rejected = run_with_stdin(
-            &["--output", format, "read", "-", "--filter", "ip"],
-            &source,
-        );
-        assert_eq!(rejected.status.code(), Some(2));
-        assert!(rejected.stdout.is_empty());
-    }
+    let selected = run_with_stdin(
+        &["--output", "pcap", "read", "-", "--filter", "ip"],
+        &source,
+    );
+    assert!(selected.status.success());
+    assert_eq!(selected.stdout, source);
+    let rejected = run_with_stdin(
+        &["--output", "pcapng", "read", "-", "--filter", "ip"],
+        &source,
+    );
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(rejected.stdout.is_empty());
 }
 
 #[test]

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, UdpSocket};
+use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::thread;
 use std::time::Instant;
 
@@ -1451,12 +1451,49 @@ fn udp_attempt_sink_failure_prevents_tcp_side_effects() {
     assert_eq!(executor.tcp_calls, 0);
 }
 
+fn accept_bounded(listener: &TcpListener, timeout: Duration) -> Option<TcpStream> {
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let deadline = Instant::now() + timeout;
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(timeout)).unwrap();
+                stream.set_write_timeout(Some(timeout)).unwrap();
+                return Some(stream);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(error) => panic!("loopback accept: {error}"),
+        }
+    }
+}
+
+#[test]
+fn loopback_fallback_server_terminates_without_a_tcp_connection() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("TCP loopback listener");
+    let started = Instant::now();
+    let server = thread::spawn(move || accept_bounded(&listener, Duration::from_millis(50)));
+
+    let accepted = server.join();
+
+    assert!(accepted.expect("TCP loopback server").is_none());
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
 #[test]
 fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     let tcp = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("TCP loopback listener");
     let endpoint = tcp.local_addr().unwrap();
     let udp = UdpSocket::bind(endpoint).expect("same-port UDP loopback listener");
     udp.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+    udp.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
     let expected_query = super::encode_query("example.com", super::QueryType::A, 0x1234, true)
         .expect("fixture query");
     let udp_query = expected_query.clone();
@@ -1469,10 +1506,8 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     });
     let tcp_query = expected_query;
     let tcp_server = thread::spawn(move || {
-        let (mut stream, _) = tcp.accept().expect("TCP fallback connection");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
+        let mut stream =
+            accept_bounded(&tcp, Duration::from_secs(1)).expect("TCP fallback connection");
         let mut prefix = [0u8; 2];
         stream.read_exact(&mut prefix).expect("TCP query prefix");
         let mut query = vec![0u8; usize::from(u16::from_be_bytes(prefix))];
@@ -1496,10 +1531,13 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
         &packetcraftr_core::protocol::builtin::registry(),
         &mut LoopbackExecutor,
         &mut NoopClock,
-    )
-    .expect("loopback fallback completes");
-    udp_server.join().expect("UDP loopback server");
-    tcp_server.join().expect("TCP loopback server");
+    );
+    let udp_joined = udp_server.join();
+    let tcp_joined = tcp_server.join();
+
+    udp_joined.expect("UDP loopback server");
+    tcp_joined.expect("TCP loopback server");
+    let result = result.expect("loopback fallback completes");
 
     assert_eq!(result.outcome, super::Outcome::Response);
     assert_eq!(result.accepted_transport, Some(super::Transport::Tcp));

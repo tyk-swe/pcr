@@ -4,7 +4,7 @@
 //! Shared serialized interface, endpoint, and route representations.
 
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use serde::Serialize;
 
@@ -104,6 +104,13 @@ impl From<packetcraftr_netio::interface::Info> for Interface {
 pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
+}
+
+/// Renders `address:port`, bracketing IPv6 addresses.
+impl fmt::Display for Endpoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        SocketAddr::new(self.address, self.port).fmt(formatter)
+    }
 }
 
 /// The interface identity every route, plan, and replay record names.

@@ -30,14 +30,6 @@ where
         if batch.probes.len() != 1 {
             return Err(EXECUTOR_FAULT.invalid("scan batches require exactly one correlated probe"));
         }
-        if self.options.max_responses < batch.probes.len() {
-            return Err(EXECUTOR_FAULT.invalid(format!(
-                "max_responses={} is smaller than scan batch size {}",
-                self.options.max_responses,
-                batch.probes.len()
-            )));
-        }
-
         let packet = first.packet();
         if !super::probe::sent_probe_matches(first, &packet) {
             return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));

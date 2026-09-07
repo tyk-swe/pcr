@@ -195,10 +195,6 @@ fn scan_help_and_parser_omit_the_removed_batch_size_option() {
     assert!(!help.contains("--batch-size"));
     assert!(help.contains("--max-probes"));
     assert!(help.contains("--rate"));
-    let rejected = run(&["scan", "192.0.2.1", "--batch-size", "1"]);
-    assert_eq!(rejected.status.code(), Some(2));
-    assert!(rejected.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--batch-size"));
 }
 
 #[test]

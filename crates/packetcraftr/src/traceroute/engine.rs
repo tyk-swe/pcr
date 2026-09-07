@@ -109,7 +109,7 @@ where
 {
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_traceroute(request, authorizer, &deadline)?;
-    let batches = build_batches(request, approved.destination)?;
+    let mut batches = build_batches(request, approved.destination)?;
     enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = TracerouteState::default();
     let stats = {
@@ -123,9 +123,8 @@ where
         };
         run_batches(
             WORKFLOW,
-            &batches,
+            &mut batches,
             request.probes_per_second,
-            request.limits.max_duration,
             &mut deadline,
             clock,
             &mut lifecycle,

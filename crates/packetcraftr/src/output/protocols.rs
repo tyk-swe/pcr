@@ -8,7 +8,7 @@ use serde::Serialize;
 use packetcraftr_core::field::FieldKind as CoreFieldKind;
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
-use packetcraftr_core::registry::FilterFieldBinding;
+use packetcraftr_core::registry::{FilterFieldBinding, Registry};
 
 use super::contract::Error as ContractError;
 
@@ -159,6 +159,15 @@ pub struct FilterField {
 }
 
 impl FilterField {
+    /// Every describable stored spelling that reads `protocol`, in path order.
+    pub fn for_protocol(registry: &Registry, protocol: &str) -> Vec<Self> {
+        registry
+            .filter_fields()
+            .filter(|(_, binding)| binding.protocol().as_str() == protocol)
+            .filter_map(|(path, binding)| Self::from_binding(path, binding))
+            .collect()
+    }
+
     /// Describes a registry binding known to the output contract.
     /// Future binding kinds may omit this optional discovery metadata.
     pub fn from_binding(path: &str, binding: &FilterFieldBinding) -> Option<Self> {
@@ -219,12 +228,16 @@ pub struct Detail {
     pub decode_only: bool,
     pub fields: Vec<Field>,
     pub bindings: Vec<Binding>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter_fields: Option<Vec<FilterField>>,
+    pub filter_fields: Vec<FilterField>,
 }
 
 impl Detail {
-    pub fn new(summary: Summary, fields: Vec<Field>, bindings: Vec<Binding>) -> Self {
+    pub fn new(
+        summary: Summary,
+        fields: Vec<Field>,
+        bindings: Vec<Binding>,
+        filter_fields: Vec<FilterField>,
+    ) -> Self {
         Self {
             protocol: summary.protocol,
             aliases: summary.aliases,
@@ -235,7 +248,7 @@ impl Detail {
             decode_only: summary.decode_only,
             fields,
             bindings,
-            filter_fields: None,
+            filter_fields,
         }
     }
 }

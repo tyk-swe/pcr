@@ -2620,7 +2620,8 @@
         "matcher",
         "decode_only",
         "fields",
-        "bindings"
+        "bindings",
+        "filter_fields"
       ],
       "properties": {
         "protocol": {

@@ -13,7 +13,7 @@ use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::{
-    emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
+    compact_hex, emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
     write_stdout_line, write_summary_line,
 };
 
@@ -34,10 +34,7 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
             render_diagnostics_text(&built.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!(
-            "{}",
-            output::frame::Wire::new(built.bytes).bytes_hex()
-        )),
+        Format::Hex => write_plain_line(format_args!("{}", compact_hex(&built.bytes))),
         Format::Raw => write_raw(&built.bytes),
         Format::Json => {
             let (result, diagnostics) = output::build::Report::from_built(built);

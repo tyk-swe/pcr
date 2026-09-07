@@ -59,9 +59,18 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let mut providers = target_workflow::prepare(route, policy, request.timeout, 1, queue_limits)?;
+    let mut providers = target_workflow::prepare(
+        route,
+        policy,
+        request.timeout,
+        MAX_TEMPLATE_PACKETS,
+        queue_limits,
+    )?;
     target_workflow::run::<Scan>(&request, &mut providers, format, stream)
 }
+
+/// Every scan exchange carries exactly one correlated probe.
+const MAX_TEMPLATE_PACKETS: usize = 1;
 
 /// The `scan` workflow.
 pub(super) struct Scan;

@@ -129,15 +129,13 @@ pub(crate) trait ProbeLifecycle<P> {
 /// executor-boundary, evidence-validation, and checked-statistics policy.
 pub(crate) fn run_batches<P, L, C>(
     workflow: Workflow,
-    batches: &[Batch<P>],
+    batches: &mut [Batch<P>],
     probes_per_second: Option<u32>,
-    max_duration: Duration,
     deadline: &mut Deadline,
     clock: &mut C,
     lifecycle: &mut L,
 ) -> Result<Stats, Error>
 where
-    P: Clone,
     L: ProbeLifecycle<P>,
     C: Clock,
 {
@@ -147,13 +145,13 @@ where
     let statistics = |sequence| fail(ErrorKind::StatisticsOverflow { sequence });
     let mut stats = Stats::default();
     let mut scheduled_delay = Duration::ZERO;
-    let mut previous: Option<&Batch<P>> = None;
+    let mut previous: Option<(usize, u64)> = None;
 
-    for batch in batches {
+    for batch in batches.iter_mut() {
         check_deadline(deadline, duration)?;
         let sequence = batch.sequence;
-        if let Some(previous) = previous {
-            let delay = rate_delay(previous.probe_count(), probes_per_second).ok_or_else(|| {
+        if let Some((previous_probes, _)) = previous {
+            let delay = rate_delay(previous_probes, probes_per_second).ok_or_else(|| {
                 fail(ErrorKind::InvalidLimit {
                     field: "probes_per_second",
                     value: u64::from(probes_per_second.unwrap_or_default()),
@@ -173,40 +171,34 @@ where
                 .checked_add(delay)
                 .ok_or_else(|| statistics(sequence))?;
         }
-        previous = Some(batch);
+        previous = Some((batch.probe_count(), sequence));
 
-        let mut effective = batch.clone();
         check_deadline(deadline, duration)?;
         deadline
             .start_accounting(Duration::ZERO)
             .map_err(exceeded)?;
-        let timeout = batch.timeout.min(deadline.remaining().map_err(exceeded)?);
-        if timeout.is_zero() {
-            return Err(duration(max_duration, max_duration));
-        }
-        effective.timeout = timeout;
+        // The child boundary may only spend what the operation has left.
+        batch.timeout = deadline.bounded_timeout(batch.timeout).map_err(exceeded)?;
+        let batch = &*batch;
         let execution = lifecycle
-            .execute(&effective)
+            .execute(batch)
             .map_err(|source| fail(ErrorKind::Execution { sequence, source }))?;
         check_deadline(deadline, duration)?;
         deadline
             .account(execution.stats.elapsed)
             .map_err(exceeded)?;
-        lifecycle.validate(&effective, &execution)?;
+        lifecycle.validate(batch, &execution)?;
         check_deadline(deadline, duration)?;
         stats
             .checked_add_assign(&execution.stats)
             .map_err(|StatsOverflow| statistics(sequence))?;
-        if lifecycle
-            .process(&effective, execution, deadline)?
-            .is_break()
-        {
+        if lifecycle.process(batch, execution, deadline)?.is_break() {
             break;
         }
     }
 
     check_deadline(deadline, duration)?;
-    let final_sequence = previous.map_or(0, |batch| batch.sequence);
+    let final_sequence = previous.map_or(0, |(_, sequence)| sequence);
     stats.elapsed = stats
         .elapsed
         .checked_add(scheduled_delay)

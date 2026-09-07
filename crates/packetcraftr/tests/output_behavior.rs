@@ -364,16 +364,15 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
         summaries[0].clone(),
         vec![field.clone()],
         vec![binding.clone()],
+        Vec::new(),
     );
     assert_eq!(detail.protocol, summaries[0].protocol);
     assert_eq!(detail.fields, vec![field]);
     assert_eq!(detail.bindings, vec![binding]);
-    assert!(detail.filter_fields.is_none());
-    assert!(
-        serde_json::to_value(detail)
-            .unwrap()
-            .get("filter_fields")
-            .is_none()
+    assert!(detail.filter_fields.is_empty());
+    assert_eq!(
+        serde_json::to_value(detail).unwrap()["filter_fields"],
+        serde_json::json!([])
     );
 }
 

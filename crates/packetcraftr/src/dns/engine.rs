@@ -500,14 +500,8 @@ where
     }
 
     fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
-        let timeout = self.request.timeout.min(self.deadline.remaining()?);
-        if timeout.is_zero() {
-            return Err(Error::DurationLimit {
-                actual: self.request.limits.max_duration,
-                limit: self.request.limits.max_duration,
-            });
-        }
         self.deadline.start_accounting(Duration::ZERO)?;
+        let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
         let mut attempt_deadline = Deadline::new(self.request.timeout);
         let execution_request = Exchange {
             probe: probe.clone(),

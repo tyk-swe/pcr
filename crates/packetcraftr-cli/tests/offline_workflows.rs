@@ -26,6 +26,13 @@ use process_support::{append_truncated_record, decode_hex, run_with_stdin};
 use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
+
+/// `UDP_CLIENT` with its last payload byte flipped, so the UDP checksum fails.
+fn damaged_udp_client() -> Vec<u8> {
+    let mut frame = decode_hex(UDP_CLIENT);
+    *frame.last_mut().expect("UDP payload") ^= 1;
+    frame
+}
 const UDP_SERVER: &str = "450000210000000040118e95c6336402c000020100093039000d957e776f726c64";
 const TCP_CLIENT: &str =
     "4500002b0000000040068e96c0000201c63364023039005000000001000000005002ffffb7b80000676574";
@@ -835,8 +842,7 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
 
 #[test]
 fn read_dissection_diagnostics_match_ndjson_and_follow_source_frame_filtering() {
-    let mut damaged = decode_hex(UDP_CLIENT);
-    *damaged.last_mut().expect("UDP payload") ^= 1;
+    let damaged = damaged_udp_client();
     let capture =
         write_capture_byte_frames(&[decode_hex(UDP_SERVER), damaged, decode_hex(TCP_CLIENT)]);
     let path = path_text(capture.path());
@@ -1260,8 +1266,7 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
 
 #[test]
 fn dissect_unmatched_filter_keeps_byte_output_empty_and_reports_on_stderr() {
-    let mut frame = decode_hex(UDP_CLIENT);
-    *frame.last_mut().expect("UDP payload") ^= 1;
+    let frame = damaged_udp_client();
     for format in ["text", "hex", "raw"] {
         let output = run_with_stdin(
             &[
@@ -1343,8 +1348,7 @@ fn dissect_matched_and_json_outputs_are_unchanged_by_the_miss_notice() {
         String::from_utf8_lossy(&filtered.stderr),
     );
 
-    let mut damaged = frame;
-    *damaged.last_mut().expect("UDP payload") ^= 1;
+    let damaged = damaged_udp_client();
     for filter in ["udp", "tcp"] {
         let output = run_with_stdin(
             &[

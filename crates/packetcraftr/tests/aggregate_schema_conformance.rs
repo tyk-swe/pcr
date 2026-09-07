@@ -458,16 +458,11 @@ fn protocols_detail_for(protocol: BuiltinProtocol) -> Value {
             discriminator: discriminator.0,
         })
         .collect();
-    let mut detail =
-        protocols_output::Detail::new(protocols_output::Summary::from(protocol), fields, bindings);
-    detail.filter_fields = Some(
-        registry
-            .filter_fields()
-            .filter(|(_, binding)| binding.protocol().as_str() == protocol.as_str())
-            .filter_map(|(path, binding)| {
-                protocols_output::FilterField::from_binding(path, binding)
-            })
-            .collect(),
+    let detail = protocols_output::Detail::new(
+        protocols_output::Summary::from(protocol),
+        fields,
+        bindings,
+        protocols_output::FilterField::for_protocol(&registry, protocol.as_str()),
     );
     envelope(
         Command::Protocols,

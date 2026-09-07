@@ -169,7 +169,7 @@ pub(super) struct TargetProviders {
 /// requested route.
 ///
 /// `max_template_packets` is how many packets one exchange may hold: one query
-/// for `dns`, one batch for `scan`, one attempt per hop for `traceroute`.
+/// for `dns`, one probe for `scan`, one attempt per hop for `traceroute`.
 pub(super) fn prepare(
     route: RouteSelectionArgs,
     policy: HostnamePolicyArgs,

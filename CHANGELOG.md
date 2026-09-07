@@ -10,9 +10,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Protocol details list registered display-filter aliases, either-endpoint
   comparisons (including `!=`), and packed-bit spellings in stable order,
-  with optional `filter_fields` JSON metadata separate from parent bindings.
-  Rust `output::protocols::Detail` struct literals must supply the new field;
-  the existing `Detail::new` constructor still works and omits metadata.
+  with `filter_fields` JSON metadata separate from parent bindings. Rust
+  `output::protocols::Detail` literals and `Detail::new` must supply the new
+  field; `FilterField::for_protocol` derives it from a registry.
 
 - `read --normalize --output pcapng` exports matching physical frames from PCAP
   or PCAPNG into one bounded section. The opt-in path preserves representable

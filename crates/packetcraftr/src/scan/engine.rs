@@ -110,7 +110,7 @@ where
 {
     let mut deadline = Deadline::new(request.limits.max_duration);
     let approved = approve_scan(request, authorizer, &deadline)?;
-    let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
+    let mut batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
     enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = EvidenceState::default();
     let mut winners = HashMap::new();
@@ -126,9 +126,8 @@ where
         };
         run_batches(
             WORKFLOW,
-            &batches,
+            &mut batches,
             request.probes_per_second,
-            request.limits.max_duration,
             &mut deadline,
             clock,
             &mut lifecycle,

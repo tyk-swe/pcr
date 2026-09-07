@@ -122,6 +122,24 @@ impl Deadline {
         Ok(self.limit.saturating_sub(elapsed))
     }
 
+    /// Clips a child boundary's `requested` timeout to the wall-clock budget
+    /// still available, so the child can never outlive the operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] after the operation budget is spent or
+    /// when nothing remains for the child to spend.
+    pub fn bounded_timeout(&self, requested: Duration) -> Result<Duration, DeadlineExceeded> {
+        let timeout = requested.min(self.remaining()?);
+        if timeout.is_zero() {
+            return Err(DeadlineExceeded {
+                actual: self.limit,
+                limit: self.limit,
+            });
+        }
+        Ok(timeout)
+    }
+
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
     ///

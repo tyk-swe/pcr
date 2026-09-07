@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::SocketAddr;
-
 use packetcraftr::output::contract::Format;
 
 use packetcraftr::{analysis, core, output};
@@ -148,14 +146,8 @@ fn session_line(session: &Session) -> String {
          cipher={} group={} alpn={} selected_alpn={} ja3={} ja4={} frames={}..{} rtt_ms={}",
         session.session,
         session.tcp_stream,
-        SocketAddr::new(
-            session.client_endpoint.address,
-            session.client_endpoint.port
-        ),
-        SocketAddr::new(
-            session.server_endpoint.address,
-            session.server_endpoint.port
-        ),
+        session.client_endpoint,
+        session.server_endpoint,
         session.status,
         optional_display(client.and_then(|client| client.sni.as_deref())),
         optional_display(server.map(version_text).as_deref()),

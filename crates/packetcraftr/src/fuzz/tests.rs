@@ -250,7 +250,7 @@ impl Executor<ExecutionCase> for SubstitutingFuzzExecutor {
     }
 }
 
-fn packet() -> Packet {
+pub(super) fn packet() -> Packet {
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {

@@ -354,23 +354,17 @@ impl ExecutionPhase<'_> {
     where
         E: Executor<ExecutionCase>,
     {
-        let mut execution_case = ExecutionCase {
-            permit: crate::evidence::ExecutionPermit::new(),
-            packet: case.prepared.recipe.clone(),
-            timeout: self.live.timeout,
-        };
         self.deadline
             .start_accounting(Duration::ZERO)
             .map_err(duration_limit)?;
-        execution_case.timeout = execution_case
-            .timeout
-            .min(self.deadline.remaining().map_err(duration_limit)?);
-        if execution_case.timeout.is_zero() {
-            return Err(Error::DurationLimit {
-                actual: self.request.limits.max_duration,
-                limit: self.request.limits.max_duration,
-            });
-        }
+        let execution_case = ExecutionCase {
+            permit: crate::evidence::ExecutionPermit::new(),
+            packet: case.prepared.recipe.clone(),
+            timeout: self
+                .deadline
+                .bounded_timeout(self.live.timeout)
+                .map_err(duration_limit)?,
+        };
         let execution = executor
             .execute(&execution_case)
             .map_err(|source| Error::Execution {
@@ -406,7 +400,7 @@ impl ExecutionPhase<'_> {
         validate_execution(
             case,
             &execution,
-            &execution_case,
+            execution_case.timeout,
             self.request.limits.max_packet_bytes,
             &self.deadline,
         )?;

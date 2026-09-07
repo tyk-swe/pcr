@@ -81,6 +81,13 @@ impl ProbeLifecycle<()> for Lifecycle {
     }
 }
 
+fn deadline_with_spent(spent: Duration) -> Deadline {
+    let now = Instant::now();
+    let mut deadline = Deadline::with_time_source(Duration::from_secs(1), move || now);
+    let _ = deadline.account(spent);
+    deadline
+}
+
 fn batches() -> Vec<Batch<()>> {
     (0..2)
         .map(|sequence| Batch {
@@ -95,26 +102,22 @@ fn batches() -> Vec<Batch<()>> {
 #[test]
 fn child_timeout_accounts_for_prior_execution_and_pacing() {
     for workflow in [Workflow::Scan, Workflow::Traceroute] {
-        let now = Instant::now();
-        let mut deadline = Deadline::with_time_source(Duration::from_secs(1), move || now);
-        let batches = batches();
+        let mut batches = batches();
         let mut lifecycle = Lifecycle::default();
         let mut clock = RecordingClock::default();
         let stats = run_batches(
             workflow,
-            &batches,
+            &mut batches,
             Some(5),
-            Duration::from_secs(1),
-            &mut deadline,
+            &mut deadline_with_spent(Duration::ZERO),
             &mut clock,
             &mut lifecycle,
         )
         .expect("two bounded executions");
 
-        assert_eq!(lifecycle.executed[0], batches[0]);
-        assert_eq!(lifecycle.executed[1].timeout, Duration::from_millis(300));
-        assert_eq!(lifecycle.executed[1].permit, batches[1].permit);
-        assert_eq!(batches[1].timeout, Duration::from_millis(800));
+        assert_eq!(lifecycle.executed, batches);
+        assert_eq!(batches[0].timeout, Duration::from_millis(800));
+        assert_eq!(batches[1].timeout, Duration::from_millis(300));
         assert_eq!(lifecycle.processed, 2);
         assert_eq!(clock.delays, [Duration::from_millis(200)]);
         assert_eq!(stats.elapsed, Duration::from_millis(700));
@@ -124,16 +127,12 @@ fn child_timeout_accounts_for_prior_execution_and_pacing() {
 #[test]
 fn zero_and_exhausted_operation_budgets_never_execute() {
     for spent in [Duration::from_secs(1), Duration::from_millis(1001)] {
-        let now = Instant::now();
-        let mut deadline = Deadline::with_time_source(Duration::from_secs(1), move || now);
-        let _ = deadline.account(spent);
         let mut lifecycle = Lifecycle::default();
         let error = run_batches(
             Workflow::Scan,
-            &batches(),
+            &mut batches(),
             None,
-            Duration::from_secs(1),
-            &mut deadline,
+            &mut deadline_with_spent(spent),
             &mut RecordingClock::default(),
             &mut lifecycle,
         )
@@ -145,18 +144,15 @@ fn zero_and_exhausted_operation_budgets_never_execute() {
 
 #[test]
 fn evidence_inside_original_timeout_but_outside_remaining_budget_is_rejected() {
-    let now = Instant::now();
-    let mut deadline = Deadline::with_time_source(Duration::from_secs(1), move || now);
     let mut lifecycle = Lifecycle {
         late_response: true,
         ..Lifecycle::default()
     };
     let error = run_batches(
         Workflow::Scan,
-        &batches(),
+        &mut batches(),
         Some(5),
-        Duration::from_secs(1),
-        &mut deadline,
+        &mut deadline_with_spent(Duration::ZERO),
         &mut RecordingClock::default(),
         &mut lifecycle,
     )

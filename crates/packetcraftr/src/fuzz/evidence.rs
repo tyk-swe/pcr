@@ -3,20 +3,25 @@
 
 //! Exact live fuzz executor-evidence validation, accounting, and retention.
 
+use std::time::Duration;
+
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::evidence::{Budget, DiagnosticLog};
+use crate::probe::evidence::{
+    format_exchange_evidence_error, validate_response_frames_and_deadlines,
+};
 
 use super::error::{Error, duration_limit};
-use super::execution::{Execution, ExecutionCase};
+use super::execution::Execution;
 use super::model::{Case, LiveLimits, Stats};
 
 pub(super) fn validate_execution(
     case: &Case,
     execution: &Execution,
-    request: &ExecutionCase,
+    timeout: Duration,
     max_packet_bytes: usize,
     deadline: &Deadline,
 ) -> Result<(), Error> {
@@ -50,24 +55,13 @@ pub(super) fn validate_execution(
             case_index: case.prepared.index,
             message: format!("invalid capture statistics: {source}"),
         })?;
-    for response in &execution.responses {
-        deadline.check().map_err(duration_limit)?;
-        if response.latency > request.timeout {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: format!(
-                    "matched response latency {:?} exceeds timeout {:?}",
-                    response.latency, request.timeout
-                ),
-            });
-        }
-        let Some(_received_at) = response.response.frame.timestamp else {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: "executor returned response frame without a timestamp".to_owned(),
-            });
-        };
-    }
+    deadline.check().map_err(duration_limit)?;
+    validate_response_frames_and_deadlines(&execution.responses, &[], timeout).map_err(
+        |error| Error::InvalidEvidence {
+            case_index: case.prepared.index,
+            message: format_exchange_evidence_error(error, "case", "fuzz"),
+        },
+    )?;
     deadline.check().map_err(duration_limit)?;
     Ok(())
 }

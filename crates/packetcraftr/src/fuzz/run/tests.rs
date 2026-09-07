@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
-use std::net::Ipv4Addr;
 use std::time::{Instant, UNIX_EPOCH};
 
-use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
-
 use super::*;
+use crate::fuzz::tests::packet;
 use crate::test_fixtures::NoopClock;
 
 #[derive(Default)]
@@ -18,11 +16,12 @@ struct ExecutorFixture {
 
 impl Executor<ExecutionCase> for ExecutorFixture {
     fn execute(&mut self, request: &ExecutionCase) -> Result<Execution, crate::BoundaryError> {
+        let case_index = self.timeouts.len();
         self.timeouts.push(request.timeout);
         let sent = crate::evidence::test_sent_packet(request.packet.clone());
         let responses = self
             .response_latency
-            .filter(|_| self.timeouts.len() == 2)
+            .filter(|_| case_index == 1)
             .map(|latency| crate::exchange::Response {
                 request_index: 0,
                 response: crate::probe::test_fixtures::decoded_packet(
@@ -41,7 +40,7 @@ impl Executor<ExecutionCase> for ExecutorFixture {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: u64::try_from(sent.bytes_sent()).unwrap(),
-                elapsed: if self.timeouts.len() == 1 {
+                elapsed: if case_index == 0 {
                     Duration::from_millis(400)
                 } else {
                     request.timeout
@@ -77,24 +76,10 @@ fn phase(request: &packet_fuzz::Request, spent: Duration) -> ExecutionPhase<'_> 
         cases_per_second: Some(5),
         ..LiveOptions::default()
     };
-    let mut packet = Packet::new();
-    packet
-        .push(Ipv4 {
-            source: Ipv4Addr::new(192, 0, 2, 1),
-            destination: Ipv4Addr::new(198, 51, 100, 1),
-            ..Ipv4::default()
-        })
-        .push(Udp {
-            destination_port: 9,
-            ..Udp::default()
-        })
-        .push(packetcraftr_core::layer::Raw::new(
-            bytes::Bytes::from_static(b"case"),
-        ));
     let prepared = prepare_campaign(
         request,
         live,
-        packet,
+        packet(),
         &registry,
         &mut Deadline::new(request.limits.max_duration),
     )

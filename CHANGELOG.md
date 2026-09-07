@@ -6,17 +6,6 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- `follow`, `tls`, and `dns` text reports bracket numeric IPv6 endpoints,
-  preserving IPv4 and DNS hostname spelling.
-
-- `read --dissect` text output shows existing packet diagnostics beneath the
-  selected source frame, matching the diagnostics already present in NDJSON.
-- Scan, traceroute, and live fuzz execution clip child response timeouts to the
-  remaining operation budget, reject execution after exhaustion, and validate
-  response evidence against the effective timeout.
-
 ### Added
 
 - Protocol details list registered display-filter aliases, either-endpoint
@@ -773,6 +762,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   became unreachable when the malformed-live opt-in moved to the authorizer.
 
 ### Fixed
+
+- `follow`, `tls`, and `dns` text reports bracket numeric IPv6 endpoints,
+  preserving IPv4 and DNS hostname spelling.
+
+- `read --dissect` text output shows existing packet diagnostics beneath the
+  selected source frame, matching the diagnostics already present in NDJSON.
+- Scan, traceroute, and live fuzz execution clip child response timeouts to the
+  remaining operation budget, reject execution after exhaustion, and validate
+  response evidence against the effective timeout.
 
 - `follow --stream` exits with invocation error 2 for absent TCP or UDP
   conversations, including empty captures, using the first analysis pass.

@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::SocketAddr;
+
 use packetcraftr::output::contract::Format;
 
 use packetcraftr::{analysis, output};
@@ -64,14 +66,12 @@ pub(super) fn render_text(selector: StreamRef, summary: &Summary) -> Result<(), 
     let transport = selector.transport.as_str();
     match &summary.client_flow {
         Some(flow) => write_stdout_line(format_args!(
-            "followed {transport} stream {}: client {}:{} sent {} byte(s), \
-             server {}:{} sent {} byte(s), {} byte(s) undelivered in {} frame(s)",
+            "followed {transport} stream {}: client {} sent {} byte(s), \
+             server {} sent {} byte(s), {} byte(s) undelivered in {} frame(s)",
             selector.index,
-            flow.source,
-            flow.source_port,
+            SocketAddr::new(flow.source, flow.source_port),
             summary.client_bytes,
-            flow.destination,
-            flow.destination_port,
+            SocketAddr::new(flow.destination, flow.destination_port),
             summary.server_bytes,
             summary.undelivered_bytes,
             summary.frames,

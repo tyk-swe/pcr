@@ -8,6 +8,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `follow`, `tls`, and `dns` text reports bracket numeric IPv6 endpoints,
+  preserving IPv4 and DNS hostname spelling.
+
 - Scan, traceroute, and live fuzz execution clip child response timeouts to the
   remaining operation budget, reject execution after exhaustion, and validate
   response evidence against the effective timeout.

@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::{IpAddr, SocketAddr};
+
 use packetcraftr::core::error::Kind;
 
 use packetcraftr::{core, output};
@@ -16,10 +18,13 @@ pub(super) fn render_text(
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
+    let server = result.server.parse::<IpAddr>().map_or_else(
+        |_| format!("{}:{}", result.server, result.server_port),
+        |address| SocketAddr::new(address, result.server_port).to_string(),
+    );
     write_stdout_line(format_args!(
-        "server={}:{} resolved={} query={} type={} id={} fallback_attempted={} accepted_transport={} outcome={}",
-        result.server,
-        result.server_port,
+        "server={} resolved={} query={} type={} id={} fallback_attempted={} accepted_transport={} outcome={}",
+        server,
         comma_separated(&result.resolved_addresses),
         result.query_name,
         result.query_type,

@@ -155,14 +155,13 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 }
 
 #[test]
-fn scan_batching_attempts_rate_and_timeout_evidence_are_deterministic() {
+fn scan_single_probe_attempts_rate_and_timeout_evidence_are_deterministic() {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81, 82, 83];
     request.attempts = 2;
     request.probes_per_second = Some(2);
-    request.limits.batch_size = 2;
     let mut executor = TimeoutExecutor::default();
     let mut clock = RecordingClock::default();
 
@@ -263,6 +262,47 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     assert!(error.to_string().contains("8.8.8.8"));
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn scan_one_probe_budget_executes_and_rejects_excess_probes() {
+    let address = "192.0.2.1".parse().unwrap();
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_probes = 1;
+    let mut executor = TimeoutExecutor::default();
+    let mut authorizer = AddressListAuthorizer {
+        addresses: vec![address],
+    };
+    let report = run(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("one probe fits the total probe budget");
+    assert_eq!(executor.batches, [(1, vec![Some(80)])]);
+    assert_eq!(report.stats.packets_completed, 1);
+
+    request.ports.push(81);
+    let error = run(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect_err("two probes exceed the one-probe budget");
+    assert!(matches!(
+        error.kind,
+        ErrorKind::InvalidLimit {
+            field: "probes",
+            value: 2,
+            ..
+        }
+    ));
+    assert_eq!(executor.batches.len(), 1, "excess probes never execute");
 }
 
 #[test]
@@ -413,7 +453,6 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81];
-    request.limits.batch_size = 1;
     let calls = Arc::new(AtomicUsize::new(0));
     let shutdowns = Arc::new(AtomicUsize::new(0));
     let mut executor = ProgressiveExecutor {
@@ -464,7 +503,6 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
     request.ports = vec![80, 81, 82];
-    request.limits.batch_size = 1;
     let calls = Arc::new(AtomicUsize::new(0));
     let shutdowns = Arc::new(AtomicUsize::new(0));
     let mut executor = ProgressiveExecutor {

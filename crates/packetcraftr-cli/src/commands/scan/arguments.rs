@@ -101,15 +101,12 @@ pub(crate) struct Args {
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = 1)]
     pub(crate) attempts: u32,
-    /// Response window for each capture-ready batch.
+    /// Response window for each capture-ready probe.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) timeout_ms: u64,
-    /// Optional average probe-rate ceiling; batches remain deliberate bursts.
+    /// Optional average probe-rate ceiling for single-probe exchanges.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
-    /// Maximum probes sent by one shared-capture exchange batch.
-    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_BATCH_SIZE)]
-    pub(crate) batch_size: usize,
     /// Maximum distinct destination ports accepted by the request.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_PORTS)]
     pub(crate) max_ports: usize,

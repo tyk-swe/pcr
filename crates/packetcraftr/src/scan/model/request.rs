@@ -15,8 +15,8 @@ use crate::target::Target;
 use crate::probe::{Error, ErrorKind};
 use crate::scan::WORKFLOW;
 use crate::scan::{
-    DEFAULT_BATCH_SIZE, DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
-    MAX_DURATION, MAX_PROBES, MAX_RATE,
+    DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_DURATION, MAX_PROBES,
+    MAX_RATE,
 };
 
 pub use crate::probe::Transport;
@@ -25,8 +25,6 @@ pub use crate::probe::Transport;
 pub struct Limits {
     pub max_ports: usize,
     pub max_probes: usize,
-    /// Upper bound on batch size; execution currently uses one correlated probe per batch.
-    pub batch_size: usize,
     pub max_duration: Duration,
     pub max_evidence_frames: usize,
     pub max_evidence_bytes: usize,
@@ -38,7 +36,6 @@ impl Default for Limits {
         Self {
             max_ports: DEFAULT_MAX_PORTS,
             max_probes: DEFAULT_MAX_TEMPLATE_PACKETS,
-            batch_size: DEFAULT_BATCH_SIZE,
             max_duration: MAX_DURATION,
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
@@ -63,7 +60,6 @@ impl Limits {
             &[
                 ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
                 ("max_probes", self.max_probes, MAX_PROBES),
-                ("batch_size", self.batch_size, MAX_PROBES),
                 (
                     "max_evidence_frames",
                     self.max_evidence_frames,
@@ -75,26 +71,12 @@ impl Limits {
                     MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
-            &[
-                (
-                    "batch_size",
-                    self.batch_size,
-                    self.max_probes,
-                    "cannot exceed max_probes",
-                ),
-                (
-                    "batch_size",
-                    self.batch_size,
-                    self.max_evidence_frames,
-                    "cannot exceed max_evidence_frames because every probe may receive a response",
-                ),
-                (
-                    "max_undecoded",
-                    self.max_undecoded,
-                    self.max_evidence_frames,
-                    "cannot exceed max_evidence_frames",
-                ),
-            ],
+            &[(
+                "max_undecoded",
+                self.max_undecoded,
+                self.max_evidence_frames,
+                "cannot exceed max_evidence_frames",
+            )],
             |field, value, reason| {
                 Error::new(
                     WORKFLOW,
@@ -177,8 +159,7 @@ pub struct Request {
     pub ports: Vec<u16>,
     pub attempts: u32,
     pub timeout: Duration,
-    /// Maximum average probe rate. Batches are deliberate bursts and the
-    /// clock spaces their start times by the preceding batch's probe count.
+    /// Maximum average probe rate, enforced by delays between single-probe exchanges.
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
 }

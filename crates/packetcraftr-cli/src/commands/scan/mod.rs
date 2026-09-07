@@ -28,7 +28,6 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         attempts,
         timeout_ms,
         rate,
-        batch_size,
         max_ports,
         max_probes,
         max_duration_ms,
@@ -42,7 +41,6 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let scan_limits = packetcraftr::scan::Limits {
         max_ports,
         max_probes,
-        batch_size,
         max_duration: Duration::from_millis(max_duration_ms),
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
@@ -61,8 +59,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let mut providers =
-        target_workflow::prepare(route, policy, request.timeout, batch_size, queue_limits)?;
+    let mut providers = target_workflow::prepare(route, policy, request.timeout, 1, queue_limits)?;
     target_workflow::run::<Scan>(&request, &mut providers, format, stream)
 }
 

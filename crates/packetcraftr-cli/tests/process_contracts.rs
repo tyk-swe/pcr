@@ -189,6 +189,19 @@ fn help_and_version_are_available_without_network_access() {
 }
 
 #[test]
+fn scan_help_and_parser_omit_the_removed_batch_size_option() {
+    let help = run_success(&["scan", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(!help.contains("--batch-size"));
+    assert!(help.contains("--max-probes"));
+    assert!(help.contains("--rate"));
+    let rejected = run(&["scan", "192.0.2.1", "--batch-size", "1"]);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert!(rejected.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("--batch-size"));
+}
+
+#[test]
 fn dns_help_documents_bounded_tcp_fallback_without_network_access() {
     let help = run_success(&["dns", "--help"]);
     let help = String::from_utf8_lossy(&help.stdout);

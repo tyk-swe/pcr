@@ -699,7 +699,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   one message no longer requires a capture-queue frame count, and the codec's
   defaults no longer reach for a capture constant.
 - **Breaking (library):** workflow constants drop the module name they repeat:
-  `scan::{MAX_RATE, MAX_PROBES, MAX_ATTEMPTS, MAX_DURATION, DEFAULT_BATCH_SIZE,
+  `scan::{MAX_RATE, MAX_PROBES, MAX_ATTEMPTS, MAX_DURATION,
   DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES}`,
   `traceroute::{MAX_RATE, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_DURATION,
   DEFAULT_FIRST_HOP, DEFAULT_MAX_HOPS, DEFAULT_PROBES_PER_HOP,
@@ -728,6 +728,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   published `dnsUndecoded.transport` stays the constant `"udp"`.
 
 ### Removed
+
+- **Breaking (scan):** removed the ineffective `--batch-size` CLI option,
+  `scan::Limits::batch_size` field, and `scan::DEFAULT_BATCH_SIZE` constant.
+  Remove the option and field assignments from callers; scans continue to
+  execute one correlated probe per exchange. Use `--max-probes` /
+  `Limits::max_probes` to cap total probes and `--rate` / `probes_per_second`
+  for pacing. Capture and evidence limits remain independent; otherwise valid
+  requests with a one-probe budget now execute.
 
 - **Breaking:** removed `packetcraftr::dns::RecordValue::type_name()`; match
   `RecordValue` variants for semantic inspection or use `type_code()` for the

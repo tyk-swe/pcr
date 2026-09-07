@@ -531,7 +531,7 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
     let harness = Harness::new(IoState::default());
     let (registry, mut executor, mut authorizer) = harness.parts();
     let destination = DESTINATION;
-    let mut request = scan::Request {
+    let request = scan::Request {
         target: Target::Address(destination),
         transport: scan::Transport::Tcp,
         address_family: packetcraftr::target::Family::Any,
@@ -541,7 +541,6 @@ fn scan_sink_failure_stops_after_capture_shutdown() {
         probes_per_second: None,
         limits: scan::Limits::default(),
     };
-    request.limits.batch_size = 1;
 
     let error = scan::run_with_events(
         &request,
@@ -566,7 +565,7 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
     });
     let (registry, mut executor, mut authorizer) = harness.parts();
     let destination = DESTINATION;
-    let mut request = scan::Request {
+    let request = scan::Request {
         target: Target::Address(destination),
         transport: scan::Transport::Tcp,
         address_family: packetcraftr::target::Family::Any,
@@ -576,7 +575,6 @@ fn later_capture_shutdown_failure_preserves_the_earlier_scan_event() {
         probes_per_second: None,
         limits: scan::Limits::default(),
     };
-    request.limits.batch_size = 1;
     let events = Arc::new(Mutex::new(Vec::new()));
     let callback_events = Arc::clone(&events);
 
@@ -678,7 +676,7 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
 }
 
 #[test]
-fn scan_materializes_distinct_correlated_identities_with_a_larger_batch_limit() {
+fn scan_materializes_distinct_correlated_identities_per_probe() {
     let harness = Harness::new(IoState::default());
     let (registry, mut executor, mut authorizer) = harness.parts();
     let request = scan::Request {
@@ -689,10 +687,7 @@ fn scan_materializes_distinct_correlated_identities_with_a_larger_batch_limit() 
         attempts: 1,
         timeout: Duration::from_millis(100),
         probes_per_second: None,
-        limits: scan::Limits {
-            batch_size: 3,
-            ..scan::Limits::default()
-        },
+        limits: scan::Limits::default(),
     };
     scan::run_with_events(
         &request,

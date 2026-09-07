@@ -15,7 +15,6 @@ pub(super) fn build_batches(
     addresses: &[IpAddr],
     endpoints: &[ProbeEndpoint],
 ) -> Result<Vec<Batch>, Error> {
-    check_batch_size(request)?;
     let mut batches = Vec::new();
     let mut sequence = 0_u64;
     for address in addresses {
@@ -52,7 +51,6 @@ pub(super) fn worst_case_duration(
     address_count: usize,
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
-    check_batch_size(request)?;
     let overflow = || {
         Error::new(
             WORKFLOW,
@@ -82,20 +80,6 @@ pub(super) fn worst_case_duration(
     exchange_time.checked_add(delay).ok_or_else(overflow)
 }
 
-fn check_batch_size(request: &Request) -> Result<(), Error> {
-    if request.limits.batch_size == 0 {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "batch_size",
-                value: 0,
-                reason: "must be non-zero".to_owned(),
-            },
-        ));
-    }
-    Ok(())
-}
-
 fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
     crate::clock::rate_delay(1, rate).ok_or(Error::new(
         WORKFLOW,
@@ -112,46 +96,6 @@ mod tests {
     use crate::target::{Family, Target};
 
     use super::*;
-
-    #[test]
-    fn zero_batch_size_is_rejected_inside_planning() {
-        let address = "192.0.2.1".parse().expect("documentation address");
-        let request = Request {
-            target: Target::Address(address),
-            transport: crate::scan::model::Transport::Tcp,
-            address_family: Family::Any,
-            ports: vec![80],
-            attempts: 1,
-            timeout: Duration::from_millis(1),
-            probes_per_second: None,
-            limits: crate::scan::model::Limits {
-                batch_size: 0,
-                ..crate::scan::model::Limits::default()
-            },
-        };
-        assert!(matches!(
-            build_batches(&request, &[address], &[ProbeEndpoint::Tcp { port: 80 }]),
-            Err(Error {
-                kind: ErrorKind::InvalidLimit {
-                    field: "batch_size",
-                    value: 0,
-                    ..
-                },
-                ..
-            })
-        ));
-        assert!(matches!(
-            worst_case_duration(&request, 1, 1),
-            Err(Error {
-                kind: ErrorKind::InvalidLimit {
-                    field: "batch_size",
-                    value: 0,
-                    ..
-                },
-                ..
-            })
-        ));
-    }
 
     #[test]
     fn duration_planning_preserves_per_gap_rounding_empty_plans_and_overflow() {

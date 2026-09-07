@@ -7,7 +7,8 @@ use packetcraftr::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, captured_frame_text, spaced_hex, write_plain_line, write_stdout_line,
+    StreamEncoder, captured_frame_text, render_diagnostics_text, spaced_hex, write_plain_line,
+    write_stdout_line,
 };
 
 pub(super) fn render_record(
@@ -26,20 +27,27 @@ pub(super) fn render_record(
                 "{source_frame}: {}",
                 captured_frame_text(frame)
             )),
-            Some(decoded) => write_stdout_line(format_args!(
-                "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
-                frame.link_type,
-                frame.captured_length,
-                frame.original_length,
-                decoded
-                    .packet
-                    .layers
-                    .iter()
-                    .map(|layer| layer.protocol.as_str())
-                    .collect::<Vec<_>>()
-                    .join("/"),
-                spaced_hex(frame.bytes())
-            )),
+            Some(decoded) => {
+                write_stdout_line(format_args!(
+                    "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
+                    frame.link_type,
+                    frame.captured_length,
+                    frame.original_length,
+                    decoded
+                        .packet
+                        .layers
+                        .iter()
+                        .map(|layer| layer.protocol.as_str())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                    spaced_hex(frame.bytes())
+                ))?;
+                if !decoded.diagnostics.is_empty() {
+                    write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
+                    render_diagnostics_text(&decoded.diagnostics)?;
+                }
+                Ok(())
+            }
         },
         Format::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
         Format::Ndjson => Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?),

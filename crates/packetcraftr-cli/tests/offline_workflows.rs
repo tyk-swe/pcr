@@ -834,6 +834,77 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
 }
 
 #[test]
+fn read_dissection_diagnostics_match_ndjson_and_follow_source_frame_filtering() {
+    let mut damaged = decode_hex(UDP_CLIENT);
+    *damaged.last_mut().expect("UDP payload") ^= 1;
+    let capture =
+        write_capture_byte_frames(&[decode_hex(UDP_SERVER), damaged, decode_hex(TCP_CLIENT)]);
+    let path = path_text(capture.path());
+
+    let ndjson = run_success(&["--output", "ndjson", "read", path, "--dissect"]);
+    assert!(ndjson.stderr.is_empty());
+    let records = parse_ndjson(&ndjson);
+    let diagnostics = records[1]["result"]["decoded"]["diagnostics"]
+        .as_array()
+        .expect("diagnostics remain in the decoded stack");
+    assert_eq!(records[1]["result"]["source_frame"], 2);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0]["code"], "decode.udp_checksum");
+    assert_eq!(diagnostics[0]["message"], "UDP checksum mismatch");
+    assert!(
+        records
+            .iter()
+            .all(|record| record["diagnostics"] == serde_json::json!([]))
+    );
+
+    let text = run_success(&["read", path, "--dissect"]);
+    assert!(text.stderr.is_empty());
+    let text = String::from_utf8(text.stdout).expect("text output");
+    let lines = text.lines().collect::<Vec<_>>();
+    assert!(lines[0].starts_with("1: dlt="));
+    assert!(lines[1].starts_with("2: dlt="));
+    assert_eq!(lines[2], "2: diagnostics:");
+    assert_eq!(
+        lines[3],
+        format!(
+            "{} {}: {}",
+            diagnostics[0]["severity"].as_str().unwrap(),
+            diagnostics[0]["code"].as_str().unwrap(),
+            diagnostics[0]["message"].as_str().unwrap(),
+        )
+    );
+    assert!(lines[4].starts_with("3: dlt="));
+    assert_eq!(lines.len(), 5);
+
+    for format in ["text", "ndjson"] {
+        let filtered = run_success(&[
+            "--output",
+            format,
+            "read",
+            path,
+            "--dissect",
+            "--filter",
+            "frame.number != 2",
+        ]);
+        assert!(filtered.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&filtered.stdout).contains("decode.udp_checksum"));
+        if format == "text" {
+            let text = String::from_utf8(filtered.stdout).unwrap();
+            assert!(!text.contains("diagnostics:"));
+            assert!(
+                text.lines()
+                    .all(|line| line.starts_with("1: ") || line.starts_with("3: "))
+            );
+        } else {
+            let records = parse_ndjson(&filtered);
+            assert_eq!(records.len(), 3);
+            assert_eq!(records[0]["result"]["source_frame"], 1);
+            assert_eq!(records[1]["result"]["source_frame"], 3);
+        }
+    }
+}
+
+#[test]
 fn read_ndjson_preserves_source_identity_and_always_completes() {
     let capture = write_capture_frames(&[UDP_CLIENT, UDP_SERVER, TCP_CLIENT]);
     let path = path_text(capture.path());

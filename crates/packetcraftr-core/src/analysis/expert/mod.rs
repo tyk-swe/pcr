@@ -63,10 +63,7 @@ pub struct Summary {
 }
 
 impl Summary {
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "u64 finding counters cannot reach u64::MAX from a bounded frame count"
-    )]
+    // u64 finding counters cannot reach u64::MAX from a bounded frame count
     fn count(&mut self, finding: &Finding) {
         self.findings += 1;
         match finding.severity {
@@ -101,8 +98,10 @@ impl Collector {
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
         let mut findings = finding::from_diagnostics(record);
         self.reconcile_tcp_evictions(record.tcp_events);
-        if let (Some(tcp), Some(flow)) = (record.tcp_header, record.tcp_flow) {
-            self.observe_tcp(record, flow, tcp, record.tcp_payload_len, &mut findings);
+        if let Some(tcp) = record.tcp
+            && let Some(conversation) = tcp.conversation
+        {
+            self.observe_tcp(record, conversation, tcp, &mut findings);
         }
 
         for finding in &findings {

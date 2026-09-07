@@ -11,7 +11,7 @@ use packetcraftr_netio::capture::Statistics;
 #[error("statistic accounting overflowed")]
 pub struct StatsOverflow;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Stats {
     pub packets_attempted: u64,
     pub packets_completed: u64,

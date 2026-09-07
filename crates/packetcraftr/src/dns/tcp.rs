@@ -644,7 +644,6 @@ fn is_timeout(error: &io::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::collections::VecDeque;
     use std::io::Cursor;

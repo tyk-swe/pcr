@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "stream",
   "sequence": 2,
   "status": "success",
   "result": {
-    "event": "record",
     "attempt": 1,
     "transport": "tcp",
     "server": "resolver.lab",
@@ -21,5 +20,6 @@
       "address": "192.0.2.10"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "record"
 }

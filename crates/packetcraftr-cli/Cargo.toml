@@ -12,14 +12,17 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["native-interfaces", "native-route"]
-native-interfaces = ["native-route", "packetcraftr/native-interfaces"]
+default = ["native-route"]
 native-route = ["packetcraftr/native-route"]
 native-layer2 = ["packetcraftr/native-layer2"]
 native-layer3 = ["packetcraftr/native-layer3"]
 
 [dependencies]
+bytes.workspace = true
 anstream.workspace = true
+packetcraftr-core.workspace = true
+packetcraftr-netio.workspace = true
+thiserror.workspace = true
 clap.workspace = true
 packetcraftr.workspace = true
 serde.workspace = true

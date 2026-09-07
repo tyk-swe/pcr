@@ -8,7 +8,7 @@ use crate::diagnostic::Severity;
 use super::finding::new as new_finding;
 use super::generation;
 use super::observation::TcpObservation;
-use super::{Collector, Finding, FlowKey, FrameRecord, Tcp, TcpEvent};
+use super::{Collector, Finding, FlowKey, FrameRecord, TcpEvent};
 
 mod acknowledgment;
 mod sequence;
@@ -47,12 +47,12 @@ impl Collector {
     pub(super) fn observe_tcp(
         &mut self,
         record: &FrameRecord<'_>,
-        flow: &FlowKey,
-        tcp: &Tcp,
-        payload_len: usize,
+        conversation: crate::analysis::Conversation<'_>,
+        tcp: crate::analysis::TcpView<'_>,
         findings: &mut Vec<Finding>,
     ) {
-        let observation = TcpObservation::new(record, flow, tcp, payload_len);
+        let flow = conversation.flow;
+        let observation = TcpObservation::new(record.number, conversation, tcp);
         let (probe_shape, reassembly_retransmission) =
             sequence::reconcile_events(&mut self.flows, &observation, record.tcp_events, findings);
 
@@ -70,9 +70,9 @@ impl Collector {
         }
         window::report_zero(&observation, findings);
 
-        if let Some(stream) = record.tcp_stream {
-            self.streams.entry(flow.clone()).or_insert(stream);
-        }
+        self.streams
+            .entry(flow.clone())
+            .or_insert(conversation.index);
 
         let generation::GenerationTransition {
             reverse,

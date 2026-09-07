@@ -157,11 +157,8 @@ impl LayerCodec for GeneveCodec {
         )?;
 
         let mut prefix = Vec::with_capacity(header_len);
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the guard above rejects options longer than GENEVE_MAX_OPTIONS_LEN, so the \
-                      word count fits the 6-bit option-length field"
-        )]
+        // the guard above rejects options longer than GENEVE_MAX_OPTIONS_LEN, so the word count
+        // fits the 6-bit option-length field
         let option_words = (layer.options.len() / 4) as u8;
         prefix.push((layer.version << 6) | option_words);
         prefix.push(
@@ -365,7 +362,6 @@ fn validate_option_chain(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
     use crate::Packet;

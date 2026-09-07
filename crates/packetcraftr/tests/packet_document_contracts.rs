@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Keeps `schemas/packetcraftr.packet.v1.schema.json` and the published
 //! `examples/documents/packet-*` files in step with the document loader.
@@ -10,7 +7,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use packetcraftr::core::document::{DEFAULT_MAX_DOCUMENT_BYTES, Format, Packet};
+use packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES;
+use packetcraftr_core::document::Format;
+use packetcraftr_core::document::Packet;
 use serde_json::Value;
 
 mod support;
@@ -72,13 +71,13 @@ fn every_published_json_packet_example_validates_against_the_schema() {
 
 #[test]
 fn every_published_packet_example_loads_and_builds() {
-    let registry = packetcraftr::core::protocol::builtin::registry();
+    let registry = packetcraftr_core::protocol::builtin::registry();
     for path in packet_examples() {
         let input = fs::read_to_string(&path).expect("published example must be readable");
         let document = Packet::parse(&input, format_for(&path), DEFAULT_MAX_DOCUMENT_BYTES)
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
         let packet = document
-            .to_packet(&registry, packetcraftr::core::build::DEFAULT_MAX_LAYERS)
+            .to_packet(&registry, packetcraftr_core::build::DEFAULT_MAX_LAYERS)
             .unwrap_or_else(|error| panic!("{} must convert: {error}", path.display()));
         assert!(!packet.is_empty(), "{} must declare layers", path.display());
 

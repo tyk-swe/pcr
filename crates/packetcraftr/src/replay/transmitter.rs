@@ -21,7 +21,7 @@ use packetcraftr_netio::{
     },
 };
 
-use crate::authorization::decode_wire;
+use crate::policy::decode_wire;
 use crate::replay::model::{Transmission, Transmitter};
 use crate::replay::wire::{map_replay_route_error, replay_network_envelope};
 
@@ -263,7 +263,6 @@ impl Transmitter for SystemTransmitter {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
 

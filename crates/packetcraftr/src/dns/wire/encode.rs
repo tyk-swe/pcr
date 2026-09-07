@@ -12,7 +12,7 @@ use crate::dns::{CLASS_IN, FLAG_RECURSION_DESIRED, HEADER_BYTES};
 /// effects.
 pub fn encode_query(
     query_name: &str,
-    query_type: crate::dns::model::QueryType,
+    query_type: crate::dns::QueryType,
     transaction_id: u16,
     recursion_desired: bool,
 ) -> Result<Bytes, crate::dns::error::WireError> {

@@ -18,7 +18,7 @@ use crate::probe::{
     packet_shape_matches,
 };
 
-use super::model::{Probe, ProbeEndpoint};
+use super::{Probe, ProbeEndpoint};
 
 fn scan_udp_source_port(attempt: u32) -> u16 {
     ephemeral_source_port(
@@ -27,12 +27,9 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
     )
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
-              probe carries; sent_probe_matches applies the same reduction when comparing, \
-              so even a wrapped counter still matches"
-)]
+// the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the probe carries;
+// sent_probe_matches applies the same reduction when comparing, so even a wrapped counter still
+// matches
 pub(super) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
@@ -76,21 +73,15 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
     packet
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
-              the two payload bytes below"
-)]
+// the identity tag is a deliberate 16-bit reduction of the sequence, split across the two payload
+// bytes below
 fn icmp_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the observed packet is compared against the same reduction probe_packet applied, \
-              so the narrowing is symmetric on both sides of the comparison"
-)]
+// the observed packet is compared against the same reduction probe_packet applied, so the narrowing
+// is symmetric on both sides of the comparison
 pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4

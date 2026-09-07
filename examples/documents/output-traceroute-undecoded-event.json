@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "undecoded",
     "hop_limit": 1,
     "frame": {
       "timestamp": {
@@ -20,5 +19,6 @@
       "bytes_hex": "deadbeef"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "undecoded"
 }

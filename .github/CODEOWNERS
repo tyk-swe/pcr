@@ -14,7 +14,7 @@
 /crates/packetcraftr-core/src/protocol/matcher/** @tyk-swe
 /crates/packetcraftr/src/probe/** @tyk-swe
 
-/crates/packetcraftr/src/output/** @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-cli/src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
 /crates/packetcraftr-core/src/document.rs @tyk-swe @rkdxodud-tyk

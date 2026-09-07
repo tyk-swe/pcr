@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 
 use std::time::SystemTime;
 
-use packetcraftr::{
-    core::{
-        self,
-        frame::{Frame, LinkType},
-    },
-    output,
-};
+use packetcraftr_core as core;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
+
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
 use super::registry_with_tls_ports;

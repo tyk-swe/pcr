@@ -203,7 +203,6 @@ fn drain_deadline_error() -> LiveIoError {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use crate::materialize::PreparedPacket;
 

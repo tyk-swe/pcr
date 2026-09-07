@@ -218,11 +218,8 @@ impl<'a> UndecodedRetention<'a> {
                 self.max_evidence_bytes,
                 self.diagnostics,
             ) {
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "`retain_evidence` returns false once the count reaches \
-                              `max_evidence_frames`, so the increment cannot overflow"
-                )]
+                // `retain_evidence` returns false once the count reaches `max_evidence_frames`, so
+                // the increment cannot overflow
                 {
                     *self.retained_count += 1;
                 }

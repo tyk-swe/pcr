@@ -175,16 +175,14 @@ where
         options: Options,
     ) -> Result<Prepared, Error> {
         let started = Instant::now();
-        // Both front doors reject a malformed policy identically: the
-        // workflow seam does it in `PolicyAuthorizer::authorize_operation`.
-        self.policy.validate()?;
         options.validate()?;
         let deadline = started
             .checked_add(options.timeout)
             .expect("validated bounded exchange timeout must fit Instant");
         let expansion_len = template.expansion_len();
-        self.policy
-            .authorize_operation(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0)?;
+        self.policy.authorize(crate::policy::Operation::Budgeted(
+            crate::policy::WireBudget::new(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0),
+        ))?;
         if expansion_len == 0 {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -262,7 +260,9 @@ where
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,
                 })?;
-            self.policy.authorize_operation(packet_count, total_bytes)?;
+            self.policy.authorize(crate::policy::Operation::Budgeted(
+                crate::policy::WireBudget::new(packet_count, total_bytes),
+            ))?;
             if let Some(first_packet) = planned_packets.first()
                 && (first_packet.plan.decision.interface != planned.plan.decision.interface
                     || first_packet.plan.mode != planned.plan.mode)

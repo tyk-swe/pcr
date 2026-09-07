@@ -31,12 +31,8 @@ use packetcraftr_core::{
 
 /// Maps an operation-local sequence to an IPv4 identification that native
 /// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::arithmetic_side_effects,
-    reason = "`u16::MAX` is a non-zero divisor and the remainder is strictly below it, so the \
-              increment neither divides by zero nor overflows u16"
-)]
+// `u16::MAX` is a non-zero divisor and the remainder is strictly below it, so the increment neither
+// divides by zero nor overflows u16
 pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }
@@ -49,12 +45,9 @@ pub const EPHEMERAL_SOURCE_PORT_BASE: u16 = 49_152;
 /// whichever range `base` already belongs to: the dynamic range at or above
 /// [`EPHEMERAL_SOURCE_PORT_BASE`], or ports `1..EPHEMERAL_SOURCE_PORT_BASE`
 /// when the caller pinned a lower port.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "both ranges start inside u16 and `rotated` is a remainder modulo the range width, \
-              so `range_start + rotated` stays at or below u16::MAX; `offset` is likewise reduced \
-              modulo that width before the narrowing"
-)]
+// both ranges start inside u16 and `rotated` is a remainder modulo the range width, so `range_start
+// + rotated` stays at or below u16::MAX; `offset` is likewise reduced modulo that width before the
+// narrowing
 pub fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
     let (range_start, width) = if base >= EPHEMERAL_SOURCE_PORT_BASE {
         (
@@ -297,7 +290,6 @@ fn classify_icmp_error(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port};
 

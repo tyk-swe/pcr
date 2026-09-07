@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! The operation deadline bounds neighbor discovery, the one preparation step
 //! that waits on the network, rather than being checked only after it.
@@ -12,11 +9,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr::core::protocol::{network::Ipv4, transport::Udp};
-use packetcraftr::core::{Packet, layer::Raw};
-use packetcraftr::netio::link::Mode;
-use packetcraftr::netio::{capture, neighbor};
 use packetcraftr::{Client, policy};
+use packetcraftr_core::Packet;
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::network::Ipv4;
+use packetcraftr_core::protocol::transport::Udp;
+use packetcraftr_netio::capture;
+use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::neighbor;
 
 mod support;
 
@@ -48,7 +48,7 @@ impl neighbor::Resolver for DeadlineBoundNeighbors {
     }
 }
 
-fn template() -> packetcraftr::core::template::Template {
+fn template() -> packetcraftr_core::template::Template {
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -62,14 +62,14 @@ fn template() -> packetcraftr::core::template::Template {
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(b"probe")));
-    packetcraftr::core::template::Template::new(packet)
+    packetcraftr_core::template::Template::new(packet)
 }
 
 #[test]
 fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
     let deadline = Arc::new(Mutex::new(None));
     let client = Client::new(
-        packetcraftr::core::protocol::builtin::registry(),
+        packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
         DeadlineBoundNeighbors {
             deadline: Arc::clone(&deadline),

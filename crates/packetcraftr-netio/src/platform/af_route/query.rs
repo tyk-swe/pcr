@@ -363,7 +363,6 @@ fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::net::{Ipv4Addr, Ipv6Addr};
 

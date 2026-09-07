@@ -16,21 +16,24 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::policy::Authorizer;
 use crate::probe::evidence::{
     EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
+use crate::target::approve_operation;
+use crate::target::budgeted;
+use crate::target::resolve_selected;
 
 use super::WORKFLOW;
 use super::classification::classify_response;
-use super::model::{
+use super::plan::{build_batches, worst_case_duration};
+use super::probe::sent_probe_matches;
+use super::{
     Batch, Classification, ClassificationCounts, Endpoint, Event, Execution, Executor, Limits,
     Probe, ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport,
 };
-use super::plan::{build_batches, worst_case_duration};
-use super::probe::sent_probe_matches;
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
 
@@ -66,7 +69,7 @@ where
 
 /// Executes one approved scan and publishes each final probe outcome and
 /// retained undecoded frame before beginning later batches. The callback runs
-/// on a process-budgeted worker; `max_duration` bounds publisher waiting and
+/// on a runtime-budgeted worker; `max_duration` bounds publisher waiting and
 /// live I/O, not arbitrary callback execution. Confirmed sends in the current
 /// batch are not undone, callback failure prevents later batches, and a
 /// callback may finish after this function returns while holding its permit.

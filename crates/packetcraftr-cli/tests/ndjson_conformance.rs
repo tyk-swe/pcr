@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::{core, output};
+use packetcraftr_core as core;
+
+use packetcraftr_cli::output;
 use serde_json::{Value, json};
 
 mod support;
@@ -92,7 +91,7 @@ fn validate_records(validator: &jsonschema::Validator, records: &[Value]) {
     }
 }
 
-fn validate_typed_event<T: serde::Serialize>(
+fn validate_typed_event<T: output::stream::StreamRecord>(
     command: output::contract::Command,
     event: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
@@ -207,16 +206,17 @@ fn dns_context() -> Arc<packetcraftr::dns::EventContext> {
 fn dns_attempt() -> packetcraftr::dns::AttemptEvidence {
     packetcraftr::dns::AttemptEvidence {
         attempt: 1,
-        transport: packetcraftr::dns::Transport::Udp,
         server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
-        source_port: Some(49_152),
         status: packetcraftr::dns::Outcome::Timeout,
-        sent_at: Some(UNIX_EPOCH),
         received_at: None,
         latency: None,
-        response: None,
         response_code: None,
         reason: "timeout".to_owned(),
+        exchange: packetcraftr::dns::AttemptTransport::Udp {
+            source_port: 49_152,
+            sent_at: UNIX_EPOCH,
+            response: None,
+        },
     }
 }
 
@@ -240,8 +240,8 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
 }
 
 fn sent_packet() -> packetcraftr::SentPacket {
-    use packetcraftr::netio::link::{Capability, Mode};
-    use packetcraftr::netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
+    use packetcraftr_netio::link::{Capability, Mode};
+    use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
 
     let mut packet = core::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));
@@ -256,7 +256,7 @@ fn sent_packet() -> packetcraftr::SentPacket {
     let route = Materialized {
         plan: Plan {
             decision: Decision {
-                interface: packetcraftr::netio::interface::Id {
+                interface: packetcraftr_netio::interface::Id {
                     name: "fixture0".to_owned(),
                     index: 1,
                 },
@@ -284,7 +284,7 @@ fn sent_packet() -> packetcraftr::SentPacket {
         },
         neighbor_resolution: None,
     };
-    let report = packetcraftr::netio::transmit::Submission::start()
+    let report = packetcraftr_netio::transmit::Submission::start()
         .complete(built.bytes.len(), built.bytes.clone());
     packetcraftr::SentPacket::try_new(built, route, report).expect("trusted sent fixture")
 }
@@ -300,22 +300,21 @@ fn production_typed_event_variants_are_schema_valid() {
         output::contract::Command::Replay,
         output::replay::Frame {
             source_index: 1,
-            interface: output::replay::InterfaceId {
+            interface: packetcraftr_netio::interface::Id {
                 name: "fixture0".to_owned(),
                 index: 1,
             },
-            link_mode: output::replay::LinkMode::Layer3,
+            link_mode: packetcraftr_netio::link::Mode::Layer3,
             scheduled_delay: Duration::ZERO,
             bytes_sent: 1,
             frame: output::frame::Captured::try_from_frame(frame(&[1])).unwrap(),
-            transmitted: true,
         },
         Vec::new(),
     );
     validate_typed_event(
         output::contract::Command::Follow,
         output::follow::Chunk {
-            direction: output::follow::Direction::Client,
+            direction: packetcraftr_core::analysis::follow::Direction::ClientToServer,
             frame: 1,
             bytes_hex: "01".to_owned(),
         },
@@ -324,7 +323,7 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_typed_event(
         output::contract::Command::Expert,
         output::expert::Finding {
-            severity: output::expert::Severity::Warning,
+            severity: packetcraftr_core::diagnostic::Severity::Warning,
             code: "fixture.warning".to_owned(),
             frame: 1,
             transport: None,
@@ -344,26 +343,27 @@ fn production_typed_event_variants_are_schema_valid() {
 }
 
 fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
-    let ipv4 = output::reassembly::DatagramKey {
-        family: output::reassembly::Family::Ipv4,
-        scope: 0,
-        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+    use packetcraftr_core::analysis::reassembly::ip::{
+        DatagramKey, IncompleteDatagram, Ipv4DatagramKey, Ipv6DatagramKey,
+    };
+    use packetcraftr_core::analysis::scope::ScopeId;
+    let ipv4 = DatagramKey::Ipv4(Ipv4DatagramKey {
+        scope: serde_json::from_str::<ScopeId>("0").unwrap(),
+        source: Ipv4Addr::new(192, 0, 2, 1),
+        destination: Ipv4Addr::new(198, 51, 100, 2),
         identification: 42,
-        protocol: Some(17),
-    };
-    let ipv6 = output::reassembly::DatagramKey {
-        family: output::reassembly::Family::Ipv6,
-        scope: 1,
-        source: "2001:db8::1".parse().expect("documentation address"),
-        destination: "2001:db8::2".parse().expect("documentation address"),
+        protocol: 17,
+    });
+    let ipv6 = DatagramKey::Ipv6(Ipv6DatagramKey {
+        scope: serde_json::from_str::<ScopeId>("0").unwrap(),
+        source: "2001:db8::1".parse().unwrap(),
+        destination: "2001:db8::2".parse().unwrap(),
         identification: 70_000,
-        protocol: None,
-    };
+    });
     [
         output::reassembly::Event::IpDatagramCompleted {
             frame: 2,
-            outcome: output::reassembly::DatagramOutcome::Completed {
+            outcome: packetcraftr_core::analysis::IpDatagramOutcome::Completed {
                 key: ipv4.clone(),
                 fragment_count: 2,
                 unique_bytes: 24,
@@ -375,20 +375,23 @@ fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
         },
         output::reassembly::Event::IpDatagramIncomplete {
             frame: 7,
-            outcome: output::reassembly::DatagramOutcome::Incomplete {
-                key: ipv6,
-                reason: output::reassembly::IncompleteReason::IdleExpired,
-                fragment_count: 3,
-                unique_bytes: 32,
-                known_final_length: Some(48),
-                duplicate_fragments: 1,
-                overlap_bytes: 0,
-            },
+            outcome: packetcraftr_core::analysis::IpDatagramOutcome::Incomplete(
+                IncompleteDatagram {
+                    key: ipv6,
+                    reason:
+                        packetcraftr_core::analysis::reassembly::ip::IncompleteReason::IdleExpired,
+                    fragment_count: 3,
+                    unique_bytes: 32,
+                    known_final_length: Some(48),
+                    duplicate_fragments: 1,
+                    overlap_bytes: 0,
+                },
+            ),
         },
         output::reassembly::Event::IpOverlapResolved {
             frame: 8,
             key: ipv4,
-            policy: output::reassembly::OverlapPolicy::Last,
+            policy: packetcraftr_core::analysis::reassembly::ip::OverlapPolicy::Last,
             affected_bytes: 8,
             fragment_count: 3,
             unique_bytes: 24,
@@ -408,9 +411,9 @@ fn validate_ip_event_stream<T: serde::Serialize>(command: output::contract::Comm
     let records = bytes.records();
     validate_records(schema_validator(), &records);
     assert_eq!(records.len(), 4);
-    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
-    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
-    assert_eq!(records[2]["result"]["event"], "ip_overlap_resolved");
+    assert_eq!(records[0]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["event"], "ip_overlap_resolved");
     assert!(records[3]["result"]["ip_reassembly"].is_object());
     assert_eq!(
         records[3]["result"]["ip_reassembly"]["families"][0]["family"],
@@ -434,7 +437,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     validate_ip_event_stream(
         output::contract::Command::Follow,
         output::follow::Report {
-            transport: output::expert::StreamTransport::Udp,
+            transport: packetcraftr_core::analysis::StreamTransport::Udp,
             stream: 0,
             client: None,
             server: None,
@@ -468,7 +471,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
 /// A minimal session record: the shape a `gap` session takes when the capture
 /// started after the ClientHello, so the optional halves are exercised too.
 fn tls_session_event() -> output::tls::Event {
-    let endpoint = |last: u8, port: u16| output::tls::Endpoint {
+    let endpoint = |last: u8, port: u16| packetcraftr_core::analysis::Endpoint {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         port,
     };
@@ -489,7 +492,7 @@ fn tls_session_event() -> output::tls::Event {
             description_name: Some("handshake_failure"),
         }],
         alerts_dropped: 2,
-        status: output::tls::Status::Gap,
+        status: packetcraftr_core::analysis::tls::Status::Gap,
         reason: Some("no ClientHello observed".to_owned()),
     })
 }
@@ -546,8 +549,10 @@ fn validate_dns_event_variants() {
         packetcraftr::dns::Event::Attempt {
             context: Arc::clone(&context),
             evidence: packetcraftr::dns::AttemptEvidence {
-                transport: packetcraftr::dns::Transport::Tcp,
-                source_port: None,
+                exchange: packetcraftr::dns::AttemptTransport::Tcp {
+                    source_port: None,
+                    sent_at: dns_attempt().sent_at(),
+                },
                 status: packetcraftr::dns::Outcome::Response,
                 received_at: Some(UNIX_EPOCH + Duration::from_millis(1)),
                 latency: Some(Duration::from_millis(1)),
@@ -593,7 +598,9 @@ fn validate_dns_event_variants() {
 #[test]
 fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
     let mut evidence = dns_attempt();
-    evidence.response = Some(frame(&[4]));
+    if let packetcraftr::dns::AttemptTransport::Udp { response, .. } = &mut evidence.exchange {
+        *response = Some(frame(&[4]));
+    }
     let (event, diagnostics) =
         output::dns::Event::try_from_dns(packetcraftr::dns::Event::Attempt {
             context: dns_context(),
@@ -605,7 +612,7 @@ fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
     let mut record = bytes.records().remove(0);
     schema_validator()
         .validate(&record)
-        .expect("UDP captured evidence is valid");
+        .unwrap_or_else(|error| panic!("UDP captured evidence is valid: {error}"));
     record["result"]["evidence"]["transport"] = json!("tcp");
     assert!(schema_validator().validate(&record).is_err());
 }
@@ -618,7 +625,7 @@ fn dns_schema_enforces_fallback_transport_consistency() {
     .unwrap();
     schema_validator()
         .validate(&document)
-        .expect("published fallback aggregate is valid");
+        .unwrap_or_else(|error| panic!("published fallback aggregate is valid: {error}"));
 
     let mut no_fallback = document.clone();
     no_fallback["result"]["fallback_attempted"] = json!(false);
@@ -700,7 +707,7 @@ fn complete(
     result: Value,
 ) -> Result<(), output::stream::EncodeError> {
     if requires_terminal_stats {
-        sink.complete_with_stats(result, Vec::new(), output::envelope::Stats::default())
+        sink.complete_with_stats(result, Vec::new(), packetcraftr::Stats::default())
     } else {
         sink.complete(result, Vec::new())
     }
@@ -710,24 +717,23 @@ fn complete(
 fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
     let (sink, output) = stream(output::contract::Command::Exchange);
     sink.emit_data(
-        json!({
-            "event": "sent",
-            "request_index": 77,
-            "frame": { "bytes_hex": "00", "length": 1 }
-        }),
+        output::exchange::Event::Sent {
+            request_index: 77,
+            frame: output::frame::Wire::new(vec![0]),
+        },
         Vec::new(),
     )
     .unwrap();
-    let cleanup = packetcraftr::netio::Error::Capture {
+    let cleanup = packetcraftr_netio::Error::Capture {
         message: "cleanup failure".to_owned(),
         source: None,
     };
     // Composed by the renderer under test rather than restated here, so the
     // record covers what `CliError::with_cleanup` actually produces.
     let primary = cli_errors::CliError::from_classification(
-        packetcraftr::core::error::Classification::new(
+        packetcraftr_core::error::Classification::new(
             "io.primary",
-            packetcraftr::core::error::Kind::Io,
+            packetcraftr_core::error::Kind::Io,
             None,
         ),
         "primary capture failure",

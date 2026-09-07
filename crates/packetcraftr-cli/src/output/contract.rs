@@ -1,0 +1,241 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Output-version, command, and format contracts.
+
+use std::fmt;
+
+use serde::Serialize;
+
+use packetcraftr_core::error::{Classification, Classified, Kind};
+
+/// Version identifier emitted by every structured CLI record.
+pub const SCHEMA_V2: &str = "packetcraftr.output/v2";
+
+/// Declares the command vocabulary once: the enum, [`Command::ALL`], and
+/// [`Command::as_str`] all come from the single list below, in canonical order.
+macro_rules! commands {
+    (
+        $(#[$enum_attribute:meta])*
+        $visibility:vis enum $name:ident {
+            $( $variant:ident = $text:literal, )*
+        }
+    ) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+        $(#[$enum_attribute])*
+        $visibility enum $name {
+            $( $variant, )*
+        }
+
+        impl $name {
+            /// Complete command vocabulary in canonical serialized order.
+            pub const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
+
+            /// The serialized name, byte-identical to what `ALL` publishes.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $text, )*
+                }
+            }
+        }
+    };
+}
+
+commands! {
+    /// CLI command identifier frozen into the output schema.
+    #[serde(rename_all = "snake_case")]
+    pub enum Command {
+        Build = "build",
+        Dissect = "dissect",
+        Protocols = "protocols",
+        Plan = "plan",
+        Send = "send",
+        Exchange = "exchange",
+        Capture = "capture",
+        Read = "read",
+        Replay = "replay",
+        Scan = "scan",
+        Stats = "stats",
+        Expert = "expert",
+        Follow = "follow",
+        Tls = "tls",
+        Traceroute = "traceroute",
+        Dns = "dns",
+        Fuzz = "fuzz",
+        Interfaces = "interfaces",
+        Routes = "routes",
+    }
+}
+
+impl Command {
+    /// Formats deliberately supported by this command contract.
+    pub const fn formats(self) -> &'static [Format] {
+        match self {
+            Self::Build | Self::Dissect => BUILD_FORMATS,
+            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
+                AGGREGATE_FORMATS
+            }
+            Self::Send => SEND_FORMATS,
+            Self::Exchange => EXCHANGE_FORMATS,
+            Self::Capture | Self::Read => CAPTURE_FORMATS,
+            Self::Replay => REPLAY_FORMATS,
+            Self::Follow => FOLLOW_FORMATS,
+            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert | Self::Tls => {
+                TOOL_FORMATS
+            }
+        }
+    }
+
+    /// Rejects unsupported combinations before a command performs I/O.
+    pub fn require_format(self, format: Format) -> Result<(), Error> {
+        if self.formats().contains(&format) {
+            Ok(())
+        } else {
+            Err(Error::UnsupportedFormat {
+                command: self,
+                format,
+            })
+        }
+    }
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// User-selectable output formats across supported commands. Never a document
+/// field: a format is chosen on the command line, so it has no default here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
+pub enum Format {
+    Text,
+    Json,
+    Ndjson,
+    Hex,
+    Raw,
+    Pcap,
+    #[value(name = "pcapng")]
+    PcapNg,
+}
+
+impl Format {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Json => "json",
+            Self::Ndjson => "ndjson",
+            Self::Hex => "hex",
+            Self::Raw => "raw",
+            Self::Pcap => "pcap",
+            Self::PcapNg => "pcapng",
+        }
+    }
+}
+
+impl fmt::Display for Format {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Whether one structured value is an aggregate JSON result or an NDJSON record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    Aggregate,
+    Stream,
+}
+
+const BUILD_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
+const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
+const SEND_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Hex,
+    Format::Raw,
+    Format::Pcap,
+    Format::PcapNg,
+];
+const EXCHANGE_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Pcap,
+    Format::PcapNg,
+];
+const CAPTURE_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Pcap,
+    Format::PcapNg,
+];
+const REPLAY_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Pcap,
+    Format::PcapNg,
+];
+const TOOL_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Ndjson];
+const FOLLOW_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Raw,
+];
+
+/// Failure produced while enforcing the shared output contract.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error(
+        "{command} does not support {format} output; choose {}",
+        supported_formats(command)
+    )]
+    UnsupportedFormat { command: Command, format: Format },
+    #[error("capture timestamp is outside the signed output range")]
+    TimestampOutOfRange,
+    #[error("source frame must be a non-zero unsigned 64-bit position")]
+    InvalidSourceFrame,
+    #[error("fuzz events are incoherent: {message}")]
+    IncoherentFuzzEvents { message: String },
+}
+
+fn supported_formats(command: &Command) -> String {
+    command
+        .formats()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::UnsupportedFormat { .. } => Classification::new(
+                "cli.output_format",
+                Kind::Cli,
+                Some("choose one of the formats listed for this command"),
+            ),
+            Self::TimestampOutOfRange => Classification::new(
+                "packet.timestamp_range",
+                Kind::Packet,
+                Some("use a capture whose timestamp fits signed 64-bit Unix seconds"),
+            ),
+            Self::InvalidSourceFrame => Classification::new(
+                "internal.source_frame",
+                Kind::Internal,
+                Some("use the one-based source position assigned while reading or capturing"),
+            ),
+            Self::IncoherentFuzzEvents { .. } => Classification::new(
+                "internal.fuzz_event_coherence",
+                Kind::Internal,
+                Some("collect cases from exactly one complete campaign in publication order"),
+            ),
+        }
+    }
+}

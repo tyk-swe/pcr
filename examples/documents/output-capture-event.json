@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
   "status": "success",
   "sequence": 0,
   "result": {
-    "event": "frame",
     "source_frame": 100,
     "frame": {
       "timestamp": {
@@ -26,5 +25,6 @@
       "severity": "warning",
       "message": "no root binding for link type 147"
     }
-  ]
+  ],
+  "event": "frame"
 }

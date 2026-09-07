@@ -17,9 +17,7 @@ use crate::Error;
 /// The boundary instant itself is not expired, matching correlation
 /// eligibility, which accepts a capture whose `received_at <= deadline`.
 ///
-/// Every "has the deadline passed" question in a live operation goes through
-/// here. Each caller keeps its own error, because each names a different
-/// operation.
+/// Preparation callers retain the error vocabulary of their operation.
 #[must_use]
 pub(crate) fn expired(deadline: Instant) -> bool {
     deadline.checked_duration_since(Instant::now()).is_none()

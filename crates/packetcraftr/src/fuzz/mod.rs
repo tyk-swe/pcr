@@ -14,15 +14,18 @@ mod error;
 mod evidence;
 mod execution;
 mod executor;
-mod model;
 mod plan;
+mod report;
+mod request;
 mod run;
 #[cfg(test)]
 mod tests;
 
-pub use crate::authorization::PolicyAuthorizer;
+pub use crate::policy::PolicyAuthorizer;
 pub use crate::probe::Executor;
 pub use error::Error;
 pub use execution::{Execution, ExecutionCase};
-pub use model::{Case, CaseOutcome, LiveLimits, LiveOptions, Report, Stats, Summary};
+pub use report::{Case, CaseOutcome, Report, Stats, Summary};
+pub use request::{LiveLimits, LiveOptions};
+
 pub use run::{RunInput, run, run_offline_with_events, run_with_events};

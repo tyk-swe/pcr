@@ -113,10 +113,7 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), Error> {
             "IPv4 identification is zero and would be replaced by the operating system".to_owned(),
         ));
     }
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "header_length was checked against bytes.len() above"
-    )]
+    // header_length was checked against bytes.len() above
     let header_checksum = checksum(&bytes[..header_length]);
     if header_checksum != 0 {
         return Err(invalid_frame(
@@ -264,7 +261,6 @@ fn invalid_frame(message: String) -> Error {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     const SOURCE_V4: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);

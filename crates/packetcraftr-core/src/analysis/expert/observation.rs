@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{FlowKey, FrameRecord, StreamRef, Tcp, tcp_stream_ref};
+use super::{FlowKey, StreamRef, Tcp, tcp_stream_ref};
 
 #[derive(Clone, Copy)]
 pub(super) struct TcpObservation<'a> {
@@ -18,17 +18,17 @@ pub(super) struct TcpObservation<'a> {
 
 impl<'a> TcpObservation<'a> {
     pub(super) fn new(
-        record: &FrameRecord<'_>,
-        flow: &'a FlowKey,
-        tcp: &'a Tcp,
-        payload_len: usize,
+        number: u64,
+        conversation: crate::analysis::Conversation<'a>,
+        view: crate::analysis::TcpView<'a>,
     ) -> Self {
+        let tcp = view.header;
         Self {
-            number: record.number,
-            stream: record.tcp_stream.map(tcp_stream_ref),
-            flow,
+            number,
+            stream: Some(tcp_stream_ref(conversation.index)),
+            flow: conversation.flow,
             tcp,
-            payload_len,
+            payload_len: view.payload.len(),
             syn: tcp.flags & Tcp::SYN != 0,
             fin: tcp.flags & Tcp::FIN != 0,
             rst: tcp.flags & Tcp::RST != 0,

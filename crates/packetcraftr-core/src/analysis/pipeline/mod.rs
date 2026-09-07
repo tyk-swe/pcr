@@ -70,34 +70,40 @@ pub struct FrameRecord<'a> {
     pub timestamp: SystemTime,
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
-    /// Conversation index of the innermost TCP flow, when there is one.
-    pub tcp_stream: Option<u64>,
-    /// Exact scoped identity corresponding to `tcp_stream`.
-    pub tcp_flow: Option<&'a ScopedFlowKey>,
-    /// Conversation index of the innermost UDP flow, when there is one.
-    pub udp_stream: Option<u64>,
-    /// Exact scoped identity corresponding to `udp_stream`.
-    pub udp_flow: Option<&'a ScopedFlowKey>,
-    /// TCP reassembly events this frame produced, when requested, including
-    /// evictions of flows whose idle expiry this frame's arrival revealed.
+    /// Innermost TCP and UDP observations, each tied to the decoded view
+    /// that supplied it. A tunnel can carry one of each.
+    pub tcp: Option<TcpView<'a>>,
+    pub udp: Option<UdpView<'a>>,
+    /// Reassembly events in delivery order, including expiry of other flows.
     pub tcp_events: &'a [TcpEvent],
-    /// Decoded view that supplied this record's innermost TCP transport.
-    pub tcp_decoded: &'a DecodedPacket,
-    /// Decoded view that supplied this record's innermost UDP transport.
-    pub udp_decoded: &'a DecodedPacket,
-    /// Layer position of the innermost TCP header within `tcp_decoded`.
-    /// Present whenever the view carries TCP, even when the header is the
-    /// visible carrier of a fragmented child and so has no `tcp_flow`.
-    pub tcp_layer: Option<usize>,
-    /// The innermost TCP header within `tcp_decoded`, located once by the
-    /// pipeline. Present under the same condition as `tcp_layer`.
-    pub tcp_header: Option<&'a Tcp>,
-    /// Exact TCP stream bytes this frame carried, and 0 when it carried no
-    /// indexed TCP segment. Pure control segments legitimately carry none.
-    pub tcp_payload_len: usize,
-    /// Layer position of the innermost UDP header within `udp_decoded`,
-    /// under the same condition as `tcp_layer`.
-    pub udp_layer: Option<usize>,
+}
+
+/// A capture-global stream index and the scoped flow it identifies.
+#[derive(Clone, Copy, Debug)]
+pub struct Conversation<'a> {
+    pub index: u64,
+    pub flow: &'a ScopedFlowKey,
+}
+
+/// One TCP header and its exact source view. A visible carrier of a fragmented
+/// TCP child has no conversation until the child can be reconstructed.
+#[derive(Clone, Copy, Debug)]
+pub struct TcpView<'a> {
+    pub decoded: &'a DecodedPacket,
+    pub layer: usize,
+    pub header: &'a Tcp,
+    pub conversation: Option<Conversation<'a>>,
+    /// Indexed segment bytes; control segments and unindexed carriers are empty.
+    pub payload: &'a [u8],
+}
+
+/// One UDP header and its exact source view, with the same carrier convention
+/// as [`TcpView`].
+#[derive(Clone, Copy, Debug)]
+pub struct UdpView<'a> {
+    pub decoded: &'a DecodedPacket,
+    pub layer: usize,
+    pub conversation: Option<Conversation<'a>>,
 }
 
 impl FrameRecord<'_> {
@@ -237,11 +243,18 @@ where
             &mut ip_sink,
         )?;
         let TransportViews { tcp, udp } = elect_transport_views(&decoded, &derived);
-        let tcp_decoded = tcp.as_ref().map_or(&decoded, |elected| elected.decoded);
-        let udp_decoded = udp.as_ref().map_or(&decoded, |elected| elected.decoded);
-        let tcp_layer = tcp.as_ref().map(|elected| elected.transport.index);
-        let tcp_header = tcp.as_ref().map(|elected| elected.transport.layer);
-        let udp_layer = udp.as_ref().map(|elected| elected.transport.index);
+        let mut tcp_view = tcp.as_ref().map(|elected| TcpView {
+            decoded: elected.decoded,
+            layer: elected.transport.index,
+            header: elected.transport.layer,
+            conversation: None,
+            payload: &[],
+        });
+        let mut udp_view = udp.as_ref().map(|elected| UdpView {
+            decoded: elected.decoded,
+            layer: elected.transport.index,
+            conversation: None,
+        });
         let scope_base = |derived_index: Option<usize>| {
             derived_index.and_then(|index| {
                 derived.get(index).map(|derived_datagram| {
@@ -264,10 +277,13 @@ where
             .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
-        let tcp_stream = match &segment {
-            Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
-            None => None,
-        };
+        if let (Some(view), Some(segment)) = (&mut tcp_view, &segment) {
+            view.conversation = Some(Conversation {
+                index: tcp_streams.assign(&segment.flow, number, limits.max_flows)?,
+                flow: &segment.flow,
+            });
+            view.payload = &segment.payload;
+        }
         let udp_flow = match udp {
             Some(elected) => udp_flow(
                 elected.decoded,
@@ -278,10 +294,12 @@ where
             .map_err(|source| Error::Scope { number, source })?,
             None => None,
         };
-        let udp_stream = match &udp_flow {
-            Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
-            None => None,
-        };
+        if let (Some(view), Some(flow)) = (&mut udp_view, &udp_flow) {
+            view.conversation = Some(Conversation {
+                index: udp_streams.assign(flow, number, limits.max_flows)?,
+                flow,
+            });
+        }
         if let Some(filter) = options.filter {
             let filter_derived = derived
                 .iter()
@@ -295,8 +313,12 @@ where
                     decoded: &decoded,
                     derived: &filter_derived,
                     number,
-                    tcp_stream,
-                    udp_stream,
+                    tcp_stream: tcp_view
+                        .and_then(|view| view.conversation)
+                        .map(|stream| stream.index),
+                    udp_stream: udp_view
+                        .and_then(|view| view.conversation)
+                        .map(|stream| stream.index),
                 })
                 .map_err(|source| Error::Filter { number, source })?
             {
@@ -305,8 +327,12 @@ where
         }
         frames_matched = frames_matched.saturating_add(1);
 
-        let tcp_events =
-            reassembly_dispatch.dispatch(tcp_header, segment.as_ref(), timestamp, number)?;
+        let tcp_events = reassembly_dispatch.dispatch(
+            tcp_view.map(|view| view.header),
+            segment.as_ref(),
+            timestamp,
+            number,
+        )?;
 
         enforce_deadline(&deadline)?;
         sink(FrameRecord {
@@ -314,17 +340,9 @@ where
             timestamp,
             decoded: &decoded,
             derived_datagrams: &derived,
-            tcp_stream,
-            tcp_flow: segment.as_ref().map(|segment| &segment.flow),
-            udp_stream,
-            udp_flow: udp_flow.as_ref(),
+            tcp: tcp_view,
+            udp: udp_view,
             tcp_events: &tcp_events,
-            tcp_decoded,
-            udp_decoded,
-            tcp_layer,
-            tcp_header,
-            tcp_payload_len: segment.as_ref().map_or(0, |segment| segment.payload.len()),
-            udp_layer,
         })
         .map_err(|source| Error::Sink { number, source })?;
     }
@@ -368,9 +386,8 @@ struct PhysicalFrame<'a> {
 /// the derived datagram views its arrival completed, outermost first.
 ///
 /// Every lifecycle event this reveals reaches `ip_sink` before the frame's
-/// own record does, and the run deadline is checked before each one: a sink
-/// that blocks must not be able to overrun the budget by staying inside a
-/// single batch.
+/// own record does. The deadline is checked between callbacks; synchronous
+/// callbacks must bound their own work because the pipeline cannot interrupt them.
 fn advance_ip_reassembly<I>(
     ip_dispatch: &mut IpDispatch,
     stage: &FrameStage<'_>,

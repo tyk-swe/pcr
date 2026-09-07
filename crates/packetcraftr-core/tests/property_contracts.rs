@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -43,12 +40,7 @@ fn arb_field_value() -> impl Strategy<Value = FieldValue> {
         any::<bool>().prop_map(FieldValue::Bool),
         (0..=i64::MAX as u64).prop_map(FieldValue::Unsigned),
         any::<i64>().prop_map(FieldValue::Signed),
-        // A lone "-" is excluded: noyalib 0.0.28 serializes it unquoted, which
-        // its own parser then reads as a block-sequence entry. The CLI never
-        // emits YAML, so this is a fixture constraint, not a parser gap.
-        "[a-zA-Z0-9_-]{1,30}"
-            .prop_filter("bare dash is mis-serialized upstream", |text| text != "-")
-            .prop_map(FieldValue::Text),
+        "[a-zA-Z0-9_-]{1,30}".prop_map(FieldValue::Text),
         prop::collection::vec(any::<u8>(), 0..32).prop_map(FieldValue::from),
         any::<[u8; 4]>().prop_map(|octets| FieldValue::Ipv4(Ipv4Addr::from(octets))),
         any::<[u8; 16]>().prop_map(|octets| FieldValue::Ipv6(Ipv6Addr::from(octets))),
@@ -352,4 +344,20 @@ proptest! {
         let neg_result = neg_compiled.matches(&context).expect("neg filter match");
         prop_assert!(!neg_result, "negated filter should not match");
     }
+}
+
+#[test]
+fn yaml_roundtrip_preserves_a_bare_dash_as_text() {
+    let packet = DocPacket {
+        schema: PACKET_DOCUMENT_SCHEMA_V1.to_owned(),
+        layers: vec![DocLayer {
+            protocol: "raw".into(),
+            fields: [("text".into(), FieldValue::Text("-".into()))].into(),
+        }],
+    };
+    let yaml = noyalib::to_string(&packet).unwrap();
+    assert_eq!(
+        DocPacket::parse_with_limits(&yaml, Format::Yaml, &DocumentLimits::DEFAULT).unwrap(),
+        packet
+    );
 }

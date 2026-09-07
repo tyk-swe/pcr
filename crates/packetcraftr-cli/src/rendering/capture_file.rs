@@ -3,13 +3,12 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use packetcraftr::{
-    analysis::pcap::{Error as CaptureError, Format, Writer},
-    core::{
-        error::{Classification, Kind},
-        frame::Frame,
-    },
-};
+use packetcraftr_core::analysis::pcap::Error as CaptureError;
+use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Kind;
+use packetcraftr_core::frame::Frame;
 
 use super::LinkCaptureWriter;
 use crate::errors::CliError;

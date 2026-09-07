@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::netio as net;
+use packetcraftr_netio as net;
 
 use super::recipe::RecipeArgs;
 

@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "undecoded",
     "frame": {
       "timestamp": {
         "unix_seconds": 1770000000,
@@ -19,5 +18,6 @@
       "bytes_hex": "deadbeef"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "undecoded"
 }

@@ -2,21 +2,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::convert::Infallible;
-use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
-use packetcraftr::core::frame::LinkType;
-use packetcraftr::netio::interface::Id as InterfaceId;
-use packetcraftr::netio::link::{Capability as LinkCapability, MacAddress};
-use packetcraftr::netio::route::{Decision, Provider, Scope, SelectionReason};
-use packetcraftr::netio::{Error as LiveIoError, capture, neighbor, transmit};
+use packetcraftr_core::frame::LinkType;
+use packetcraftr_netio::Error as LiveIoError;
+use packetcraftr_netio::capture;
+use packetcraftr_netio::interface::Id as InterfaceId;
+use packetcraftr_netio::link::Capability as LinkCapability;
+use packetcraftr_netio::link::MacAddress;
+use packetcraftr_netio::neighbor;
+use packetcraftr_netio::route::Decision;
+use packetcraftr_netio::route::Provider;
+use packetcraftr_netio::route::Scope;
+use packetcraftr_netio::route::SelectionReason;
+use packetcraftr_netio::transmit;
 use serde_json::Value;
 
 /// The MAC address of the one interface [`FixedRoutes`] selects.
@@ -116,53 +119,6 @@ impl capture::Session for IdleCapture {
     fn statistics(&self) -> capture::Statistics {
         capture::Statistics::default()
     }
-}
-
-/// A writer the test can still read after handing it to an encoder.
-#[derive(Clone, Default)]
-pub(crate) struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-
-impl SharedWriter {
-    pub(crate) fn records(&self) -> Vec<Value> {
-        std::str::from_utf8(&self.0.lock().expect("shared writer lock"))
-            .expect("encoded output must be UTF-8")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("each record must be JSON"))
-            .collect()
-    }
-}
-
-impl Write for SharedWriter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0
-            .lock()
-            .expect("shared writer lock")
-            .extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// The published output schema, parsed once per test binary.
-pub(crate) fn output_schema() -> &'static Value {
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/packetcraftr.output.v1.schema.json"
-        ))
-        .expect("published output schema must be JSON")
-    })
-}
-
-/// A compiled validator for the published output schema.
-pub(crate) fn output_schema_validator() -> &'static jsonschema::Validator {
-    static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
-        jsonschema::validator_for(output_schema()).expect("published output schema must compile")
-    })
 }
 
 /// A compiled validator for the published packet-document schema.

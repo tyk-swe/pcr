@@ -289,7 +289,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{

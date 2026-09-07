@@ -147,10 +147,7 @@ impl Authorized {
         &self.addresses
     }
 
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "authorization only constructs `Authorized` with a non-empty address list"
-    )]
+    // authorization only constructs `Authorized` with a non-empty address list
     pub fn selected_address(&self) -> IpAddr {
         self.addresses[0]
     }
@@ -233,11 +230,14 @@ impl Classified for Error {
 
 /// Injectable hostname resolver. Implementations must stop once `limit`
 /// distinct addresses have been selected and report a typed overflow.
+/// Resolution is synchronous. Implementations own their I/O timeout; an
+/// operation deadline can stop subsequent work but cannot interrupt this call.
 pub trait Resolver: Send + Sync {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+/// Uses the operating system resolver and its configured timeouts.
 pub struct SystemResolver;
 
 impl Resolver for SystemResolver {
@@ -273,7 +273,6 @@ impl Resolver for SystemResolver {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

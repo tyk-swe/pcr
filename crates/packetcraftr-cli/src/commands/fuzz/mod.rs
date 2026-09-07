@@ -3,9 +3,9 @@
 
 //! Fuzz CLI command logic.
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 mod rendering;
@@ -13,7 +13,10 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{core, netio as net, output};
+use packetcraftr_core as core;
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
 use super::registry;
@@ -229,7 +232,7 @@ fn execute_live(
 fn render_collected(
     result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+    stats: packetcraftr::Stats,
     format: Format,
 ) -> Result<(), CliError> {
     match format {

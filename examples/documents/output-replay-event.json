@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "replay",
   "mode": "stream",
   "status": "success",
@@ -25,8 +25,8 @@
       "original_length": 4,
       "link_type": 147,
       "bytes_hex": "deadbeef"
-    },
-    "transmitted": true
+    }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "frame"
 }

@@ -19,7 +19,7 @@ use super::model::{
     FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
 use super::wire::{replay_link_mode, validate_transmission_evidence};
-use crate::authorization::{Authorizer, Operation, ReplayFrame, WireBudget};
+use crate::policy::{Authorizer, Operation, ReplayFrame, WireBudget};
 
 #[derive(Default)]
 struct Progress {
@@ -466,7 +466,6 @@ fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
     use crate::test_fixtures::RecordingClock;
     use packetcraftr_core::frame::LinkType;

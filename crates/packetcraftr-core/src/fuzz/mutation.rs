@@ -30,10 +30,7 @@ pub(super) fn mutation_value(
     }
 }
 
-#[expect(
-    clippy::indexing_slicing,
-    reason = "`index_from` reduces the selector below the length of the table it indexes"
-)]
+// `index_from` reduces the selector below the length of the table it indexes
 fn boundary_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -114,12 +111,8 @@ fn boundary_value(
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    reason = "each arm reinterprets or narrows uniformly random bits to fill the requested field \
-              width, so discarding the surplus bits is the generator's purpose"
-)]
+// each arm reinterprets or narrows uniformly random bits to fill the requested field width, so
+// discarding the surplus bits is the generator's purpose
 pub(super) fn random_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -134,10 +127,7 @@ pub(super) fn random_value(
             let length = bounded_length(random, limits.max_field_bytes.min(256));
             let mut value = String::with_capacity(length);
             for _ in 0..length {
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "the printable offset is below 95, so `b' ' + offset` stays under u8::MAX"
-                )]
+                // the printable offset is below 95, so `b' ' + offset` stays under u8::MAX
                 let character = match random.next_u64() % 20 {
                     0 => '\u{1b}',
                     1 => '\n',
@@ -167,10 +157,7 @@ pub(super) fn random_value(
                 let mut output = Vec::with_capacity(count);
                 let mut bytes = 0_usize;
                 for _ in 0..count {
-                    #[expect(
-                        clippy::indexing_slicing,
-                        reason = "`index_below` reduces below `values.len()`, which the guard proves non-zero"
-                    )]
+                    // `index_below` reduces below `values.len()`, which the guard proves non-zero
                     let value = &values[index_below(random, values.len())];
                     let remaining = limits
                         .max_field_bytes
@@ -273,16 +260,10 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
         }
         // Replacing an oversized value with a bounded prefix keeps allocation
         // within the mutation budget and makes the reduction explicit.
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the branch is entered only when `bytes.len() > maximum`"
-        )]
+        // the branch is entered only when `bytes.len() > maximum`
         let mut value = bytes[..maximum].to_vec();
         let index = index_below(random, value.len());
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`index_below` reduces below `value.len()`"
-        )]
+        // `index_below` reduces below `value.len()`
         {
             value[index] ^= 1 << (random.next_u64() % 8);
         }
@@ -290,10 +271,7 @@ fn bit_flip_value(original: &FieldValue, random: &mut SplitMix64, maximum: usize
     }
     let mut value = bytes.to_vec();
     let index = index_below(random, value.len());
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`index_below` reduces below `value.len()`, which the emptiness check above proves non-zero"
-    )]
+    // `index_below` reduces below `value.len()`, which the emptiness check above proves non-zero
     {
         value[index] ^= 1 << (random.next_u64() % 8);
     }
@@ -316,10 +294,7 @@ fn malformed_value(
         if round & 1 == 0 {
             return FieldValue::Unsigned(random.next_u64() & u16::MAX as u64);
         }
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "`index_below` returns at most 3 here, so the increment cannot overflow"
-        )]
+        // `index_below` returns at most 3 here, so the increment cannot overflow
         let length = 1 + index_below(random, limits.max_field_bytes.min(4));
         return FieldValue::Bytes(Bytes::from(random.bytes(length)));
     }
@@ -348,12 +323,8 @@ pub(super) fn index_from(word: u64, exclusive_maximum: usize) -> usize {
     let Some(remainder) = word.checked_rem(exclusive_maximum as u64) else {
         return 0;
     };
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the remainder is below exclusive_maximum, which is a usize"
-    )]
-    let index = remainder as usize;
-    index
+    // the remainder is below exclusive_maximum, which is a usize
+    remainder as usize
 }
 
 fn index_below(random: &mut SplitMix64, exclusive_maximum: usize) -> usize {
@@ -408,10 +379,7 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         FieldValue::List(value) => {
             push(FieldValue::List(Vec::new()));
             if value.len() > 1 {
-                #[expect(
-                    clippy::indexing_slicing,
-                    reason = "`value.len() / 2` is below `value.len()`, which the guard proves is above 1"
-                )]
+                // `value.len() / 2` is below `value.len()`, which the guard proves is above 1
                 {
                     push(FieldValue::List(value[..value.len() / 2].to_vec()));
                 }
@@ -423,7 +391,6 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
     use crate::fuzz::request::Target;

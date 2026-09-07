@@ -356,7 +356,6 @@ fn select_link(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::fmt;
     use std::net::{Ipv4Addr, Ipv6Addr};

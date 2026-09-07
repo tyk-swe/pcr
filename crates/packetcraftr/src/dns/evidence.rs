@@ -15,7 +15,7 @@ use crate::probe::evidence::{
 
 use super::classification::dns_payload;
 use super::error::Error;
-use super::model::{Execution, Limits, Probe};
+use super::{Execution, Limits, Probe};
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,

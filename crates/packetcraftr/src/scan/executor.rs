@@ -7,7 +7,7 @@ use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor};
+use super::{Batch, Execution, Executor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",

@@ -1,23 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr::{
-    analysis::pcap::{Format as CaptureFormat, Writer},
-    core::{
-        Packet,
-        field::WireValue,
-        frame::{Frame, LinkType},
-        layer::Raw,
-        protocol::{ipv6::Fragment as Ipv6Fragment, network::Ipv6},
-    },
-};
+use packetcraftr_core::Packet;
+use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::field::WireValue;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::ipv6::Fragment as Ipv6Fragment;
+use packetcraftr_core::protocol::network::Ipv6;
 #[path = "support/process.rs"]
 mod process_support;
 mod support;
@@ -116,7 +112,7 @@ fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
 }
 
 fn ipv6_fragment_hex() -> String {
-    let registry = packetcraftr::core::protocol::builtin::registry();
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let mut packet = Packet::new();
     packet.push(Ipv6 {
         source: "2001:db8::1".parse().expect("documentation source"),
@@ -130,11 +126,11 @@ fn ipv6_fragment_hex() -> String {
         identification: 42,
     });
     packet.push(Raw::new(b"abcdefgh".to_vec()));
-    packetcraftr::core::build::Builder::new(registry)
+    packetcraftr_core::build::Builder::new(registry)
         .build(
             packet,
-            packetcraftr::core::build::Context::default(),
-            packetcraftr::core::build::Options::default(),
+            packetcraftr_core::build::Context::default(),
+            packetcraftr_core::build::Options::default(),
         )
         .expect("IPv6 fragment builds")
         .bytes
@@ -457,7 +453,7 @@ fn follow_missing_stream_terminates_after_preceding_ip_events() {
         let records = parse_ndjson(&output);
         assert_contiguous(&records);
         assert_eq!(records.len(), 2);
-        assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+        assert_eq!(records[0]["event"], "ip_datagram_completed");
         assert_eq!(records[1]["status"], "error");
         assert_eq!(records[1]["error"]["code"], "cli.error");
         assert_eq!(
@@ -537,14 +533,14 @@ fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
     let records = parse_ndjson(&follow);
     assert_contiguous(&records);
     assert_eq!(records.len(), 4);
-    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[0]["event"], "ip_datagram_completed");
     assert_eq!(records[0]["result"]["frame"], 2);
     assert_eq!(records[1]["result"]["frame"], 2);
     assert_eq!(
         records[1]["result"]["bytes_hex"],
         "6162636465666768696a6b6c6d6e6f70"
     );
-    assert_eq!(records[2]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["event"], "ip_datagram_incomplete");
     assert_eq!(records[2]["result"]["frame"], 3);
     assert_eq!(records[3]["result"]["frames"], 1);
     assert_eq!(
@@ -568,8 +564,8 @@ fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
     let records = parse_ndjson(&expert);
     assert_contiguous(&records);
     assert_eq!(records.len(), 3);
-    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
-    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[0]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["event"], "ip_datagram_incomplete");
     assert_eq!(records[2]["result"]["frames_read"], 3);
     assert_eq!(
         records[2]["result"]["ip_reassembly"]["families"][0]["completed_datagrams"],
@@ -588,9 +584,9 @@ fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
     let records = parse_ndjson(&tls);
     assert_contiguous(&records);
     assert_eq!(records.len(), 3);
-    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
-    assert_eq!(records[1]["result"]["event"], "ip_datagram_incomplete");
-    assert_eq!(records[2]["result"]["event"], "complete");
+    assert_eq!(records[0]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["event"], "ip_datagram_incomplete");
+    assert_eq!(records[2]["event"], "complete");
     assert_eq!(records[2]["result"]["sessions"], 0);
     assert_eq!(
         records[2]["result"]["ip_reassembly"]["families"][0]["incomplete_datagrams"],
@@ -599,7 +595,7 @@ fn follow_and_expert_stream_ip_lifecycle_before_data_and_single_terminal() {
     assert_eq!(
         records
             .iter()
-            .filter(|record| record["result"]["event"] == "complete")
+            .filter(|record| record["event"] == "complete")
             .count(),
         1,
         "TLS has exactly one terminal record"
@@ -627,10 +623,10 @@ fn follow_stream_reports_overlap_resolution_before_completion_and_payload() {
     let records = parse_ndjson(&output);
     assert_contiguous(&records);
     assert_eq!(records.len(), 4);
-    assert_eq!(records[0]["result"]["event"], "ip_overlap_resolved");
+    assert_eq!(records[0]["event"], "ip_overlap_resolved");
     assert_eq!(records[0]["result"]["frame"], 2);
     assert_eq!(records[0]["result"]["affected_bytes"], 1);
-    assert_eq!(records[1]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["event"], "ip_datagram_completed");
     assert_eq!(records[1]["result"]["frame"], 3);
     assert_eq!(records[2]["result"]["frame"], 3);
     assert_eq!(
@@ -804,7 +800,7 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
             .iter()
             .all(|record| record["result"]["decoded"].is_object())
     );
-    assert_eq!(records[2]["result"]["event"], "complete");
+    assert_eq!(records[2]["event"], "complete");
 
     for format in ["text", "hex"] {
         let output = run(&["--output", format, "read", path, "--max-frames", "5"]);
@@ -830,7 +826,8 @@ fn read_rewrites_same_format_and_rejects_lossy_capture_output() {
     let filtered = run(&["--output", "pcap", "read", path, "--filter", "udp"]);
     assert!(filtered.status.success(), "{:?}", filtered.stderr);
     let mut reader =
-        packetcraftr::analysis::pcap::Reader::new(std::io::Cursor::new(filtered.stdout)).unwrap();
+        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(filtered.stdout))
+            .unwrap();
     for packet in [UDP_CLIENT, UDP_SERVER] {
         assert_eq!(
             reader.next_frame().unwrap().unwrap().bytes().as_ref(),
@@ -919,14 +916,14 @@ fn read_ndjson_preserves_source_identity_and_always_completes() {
     assert_contiguous(&records);
     assert_eq!(records.len(), 4);
     for (index, record) in records[..3].iter().enumerate() {
-        assert_eq!(record["result"]["event"], "frame");
+        assert_eq!(record["event"], "frame");
         assert_eq!(
             record["result"]["source_frame"],
             u64::try_from(index + 1).expect("fixture index fits")
         );
     }
     let complete = &records[3];
-    assert_eq!(complete["result"]["event"], "complete");
+    assert_eq!(complete["event"], "complete");
     assert_eq!(complete["result"]["frames_read"], 3);
     assert_eq!(complete["result"]["frames_matched"], 3);
     assert_eq!(complete["result"]["captured_bytes_read"], 109);
@@ -972,7 +969,7 @@ fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
         let records = parse_ndjson(&output);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["event"], "complete");
+        assert_eq!(records[0]["event"], "complete");
         assert_eq!(records[0]["result"]["frames_read"], frames_read);
         assert_eq!(records[0]["result"]["frames_matched"], 0);
         assert_eq!(
@@ -1015,11 +1012,7 @@ fn read_limits_account_for_filtered_source_input() {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["sequence"], 0);
         assert_eq!(records[0]["status"], "error");
-        assert!(
-            records
-                .iter()
-                .all(|record| record["result"]["event"] != "complete")
-        );
+        assert!(records.iter().all(|record| record["event"] != "complete"));
     }
 }
 
@@ -1046,11 +1039,7 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
             .as_str()
             .is_some_and(|message| message.contains("frame 2"))
     );
-    assert!(
-        records
-            .iter()
-            .all(|record| record["result"]["event"] != "complete")
-    );
+    assert!(records.iter().all(|record| record["event"] != "complete"));
 }
 
 #[test]
@@ -1139,7 +1128,7 @@ fn malformed_recipe_stdin_retains_document_and_expression_diagnostics() {
 
 #[test]
 fn recipe_stdin_keeps_file_byte_and_build_layer_limits() {
-    let limit = packetcraftr::core::document::DEFAULT_MAX_DOCUMENT_BYTES;
+    let limit = packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES;
     let oversized = vec![b' '; limit + 1];
     let layers = b"# Two layers\nlayers:\n  - protocol: raw\n  - protocol: raw\nschema: packetcraftr.packet/v1\n";
     for (input, code, message) in [
@@ -1464,7 +1453,6 @@ fn format_and_limit_failures_are_reported_before_offline_work() {
 // These commands intentionally name a public destination. Keep them in the
 // feature profile where the CLI has no native I/O implementation to invoke.
 #[cfg(not(any(
-    feature = "native-interfaces",
     feature = "native-route",
     feature = "native-layer2",
     feature = "native-layer3"
@@ -1626,7 +1614,7 @@ fn protocol_discovery_lists_describes_and_rejects_names() {
 
 #[test]
 fn read_exports_selected_source_frames_in_both_capture_formats() {
-    use packetcraftr::analysis::pcap::Reader;
+    use packetcraftr_core::analysis::pcap::Reader;
     use std::io::Cursor;
     for (format, capture) in [
         ("pcap", write_capture_frames(&[UDP_CLIENT, UDP_SERVER])),

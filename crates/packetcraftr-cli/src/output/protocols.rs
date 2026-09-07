@@ -1,0 +1,204 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Built-in protocol discovery output.
+
+use serde::Serialize;
+
+use packetcraftr_core::field::FieldKind;
+use packetcraftr_core::layer::FieldSchema;
+use packetcraftr_core::protocol::BuiltinProtocol;
+use packetcraftr_core::registry::{FilterFieldBinding, Registry};
+
+/// Capability summary for one built-in protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Summary {
+    pub protocol: String,
+    pub aliases: Vec<String>,
+    pub build: bool,
+    pub dissect: bool,
+    pub exact_round_trip: bool,
+    pub matcher: bool,
+    pub decode_only: bool,
+}
+
+impl From<BuiltinProtocol> for Summary {
+    fn from(protocol: BuiltinProtocol) -> Self {
+        Self {
+            protocol: protocol.as_str().to_owned(),
+            aliases: protocol
+                .aliases()
+                .iter()
+                .map(|alias| (*alias).to_owned())
+                .collect(),
+            build: protocol.is_constructible(),
+            dissect: true,
+            exact_round_trip: protocol.exact_round_trip(),
+            matcher: protocol.has_matcher(),
+            decode_only: !protocol.is_constructible(),
+        }
+    }
+}
+
+/// One ordered reflective field exposed by a built-in protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Field {
+    pub name: String,
+    pub kind: FieldKind,
+    pub required: bool,
+    pub derived: bool,
+    pub description: String,
+}
+
+impl From<&FieldSchema> for Field {
+    fn from(value: &FieldSchema) -> Self {
+        Self {
+            name: value.name.to_owned(),
+            kind: value.kind,
+            required: value.required,
+            derived: value.derived,
+            description: value.description.to_owned(),
+        }
+    }
+}
+
+/// One registered edge that reaches a protocol during dissection.
+///
+/// `discriminator` is the parent's selector value: a TCP or UDP port, an
+/// EtherType, an IP protocol number. Zero is the parent's fallback binding,
+/// used when nothing more specific matches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Binding {
+    pub parent: String,
+    pub discriminator: u64,
+}
+
+/// How a registered filter spelling reads its reflective fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterKind {
+    Direct,
+    Either,
+    Bits,
+}
+
+/// One registered display-filter spelling, separate from dissection bindings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FilterField {
+    pub path: String,
+    pub kind: FilterKind,
+    /// Canonical protocol-qualified fields read by this spelling.
+    pub fields: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mask: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shift: Option<u32>,
+    pub description: String,
+}
+
+impl FilterField {
+    /// Every describable stored spelling that reads `protocol`, in path order.
+    pub fn for_protocol(registry: &Registry, protocol: &str) -> Vec<Self> {
+        registry
+            .filter_fields()
+            .filter(|(_, binding)| binding.protocol().as_str() == protocol)
+            .filter_map(|(path, binding)| Self::from_binding(path, binding))
+            .collect()
+    }
+
+    /// Describes a registry binding known to the output contract.
+    /// Future binding kinds may omit this optional discovery metadata.
+    pub fn from_binding(path: &str, binding: &FilterFieldBinding) -> Option<Self> {
+        let fields: Vec<_> = binding
+            .fields()
+            .iter()
+            .map(|field| format!("{}.{}", binding.protocol(), field))
+            .collect();
+        let (kind, mask, shift, description) = match binding {
+            FilterFieldBinding::Direct { protocol, field } => (
+                FilterKind::Direct,
+                None,
+                None,
+                format!("Alias for {protocol}.{field}."),
+            ),
+            FilterFieldBinding::Either { .. } => (
+                FilterKind::Either,
+                None,
+                None,
+                format!(
+                    "Comparison matches when any of [{}] satisfies it; != matches when any listed field differs, even if another equals the value.",
+                    fields.join(", ")
+                ),
+            ),
+            FilterFieldBinding::Bits {
+                protocol,
+                field,
+                mask,
+                shift,
+            } => (
+                FilterKind::Bits,
+                Some(*mask),
+                Some(*shift),
+                format!("Reads ({protocol}.{field} & {mask}) >> {shift} before comparison."),
+            ),
+            _ => return None,
+        };
+        Some(Self {
+            path: path.to_owned(),
+            kind,
+            fields,
+            mask,
+            shift,
+            description,
+        })
+    }
+}
+
+/// Detailed capability and reflection data for one built-in protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Detail {
+    pub protocol: String,
+    pub aliases: Vec<String>,
+    pub build: bool,
+    pub dissect: bool,
+    pub exact_round_trip: bool,
+    pub matcher: bool,
+    pub decode_only: bool,
+    pub fields: Vec<Field>,
+    pub bindings: Vec<Binding>,
+    pub filter_fields: Vec<FilterField>,
+}
+
+impl Detail {
+    pub fn new(
+        summary: Summary,
+        fields: Vec<Field>,
+        bindings: Vec<Binding>,
+        filter_fields: Vec<FilterField>,
+    ) -> Self {
+        Self {
+            protocol: summary.protocol,
+            aliases: summary.aliases,
+            build: summary.build,
+            dissect: summary.dissect,
+            exact_round_trip: summary.exact_round_trip,
+            matcher: summary.matcher,
+            decode_only: summary.decode_only,
+            fields,
+            bindings,
+            filter_fields,
+        }
+    }
+}
+
+/// Aggregate result of listing built-in protocols.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ListResult {
+    pub protocols: Vec<Summary>,
+}
+
+/// Aggregate result of describing one built-in protocol.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DetailResult {
+    pub protocol: Detail,
+}

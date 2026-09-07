@@ -4,14 +4,10 @@
 use std::sync::Arc;
 
 use crate::progress::Runtime;
-use packetcraftr_core::build::BuiltPacket;
-use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::transmit::Sender as PacketIo;
-use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 
 use crate::Error;
-use crate::authorization::{WireAuthorizationError, authorize_permissive_live, authorize_wire};
 use crate::materialize::{
     PlannedPacket, PreparedPacket, build_context, materialize_link_fields,
     materialize_link_structure, materialize_network_fields,
@@ -33,7 +29,7 @@ pub struct Client<R, N, I> {
     pub(crate) routes: R,
     pub(crate) neighbors: N,
     pub(crate) io: I,
-    pub(crate) policy: Policy,
+    pub(crate) policy: Arc<Policy>,
     /// Owns the worker budget behind
     /// [`exchange_with_events`](Self::exchange_with_events). It starts no
     /// thread until an exchange actually publishes events, and scoping it here
@@ -47,13 +43,19 @@ where
     N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
-    pub fn new(registry: Arc<Registry>, routes: R, neighbors: N, io: I, policy: Policy) -> Self {
+    pub fn new(
+        registry: Arc<Registry>,
+        routes: R,
+        neighbors: N,
+        io: I,
+        policy: impl Into<Arc<Policy>>,
+    ) -> Self {
         Self {
             registry,
             routes,
             neighbors,
             io,
-            policy,
+            policy: policy.into(),
             runtime: Runtime::default(),
         }
     }
@@ -63,56 +65,9 @@ where
     }
 }
 
-/// The client's own authorization seam.
-///
-/// `send`, `exchange`, and `plan` never take an injected
-/// [`Authorizer`](crate::authorization::Authorizer); they apply the [`Policy`]
-/// this client owns through the two methods below.
 impl<R, N, I> Client<R, N, I> {
-    /// The traffic policy this client applies to every operation it runs.
     pub fn policy(&self) -> &Policy {
         &self.policy
-    }
-
-    /// Authorizes the destinations a built packet declares, plus the two
-    /// permissive-live approvals when the build needed them.
-    pub(crate) fn authorize_built_packet(
-        &self,
-        built: &BuiltPacket,
-        allow_permissive_live: bool,
-    ) -> Result<(), Error> {
-        self.policy.authorize_packet_destinations(&built.packet)?;
-        if built.requires_live_opt_in {
-            authorize_permissive_live(&self.policy, allow_permissive_live)?;
-        }
-        Ok(())
-    }
-
-    /// Authorizes the exact bytes that would reach the wire against the route
-    /// that was selected for them, decoding them with the trusted registry.
-    pub(crate) fn authorize_built_wire(
-        &self,
-        built: &BuiltPacket,
-        route: &packetcraftr_netio::route::Plan,
-    ) -> Result<(), Error> {
-        let link_type = match route.mode {
-            LinkMode::Layer2 => route.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
-        };
-        authorize_wire(&self.policy, link_type, &built.bytes, Some(route)).map_err(
-            |error| -> Error {
-                match error {
-                    WireAuthorizationError::Decode(error) => {
-                        crate::policy::Error::InvalidPacketSemantics {
-                            reason: error.to_string(),
-                        }
-                    }
-                    WireAuthorizationError::Policy(error) => error,
-                }
-                .into()
-            },
-        )
     }
 }
 
@@ -122,8 +77,8 @@ where
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
-    /// Steps 1-6 of the transmission pipeline, shared by `send` and the
-    /// exchange: materialize the route-dependent fields, build the exact
+    /// Shared send/exchange preparation: materialize route-dependent fields,
+    /// build the exact
     /// bytes, and authorize them against the selected route. Nothing here may
     /// emit traffic — neighbor discovery is deliberately still ahead.
     ///
@@ -147,8 +102,10 @@ where
             builder.build(packet.clone(), build_context.clone(), options.build.clone())?;
         ensure_deadline(deadline)?;
         validate_mtu(&preliminary_build, plan.decision.mtu)?;
-        self.authorize_built_packet(&preliminary_build, options.allow_permissive_live)?;
-        self.authorize_built_wire(&preliminary_build, &plan)?;
+        self.policy
+            .authorize_built_packet(&preliminary_build, options.allow_permissive_live)?;
+        self.policy
+            .authorize_built_wire(&preliminary_build, &plan)?;
         Ok(PlannedPacket {
             packet,
             plan,
@@ -157,7 +114,7 @@ where
         })
     }
 
-    /// Steps 7-11: materialize the route — the only step that resolves link
+    /// Materializes the route — the only step that resolves link
     /// fields, and the first that may emit traffic — rebuild if that changed
     /// the packet, require the planned frame width, then re-authorize the
     /// exact final bytes against the final route.
@@ -196,10 +153,11 @@ where
         };
         require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
         ensure_deadline(deadline)?;
-        self.authorize_built_packet(&built, options.allow_permissive_live)?;
+        self.policy
+            .authorize_built_packet(&built, options.allow_permissive_live)?;
         // Every final materialized destination is authorized immediately
         // before capture arming and transmission can observe it.
-        self.authorize_built_wire(&built, &route.plan)?;
+        self.policy.authorize_built_wire(&built, &route.plan)?;
         Ok(PreparedPacket { built, route })
     }
 }

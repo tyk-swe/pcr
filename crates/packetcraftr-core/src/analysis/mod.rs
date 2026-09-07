@@ -37,7 +37,8 @@ pub mod tls;
 
 pub use error::Error;
 pub use pipeline::{
-    DerivedDatagram, FrameRecord, IpCounters, IpDatagramOutcome, IpEvent, IpEventRecord,
-    IpFamilyCounters, IpReassemblyReport, Limits, Options, Summary, run, run_with_ip_events,
+    Conversation, DerivedDatagram, FrameRecord, IpCounters, IpDatagramOutcome, IpEvent,
+    IpEventRecord, IpFamilyCounters, IpReassemblyReport, Limits, Options, Summary, TcpView,
+    UdpView, run, run_with_ip_events,
 };
-pub use stream::{StreamRef, StreamTransport};
+pub use stream::{Endpoint, StreamRef, StreamTransport};

@@ -8,7 +8,8 @@ use crate::link::{Capability, MacAddress, Mode, VlanTag};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::LinkType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Scope {
     Host,
     Link,
@@ -20,7 +21,8 @@ pub enum Scope {
 
 /// Why the operating system selected a route. The concrete next hop remains
 /// in [`Decision::next_hop`]; this enum is stable across native APIs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SelectionReason {
     Local,
     OnLink,

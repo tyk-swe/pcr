@@ -81,15 +81,29 @@ struct DatagramState {
     reconstruction: Reconstruction,
     last_update: Instant,
     deadline: Option<Instant>,
+    /// Admission computes this once; teardown releases exactly that charge.
+    memory_charge: usize,
 }
 
-impl DatagramState {
-    fn memory_charge(&self) -> Option<usize> {
-        self.ranges
-            .len()
-            .checked_mul(RANGE_METADATA_CHARGE)
-            .and_then(|charge| charge.checked_add(self.unique_bytes))
-            .and_then(|charge| charge.checked_add(self.reconstruction.retained_bytes()))
+/// Retained payload, allocation charge, and table capacity move together.
+#[derive(Debug, Default)]
+struct Retained {
+    payload_bytes: usize,
+    memory_charge: usize,
+    datagram_slots: usize,
+}
+
+impl Retained {
+    fn release(&mut self, state: &DatagramState) {
+        // A state enters the table only after its complete charge is admitted.
+        self.payload_bytes = self
+            .payload_bytes
+            .checked_sub(state.unique_bytes)
+            .expect("retained datagram payload was charged on admission");
+        self.memory_charge = self
+            .memory_charge
+            .checked_sub(state.memory_charge)
+            .expect("retained datagram storage was charged on admission");
     }
 }
 
@@ -100,9 +114,7 @@ pub struct Reassembler {
     overlap_policy: OverlapPolicy,
     datagrams: HashMap<DatagramKey, DatagramState>,
     expiry: ExpiryIndex<DatagramKey>,
-    aggregate_payload_bytes: usize,
-    aggregate_memory_charge: usize,
-    charged_datagram_slots: usize,
+    retained: Retained,
 }
 
 #[cfg(test)]

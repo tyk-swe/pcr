@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{core, output};
+use crate::rendering::StreamEncoder;
+
+use packetcraftr_core as core;
+
+use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -12,7 +16,7 @@ use crate::rendering::{
 pub(super) fn render_text(
     result: output::traceroute::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+    stats: packetcraftr::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "target={} resolved={} destination={} strategy={} port={}",
@@ -32,7 +36,7 @@ pub(super) fn render_text(
                 probe.status.as_str(),
                 probe
                     .response_kind
-                    .map_or("none", output::traceroute::ResponseKind::as_str),
+                    .map_or("none", packetcraftr::traceroute::ResponseKind::as_str),
                 probe.sent_at,
                 optional_display(probe.received_at),
                 optional_display(probe.responder),
@@ -61,9 +65,26 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
+/// Converts and writes one final workflow event at its publication boundary.
+pub(super) fn emit_event(
+    event: packetcraftr::traceroute::Event,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let (record, diagnostics) =
+        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
+    Ok(stream.emit_data(record, diagnostics)?)
+}
+
+pub(super) fn emit_complete(
+    summary: packetcraftr::traceroute::Summary,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let (record, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
+    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+}
+
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
@@ -71,8 +92,6 @@ mod tests {
     use packetcraftr::traceroute;
 
     use super::*;
-    use crate::commands::target_workflow::TargetWorkflow as _;
-    use crate::commands::traceroute::Traceroute;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use crate::test_support::assert_single_complete;
 
@@ -85,9 +104,9 @@ mod tests {
                 hop_limit,
                 attempt: 1,
                 destination,
-                strategy: traceroute::Strategy::Udp,
+                strategy: packetcraftr::traceroute::Strategy::Udp,
                 destination_port: Some(33_434),
-                status: traceroute::ProbeStatus::Timeout,
+                status: packetcraftr::traceroute::ProbeStatus::Timeout,
                 response_kind: None,
                 responder: None,
                 sent_at: UNIX_EPOCH,
@@ -105,9 +124,9 @@ mod tests {
             target: destination.to_string(),
             resolved_addresses: vec![destination],
             destination,
-            strategy: traceroute::Strategy::Udp,
+            strategy: packetcraftr::traceroute::Strategy::Udp,
             destination_port: Some(33_434),
-            completion: traceroute::Completion::Timeout,
+            completion: packetcraftr::traceroute::Completion::Timeout,
             stats: packetcraftr::Stats::default(),
         }
     }
@@ -115,16 +134,16 @@ mod tests {
     #[test]
     fn traceroute_stream_positions_ignore_probe_and_hop_ids() {
         let (sink, output) = stream(output::contract::Command::Traceroute);
-        Traceroute::emit_event(probe_event(4_000_000_000, 200), &sink).unwrap();
-        Traceroute::emit_event(probe_event(3, 2), &sink).unwrap();
-        Traceroute::emit_complete(summary(), &sink).unwrap();
+        emit_event(probe_event(4_000_000_000, 200), &sink).unwrap();
+        emit_event(probe_event(3, 2), &sink).unwrap();
+        emit_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
         assert_eq!(records[0]["result"]["probe"]["sequence"], 4_000_000_000_u64);
         assert_eq!(records[0]["result"]["probe"]["hop_limit"], 200);
         assert_eq!(records[1]["result"]["probe"]["sequence"], 3);
-        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["event"], "complete");
         assert_single_complete(&records);
     }
 }

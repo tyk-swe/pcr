@@ -276,7 +276,6 @@ fn push_decimal<T: std::fmt::Display>(text: &mut String, values: impl Iterator<I
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use bytes::Bytes;
     use md5::Md5;

@@ -5,8 +5,12 @@
 
 use std::io::Write;
 
-use packetcraftr::analysis::pcap::{Error, Format, Interface, Writer};
-use packetcraftr::core::frame::{Frame, LinkType};
+use packetcraftr_core::analysis::pcap::Error;
+use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::analysis::pcap::Interface;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
 
 /// A streaming writer plus the interface mapping its callers register.
 ///
@@ -99,12 +103,11 @@ impl<W: Write> SourceCaptureWriter<W> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::io::Cursor;
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::analysis::pcap::{Limits, PcapOptions, Reader, TimestampResolution};
+    use packetcraftr_core::analysis::pcap::{Limits, PcapOptions, Reader, TimestampResolution};
 
     use super::*;
 

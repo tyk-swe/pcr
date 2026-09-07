@@ -3,16 +3,18 @@
 
 //! TLS session assembly CLI command.
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::sync::OnceLock;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::{analysis, output};
+use packetcraftr_core::analysis;
+
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
 use super::offline_analysis::{parse_stream_selector, prepare_with_tls_ports};

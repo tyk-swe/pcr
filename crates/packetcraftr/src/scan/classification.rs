@@ -7,7 +7,7 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, registry::Registry};
 
 use crate::probe::Correlation;
 
-use super::model::{Classification, Transport};
+use super::{Classification, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseClassification {

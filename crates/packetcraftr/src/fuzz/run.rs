@@ -30,9 +30,9 @@ use super::evidence::{
     ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
 };
 use super::execution::{Execution, ExecutionCase};
-use super::model::{Case, CaseOutcome, LiveOptions, Report, Stats, Summary};
 use super::plan::{rate_delay, worst_case_duration};
-use crate::authorization::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
+use super::{Case, CaseOutcome, LiveOptions, Report, Stats, Summary};
+use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
 use crate::probe::Executor;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
@@ -61,7 +61,7 @@ where
 }
 
 /// Executes one fully authorized campaign and publishes cases in deterministic
-/// case order as soon as each live outcome is final. The process-budgeted
+/// case order as soon as each live outcome is final. The runtime-budgeted
 /// callback worker acknowledges every case before later transmission and
 /// preserves its classification on failure. The campaign deadline bounds
 /// publisher waiting and live I/O, not callback execution; an outliving
@@ -303,11 +303,7 @@ impl ExecutionPhase<'_> {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
                 self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "one increment per case in `cases`, so the ordinal cannot exceed \
-                              `cases.len()`"
-                )]
+                // one increment per case in `cases`, so the ordinal cannot exceed `cases.len()`
                 {
                     built_ordinal += 1;
                 }

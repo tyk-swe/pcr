@@ -114,11 +114,8 @@ impl LayerCodec for IgmpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`prefix` starts with the four-byte IGMP header and the guard above rejects \
-                      any message shorter than eight bytes"
-        )]
+        // `prefix` starts with the four-byte IGMP header and the guard above rejects any message
+        // shorter than eight bytes
         let checksum_slot = &mut prefix[2..4];
         checksum_slot.copy_from_slice(&checksum.to_be_bytes());
 

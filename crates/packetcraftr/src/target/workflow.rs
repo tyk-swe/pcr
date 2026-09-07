@@ -9,8 +9,8 @@ use super::{Family, Target};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::BoundaryError;
 
-use crate::authorization::{Authorizer, Operation, WireBudget};
 use crate::clock::check_deadline;
+use crate::policy::{Authorizer, Operation, WireBudget};
 
 /// How a workflow names the two failures every policy gate can raise.
 pub(crate) trait GateErrors {

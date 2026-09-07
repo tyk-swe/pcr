@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use std::sync::OnceLock;
 
 use clap::{Parser, ValueEnum};
-use packetcraftr::output;
+use packetcraftr_cli::output::contract::Format;
 
 use crate::commands::Command;
 use crate::errors::{KINDS, exit_code_description, exit_code_for};
@@ -55,7 +55,6 @@ fn long_version() -> &'static str {
     static LONG_VERSION: OnceLock<String> = OnceLock::new();
     LONG_VERSION.get_or_init(|| {
         let enabled = [
-            ("native-interfaces", cfg!(feature = "native-interfaces")),
             ("native-route", cfg!(feature = "native-route")),
             ("native-layer2", cfg!(feature = "native-layer2")),
             ("native-layer3", cfg!(feature = "native-layer3")),
@@ -108,39 +107,6 @@ pub(crate) struct Cli {
     pub(crate) color: ColorChoice,
     #[command(subcommand)]
     pub(crate) command: Command,
-}
-
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum Format {
-    #[default]
-    Text,
-    Json,
-    Ndjson,
-    Hex,
-    Raw,
-    Pcap,
-    #[value(name = "pcapng")]
-    PcapNg,
-}
-
-impl std::fmt::Display for Format {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(output::contract::Format::from(*self).as_str())
-    }
-}
-
-impl From<Format> for output::contract::Format {
-    fn from(value: Format) -> Self {
-        match value {
-            Format::Text => Self::Text,
-            Format::Json => Self::Json,
-            Format::Ndjson => Self::Ndjson,
-            Format::Hex => Self::Hex,
-            Format::Raw => Self::Raw,
-            Format::Pcap => Self::Pcap,
-            Format::PcapNg => Self::PcapNg,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{Cursor, Write};
 use std::process::Output;
 
-use packetcraftr::analysis::pcap::{Format, Reader, Writer};
-use packetcraftr::core::frame::{Frame, LinkType};
+use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
 
 #[path = "support/process.rs"]
 mod process_support;
@@ -95,7 +97,7 @@ fn piped_pcap_and_pcapng_match_all_offline_commands() {
                     let is_complete = |record: &serde_json::Value| match command {
                         "expert" => record["result"].get("frames_read").is_some(),
                         "follow" => record["result"].get("frames").is_some(),
-                        _ => record["result"]["event"] == "complete",
+                        _ => record["event"] == "complete",
                     };
                     assert!(is_complete(records.last().unwrap()));
                     assert_eq!(
@@ -200,11 +202,7 @@ fn piped_empty_malformed_and_truncated_input_keeps_file_errors() {
                 let records = parse_ndjson(&output);
                 assert_contiguous(&records);
                 assert_eq!(records.last().unwrap()["status"], "error");
-                assert!(
-                    !records
-                        .iter()
-                        .any(|record| record["result"]["event"] == "complete")
-                );
+                assert!(!records.iter().any(|record| record["event"] == "complete"));
             }
         }
     }

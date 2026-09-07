@@ -8,18 +8,19 @@
 //! and sometimes `conversion.rs` once those parts stop fitting together, which
 //! is most of the live and capture-reading commands. [`Command::run`] validates
 //! the global `--output` choice before dispatch; [`execution`] and
-//! [`target_workflow`] hold what the probing commands share, and
+//! [`execution`] composes the live probe providers, and
 //! [`render_aggregate_rows`] renders the Text/Json match the aggregate
 //! commands share.
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::sync::Arc;
 
 use clap::Subcommand;
-use packetcraftr::{core, output};
+use packetcraftr_cli::output;
+use packetcraftr_core as core;
 
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
@@ -43,7 +44,6 @@ mod routes;
 mod scan;
 mod send;
 mod stats;
-mod target_workflow;
 mod tls;
 mod traceroute;
 

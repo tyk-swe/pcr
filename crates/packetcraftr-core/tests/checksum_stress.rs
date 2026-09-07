@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use packetcraftr_core::protocol::ChecksumAccumulator;
 
@@ -22,10 +19,7 @@ fn reference_checksum(bytes: &[u8]) -> u16 {
     while (sum >> 16) != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "sum is folded until sum >> 16 == 0, so sum <= 0xffff"
-    )]
+    // sum is folded until sum >> 16 == 0, so sum <= 0xffff
     fn truncate(sum: u64) -> u16 {
         sum as u16
     }

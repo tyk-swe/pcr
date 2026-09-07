@@ -5,11 +5,11 @@
 
 use std::time::Duration;
 
-use crate::authorization::SocketBudget;
+use crate::policy::SocketBudget;
 
 use super::MAX_PROBE_OVERHEAD;
+use super::Request;
 use super::error::Error;
-use super::model::Request;
 
 /// The complete finite cost one DNS operation may incur, approved before any
 /// resolver, route, capture, or socket side effect.

@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "fuzz",
   "mode": "stream",
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "case",
     "operation_seed": 1,
     "case": {
       "index": 0,
@@ -15,8 +14,18 @@
         "protocol": "raw",
         "field": "bytes",
         "strategy": "bit_flip",
-        "original": { "type": "bytes", "value": [0] },
-        "value": { "type": "bytes", "value": [4] }
+        "original": {
+          "type": "bytes",
+          "value": [
+            0
+          ]
+        },
+        "value": {
+          "type": "bytes",
+          "value": [
+            4
+          ]
+        }
       },
       "reproduction": {
         "operation_seed": 1,
@@ -24,8 +33,16 @@
         "case_seed": 5206558337466748783
       },
       "shrink_values": [
-        { "type": "bytes", "value": [] },
-        { "type": "bytes", "value": [0] }
+        {
+          "type": "bytes",
+          "value": []
+        },
+        {
+          "type": "bytes",
+          "value": [
+            0
+          ]
+        }
       ],
       "recipe": {
         "schema": "packetcraftr.packet/v1",
@@ -33,12 +50,20 @@
           {
             "protocol": "raw",
             "fields": {
-              "bytes": { "type": "bytes", "value": [4] }
+              "bytes": {
+                "type": "bytes",
+                "value": [
+                  4
+                ]
+              }
             }
           }
         ]
       },
-      "frame": { "bytes_hex": "04", "length": 1 },
+      "frame": {
+        "bytes_hex": "04",
+        "length": 1
+      },
       "requires_live_opt_in": false,
       "outcome": "built",
       "responses": [],
@@ -53,5 +78,6 @@
       ]
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "case"
 }

@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "scan",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "probe",
     "target": "192.168.56.10",
     "probe": {
       "sequence": 70000,
@@ -43,5 +42,6 @@
       "reason": "checksum-valid SYN/ACK from the target"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "probe"
 }

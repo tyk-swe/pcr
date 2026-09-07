@@ -6,13 +6,13 @@
 use super::name::{canonical_query_name, decode_name};
 use super::relevance::{RelevantRecords, filter_relevant_records};
 use crate::dns::error::WireError;
-use crate::dns::model::{
-    Edns, MessageLimits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
-};
 use crate::dns::{
     CLASS_IN, FLAG_AUTHENTICATED_DATA, FLAG_AUTHORITATIVE, FLAG_CHECKING_DISABLED,
     FLAG_RECURSION_AVAILABLE, FLAG_RECURSION_DESIRED, FLAG_RESPONSE, FLAG_TRUNCATED, HEADER_BYTES,
     OPCODE_MASK, RCODE_MASK, RESERVED_MASK,
+};
+use crate::dns::{
+    Edns, MessageLimits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
 };
 
 use primitives::read_u16;

@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
-use packetcraftr::{core, output};
+use packetcraftr_core as core;
+
+use packetcraftr_cli::output;
 
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
@@ -233,9 +235,8 @@ fn write_terminated(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
 
-    use packetcraftr::core::error::{Classification, Kind};
+    use packetcraftr_core::error::{Classification, Kind};
 
     use super::*;
 

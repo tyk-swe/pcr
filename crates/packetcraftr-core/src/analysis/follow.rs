@@ -130,15 +130,17 @@ impl Collector {
                 }
             }
         }
-        if record.tcp_stream != Some(self.selector.index) {
-            return Vec::new();
-        }
-        let Some(tcp) = record.tcp_header else {
+        let Some(view) = record.tcp else {
             return Vec::new();
         };
-        let Some(flow) = record.tcp_flow else {
+        let Some(conversation) = view
+            .conversation
+            .filter(|stream| stream.index == self.selector.index)
+        else {
             return Vec::new();
         };
+        let tcp = view.header;
+        let flow = conversation.flow;
         let client = self
             .client_flow
             .get_or_insert_with(|| {
@@ -182,15 +184,16 @@ impl Collector {
     }
 
     fn observe_udp(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {
-        if record.udp_stream != Some(self.selector.index) {
-            return Vec::new();
-        }
-        let Some(udp_layer) = record.udp_layer else {
+        let Some(view) = record.udp else {
             return Vec::new();
         };
-        let Some(flow) = record.udp_flow else {
+        let Some(conversation) = view
+            .conversation
+            .filter(|stream| stream.index == self.selector.index)
+        else {
             return Vec::new();
         };
+        let flow = conversation.flow;
         let client = self
             .client_flow
             .get_or_insert_with(|| {
@@ -206,7 +209,7 @@ impl Collector {
         };
         // Every datagram is one chunk, an empty one included: the frame and
         // direction are part of the conversation's shape.
-        let bytes = transport_payload(record.udp_decoded, udp_layer);
+        let bytes = transport_payload(view.decoded, view.layer);
         self.tally(direction, bytes.len());
         vec![Chunk {
             direction,

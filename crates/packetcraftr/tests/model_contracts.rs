@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -190,32 +187,62 @@ fn policy_validates_address_and_operation_bounds() {
     );
 
     defaults
-        .authorize_operation(
+        .authorize(policy::Operation::Budgeted(policy::WireBudget::new(
             defaults.max_packets_per_operation,
             defaults.max_bytes_per_operation,
-        )
+        )))
         .expect("limits are inclusive");
     assert!(matches!(
-        defaults.authorize_operation(defaults.max_packets_per_operation + 1, 0),
-        Err(policy::Error::PacketLimit { .. })
+        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+            defaults.max_packets_per_operation + 1,
+            0
+        ))),
+        Err(packetcraftr::Error::Policy(
+            policy::Error::PacketLimit { .. }
+        ))
     ));
     assert!(matches!(
-        defaults.authorize_operation(0, defaults.max_bytes_per_operation + 1),
-        Err(policy::Error::ByteLimit { .. })
+        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+            0,
+            defaults.max_bytes_per_operation + 1
+        ))),
+        Err(packetcraftr::Error::Policy(policy::Error::ByteLimit { .. }))
     ));
     defaults
-        .authorize_dns_operation(
-            defaults.max_packets_per_operation,
-            defaults.max_bytes_per_operation,
-        )
+        .authorize(policy::Operation::Dns(
+            policy::DnsOperation::new(
+                policy::WireBudget::new(
+                    defaults.max_packets_per_operation,
+                    defaults.max_bytes_per_operation,
+                ),
+                policy::SocketBudget::none(),
+            )
+            .unwrap(),
+        ))
         .expect("DNS traffic-unit limits are inclusive");
     assert!(matches!(
-        defaults.authorize_dns_operation(defaults.max_packets_per_operation + 1, 0),
-        Err(policy::Error::TrafficUnitLimit { .. })
+        defaults.authorize(policy::Operation::Dns(
+            policy::DnsOperation::new(
+                policy::WireBudget::new(defaults.max_packets_per_operation + 1, 0),
+                policy::SocketBudget::none()
+            )
+            .unwrap()
+        )),
+        Err(packetcraftr::Error::Policy(
+            policy::Error::TrafficUnitLimit { .. }
+        ))
     ));
     assert!(matches!(
-        defaults.authorize_dns_operation(0, defaults.max_bytes_per_operation + 1),
-        Err(policy::Error::TrafficByteLimit { .. })
+        defaults.authorize(policy::Operation::Dns(
+            policy::DnsOperation::new(
+                policy::WireBudget::new(0, defaults.max_bytes_per_operation + 1),
+                policy::SocketBudget::none()
+            )
+            .unwrap()
+        )),
+        Err(packetcraftr::Error::Policy(
+            policy::Error::TrafficByteLimit { .. }
+        ))
     ));
 }
 
@@ -404,11 +431,11 @@ fn public_errors_retain_stable_policy_and_target_classification() {
 /// a retained source walks it.
 #[test]
 fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
-    let udp = packetcraftr::core::layer::Id::from("udp");
-    let codec = packetcraftr::core::build::Error::Codec {
+    let udp = packetcraftr_core::layer::Id::from("udp");
+    let codec = packetcraftr_core::build::Error::Codec {
         index: 1,
         protocol: udp,
-        source: packetcraftr::core::codec::Error::Invalid {
+        source: packetcraftr_core::codec::Error::Invalid {
             protocol: udp,
             message: "port 53 is reserved".to_owned(),
         },

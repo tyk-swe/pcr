@@ -27,13 +27,14 @@ pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Statistics {
     pub received_frames: u64,
     pub received_bytes: u64,
     pub dropped_frames: u64,
     pub dropped_bytes: u64,
     pub overflow_events: u64,
+    #[serde(skip_serializing_if = "is_zero")]
     pub receiver_dropped_frames: u64,
 }
 
@@ -326,4 +327,8 @@ where
     fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
         self.capture.arm_capture(request)
     }
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }

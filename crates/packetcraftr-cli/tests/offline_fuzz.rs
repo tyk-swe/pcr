@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 mod support;
 
@@ -83,7 +80,7 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
     assert_eq!(lines.len(), 9);
     let terminal: Value = serde_json::from_str(lines.last().expect("terminal record"))
         .expect("terminal record must parse");
-    assert_eq!(terminal["result"]["event"], "complete");
+    assert_eq!(terminal["event"], "complete");
 }
 
 #[test]
@@ -166,11 +163,7 @@ fn fuzz_stream_preserves_cases_before_a_late_campaign_failure() {
     assert_eq!(records[1]["result"]["case"]["index"], 1);
     assert_eq!(records[2]["status"], "error");
     assert_eq!(records[2]["sequence"], 2);
-    assert!(
-        records
-            .iter()
-            .all(|record| record["result"]["event"] != "complete")
-    );
+    assert!(records.iter().all(|record| record["event"] != "complete"));
 }
 
 #[test]

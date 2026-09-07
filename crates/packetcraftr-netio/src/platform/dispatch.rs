@@ -112,7 +112,7 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
 pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
     Err(unsupported(
         cfg!(feature = "native-route"),
-        "native-interfaces",
+        "native-route",
         "interface enumeration",
     ))
 }

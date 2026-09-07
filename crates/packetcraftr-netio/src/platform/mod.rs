@@ -3,7 +3,7 @@
 
 //! Crate-private FFI and reviewed-unsafe-code boundary.
 //!
-//! The `native_*`, `pcap_backend`, `npcap_backend`, and `worker_reaper`
+//! The `native_*`, `pcap_backend`, `npcap_backend`, and `native_workers`
 //! predicates come from the build script, which combines the enabled
 //! features with the target the crate is compiled for.
 
@@ -32,8 +32,10 @@ mod pcap_common;
 mod raw_ip;
 #[cfg(native_route)]
 mod route_normalize;
-#[cfg(worker_reaper)]
+#[cfg(native_layer2)]
 mod worker_reaper;
+#[cfg(native_workers)]
+mod workers;
 
 /// Wraps a native failure as the operating-system route diagnostic.
 ///

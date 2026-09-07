@@ -7,11 +7,13 @@ pub(super) mod arguments;
 mod execution;
 mod rendering;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::time::{Duration, Instant};
 
-use packetcraftr::{analysis::pcap, netio as net, netio::capture::Provider as _};
+use packetcraftr_core::analysis::pcap;
+use packetcraftr_netio as net;
+use packetcraftr_netio::capture::Provider as _;
 
 use self::arguments::Args;
 use super::registry;

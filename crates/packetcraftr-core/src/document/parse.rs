@@ -102,20 +102,17 @@ fn yaml_config(limits: &DocumentLimits) -> noyalib::ParserConfig {
         .strict_booleans(true)
 }
 
-/// Whether reading past the end of a YAML stream failed because the stream
-/// ended rather than because the input is malformed.
-///
-/// noyalib has no typed end-of-stream signal: a read after the last document
-/// fails with a `ScanError` whose message is [`YAML_STREAM_ENDED`], which is
-/// one reason `noyalib` is pinned exactly (`=0.0.28`).
-/// `the_yaml_end_of_stream_probe_still_matches_the_pinned_parser` fails if a
-/// bump changes that spelling.
+/// The streaming deserializer reports exhaustion as a scanner error rather
+/// than exposing its StreamEnd event. Match only the scanner's exact message;
+/// another error mentioning those words must remain a parse failure.
 fn yaml_stream_ended(error: &noyalib::Error) -> bool {
-    error.to_string().contains(YAML_STREAM_ENDED)
+    match error {
+        noyalib::Error::Parse(message) | noyalib::Error::ParseWithLocation { message, .. } => {
+            message == "parser has already finished"
+        }
+        _ => false,
+    }
 }
-
-/// The message the pinned YAML parser reports once a stream is exhausted.
-const YAML_STREAM_ENDED: &str = "parser has already finished";
 
 fn document_container_depth(max_nesting: usize) -> usize {
     DOCUMENT_BASE_CONTAINER_DEPTH.saturating_add(max_nesting.saturating_mul(2))
@@ -197,7 +194,7 @@ mod tests {
     );
 
     #[test]
-    fn the_yaml_end_of_stream_probe_still_matches_the_pinned_parser() {
+    fn yaml_stream_exhaustion_is_distinct_from_parse_failure() {
         let limits = DocumentLimits::DEFAULT;
         let config = yaml_config(&limits);
         let mut deserializer = noyalib::StreamingDeserializer::with_config(ONE_DOCUMENT, &config);
@@ -207,8 +204,11 @@ mod tests {
             .expect_err("reading past the last document fails instead of ending cleanly");
         assert!(
             yaml_stream_ended(&error),
-            "the pinned parser now reports end of stream as {error}, not {YAML_STREAM_ENDED:?}"
+            "unexpected YAML end-of-stream error: {error}"
         );
+        assert!(!yaml_stream_ended(&noyalib::Error::Parse(
+            "invalid token: parser has already finished".to_owned()
+        )));
     }
 
     #[test]

@@ -1,13 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 pub(super) use crate::command_options::SendArgs;
 
 use std::sync::Arc;
 
-use packetcraftr::{analysis::pcap as capture, core, output};
+use packetcraftr_core as core;
+use packetcraftr_core::analysis::pcap as capture;
+
+use packetcraftr_cli::output;
 
 use super::registry;
 use crate::errors::CliError;

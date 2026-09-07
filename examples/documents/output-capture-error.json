@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
   "sequence": 0,
@@ -13,5 +13,6 @@
     ],
     "remediation": "inspect the capture device state and native backend diagnostic before retrying"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "error"
 }

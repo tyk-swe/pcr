@@ -40,11 +40,7 @@ fn validate_adjacent_bindings(
 ) -> Result<(), Error> {
     let mut previous_binding = None;
     for index in 0..packet.len().saturating_sub(1) {
-        #[expect(
-            clippy::indexing_slicing,
-            clippy::arithmetic_side_effects,
-            reason = "`protocols.len() == packet.len()` and `index + 1` stays below that length"
-        )]
+        // `protocols.len() == packet.len()` and `index + 1` stays below that length
         let (parent, child) = (&protocols[index], &protocols[index + 1]);
         let discriminator = match previous_binding {
             Some((previous_parent, previous_child, discriminator))
@@ -136,10 +132,7 @@ fn validate_padding(
         .unwrap_or(declared_child.as_str());
     let link_declares_length = || match outside.field("ether_type") {
         Some(FieldValue::Unsigned(value)) => value <= 1500,
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the guard admits this arm only when `value.len() == 2`"
-        )]
+        // the guard admits this arm only when `value.len() == 2`
         Some(FieldValue::Bytes(value)) if value.len() == 2 => {
             u16::from_be_bytes([value[0], value[1]]) <= 1500
         }

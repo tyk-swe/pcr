@@ -8,7 +8,7 @@ use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::model::{Batch, Execution, Executor, Probe, Strategy};
+use super::{Batch, Execution, Executor, Probe, Strategy};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
@@ -130,7 +130,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
 
-    use super::super::model::ProbeTarget;
+    use super::super::ProbeTarget;
     use super::*;
     use crate::evidence::ExecutionPermit;
 

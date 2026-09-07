@@ -88,11 +88,8 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         if layer.flags != 0 {
             return Err(invalid(NAME, "unsupported SRH flags must be zero"));
         }
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the guard above rejects an empty segment list and any list longer than \
-                      127, so the decremented length is at most 126"
-        )]
+        // the guard above rejects an empty segment list and any list longer than 127, so the
+        // decremented length is at most 126
         let expected_last = layer.segments.len().saturating_sub(1) as u8;
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator(NAME, context, 59_u8, &layer.next_header);
@@ -156,11 +153,8 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         materialized.next_header = materialized_next;
         materialized.segments_left = materialized_left;
         materialized.last_entry = materialized_last;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`prefix` was resized to `header_len`, which `srh_lengths` guarantees is at \
-                      least `segments_end`"
-        )]
+        // `prefix` was resized to `header_len`, which `srh_lengths` guarantees is at least
+        // `segments_end`
         let tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
         materialized.tlvs = tlvs;
         Ok(EncodedLayer::header(prefix, Box::new(materialized))
@@ -212,10 +206,8 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             .get(8..segments_end)
             .ok_or_else(|| truncated(NAME, segments_end, input.len()))?;
         let mut wire_segments = Vec::with_capacity(count);
-        for chunk in segment_bytes.chunks_exact(16) {
-            let mut bytes = [0u8; 16];
-            bytes.copy_from_slice(chunk);
-            wire_segments.push(Ipv6Addr::from(bytes));
+        for address in segment_bytes.as_chunks::<16>().0 {
+            wire_segments.push(Ipv6Addr::from(*address));
         }
         wire_segments.reverse();
         let final_destination = wire_segments

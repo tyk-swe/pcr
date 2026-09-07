@@ -7,11 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::Error;
 
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "the guard below rejects microseconds outside 0..1_000_000 and the branch below \
-              only converts seconds once it is known to be non-negative"
-)]
+// the guard below rejects microseconds outside 0..1_000_000 and the branch below only converts
+// seconds once it is known to be non-negative
 pub(in crate::platform) fn system_time(
     seconds: i64,
     microseconds: i64,

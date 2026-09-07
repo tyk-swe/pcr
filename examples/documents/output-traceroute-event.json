@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "probe",
     "target": "router.lab",
     "probe": {
       "hop_limit": 1,
@@ -32,5 +31,6 @@
       "reason": "ICMPv4 time exceeded before reaching the endpoint"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "probe"
 }

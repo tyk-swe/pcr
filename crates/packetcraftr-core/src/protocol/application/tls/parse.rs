@@ -504,13 +504,11 @@ fn u16_list(input: &[u8], limit: usize, what: &str) -> Result<Vec<u16>, Error> {
             format!("{what} list of {count} entries exceeds the limit of {limit}"),
         ));
     }
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "chunks_exact(2) yields slices of length exactly 2"
-    )]
     let values = input
-        .chunks_exact(2)
-        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_be_bytes(*pair))
         .collect();
     Ok(values)
 }
@@ -583,7 +581,6 @@ impl<'a> Reader<'a> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use crate::fuzz::rng::SplitMix64;
     use crate::protocol::application::tls::model::{

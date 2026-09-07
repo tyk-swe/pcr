@@ -4,9 +4,9 @@
 use std::path::PathBuf;
 
 use clap::{ArgAction, ValueEnum};
-use packetcraftr::analysis::tls::{
-    Limits as TlsLimits, MAX_DIRECTION_BUFFER, Status as AnalysisStatus,
-};
+use packetcraftr_core::analysis::tls::Limits as TlsLimits;
+use packetcraftr_core::analysis::tls::MAX_DIRECTION_BUFFER;
+use packetcraftr_core::analysis::tls::Status as AnalysisStatus;
 
 // The `--max-tls-buffer-bytes` help text below spells out the floor; keep it
 // honest when the core constant moves.
@@ -109,7 +109,7 @@ pub(crate) struct Args {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr::core::protocol::builtin::TLS_TCP_PORTS;
+    use packetcraftr_core::protocol::builtin::TLS_TCP_PORTS;
 
     use super::*;
 

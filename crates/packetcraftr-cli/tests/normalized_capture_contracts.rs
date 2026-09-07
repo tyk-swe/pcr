@@ -1,16 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{Cursor, Write};
 use std::process::Output;
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::analysis::pcap::{
-    Endianness, Format, Interface, MetadataBlockKind, PcapNgOptions, PcapOptions, Reader,
-    RecordKind, TimestampResolution, Writer,
-};
-use packetcraftr::core::frame::{Direction, Frame, LinkType};
+use packetcraftr_core::analysis::pcap::Endianness;
+use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::analysis::pcap::Interface;
+use packetcraftr_core::analysis::pcap::MetadataBlockKind;
+use packetcraftr_core::analysis::pcap::PcapNgOptions;
+use packetcraftr_core::analysis::pcap::PcapOptions;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::RecordKind;
+use packetcraftr_core::analysis::pcap::TimestampResolution;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::frame::Direction;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
 
 #[path = "support/process.rs"]
 mod process_support;

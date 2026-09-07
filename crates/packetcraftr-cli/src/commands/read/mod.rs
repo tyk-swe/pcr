@@ -8,19 +8,20 @@ mod rendering;
 #[cfg(test)]
 mod tests;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 
-use packetcraftr::{
-    analysis::pcap::{self as capture, Limits, Reader, rewrite},
-    core::{
-        self,
-        error::{Classification, Kind},
-    },
-    output,
-};
+use packetcraftr_core as core;
+use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::analysis::pcap::Limits;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::rewrite;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Kind;
+
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
 use super::registry_with_tls_ports;

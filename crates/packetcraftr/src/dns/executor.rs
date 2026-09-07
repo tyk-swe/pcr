@@ -9,7 +9,7 @@ use crate::probe::{self, Executor, Transport as ProbeTransport};
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::{ResponseClassification, classify_response};
-use super::model::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
+use super::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.dns_executor",

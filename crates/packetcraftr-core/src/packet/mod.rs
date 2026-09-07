@@ -28,7 +28,7 @@ impl Packet {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             layers: Vec::with_capacity(capacity),
-            encoded_payload_lengths: Vec::with_capacity(capacity),
+            encoded_payload_lengths: Vec::new(),
         }
     }
 
@@ -164,8 +164,9 @@ impl Packet {
     }
 
     fn invalidate_encoded_payload_lengths(&mut self) {
-        self.encoded_payload_lengths.resize(self.layers.len(), None);
-        self.encoded_payload_lengths.fill(None);
+        // Empty means every length is unknown; mutation neither scans the
+        // layer stack nor allocates placeholder entries.
+        self.encoded_payload_lengths.clear();
     }
 }
 
@@ -185,7 +186,7 @@ impl<L: Layer> FromIterator<L> for Packet {
             .into_iter()
             .map(|layer| Box::new(layer) as Box<dyn Layer>)
             .collect::<Vec<_>>();
-        let encoded_payload_lengths = vec![None; layers.len()];
+        let encoded_payload_lengths = Vec::new();
         Self {
             layers,
             encoded_payload_lengths,

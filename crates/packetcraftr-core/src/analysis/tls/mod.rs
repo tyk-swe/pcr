@@ -60,8 +60,8 @@ mod session;
 
 pub use limits::{Limits, MAX_DIRECTION_BUFFER};
 pub use session::{
-    ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Alert, ClientSummary, Endpoint, MAX_ALERTS,
-    ServerSummary, Session, Status,
+    ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Alert, ClientSummary, MAX_ALERTS, ServerSummary,
+    Session, Status,
 };
 
 use session::{Live, Verdict};
@@ -176,7 +176,8 @@ impl Collector {
     /// Folds one matched frame, returning the sessions it ended.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<SessionEvent> {
         let mut events = Vec::new();
-        if let Some(flow) = record.udp_flow
+        if let Some(conversation) = record.udp.and_then(|view| view.conversation)
+            && let flow = conversation.flow
             && (flow.flow.source_port == QUIC_UDP_PORT
                 || flow.flow.destination_port == QUIC_UDP_PORT)
         {
@@ -184,8 +185,12 @@ impl Collector {
         }
         // Reassembly emits current-generation data before its clean close. Expiry
         // and replacement events precede that data and must retain their ordering.
+        let current_flow = record
+            .tcp
+            .and_then(|view| view.conversation)
+            .map(|stream| stream.flow);
         let last_data = record.tcp_events.iter().rposition(
-            |event| matches!(event, TcpEvent::Data { flow, .. } if Some(flow) == record.tcp_flow),
+            |event| matches!(event, TcpEvent::Data { flow, .. } if Some(flow) == current_flow),
         );
         let deferred_close = last_data.and_then(|data| {
             record
@@ -195,7 +200,7 @@ impl Collector {
                 .find_map(|(index, event)| {
                     (index > data
                         && matches!(event, TcpEvent::Closed { flow, reset: false }
-                    if Some(flow) == record.tcp_flow))
+                    if Some(flow) == current_flow))
                     .then_some(index)
                 })
         });
@@ -206,15 +211,15 @@ impl Collector {
             &mut events,
         );
 
-        let (Some(flow), Some(stream)) = (record.tcp_flow, record.tcp_stream) else {
+        let Some(tcp) = record.tcp else { return events };
+        let Some(conversation) = tcp.conversation else {
             return events;
         };
+        let flow = conversation.flow;
+        let stream = conversation.index;
         self.note_stream(stream);
         let key = CanonicalFlow::from_flow(flow);
-        let tcp = record.tcp_header;
-        if let Some(tcp) = tcp
-            && tcp.flags & Tcp::SYN != 0
-        {
+        if tcp.header.flags & Tcp::SYN != 0 {
             // A connection opening on a retired four-tuple is a new session,
             // with its own index and its own delivery edges.
             self.discard_closed(&key);
@@ -234,10 +239,8 @@ impl Collector {
         }
         if let Some(live) = self.live_mut(&key) {
             live.note_frame(Some(record.timestamp));
-            if let Some(tcp) = tcp {
-                let first = live.first_flow().clone();
-                live.dedup().observe_syn(flow, &first, tcp);
-            }
+            let first = live.first_flow().clone();
+            live.dedup().observe_syn(flow, &first, tcp.header);
         }
         self.fold_deliveries(record, &key, &mut events);
         if let Some(close) = deferred_close.and_then(|index| record.tcp_events.get(index)) {

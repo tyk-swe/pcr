@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::WORKFLOW;
-use super::model::{Batch, Probe, ProbeTarget, Request, Strategy};
+use super::{Batch, Probe, ProbeTarget, Request, Strategy};
 use crate::probe::{Error, ErrorKind};
 
 pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
@@ -100,11 +100,8 @@ fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> 
 }
 
 pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it \
-                  never exceeds 256"
-    )]
+    // hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it never exceeds
+    // 256
     let hops = request.hop_count() as u32;
     let overflow = || {
         Error::new(

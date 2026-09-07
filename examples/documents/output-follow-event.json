@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "follow",
   "mode": "stream",
   "sequence": 0,
@@ -9,5 +9,6 @@
     "frame": 1,
     "bytes_hex": "70696e6721"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "chunk"
 }

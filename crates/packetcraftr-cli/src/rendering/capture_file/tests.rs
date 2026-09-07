@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
 use std::time::UNIX_EPOCH;
 
-use packetcraftr::analysis::pcap::Reader;
-use packetcraftr::core::frame::LinkType;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::frame::LinkType;
 
 use super::*;
 

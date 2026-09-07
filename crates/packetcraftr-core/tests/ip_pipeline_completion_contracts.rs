@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for datagram completion dispatch through the analysis pipeline.
 
@@ -353,7 +350,10 @@ fn assert_derived_udp(link_type: LinkType, family: Family, frames: &[Frame]) {
                 record.decoded.frame.captured_length(),
                 derived.decoded.frame.captured_length(),
                 derived.decoded.original.len(),
-                record.udp_stream,
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
                 derived.fragment_count,
                 derived.payload_bytes,
             ));
@@ -421,11 +421,23 @@ fn ipv6_ah_prefix_reuses_unfragmented_tcp_scope() {
     let mut capture = reader_with_link_type(LinkType::IPV6, &frames);
     let mut observed = Vec::new();
     packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
-        if record.tcp_flow.is_some() {
+        if record
+            .tcp
+            .and_then(|view| view.conversation)
+            .map(|stream| stream.flow)
+            .is_some()
+        {
             observed.push((
                 record.derived().is_some(),
-                record.tcp_stream,
-                record.tcp_flow.map(|flow| flow.scope),
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.flow)
+                    .map(|flow| flow.scope),
             ));
         }
         Ok(())
@@ -447,8 +459,23 @@ fn ipv6_ah_prefix_keeps_order_for_derived_tunneled_tcp_scope() {
     let mut capture = reader_with_link_type(LinkType::IPV6, &frames);
     let mut observed = Vec::new();
     packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
-        if record.tcp_flow.is_some() {
-            observed.push((record.tcp_stream, record.tcp_flow.map(|flow| flow.scope)));
+        if record
+            .tcp
+            .and_then(|view| view.conversation)
+            .map(|stream| stream.flow)
+            .is_some()
+        {
+            observed.push((
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.flow)
+                    .map(|flow| flow.scope),
+            ));
         }
         Ok(())
     })
@@ -526,7 +553,13 @@ fn atomic_ipv6_fragment_keeps_single_frame_dispatch_unchanged() {
     let mut observed = Vec::new();
     let summary =
         packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
-            observed.push((record.derived().is_none(), record.udp_stream));
+            observed.push((
+                record.derived().is_none(),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+            ));
             Ok(())
         })
         .expect("atomic fragment analyzes without reassembly");
@@ -585,8 +618,14 @@ fn partial_ipv6_extension_fragment_does_not_read_link_padding() {
 
     packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
         observed.push((
-            record.udp_stream,
-            record.tcp_stream,
+            record
+                .udp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
+            record
+                .tcp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
             record.derived().is_some(),
         ));
         Ok(())

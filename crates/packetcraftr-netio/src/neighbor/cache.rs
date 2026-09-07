@@ -108,7 +108,6 @@ impl NeighborCache {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::Arc;
     use std::time::Duration;

@@ -29,7 +29,7 @@ fn main() {
         ("pcap_backend", pcap_backend),
         ("npcap_backend", npcap_backend),
         (
-            "worker_reaper",
+            "native_workers",
             (native_route && os == "linux") || native_layer2,
         ),
     ];

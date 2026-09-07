@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -22,13 +19,16 @@ use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
 
-use crate::authorization::Operation;
+use crate::policy::Authorizer;
+use crate::policy::Operation;
 use crate::probe::Executor;
-use crate::target::{Authorized, Authorizer, Family, Target};
+use crate::target::Authorized;
+use crate::target::Family;
+use crate::target::Target;
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats};
 
-use super::model::{Exchange, TcpExecutor};
+use super::{Exchange, TcpExecutor};
 
 use super::DEFAULT_SERVER_PORT;
 
@@ -109,13 +109,10 @@ impl Authorizer for SlowTcpDenyingAuthorizer {
 struct TrustedReceiptExecutor;
 
 impl Executor<Exchange> for TrustedReceiptExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
-        Ok(super::model::Execution {
+        Ok(super::Execution {
             permit: exchange.permit,
             sent,
             responses: Vec::new(),
@@ -138,10 +135,7 @@ impl TcpExecutor for TrustedReceiptExecutor {}
 struct InvalidResponseIndexExecutor;
 
 impl Executor<Exchange> for InvalidResponseIndexExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         let frame = Frame::without_timestamp(LinkType::RAW, &[0_u8][..]).expect("evidence frame");
         execution.responses.push(crate::exchange::Response {
@@ -174,10 +168,7 @@ struct SelectionDeadlineExecutor {
 }
 
 impl Executor<Exchange> for SelectionDeadlineExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let execution = ClassifiedResponseExecutor.execute(exchange)?;
         self.completed.store(true, Ordering::SeqCst);
         Ok(execution)
@@ -189,10 +180,7 @@ impl TcpExecutor for SelectionDeadlineExecutor {}
 struct UdpOnlyTruncatedExecutor;
 
 impl Executor<Exchange> for UdpOnlyTruncatedExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         Ok(scripted_udp_execution(
             exchange,
             Some(truncated_dns_response()),
@@ -206,10 +194,7 @@ impl TcpExecutor for UdpOnlyTruncatedExecutor {}
 struct LoopbackExecutor;
 
 impl Executor<Exchange> for LoopbackExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).map_err(loopback_boundary_error)?;
         socket
             .set_read_timeout(Some(exchange.timeout))
@@ -240,15 +225,15 @@ impl Executor<Exchange> for LoopbackExecutor {
 impl TcpExecutor for LoopbackExecutor {
     fn execute_tcp(
         &mut self,
-        exchange: &super::model::TcpExchange,
-    ) -> Result<super::model::TcpExecution, crate::dns::tcp::Error> {
+        exchange: &super::TcpExchange,
+    ) -> Result<super::TcpExecution, crate::dns::tcp::Error> {
         let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
             endpoint: exchange.endpoint,
             query: &exchange.query,
             timeout: exchange.timeout,
             max_message_bytes: exchange.max_message_bytes,
         })?;
-        Ok(super::model::TcpExecution::new(exchange.permit, response))
+        Ok(super::TcpExecution::new(exchange.permit, response))
     }
 }
 
@@ -293,10 +278,7 @@ impl ScriptedExecutor {
 }
 
 impl Executor<Exchange> for ScriptedExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         self.udp_calls += 1;
         let payload = self.udp_payloads.pop_front().unwrap_or(None);
         Ok(scripted_udp_execution(exchange, payload, self.udp_elapsed))
@@ -306,8 +288,8 @@ impl Executor<Exchange> for ScriptedExecutor {
 impl TcpExecutor for ScriptedExecutor {
     fn execute_tcp(
         &mut self,
-        exchange: &super::model::TcpExchange,
-    ) -> Result<super::model::TcpExecution, crate::dns::tcp::Error> {
+        exchange: &super::TcpExchange,
+    ) -> Result<super::TcpExecution, crate::dns::tcp::Error> {
         self.tcp_calls += 1;
         self.tcp_timeouts.push(exchange.timeout);
         match self.tcp_scripts.pop_front().unwrap_or_else(|| {
@@ -326,7 +308,7 @@ impl TcpExecutor for ScriptedExecutor {
                         .to_be_bytes(),
                 );
                 frame.extend_from_slice(&message);
-                Ok(super::model::TcpExecution::new(
+                Ok(super::TcpExecution::new(
                     exchange.permit,
                     crate::dns::tcp::Response {
                         peer_address: exchange.endpoint,
@@ -346,10 +328,10 @@ impl TcpExecutor for ScriptedExecutor {
 }
 
 fn scripted_udp_execution(
-    exchange: &super::model::Exchange,
+    exchange: &super::Exchange,
     payload: Option<Bytes>,
     elapsed: Duration,
-) -> super::model::Execution {
+) -> super::Execution {
     let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
     let bytes = u64::try_from(sent.bytes_sent()).unwrap();
     let responses = payload
@@ -390,7 +372,7 @@ fn scripted_udp_execution(
             }
         })
         .collect();
-    super::model::Execution {
+    super::Execution {
         permit: exchange.permit,
         sent,
         responses,
@@ -408,10 +390,7 @@ fn scripted_udp_execution(
 }
 
 impl Executor<Exchange> for ClassifiedResponseExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         let mut packet = Packet::new();
@@ -448,7 +427,7 @@ impl Executor<Exchange> for ClassifiedResponseExecutor {
             Bytes::from_static(&[0xfe]),
         )
         .expect("second undecoded frame");
-        Ok(super::model::Execution {
+        Ok(super::Execution {
             permit: exchange.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -520,8 +499,8 @@ fn malformed_dns_response() -> Bytes {
 struct RecordingAuthorizer {
     address: IpAddr,
     targets: Vec<Target>,
-    budgets: Vec<crate::authorization::WireBudget>,
-    socket_budgets: Vec<crate::authorization::SocketBudget>,
+    budgets: Vec<crate::policy::WireBudget>,
+    socket_budgets: Vec<crate::policy::SocketBudget>,
     deny_numeric: bool,
 }
 
@@ -585,10 +564,7 @@ fn push_a_record_tail(output: &mut Vec<u8>, address: [u8; 4]) {
 }
 
 impl Executor<Exchange> for ProgressiveExecutor {
-    fn execute(
-        &mut self,
-        exchange: &super::model::Exchange,
-    ) -> Result<super::model::Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
@@ -605,21 +581,21 @@ impl Executor<Exchange> for ProgressiveExecutor {
 
 impl TcpExecutor for ProgressiveExecutor {}
 
-fn dns_request(address: IpAddr) -> super::model::Request {
-    super::model::Request {
+fn dns_request(address: IpAddr) -> super::Request {
+    super::Request {
         server: Target::Address(address),
         address_family: Family::Any,
         server_port: DEFAULT_SERVER_PORT,
         source_port: 49_152,
         query_name: "example.com".to_owned(),
-        query_type: super::model::QueryType::A,
+        query_type: super::QueryType::A,
         transaction_id: 0x1234,
         recursion_desired: true,
         tcp_fallback: false,
         attempts: 1,
         timeout: Duration::from_millis(1),
         queries_per_second: None,
-        limits: super::model::Limits::default(),
+        limits: super::Limits::default(),
     }
 }
 
@@ -782,11 +758,14 @@ fn dns_aggregate_result_is_collected_from_attempt_events() {
     )
     .expect("timeouts are a successful aggregate operation");
 
-    assert_eq!(result.attempts.len(), 2);
-    assert_eq!(result.attempts[0].attempt, 1);
-    assert_eq!(result.attempts[1].attempt, 2);
-    assert_eq!(result.stats.packets_completed, 2);
-    assert_eq!(result.outcome, super::Outcome::Timeout);
+    assert_eq!(result.attempts().len(), 2);
+    assert_eq!(result.attempts()[0].attempt, 1);
+    assert_eq!(result.attempts()[1].attempt, 2);
+    assert_eq!(result.summary().stats.packets_completed, 2);
+    assert_eq!(
+        result.summary().completion.outcome(),
+        super::Outcome::Timeout
+    );
 }
 
 #[test]
@@ -840,10 +819,11 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
     assert!(events.iter().any(
         |event| matches!(event, super::Event::Diagnostic(diagnostic) if diagnostic.code == "dns.fixture")
     ));
-    assert_eq!(summary.outcome, super::Outcome::Response);
+    assert_eq!(summary.completion.outcome(), super::Outcome::Response);
     assert_eq!(
         summary
-            .response
+            .completion
+            .response()
             .expect("response summary")
             .rejected_record_count,
         1
@@ -857,22 +837,22 @@ fn dns_response_events_preserve_attempt_record_rejection_and_evidence_order() {
         &mut NoopClock,
     )
     .expect("aggregate response must complete");
-    let response = aggregate.response.expect("aggregate response");
-    assert_eq!(aggregate.attempts.len(), 1);
+    let response = aggregate.response().expect("aggregate response");
+    assert_eq!(aggregate.attempts().len(), 1);
     assert_eq!(response.answers.len(), 1);
     assert_eq!(response.rejected_records.len(), 1);
     assert_eq!(response.metadata.rejected_record_count, 1);
-    assert_eq!(aggregate.undecoded.len(), 1);
-    assert_eq!(aggregate.stats.packets_completed, 1);
+    assert_eq!(aggregate.undecoded().len(), 1);
+    assert_eq!(aggregate.summary().stats.packets_completed, 1);
     assert!(
         aggregate
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|diagnostic| diagnostic.code == "dns.fixture")
     );
     assert!(
         aggregate
-            .diagnostics
+            .diagnostics()
             .iter()
             .any(|diagnostic| diagnostic.code == "dns.undecoded_limit")
     );
@@ -985,23 +965,29 @@ fn truncated_udp_falls_back_once_and_accepts_tcp_without_a_captured_frame() {
 
     assert_eq!(executor.udp_calls, 1);
     assert_eq!(executor.tcp_calls, 1);
-    assert_eq!(result.outcome, super::Outcome::Response);
-    assert!(result.fallback_attempted);
-    assert_eq!(result.accepted_transport, Some(super::Transport::Tcp));
-    assert_eq!(result.attempts.len(), 2);
-    assert_eq!(result.attempts[0].attempt, 1);
-    assert_eq!(result.attempts[0].transport, super::Transport::Udp);
-    assert_eq!(result.attempts[0].status, super::Outcome::Truncated);
-    assert_eq!(result.attempts[1].attempt, 1);
-    assert_eq!(result.attempts[1].transport, super::Transport::Tcp);
     assert_eq!(
-        result.attempts[1].sent_at,
+        result.summary().completion.outcome(),
+        super::Outcome::Response
+    );
+    assert!(result.summary().completion.fallback_attempted());
+    assert_eq!(
+        result.summary().completion.accepted_transport(),
+        Some(super::Transport::Tcp)
+    );
+    assert_eq!(result.attempts().len(), 2);
+    assert_eq!(result.attempts()[0].attempt, 1);
+    assert_eq!(result.attempts()[0].transport(), super::Transport::Udp);
+    assert_eq!(result.attempts()[0].status, super::Outcome::Truncated);
+    assert_eq!(result.attempts()[1].attempt, 1);
+    assert_eq!(result.attempts()[1].transport(), super::Transport::Tcp);
+    assert_eq!(
+        result.attempts()[1].sent_at(),
         Some(UNIX_EPOCH + Duration::from_secs(10) + Duration::from_millis(5))
     );
-    assert_eq!(result.attempts[1].latency, Some(Duration::from_millis(5)));
-    assert!(result.attempts[1].response.is_none());
-    assert_eq!(result.stats.packets_attempted, 1);
-    assert_eq!(result.stats.packets_completed, 1);
+    assert_eq!(result.attempts()[1].latency, Some(Duration::from_millis(5)));
+    assert!(result.attempts()[1].response().is_none());
+    assert_eq!(result.summary().stats.packets_attempted, 1);
+    assert_eq!(result.summary().stats.packets_completed, 1);
     assert_eq!(authorizer.targets.len(), 2);
     assert!(matches!(authorizer.targets[0], Target::Hostname(_)));
     assert_eq!(authorizer.targets[1], Target::Address(address));
@@ -1029,10 +1015,16 @@ fn udp_only_mode_keeps_truncation_terminal_and_reserves_no_tcp_phase() {
     .expect("UDP-only truncation remains a completed diagnostic outcome");
 
     assert_eq!(executor.tcp_calls, 0);
-    assert_eq!(result.outcome, super::Outcome::Truncated);
-    assert!(!result.fallback_attempted);
-    assert_eq!(result.accepted_transport, Some(super::Transport::Udp));
-    assert!(result.response.unwrap().metadata.truncated);
+    assert_eq!(
+        result.summary().completion.outcome(),
+        super::Outcome::Truncated
+    );
+    assert!(!result.summary().completion.fallback_attempted());
+    assert_eq!(
+        result.summary().completion.accepted_transport(),
+        Some(super::Transport::Udp)
+    );
+    assert!(result.response().unwrap().metadata.truncated);
     assert_eq!(authorizer.budgets[0].packets(), 1);
 }
 
@@ -1060,12 +1052,12 @@ fn only_a_validated_truncated_udp_response_triggers_tcp() {
             &mut NoopClock,
         )
         .expect("non-fallback UDP outcome remains retryable or complete");
-        assert_eq!(result.outcome, expected);
+        assert_eq!(result.summary().completion.outcome(), expected);
         assert_eq!(
             executor.tcp_calls, 0,
             "unexpected fallback for {expected:?}"
         );
-        assert!(!result.fallback_attempted);
+        assert!(!result.summary().completion.fallback_attempted());
     }
 }
 
@@ -1207,9 +1199,9 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
             &mut NoopClock,
         )
         .expect("typed TCP failure becomes a deterministic DNS outcome");
-        assert_eq!(result.outcome, expected);
-        assert!(result.accepted_transport.is_none());
-        assert_eq!(result.attempts[1].sent_at.is_some(), sent);
+        assert_eq!(result.summary().completion.outcome(), expected);
+        assert!(result.summary().completion.accepted_transport().is_none());
+        assert_eq!(result.attempts()[1].sent_at().is_some(), sent);
         assert_eq!(executor.tcp_calls, 1);
     }
 }
@@ -1268,10 +1260,13 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
 
     assert_eq!(executor.udp_calls, 2);
     assert_eq!(executor.tcp_calls, 2);
-    assert_eq!(result.attempts.len(), 4);
-    assert_eq!(result.outcome, super::Outcome::NetworkFailure);
-    assert_eq!(result.stats.packets_attempted, 2);
-    assert_eq!(result.stats.packets_completed, 2);
+    assert_eq!(result.attempts().len(), 4);
+    assert_eq!(
+        result.summary().completion.outcome(),
+        super::Outcome::NetworkFailure
+    );
+    assert_eq!(result.summary().stats.packets_attempted, 2);
+    assert_eq!(result.summary().stats.packets_completed, 2);
     assert_eq!(authorizer.budgets[0].packets(), 6);
 }
 
@@ -1311,7 +1306,7 @@ fn tcp_destination_policy_denial_happens_before_connection() {
     assert!(matches!(
         events.lock().unwrap().as_slice(),
         [super::Event::Attempt { evidence, .. }]
-            if evidence.transport == super::Transport::Udp
+            if evidence.transport() == super::Transport::Udp
                 && evidence.status == super::Outcome::Truncated
     ));
     assert_eq!(
@@ -1345,9 +1340,9 @@ fn tcp_reauthorization_failure_after_attempt_deadline_becomes_timeout() {
 
     assert_eq!(authorizer.numeric_calls, 1);
     assert_eq!(executor.tcp_calls, 0);
-    assert_eq!(result.attempts.len(), 2);
-    assert_eq!(result.attempts[1].transport, super::Transport::Tcp);
-    assert_eq!(result.attempts[1].status, super::Outcome::Timeout);
+    assert_eq!(result.attempts().len(), 2);
+    assert_eq!(result.attempts()[1].transport(), super::Transport::Tcp);
+    assert_eq!(result.attempts()[1].status, super::Outcome::Timeout);
 }
 
 #[test]
@@ -1360,7 +1355,7 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
         max_packets_per_operation: 2,
         ..crate::policy::Policy::default()
     };
-    let mut authorizer = crate::target::PolicyAuthorizer::for_packets(&policy);
+    let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
     let mut executor = ScriptedExecutor::new([Some(truncated_dns_response())]);
 
     let error = super::engine::run(
@@ -1397,7 +1392,7 @@ fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
         request.attempts = 3;
         request.tcp_fallback = tcp_fallback;
         request.timeout = Duration::from_secs(1);
-        let mut authorizer = crate::target::PolicyAuthorizer::for_packets(&policy);
+        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
         let mut executor = ScriptedExecutor::new([Some(dns_response())]);
 
         let error = super::engine::run(
@@ -1539,12 +1534,18 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     tcp_joined.expect("TCP loopback server");
     let result = result.expect("loopback fallback completes");
 
-    assert_eq!(result.outcome, super::Outcome::Response);
-    assert_eq!(result.accepted_transport, Some(super::Transport::Tcp));
-    assert_eq!(result.attempts.len(), 2);
-    assert_eq!(result.attempts[0].status, super::Outcome::Truncated);
-    assert_eq!(result.attempts[1].transport, super::Transport::Tcp);
-    assert_eq!(result.response.unwrap().answers.len(), 1);
+    assert_eq!(
+        result.summary().completion.outcome(),
+        super::Outcome::Response
+    );
+    assert_eq!(
+        result.summary().completion.accepted_transport(),
+        Some(super::Transport::Tcp)
+    );
+    assert_eq!(result.attempts().len(), 2);
+    assert_eq!(result.attempts()[0].status, super::Outcome::Truncated);
+    assert_eq!(result.attempts()[1].transport(), super::Transport::Tcp);
+    assert_eq!(result.response().unwrap().answers.len(), 1);
 }
 
 #[test]
@@ -1575,7 +1576,13 @@ fn loopback_udp_only_truncation_never_connects_tcp() {
     udp_server.join().expect("UDP loopback server");
     tcp.set_nonblocking(true).unwrap();
 
-    assert_eq!(result.outcome, super::Outcome::Truncated);
-    assert_eq!(result.accepted_transport, Some(super::Transport::Udp));
+    assert_eq!(
+        result.summary().completion.outcome(),
+        super::Outcome::Truncated
+    );
+    assert_eq!(
+        result.summary().completion.accepted_transport(),
+        Some(super::Transport::Udp)
+    );
     assert!(matches!(tcp.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
 }

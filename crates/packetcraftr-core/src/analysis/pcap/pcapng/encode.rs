@@ -51,11 +51,8 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
     let block_length = if timestamp_offset == 0 { 32 } else { 44 };
     write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "validate_new_interface rejects a link type above u16::MAX with \
-                  Error::LinkTypeOutOfRange before any interface description is written"
-    )]
+    // validate_new_interface rejects a link type above u16::MAX with Error::LinkTypeOutOfRange
+    // before any interface description is written
     let link_type_field = link_type.0 as u16;
     write_u16(writer, endianness, link_type_field)?;
     write_u16(writer, endianness, 0)?;
@@ -95,11 +92,8 @@ pub(in crate::analysis::pcap) fn write_enhanced_packet<W: Write>(
     write_u32(writer, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
     write_u32(writer, endianness, interface_id)?;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the PCAPNG enhanced packet block stores its 64-bit timestamp as two \
-                  32-bit halves, so discarding the upper bits of each half is the format"
-    )]
+    // the PCAPNG enhanced packet block stores its 64-bit timestamp as two 32-bit halves, so
+    // discarding the upper bits of each half is the format
     let (timestamp_high, timestamp_low) = ((timestamp >> 32) as u32, timestamp as u32);
     write_u32(writer, endianness, timestamp_high)?;
     write_u32(writer, endianness, timestamp_low)?;
@@ -218,10 +212,7 @@ pub(in crate::analysis::pcap) fn select_interface(
             link_type: frame.link_type.0,
         });
     }
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "validate_new_interface refuses indexes above u32"
-    )]
+    // validate_new_interface refuses indexes above u32
     let id = index as u32;
     Ok(InterfacePlan {
         id,

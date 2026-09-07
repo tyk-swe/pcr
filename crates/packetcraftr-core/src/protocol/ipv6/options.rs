@@ -132,11 +132,8 @@ where
     prefix.resize(header_len, 0);
     let mut materialized = layer.clone_box();
     materialized.set_field("next_header", FieldValue::Unsigned(u64::from(next)))?;
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`prefix` was resized to `header_len`, which is the option length plus the \
-                  two-byte fixed header rounded up to an eight-byte boundary"
-    )]
+    // `prefix` was resized to `header_len`, which is the option length plus the two-byte fixed
+    // header rounded up to an eight-byte boundary
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);
     materialized.set_field("options", FieldValue::Bytes(padded_options))?;
     Ok(EncodedLayer::header(prefix, materialized)

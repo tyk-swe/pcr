@@ -3,15 +3,15 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{
-    analysis,
-    core::{self, filter::Filter, registry::Registry},
-};
+use packetcraftr_core as core;
+use packetcraftr_core::analysis;
+use packetcraftr_core::filter::Filter;
+use packetcraftr_core::registry::Registry;
 
 use analysis::{StreamRef, StreamTransport};
 
@@ -175,12 +175,12 @@ pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
 /// `ip_reassembly` report, so they pass `None` and the events are dropped.
 pub(super) fn ip_event_sink(
     stream: Option<StreamEncoder>,
-) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr::BoundaryError> {
+) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError> {
     move |event| {
         if let Some(stream) = &stream {
             stream
                 .emit_data(
-                    packetcraftr::output::reassembly::Event::from(event),
+                    packetcraftr_cli::output::reassembly::Event::from(event),
                     Vec::new(),
                 )
                 .map_err(|error| CliError::from(error).into_boundary_error())?;
@@ -191,7 +191,6 @@ pub(super) fn ip_event_sink(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
 

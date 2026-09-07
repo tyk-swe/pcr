@@ -3,20 +3,21 @@
 
 //! Traceroute CLI command logic.
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 mod rendering;
 
 use std::time::Duration;
 
-use packetcraftr::{core, netio as net, output};
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::execution::Executor;
-use super::target_workflow::{self, Document, TargetWorkflow};
+use super::execution;
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
@@ -30,14 +31,53 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;
-    let mut providers = target_workflow::prepare(
+    let mut providers = execution::prepare(
         arguments.route,
         arguments.policy,
         request.timeout,
         max_template_packets,
         queue_limits,
     )?;
-    target_workflow::run::<Traceroute>(&request, &mut providers, format, stream)
+    let resolver = packetcraftr::target::SystemResolver;
+    let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
+    let mut clock = packetcraftr::clock::SystemClock;
+    if format == Format::Ndjson {
+        let events = stream.clone();
+        let summary = packetcraftr::traceroute::run_with_events(
+            &request,
+            &mut authorizer,
+            &providers.registry,
+            &mut providers.executor,
+            &mut clock,
+            &providers.runtime,
+            move |event| {
+                rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
+            },
+        )
+        .map_err(CliError::classified)?;
+        rendering::emit_complete(summary, stream)
+    } else {
+        let report = packetcraftr::traceroute::run(
+            &request,
+            &mut authorizer,
+            &providers.registry,
+            &mut providers.executor,
+            &mut clock,
+        )
+        .map_err(CliError::classified)?;
+        let (result, diagnostics, stats) = output::traceroute::Report::try_from_traceroute(report)
+            .map_err(CliError::classified)?;
+        if format == Format::Text {
+            rendering::render_text(result, diagnostics, stats)
+        } else {
+            crate::rendering::emit_aggregate_with_stats(
+                output::contract::Command::Traceroute,
+                result,
+                diagnostics,
+                stats,
+            )
+        }
+    }
 }
 
 fn prepare_request(
@@ -80,79 +120,4 @@ fn prepare_request(
     };
     request.validate().map_err(CliError::classified)?;
     Ok(request)
-}
-
-/// The `traceroute` workflow.
-pub(super) struct Traceroute;
-
-impl TargetWorkflow for Traceroute {
-    const COMMAND: output::contract::Command = output::contract::Command::Traceroute;
-
-    type Request = packetcraftr::traceroute::Request;
-    type Event = packetcraftr::traceroute::Event;
-    type Summary = packetcraftr::traceroute::Summary;
-    type Document = output::traceroute::Report;
-    type Record = output::traceroute::Event;
-
-    fn execute(
-        request: &Self::Request,
-        authorizer: &mut impl packetcraftr::target::Authorizer,
-        registry: &core::registry::Registry,
-        executor: &mut Executor,
-        clock: &mut impl packetcraftr::clock::Clock,
-    ) -> Result<Document<Self::Document>, CliError> {
-        let result = packetcraftr::traceroute::run(request, authorizer, registry, executor, clock)
-            .map_err(CliError::classified)?;
-        let (result, diagnostics, stats) = output::traceroute::Report::try_from_traceroute(result)
-            .map_err(CliError::classified)?;
-        Ok(Document::new(result, diagnostics, stats))
-    }
-
-    fn stream(
-        request: &Self::Request,
-        authorizer: &mut impl packetcraftr::target::Authorizer,
-        registry: &core::registry::Registry,
-        executor: &mut Executor,
-        clock: &mut impl packetcraftr::clock::Clock,
-        runtime: &packetcraftr::progress::Runtime,
-        stream: &StreamEncoder,
-    ) -> Result<(), CliError> {
-        let event_stream = stream.clone();
-        let summary = packetcraftr::traceroute::run_with_events(
-            request,
-            authorizer,
-            registry,
-            executor,
-            clock,
-            runtime,
-            move |event| {
-                Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
-            },
-        )
-        .map_err(CliError::classified)?;
-        Self::emit_complete(summary, stream)
-    }
-
-    fn render_text(document: Document<Self::Document>) -> Result<(), CliError> {
-        rendering::render_text(document.result, document.diagnostics, document.stats)
-    }
-
-    fn convert_event(
-        event: Self::Event,
-    ) -> Result<(Self::Record, Vec<core::diagnostic::Diagnostic>), CliError> {
-        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)
-    }
-
-    fn convert_complete(
-        summary: Self::Summary,
-    ) -> Result<
-        (
-            Self::Record,
-            Vec<core::diagnostic::Diagnostic>,
-            output::envelope::Stats,
-        ),
-        CliError,
-    > {
-        Ok(output::traceroute::Event::complete_from_traceroute(summary))
-    }
 }

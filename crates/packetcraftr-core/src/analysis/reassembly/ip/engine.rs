@@ -10,7 +10,8 @@ use bytes::Bytes;
 use super::{
     CompletedDatagram, DatagramKey, DatagramState, Error, Family, Fragment, FragmentDisposition,
     FragmentOutcome, IncompleteDatagram, IncompleteReason, Limits, MalformedError, OverlapPolicy,
-    PushOutcome, Reassembler, Reconstruction, ResourceError, RetainedRange, RetiredDatagrams,
+    PushOutcome, Reassembler, Reconstruction, ResourceError, Retained, RetainedRange,
+    RetiredDatagrams,
 };
 
 const IPV4_MIN_HEADER_LENGTH: usize = 20;
@@ -85,15 +86,13 @@ enum RangeUpdate {
 }
 
 /// Validated memory admission for one fragment arrival. Every fallible
-/// replacement allocation has succeeded when this is returned, so the caller
-/// can commit without further resource checks except the completion peak.
+/// replacement allocation is bounded by this plan. Allocation and completion
+/// peak checks still run before the retained state can change.
 struct Charges {
     unique_bytes: usize,
     duplicate_fragments: usize,
     overlap_bytes: usize,
     new_slot_charge: usize,
-    old_unique_bytes: usize,
-    old_charge: usize,
     prospective_charge: usize,
     aggregate_memory_charge: usize,
     replacement_peak_charge: usize,
@@ -146,7 +145,7 @@ impl Reassembler {
     ) -> Result<Charges, Error> {
         let old_unique_bytes = existing.map_or(0, |state| state.unique_bytes);
         let new_slot_charge =
-            if existing.is_none() && self.datagrams.len() >= self.charged_datagram_slots {
+            if existing.is_none() && self.datagrams.len() >= self.retained.datagram_slots {
                 super::DATAGRAM_METADATA_CHARGE
             } else {
                 0
@@ -182,9 +181,10 @@ impl Reassembler {
             .and_then(|charge| charge.checked_add(unique_bytes))
             .and_then(|charge| charge.checked_add(reconstruction_bytes))
             .ok_or_else(|| self.aggregate_limit())?;
-        let old_charge = existing.and_then(DatagramState::memory_charge).unwrap_or(0);
+        let old_charge = existing.map_or(0, |state| state.memory_charge);
         let aggregate_memory_charge = self
-            .aggregate_memory_charge
+            .retained
+            .memory_charge
             .checked_sub(old_charge)
             .and_then(|charge| charge.checked_add(prospective_charge))
             .and_then(|charge| charge.checked_add(new_slot_charge))
@@ -204,13 +204,15 @@ impl Reassembler {
             new_slot_charge,
         )?;
         let replacement_peak_charge = self
-            .aggregate_memory_charge
+            .retained
+            .memory_charge
             .checked_add(replacement_allocation)
             .and_then(|charge| charge.checked_add(external_charge))
             .filter(|charge| *charge <= self.limits.max_aggregate_bytes)
             .ok_or_else(|| self.aggregate_limit())?;
         let aggregate_payload_bytes = self
-            .aggregate_payload_bytes
+            .retained
+            .payload_bytes
             .checked_sub(old_unique_bytes)
             .and_then(|bytes| bytes.checked_add(unique_bytes))
             .filter(|bytes| *bytes <= self.limits.max_aggregate_bytes)
@@ -220,8 +222,6 @@ impl Reassembler {
             duplicate_fragments,
             overlap_bytes,
             new_slot_charge,
-            old_unique_bytes,
-            old_charge,
             prospective_charge,
             aggregate_memory_charge,
             replacement_peak_charge,
@@ -238,9 +238,7 @@ impl Reassembler {
             overlap_policy,
             datagrams: Default::default(),
             expiry: Default::default(),
-            aggregate_payload_bytes: 0,
-            aggregate_memory_charge: 0,
-            charged_datagram_slots: 0,
+            retained: Retained::default(),
         }
     }
 
@@ -294,8 +292,6 @@ impl Reassembler {
             duplicate_fragments,
             overlap_bytes,
             new_slot_charge,
-            old_unique_bytes,
-            old_charge,
             prospective_charge,
             aggregate_memory_charge,
             replacement_peak_charge,
@@ -382,11 +378,9 @@ impl Reassembler {
                 overlap_bytes,
             };
             self.expiry.remove(previous_deadline, &key);
-            self.datagrams.remove(&key);
-            self.aggregate_payload_bytes = self
-                .aggregate_payload_bytes
-                .saturating_sub(old_unique_bytes);
-            self.aggregate_memory_charge = self.aggregate_memory_charge.saturating_sub(old_charge);
+            if let Some(state) = self.datagrams.remove(&key) {
+                self.retained.release(&state);
+            }
             return Ok(PushOutcome::Completed {
                 fragment: fragment_outcome,
                 datagram,
@@ -420,6 +414,7 @@ impl Reassembler {
             reconstruction,
             last_update,
             deadline,
+            memory_charge: prospective_charge,
         };
         match slot {
             Some(state) => *state = new_state,
@@ -430,10 +425,10 @@ impl Reassembler {
         self.expiry.remove(previous_deadline, &key);
         self.expiry.insert(deadline, key);
         if new_slot_charge != 0 {
-            self.charged_datagram_slots = self.charged_datagram_slots.saturating_add(1);
+            self.retained.datagram_slots = self.retained.datagram_slots.saturating_add(1);
         }
-        self.aggregate_payload_bytes = aggregate_payload_bytes;
-        self.aggregate_memory_charge = aggregate_memory_charge;
+        self.retained.payload_bytes = aggregate_payload_bytes;
+        self.retained.memory_charge = aggregate_memory_charge;
         Ok(PushOutcome::Accepted(fragment_outcome))
     }
 
@@ -443,15 +438,12 @@ impl Reassembler {
         let mut retired = RetiredDatagrams::default();
         let retain_limit = self.limits.max_retained_outcomes;
         let datagrams = &mut self.datagrams;
-        let aggregate_payload_bytes = &mut self.aggregate_payload_bytes;
-        let aggregate_memory_charge = &mut self.aggregate_memory_charge;
+        let retained = &mut self.retained;
         self.expiry.drain_expired(now, |key| {
             let Some(state) = datagrams.remove(&key) else {
                 return;
             };
-            *aggregate_payload_bytes = aggregate_payload_bytes.saturating_sub(state.unique_bytes);
-            *aggregate_memory_charge =
-                aggregate_memory_charge.saturating_sub(state.memory_charge().unwrap_or(0));
+            retained.release(&state);
             retired.push(
                 incomplete_datagram(key, state, IncompleteReason::IdleExpired),
                 retain_limit,
@@ -481,12 +473,7 @@ impl Reassembler {
             let Some(state) = self.datagrams.remove(&key) else {
                 continue;
             };
-            self.aggregate_payload_bytes = self
-                .aggregate_payload_bytes
-                .saturating_sub(state.unique_bytes);
-            self.aggregate_memory_charge = self
-                .aggregate_memory_charge
-                .saturating_sub(state.memory_charge().unwrap_or(0));
+            self.retained.release(&state);
             retired.outcomes.push(incomplete_datagram(
                 key,
                 state,
@@ -494,12 +481,7 @@ impl Reassembler {
             ));
         }
         for (key, state) in self.datagrams.drain() {
-            self.aggregate_payload_bytes = self
-                .aggregate_payload_bytes
-                .saturating_sub(state.unique_bytes);
-            self.aggregate_memory_charge = self
-                .aggregate_memory_charge
-                .saturating_sub(state.memory_charge().unwrap_or(0));
+            self.retained.release(&state);
             retired.omit(key.family());
         }
         self.expiry = Default::default();
@@ -513,12 +495,12 @@ impl Reassembler {
 
     #[must_use]
     pub const fn aggregate_payload_bytes(&self) -> usize {
-        self.aggregate_payload_bytes
+        self.retained.payload_bytes
     }
 
     #[must_use]
     pub const fn aggregate_memory_charge(&self) -> usize {
-        self.aggregate_memory_charge
+        self.retained.memory_charge
     }
 }
 

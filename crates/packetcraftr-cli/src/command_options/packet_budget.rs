@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::Args;
-use packetcraftr::core;
+use packetcraftr_core as core;
 
 /// The finite layer and byte budgets `build` and `dissect` apply to one
 /// packet, shared so both commands spell the same flags with the same

@@ -5,11 +5,12 @@ use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
-use packetcraftr::{
-    analysis::pcap::{Reader, ReaderOptions},
-    core::error::{Classification, Kind},
-    core::{self, Packet},
-};
+use packetcraftr_core as core;
+use packetcraftr_core::Packet;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::ReaderOptions;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Kind;
 
 use super::command_options::{CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, RecipeArgs};
 use super::errors::CliError;
@@ -476,7 +477,7 @@ mod tests {
 
     #[test]
     fn document_extensions_are_case_insensitive_and_explicit() {
-        use packetcraftr::core::document::Format;
+        use packetcraftr_core::document::Format;
 
         for (path, expected) in [
             ("packet.json", Some(Format::Json)),

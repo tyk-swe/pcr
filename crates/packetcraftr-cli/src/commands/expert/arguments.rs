@@ -27,7 +27,7 @@ pub(crate) enum Severity {
     Error,
 }
 
-impl From<Severity> for packetcraftr::core::diagnostic::Severity {
+impl From<Severity> for packetcraftr_core::diagnostic::Severity {
     fn from(value: Severity) -> Self {
         match value {
             Severity::Info => Self::Info,

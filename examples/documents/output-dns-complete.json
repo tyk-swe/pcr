@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "stream",
   "sequence": 4,
   "status": "success",
   "result": {
-    "event": "complete",
     "server": "resolver.lab",
     "server_port": 53,
     "resolved_addresses": [
@@ -52,5 +51,6 @@
       "dropped_bytes": 0,
       "overflow_events": 0
     }
-  }
+  },
+  "event": "complete"
 }

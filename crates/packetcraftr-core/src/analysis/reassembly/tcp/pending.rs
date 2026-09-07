@@ -87,15 +87,9 @@ struct IncomingPayload<'a> {
     conflicting: bool,
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so \
-              next_offset never reaches 2^32"
-)]
-#[expect(
-    clippy::cast_possible_wrap,
-    reason = "reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping step"
-)]
+// validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so next_offset
+// never reaches 2^32
+// reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping step
 fn normalize_payload<'a>(
     limits: &Limits,
     state: &TcpFlowState,
@@ -118,10 +112,7 @@ fn normalize_payload<'a>(
     } else {
         0
     };
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "before_base is clamped to segment.payload.len() just above"
-    )]
+    // before_base is clamped to segment.payload.len() just above
     let mut payload = &segment.payload[before_base..];
     let mut payload_start = before_base;
     let mut retransmitted = before_base;

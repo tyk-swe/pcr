@@ -57,10 +57,12 @@ mod classification;
 mod engine;
 mod error;
 mod evidence;
+mod execution;
 mod executor;
-mod model;
 mod plan;
 mod probe;
+mod report;
+mod request;
 pub mod tcp;
 #[cfg(test)]
 mod tests;
@@ -70,11 +72,28 @@ pub use crate::probe::Executor;
 pub use classification::{ResponseClassification, classify_response, response_code_name};
 pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
-pub use model::{
-    AttemptEvidence, Edns, EdnsOption, Event, EventContext, Exchange, Execution, Limits,
-    MessageLimits, Name, Outcome, Probe, QueryType, Record, RecordValue, RejectedRecord, Report,
-    Request, ResponseMetadata, Section, Summary, TcpExchange, TcpExecution, TcpExecutor, Transport,
-    UndecodedEvidence, ValidatedResponse,
-};
+pub use execution::{Exchange, Execution, Probe, TcpExchange, TcpExecution, TcpExecutor};
+pub use report::AttemptEvidence;
+pub use report::AttemptTransport;
+pub use report::Completion;
+pub use report::Edns;
+pub use report::EdnsOption;
+pub use report::Event;
+pub use report::EventContext;
+pub use report::EvidenceError;
+pub use report::Name;
+pub use report::Outcome;
+pub use report::Record;
+pub use report::RecordValue;
+pub use report::RejectedRecord;
+pub use report::Report;
+pub use report::ResponseMetadata;
+pub use report::Section;
+pub use report::Summary;
+pub use report::Transport;
+pub use report::UndecodedEvidence;
+pub use report::ValidatedResponse;
+pub use request::{Limits, MessageLimits, QueryType, Request};
+
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};
 pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};

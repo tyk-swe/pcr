@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};

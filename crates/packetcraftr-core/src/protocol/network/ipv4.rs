@@ -173,10 +173,7 @@ impl LayerCodec for Ipv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the fixed twenty-byte prefix above always reserves bytes 10..12 for the checksum"
-        )]
+        // the fixed twenty-byte prefix above always reserves bytes 10..12 for the checksum
         {
             prefix[10..12].copy_from_slice(&header_checksum.to_be_bytes());
         }

@@ -1,22 +1,24 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{Cursor, Write};
 use std::net::Ipv4Addr;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr::analysis::pcap::{Format as CaptureFormat, Reader, Writer};
-use packetcraftr::core::{
-    Packet,
-    build::{Builder, Context, Options},
-    frame::{Frame, LinkType},
-    layer::Raw,
-    protocol::{builtin, network::Ipv4, transport::Tcp},
-};
+use packetcraftr_core::Packet;
+use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::build::Builder;
+use packetcraftr_core::build::Context;
+use packetcraftr_core::build::Options;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::builtin;
+use packetcraftr_core::protocol::network::Ipv4;
+use packetcraftr_core::protocol::transport::Tcp;
 use serde_json::Value;
 
 #[path = "support/process.rs"]
@@ -174,7 +176,6 @@ fn help_and_version_are_available_without_network_access() {
         "missing native feature line in:\n{version}"
     );
     for (name, enabled) in [
-        ("native-interfaces", cfg!(feature = "native-interfaces")),
         ("native-route", cfg!(feature = "native-route")),
         ("native-layer2", cfg!(feature = "native-layer2")),
         ("native-layer3", cfg!(feature = "native-layer3")),
@@ -241,7 +242,7 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     ]);
     assert_no_terminal_style(&json_output.stdout);
     let value = parse_json(&json_output);
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
     let text = run_success(&["--output", "text", "build", "--packet", "raw(text=hello)"]);
@@ -447,21 +448,16 @@ fn runtime_stream_error_follows_every_preserved_record() {
     assert_contiguous(&records);
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["status"], "success");
-    assert_eq!(records[0]["result"]["event"], "frame");
+    assert_eq!(records[0]["event"], "frame");
     assert_eq!(records[0]["result"]["source_frame"], 1);
     assert_eq!(records[1]["status"], "error");
     assert_eq!(records[1]["sequence"], 1);
-    assert!(
-        records
-            .iter()
-            .all(|record| record["result"]["event"] != "complete")
-    );
+    assert!(records.iter().all(|record| record["event"] != "complete"));
 }
 
 // These commands intentionally name a public destination. Keep them in the
 // feature profile where the CLI has no native I/O implementation to invoke.
 #[cfg(not(any(
-    feature = "native-interfaces",
     feature = "native-route",
     feature = "native-layer2",
     feature = "native-layer3"
@@ -769,7 +765,7 @@ fn dissect_enforces_configurable_decode_budgets() {
 
 #[test]
 fn dissect_uses_the_packet_budget_for_file_and_stdin_reads() {
-    let default_packet_size = packetcraftr::core::layout::DEFAULT_MAX_PACKET_SIZE;
+    let default_packet_size = packetcraftr_core::layout::DEFAULT_MAX_PACKET_SIZE;
     let packet_size = default_packet_size + 1;
     let packet_size_arg = packet_size.to_string();
     let frame = vec![0; packet_size];
@@ -926,4 +922,22 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
             }
         }
     }
+}
+
+#[test]
+fn published_quick_start_capture_reads_as_a_complete_stream() {
+    let capture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
+    let output = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        capture.to_str().unwrap(),
+        "--max-frames",
+        "100",
+    ]);
+    let records = parse_ndjson(&output);
+    assert_contiguous(&records);
+    assert!(records.len() > 1);
+    assert_eq!(records.last().unwrap()["event"], "complete");
 }

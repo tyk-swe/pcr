@@ -7,16 +7,15 @@ pub(super) mod arguments;
 mod conversion;
 mod rendering;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::fs::File;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::{
-    analysis::pcap::{self as capture, Reader},
-    netio as net,
-};
+use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_netio as net;
 
 use self::arguments::Args;
 use super::registry;

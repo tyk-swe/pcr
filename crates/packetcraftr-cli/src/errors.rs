@@ -1,10 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{
-    core::error::{Classification, Classified, Coordinate, Kind},
-    netio as net, output,
-};
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Classified;
+use packetcraftr_core::error::Coordinate;
+use packetcraftr_core::error::Kind;
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 #[derive(Debug)]
 pub(crate) struct CliError {
@@ -57,8 +60,8 @@ impl CliError {
         self
     }
 
-    pub(crate) fn into_boundary_error(self) -> packetcraftr::BoundaryError {
-        packetcraftr::BoundaryError::new(self.message, self.classification, self.causes)
+    pub(crate) fn into_boundary_error(self) -> packetcraftr_core::error::BoundaryError {
+        packetcraftr_core::error::BoundaryError::new(self.message, self.classification, self.causes)
             .with_context(self.context)
     }
 
@@ -161,7 +164,7 @@ mod tests {
 
     #[test]
     fn classified_errors_preserve_causes_and_boundary_contracts() {
-        let classified = packetcraftr::BoundaryError::new(
+        let classified = packetcraftr_core::error::BoundaryError::new(
             "fixture failed",
             Classification::new(
                 "fixture.denied",

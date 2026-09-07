@@ -5,11 +5,12 @@
 
 use std::net::SocketAddr;
 
-use packetcraftr::{analysis, core, output};
+use packetcraftr_core as core;
+use packetcraftr_core::analysis;
 
-use super::arguments::Table;
 use crate::errors::CliError;
 use crate::rendering::{render_diagnostics_text, write_stdout_line, write_summary_line};
+use packetcraftr_cli::output::stats::Table;
 
 pub(super) fn render_text(
     table: Table,
@@ -120,7 +121,7 @@ fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliErro
                 overlap_bytes,
             } => write_stdout_line(format_args!(
                 "{}: complete, fragments {}, unique bytes {}, final payload bytes {}, datagram bytes {}, duplicate fragments {}, overlap bytes {}",
-                output::reassembly::DatagramKey::from(key),
+                key,
                 fragment_count,
                 unique_bytes,
                 final_payload_length,
@@ -130,8 +131,8 @@ fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliErro
             ))?,
             analysis::IpDatagramOutcome::Incomplete(datagram) => write_stdout_line(format_args!(
                 "{}: incomplete ({}), fragments {}, unique bytes {}, known final payload bytes {}, duplicate fragments {}, overlap bytes {}",
-                output::reassembly::DatagramKey::from(&datagram.key),
-                output::reassembly::IncompleteReason::from(datagram.reason),
+                datagram.key,
+                datagram.reason,
                 datagram.fragment_count,
                 datagram.unique_bytes,
                 datagram
@@ -151,11 +152,8 @@ fn render_fragments(report: &analysis::IpReassemblyReport) -> Result<(), CliErro
     Ok(())
 }
 
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "counter magnitudes that exceed the f64 mantissa are far beyond any capture this \
-              renders, and the result is a display percentage"
-)]
+// counter magnitudes that exceed the f64 mantissa are far beyond any capture this renders, and the
+// result is a display percentage
 fn percent(part: u64, whole: u64) -> f64 {
     if whole == 0 {
         0.0

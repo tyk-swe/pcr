@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::time::{Duration, Instant};
 
 use packetcraftr::policy::CaptureBudget;
-use packetcraftr::{core, core::frame::Frame, netio as net, output};
+use packetcraftr_core as core;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_netio as net;
 
 use crate::commands::increment_counter;
 use crate::errors::CliError;
@@ -15,7 +17,7 @@ use crate::filtering::FrameSelector;
 #[derive(Debug)]
 pub(super) struct Outcome {
     pub(super) diagnostics: Vec<core::diagnostic::Diagnostic>,
-    pub(super) stats: output::envelope::Stats,
+    pub(super) stats: packetcraftr::Stats,
 }
 
 struct Progress {
@@ -149,12 +151,12 @@ fn finish<C: net::capture::Session>(
     let diagnostics = loss_diagnostics(&statistics, limits)?;
     Ok(Outcome {
         diagnostics,
-        stats: output::envelope::Stats {
+        stats: packetcraftr::Stats {
             packets_attempted: progress.budget.frames(),
             packets_completed: progress.frames_matched,
             bytes: progress.budget.bytes(),
             elapsed: progress.started.elapsed(),
-            capture: statistics.into(),
+            capture: statistics,
         },
     })
 }

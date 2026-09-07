@@ -20,10 +20,8 @@ use crate::probe::{self, Transport as ProbeTransport};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::error::Error;
-use super::model::{
-    AttemptEvidence, Limits, MessageLimits, Outcome, Probe, Transport, ValidatedResponse,
-};
 use super::wire::{decode_response, decode_tcp_frame};
+use super::{AttemptEvidence, Limits, MessageLimits, Outcome, Probe, ValidatedResponse};
 
 pub const fn response_code_name(code: u16) -> &'static str {
     match code {
@@ -267,18 +265,19 @@ pub(super) fn candidate_evidence(
         AttemptClassification::Failed { status, reason } => (status, None, reason, None),
     };
     ClassifiedAttempt {
-        evidence: AttemptEvidence {
+        evidence: crate::dns::AttemptEvidence {
             attempt: probe.attempt,
-            transport: Transport::Udp,
             server_address: probe.server_address,
-            source_port: Some(probe.source_port),
             status,
-            sent_at: Some(sent_at),
             received_at: candidate.decoded.frame.timestamp,
             latency: Some(candidate.latency),
-            response: response_frame,
             response_code,
             reason,
+            exchange: crate::dns::AttemptTransport::Udp {
+                source_port: probe.source_port,
+                sent_at,
+                response: response_frame,
+            },
         },
         response,
     }
@@ -286,19 +285,20 @@ pub(super) fn candidate_evidence(
 
 pub(super) fn timeout_evidence(probe: &Probe, sent_at: SystemTime) -> ClassifiedAttempt {
     ClassifiedAttempt {
-        evidence: AttemptEvidence {
+        evidence: crate::dns::AttemptEvidence {
             attempt: probe.attempt,
-            transport: Transport::Udp,
             server_address: probe.server_address,
-            source_port: Some(probe.source_port),
             status: Outcome::Timeout,
-            sent_at: Some(sent_at),
             received_at: None,
             latency: None,
-            response: None,
             response_code: None,
             reason: "no checksum-valid, tuple-correlated DNS response before the deadline"
                 .to_owned(),
+            exchange: crate::dns::AttemptTransport::Udp {
+                source_port: probe.source_port,
+                sent_at,
+                response: None,
+            },
         },
         response: None,
     }
@@ -314,18 +314,18 @@ pub(super) fn tcp_failure_evidence(
     reason: String,
 ) -> ClassifiedAttempt {
     ClassifiedAttempt {
-        evidence: AttemptEvidence {
+        evidence: crate::dns::AttemptEvidence {
             attempt: probe.attempt,
-            transport: Transport::Tcp,
             server_address: probe.server_address,
-            source_port: None,
             status,
-            sent_at: None,
             received_at: None,
             latency: None,
-            response: None,
             response_code: None,
             reason,
+            exchange: crate::dns::AttemptTransport::Tcp {
+                source_port: None,
+                sent_at: None,
+            },
         },
         response: None,
     }
@@ -380,18 +380,18 @@ pub(super) fn classify_tcp_response(
         Err(error) => (Outcome::DecodeFailure, None, error.to_string(), None),
     };
     Ok(ClassifiedAttempt {
-        evidence: AttemptEvidence {
+        evidence: crate::dns::AttemptEvidence {
             attempt: probe.attempt,
-            transport: Transport::Tcp,
             server_address: probe.server_address,
-            source_port: Some(response.local_address.port()),
             status,
-            sent_at: Some(response.sent_at),
             received_at: Some(response.received_at),
             latency: Some(response.latency),
-            response: None,
             response_code,
             reason,
+            exchange: crate::dns::AttemptTransport::Tcp {
+                source_port: Some(response.local_address.port()),
+                sent_at: Some(response.sent_at),
+            },
         },
         response: validated,
     })

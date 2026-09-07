@@ -4,6 +4,14 @@
 //! Live workflow executor shared by the probe-driven commands. It resolves
 //! the deferred interface once, then delegates to the library exchange.
 
+use super::registry;
+use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
+use crate::system::{client, exchange};
+use packetcraftr_core as core;
+use packetcraftr_netio as net;
+use std::sync::Arc;
+use std::time::Duration;
+
 use crate::errors::CliError;
 use crate::system::{Client, Exchange, InterfaceSelector, resolve};
 
@@ -23,7 +31,7 @@ impl Executor {
     ///
     /// The selector is cleared only after the lookup succeeds, so a failed
     /// lookup never leaves a later attempt unconstrained.
-    fn bind_interface<P: packetcraftr::netio::interface::Provider>(
+    fn bind_interface<P: packetcraftr_netio::interface::Provider>(
         &mut self,
         provider: &P,
     ) -> Result<(), CliError> {
@@ -36,7 +44,7 @@ impl Executor {
     }
 
     fn prepared(&mut self) -> Result<Exchange<'_>, CliError> {
-        self.bind_interface(&packetcraftr::netio::interface::SystemProvider)?;
+        self.bind_interface(&packetcraftr_netio::interface::SystemProvider)?;
         Ok(packetcraftr::probe::ExchangeExecutor::new(
             &self.client,
             self.exchange.clone(),
@@ -51,7 +59,10 @@ where
     Req: packetcraftr::probe::Request,
     for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
 {
-    fn execute(&mut self, request: &Req) -> Result<Req::Execution, packetcraftr::BoundaryError> {
+    fn execute(
+        &mut self,
+        request: &Req,
+    ) -> Result<Req::Execution, packetcraftr_core::error::BoundaryError> {
         self.prepared()
             .map_err(CliError::into_boundary_error)?
             .execute(request)
@@ -69,9 +80,63 @@ impl packetcraftr::dns::TcpExecutor for Executor {
     }
 }
 
+/// The providers the three commands compose identically once their request is
+/// built.
+pub(super) struct Providers {
+    pub(super) policy: Arc<packetcraftr::policy::Policy>,
+    pub(super) registry: Arc<core::registry::Registry>,
+    pub(super) executor: Executor,
+    /// Admits the one callback worker NDJSON streaming publishes through.
+    pub(super) runtime: packetcraftr::progress::Runtime,
+}
+
+/// Validates the policy and interface selector, then binds an executor to the
+/// requested route.
+///
+/// `max_template_packets` is how many packets one exchange may hold: one query
+/// for `dns`, one probe for `scan`, one attempt per hop for `traceroute`.
+pub(super) fn prepare(
+    route: RouteSelectionArgs,
+    policy: HostnamePolicyArgs,
+    timeout: Duration,
+    max_template_packets: usize,
+    queue_limits: net::capture::Limits,
+) -> Result<Providers, CliError> {
+    let policy = Arc::new(policy.into_policy());
+    policy.validate().map_err(CliError::classified)?;
+    let interface = InterfaceSelector::parse_optional(route.interface.as_deref())?;
+    let registry = registry()?;
+    let exchange = exchange::options(
+        packetcraftr::send::Options {
+            destination: None,
+            plan: net::route::Options {
+                link_mode: route.link_mode.into(),
+                interface: None,
+                preferred_source: route.source,
+            },
+            build: core::build::Options::default(),
+            allow_permissive_live: false,
+        },
+        timeout,
+        max_template_packets,
+        queue_limits,
+    )?;
+    let executor = Executor {
+        client: client(Arc::clone(&registry), policy.clone()),
+        exchange,
+        interface,
+    };
+    Ok(Providers {
+        policy,
+        registry,
+        executor,
+        runtime: packetcraftr::progress::Runtime::default(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use packetcraftr::netio as net;
+    use packetcraftr_netio as net;
 
     use super::*;
     use crate::system::client;
@@ -104,13 +169,13 @@ mod tests {
                 flags: net::interface::Flags::default(),
                 mtu: None,
                 capability: net::link::Capability::Layer2AndLayer3,
-                link_type: packetcraftr::core::frame::LinkType::ETHERNET,
+                link_type: packetcraftr_core::frame::LinkType::ETHERNET,
             }])
         }
     }
 
     fn executor() -> Executor {
-        let registry = packetcraftr::core::protocol::builtin::registry();
+        let registry = packetcraftr_core::protocol::builtin::registry();
         let policy = packetcraftr::policy::Policy::default();
         Executor {
             client: client(registry, policy),

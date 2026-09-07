@@ -11,8 +11,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use clap::Args;
-use packetcraftr::analysis::pcap as capture;
-use packetcraftr::netio as net;
+use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_netio as net;
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct PublicDestinationArgs {
@@ -288,7 +288,6 @@ impl ReplayPolicyArgs {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use clap::Parser as _;
 

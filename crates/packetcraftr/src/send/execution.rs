@@ -23,19 +23,20 @@ where
 {
     pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {
         let started = Instant::now();
-        // Both front doors reject a malformed policy identically: the
-        // workflow seam does it in `PolicyAuthorizer::authorize_operation`.
-        self.policy.validate()?;
-        self.policy.authorize_operation(1, 0)?;
+        self.policy.authorize(crate::policy::Operation::Budgeted(
+            crate::policy::WireBudget::new(1, 0),
+        ))?;
         let plan = self.plan(&packet, options.destination, &options.plan)?;
         let builder = Builder::new(Arc::clone(&self.registry));
         // Validate and authorize every packet field before neighbor discovery
         // emits traffic.
         let planned = self.plan_and_authorize(packet, plan, &builder, &options, None)?;
-        self.policy.authorize_operation(
-            1,
-            u64::try_from(planned.preliminary_build.bytes.len()).unwrap_or(u64::MAX),
-        )?;
+        self.policy.authorize(crate::policy::Operation::Budgeted(
+            crate::policy::WireBudget::new(
+                1,
+                u64::try_from(planned.preliminary_build.bytes.len()).unwrap_or(u64::MAX),
+            ),
+        ))?;
         let prepared = self.materialize_and_authorize(planned, &builder, &options, None)?;
         // Link-layer synthesis is already included in the exact build. The
         // typed frame selects the matching native provider boundary.

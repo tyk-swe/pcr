@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Process entry point for argument parsing, provider composition, workflow
-//! dispatch, and rendering through the versioned [`packetcraftr::output`]
+//! dispatch, and rendering through the versioned [`packetcraftr_cli::output`]
 //! contract.
 
 #![forbid(unsafe_code)]

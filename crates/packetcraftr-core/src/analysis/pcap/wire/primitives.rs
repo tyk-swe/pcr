@@ -74,10 +74,7 @@ pub(in crate::analysis::pcap) fn read_exact_or_eof<R: Read>(
 ) -> Result<bool, Error> {
     let mut offset = 0;
     while offset < buffer.len() {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "`offset < buffer.len()` is the loop condition"
-        )]
+        // `offset < buffer.len()` is the loop condition
         let unfilled = &mut buffer[offset..];
         match reader.read(unfilled) {
             Ok(0) if offset == 0 => return Ok(false),

@@ -132,6 +132,10 @@ impl WireError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    BudgetOverflow(#[from] crate::policy::BudgetOverflow),
+    #[error(transparent)]
+    IncoherentReport(#[from] super::EvidenceError),
     #[error("invalid DNS limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -239,7 +243,10 @@ impl Classified for Error {
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
             Self::Output { source } => source.classification(),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+            Self::BudgetOverflow(_)
+            | Self::IncoherentReport(_)
+            | Self::InvalidEvidence { .. }
+            | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.dns_evidence",
                 Kind::Internal,
                 Some(

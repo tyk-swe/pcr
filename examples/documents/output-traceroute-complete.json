@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
   "sequence": 3,
   "status": "success",
   "result": {
-    "event": "complete",
     "target": "router.lab",
     "resolved_addresses": [
       "192.168.56.10"
@@ -31,5 +30,6 @@
       "dropped_bytes": 0,
       "overflow_events": 0
     }
-  }
+  },
+  "event": "complete"
 }

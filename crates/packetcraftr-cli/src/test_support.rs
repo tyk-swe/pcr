@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -59,20 +56,37 @@ pub(crate) fn assert_single_complete(records: &[Value]) {
     assert_eq!(
         records
             .iter()
-            .filter(|record| record["result"]["event"] == "complete")
+            .filter(|record| record["event"] == "complete")
             .count(),
         1,
         "stream must contain exactly one complete event"
     );
 }
 
+pub(crate) fn output_schema() -> &'static Value {
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../../schemas/packetcraftr.output.v2.schema.json"
+        ))
+        .expect("published output schema must be JSON")
+    })
+}
+
 pub(crate) fn schema_validator() -> &'static jsonschema::Validator {
     static VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
     VALIDATOR.get_or_init(|| {
-        let schema: Value = serde_json::from_str(include_str!(
-            "../../../schemas/packetcraftr.output.v1.schema.json"
-        ))
-        .expect("published output schema must be JSON");
-        jsonschema::validator_for(&schema).expect("published output schema must compile")
+        jsonschema::validator_for(output_schema()).expect("published output schema must compile")
     })
+}
+
+/// Arbitrary data for stream state and I/O failure tests.
+#[derive(serde::Serialize)]
+#[serde(transparent)]
+pub(crate) struct TestRecord<T>(pub(crate) T);
+
+impl<T: serde::Serialize> packetcraftr_cli::output::stream::StreamRecord for TestRecord<T> {
+    fn event_name(&self) -> &'static str {
+        "frame"
+    }
 }

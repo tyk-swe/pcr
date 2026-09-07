@@ -11,6 +11,13 @@ use crate::{policy, target};
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("{authorizer} does not authorize {operation} operations")]
+    UnsupportedOperation {
+        authorizer: &'static str,
+        operation: &'static str,
+    },
+    #[error("traffic policy cannot authorize packet routing semantics: {0}")]
+    Wire(#[source] packetcraftr_core::decode::Error),
     #[error(transparent)]
     Target(#[from] target::Error),
     /// Route planning or materialization failed, including active neighbor
@@ -73,6 +80,12 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::UnsupportedOperation { .. } => Classification::new(
+                "internal.unsupported_operation",
+                Kind::Internal,
+                Some("route this operation through the authorizer built for its workflow"),
+            ),
+            Self::Wire(_) => policy::INVALID_PACKET_SEMANTICS,
             Self::Target(error) => error.classification(),
             Self::Plan(error) => error.classification(),
             Self::Build(_) => Classification::new(
@@ -140,7 +153,9 @@ impl Classified for Error {
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
             Self::ExchangeOutput { source } => source.context(),
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
-            Self::Build(_)
+            Self::Wire(error) => error.context(),
+            Self::UnsupportedOperation { .. }
+            | Self::Build(_)
             | Self::PermissiveLiveOptInRequired
             | Self::InvalidExchangeEvents { .. }
             | Self::HeterogeneousExchangeRoute

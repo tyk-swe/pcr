@@ -3,7 +3,6 @@
 //! Exit code 4 and the fail-closed native stubs: the commands that need a
 //! native capability report `capability.*` and exit 4 when the capability is
 //! compiled out, and enumerate the loopback interface when it is compiled in.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 mod support;
 

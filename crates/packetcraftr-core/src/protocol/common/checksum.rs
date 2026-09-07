@@ -37,10 +37,7 @@ impl ChecksumAccumulator {
     /// Bytes are folded in 64-bit chunks: RFC 1071 permits summing 16-bit words in wider
     /// registers because carry propagation matches ones'-complement addition modulo 2^16 - 1,
     /// and the `u128` sum has room for every chunk a slice can contribute.
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute"
-    )]
+    // the u128 accumulator has room for far more than the 2^64 word additions a slice could contribute
     pub fn add(&mut self, bytes: &[u8]) {
         let mut bytes = bytes;
         if let Some(high) = self.pending_high_byte {
@@ -52,37 +49,19 @@ impl ChecksumAccumulator {
             self.pending_high_byte = None;
         }
 
-        let mut chunks8 = bytes.chunks_exact(8);
-        for chunk in &mut chunks8 {
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "chunks_exact(8) yields slices of length exactly 8"
-            )]
-            let arr = [
-                chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
-            ];
-            self.sum += u128::from(u64::from_be_bytes(arr));
+        let (chunks8, remainder) = bytes.as_chunks::<8>();
+        for chunk in chunks8 {
+            self.sum += u128::from(u64::from_be_bytes(*chunk));
         }
-
-        let remainder = chunks8.remainder();
-        let mut chunks2 = remainder.chunks_exact(2);
-        for chunk in &mut chunks2 {
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "chunks_exact(2) yields slices of length exactly 2"
-            )]
-            let arr = [chunk[0], chunk[1]];
-            self.sum += u128::from(u16::from_be_bytes(arr));
+        let (chunks2, remainder) = remainder.as_chunks::<2>();
+        for chunk in chunks2 {
+            self.sum += u128::from(u16::from_be_bytes(*chunk));
         }
-
-        self.pending_high_byte = chunks2.remainder().first().copied();
+        self.pending_high_byte = remainder.first().copied();
     }
 
     /// Finalizes and returns the 16-bit Internet Checksum.
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "the pending byte contributes at most 0xff00, which the u128 accumulator still has room for"
-    )]
+    // the pending byte contributes at most 0xff00, which the u128 accumulator still has room for
     pub fn finish(self) -> u16 {
         let sum = self.sum
             + self
@@ -92,14 +71,8 @@ impl ChecksumAccumulator {
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "the loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
-)]
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "each addend is a masked or shifted half of sum, so every fold step stays below u128::MAX"
-)]
+// the loop only exits once sum >> 16 is zero, so sum is at most 0xffff
+// each addend is a masked or shifted half of sum, so every fold step stays below u128::MAX
 fn fold_checksum(mut sum: u128) -> u16 {
     sum = (sum & 0xffff_ffff_ffff_ffff) + (sum >> 64);
     sum = (sum & 0xffff_ffff) + (sum >> 32);
@@ -166,7 +139,6 @@ pub(crate) fn network_from_addresses(source: IpAddr, destination: IpAddr) -> Net
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::{checksum, checksum_parts};
 
     #[test]

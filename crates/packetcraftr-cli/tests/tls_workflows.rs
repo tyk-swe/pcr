@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for the `tls` command and the `--tls-port` remap shared by the
 //! offline dissection and analysis commands.
@@ -84,9 +81,9 @@ fn the_published_capture_assembles_one_complete_session_in_every_format() {
     let records = parse_ndjson(&run_success(&["--output", "ndjson", "tls", path]));
     assert_contiguous(&records);
     assert_eq!(records.len(), 2);
-    assert_eq!(records[0]["result"]["event"], "session");
+    assert_eq!(records[0]["event"], "session");
     assert_eq!(records[0]["result"]["client"]["sni"], "api.example.test");
-    assert_eq!(records[1]["result"]["event"], "complete");
+    assert_eq!(records[1]["event"], "complete");
     assert_eq!(records[1]["result"]["sessions"], 1);
 }
 
@@ -101,13 +98,13 @@ fn fragmented_tls_ndjson_orders_ip_completion_before_session_and_terminal() {
     ]));
     assert_contiguous(&records);
     assert_eq!(records.len(), 4);
-    assert_eq!(records[0]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[0]["event"], "ip_datagram_completed");
     assert_eq!(records[0]["result"]["frame"], 2);
-    assert_eq!(records[1]["result"]["event"], "ip_datagram_completed");
+    assert_eq!(records[1]["event"], "ip_datagram_completed");
     assert_eq!(records[1]["result"]["frame"], 4);
-    assert_eq!(records[2]["result"]["event"], "session");
+    assert_eq!(records[2]["event"], "session");
     assert_eq!(records[2]["result"]["status"], "complete");
-    assert_eq!(records[3]["result"]["event"], "complete");
+    assert_eq!(records[3]["event"], "complete");
     assert_eq!(records[3]["result"]["sessions"], 1);
     assert_eq!(
         records[3]["result"]["ip_reassembly"]["families"][0]["completed_datagrams"],
@@ -116,7 +113,7 @@ fn fragmented_tls_ndjson_orders_ip_completion_before_session_and_terminal() {
     assert_eq!(
         records
             .iter()
-            .filter(|record| record["result"]["event"] == "complete")
+            .filter(|record| record["event"] == "complete")
             .count(),
         1,
         "TLS emits one terminal record"
@@ -568,7 +565,7 @@ fn limit_failures_are_reported_before_any_capture_is_read() {
         "{rendered}"
     );
     assert!(
-        rendered.contains(&packetcraftr::core::analysis::tls::MAX_DIRECTION_BUFFER.to_string()),
+        rendered.contains(&packetcraftr_core::analysis::tls::MAX_DIRECTION_BUFFER.to_string()),
         "{rendered}"
     );
     assert!(

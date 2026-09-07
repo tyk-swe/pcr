@@ -18,7 +18,7 @@ use packetcraftr_core::{Packet, layer::Raw};
 use crate::probe::nonzero_ipv4_identification;
 
 use super::DEFAULT_SERVER_PORT;
-use super::model::Probe;
+use super::Probe;
 
 pub(super) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
@@ -73,14 +73,9 @@ pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
 /// in this crate treats it as one.
 #[must_use]
 pub fn unpredictable_transaction_id() -> u16 {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the transaction ID is the low 16 bits of the mixed entropy; every bit of the \
-                  64-bit value is equally unpredictable, so the narrowing loses no unpredictability"
-    )]
-    {
-        entropy() as u16
-    }
+    // the transaction ID is the low 16 bits of the mixed entropy; every bit of the 64-bit value is
+    // equally unpredictable, so the narrowing loses no unpredictability
+    entropy() as u16
 }
 
 /// An unpredictable ephemeral source port for a new query, inside the IANA

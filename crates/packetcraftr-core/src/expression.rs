@@ -469,7 +469,6 @@ fn strip_hex_prefix(input: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

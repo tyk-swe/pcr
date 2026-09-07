@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "response",
     "request_index": 0,
     "response": {
       "frame": {
@@ -26,7 +25,12 @@
             "fields": {
               "bytes": {
                 "type": "bytes",
-                "value": [222, 173, 190, 239]
+                "value": [
+                  222,
+                  173,
+                  190,
+                  239
+                ]
               }
             }
           }
@@ -60,5 +64,6 @@
       "nanos": 4000000
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "response"
 }

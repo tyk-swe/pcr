@@ -185,6 +185,7 @@ pub struct IncompleteDatagram {
     pub reason: IncompleteReason,
     pub fragment_count: usize,
     pub unique_bytes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub known_final_length: Option<usize>,
     pub duplicate_fragments: usize,
     pub overlap_bytes: usize,
@@ -275,4 +276,44 @@ pub enum Error {
     /// it is classified as an internal failure.
     #[error("IP reassembly state is inconsistent: {reason}")]
     Inconsistent { reason: &'static str },
+}
+
+impl std::fmt::Display for Family {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Ipv4 => "ipv4",
+            Self::Ipv6 => "ipv6",
+        })
+    }
+}
+impl std::fmt::Display for IncompleteReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::IdleExpired => "idle-expired",
+            Self::EndOfCapture => "end-of-capture",
+        })
+    }
+}
+impl std::fmt::Display for DatagramKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ipv4(key) => write!(
+                f,
+                "ipv4 scope {} {} -> {} identification {} protocol {}",
+                key.scope.get(),
+                key.source,
+                key.destination,
+                key.identification,
+                key.protocol
+            ),
+            Self::Ipv6(key) => write!(
+                f,
+                "ipv6 scope {} {} -> {} identification {}",
+                key.scope.get(),
+                key.source,
+                key.destination,
+                key.identification
+            ),
+        }
+    }
 }

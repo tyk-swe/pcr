@@ -399,7 +399,6 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
     use crate::Packet;

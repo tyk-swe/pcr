@@ -1,11 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 
-use packetcraftr::output;
+use packetcraftr_cli::output;
 
-use crate::cli::{ColorChoice, Format};
+use crate::cli::ColorChoice;
+use packetcraftr_cli::output::contract::Format;
 
 /// The formats that can carry a structured error document. A clap failure is
 /// reported in one of these or, for everything else, as prose on stderr.
@@ -27,81 +28,48 @@ pub(super) fn from_env() -> Context {
     parse(&arguments)
 }
 
-/// Reads the global options the way clap will read them: the last `--output`
-/// and `--color` win, and the first bare word is the subcommand.
-///
-/// A value clap would reject leaves the earlier choice standing, so the
-/// rejection is rendered in the format asked for so far. Any format clap
-/// accepts wins, and one that cannot carry a structured document clears the
-/// choice so the rejection goes out as prose.
+/// Selects error rendering from global output/color options and the first
+/// root positional. This scan never interprets command-specific options or
+/// decides argument validity; Clap remains the argument parser.
 fn parse(arguments: &[OsString]) -> Context {
     let mut context = Context::default();
     let mut saw_root_positional = false;
-    let mut index = 1;
-
-    while let Some(argument) = arguments.get(index) {
-        if argument.as_os_str() == "--" {
+    let mut arguments = arguments.iter().skip(1).peekable();
+    while let Some(raw) = arguments.next() {
+        if raw == "--" {
             break;
         }
-
-        if argument.as_os_str() == "--output" {
-            let value = separate_option_value(arguments, index);
-            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_machine_format) {
-                context.format = parsed;
+        let argument = raw.to_str();
+        let (name, inline) = argument.map_or(("", None), |argument| {
+            argument
+                .split_once('=')
+                .map_or((argument, None), |(name, value)| (name, Some(value)))
+        });
+        if matches!(name, "--output" | "--color") {
+            let value = inline.or_else(|| {
+                arguments
+                    .next_if(|value| {
+                        value
+                            .to_str()
+                            .is_none_or(|value| !value.starts_with('-') || value == "-")
+                    })
+                    .and_then(|value| value.to_str())
+            });
+            if name == "--output" {
+                if let Some(format) = value.and_then(parse_machine_format) {
+                    context.format = format;
+                }
+            } else if let Some(color) = value.and_then(parse_color_choice) {
+                context.color = color;
             }
-            index = index
-                .saturating_add(usize::from(value.is_some()))
-                .saturating_add(1);
-            continue;
-        }
-        if argument.as_os_str() == "--color" {
-            let value = separate_option_value(arguments, index);
-            if let Some(parsed) = value.and_then(OsStr::to_str).and_then(parse_color_choice) {
-                context.color = parsed;
-            }
-            index = index
-                .saturating_add(usize::from(value.is_some()))
-                .saturating_add(1);
-            continue;
-        }
-
-        let argument = argument.to_str();
-        if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--output=")) {
-            if let Some(parsed) = parse_machine_format(value) {
-                context.format = parsed;
-            }
-            index = index.saturating_add(1);
-            continue;
-        }
-        if let Some(value) = argument.and_then(|argument| argument.strip_prefix("--color=")) {
-            if let Some(parsed) = parse_color_choice(value) {
-                context.color = parsed;
-            }
-            index = index.saturating_add(1);
-            continue;
-        }
-
-        let is_option =
-            argument.is_some_and(|argument| argument.starts_with('-') && argument != "-");
-        if !saw_root_positional && !is_option {
+        } else if !saw_root_positional
+            && argument.is_none_or(|argument| !argument.starts_with('-') || argument == "-")
+        {
             saw_root_positional = true;
             context.command = argument.and_then(parse_command);
         }
-        index = index.saturating_add(1);
     }
-
     context
-}
-
-fn separate_option_value(arguments: &[OsString], option_index: usize) -> Option<&OsStr> {
-    arguments
-        .get(option_index.saturating_add(1))
-        .map(OsString::as_os_str)
-        .filter(|value| {
-            !value
-                .to_str()
-                .is_some_and(|value| value.starts_with('-') && value != "-")
-        })
 }
 
 /// `None` for a value clap would reject, so the earlier choice stands;

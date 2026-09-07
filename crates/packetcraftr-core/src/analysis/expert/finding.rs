@@ -80,20 +80,22 @@ fn diagnostic_streams(
 ) -> DiagnosticStreams {
     DiagnosticStreams {
         tcp: record
-            .tcp_stream
-            .filter(|_| std::ptr::eq(record.tcp_decoded, decoded))
-            .zip(transports.tcp.as_ref())
-            .map(|(stream, transport)| IndexedTransport {
-                layer: transport.index,
-                stream: tcp_stream_ref(stream),
+            .tcp
+            .filter(|view| std::ptr::eq(view.decoded, decoded))
+            .and_then(|view| {
+                view.conversation.map(|stream| IndexedTransport {
+                    layer: view.layer,
+                    stream: tcp_stream_ref(stream.index),
+                })
             }),
         udp: record
-            .udp_stream
-            .filter(|_| std::ptr::eq(record.udp_decoded, decoded))
-            .zip(transports.udp.as_ref())
-            .map(|(stream, transport)| IndexedTransport {
-                layer: transport.index,
-                stream: udp_stream_ref(stream),
+            .udp
+            .filter(|view| std::ptr::eq(view.decoded, decoded))
+            .and_then(|view| {
+                view.conversation.map(|stream| IndexedTransport {
+                    layer: view.layer,
+                    stream: udp_stream_ref(stream.index),
+                })
             }),
         outermost: transports.outermost,
     }

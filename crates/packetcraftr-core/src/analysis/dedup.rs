@@ -19,9 +19,11 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey as FlowKey;
 /// as the endpoint that sent the first frame this capture holds for the
 /// conversation — which for a capture that includes the handshake is the
 /// endpoint that sent the SYN.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Direction {
+    #[serde(rename = "client")]
     ClientToServer,
+    #[serde(rename = "server")]
     ServerToClient,
 }
 

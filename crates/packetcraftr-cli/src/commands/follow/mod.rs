@@ -1,14 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::analysis;
+use packetcraftr_core::analysis;
 
 use self::arguments::{Args, Direction};
 use super::offline_analysis::{parse_stream_selector, prepare};

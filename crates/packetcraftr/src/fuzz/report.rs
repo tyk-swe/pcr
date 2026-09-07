@@ -1,0 +1,115 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::time::Duration;
+
+use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
+use packetcraftr_netio::capture::Statistics as CaptureStatistics;
+use serde::Serialize;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaseOutcome {
+    Built,
+    Rejected,
+    Response,
+    Timeout,
+}
+
+impl CaseOutcome {
+    /// The serialized name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Rejected => "rejected",
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Case {
+    pub prepared: packet_fuzz::Case,
+    pub outcome: CaseOutcome,
+    pub sent: Option<Frame>,
+    pub responses: Vec<Frame>,
+    pub unmatched: Vec<Frame>,
+    pub undecoded: Vec<Frame>,
+}
+
+impl From<packet_fuzz::CaseOutcome> for CaseOutcome {
+    /// An offline case has been generated and either built or rejected; the
+    /// live outcomes are reached only after transmission.
+    fn from(value: packet_fuzz::CaseOutcome) -> Self {
+        match value {
+            packet_fuzz::CaseOutcome::Built => Self::Built,
+            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
+        }
+    }
+}
+
+impl From<packet_fuzz::Case> for Case {
+    fn from(prepared: packet_fuzz::Case) -> Self {
+        let outcome = prepared.outcome.into();
+        Self {
+            prepared,
+            outcome,
+            sent: None,
+            responses: Vec::new(),
+            unmatched: Vec::new(),
+            undecoded: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Stats {
+    pub cases_generated: u64,
+    pub cases_built: u64,
+    pub packets_attempted: u64,
+    pub packets_completed: u64,
+    pub bytes: u64,
+    pub elapsed: Duration,
+    pub capture: CaptureStatistics,
+}
+
+/// One completed live campaign. Diagnostics are carried by the case they were
+/// raised during, in [`Case::prepared`]'s `diagnostics`, so the campaign does
+/// not repeat them.
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub seed: u64,
+    pub first_case: u64,
+    pub cases: Vec<Case>,
+    pub stats: Stats,
+}
+
+/// Final live campaign metadata after every case event was published.
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub seed: u64,
+    pub first_case: u64,
+    pub stats: Stats,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::test_fixtures::assert_names_match_serialization;
+
+    #[test]
+    fn names_match_the_serialized_names() {
+        assert_names_match_serialization(
+            [
+                CaseOutcome::Built,
+                CaseOutcome::Rejected,
+                CaseOutcome::Response,
+                CaseOutcome::Timeout,
+            ],
+            |value| value.as_str(),
+        );
+    }
+}

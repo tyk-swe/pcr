@@ -16,15 +16,19 @@ use packetcraftr_core::registry::Registry;
 
 use crate::BoundaryError;
 use crate::Stats;
-use crate::authorization::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::clock::Clock;
 use crate::evidence::{Budget, DiagnosticLog};
+use crate::policy::Authorizer;
+use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::probe::Executor;
 use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
 };
 use crate::probe::runner::sink_observer;
-use crate::target::{Authorizer, Family, Target, approve_operation, resolve_selected};
+use crate::target::Family;
+use crate::target::Target;
+use crate::target::approve_operation;
+use crate::target::resolve_selected;
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{
@@ -33,13 +37,13 @@ use super::classification::{
 };
 use super::error::Error;
 use super::evidence::validate_dns_execution;
-use super::model::{
+use super::plan::{OperationBudget, operation_budget};
+use super::probe::rotated_source_port;
+use super::{
     AttemptEvidence, Event, EventContext, Exchange, Execution, Limits, Outcome, Probe, Record,
     Report, Request, Section, Summary, TcpExchange, TcpExecutor, Transport, UndecodedEvidence,
     ValidatedResponse,
 };
-use super::plan::{OperationBudget, operation_budget};
-use super::probe::rotated_source_port;
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
 /// resolution, and resolved-answer authorization before each UDP probe. A
@@ -69,15 +73,15 @@ where
             Ok(())
         },
     )?;
-    Ok(collector.finish(summary))
+    collector.finish(summary)
 }
 
 /// Executes one approved DNS retry sequence and publishes attempts, accepted
 /// and rejected records, and retained undecoded evidence as they become final.
-/// The callback runs on a process-budgeted worker. `max_duration` bounds
+/// The callback runs on a runtime-budgeted worker. `max_duration` bounds
 /// publisher waiting and live I/O, not arbitrary callback execution. Callback
 /// failure prevents later retries; a callback may finish after this function
-/// returns and holds one process-wide worker permit until then.
+/// returns and holds one runtime worker permit until then.
 pub fn run_with_events<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -177,7 +181,7 @@ pub(super) struct Collector {
     answers: Vec<Record>,
     authorities: Vec<Record>,
     additionals: Vec<Record>,
-    rejected: Vec<super::model::RejectedRecord>,
+    rejected: Vec<super::RejectedRecord>,
     undecoded: Vec<UndecodedEvidence>,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
 }
@@ -199,30 +203,26 @@ impl Collector {
         }
     }
 
-    pub(super) fn finish(self, summary: Summary) -> Report {
-        let response = summary.response.map(|response| ValidatedResponse {
-            metadata: response,
-            answers: self.answers,
-            authorities: self.authorities,
-            additionals: self.additionals,
-            rejected_records: self.rejected,
-        });
-        Report {
-            server: summary.server,
-            server_port: summary.server_port,
-            resolved_addresses: summary.resolved_addresses,
-            query_name: summary.query_name,
-            query_type: summary.query_type,
-            transaction_id: summary.transaction_id,
-            outcome: summary.outcome,
-            fallback_attempted: summary.fallback_attempted,
-            accepted_transport: summary.accepted_transport,
+    pub(super) fn finish(self, summary: Summary) -> Result<Report, Error> {
+        let response = summary
+            .completion
+            .response
+            .clone()
+            .map(|metadata| ValidatedResponse {
+                metadata,
+                answers: self.answers,
+                authorities: self.authorities,
+                additionals: self.additionals,
+                rejected_records: self.rejected,
+            });
+        Report::new(
+            summary,
             response,
-            attempts: self.attempts,
-            undecoded: self.undecoded,
-            diagnostics: self.diagnostics,
-            stats: summary.stats,
-        }
+            self.attempts,
+            self.undecoded,
+            self.diagnostics,
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -261,7 +261,7 @@ fn prepare_operation<A: Authorizer>(
         AuthorizedOperation::Dns(DnsOperation::new(
             WireBudget::new(packet_count, maximum_wire_bytes),
             tcp,
-        )),
+        )?),
         &deadline,
         &Gates,
     )?;
@@ -277,10 +277,7 @@ fn prepare_operation<A: Authorizer>(
             query_name,
             query_type: request.query_type,
             transaction_id: request.transaction_id,
-            outcome: Outcome::Timeout,
-            fallback_attempted: false,
-            accepted_transport: None,
-            response: None,
+            completion: super::Completion::new(Outcome::Timeout, false, None, None)?,
             stats: Stats::default(),
         },
     })
@@ -340,6 +337,7 @@ where
             .ok_or(Error::StatisticsOverflow {
                 attempt: self.state.attempts_completed,
             })?;
+        self.summary.completion.validate()?;
         Ok(self.summary)
     }
 
@@ -423,8 +421,8 @@ where
     /// outcome. An accepted response is recorded by [`Self::accept_response`]
     /// and ends the operation, so it never competes here.
     fn record_failure_outcome(&mut self, candidate: Outcome) {
-        if candidate.retry_rank() > self.summary.outcome.retry_rank() {
-            self.summary.outcome = candidate;
+        if candidate.retry_rank() > self.summary.completion.outcome.retry_rank() {
+            self.summary.completion.outcome = candidate;
         }
     }
 
@@ -476,10 +474,7 @@ where
             .saturating_sub(1)
             .checked_rem(addresses.len())
             .unwrap_or(0);
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "address_index is a remainder modulo addresses.len(), which is non-empty"
-        )]
+        // address_index is a remainder modulo addresses.len(), which is non-empty
         let server_address = addresses[address_index];
         if self.request.tcp_fallback
             && let IpAddr::V6(address) = server_address
@@ -546,7 +541,7 @@ where
         probe: &Probe,
         attempt_deadline: &mut Deadline,
     ) -> Result<ClassifiedAttempt, Error> {
-        self.summary.fallback_attempted = true;
+        self.summary.completion.fallback_attempted = true;
         if !self.authorize_tcp_destination(probe, attempt_deadline)? {
             return Ok(tcp_timeout_evidence(
                 probe,
@@ -731,12 +726,12 @@ where
             additionals,
             rejected_records,
         } = response;
-        self.summary.outcome = if metadata.truncated {
+        self.summary.completion.outcome = if metadata.truncated {
             Outcome::Truncated
         } else {
             Outcome::Response
         };
-        self.summary.accepted_transport = Some(transport);
+        self.summary.completion.accepted_transport = Some(transport);
         for (section, records) in [
             (Section::Answer, answers),
             (Section::Authority, authorities),
@@ -754,7 +749,7 @@ where
                 record,
             })?;
         }
-        self.summary.response = Some(metadata);
+        self.summary.completion.response = Some(metadata);
         Ok(())
     }
 

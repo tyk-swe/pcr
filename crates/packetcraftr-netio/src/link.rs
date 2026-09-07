@@ -3,13 +3,17 @@
 
 //! Link-layer addressing, VLAN tags, and transmission capabilities.
 
+use std::fmt;
+
 /// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Capability {
     Layer2,
     Layer3,
+    #[serde(rename = "layer2_and3")]
     Layer2AndLayer3,
 }
 
@@ -26,7 +30,8 @@ impl Capability {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Mode {
     #[default]
     Auto,
@@ -35,3 +40,41 @@ pub enum Mode {
 }
 
 pub use packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag};
+
+impl Capability {
+    /// The serialized spelling, so a text renderer and the JSON document never
+    /// name the same capability two ways.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Layer2 => "layer2",
+            Self::Layer3 => "layer3",
+            Self::Layer2AndLayer3 => "layer2_and3",
+        }
+    }
+}
+
+impl fmt::Display for Capability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl Mode {
+    /// The serialized spelling, so a text renderer and the JSON document never
+    /// name the same mode two ways.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Layer2 => "layer2",
+            Self::Layer3 => "layer3",
+        }
+    }
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}

@@ -1,16 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::io::{self, Write};
 
-use packetcraftr::{
-    analysis::pcap::{
-        self as capture, Interface, Limits, PcapNgOptions, PcapOptions, TimestampResolution, Writer,
-    },
-    netio as net, output,
-};
+use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::analysis::pcap::Interface;
+use packetcraftr_core::analysis::pcap::Limits;
+use packetcraftr_core::analysis::pcap::PcapNgOptions;
+use packetcraftr_core::analysis::pcap::PcapOptions;
+use packetcraftr_core::analysis::pcap::TimestampResolution;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 use packetcraftr::policy::CaptureBudget;
 
@@ -67,7 +71,7 @@ pub(super) fn render_stream<C: net::capture::Session>(
         Ok(stream.emit_data(event, Vec::new())?)
     })?;
     Ok(stream.complete_with_stats(
-        output::capture::Event::Complete,
+        output::capture::Event::Complete {},
         outcome.diagnostics,
         outcome.stats,
     )?)
@@ -160,15 +164,14 @@ fn pcapng_max_size(snap_length: usize) -> Result<usize, CliError> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+    use packetcraftr_core as core;
 
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, UNIX_EPOCH};
 
-    use packetcraftr::core;
-    use packetcraftr::core::frame::{Frame, LinkType};
+    use packetcraftr_core::frame::{Frame, LinkType};
     use serde_json::Value;
 
     use super::*;
@@ -253,7 +256,7 @@ mod tests {
         for record in records {
             crate::test_support::schema_validator()
                 .validate(record)
-                .expect("capture stream record must validate");
+                .unwrap_or_else(|error| panic!("capture stream record must validate: {error}"));
         }
     }
 
@@ -261,8 +264,8 @@ mod tests {
     fn capture_files_use_negotiated_session_metadata_at_the_snapshot_limit() {
         use std::io::Cursor;
 
-        use packetcraftr::analysis::pcap::Reader;
-        use packetcraftr::netio::capture::Session as _;
+        use packetcraftr_core::analysis::pcap::Reader;
+        use packetcraftr_netio::capture::Session as _;
 
         let mut capture = FakeSession::with_frames(0);
         capture.metadata.link_type = LinkType::LINUX_SLL2;
@@ -315,7 +318,7 @@ mod tests {
         assert_eq!(records.len(), 3);
         assert_eq!(records[0]["result"]["source_frame"], 1);
         assert_eq!(records[1]["result"]["source_frame"], 2);
-        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["event"], "complete");
         assert_eq!(records[2]["stats"]["packets_attempted"], 2);
         assert_eq!(records[2]["stats"]["packets_completed"], 2);
         assert_eq!(records[2]["stats"]["bytes"], 2);
@@ -351,7 +354,7 @@ mod tests {
         assert_eq!(records[0]["sequence"], 0);
         assert_eq!(records[0]["result"]["source_frame"], 3);
         assert_eq!(records[1]["sequence"], 1);
-        assert_eq!(records[1]["result"]["event"], "complete");
+        assert_eq!(records[1]["event"], "complete");
         assert_eq!(records[1]["stats"]["packets_attempted"], 3);
         assert_eq!(records[1]["stats"]["packets_completed"], 1);
         assert_eq!(records[1]["stats"]["bytes"], 3);
@@ -416,7 +419,7 @@ mod tests {
         assert_contiguous(&records);
         assert_eq!(records.len(), 2);
         assert_eq!(records[0]["result"]["source_frame"], 1);
-        assert_eq!(records[1]["result"]["event"], "complete");
+        assert_eq!(records[1]["event"], "complete");
         assert_eq!(records[1]["stats"]["packets_attempted"], 1);
         assert_eq!(records[1]["stats"]["packets_completed"], 1);
         assert_matches_published_schema(&records);
@@ -493,11 +496,7 @@ mod tests {
                 .as_str()
                 .is_some_and(|message| message.contains("cleanup failure"))
         );
-        assert!(
-            records
-                .iter()
-                .all(|record| record["result"]["event"] != "complete")
-        );
+        assert!(records.iter().all(|record| record["event"] != "complete"));
         assert_matches_published_schema(&records);
     }
 }

@@ -4,9 +4,9 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::analysis;
+use packetcraftr_core::analysis;
 
 use self::arguments::{Args, Severity};
 use super::offline_analysis::prepare_with_tls_ports;

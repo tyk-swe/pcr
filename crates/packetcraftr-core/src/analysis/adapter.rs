@@ -643,7 +643,6 @@ pub(crate) fn replayed_ip_prefix_layers(decoded: &DecodedPacket) -> usize {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     fn pppoe_path(

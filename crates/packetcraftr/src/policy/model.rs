@@ -69,6 +69,12 @@ pub enum Error {
     TrafficByteLimit { actual: u64, limit: u64 },
 }
 
+pub(crate) const INVALID_PACKET_SEMANTICS: Classification = Classification::new(
+    "policy.invalid_packet_semantics",
+    Kind::Policy,
+    Some("repair malformed or unsupported route-bearing packet fields before live transmission"),
+);
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         let (code, remediation) = match self {
@@ -82,10 +88,7 @@ impl Classified for Error {
                 "policy.public_destination",
                 "explicitly authorize public destinations only for networks you are permitted to test",
             ),
-            Self::InvalidPacketSemantics { .. } => (
-                "policy.invalid_packet_semantics",
-                "repair malformed or unsupported route-bearing packet fields before live transmission",
-            ),
+            Self::InvalidPacketSemantics { .. } => return INVALID_PACKET_SEMANTICS,
             Self::HostnameResolution { .. } => (
                 "policy.hostname_resolution",
                 "explicitly authorize hostname resolution, then independently authorize every resolved address",

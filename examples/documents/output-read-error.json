@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "read",
   "mode": "stream",
   "sequence": 0,
@@ -11,5 +11,6 @@
     "causes": [],
     "remediation": "use finite non-zero capture frame, byte, packet, and interface limits"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "error"
 }

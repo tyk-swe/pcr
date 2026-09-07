@@ -14,23 +14,26 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::clock::Clock;
+use crate::policy::Authorizer;
 use crate::probe::evidence::{
     EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::{Authorizer, approve_operation, budgeted, resolve_selected};
+use crate::target::approve_operation;
+use crate::target::budgeted;
+use crate::target::resolve_selected;
 use crate::{BoundaryError, SentPacket};
 
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
 use super::classification::classify_response;
-use super::model::{
+use super::plan::{build_batches, worst_case_duration};
+use super::probe::sent_probe_matches;
+use super::{
     Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
     Report, Request, ResponseKind, Strategy, Summary, UndecodedEvidence,
 };
-use super::plan::{build_batches, worst_case_duration};
-use super::probe::sent_probe_matches;
 use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
@@ -65,7 +68,7 @@ where
 
 /// Executes one approved trace and publishes each final probe outcome and
 /// retained undecoded frame before starting a later hop. The callback runs on
-/// a process-budgeted worker. `max_duration` bounds publisher waiting and live
+/// a runtime-budgeted worker. `max_duration` bounds publisher waiting and deadline-aware live
 /// I/O, not arbitrary callback execution. Confirmed sends in the current hop
 /// are not undone, callback failure prevents later hops, and a callback may
 /// finish after this function returns while holding its permit.
@@ -370,10 +373,7 @@ where
         enforce_deadline(WORKFLOW, deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
         let terminal = self.process_probes(batch, &sent, &mut response_selector, deadline)?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "every hop batch is built with at least one probe per hop limit"
-        )]
+        // every hop batch is built with at least one probe per hop limit
         let hop_limit = batch.probes[0].hop_limit;
         self.retain_undecoded(batch_undecoded, hop_limit, deadline)?;
         Ok(terminal)

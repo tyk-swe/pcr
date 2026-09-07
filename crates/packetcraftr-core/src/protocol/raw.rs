@@ -56,10 +56,7 @@ pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
     Ok(Bytes::from(bytes))
 }
 
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "each arm bounds value to its own ASCII range, so the subtraction and the plus ten stay inside u8"
-)]
+// each arm bounds value to its own ASCII range, so the subtraction and the plus ten stay inside u8
 fn hex_nibble(value: u8) -> Option<u8> {
     match value {
         b'0'..=b'9' => Some(value - b'0'),

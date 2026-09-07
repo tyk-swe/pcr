@@ -107,8 +107,8 @@ Attestations signed with Sigstore:
 gh attestation verify packetcraftr-vVERSION-TARGET-VARIANT.EXT --owner tyk-swe
 ```
 
-To build from source, install the toolchain in `rust-toolchain.toml`; the MSRV
-is `rust-version` in `Cargo.toml`. All-feature Linux builds also need libpcap
+To build from source, install the toolchain in `rust-toolchain.toml`; the same supported version
+is declared in `Cargo.toml`. All-feature Linux builds also need libpcap
 development files such as `libpcap-dev`.
 
 ```console
@@ -117,32 +117,33 @@ cargo build --locked --release -p packetcraftr-cli
 ```
 
 Use `--no-default-features` for offline-only builds,
-`--no-default-features --features native-route,native-layer3` for pcap-free
-native support, or `--all-features` for every native provider. Run
-`./scripts/check-features.sh` to validate the complete supported matrix.
-
-The optional `packetcraftr-core/decrypt` feature enables the RustCrypto
-AES-GCM, ChaCha20-Poly1305, and HKDF dependencies for offline cryptographic
-analysis. It is disabled by default; decryption workflows are not yet exposed.
+`--no-default-features --features native-layer3` for pcap-free
+native support, or `--all-features` for every native provider. See
+[Contributing](CONTRIBUTING.md) for the ordinary Cargo development loop.
 
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
-- Structured command output: [`packetcraftr.output/v1`](schemas/packetcraftr.output.v1.schema.json)
+- Structured command output: [`packetcraftr.output/v2`](schemas/packetcraftr.output.v2.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
 nested output records. Shared records follow this rule in NDJSON too. Envelope
-fields, enum vocabularies, and embedded packet documents remain strict. See
-[the evolution policy](schemas/EVOLUTION.md) for compatibility and runtime
-protocol schema decisions.
+fields, enum vocabularies, and embedded packet documents remain strict. Changed machine contracts receive a new schema version; packet documents
+and command output are versioned independently.
 
 Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`; invalid
-combinations fail explicitly. Streaming NDJSON ends with one completion record
-or one typed error.
+combinations fail explicitly. Every output-v2 NDJSON envelope has an `event`
+discriminator, including `frame`, `finding`, `chunk`, `session`, `complete`,
+and `error`. The payload is in `result` or `error`; consumers never need to
+infer a record kind from payload fields. `sequence` starts at zero and advances
+for each record. Successful operations end with exactly one `complete`; failed
+operations emit one terminal `error` when the output is still writable. A broken
+output is reported as incomplete on stderr and cannot guarantee a terminal line.
+The packet-document contract remains v1; the old output-v1 contract is retired.
 
 Exit codes are part of the contract: 0 on success, 2 for an invalid invocation
 or input (`cli`), 3 for a packet that cannot be built or dissected (`packet`),
@@ -168,9 +169,24 @@ Existing conversations with no payload still succeed with zero extracted bytes.
 
 ## Library
 
-Rust users normally depend on the `packetcraftr` facade. It re-exports packet
-mechanics as `core`, offline capture tools as `analysis`, and providers/native
-I/O as `netio`. The core and offline-analysis path has no live-I/O dependency.
+Depend on the crate that owns the capability you need:
+
+| Crate | Ownership and entry points |
+|---|---|
+| `packetcraftr-core` | `Packet`, protocol codecs/reflection, bounded documents, capture files, filters, and `analysis::run` |
+| `packetcraftr-netio` | Interface/route providers, capture/transmit resources, and platform backends |
+| `packetcraftr` | `Client` preparation/send/exchange, `policy`, and DNS/replay/scan/traceroute/fuzz workflows |
+| `packetcraftr-cli` | Arguments and rendering; its `output` module owns machine representations and the stream encoder |
+
+Core is portable and independent of native I/O. A workflow uses one policy
+implementation for operation admission and final-wire checks; resolver and
+replay adapters add their specific boundaries. The CLI shares the same policy
+instance with its authorizer and executor. `dns::Completion` and `dns::Report`
+validate accepted transport and retained evidence at construction.
+
+Offline analysis exposes a physical `FrameRecord` with optional `TcpView` and
+`UdpView` observations. Each observation carries its decoded source and scoped
+conversation together. Derived datagrams do not add physical frames or bytes.
 
 ```console
 cargo doc --locked --all-features --no-deps --open
@@ -183,6 +199,12 @@ permissive-packet and source-spoofing controls, route/interface and MTU checks,
 finite packet/byte/time budgets, and native OS permission requirements. Only
 applicable commands expose each control; read that command's `--help` instead
 of copying flags between workflows.
+
+Time budgets are checked at workflow boundaries and passed to native I/O where
+its interface accepts a deadline. Event publication bounds the caller's wait.
+Synchronous provider, reader, and resolver calls use their own I/O timeouts;
+workflow checks cannot interrupt them or arbitrary injected callbacks. Timed-out
+workers retain their permits and resources until cleanup finishes.
 
 | Platform | Requirements and notable limits |
 | --- | --- |

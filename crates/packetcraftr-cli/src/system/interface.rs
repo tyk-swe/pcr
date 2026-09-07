@@ -4,7 +4,8 @@
 use std::fmt;
 use std::num::NonZeroU32;
 
-use packetcraftr::{core::error::Kind, netio as net};
+use packetcraftr_core::error::Kind;
+use packetcraftr_netio as net;
 
 use crate::errors::CliError;
 
@@ -112,7 +113,7 @@ pub(crate) fn resolve<I: net::interface::Provider>(
 mod tests {
     use std::num::NonZeroU32;
 
-    use packetcraftr::netio as net;
+    use packetcraftr_netio as net;
 
     use super::InterfaceSelector;
 

@@ -1,11 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::io::{self, Write};
 
-use packetcraftr::{core, output};
+use packetcraftr_core as core;
+
+use packetcraftr_cli::output;
 use serde::Serialize;
 
 use crate::errors::CliError;
@@ -44,7 +46,7 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+    stats: packetcraftr::Stats,
 ) -> Result<(), CliError> {
     emit_json(&output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats))
 }

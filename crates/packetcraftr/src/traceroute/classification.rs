@@ -9,7 +9,7 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, registry::Registry};
 
 use crate::probe::{self, Correlation};
 
-use super::model::{ResponseKind, Strategy};
+use super::{ResponseKind, Strategy};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseClassification {

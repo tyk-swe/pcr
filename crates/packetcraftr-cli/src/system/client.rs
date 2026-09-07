@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{Client as WorkflowClient, core, netio as net};
+use packetcraftr::Client as WorkflowClient;
+use packetcraftr_core as core;
+use packetcraftr_netio as net;
 
 type SystemSender =
     net::transmit::ModeSender<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
@@ -19,7 +21,7 @@ pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<
 
 pub(crate) fn client(
     registry: Arc<core::registry::Registry>,
-    policy: packetcraftr::policy::Policy,
+    policy: impl Into<Arc<packetcraftr::policy::Policy>>,
 ) -> Client {
     WorkflowClient::new(
         registry,

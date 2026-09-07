@@ -27,10 +27,7 @@ pub(super) fn prefix(
     tags: &[VlanTag],
     payload_type: u16,
 ) -> Vec<u8> {
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "tags is capped at MAX_VLAN_TAGS, so the capacity is a small constant sum"
-    )]
+    // tags is capped at MAX_VLAN_TAGS, so the capacity is a small constant sum
     let capacity = HEADER_LENGTH + tags.len() * VLAN_HEADER_LENGTH + super::arp::PAYLOAD_LENGTH;
     let mut frame = Vec::with_capacity(capacity);
     frame.extend_from_slice(&destination.0);
@@ -46,10 +43,7 @@ pub(super) fn prefix(
             | (if tag.drop_eligible { 1 << 12 } else { 0 })
             | tag.vlan_id;
         frame.extend_from_slice(&tci.to_be_bytes());
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "index is below tags.len() from the enumerate, so index + 1 cannot overflow"
-        )]
+        // index is below tags.len() from the enumerate, so index + 1 cannot overflow
         let next = tags
             .get(index + 1)
             .map_or(payload_type, |next| next.kind.ether_type());

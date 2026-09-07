@@ -53,7 +53,7 @@ fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
 /// The tokens are [`Severity::as_str`][severity] spellings, the same three the
 /// JSON documents carry, so text and machine output name a severity one way.
 ///
-/// [severity]: packetcraftr::core::diagnostic::Severity::as_str
+/// [severity]: packetcraftr_core::diagnostic::Severity::as_str
 pub(crate) fn style_human_line(value: &str) -> String {
     if let Some((prefix, rest)) = split_leading_token(value) {
         let style = match prefix {
@@ -186,9 +186,9 @@ mod tests {
     #[test]
     fn severity_colour_follows_the_serialized_spellings_alone() {
         for severity in [
-            packetcraftr::core::diagnostic::Severity::Info,
-            packetcraftr::core::diagnostic::Severity::Warning,
-            packetcraftr::core::diagnostic::Severity::Error,
+            packetcraftr_core::diagnostic::Severity::Info,
+            packetcraftr_core::diagnostic::Severity::Warning,
+            packetcraftr_core::diagnostic::Severity::Error,
         ] {
             let line = format!("{} some.code: message", severity.as_str());
             assert_ne!(style_human_line(&line), line, "{severity} must be styled");

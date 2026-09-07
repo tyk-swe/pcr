@@ -5,26 +5,22 @@
 
 use std::{
     future::Future,
-    sync::Arc,
     sync::mpsc::{self, SyncSender},
-    thread::{self, JoinHandle},
+    thread,
     time::Duration,
 };
 
-use rtnetlink::{Handle, new_connection};
-
-use crate::platform::os_error;
 use crate::{
-    platform::worker_reaper::{
-        JoinAttempt, ReaperClient, ReaperPermit, TransferOutcome, join_with_deadline,
-        shared_reaper, wait_until_finished,
+    platform::{
+        os_error,
+        workers::{JoinAttempt, join_with_deadline, shared_budget},
     },
     route::SystemError,
 };
+use rtnetlink::{Handle, new_connection};
 
 const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
-const NETLINK_REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
 where
@@ -32,107 +28,74 @@ where
     Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
-    let reaper = shared_reaper().map_err(|error| SystemError::OperatingSystem {
-        operation: "initialize native worker cleanup",
-        message: "the shared native worker cleanup service is unavailable".to_owned(),
-        source: Some(Arc::new(error)),
-    })?;
-    let permit = reaper
+    let permit = shared_budget()
         .reserve()
         .map_err(|error| SystemError::OperatingSystem {
-            operation: "reserve native worker cleanup",
-            message: format!(
-                "shared native worker cleanup capacity {} is exhausted",
-                error.capacity
-            ),
+            operation: "reserve native worker",
+            message: format!("native worker capacity {} is exhausted", error.capacity),
             source: None,
         })?;
-    let (setup, setup_receiver) = mpsc::sync_channel(1);
-    let (response, response_receiver) = mpsc::sync_channel(1);
+    let (setup, initialized) = mpsc::sync_channel(1);
+    let (response, finished) = mpsc::sync_channel(1);
+    // The new thread inherits the caller's network namespace. It owns the
+    // runtime and socket; response publication follows their destruction.
+    // A caller timeout releases its wait, while the worker retains its permit.
     let worker = thread::Builder::new()
         .name("packetcraftr-netlink".to_owned())
-        .spawn(move || netlink_worker(operation, setup, response))
+        .spawn(move || {
+            let _permit = permit;
+            let result = netlink_worker(operation, setup);
+            let _ = response.send(result);
+        })
         .map_err(|error| os_error("spawn netlink worker", error))?;
-
-    match setup_receiver.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => return finish_failed_start(worker, permit, &reaper, error),
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            return finish_failed_start(
-                worker,
-                permit,
-                &reaper,
-                netlink_channel_error("setup response channel closed"),
-            );
-        }
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            let _ = transfer_netlink_worker(worker, permit, &reaper);
-            return Err(netlink_timeout("initialize netlink"));
-        }
+    match initialized.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
+        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        Err(mpsc::RecvTimeoutError::Timeout) => return Err(netlink_timeout("initialize netlink")),
     }
-
-    let result = match response_receiver.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
+    let result = match finished.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
         Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            join_netlink_worker(worker, permit, &reaper, NETLINK_RESPONSE_TIMEOUT)?;
-            return Err(netlink_channel_error("response channel closed"));
-        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(netlink_worker_panicked()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            let _ = transfer_netlink_worker(worker, permit, &reaper);
             return Err(netlink_timeout("wait for netlink response"));
         }
     };
-    join_netlink_worker(worker, permit, &reaper, NETLINK_RESPONSE_TIMEOUT)?;
-    result
+    match join_with_deadline(worker, NETLINK_RESPONSE_TIMEOUT, Duration::from_millis(10)) {
+        JoinAttempt::Finished(Ok(())) => result,
+        JoinAttempt::Finished(Err(_)) => Err(netlink_worker_panicked()),
+        JoinAttempt::TimedOut(worker) => {
+            // The worker, including its permit, still owns its resources.
+            drop(worker);
+            Err(netlink_timeout("shut down netlink worker"))
+        }
+    }
 }
 
-fn finish_failed_start<T>(
-    worker: JoinHandle<()>,
-    permit: ReaperPermit,
-    reaper: &ReaperClient,
-    error: SystemError,
-) -> Result<T, SystemError> {
-    join_netlink_worker(worker, permit, reaper, NETLINK_RESPONSE_TIMEOUT)?;
-    Err(error)
-}
-
-fn netlink_worker<F, Fut, T>(
-    operation: F,
-    setup: SyncSender<Result<(), SystemError>>,
-    response: SyncSender<Result<T, SystemError>>,
-) where
+fn netlink_worker<F, Fut, T>(operation: F, setup: SyncSender<()>) -> Result<T, SystemError>
+where
     F: FnOnce(Handle) -> Fut,
     Fut: Future<Output = Result<T, SystemError>>,
 {
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
         .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let _ = setup.send(Err(os_error("create Tokio netlink runtime", error)));
-            return;
-        }
-    };
-    let (connection, handle, _) = match runtime.block_on(async { new_connection() }) {
-        Ok(parts) => parts,
-        Err(error) => {
-            let _ = setup.send(Err(os_error("open route netlink socket", error)));
-            return;
-        }
-    };
+        .map_err(|error| os_error("create Tokio netlink runtime", error))?;
+    let (connection, handle, _) = runtime
+        .block_on(async { new_connection() })
+        .map_err(|error| os_error("open route netlink socket", error))?;
     let connection = runtime.spawn(connection);
-    if setup.send(Ok(())).is_err() {
+    if setup.send(()).is_err() {
         connection.abort();
-        return;
+        return Err(netlink_channel_error(
+            "caller stopped waiting during initialization",
+        ));
     }
     let result = runtime.block_on(await_netlink_operation(
         operation(handle),
         NETLINK_OPERATION_TIMEOUT,
     ));
     connection.abort();
-    let _ = response.send(result);
+    result
 }
 
 async fn await_netlink_operation<F, T>(operation: F, timeout: Duration) -> Result<T, SystemError>
@@ -142,35 +105,6 @@ where
     tokio::time::timeout(timeout, operation)
         .await
         .map_err(|_| netlink_timeout("execute netlink operation"))?
-}
-
-fn join_netlink_worker(
-    worker: JoinHandle<()>,
-    permit: ReaperPermit,
-    reaper: &ReaperClient,
-    timeout: Duration,
-) -> Result<(), SystemError> {
-    match join_with_deadline(worker, timeout, NETLINK_REAPER_POLL_INTERVAL) {
-        JoinAttempt::TimedOut(worker) => {
-            let _ = transfer_netlink_worker(worker, permit, reaper);
-            Err(netlink_timeout("shut down netlink worker"))
-        }
-        JoinAttempt::Finished(result) => {
-            drop(permit);
-            result.map_err(|_| netlink_worker_panicked())
-        }
-    }
-}
-
-fn transfer_netlink_worker(
-    worker: JoinHandle<()>,
-    permit: ReaperPermit,
-    reaper: &ReaperClient,
-) -> TransferOutcome {
-    reaper.transfer(Box::new(move || {
-        let _permit = permit;
-        wait_until_finished(worker, NETLINK_REAPER_POLL_INTERVAL, || {});
-    }))
 }
 
 fn netlink_worker_panicked() -> SystemError {
@@ -195,24 +129,17 @@ fn netlink_timeout(operation: &'static str) -> SystemError {
 
 #[cfg(test)]
 mod tests {
-    use std::future;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
     use super::*;
-    use crate::platform::worker_reaper::test_support::client_with_receiver;
 
     #[test]
-    fn operation_and_join_waits_are_bounded() {
+    fn a_pending_query_is_cancelled_at_its_operation_deadline() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
             .unwrap();
         assert!(matches!(
             runtime.block_on(await_netlink_operation(
-                future::pending::<Result<(), SystemError>>(),
+                std::future::pending::<Result<(), SystemError>>(),
                 Duration::ZERO,
             )),
             Err(SystemError::OperatingSystem {
@@ -220,27 +147,5 @@ mod tests {
                 ..
             })
         ));
-
-        let release = Arc::new(AtomicBool::new(false));
-        let worker_release = Arc::clone(&release);
-        let worker = thread::spawn(move || {
-            while !worker_release.load(Ordering::Acquire) {
-                thread::park_timeout(Duration::from_millis(1));
-            }
-        });
-        let (reaper, receiver) = client_with_receiver(1, 1);
-        let permit = reaper.reserve().expect("test reaper reservation");
-        assert!(matches!(
-            join_netlink_worker(worker, permit, &reaper, Duration::ZERO),
-            Err(SystemError::OperatingSystem {
-                operation: "shut down netlink worker",
-                ..
-            })
-        ));
-        release.store(true, Ordering::Release);
-        let task = receiver
-            .recv_timeout(Duration::from_secs(1))
-            .expect("timed-out worker transferred to the reaper");
-        task();
     }
 }

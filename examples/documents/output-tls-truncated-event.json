@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "tls",
   "mode": "stream",
   "sequence": 2,
   "status": "success",
   "result": {
-    "event": "session",
     "session": 2,
     "tcp_stream": 2,
     "client_endpoint": {
@@ -60,5 +59,6 @@
     "status": "truncated",
     "reason": "the capture ended while the handshake was still in flight"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "session"
 }

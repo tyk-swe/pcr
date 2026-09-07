@@ -12,13 +12,13 @@ use std::{
         mpsc::{self, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// The maximum number of native workers that may concurrently hold a cleanup
 /// reservation. The channel and cleanup pool have the same capacity, so every
 /// reserved worker can be transferred and reaped independently.
-const REAPER_CAPACITY: usize = 16;
+use super::workers::{Exhausted, PermitPool, WorkerPermit, shared_budget};
 
 static SHARED_REAPER: OnceLock<Result<ReaperService, ReaperStartError>> = OnceLock::new();
 
@@ -53,20 +53,6 @@ impl fmt::Display for ReaperStartError {
 /// formatting it into a message.
 impl std::error::Error for ReaperStartError {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct ReaperExhausted {
-    pub capacity: usize,
-}
-
-pub(super) struct ReaperPermit {
-    pool: Arc<PermitPool>,
-}
-
-struct PermitPool {
-    capacity: usize,
-    available: Mutex<usize>,
-}
-
 pub(super) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,35 +60,6 @@ pub(super) enum TransferOutcome {
     Queued,
     RetainedQueueFull,
     RetainedReaperStopped,
-}
-
-/// Outcome of waiting for a worker thread within a deadline.
-pub(super) enum JoinAttempt {
-    Finished(thread::Result<()>),
-    /// The deadline expired first, so the still-running worker is handed back
-    /// to its owner rather than detached.
-    TimedOut(JoinHandle<()>),
-}
-
-/// Waits for `worker` to finish, polling every `poll_interval`, and hands the
-/// handle back if `timeout` expires first.
-pub(super) fn join_with_deadline(
-    worker: JoinHandle<()>,
-    timeout: Duration,
-    poll_interval: Duration,
-) -> JoinAttempt {
-    let Some(deadline) = Instant::now().checked_add(timeout) else {
-        return JoinAttempt::TimedOut(worker);
-    };
-    while !worker.is_finished() {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return JoinAttempt::TimedOut(worker);
-        };
-        thread::park_timeout(remaining.min(poll_interval));
-    }
-    // `is_finished` is monotonic: once true, joining cannot block on a worker
-    // that is still running.
-    JoinAttempt::Finished(worker.join())
 }
 
 /// Blocks until `worker` finishes, calling `on_poll` before every wait so a
@@ -120,21 +77,8 @@ pub(super) fn wait_until_finished(
 }
 
 impl ReaperClient {
-    pub(super) fn reserve(&self) -> Result<ReaperPermit, ReaperExhausted> {
-        let mut available = self
-            .permits
-            .available
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(next) = available.checked_sub(1) else {
-            return Err(ReaperExhausted {
-                capacity: self.permits.capacity,
-            });
-        };
-        *available = next;
-        Ok(ReaperPermit {
-            pool: Arc::clone(&self.permits),
-        })
+    pub(super) fn reserve(&self) -> Result<WorkerPermit, Exhausted> {
+        self.permits.reserve()
     }
 
     /// Transfers `task` without blocking. If the bounded service cannot accept
@@ -166,39 +110,21 @@ impl ReaperClient {
     }
 }
 
-impl Drop for ReaperPermit {
-    fn drop(&mut self) {
-        let mut available = self
-            .pool
-            .available
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(next) = available.checked_add(1)
-            && next <= self.pool.capacity
-        {
-            *available = next;
-        }
-    }
-}
-
 pub(super) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
     SHARED_REAPER
-        .get_or_init(|| start_reaper(REAPER_CAPACITY, spawn_reaper_thread))
+        .get_or_init(|| start_reaper(shared_budget(), spawn_reaper_thread))
         .as_ref()
         .map(|service| service.client.clone())
         .map_err(Clone::clone)
 }
 
 fn start_reaper(
-    capacity: usize,
+    permits: Arc<PermitPool>,
     mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
+    let capacity = permits.capacity;
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
-    let permits = Arc::new(PermitPool {
-        capacity,
-        available: Mutex::new(capacity),
-    });
     let retained_tasks = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::with_capacity(capacity);
     for _ in 0..capacity {
@@ -260,10 +186,7 @@ pub(super) mod test_support {
         (
             ReaperClient {
                 tasks,
-                permits: Arc::new(PermitPool {
-                    capacity: permit_capacity,
-                    available: Mutex::new(permit_capacity),
-                }),
+                permits: Arc::new(PermitPool::new(permit_capacity)),
                 retained_tasks: Arc::new(AtomicUsize::new(0)),
             },
             receiver,
@@ -274,7 +197,7 @@ pub(super) mod test_support {
         capacity: usize,
         spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
     ) -> Result<ReaperClient, ReaperStartError> {
-        start_reaper(capacity, spawn).map(|service| service.client)
+        start_reaper(Arc::new(PermitPool::new(capacity)), spawn).map(|service| service.client)
     }
 
     pub(in crate::platform) fn retained_tasks(client: &ReaperClient) -> usize {
@@ -282,7 +205,7 @@ pub(super) mod test_support {
     }
 
     pub(super) const fn production_capacity() -> usize {
-        REAPER_CAPACITY
+        crate::platform::workers::CAPACITY
     }
 }
 
@@ -327,13 +250,10 @@ mod tests {
 
     #[test]
     fn reservations_bound_all_cleanup_liabilities() {
-        assert_eq!(production_capacity(), REAPER_CAPACITY);
+        assert_eq!(production_capacity(), crate::platform::workers::CAPACITY);
         let (client, _receiver) = client_with_receiver(1, 1);
         let permit = client.reserve().expect("one reservation");
-        assert_eq!(
-            client.reserve().map(|_| ()),
-            Err(ReaperExhausted { capacity: 1 })
-        );
+        assert_eq!(client.reserve().map(|_| ()), Err(Exhausted { capacity: 1 }));
         drop(permit);
         assert!(client.reserve().is_ok());
     }

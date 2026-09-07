@@ -293,10 +293,7 @@ fn wire_u8_field(layer: &dyn Layer, field: &'static str, automatic: u8) -> Resul
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value)
             .map_err(|_| Error::field(layer.protocol_id(), field, "is outside the u8 range")),
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the arm guard checks value.len() == 1"
-        )]
+        // the arm guard checks value.len() == 1
         Some(FieldValue::Bytes(value)) if value.len() == 1 => Ok(value[0]),
         Some(FieldValue::Text(value)) if value.eq_ignore_ascii_case("auto") => Ok(automatic),
         Some(_) => Err(Error::field(

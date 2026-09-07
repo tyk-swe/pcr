@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -21,10 +18,10 @@ use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
 use super::evidence::add_execution_stats;
-use crate::authorization::{Authorizer, Operation};
+use crate::policy::{Authorizer, Operation};
 
-use super::model::{LiveLimits, LiveOptions, Stats};
 use super::{Execution, ExecutionCase, Executor, RunInput, run, run_with_events};
+use super::{LiveLimits, LiveOptions, Stats};
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
@@ -640,7 +637,7 @@ fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmissio
         (&strict_policy, true, "policy.permissive_packet"),
         (&strict_policy, false, "policy.permissive_live_opt_in"),
     ] {
-        let mut authorizer = crate::authorization::PolicyAuthorizer::for_packets(policy);
+        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(policy);
         let mut executor = CountingExecutor::default();
 
         let error = run(
@@ -677,7 +674,7 @@ fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmissio
         build: permissive_build,
         ..packet_fuzz::Request::default()
     };
-    let mut authorizer = crate::authorization::PolicyAuthorizer::for_packets(&permissive_policy);
+    let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&permissive_policy);
     let mut executor = CountingExecutor::default();
     let report = run(
         RunInput {

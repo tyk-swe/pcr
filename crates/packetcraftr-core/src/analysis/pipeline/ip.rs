@@ -19,7 +19,7 @@ use crate::decode::DecodedPacket;
 /// Counters for one IP family. Sub-counters describe admitted fragments and
 /// are intentionally independent: a completing fragment may also resolve an
 /// overlap.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct IpFamilyCounters {
     pub physical_fragments: u64,
     pub atomic_fragments: u64,
@@ -53,7 +53,8 @@ impl IpCounters {
 }
 
 /// Bounded terminal evidence for one completed or incomplete datagram.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum IpDatagramOutcome {
     Completed {
         key: DatagramKey,

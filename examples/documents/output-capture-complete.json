@@ -1,12 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
   "status": "success",
   "sequence": 1,
-  "result": {
-    "event": "complete"
-  },
+  "result": {},
   "diagnostics": [],
   "stats": {
     "packets_attempted": 100,
@@ -23,5 +21,6 @@
       "dropped_bytes": 0,
       "overflow_events": 0
     }
-  }
+  },
+  "event": "complete"
 }

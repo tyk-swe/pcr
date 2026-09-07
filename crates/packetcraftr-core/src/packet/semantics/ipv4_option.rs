@@ -54,11 +54,7 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
                     if length < 3 || !length.saturating_sub(3).is_multiple_of(4) {
                         return Err(Error::Ipv4SourceRouteLength { option, length });
                     }
-                    #[expect(
-                        clippy::indexing_slicing,
-                        clippy::arithmetic_side_effects,
-                        reason = "cursor + 2 < end <= options.len() because length >= 3"
-                    )]
+                    // cursor + 2 < end <= options.len() because length >= 3
                     let pointer = usize::from(options[cursor + 2]);
                     if pointer < 4
                         || pointer > length.saturating_add(1)
@@ -66,25 +62,13 @@ pub(super) fn parse_ipv4_source_routes(options: &[u8]) -> Result<ParsedIpv4Sourc
                     {
                         return Err(Error::Ipv4SourceRoutePointer { option, pointer });
                     }
-                    #[expect(
-                        clippy::indexing_slicing,
-                        clippy::arithmetic_side_effects,
-                        reason = "cursor + 3 <= end <= options.len() because length >= 3, and chunks_exact(4) yields slices of length exactly 4"
-                    )]
-                    for address in options[cursor + 3..end].chunks_exact(4) {
-                        routes.declared.push(Ipv4Addr::new(
-                            address[0], address[1], address[2], address[3],
-                        ));
+                    // The validated option length covers whole IPv4 addresses.
+                    for address in options[cursor + 3..end].as_chunks::<4>().0 {
+                        routes.declared.push(Ipv4Addr::from(*address));
                     }
-                    #[expect(
-                        clippy::indexing_slicing,
-                        clippy::arithmetic_side_effects,
-                        reason = "4 <= pointer <= length + 1 puts cursor + pointer - 1 in cursor + 3..=end, and chunks_exact(4) yields slices of length exactly 4"
-                    )]
-                    for address in options[cursor + pointer - 1..end].chunks_exact(4) {
-                        routes.remaining.push(Ipv4Addr::new(
-                            address[0], address[1], address[2], address[3],
-                        ));
+                    // The validated pointer selects an address boundary within the option.
+                    for address in options[cursor + pointer - 1..end].as_chunks::<4>().0 {
+                        routes.remaining.push(Ipv4Addr::from(*address));
                     }
                 }
                 cursor = end;

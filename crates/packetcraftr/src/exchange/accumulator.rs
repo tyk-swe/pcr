@@ -175,11 +175,8 @@ impl Accumulator {
             return false;
         }
         self.mark_record_retained(identity);
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "the early return above keeps `retained_unmatched` below \
-                      `max_unmatched_frames`, so the increment cannot overflow"
-        )]
+        // the early return above keeps `retained_unmatched` below `max_unmatched_frames`, so the
+        // increment cannot overflow
         {
             self.retained_unmatched += 1;
         }

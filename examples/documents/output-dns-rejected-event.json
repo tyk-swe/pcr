@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "stream",
   "sequence": 3,
   "status": "success",
   "result": {
-    "event": "rejected",
     "attempt": 1,
     "transport": "tcp",
     "server": "resolver.lab",
@@ -20,5 +19,6 @@
       "reason": "additional record is not IN-class address glue referenced by accepted data"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "rejected"
 }

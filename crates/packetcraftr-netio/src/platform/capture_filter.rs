@@ -15,14 +15,8 @@ pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Erro
     Ok(())
 }
 
-#[expect(
-    clippy::indexing_slicing,
-    reason = "indices stay below bytes.len() and every str slice boundary is an ASCII byte"
-)]
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "offset and end only advance by one within bytes.len(), which cannot overflow usize"
-)]
+// indices stay below bytes.len() and every str slice boundary is an ASCII byte
+// offset and end only advance by one within bytes.len(), which cannot overflow usize
 fn has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;
@@ -166,7 +160,6 @@ fn is_bpf_keyword(atom: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

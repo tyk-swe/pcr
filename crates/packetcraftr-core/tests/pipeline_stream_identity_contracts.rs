@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for frame indices and stream identity across interfaces and
 //! tunnels.
@@ -165,7 +162,17 @@ fn pipeline_assigns_stable_indices_before_filtering() {
         },
         |record| {
             assert!(record.tcp_events.is_empty());
-            seen.push((record.number, record.tcp_stream, record.udp_stream));
+            seen.push((
+                record.number,
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+            ));
             Ok(())
         },
     )
@@ -205,7 +212,13 @@ fn identical_tcp_tuples_on_distinct_pcapng_interfaces_get_distinct_streams() {
     let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("PCAPNG capture opens");
     let mut seen = Vec::new();
     run(&mut capture, registry, &Options::default(), |record| {
-        seen.push((record.decoded.frame.interface, record.tcp_stream));
+        seen.push((
+            record.decoded.frame.interface,
+            record
+                .tcp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
+        ));
         Ok(())
     })
     .expect("scoped interface analysis succeeds");
@@ -232,7 +245,12 @@ fn vxlan_vni_scopes_inner_streams_and_preserves_reverse_direction_identity() {
     let mut capture = reader(&frames);
     let mut streams = Vec::new();
     run(&mut capture, registry, &Options::default(), |record| {
-        streams.push(record.tcp_stream);
+        streams.push(
+            record
+                .tcp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
+        );
         Ok(())
     })
     .expect("VXLAN analysis succeeds");
@@ -251,7 +269,12 @@ fn gre_keys_scope_identical_inner_tcp_tuples() {
     let mut capture = reader(&frames);
     let mut streams = Vec::new();
     run(&mut capture, registry, &Options::default(), |record| {
-        streams.push(record.tcp_stream);
+        streams.push(
+            record
+                .tcp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
+        );
         Ok(())
     })
     .expect("GRE analysis succeeds");

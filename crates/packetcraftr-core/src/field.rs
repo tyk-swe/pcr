@@ -52,6 +52,22 @@ pub enum FieldKind {
     List,
 }
 
+impl FieldKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Bool => "bool",
+            Self::Unsigned => "unsigned",
+            Self::Signed => "signed",
+            Self::Text => "text",
+            Self::Bytes => "bytes",
+            Self::Ipv4 => "ipv4",
+            Self::Ipv6 => "ipv6",
+            Self::Mac => "mac",
+            Self::List => "list",
+        }
+    }
+}
+
 /// A dynamically inspectable or editable layer-field value.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]

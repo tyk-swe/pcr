@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dns::model::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
 use crate::dns::{CLASS_IN, TYPE_OPT};
+use crate::dns::{Name, QueryType, Record, RecordValue, RejectedRecord, Section};
 
 pub(super) struct RelevantRecords {
     pub(super) answers: Vec<Record>,
@@ -262,7 +262,6 @@ fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use super::*;
 
     #[test]

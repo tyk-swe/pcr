@@ -9,7 +9,7 @@ use super::Error;
 use super::link::{Capability, MacAddress};
 
 /// Stable operating-system interface identity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Id {
     pub name: String,
     pub index: u32,
@@ -23,7 +23,7 @@ pub struct Address {
 }
 
 /// Portable interface state exposed by every platform adapter.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Flags {
     pub up: bool,
     pub broadcast: bool,

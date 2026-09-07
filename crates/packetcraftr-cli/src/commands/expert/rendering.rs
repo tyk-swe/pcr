@@ -1,11 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::collections::BTreeMap;
 
-use packetcraftr::{analysis, output};
+use packetcraftr_core::analysis;
+
+use packetcraftr_cli::output;
 
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
@@ -35,16 +37,13 @@ impl State {
         }
     }
 
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "u64 severity counters cannot reach u64::MAX from a bounded finding count"
-    )]
+    // u64 severity counters cannot reach u64::MAX from a bounded finding count
     pub(super) fn count(&mut self, finding: &analysis::expert::Finding) {
         self.findings += 1;
         match finding.severity {
-            packetcraftr::core::diagnostic::Severity::Error => self.errors += 1,
-            packetcraftr::core::diagnostic::Severity::Warning => self.warnings += 1,
-            packetcraftr::core::diagnostic::Severity::Info => self.notes += 1,
+            packetcraftr_core::diagnostic::Severity::Error => self.errors += 1,
+            packetcraftr_core::diagnostic::Severity::Warning => self.warnings += 1,
+            packetcraftr_core::diagnostic::Severity::Info => self.notes += 1,
         }
         *self.codes.entry(finding.code.clone()).or_default() += 1;
     }

@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "follow",
   "mode": "stream",
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "ip_datagram_completed",
     "frame": 2,
     "outcome": {
       "status": "completed",
@@ -25,5 +24,6 @@
       "overlap_bytes": 0
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "ip_datagram_completed"
 }

@@ -128,11 +128,19 @@ impl Collector {
         }
 
         // Use pipeline-assigned stream IDs for stable conversation and port stats.
-        if let (Some(stream), Some(flow)) = (record.tcp_stream, record.tcp_flow) {
-            self.record_conversation(StreamTransport::Tcp, stream, flow, bytes, timestamp);
-        }
-        if let (Some(stream), Some(flow)) = (record.udp_stream, record.udp_flow) {
-            self.record_conversation(StreamTransport::Udp, stream, flow, bytes, timestamp);
+        for (transport, conversation) in [
+            (
+                StreamTransport::Tcp,
+                record.tcp.and_then(|view| view.conversation),
+            ),
+            (
+                StreamTransport::Udp,
+                record.udp.and_then(|view| view.conversation),
+            ),
+        ] {
+            if let Some(stream) = conversation {
+                self.record_conversation(transport, stream.index, stream.flow, bytes, timestamp);
+            }
         }
     }
 
@@ -149,10 +157,7 @@ impl Collector {
 
         // Bucket timestamps before the capture origin at zero.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "the divisor is forced to at least 1 by `max(1)`"
-        )]
+        // the divisor is forced to at least 1 by `max(1)`
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
         self.io
             .entry(u64::try_from(bucket).unwrap_or(u64::MAX))

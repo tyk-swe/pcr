@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr"
-description = "Policy-gated PacketcraftR workflows and versioned output models"
+description = "Policy-gated PacketcraftR workflows and evidence"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,8 +12,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["native-interfaces", "native-route"]
-native-interfaces = ["native-route", "packetcraftr-netio/native-interfaces"]
+default = ["native-route"]
 native-route = ["packetcraftr-netio/native-route"]
 native-layer2 = ["packetcraftr-netio/native-layer2"]
 native-layer3 = ["packetcraftr-netio/native-layer3"]
@@ -23,8 +22,8 @@ bytes.workspace = true
 packetcraftr-core.workspace = true
 packetcraftr-netio.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 jsonschema.workspace = true

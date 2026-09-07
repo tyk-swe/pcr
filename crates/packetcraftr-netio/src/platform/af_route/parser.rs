@@ -70,10 +70,7 @@ pub(super) fn parse_route_addresses(
             });
         }
         let padded_end = offset.checked_add(stride);
-        #[expect(
-            clippy::arithmetic_side_effects,
-            reason = "index comes from enumerate over output, whose length is RTAX_MAX"
-        )]
+        // index comes from enumerate over output, whose length is RTAX_MAX
         let has_later_address = ((index + 1)..address_slots).any(|later| mask & (1 << later) != 0);
         let next_offset = match padded_end {
             Some(end) if end <= bytes.len() => end,

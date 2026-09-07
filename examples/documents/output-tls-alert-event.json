@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "tls",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "session",
     "session": 1,
     "tcp_stream": 1,
     "client_endpoint": {
@@ -65,5 +64,6 @@
     ],
     "status": "alert"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "session"
 }

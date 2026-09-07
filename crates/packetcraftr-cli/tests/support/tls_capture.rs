@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Synthetic TLS handshake captures for the `tls` command's contracts.
 //!
@@ -15,19 +12,27 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr::analysis::pcap::{Format as CaptureFormat, Writer};
-use packetcraftr::core::field::WireValue;
-use packetcraftr::core::frame::{Frame, LinkType};
-use packetcraftr::core::protocol::application::tls::model::extension::{
-    ALPN, KEY_SHARE, SERVER_NAME, SIGNATURE_ALGORITHMS, SUPPORTED_GROUPS, SUPPORTED_VERSIONS,
-};
-use packetcraftr::core::protocol::application::tls::model::{
-    CONTENT_TYPE_HANDSHAKE, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
-};
-use packetcraftr::core::protocol::network::Ipv4;
-use packetcraftr::core::protocol::transport::{Tcp, Udp};
-use packetcraftr::core::registry::Registry;
-use packetcraftr::core::{self, Packet, layer::Raw};
+use packetcraftr_core as core;
+use packetcraftr_core::Packet;
+use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::field::WireValue;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::layer::Raw;
+use packetcraftr_core::protocol::application::tls::model::CONTENT_TYPE_HANDSHAKE;
+use packetcraftr_core::protocol::application::tls::model::HANDSHAKE_CLIENT_HELLO;
+use packetcraftr_core::protocol::application::tls::model::HANDSHAKE_SERVER_HELLO;
+use packetcraftr_core::protocol::application::tls::model::extension::ALPN;
+use packetcraftr_core::protocol::application::tls::model::extension::KEY_SHARE;
+use packetcraftr_core::protocol::application::tls::model::extension::SERVER_NAME;
+use packetcraftr_core::protocol::application::tls::model::extension::SIGNATURE_ALGORITHMS;
+use packetcraftr_core::protocol::application::tls::model::extension::SUPPORTED_GROUPS;
+use packetcraftr_core::protocol::application::tls::model::extension::SUPPORTED_VERSIONS;
+use packetcraftr_core::protocol::network::Ipv4;
+use packetcraftr_core::protocol::transport::Tcp;
+use packetcraftr_core::protocol::transport::Udp;
+use packetcraftr_core::registry::Registry;
 
 const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
@@ -196,7 +201,7 @@ pub(crate) fn client_hello_frame_hex(server_port: u16, sni: &str) -> String {
 }
 
 fn registry() -> Arc<Registry> {
-    packetcraftr::core::protocol::builtin::registry()
+    packetcraftr_core::protocol::builtin::registry()
 }
 
 /// A datagram on UDP port 443, which the collector counts but never assembles.

@@ -12,7 +12,7 @@ use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
 
-use crate::authorization::{
+use crate::policy::{
     Authorizer, Operation, PermissiveLiveDenial, WireAuthorizationError, authorize_wire,
     check_permissive_live, unsupported_operation,
 };
@@ -218,7 +218,7 @@ impl Authorizer for SystemAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         let budget = operation.budget();
         self.policy
-            .authorize_operation(budget.packets(), budget.wire_bytes())
+            .authorize(crate::policy::Operation::Budgeted(budget))
             .map_err(BoundaryError::from_error)?;
         match operation {
             Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
@@ -264,7 +264,7 @@ mod tests {
     use packetcraftr_netio::route::{Decision, Plan, Scope, SelectionReason};
 
     use super::*;
-    use crate::authorization::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
+    use crate::policy::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
 
     fn registry() -> Arc<Registry> {
         packetcraftr_core::protocol::builtin::registry()

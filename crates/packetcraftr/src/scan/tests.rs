@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -23,12 +20,13 @@ use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::model::{
+use super::probe::probe_packet;
+use super::{
     Batch, Classification, Event, Execution, Executor, Limits, PortSpec, ProbeStatus, Request,
     Transport, select_ports,
 };
-use super::probe::probe_packet;
-use crate::target::{PolicyAuthorizer, Target};
+use crate::policy::PolicyAuthorizer;
+use crate::target::Target;
 use crate::test_fixtures::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };

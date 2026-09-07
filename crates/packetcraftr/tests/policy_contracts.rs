@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
@@ -11,13 +8,13 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use packetcraftr::{
-    Client,
-    authorization::Authorizer,
-    core::error::Classified,
-    policy,
-    target::{Hostname, Resolver, Target},
-};
+use packetcraftr::Client;
+use packetcraftr::policy;
+use packetcraftr::policy::Authorizer;
+use packetcraftr::target::Hostname;
+use packetcraftr::target::Resolver;
+use packetcraftr::target::Target;
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::{
     Packet,
     layer::Raw,
@@ -323,9 +320,9 @@ fn both_authorization_seams_refuse_a_malformed_policy_identically() {
         max_resolved_addresses: 0,
         ..policy::Policy::default()
     };
-    let workflow_denial = packetcraftr::authorization::PolicyAuthorizer::for_packets(&malformed)
-        .authorize_operation(packetcraftr::authorization::Operation::Budgeted(
-            packetcraftr::authorization::WireBudget::new(1, 1),
+    let workflow_denial = packetcraftr::policy::PolicyAuthorizer::for_packets(&malformed)
+        .authorize_operation(packetcraftr::policy::Operation::Budgeted(
+            packetcraftr::policy::WireBudget::new(1, 1),
         ))
         .expect_err("the workflow seam rejects a malformed policy");
 

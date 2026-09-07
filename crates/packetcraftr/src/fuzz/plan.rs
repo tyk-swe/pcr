@@ -5,9 +5,9 @@
 
 use std::time::Duration;
 
+use super::LiveOptions;
 use super::MAX_DURATION;
 use super::error::Error;
-use super::model::LiveOptions;
 
 pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, Error> {
     let exchange = live

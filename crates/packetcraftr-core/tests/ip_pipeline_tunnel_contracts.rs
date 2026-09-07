@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for fragments inside tunnels: derived inner transports and
 //! nested and cascading completions.
@@ -304,8 +301,15 @@ fn derived_inner_transports_extend_scope_with_gre_identity() {
         if record.derived().is_some() {
             completed.push((
                 record.number,
-                record.udp_stream,
-                record.udp_flow.map(|flow| flow.scope),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.flow)
+                    .map(|flow| flow.scope),
             ));
         }
         Ok(())
@@ -355,7 +359,10 @@ fn derived_inner_fragments_reenter_reassembly_and_dispatch_udp() {
                 .expect("inner completion has a derived view");
             observed.push((
                 record.number,
-                record.udp_stream,
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
                 derived.fragment_count,
                 derived.payload_bytes,
             ));
@@ -400,7 +407,10 @@ fn nested_fragments_keep_the_parent_tunnel_scope() {
             observed.push((
                 record.number,
                 record.derived_datagrams().len(),
-                record.udp_stream,
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
             ));
             Ok(())
         })
@@ -440,10 +450,16 @@ fn cascading_completions_preserve_intermediate_layers_and_streams() {
             observed.push((
                 record.number,
                 record.derived_datagrams().len(),
-                record.udp_stream,
-                record.tcp_stream,
-                record.udp_decoded.packet.get::<Vxlan>().is_some(),
-                record.tcp_decoded.packet.get::<Tcp>().is_some(),
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record
+                    .tcp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record.udp.unwrap().decoded.packet.get::<Vxlan>().is_some(),
+                record.tcp.unwrap().decoded.packet.get::<Tcp>().is_some(),
             ));
             Ok(())
         },

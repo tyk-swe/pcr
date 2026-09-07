@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "tls",
   "mode": "stream",
   "sequence": 1,
   "status": "success",
   "result": {
-    "event": "complete",
     "frames_read": 8,
     "frames_matched": 8,
     "sessions": 1,
@@ -63,5 +62,6 @@
       "outcomes_omitted": 0
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "complete"
 }

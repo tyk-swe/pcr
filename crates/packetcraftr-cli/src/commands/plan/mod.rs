@@ -3,11 +3,11 @@
 
 pub(super) mod arguments;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::sync::Arc;
 
-use packetcraftr::output;
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
 use super::registry;

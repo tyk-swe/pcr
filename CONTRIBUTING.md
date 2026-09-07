@@ -1,65 +1,56 @@
 # Contributing to PacketcraftR
 
-PacketcraftR welcomes focused fixes, features, and documentation changes.
-Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a
-public issue.
+Report vulnerabilities through [SECURITY.md](SECURITY.md). The compact
+[repository guide](AGENTS.md) describes ownership, invariants, and checks.
 
-[AGENTS.md](AGENTS.md) holds the repository layout, the check commands, the
-coding and lint rules (`unsafe`, `#[expect]`, indexing, and arithmetic), and
-the commit and pull request conventions. This file covers what it leaves out.
+## Development
 
-## Setup and checks
+Install Rust with rustup; the repository selects its supported stable toolchain
+and rustfmt/Clippy components. Linux full-native builds require `libpcap-dev`;
+macOS uses system libpcap; Windows Layer 2 operations load Npcap at runtime.
+Cargo uses the platform's default compiler and linker.
 
-Run the checks from AGENTS.md that cover your change, with locked
-dependencies. The project does not configure a compiler wrapper or linker, so
-Cargo and the Rust toolchain use their platform defaults.
+For an ordinary change, run `cargo test --locked -p <affected-crate>` and the
+relevant integration test or feature profile. Before integrating a broad
+change, run the three comprehensive commands in AGENTS.md. Cargo test includes
+doctests. There is no required test runner or command wrapper.
 
-The feature profiles differ: `no-default-features` keeps native providers
-disabled; the default enables interface enumeration and passive route lookup;
-`native-interfaces` directly encodes its dependency on `native-route`; `native-layer2`
-and `native-layer3` both imply `native-interfaces` and `native-route`.
-The `pcap-free` profile (`--no-default-features --features native-route,native-layer3`)
-supports routing and raw layer 3 without libpcap. All features enable every native provider.
-Use `./scripts/check-features.sh` to check the supported public feature matrix.
-The [CI workflow](.github/workflows/ci.yml) is the authoritative check set;
-Linux tests `no-default`, `default`, `pcap-free`, and all features. macOS and
-Windows test the default profile and compile all features. The quality job
-checks every supported feature profile; MSRV checks cover no-default and all
-features. Pre-1.0 API changes are documented in the changelog without a
-patch-only compatibility gate. Coverage reports run on manual dispatch;
-fuzzing runs daily or on manual dispatch.
+| Profile | Cargo arguments | Capability |
+|---|---|---|
+| Portable | `--no-default-features` | Offline processing; native providers report unavailable |
+| Default | none | Passive interface enumeration and route lookup |
+| Pcap-free | `--no-default-features --features native-layer3` | Default capabilities and raw Layer 3 I/O |
+| Full native | `--all-features` | All providers, including Layer 2 capture/injection |
 
-The fuzz harness is a standalone workspace. Bounded nightly smoke runs are
-registered in [fuzz.yml](.github/workflows/fuzz.yml). For example, format it
-and exercise the IP offset map, overlap policies, reconstruction metadata, and
-limits from the repository root:
+Features belong to netio; workflow and CLI features select those capabilities.
+CI tests full native and portable on Linux, tests passive providers on macOS
+and Windows, and compiles their full-native backends. The pcap-free binary is
+built independently and checked for absence of libpcap. Release checks cover
+packaging, checksums, and provenance separately.
 
-```console
+## Optional tools
+
+Use `cargo doc --locked --workspace --all-features --no-deps` for API docs,
+`cargo bench -p packetcraftr-core` for benchmarks, and
+`./scripts/measure-memory.sh` for Linux peak-RSS profiling. Coverage is a manual
+workflow. Dependency advisory/license checks run weekly and for dependency
+changes; `cargo deny check` is available locally when needed.
+
+Fuzzing has its own manifest and lockfile. Update both dependency graphs when
+changing shared dependencies. Bounded fuzz runs are scheduled and can also run
+locally with cargo-fuzz and nightly Rust, for example:
+
+```sh
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 cargo +nightly fuzz run ip_reassembly fuzz/corpora/ip_reassembly -- -max_total_time=30
 ```
 
-## Architecture
+## Changes and reviews
 
-Cargo manifests and `cargo metadata` are the source of truth for packages,
-features, and dependencies. Keep the graph acyclic. In particular, the core
-crate must remain independent of native I/O and live workflows so offline
-analysis cannot acquire a resolver, route, capture, or transmission seam.
-
-## Issues and pull requests
-
-Use the general issue form for portable or offline defects and the native form
-for interfaces, routes, capture, injection, raw sockets, or live workflows.
-Include the version, feature profile, platform, minimal reproduction, expected
-and actual results, and sanitized diagnostics. Never post production captures,
-credentials, public-target details, or exploit information.
-
-On top of the pull request rules in AGENTS.md:
-
-- keep mechanical refactoring separate from behavior changes;
-- record work you deliberately left out in the pull request description;
-- review the full diff yourself first, and get review from every affected
-  owner on a cross-boundary change; and
-- cover the relevant unavailable-backend, permission, stale-interface,
-  timeout, cancellation, partial-I/O, queue, accounting, and cleanup paths in
-  native networking changes.
+Include a minimal reproduction, platform, feature profile, and sanitized
+diagnostics in bug reports. Do not post production captures or credentials.
+Native changes should cover affected unavailable-backend, stale-interface,
+timeout, cancellation, partial-I/O, accounting, and cleanup behavior using
+fake providers or isolated loopback tests. Record unavailable platform checks
+as unavailable. Prefer one authoritative implementation over compatibility
+wrappers; version changed machine contracts and migrate their consumers.

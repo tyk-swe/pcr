@@ -1,14 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+#[cfg(test)]
+use crate::test_support::TestRecord;
+
+use packetcraftr_core::error::Kind;
 
 mod context;
 
 use std::process::ExitCode;
 
 use clap::Parser;
-use packetcraftr::output;
+use packetcraftr_cli::output;
 
 use self::context::{MachineFormat, from_env};
 use super::cli::Cli;
@@ -63,7 +66,7 @@ pub(crate) fn run() -> ExitCode {
         }
     };
     cli.color.write_global();
-    let format = output::contract::Format::from(cli.format);
+    let format = cli.format;
     let command = cli.command.kind();
     let stream = match if format == output::contract::Format::Ndjson {
         stdout_stream(command)
@@ -89,7 +92,7 @@ fn require_success_terminal(
     format: output::contract::Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    if format == output::contract::Format::Ndjson && !stream.is_terminal() {
+    if format == output::contract::Format::Ndjson && !stream.is_complete() {
         return Err(CliError::new(
             Kind::Internal,
             "NDJSON command returned without a terminal completion record",
@@ -108,7 +111,7 @@ fn command_failure(
     let error = if format == output::contract::Format::Ndjson && !open && !stream.is_terminal() {
         let causes = std::iter::once(error.message).chain(error.causes).collect();
         CliError::from_classification(
-            packetcraftr::core::error::Classification::new(
+            packetcraftr_core::error::Classification::new(
                 "io.stdout",
                 Kind::Io,
                 Some("treat the structured stream as incomplete"),
@@ -176,7 +179,7 @@ mod tests {
             BlockedWriter(entered, wait),
         );
         let callback = stream.clone();
-        let worker = std::thread::spawn(move || callback.emit_data((), Vec::new()));
+        let worker = std::thread::spawn(move || callback.emit_data(TestRecord(()), Vec::new()));
         writer_entered.recv_timeout(Duration::from_secs(1)).unwrap();
         let started = Instant::now();
         let status = command_failure(
@@ -204,5 +207,14 @@ mod tests {
             .unwrap();
         assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_ok());
         assert!(require_success_terminal(output::contract::Format::Json, &stream).is_ok());
+    }
+    #[test]
+    fn a_terminal_error_cannot_satisfy_successful_completion() {
+        let stream = StreamEncoder::new(output::contract::Command::Read, Vec::new());
+        stream
+            .emit_error(CliError::new(Kind::Io, "fixture failure").output_error())
+            .unwrap();
+        assert!(stream.is_terminal());
+        assert!(require_success_terminal(output::contract::Format::Ndjson, &stream).is_err());
     }
 }

@@ -24,18 +24,21 @@ const WORKFLOW: Workflow = Workflow::Scan;
 
 mod classification;
 mod engine;
+mod execution;
 mod executor;
-mod model;
 mod plan;
 mod probe;
+mod report;
+mod request;
 #[cfg(test)]
 mod tests;
 
 pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use model::{
-    Batch, Classification, ClassificationCounts, Endpoint, Event, Execution, Executor, Limits,
-    PortSpec, Probe, ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary,
-    Transport, select_ports,
+pub use execution::{Batch, Execution, Executor, Probe, ProbeEndpoint};
+pub use report::{
+    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, ProbeStatus, Report,
+    Summary,
 };
+pub use request::{Limits, PortSpec, Request, Transport, select_ports};

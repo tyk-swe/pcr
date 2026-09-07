@@ -36,10 +36,7 @@ pub(crate) fn payload_without_padding<'a>(
         .len()
         .checked_sub(trailing)
         .ok_or_else(|| invalid(name, "trailing padding exceeds encoded payload"))?;
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "covered comes from payload.len().checked_sub, so it is at most payload.len()"
-    )]
+    // covered comes from payload.len().checked_sub, so it is at most payload.len()
     let covered_payload = &payload[..covered];
     Ok(covered_payload)
 }

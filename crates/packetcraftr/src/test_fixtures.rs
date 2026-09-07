@@ -14,10 +14,15 @@ use packetcraftr_core::error::{Classification, Kind};
 use serde::Serialize;
 
 use crate::BoundaryError;
-use crate::authorization::Operation;
 use crate::clock::Clock;
+use crate::policy::Authorizer;
+use crate::policy::Operation;
 use crate::probe::{Executor, Request};
-use crate::target::{Authorized, Authorizer, Error as TargetError, Hostname, Resolver, Target};
+use crate::target::Authorized;
+use crate::target::Error as TargetError;
+use crate::target::Hostname;
+use crate::target::Resolver;
+use crate::target::Target;
 
 /// A clock that never actually waits.
 #[derive(Default)]

@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Fingerprint vectors for the TLS parser.
 //!
@@ -106,7 +103,9 @@ pub(crate) fn decode_hex(text: &str) -> Vec<u8> {
         "hex vectors have an even length"
     );
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let text = std::str::from_utf8(pair).expect("hex vectors are ASCII");
             u8::from_str_radix(text, 16).expect("hex vectors contain only hex digits")

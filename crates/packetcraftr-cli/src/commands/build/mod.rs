@@ -3,10 +3,13 @@
 
 pub(super) mod arguments;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::core::error::{Classification, Classified as _, Kind};
-use packetcraftr::{core, output};
+use packetcraftr_cli::output;
+use packetcraftr_core as core;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Classified as _;
+use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
 use super::registry;

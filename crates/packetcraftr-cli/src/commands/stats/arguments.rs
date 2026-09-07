@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::ValueEnum;
+use packetcraftr_cli::output::stats::Table;
 
 use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
 
@@ -18,29 +18,6 @@ Examples:
   packetcraftr stats capture.pcapng --table fragments
   packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
   packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(crate) enum Table {
-    Conversations,
-    Endpoints,
-    Protocols,
-    Ports,
-    Io,
-    Fragments,
-}
-
-impl From<Table> for packetcraftr::output::stats::Table {
-    fn from(value: Table) -> Self {
-        match value {
-            Table::Conversations => Self::Conversations,
-            Table::Endpoints => Self::Endpoints,
-            Table::Protocols => Self::Protocols,
-            Table::Ports => Self::Ports,
-            Table::Io => Self::Io,
-            Table::Fragments => Self::Fragments,
-        }
-    }
-}
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

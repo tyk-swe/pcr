@@ -3,17 +3,20 @@
 
 //! The NDJSON stream every structured command writes through.
 
+#[cfg(test)]
+use crate::test_support::TestRecord;
+
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::core::budget::Deadline;
 use packetcraftr::progress::{Runtime, Sink};
+use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
 
-use packetcraftr::output;
+use packetcraftr_cli::output;
 
-pub(crate) use packetcraftr::output::stream::StreamEncoder;
+pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 
 /// One blocked output attempt may add this much time to a workflow budget.
 const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -58,8 +61,7 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
-    use packetcraftr::core::error::Kind;
+    use packetcraftr_core::error::Kind;
 
     use std::io::Write;
 
@@ -75,8 +77,12 @@ mod tests {
     #[test]
     fn data_and_completion_are_contiguous_from_zero() {
         let (stream, output) = stream(output::contract::Command::Read);
-        stream.emit_data(json!({"frame": 1}), Vec::new()).unwrap();
-        stream.emit_data(json!({"frame": 2}), Vec::new()).unwrap();
+        stream
+            .emit_data(TestRecord(json!({"frame": 1})), Vec::new())
+            .unwrap();
+        stream
+            .emit_data(TestRecord(json!({"frame": 2})), Vec::new())
+            .unwrap();
         stream
             .complete(json!({"event": "complete"}), Vec::new())
             .unwrap();
@@ -84,7 +90,7 @@ mod tests {
         let records = output.records();
         assert_contiguous(&records);
         assert_eq!(records.len(), 3);
-        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["event"], "complete");
         assert!(!stream.is_open());
     }
 
@@ -112,7 +118,7 @@ mod tests {
         let (partial, partial_output) = stream(output::contract::Command::Capture);
         for value in 0..3 {
             partial
-                .emit_data(json!({"value": value}), Vec::new())
+                .emit_data(TestRecord(json!({"value": value})), Vec::new())
                 .unwrap();
         }
         partial.emit_error(fixture_error()).unwrap();
@@ -125,7 +131,7 @@ mod tests {
     fn domain_identifiers_do_not_select_envelope_positions() {
         let (stream, output) = stream(output::contract::Command::Replay);
         stream
-            .emit_data(json!({"source_sequence": 42}), Vec::new())
+            .emit_data(TestRecord(json!({"source_sequence": 42})), Vec::new())
             .unwrap();
         stream
             .complete(json!({"event": "complete"}), Vec::new())
@@ -147,7 +153,7 @@ mod tests {
 
         assert!(
             success_stream
-                .emit_data(json!({"late": true}), Vec::new())
+                .emit_data(TestRecord(json!({"late": true})), Vec::new())
                 .is_err()
         );
         assert!(
@@ -164,7 +170,7 @@ mod tests {
         let terminal = output.bytes();
         assert!(
             error_stream
-                .emit_data(json!({"late": true}), Vec::new())
+                .emit_data(TestRecord(json!({"late": true})), Vec::new())
                 .is_err()
         );
         assert_eq!(output.bytes(), terminal);
@@ -184,9 +190,11 @@ mod tests {
     #[test]
     fn serialization_failure_keeps_the_unwritten_position_open_for_terminal_error() {
         let (stream, output) = stream(output::contract::Command::Expert);
-        stream.emit_data(json!({"ok": true}), Vec::new()).unwrap();
+        stream
+            .emit_data(TestRecord(json!({"ok": true})), Vec::new())
+            .unwrap();
         let error = stream
-            .emit_data(FailingSerialization, Vec::new())
+            .emit_data(TestRecord(FailingSerialization), Vec::new())
             .expect_err("serialization must fail");
 
         assert!(error.to_string().contains("sequence 1"));
@@ -229,9 +237,11 @@ mod tests {
             flushes: 0,
         };
         let stream = StreamEncoder::new(output::contract::Command::Capture, writer);
-        stream.emit_data(json!({"value": 0}), Vec::new()).unwrap();
+        stream
+            .emit_data(TestRecord(json!({"value": 0})), Vec::new())
+            .unwrap();
         let error = stream
-            .emit_data(json!({"value": 1}), Vec::new())
+            .emit_data(TestRecord(json!({"value": 1})), Vec::new())
             .expect_err("second flush must fail");
 
         assert!(error.to_string().contains("sequence 1"));

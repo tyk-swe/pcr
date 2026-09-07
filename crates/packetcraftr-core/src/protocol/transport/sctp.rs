@@ -291,10 +291,7 @@ const fn crc32c_table() -> [u32; 256] {
     let mut table = [0_u32; 256];
     let mut index = 0_usize;
     while index < table.len() {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the loop condition bounds index by table.len(), which is 256"
-        )]
+        // the loop condition bounds index by table.len(), which is 256
         let mut remainder = index as u32;
         let mut bit = 0_u32;
         while bit < 8 {
@@ -305,10 +302,7 @@ const fn crc32c_table() -> [u32; 256] {
             };
             bit = bit.saturating_add(1);
         }
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the while condition bounds index below table.len()"
-        )]
+        // the while condition bounds index below table.len()
         {
             table[index] = remainder;
         }
@@ -322,10 +316,7 @@ fn crc32c_parts(parts: &[&[u8]]) -> u32 {
     for part in parts {
         for byte in *part {
             let index = ((remainder ^ u32::from(*byte)) & 0xff) as usize;
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "the 0xff mask bounds index below 256, the length of CRC32C_TABLE"
-            )]
+            // the 0xff mask bounds index below 256, the length of CRC32C_TABLE
             let entry = CRC32C_TABLE[index];
             remainder = (remainder >> 8) ^ entry;
         }

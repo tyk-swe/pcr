@@ -3,15 +3,13 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{
-    core::error::{Classification, Kind},
-    core::frame::Frame,
-    core::{
-        self,
-        filter::{Context, Filter},
-        registry::Registry,
-    },
-};
+use packetcraftr_core as core;
+use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Kind;
+use packetcraftr_core::filter::Context;
+use packetcraftr_core::filter::Filter;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::registry::Registry;
 
 use super::errors::CliError;
 
@@ -47,7 +45,7 @@ pub(crate) fn compile(
     let filter = Filter::compile(
         source,
         registry,
-        packetcraftr::core::filter::Options::default(),
+        packetcraftr_core::filter::Options::default(),
     )
     .map_err(cli_error)?;
     if filter.requirements().stream_index && !capabilities.stream_index {
@@ -130,31 +128,31 @@ impl packetcraftr::replay::Selector for FrameSelector {
         &mut self,
         source_frame: u64,
         frame: &Frame,
-    ) -> Result<bool, packetcraftr::BoundaryError> {
+    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
         self.keep(source_frame, frame)
             .map_err(CliError::into_boundary_error)
     }
 }
 
 /// Converts a filter compilation failure into the CLI error taxonomy.
-fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
+fn cli_error(error: packetcraftr_core::filter::Error) -> CliError {
     let remediation = match &error {
-        packetcraftr::core::filter::Error::UnknownField { .. }
-        | packetcraftr::core::filter::Error::UnresolvableProtocol { .. } => {
+        packetcraftr_core::filter::Error::UnknownField { .. }
+        | packetcraftr_core::filter::Error::UnresolvableProtocol { .. } => {
             "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
         }
-        packetcraftr::core::filter::Error::IncompatibleLiteral { .. }
-        | packetcraftr::core::filter::Error::OrderedPrefixComparison { .. } => {
+        packetcraftr_core::filter::Error::IncompatibleLiteral { .. }
+        | packetcraftr_core::filter::Error::OrderedPrefixComparison { .. } => {
             "compare the field against a value of its own type"
         }
-        packetcraftr::core::filter::Error::UnsliceableField { .. } => {
+        packetcraftr_core::filter::Error::UnsliceableField { .. } => {
             "slice only fields that hold bytes, such as an address or a byte string"
         }
-        packetcraftr::core::filter::Error::SizeLimit { .. }
-        | packetcraftr::core::filter::Error::NestingLimit { .. }
-        | packetcraftr::core::filter::Error::TermLimit { .. }
-        | packetcraftr::core::filter::Error::SetMemberLimit { .. }
-        | packetcraftr::core::filter::Error::InvalidNestingLimit { .. } => {
+        packetcraftr_core::filter::Error::SizeLimit { .. }
+        | packetcraftr_core::filter::Error::NestingLimit { .. }
+        | packetcraftr_core::filter::Error::TermLimit { .. }
+        | packetcraftr_core::filter::Error::SetMemberLimit { .. }
+        | packetcraftr_core::filter::Error::InvalidNestingLimit { .. } => {
             "simplify the filter to fit the stable bounds"
         }
         // Covers `Empty` and `Syntax`, and — because `filter::Error` is
@@ -172,7 +170,7 @@ fn cli_error(error: packetcraftr::core::filter::Error) -> CliError {
 mod tests {
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::{frame::LinkType, protocol::builtin};
+    use packetcraftr_core::{frame::LinkType, protocol::builtin};
 
     use super::*;
 

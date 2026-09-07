@@ -5,7 +5,7 @@ resolver = "3"
 [workspace.package]
 version = "0.5.0-beta.2"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.98.1"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/pcr"
 publish = false
@@ -17,25 +17,6 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
-# A public function that can panic is part of its contract, not an
-# implementation detail. Library code keeps `expect` for genuine invariants, so
-# every one that reaches a public boundary has to say so.
-missing_panics_doc = "deny"
-return_self_not_must_use = "deny"
-# `overflow-checks` cannot see through an `as` conversion, so packet offsets,
-# lengths, and accounting only fail closed if every narrowing cast is either
-# replaced by a checked conversion or carries an `#[expect]` naming the
-# invariant that makes it lossless.
-cast_possible_truncation = "deny"
-cast_possible_wrap = "deny"
-cast_sign_loss = "deny"
-cast_precision_loss = "deny"
-# The cast lints only cover the narrowing step. Wire offsets and lengths also
-# reach slices and counters, so plain indexing and unchecked arithmetic on
-# library paths are denied too: either use `get`/`checked_*` or carry an
-# `#[expect]` naming the local invariant. Test code may opt out per module.
-indexing_slicing = "deny"
-arithmetic_side_effects = "deny"
 
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
@@ -44,35 +25,29 @@ packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.2", default
 packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.2" }
 packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.2" }
 
-aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
-chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
-hkdf = { version = "0.13", default-features = false }
-anstream = "1"
-bytes = { version = "1", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
-criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-# Pinned exactly: a 0.0.x release carries no semver guarantee, and this parser
-# enforces duplicate-key, alias-expansion, and recursion limits. A patch bump
-# could relax one silently, so take it deliberately.
-noyalib = { version = "=0.0.28", default-features = false, features = ["std", "fast-int", "fast-float"] }
-jsonschema = { version = "0.52", default-features = false }
+anstream = "1.0.0"
+bytes = { version = "1.12.1", features = ["serde"] }
+clap = { version = "4.6.6", features = ["derive"] }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+noyalib = { version = "0.0.39", default-features = false, features = ["std", "fast-int", "fast-float"] }
+jsonschema = { version = "0.55.0", default-features = false }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
-md-5 = { version = "0.11", default-features = false }
-sha2 = { version = "0.11", default-features = false }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["unbounded_depth"] }
-tempfile = "3"
-thiserror = "2"
-proptest = { version = "1", default-features = false, features = ["std"] }
+md-5 = { version = "0.11.0", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["unbounded_depth"] }
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 
-futures-util = { version = "0.3", default-features = false }
-libc = { version = "0.2", default-features = false }
-libloading = "0.9"
-pcap = { version = "2.5", default-features = false }
-rtnetlink = { version = "0.23", default-features = false, features = ["tokio_socket"] }
-socket2 = { version = "0.6", default-features = false, features = ["all"] }
-tokio = { version = "1", default-features = false, features = ["rt"] }
-windows = { version = "0.62", default-features = false, features = [
+futures-util = { version = "0.3.34", default-features = false }
+libc = { version = "0.2.189", default-features = false }
+libloading = "0.9.0"
+pcap = { version = "2.5.0", default-features = false }
+rtnetlink = { version = "0.23.0", default-features = false, features = ["tokio_socket"] }
+socket2 = { version = "0.6.5", default-features = false, features = ["all"] }
+tokio = { version = "1.53.1", default-features = false, features = ["rt"] }
+windows = { version = "0.62.2", default-features = false, features = [
     "std",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",

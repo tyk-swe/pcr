@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
@@ -27,7 +24,9 @@ pub(crate) fn run_with_stdin(arguments: &[&str], input: &[u8]) -> Output {
 pub(crate) fn decode_hex(value: &str) -> Vec<u8> {
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let pair = std::str::from_utf8(pair).expect("fixture hex must be UTF-8");
             u8::from_str_radix(pair, 16).expect("fixture hex must be valid")

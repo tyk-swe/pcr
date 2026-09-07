@@ -287,7 +287,6 @@ fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
     use std::time::SystemTime;
 
     use packetcraftr_core::frame::{Frame, LinkType};

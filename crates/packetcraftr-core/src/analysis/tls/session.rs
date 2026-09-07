@@ -3,7 +3,6 @@
 
 //! The assembled TLS session record and the per-session state machine.
 
-use std::net::IpAddr;
 use std::time::SystemTime;
 
 use bytes::{Buf as _, Bytes, BytesMut};
@@ -37,12 +36,7 @@ const ALERT_CHARGE: usize = size_of::<Alert>();
 const REASON_RECORD_CEILING: &str = "one direction's record buffer reached its ceiling";
 const REASON_HANDSHAKE_CEILING: &str = "one direction's handshake buffer reached its ceiling";
 
-/// One side of a TLS session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct Endpoint {
-    pub address: IpAddr,
-    pub port: u16,
-}
+use crate::analysis::Endpoint;
 
 /// How far a handshake got, and why it stopped.
 ///

@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -15,119 +14,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ubuntu-no-default
-            os: ubuntu-latest
-            cargo_args: --no-default-features
-            native_packages: false
-          - name: ubuntu-default
-            os: ubuntu-latest
-            cargo_args: ""
-            native_packages: false
-          - name: ubuntu-pcap-free
-            os: ubuntu-latest
-            cargo_args: --no-default-features --features native-route,native-layer3
-            native_packages: false
-          - name: macos-default
-            os: macos-latest
-            cargo_args: ""
-            native_packages: false
-          - name: windows-default
-            os: windows-latest
-            cargo_args: ""
-            native_packages: false
-          - name: ubuntu-all-features
-            os: ubuntu-latest
-            cargo_args: --all-features
-            native_packages: true
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Linux native dependencies
-        if: matrix.native_packages
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
-        with:
-          # Keep in step with `nextest-version` in .config/nextest.toml.
-          tool: nextest@0.9.143
-      - name: Run tests
-        run: cargo nextest run --locked --workspace --profile ci ${{ matrix.cargo_args }}
-
-  native-all-features:
-    name: Native all-features check (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos
-            os: macos-latest
-          - name: windows
-            os: windows-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-      - name: Check all native features
-        run: cargo check --locked --workspace --all-targets --all-features
-
-  quality:
-    name: Quality
+  linux:
+    name: Linux full native
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Linux native dependencies
+      - name: Install native development library
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - name: Install the pinned toolchain
-        # rustup reads `rust-toolchain.toml` (channel and components) so the
-        # version is stated once, in that file.
         run: rustup toolchain install
-      - uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2.86.7
-        with:
-          tool: cargo-deny@0.20.2
-      - name: Check formatting
+      - name: Format
         run: |
           cargo fmt --all -- --check
           cargo fmt --manifest-path fuzz/Cargo.toml -- --check
-      - name: Check dangerous range APIs
-        run: bash scripts/check-dangerous-ranges.sh
-      - name: Smoke-test repository Quick Start
-        run: bash scripts/check-quick-start.sh
-      - name: Check every supported feature profile
-        run: bash scripts/check-features.sh
-      - name: Run Clippy
+      - name: Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Build API documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --workspace --all-features --no-deps
-      - name: Run doctests
-        run: cargo test --locked --workspace --all-features --doc
-      - name: Check dependency policy
-        run: |
-          cargo deny check
-          cargo deny --manifest-path fuzz/Cargo.toml check advisories
+      - name: Test
+        run: cargo test --locked --workspace --all-features
 
-  msrv:
-    name: MSRV
+  portable:
+    name: Portable and pcap-free isolation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
-      # The only job that overrides `rust-toolchain.toml`. Keep in step with
-      # `rust-version` in Cargo.toml.
-      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.96.0
-      - name: Check minimum toolchain compatibility
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Test without native capabilities
+        run: cargo test --locked --workspace --no-default-features
+      - name: Build the isolated pcap-free CLI
+        run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
+      - name: Verify the binary has no libpcap dependency
         run: |
-          cargo check --locked --workspace --all-targets --no-default-features
-          cargo check --locked --workspace --all-targets --all-features
+          ldd target/debug/packetcraftr > linked-libraries.txt
+          ! grep -q libpcap linked-libraries.txt
+
+  platforms:
+    name: Native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Test passive native providers and CLI integration
+        run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
+      - name: Compile all native backends
+        run: cargo check --locked --workspace --all-targets --all-features

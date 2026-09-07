@@ -137,10 +137,7 @@ impl LayerCodec for Icmpv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "prefix begins with the four-byte ICMP header pushed above"
-        )]
+        // prefix begins with the four-byte ICMP header pushed above
         {
             prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         }
@@ -230,10 +227,7 @@ impl LayerCodec for Icmpv6Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "prefix begins with the four-byte ICMP header pushed above"
-        )]
+        // prefix begins with the four-byte ICMP header pushed above
         {
             prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         }

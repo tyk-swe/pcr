@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::{analysis::pcap::Format, output};
+use packetcraftr_core::analysis::pcap::Format;
+
+use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -48,8 +50,8 @@ pub(super) fn render_capture(
 }
 
 fn stable_timestamp_order<'a>(
-    frames: impl IntoIterator<Item = &'a packetcraftr::core::frame::Frame>,
-) -> Vec<&'a packetcraftr::core::frame::Frame> {
+    frames: impl IntoIterator<Item = &'a packetcraftr_core::frame::Frame>,
+) -> Vec<&'a packetcraftr_core::frame::Frame> {
     let mut frames = frames.into_iter().collect::<Vec<_>>();
     frames.sort_by_key(|frame| frame.timestamp);
     frames
@@ -78,7 +80,7 @@ pub(super) fn render_complete(
 mod tests {
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::frame::{Frame, LinkType};
+    use packetcraftr_core::frame::{Frame, LinkType};
 
     use super::stable_timestamp_order;
 

@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "read",
   "mode": "stream",
   "status": "success",
   "sequence": 0,
   "result": {
-    "event": "frame",
     "source_frame": 100,
     "frame": {
       "captured_length": 4,
@@ -14,5 +13,6 @@
       "bytes_hex": "deadbeef"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "frame"
 }

@@ -7,7 +7,7 @@
 use std::fmt;
 
 /// A 48-bit IEEE 802 MAC address.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct MacAddress(pub [u8; 6]);
 
 impl fmt::Display for MacAddress {
@@ -18,7 +18,8 @@ impl fmt::Display for MacAddress {
 }
 
 /// The tagging standard of one VLAN header.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VlanKind {
     Ieee8021Q,
     Ieee8021Ad,
@@ -35,7 +36,7 @@ impl VlanKind {
 }
 
 /// One fixed-width VLAN tag.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct VlanTag {
     pub kind: VlanKind,
     pub priority: u8,

@@ -3,9 +3,13 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use packetcraftr::core::error::Kind;
+use crate::rendering::StreamEncoder;
 
-use packetcraftr::{core, output};
+use packetcraftr_core::error::Kind;
+
+use packetcraftr_core as core;
+
+use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -16,7 +20,7 @@ use crate::rendering::{
 pub(super) fn render_text(
     result: output::dns::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+    stats: packetcraftr::Stats,
 ) -> Result<(), CliError> {
     let server = result.server.parse::<IpAddr>().map_or_else(
         |_| format!("{}:{}", result.server, result.server_port),
@@ -52,9 +56,9 @@ pub(super) fn render_text(
         }
     }
     for (section, records) in [
-        (output::dns::Section::Answer, &result.answers),
-        (output::dns::Section::Authority, &result.authorities),
-        (output::dns::Section::Additional, &result.additionals),
+        (packetcraftr::dns::Section::Answer, &result.answers),
+        (packetcraftr::dns::Section::Authority, &result.authorities),
+        (packetcraftr::dns::Section::Additional, &result.additionals),
     ] {
         for record in records {
             render_record(section, record)?;
@@ -108,7 +112,7 @@ pub(super) fn render_text(
 }
 
 fn render_record(
-    section: output::dns::Section,
+    section: packetcraftr::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
     let data = serde_json::to_string(&record.data).map_err(serialization_failure)?;
@@ -154,9 +158,26 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
     )
 }
 
+/// Converts and writes one final workflow event at its publication boundary.
+pub(super) fn emit_event(
+    event: packetcraftr::dns::Event,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let (record, diagnostics) =
+        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
+    Ok(stream.emit_data(record, diagnostics)?)
+}
+
+pub(super) fn emit_complete(
+    summary: packetcraftr::dns::Summary,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let (record, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
+    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+}
+
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
@@ -164,12 +185,10 @@ mod tests {
 
     use packetcraftr::dns;
 
-    use super::{ResponseLine, response_summary, serialization_failure};
-    use crate::commands::dns::Dns;
-    use crate::commands::target_workflow::TargetWorkflow as _;
+    use super::{ResponseLine, emit_complete, emit_event, response_summary, serialization_failure};
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
     use crate::test_support::assert_single_complete;
-    use packetcraftr::output;
+    use packetcraftr_cli::output;
 
     fn attempt_event(attempt: u32) -> dns::Event {
         let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
@@ -180,35 +199,39 @@ mod tests {
                 query_name: Arc::from("example.test."),
                 query_type: dns::QueryType::A,
             }),
-            evidence: dns::AttemptEvidence {
+            evidence: packetcraftr::dns::AttemptEvidence {
                 attempt,
-                transport: dns::Transport::Udp,
                 server_address: address,
-                source_port: Some(packetcraftr::probe::EPHEMERAL_SOURCE_PORT_BASE),
-                status: dns::Outcome::Timeout,
-                sent_at: Some(UNIX_EPOCH),
+                status: packetcraftr::dns::Outcome::Timeout,
                 received_at: None,
                 latency: None,
-                response: None,
                 response_code: None,
                 reason: "timeout".to_owned(),
+                exchange: packetcraftr::dns::AttemptTransport::Udp {
+                    source_port: packetcraftr::probe::EPHEMERAL_SOURCE_PORT_BASE,
+                    sent_at: UNIX_EPOCH,
+                    response: None,
+                },
             },
         }
     }
 
-    fn summary() -> dns::Summary {
-        dns::Summary {
+    fn summary() -> packetcraftr::dns::Summary {
+        packetcraftr::dns::Summary {
             server: "resolver.test".to_owned(),
             server_port: 53,
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
             query_name: "example.test.".to_owned(),
             query_type: dns::QueryType::A,
             transaction_id: u16::MAX,
-            outcome: dns::Outcome::Timeout,
-            fallback_attempted: false,
-            accepted_transport: None,
-            response: None,
             stats: packetcraftr::Stats::default(),
+            completion: packetcraftr::dns::Completion::new(
+                packetcraftr::dns::Outcome::Timeout,
+                false,
+                None,
+                None,
+            )
+            .unwrap(),
         }
     }
 
@@ -248,16 +271,16 @@ mod tests {
     #[test]
     fn dns_stream_positions_ignore_noncontiguous_attempt_ids() {
         let (sink, output) = stream(output::contract::Command::Dns);
-        Dns::emit_event(attempt_event(31), &sink).unwrap();
-        Dns::emit_event(attempt_event(2), &sink).unwrap();
-        Dns::emit_complete(summary(), &sink).unwrap();
+        emit_event(attempt_event(31), &sink).unwrap();
+        emit_event(attempt_event(2), &sink).unwrap();
+        emit_complete(summary(), &sink).unwrap();
 
         let records = output.records();
         assert_contiguous(&records);
         assert_eq!(records[0]["result"]["evidence"]["attempt"], 31);
         assert_eq!(records[1]["result"]["evidence"]["attempt"], 2);
         assert_eq!(records[2]["result"]["transaction_id"], u16::MAX);
-        assert_eq!(records[2]["result"]["event"], "complete");
+        assert_eq!(records[2]["event"], "complete");
         assert_single_complete(&records);
     }
 }

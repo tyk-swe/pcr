@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "expert",
   "mode": "stream",
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "ip_datagram_incomplete",
     "frame": 7,
     "outcome": {
       "status": "incomplete",
@@ -24,5 +23,6 @@
       "overlap_bytes": 0
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "ip_datagram_incomplete"
 }

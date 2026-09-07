@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::{analysis, core, output};
+use packetcraftr_core as core;
+use packetcraftr_core::analysis;
+
+use packetcraftr_cli::output;
 
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
@@ -255,12 +258,12 @@ fn alert_text(alert: &output::tls::Alert) -> String {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use output::tls::Status;
+    use packetcraftr_core::analysis::tls::Status;
 
     use super::*;
 
-    fn endpoint(last: u8, port: u16) -> output::tls::Endpoint {
-        output::tls::Endpoint {
+    fn endpoint(last: u8, port: u16) -> packetcraftr_core::analysis::Endpoint {
+        packetcraftr_core::analysis::Endpoint {
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
             port,
         }

@@ -28,17 +28,21 @@ const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
 mod engine;
+mod execution;
 mod executor;
-mod model;
 mod plan;
 mod probe;
+mod report;
+mod request;
 #[cfg(test)]
 mod tests;
 
 pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use model::{
-    Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
-    ProbeTarget, Report, Request, ResponseKind, Strategy, Summary, UndecodedEvidence,
+pub use execution::{Batch, Execution, Executor, Probe, ProbeTarget};
+pub use report::{
+    Completion, Event, Hop, ProbeEvidence, ProbeStatus, Report, ResponseKind, Summary,
+    UndecodedEvidence,
 };
+pub use request::{Limits, Request, Strategy};

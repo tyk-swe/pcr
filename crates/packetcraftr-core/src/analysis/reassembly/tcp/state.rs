@@ -84,11 +84,8 @@ pub(super) fn planned_history_allocation(current: usize, required: usize, limit:
     retained.saturating_mul(2).max(required).min(limit)
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "each difference is clamped by overlap_start/overlap_end into payload or \
-              emitted_history, whose lengths are already usize, so no target can truncate"
-)]
+// each difference is clamped by overlap_start/overlap_end into payload or emitted_history, whose
+// lengths are already usize, so no target can truncate
 pub(super) fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, payload: &[u8]) -> bool {
     let Some(payload_end) = offset.checked_add(payload.len() as u64) else {
         return true;
@@ -155,11 +152,8 @@ pub(super) fn prepare_emitted_history(
     Ok(Some(resized))
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "history_start_offset lies between output_start and output_end, so each difference \
-              is bounded by emitted_history.len() or output.len(), both already usize"
-)]
+// history_start_offset lies between output_start and output_end, so each difference is bounded by
+// emitted_history.len() or output.len(), both already usize
 pub(super) fn append_emitted_history(
     state: &mut TcpFlowState,
     output_start: u64,

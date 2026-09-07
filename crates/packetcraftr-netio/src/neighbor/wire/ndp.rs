@@ -41,17 +41,11 @@ pub(super) fn build_solicitation(
     icmp.extend_from_slice(&[SOURCE_LINK_LAYER_OPTION, 1]);
     icmp.extend_from_slice(&request.interface_mac.0);
     let checksum = icmpv6_checksum(source, destination, &icmp);
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "icmp was just built with SOLICITATION_LENGTH bytes, so the checksum field exists"
-    )]
+    // icmp was just built with SOLICITATION_LENGTH bytes, so the checksum field exists
     icmp[2..4].copy_from_slice(&checksum.to_be_bytes());
 
     frame.extend_from_slice(&[0x60, 0, 0, 0]);
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "SOLICITATION_LENGTH is fixed far below u16::MAX"
-    )]
+    // SOLICITATION_LENGTH is fixed far below u16::MAX
     let solicitation_length = SOLICITATION_LENGTH as u16;
     frame.extend_from_slice(&solicitation_length.to_be_bytes());
     frame.extend_from_slice(&[NEXT_HEADER_ICMP, 255]);

@@ -16,7 +16,7 @@ use crate::probe::evidence::{
 
 use super::error::{Error, duration_limit};
 use super::execution::Execution;
-use super::model::{Case, LiveLimits, Stats};
+use super::{Case, LiveLimits, Stats};
 
 pub(super) fn validate_execution(
     case: &Case,

@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
-use packetcraftr::{core, output};
+use packetcraftr_cli::output;
+use packetcraftr_core as core;
+use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -12,7 +13,7 @@ use crate::rendering::{
 pub(super) fn render_text(
     result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
+    stats: packetcraftr::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
@@ -75,7 +76,8 @@ pub(super) fn render_offline_complete(
     summary: core::fuzz::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::fuzz::Event::complete_from_offline(summary);
+    let (event, diagnostics, stats) =
+        output::fuzz::Event::complete_from_offline(summary).map_err(CliError::classified)?;
     Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }
 
@@ -83,7 +85,8 @@ pub(super) fn render_live_complete(
     summary: packetcraftr::fuzz::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::fuzz::Event::complete_from_live(summary);
+    let (event, diagnostics, stats) =
+        output::fuzz::Event::complete_from_live(summary).map_err(CliError::classified)?;
     Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }
 

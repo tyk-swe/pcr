@@ -3,7 +3,9 @@
 
 use std::net::IpAddr;
 
-use packetcraftr::{core, core::Packet, netio as net};
+use packetcraftr_core as core;
+use packetcraftr_core::Packet;
+use packetcraftr_netio as net;
 
 use super::interface;
 use crate::command_options::RouteArgs;

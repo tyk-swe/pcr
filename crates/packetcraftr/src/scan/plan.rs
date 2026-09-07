@@ -7,7 +7,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::WORKFLOW;
-use super::model::{Batch, Probe, ProbeEndpoint, Request};
+use super::{Batch, Probe, ProbeEndpoint, Request};
 use crate::probe::{Error, ErrorKind};
 
 pub(super) fn build_batches(
@@ -101,13 +101,13 @@ mod tests {
     fn duration_planning_preserves_per_gap_rounding_empty_plans_and_overflow() {
         let mut request = Request {
             target: Target::Address("192.0.2.1".parse().expect("documentation address")),
-            transport: crate::scan::model::Transport::Tcp,
+            transport: crate::scan::Transport::Tcp,
             address_family: Family::Any,
             ports: vec![80],
             attempts: 1,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
-            limits: crate::scan::model::Limits::default(),
+            limits: crate::scan::Limits::default(),
         };
         for (addresses, endpoints, expected) in [
             (0, 1, Duration::ZERO),

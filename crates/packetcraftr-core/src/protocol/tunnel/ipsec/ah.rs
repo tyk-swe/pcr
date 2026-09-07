@@ -117,11 +117,8 @@ impl LayerCodec for AhCodec {
                 "the ICV must be a multiple of 4 bytes within the length field's range",
             ));
         }
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the guard above rejects header_len > (0xff + 2) * 4, so the word count \
-                      minus two fits the 8-bit payload-length field"
-        )]
+        // the guard above rejects header_len > (0xff + 2) * 4, so the word count minus two fits the
+        // 8-bit payload-length field
         let expected_payload_length = (header_len / 4).saturating_sub(2) as u8;
 
         let (under_ipv6, mut diagnostics) = validate_context(layer, header_len, context)?;

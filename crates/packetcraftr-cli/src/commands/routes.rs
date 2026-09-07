@@ -1,10 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::netio::{interface::Provider as _, route::Provider as _};
-use packetcraftr::{netio as net, output};
+use packetcraftr_cli::output;
+use packetcraftr_netio as net;
+use packetcraftr_netio::interface::Provider as _;
+use packetcraftr_netio::route::Provider as _;
 
 use crate::errors::CliError;
 use crate::rendering::optional_display;
@@ -77,7 +79,6 @@ fn route_line(route: &output::network::Decision) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
 
@@ -94,7 +95,7 @@ mod tests {
             flags: net::interface::Flags::default(),
             mtu: None,
             capability: net::link::Capability::Layer3,
-            link_type: packetcraftr::core::frame::LinkType::RAW,
+            link_type: packetcraftr_core::frame::LinkType::RAW,
         };
         for up in [false, true] {
             interface.flags.up = up;

@@ -13,13 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::platform::workers::WorkerPermit;
+
 use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::CaptureQueue};
-use crate::platform::worker_reaper::{
-    ReaperClient, ReaperPermit, TransferOutcome, wait_until_finished,
-};
+use crate::platform::worker_reaper::{ReaperClient, TransferOutcome, wait_until_finished};
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -28,7 +28,7 @@ pub(super) fn transfer_capture_worker(
     worker: JoinHandle<()>,
     stop: Arc<AtomicBool>,
     interrupt: Arc<dyn super::CaptureInterrupt>,
-    permit: ReaperPermit,
+    permit: WorkerPermit,
     reaper: &ReaperClient,
 ) -> TransferOutcome {
     reaper.transfer(Box::new(move || {

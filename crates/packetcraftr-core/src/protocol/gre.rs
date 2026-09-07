@@ -33,10 +33,7 @@ const MUST_DISCARD_FLAGS: u16 = 0x0c00;
 const IGNORED_RESERVED_FLAGS: u16 = 0x03f8;
 const VERSION_MASK: u16 = 0x0007;
 
-#[expect(
-    clippy::arithmetic_side_effects,
-    reason = "at most GRE_BASE_LEN plus three GRE_OPTION_LEN options, so the sum is 16 at the largest"
-)]
+// at most GRE_BASE_LEN plus three GRE_OPTION_LEN options, so the sum is 16 at the largest
 fn gre_header_len(checksum: bool, key: bool, sequence: bool) -> usize {
     GRE_BASE_LEN
         + usize::from(checksum) * GRE_OPTION_LEN
@@ -148,10 +145,7 @@ impl LayerCodec for GreCodec {
                 context.mode,
                 &mut diagnostics,
             )?;
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "layer.checksum is Some here, so encode_prefix reserved bytes 4..6 for the checksum"
-            )]
+            // layer.checksum is Some here, so encode_prefix reserved bytes 4..6 for the checksum
             {
                 prefix[4..6].copy_from_slice(&checksum.to_be_bytes());
             }

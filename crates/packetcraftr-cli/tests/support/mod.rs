@@ -2,14 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::path::Path;
 use std::process::{Command, Output};
 
-use packetcraftr::output;
+use packetcraftr_cli::output;
 use serde_json::Value;
 
 #[path = "../../src/test_support.rs"]
@@ -18,7 +15,9 @@ mod shared;
 // Re-exported for the binaries that need them; an unused re-export warns
 // even though the definitions behind it are allowed to be dead.
 #[allow(unused_imports)]
-pub(crate) use shared::{SharedBuffer, assert_contiguous, schema_validator};
+pub(crate) use shared::{
+    SharedBuffer, TestRecord, assert_contiguous, output_schema, schema_validator,
+};
 
 pub(crate) fn path_text(path: &Path) -> &str {
     path.to_str().expect("temporary path must be UTF-8")
@@ -56,16 +55,16 @@ pub(crate) fn parse_json(output: &Output) -> Value {
     });
     schema_validator()
         .validate(&value)
-        .expect("JSON output must match the published schema");
+        .unwrap_or_else(|error| panic!("JSON output must match the published schema: {error}"));
     value
 }
 
 pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
     let records = shared::parse_ndjson(&output.stdout);
     for record in &records {
-        schema_validator()
-            .validate(record)
-            .expect("NDJSON record must match the published schema");
+        schema_validator().validate(record).unwrap_or_else(|error| {
+            panic!("NDJSON record must match the published schema: {error}")
+        });
     }
     records
 }

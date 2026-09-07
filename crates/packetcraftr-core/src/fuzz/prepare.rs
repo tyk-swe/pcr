@@ -142,20 +142,11 @@ fn prepare_case(
         .ok_or(Error::CaseIndexOverflow)?;
     let seed = case_seed(request.seed, index);
     let selection_index = index_from(index, compatible_mutations.len());
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "`prepare` returns before preparing cases when `compatible_mutations` is empty"
-    )]
+    // `prepare` returns before preparing cases when `compatible_mutations` is empty
     let strategy_round = index / compatible_mutations.len() as u64;
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`index_from` reduces below `compatible_mutations.len()`"
-    )]
+    // `index_from` reduces below `compatible_mutations.len()`
     let (strategy, field_index) = compatible_mutations[selection_index];
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "every `compatible_mutations` entry stores an index into `inputs.fields`"
-    )]
+    // every `compatible_mutations` entry stores an index into `inputs.fields`
     let field = &inputs.fields[field_index];
     let mut recipe = inputs.packet.clone();
     let Some(layer) = recipe.layer_mut(field.target.layer) else {
@@ -283,10 +274,7 @@ fn build_case(
             }
             case.built = Some(built);
             case.outcome = CaseOutcome::Built;
-            #[expect(
-                clippy::arithmetic_side_effects,
-                reason = "a u64 case counter cannot reach u64::MAX from the validated case budget"
-            )]
+            // a u64 case counter cannot reach u64::MAX from the validated case budget
             {
                 counters.built_cases += 1;
             }

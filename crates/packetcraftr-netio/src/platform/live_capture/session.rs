@@ -13,13 +13,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::platform::workers::{JoinAttempt, WorkerPermit, join_with_deadline};
+
 use crate::{
     Error,
     capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Statistics},
-    platform::worker_reaper::{
-        JoinAttempt, ReaperClient, ReaperPermit, ReaperStartError, join_with_deadline,
-        shared_reaper,
-    },
+    platform::worker_reaper::{ReaperClient, ReaperStartError, shared_reaper},
 };
 
 use super::{
@@ -67,7 +66,7 @@ const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 struct RunningCapture {
     worker: JoinHandle<()>,
     interrupt: Arc<dyn CaptureInterrupt>,
-    permit: ReaperPermit,
+    permit: WorkerPermit,
 }
 
 enum Shutdown {

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::core;
+use packetcraftr_core as core;
 
 /// Packet input shared by commands that construct or inspect a recipe.
 #[derive(Debug, Args)]

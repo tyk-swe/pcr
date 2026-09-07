@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Workflow error variants render stable messages with the classification the
 //! CLI relies on, and the budget and wire-authorization variants are reached
@@ -13,14 +10,18 @@ use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::authorization::{Authorizer, Operation};
+use packetcraftr::Client;
+use packetcraftr::Error;
 use packetcraftr::clock::Clock;
+use packetcraftr::policy;
+use packetcraftr::policy::{Authorizer, Operation};
 use packetcraftr::replay::{
     Error as ReplayError, Limits, Options as ReplayOptions, Timing, Transmission, Transmitter,
     run_with_selector,
 };
-use packetcraftr::{BoundaryError, Client, Error, policy, send};
+use packetcraftr::send;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;

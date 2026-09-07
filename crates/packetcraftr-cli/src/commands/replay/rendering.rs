@@ -1,15 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::core::error::Kind;
+use packetcraftr_core::error::Kind;
 
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
-use packetcraftr::{
-    analysis::pcap::{self as capture, Format, Limits, Reader, Writer},
-    netio as net, output,
-};
+use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::analysis::pcap::Limits;
+use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -232,10 +236,7 @@ fn classic_writer<R: Read, W: Write>(
             },
         ));
     }
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "the format is checked to be classic pcap above, which always exposes its single global interface"
-    )]
+    // the format is checked to be classic pcap above, which always exposes its single global interface
     let interface = reader.interfaces()[0].clone();
     let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
         CliError::new(
@@ -279,26 +280,25 @@ fn render_capture_record<W: Write>(
         .map_err(|source| output_error(source_index, source.to_string()))
 }
 
-fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> output::envelope::Stats {
-    output::envelope::Stats {
+fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> packetcraftr::Stats {
+    packetcraftr::Stats {
         packets_attempted: summary.frames_read,
         packets_completed: summary.frames_transmitted,
         bytes: summary.bytes_transmitted,
         elapsed,
-        capture: net::capture::Statistics::default().into(),
+        capture: net::capture::Statistics::default(),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use std::convert::Infallible;
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr::core::error::{Classification, Kind};
-    use packetcraftr::core::frame::{Frame, LinkType};
+    use packetcraftr_core::error::{Classification, Kind};
+    use packetcraftr_core::frame::{Frame, LinkType};
 
     use super::*;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
@@ -313,10 +313,10 @@ mod tests {
         fn authorize_operation(
             &mut self,
             _request: packetcraftr::replay::Operation<'_>,
-        ) -> Result<(), packetcraftr::BoundaryError> {
+        ) -> Result<(), packetcraftr_core::error::BoundaryError> {
             self.calls += 1;
             if self.deny_on == Some(self.calls) {
-                return Err(packetcraftr::BoundaryError::new(
+                return Err(packetcraftr_core::error::BoundaryError::new(
                     "fixture policy denied replay",
                     Classification::new(
                         "policy.fixture_replay",
@@ -333,7 +333,7 @@ mod tests {
             &mut self,
             _frame: &Frame,
             _route: &net::route::Plan,
-        ) -> Result<(), packetcraftr::BoundaryError> {
+        ) -> Result<(), packetcraftr_core::error::BoundaryError> {
             Ok(())
         }
     }
@@ -412,7 +412,7 @@ mod tests {
             &mut self,
             number: u64,
             _frame: &Frame,
-        ) -> Result<bool, packetcraftr::BoundaryError> {
+        ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
             Ok(number == self.0)
         }
     }

@@ -13,7 +13,7 @@ use crate::analysis::{IpReassemblyReport, StreamTransport};
 /// A frame counts once per protocol it contains, however many times the
 /// protocol occurs in its stack, and contributes its whole captured length,
 /// so a tunnelled frame is visible in full under both its encapsulations.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ProtocolStat {
     pub protocol: String,
     pub frames: u64,
@@ -50,7 +50,7 @@ impl ConversationStat {
 }
 
 /// One IP endpoint's transmit and receive tallies.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EndpointStat {
     pub address: IpAddr,
     pub tx_frames: u64,
@@ -60,7 +60,7 @@ pub struct EndpointStat {
 }
 
 /// One transport port's tallies, counting source and destination roles.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct PortStat {
     pub transport: StreamTransport,
     pub port: u16,
@@ -69,7 +69,7 @@ pub struct PortStat {
 }
 
 /// One non-empty time bucket of the I/O series.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct IoBucketStat {
     pub offset: Duration,
     pub frames: u64,

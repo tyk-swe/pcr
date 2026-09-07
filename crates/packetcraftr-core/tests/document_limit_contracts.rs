@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Semantic resource limits of the packet-document parser, enforced
 //! identically for JSON and YAML.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::collections::BTreeMap;
 

@@ -197,10 +197,7 @@ fn read_slice(bytes: &[u8], open: usize) -> Result<(String, usize), Error> {
     if index >= bytes.len() {
         return Err(syntax(open, "unterminated byte slice, expected `]`"));
     }
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "start <= index <= bytes.len(): index starts at start and only advances while it addresses a byte"
-    )]
+    // start <= index <= bytes.len(): index starts at start and only advances while it addresses a byte
     let contents = String::from_utf8(bytes[start..index].to_vec())
         .map_err(|_| syntax(open, "byte slice bounds must be ASCII"))?;
     Ok((contents, index.saturating_add(1)))

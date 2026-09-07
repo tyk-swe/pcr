@@ -16,8 +16,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-native-interfaces = ["native-route", "dep:windows"]
-# `dep:socket2` covers the macOS AF_ROUTE socket in `platform/macos/query.rs`.
+# `dep:socket2` covers the macOS AF_ROUTE socket in `platform/af_route/query.rs`.
 # Cargo cannot scope a feature's dependency to one target, so Linux and Windows
 # route-only builds pull the (tiny) crate as well.
 native-route = [
@@ -30,13 +29,14 @@ native-route = [
 ]
 # `dep:libc` covers the `if_nametoindex`/`if_indextoname` identity check that
 # every Layer 2 and Layer 3 injection performs on Linux and macOS.
-native-layer2 = ["native-interfaces", "dep:libc", "dep:libloading", "dep:pcap"]
-native-layer3 = ["native-interfaces", "dep:libc", "dep:socket2"]
+native-layer2 = ["native-route", "dep:libc", "dep:libloading", "dep:pcap"]
+native-layer3 = ["native-route", "dep:libc", "dep:socket2"]
 
 [dependencies]
 bytes.workspace = true
 packetcraftr-core.workspace = true
 thiserror.workspace = true
+serde.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { workspace = true, optional = true }

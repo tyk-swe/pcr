@@ -1,11 +1,10 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "read",
   "mode": "stream",
   "sequence": 0,
   "status": "success",
   "result": {
-    "event": "frame",
     "source_frame": 1,
     "frame": {
       "timestamp": {
@@ -314,5 +313,6 @@
       "diagnostics": []
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "frame"
 }

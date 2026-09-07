@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 // Test code indexes deterministic wire fixtures by hand.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -11,8 +10,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use packetcraftr::core::error::{Classified, Kind};
 use packetcraftr::dns::tcp::{self as dns_tcp, Category};
+use packetcraftr_core::error::Classified;
+use packetcraftr_core::error::Kind;
 
 const QUERY: &[u8] = b"bounded query";
 

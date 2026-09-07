@@ -6,15 +6,14 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
 use std::time::Duration;
 
-use packetcraftr::{core, output};
+use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::execution::Executor;
-use super::target_workflow::{self, Document, TargetWorkflow};
+use super::execution;
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
@@ -59,90 +58,54 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let mut providers = target_workflow::prepare(
+    let mut providers = execution::prepare(
         route,
         policy,
         request.timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    target_workflow::run::<Scan>(&request, &mut providers, format, stream)
+    let resolver = packetcraftr::target::SystemResolver;
+    let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
+    let mut clock = packetcraftr::clock::SystemClock;
+    if format == Format::Ndjson {
+        let events = stream.clone();
+        let summary = packetcraftr::scan::run_with_events(
+            &request,
+            &mut authorizer,
+            &providers.registry,
+            &mut providers.executor,
+            &mut clock,
+            &providers.runtime,
+            move |event| {
+                rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
+            },
+        )
+        .map_err(CliError::classified)?;
+        rendering::emit_complete(summary, stream)
+    } else {
+        let report = packetcraftr::scan::run(
+            &request,
+            &mut authorizer,
+            &providers.registry,
+            &mut providers.executor,
+            &mut clock,
+        )
+        .map_err(CliError::classified)?;
+        let (result, diagnostics, stats) =
+            output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
+        if format == Format::Text {
+            rendering::render_text(result, diagnostics, stats)
+        } else {
+            crate::rendering::emit_aggregate_with_stats(
+                output::contract::Command::Scan,
+                result,
+                diagnostics,
+                stats,
+            )
+        }
+    }
 }
 
 /// Every scan exchange carries exactly one correlated probe.
 const MAX_TEMPLATE_PACKETS: usize = 1;
-
-/// The `scan` workflow.
-pub(super) struct Scan;
-
-impl TargetWorkflow for Scan {
-    const COMMAND: output::contract::Command = output::contract::Command::Scan;
-
-    type Request = packetcraftr::scan::Request;
-    type Event = packetcraftr::scan::Event;
-    type Summary = packetcraftr::scan::Summary;
-    type Document = output::scan::Report;
-    type Record = output::scan::Event;
-
-    fn execute(
-        request: &Self::Request,
-        authorizer: &mut impl packetcraftr::target::Authorizer,
-        registry: &core::registry::Registry,
-        executor: &mut Executor,
-        clock: &mut impl packetcraftr::clock::Clock,
-    ) -> Result<Document<Self::Document>, CliError> {
-        let result = packetcraftr::scan::run(request, authorizer, registry, executor, clock)
-            .map_err(CliError::classified)?;
-        let (result, diagnostics, stats) =
-            output::scan::Report::try_from_scan(result).map_err(CliError::classified)?;
-        Ok(Document::new(result, diagnostics, stats))
-    }
-
-    fn stream(
-        request: &Self::Request,
-        authorizer: &mut impl packetcraftr::target::Authorizer,
-        registry: &core::registry::Registry,
-        executor: &mut Executor,
-        clock: &mut impl packetcraftr::clock::Clock,
-        runtime: &packetcraftr::progress::Runtime,
-        stream: &StreamEncoder,
-    ) -> Result<(), CliError> {
-        let event_stream = stream.clone();
-        let summary = packetcraftr::scan::run_with_events(
-            request,
-            authorizer,
-            registry,
-            executor,
-            clock,
-            runtime,
-            move |event| {
-                Self::emit_event(event, &event_stream).map_err(CliError::into_boundary_error)
-            },
-        )
-        .map_err(CliError::classified)?;
-        Self::emit_complete(summary, stream)
-    }
-
-    fn render_text(document: Document<Self::Document>) -> Result<(), CliError> {
-        rendering::render_text(document.result, document.diagnostics, document.stats)
-    }
-
-    fn convert_event(
-        event: Self::Event,
-    ) -> Result<(Self::Record, Vec<core::diagnostic::Diagnostic>), CliError> {
-        output::scan::Event::try_from_scan(event).map_err(CliError::classified)
-    }
-
-    fn convert_complete(
-        summary: Self::Summary,
-    ) -> Result<
-        (
-            Self::Record,
-            Vec<core::diagnostic::Diagnostic>,
-            output::envelope::Stats,
-        ),
-        CliError,
-    > {
-        Ok(output::scan::Event::complete_from_scan(summary))
-    }
-}

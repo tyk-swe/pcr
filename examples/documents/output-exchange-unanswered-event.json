@@ -1,12 +1,12 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "sequence": 2,
   "status": "success",
   "result": {
-    "event": "unanswered",
     "request_index": 1
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "event": "unanswered"
 }

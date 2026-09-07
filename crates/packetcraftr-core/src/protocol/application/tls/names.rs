@@ -181,7 +181,6 @@ fn lookup<K: Copy + Ord>(table: &[(K, &'static str)], value: K) -> Option<&'stat
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::{
         ALERT_DESCRIPTIONS, CIPHER_SUITES, NAMED_GROUPS, VERSIONS, alert_description_name,

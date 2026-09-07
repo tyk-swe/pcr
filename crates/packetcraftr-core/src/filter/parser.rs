@@ -197,10 +197,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn consume_operand(&mut self) -> Result<(), Error> {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "compile only dispatches here while self.index < self.tokens.len()"
-        )]
+        // compile only dispatches here while self.index < self.tokens.len()
         let Spanned { token, offset } = &self.tokens[self.index];
         match token {
             Token::LeftParen => {
@@ -246,10 +243,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn consume_operator(&mut self) -> Result<(), Error> {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "compile only dispatches here while self.index < self.tokens.len()"
-        )]
+        // compile only dispatches here while self.index < self.tokens.len()
         let Spanned { token, offset } = &self.tokens[self.index];
         match token {
             Token::And | Token::Or => {
@@ -362,10 +356,7 @@ enum Subject {
 }
 
 fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Result<Subject, Error> {
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "start is the index of the Word token consume_operand already read"
-    )]
+    // start is the index of the Word token consume_operand already read
     let Spanned { token, offset } = &tokens[start];
     let offset = *offset;
     let Token::Word(word) = token else {
@@ -648,7 +639,6 @@ fn describe(token: &Token) -> String {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
 

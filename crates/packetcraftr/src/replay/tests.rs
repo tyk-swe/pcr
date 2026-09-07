@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -32,7 +29,7 @@ use super::wire::{
     validate_transmission_evidence,
 };
 use crate::BoundaryError;
-use crate::authorization::{Authorizer, Operation};
+use crate::policy::{Authorizer, Operation};
 use crate::test_fixtures::RecordingClock;
 
 #[derive(Default)]

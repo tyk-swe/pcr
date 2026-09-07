@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{analysis, analysis::pcap as capture};
+use packetcraftr_core::analysis;
+use packetcraftr_core::analysis::pcap as capture;
 
 /// How conflicting bytes in overlapping IP fragments are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]

@@ -1,9 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::{netio as net, output};
+use packetcraftr_netio as net;
+
+use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::optional_display;
@@ -52,7 +54,7 @@ fn interface_line(interface: &output::network::Interface) -> String {
 
 /// The set flags as one comma-separated word, so text stays greppable while
 /// JSON keeps the structured object.
-fn interface_flags(flags: &output::network::Flags) -> String {
+fn interface_flags(flags: &packetcraftr_netio::interface::Flags) -> String {
     let mut set = Vec::new();
     if flags.up {
         set.push("up");
@@ -99,7 +101,7 @@ mod tests {
                     },
                     mtu: Some(1_500),
                     capability: net::link::Capability::Layer2AndLayer3,
-                    link_type: packetcraftr::core::frame::LinkType::ETHERNET,
+                    link_type: packetcraftr_core::frame::LinkType::ETHERNET,
                 },
                 net::interface::Info {
                     id: net::interface::Id {
@@ -112,7 +114,7 @@ mod tests {
                     flags: net::interface::Flags::default(),
                     mtu: None,
                     capability: net::link::Capability::Layer2AndLayer3,
-                    link_type: packetcraftr::core::frame::LinkType::ETHERNET,
+                    link_type: packetcraftr_core::frame::LinkType::ETHERNET,
                 },
             ])
         }

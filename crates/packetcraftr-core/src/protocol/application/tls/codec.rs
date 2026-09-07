@@ -436,7 +436,6 @@ fn raw_segment(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::*;
     use crate::protocol::application::tls::test_wire::{TLS_1_2, record};

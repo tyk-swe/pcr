@@ -3,9 +3,11 @@
 
 use std::net::SocketAddr;
 
-use packetcraftr::output::contract::Format;
+use packetcraftr_cli::output::contract::Format;
 
-use packetcraftr::{analysis, output};
+use packetcraftr_core::analysis;
+
+use packetcraftr_cli::output;
 
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;
@@ -98,7 +100,7 @@ pub(super) fn render_aggregate(
     emit_aggregate(
         output::contract::Command::Follow,
         output::follow::Report::from_summary(
-            selector.transport.into(),
+            selector.transport,
             selector.index,
             summary,
             state.retained.into_items(),
@@ -116,7 +118,7 @@ pub(super) fn render_stream(
 ) -> Result<(), CliError> {
     Ok(stream.complete(
         output::follow::Report::from_summary(
-            selector.transport.into(),
+            selector.transport,
             selector.index,
             summary,
             Vec::new(),

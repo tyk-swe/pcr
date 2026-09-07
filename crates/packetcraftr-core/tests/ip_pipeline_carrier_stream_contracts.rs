@@ -1,8 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-// Test code indexes fixtures and counts by hand; the fail-closed lints are
-// for library paths.
-#![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 //! Contracts for the carrier stream a fragmented inner datagram is
 //! attributed to while it is incomplete.
@@ -307,7 +304,14 @@ fn fragmented_udp_inside_udp_defers_the_same_kind_carrier_stream() {
             ..Options::default()
         },
         |record| {
-            observed.push((record.number, record.udp_stream, record.derived().is_some()));
+            observed.push((
+                record.number,
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record.derived().is_some(),
+            ));
             chunks.extend(follow.observe(&record));
             Ok(())
         },
@@ -342,7 +346,14 @@ fn fragmented_ipv6_extension_udp_defers_the_same_kind_carrier_stream() {
             ..Options::default()
         },
         |record| {
-            observed.push((record.number, record.udp_stream, record.derived().is_some()));
+            observed.push((
+                record.number,
+                record
+                    .udp
+                    .and_then(|view| view.conversation)
+                    .map(|stream| stream.index),
+                record.derived().is_some(),
+            ));
             chunks.extend(follow.observe(&record));
             Ok(())
         },
@@ -396,8 +407,14 @@ fn unresolved_ipv6_extension_fragment_keeps_cross_kind_carrier_stream() {
     packetcraftr_core::analysis::run(&mut capture, registry, &Options::default(), |record| {
         observed.push((
             record.number,
-            record.udp_stream,
-            record.tcp_stream,
+            record
+                .udp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
+            record
+                .tcp
+                .and_then(|view| view.conversation)
+                .map(|stream| stream.index),
             record.derived().is_some(),
         ));
         findings.extend(expert.observe(&record));

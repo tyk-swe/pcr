@@ -135,11 +135,8 @@ impl LayerCodec for TcpCodec {
         let header_len = TCP_MIN_LEN.saturating_add(options.len());
         let data_offset =
             u8::try_from(header_len / 4).map_err(|_| invalid(NAME, "header length overflow"))?;
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the 9-bit flags field is split deliberately: bit 8 goes into the byte at \
-                      offset 12 below and the low 8 bits are this byte"
-        )]
+        // the 9-bit flags field is split deliberately: bit 8 goes into the byte at offset 12 below
+        // and the low 8 bits are this byte
         let flags_low = layer.flags as u8;
         let mut prefix = Vec::with_capacity(header_len);
         prefix.extend_from_slice(&layer.source_port.to_be_bytes());
@@ -167,10 +164,7 @@ impl LayerCodec for TcpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "the fixed twenty-byte prefix above always reserves bytes 16..18 for the checksum"
-        )]
+        // the fixed twenty-byte prefix above always reserves bytes 16..18 for the checksum
         {
             prefix[16..18].copy_from_slice(&checksum.to_be_bytes());
         }
@@ -267,7 +261,6 @@ impl LayerCodec for TcpCodec {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
     use super::child_discriminators;
     use crate::registry::Discriminator;

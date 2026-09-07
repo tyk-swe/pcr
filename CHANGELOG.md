@@ -6,6 +6,51 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Maintainability redesign
+
+- **BREAKING:** Structured output uses `packetcraftr.output/v2`. Every NDJSON
+  envelope carries an explicit `event`, with `complete` or `error` as its single
+  terminal record. Event tags no longer live inside `result`; expert findings,
+  follow chunks, and replay frames use the same convention. Replay drops the
+  redundant always-true `transmitted` field. Packet documents remain v1.
+- **BREAKING:** CLI representations and the stream encoder live in
+  `packetcraftr_cli::output`. The workflow crate no longer re-exports core,
+  analysis, netio, or machine-output APIs. Import values from their owning
+  crates; identity-only output types and the output mirror macro are removed.
+- **BREAKING:** Policy operation declarations, authorizers, and exact-wire
+  checks belong to `packetcraftr::policy`. `Policy::authorize` is the shared
+  operation admission API. DNS budget construction rejects arithmetic overflow.
+  Client preparation still checks policy before discovery and after final
+  materialization, retaining typed wire-decoder errors.
+- **BREAKING:** DNS attempts use transport-specific evidence. Validated
+  `Completion` and `Report` constructors reject contradictory accepted-response
+  and fallback evidence; aggregate reports share the streamed summary metadata.
+  Offline frame records carry coherent TCP/UDP views with scoped conversations.
+  Conversation endpoints live at `packetcraftr_core::analysis::Endpoint`.
+- Packet edits invalidate derived lengths in constant time. IP reassembly
+  releases its recorded admission charge at completion, expiry, and EOF.
+  Statistics output owns exactly one selected table and moves retained rows.
+- Progress workers own callback resources and permits through cleanup, including
+  unwinding; the callback reaper is removed. Netlink workers share native
+  admission capacity but no longer start or depend on the capture cleanup pool.
+  DNS, scan, and traceroute CLI handlers call their owners directly, using one
+  immutable policy instance instead of duplicated configuration.
+- **BREAKING:** `native-interfaces` is removed; `native-route` supplies passive
+  interfaces and routes. Pcap-free builds select `native-layer3`. The unused
+  `decrypt` feature, dependency-only crypto scope, and runtime-schema roadmap
+  are removed.
+- The supported toolchain is Rust 1.98.1. Direct dependencies and tooling are
+  refreshed to current stable releases, including noyalib 0.0.39 and jsonschema
+  0.55.0, with both workspace lockfiles updated. The YAML round trip now includes
+  a bare dash, and stream exhaustion uses an exact scanner-error match.
+- Development uses Cargo, rustfmt, and Clippy directly. Nextest, blanket
+  arithmetic/indexing/cast policies, shell source policing, duplicate feature
+  and Quick Start scripts, old-toolchain CI, and automatic AI review are removed.
+  CI retains distinct portable/native/platform/packaging risks; dependency
+  advisories and licenses run on schedule and dependency changes. Release
+  checksums and provenance remain in place.
+
+
 ### Added
 
 - Protocol details list registered display-filter aliases, either-endpoint

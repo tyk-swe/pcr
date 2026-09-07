@@ -11,8 +11,8 @@ use super::advance;
 use super::primitives::{read_u16, read_u32};
 use crate::dns::TYPE_OPT;
 use crate::dns::error::WireError;
-use crate::dns::model::{Edns, EdnsOption, MessageLimits, Name, Record, RecordValue};
 use crate::dns::wire::name::decode_name;
+use crate::dns::{Edns, EdnsOption, MessageLimits, Name, Record, RecordValue};
 
 pub(super) fn decode_records(
     message: &[u8],
@@ -140,10 +140,7 @@ impl Rdata<'_> {
                     limit: self.limits.max_txt_strings,
                 });
             }
-            #[expect(
-                clippy::indexing_slicing,
-                reason = "cursor is below bytes.len() from the loop condition"
-            )]
+            // cursor is below bytes.len() from the loop condition
             let length = usize::from(self.bytes[cursor]);
             cursor = cursor.saturating_add(1);
             let string = self
@@ -280,10 +277,7 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
                 .ok_or_else(|| WireError::InvalidEdns {
                     message: format!("option header is truncated at RDATA byte {cursor}"),
                 })?;
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "header is the four-byte slice returned by the get above"
-        )]
+        // header is the four-byte slice returned by the get above
         let (code, length) = (
             u16::from_be_bytes([header[0], header[1]]),
             usize::from(u16::from_be_bytes([header[2], header[3]])),

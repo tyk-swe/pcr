@@ -129,11 +129,8 @@ impl<'registry> DecodeSession<'registry> {
         cursor: &DecodeCursor,
         allow_link_padding: bool,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "cursor byte ranges are derived from the original buffer's own length and \
-                      validated by validate_layer before the traversal advances"
-        )]
+        // cursor byte ranges are derived from the original buffer's own length and validated by
+        // validate_layer before the traversal advances
         let input = &self.original[cursor.bytes.clone()];
         codec.decode(
             input,

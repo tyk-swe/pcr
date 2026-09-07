@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::ValueEnum;
-use packetcraftr::core;
+use packetcraftr_core as core;
 
 use crate::command_options::{
     AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,

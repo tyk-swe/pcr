@@ -144,6 +144,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `build` and `dissect` construct structured packet reports only for JSON
+  output that uses them, avoiding field conversion for text, raw, hex, and
+  dissection filter misses while preserving output and diagnostics.
 - CI keeps Linux feature-profile tests and native platform validation while
   reducing duplicate builds and job setup. Coverage reports are manual-only;
   fuzzing runs daily or manually instead of on pull requests. Removed the

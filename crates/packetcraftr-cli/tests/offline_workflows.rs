@@ -1260,7 +1260,8 @@ fn packet_documents_stdin_and_file_inputs_cover_offline_input_paths() {
 
 #[test]
 fn dissect_unmatched_filter_keeps_byte_output_empty_and_reports_on_stderr() {
-    let frame = decode_hex(UDP_CLIENT);
+    let mut frame = decode_hex(UDP_CLIENT);
+    *frame.last_mut().expect("UDP payload") ^= 1;
     for format in ["text", "hex", "raw"] {
         let output = run_with_stdin(
             &[
@@ -1304,10 +1305,15 @@ fn dissect_matched_and_json_outputs_are_unchanged_by_the_miss_notice() {
             &frame,
         );
         assert!(output.status.success(), "{format}: {:?}", output.stderr);
-        assert!(
-            !output.stdout.is_empty(),
-            "{format} must still emit a match",
-        );
+        match format {
+            "text" => assert_eq!(
+                output.stdout,
+                b"decoded 33 bytes into 3 layer(s)\n0: ipv4\n1: udp\n2: raw\n"
+            ),
+            "hex" => assert_eq!(output.stdout, format!("{UDP_CLIENT}\n").as_bytes()),
+            "raw" => assert_eq!(output.stdout, frame),
+            _ => unreachable!("fixture output formats are exhaustive"),
+        }
         assert!(
             output.stderr.is_empty(),
             "{format} must stay silent on stderr for a match: {:?}",
@@ -1335,6 +1341,38 @@ fn dissect_matched_and_json_outputs_are_unchanged_by_the_miss_notice() {
         filtered.stderr.is_empty(),
         "JSON keeps the miss in the document, not on stderr: {:?}",
         String::from_utf8_lossy(&filtered.stderr),
+    );
+
+    let mut damaged = frame;
+    *damaged.last_mut().expect("UDP payload") ^= 1;
+    for filter in ["udp", "tcp"] {
+        let output = run_with_stdin(
+            &[
+                "--output",
+                "json",
+                "dissect",
+                "--link-type",
+                "228",
+                "--filter",
+                filter,
+            ],
+            &damaged,
+        );
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let value = parse_json(&output);
+        assert_eq!(value["result"]["matched"], filter == "udp");
+        assert_eq!(value["result"]["dissection"].is_null(), filter == "tcp");
+        assert_eq!(value["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(value["diagnostics"][0]["code"], "decode.udp_checksum");
+        assert_eq!(value["diagnostics"][0]["message"], "UDP checksum mismatch");
+    }
+    let text = run_with_stdin(&["dissect", "--link-type", "228"], &damaged);
+    assert!(text.status.success());
+    assert!(text.stderr.is_empty());
+    assert_eq!(
+        text.stdout,
+        b"decoded 33 bytes into 3 layer(s)\n0: ipv4\n1: udp\n2: raw\nwarning decode.udp_checksum: UDP checksum mismatch\n"
     );
 }
 

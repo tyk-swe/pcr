@@ -67,7 +67,6 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
         None => true,
     };
-    let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
     // An unmatched frame keeps byte-oriented stdout empty on success; the
     // notice goes to stderr through the shared human renderer.
     if !kept && !matches!(format, Format::Json) {
@@ -77,21 +76,32 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         Format::Text => {
             write_summary_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
-                result.frame.length,
-                result.packet.layers.len()
+                decoded.original.len(),
+                decoded.packet.len()
             ))?;
-            for (index, layer) in result.packet.layers.iter().enumerate() {
-                write_stdout_line(format_args!("{index}: {}", layer.protocol))?;
+            for (index, layer) in decoded.packet.iter().enumerate() {
+                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
             }
-            render_diagnostics_text(&diagnostics)
+            render_diagnostics_text(&decoded.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
-        Format::Raw => write_raw(result.frame.bytes()),
-        Format::Json => emit_aggregate(
-            output::contract::Command::Dissect,
-            output::dissect::AggregateResult::new(kept.then_some(result)),
-            diagnostics,
-        ),
+        Format::Hex => write_plain_line(format_args!(
+            "{}",
+            output::frame::Wire::new(decoded.original).bytes_hex()
+        )),
+        Format::Raw => write_raw(&decoded.original),
+        Format::Json => {
+            let (dissection, diagnostics) = if kept {
+                let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
+                (Some(result), diagnostics)
+            } else {
+                (None, decoded.diagnostics)
+            };
+            emit_aggregate(
+                output::contract::Command::Dissect,
+                output::dissect::AggregateResult::new(dissection),
+                diagnostics,
+            )
+        }
         _ => unreachable!("command dispatch validated the output format"),
     }
 }

@@ -248,6 +248,9 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     assert_eq!(value["schema"], "packetcraftr.output/v1");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
+    let text = run_success(&["--output", "text", "build", "--packet", "raw(text=hello)"]);
+    assert_eq!(text.stdout, b"built 5 bytes\n68 65 6c 6c 6f\n");
+
     let hex = run_success(&["--output", "hex", "build", "--packet", "raw(text=hello)"]);
     assert_eq!(String::from_utf8_lossy(&hex.stdout).trim(), "68656c6c6f");
 

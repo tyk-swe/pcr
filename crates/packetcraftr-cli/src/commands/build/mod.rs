@@ -28,16 +28,21 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             arguments.budget.build_options(arguments.mode.into()),
         )
         .map_err(build_error)?;
-    let (result, diagnostics) = output::build::Report::from_built(built);
     match format {
         Format::Text => {
-            write_summary_line(format_args!("built {} bytes", result.frame.length))?;
-            write_stdout_line(format_args!("{}", spaced_hex(result.frame.bytes())))?;
-            render_diagnostics_text(&diagnostics)
+            write_summary_line(format_args!("built {} bytes", built.bytes.len()))?;
+            write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
+            render_diagnostics_text(&built.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
-        Format::Raw => write_raw(result.frame.bytes()),
-        Format::Json => emit_aggregate(output::contract::Command::Build, result, diagnostics),
+        Format::Hex => write_plain_line(format_args!(
+            "{}",
+            output::frame::Wire::new(built.bytes).bytes_hex()
+        )),
+        Format::Raw => write_raw(&built.bytes),
+        Format::Json => {
+            let (result, diagnostics) = output::build::Report::from_built(built);
+            emit_aggregate(output::contract::Command::Build, result, diagnostics)
+        }
         _ => unreachable!("command dispatch validated the output format"),
     }
 }

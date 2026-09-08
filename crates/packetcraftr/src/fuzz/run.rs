@@ -137,7 +137,8 @@ where
         registry,
     } = input;
     live.validate()?;
-    let mut deadline = Deadline::new(request.limits.max_duration);
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     let live_dissector = Dissector::new(Arc::clone(&registry));
     let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
     authorize_campaign(&prepared, live, authorizer)?;
@@ -337,7 +338,9 @@ impl ExecutionPhase<'_> {
         self.deadline
             .start_accounting(delay)
             .map_err(duration_limit)?;
-        clock.sleep(delay).map_err(|source| Error::Clock {
+        let slept = clock.sleep(delay);
+        self.deadline.check_cancelled()?;
+        slept.map_err(|source| Error::Clock {
             case_index,
             source: Box::new(source),
         })?;

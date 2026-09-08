@@ -201,6 +201,93 @@ impl Executor<ExecutionCase> for CountingExecutor {
     }
 }
 
+struct InterruptedPacingClock {
+    signal: packetcraftr_core::budget::Cancellation,
+    cancel: bool,
+    fail: bool,
+}
+
+impl crate::clock::Clock for InterruptedPacingClock {
+    type Error = std::io::Error;
+
+    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
+        assert!(!delay.is_zero());
+        if self.cancel {
+            self.signal.cancel();
+        }
+        if self.fail {
+            Err(std::io::Error::other("pacing stopped"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
+        Some(self.signal.clone())
+    }
+}
+
+#[test]
+fn live_pacing_distinguishes_cancellation_from_clock_failure() {
+    for progressive in [false, true] {
+        for (cancel, fail) in [(true, true), (true, false), (false, true)] {
+            let request = packet_fuzz::Request {
+                cases: 2,
+                first_case: 7,
+                strategies: vec![packet_fuzz::Strategy::BitFlip],
+                targets: vec!["2.bytes".parse().unwrap()],
+                ..packet_fuzz::Request::default()
+            };
+            let input = RunInput {
+                request: &request,
+                live: LiveOptions {
+                    cases_per_second: Some(10),
+                    ..LiveOptions::default()
+                },
+                packet: packet(),
+                registry: packetcraftr_core::protocol::builtin::registry(),
+            };
+            let mut clock = InterruptedPacingClock {
+                signal: Default::default(),
+                cancel,
+                fail,
+            };
+            let mut executor = CountingExecutor::default();
+            let published = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let error = if progressive {
+                let published = Arc::clone(&published);
+                run_with_events(
+                    input,
+                    &mut AllowAll,
+                    &mut executor,
+                    &mut clock,
+                    &Runtime::default(),
+                    move |_| {
+                        published.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+                .unwrap_err()
+            } else {
+                run(input, &mut AllowAll, &mut executor, &mut clock).unwrap_err()
+            };
+            assert_eq!(executor.executions, 1);
+            assert_eq!(
+                published.load(std::sync::atomic::Ordering::SeqCst),
+                usize::from(progressive)
+            );
+            if cancel {
+                assert!(matches!(error, super::Error::Cancelled(_)));
+                assert_eq!(error.classification().code, "io.cancelled");
+            } else {
+                assert!(matches!(error, super::Error::Clock { case_index: 8, .. }));
+                assert_eq!(error.classification().code, "io.fuzz_clock");
+                assert_eq!(error.causes(), ["pacing stopped"]);
+            }
+        }
+    }
+}
+
 struct RouteMaterializingExecutor {
     registry: Arc<packetcraftr_core::registry::Registry>,
 }

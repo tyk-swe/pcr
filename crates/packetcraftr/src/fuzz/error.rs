@@ -11,6 +11,8 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
+    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
+    #[error(transparent)]
     Campaign(#[from] packetcraftr_core::fuzz::Error),
     #[error("invalid fuzz limit {field}={value}: {reason}")]
     InvalidLimit {
@@ -50,6 +52,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(error) => error.classification(),
             Self::Campaign(error) => error.classification(),
             Self::InvalidLimit { .. } | Self::InvalidTimeout { .. } => Classification::new(
                 "cli.fuzz_limit",

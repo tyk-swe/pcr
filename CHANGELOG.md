@@ -8,6 +8,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Engineering review corrections (next: 0.5.0-beta.3)
 
+- Live fuzz pacing preserves `io.cancelled` on interruption in JSON/NDJSON
+  output instead of reporting a timer failure.
 - Correct distinct TLS conversation counting after frame filtering, repair the
   output/v2 jq example, and fail capture benchmarks on parse errors and incomplete
   fixture traversal.

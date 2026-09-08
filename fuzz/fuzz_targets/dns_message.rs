@@ -14,6 +14,22 @@ fuzz_target!(|data: &[u8]| {
         max_rejected_records: 8,
         ..MessageLimits::default()
     };
+    let offline_limits = packetcraftr_core::protocol::application::dns::DecodeLimits::from(limits);
+    if let Ok(decoded) = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
+        bytes::Bytes::copy_from_slice(data),
+        offline_limits,
+    ) {
+        assert_eq!(decoded.wire().as_ref(), data);
+        assert!(
+            decoded.answers.len() + decoded.authorities.len() + decoded.additionals.len() <= 64
+        );
+        // Reflection must remain bounded for binary names, TXT, OPT options,
+        // and unknown records as well as ordinary address answers.
+        use packetcraftr_core::layer::Layer;
+        for section in ["answers", "authorities", "additionals"] {
+            assert!(decoded.field(section).is_some());
+        }
+    }
     let id = 0x1234;
     let _ = decode_tcp_frame(data, "example.test", QueryType::A, id, limits);
     if decode_response(data, "example.test", QueryType::A, id, limits).is_ok() {

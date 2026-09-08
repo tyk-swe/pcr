@@ -1,23 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::fmt::{self, Write as _};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::fmt;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use bytes::Bytes;
 use serde::Serialize;
 
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::protocol::application::dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
 use crate::Stats;
 
 use super::request::QueryType;
-use crate::dns::TYPE_OPT;
+use super::{Edns, Record};
 use crate::dns::classification::response_code_name;
-use crate::dns::error::WireError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -25,122 +22,6 @@ pub enum Section {
     Answer,
     Authority,
     Additional,
-}
-
-/// A lossless DNS wire name. Labels retain their exact octets; DNS semantic
-/// equality folds ASCII letters only, and presentation escaping is deferred
-/// to [`fmt::Display`].
-#[derive(Clone, Debug, Eq)]
-pub struct Name {
-    pub(in crate::dns) labels: Vec<Bytes>,
-}
-
-impl Name {
-    pub(in crate::dns) fn root() -> Self {
-        Self { labels: Vec::new() }
-    }
-
-    pub(in crate::dns) fn from_canonical_ascii(value: &str) -> Self {
-        if value == "." {
-            return Self::root();
-        }
-        Self {
-            labels: value
-                .trim_end_matches('.')
-                .split('.')
-                .map(|label| Bytes::copy_from_slice(label.as_bytes()))
-                .collect(),
-        }
-    }
-
-    pub fn from_labels<I, B>(labels: I) -> Result<Self, WireError>
-    where
-        I: IntoIterator<Item = B>,
-        B: Into<Bytes>,
-    {
-        let labels = labels.into_iter().map(Into::into).collect::<Vec<_>>();
-        let mut wire_length = 1usize;
-        for label in &labels {
-            if label.is_empty() || label.len() > MAX_LABEL_LEN {
-                return Err(WireError::InvalidName {
-                    message: format!("wire labels must contain 1..={MAX_LABEL_LEN} octets"),
-                });
-            }
-            wire_length = wire_length
-                .checked_add(label.len())
-                .and_then(|length| length.checked_add(1))
-                .ok_or(WireError::NameTooLong)?;
-        }
-        if wire_length > MAX_NAME_LEN {
-            return Err(WireError::NameTooLong);
-        }
-        Ok(Self { labels })
-    }
-
-    pub fn labels(&self) -> &[Bytes] {
-        &self.labels
-    }
-
-    pub(in crate::dns) fn is_root(&self) -> bool {
-        self.labels.is_empty()
-    }
-}
-
-impl PartialEq for Name {
-    fn eq(&self, other: &Self) -> bool {
-        self.labels.len() == other.labels.len()
-            && self
-                .labels
-                .iter()
-                .zip(&other.labels)
-                .all(|(left, right)| left.eq_ignore_ascii_case(right))
-    }
-}
-
-impl fmt::Display for Name {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.labels.is_empty() {
-            return formatter.write_str(".");
-        }
-        for (label_index, label) in self.labels.iter().enumerate() {
-            if label_index != 0 {
-                formatter.write_str(".")?;
-            }
-            for byte in label {
-                if byte.is_ascii_graphic() && !matches!(*byte, b'.' | b'\\') {
-                    formatter.write_char(char::from(*byte))?;
-                } else {
-                    write!(formatter, "\\{byte:03}")?;
-                }
-            }
-        }
-        formatter.write_str(".")
-    }
-}
-
-impl Serialize for Name {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct EdnsOption {
-    pub code: u16,
-    pub data: Bytes,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct Edns {
-    pub udp_payload_size: u16,
-    pub extended_response_code: u8,
-    pub version: u8,
-    pub dnssec_ok: bool,
-    pub flags: u16,
-    pub options: Vec<EdnsOption>,
 }
 
 impl fmt::Display for Section {
@@ -151,88 +32,6 @@ impl fmt::Display for Section {
             Self::Additional => "additional",
         })
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RecordValue {
-    A(Ipv4Addr),
-    Aaaa(Ipv6Addr),
-    Caa {
-        flags: u8,
-        tag: Bytes,
-        value: Bytes,
-    },
-    Cname(Name),
-    Mx {
-        preference: u16,
-        exchange: Name,
-    },
-    Ns(Name),
-    Ptr(Name),
-    Soa {
-        primary_name_server: Name,
-        responsible_mailbox: Name,
-        serial: u32,
-        refresh: u32,
-        retry: u32,
-        expire: u32,
-        minimum: u32,
-    },
-    Srv {
-        priority: u16,
-        weight: u16,
-        port: u16,
-        target: Name,
-    },
-    Txt(Vec<Bytes>),
-    Opt(Edns),
-    Unknown {
-        type_code: u16,
-        rdata: Bytes,
-    },
-}
-
-impl RecordValue {
-    pub const fn type_code(&self) -> u16 {
-        match self {
-            Self::A(_) => 1,
-            Self::Ns(_) => 2,
-            Self::Cname(_) => 5,
-            Self::Soa { .. } => 6,
-            Self::Ptr(_) => 12,
-            Self::Mx { .. } => 15,
-            Self::Txt(_) => 16,
-            Self::Aaaa(_) => 28,
-            Self::Srv { .. } => 33,
-            Self::Caa { .. } => 257,
-            Self::Opt(_) => TYPE_OPT,
-            Self::Unknown { type_code, .. } => *type_code,
-        }
-    }
-
-    pub(in crate::dns) fn referenced_name(&self) -> Option<&Name> {
-        match self {
-            Self::Cname(value) | Self::Ns(value) => Some(value),
-            Self::Mx { exchange, .. } => Some(exchange),
-            Self::Srv { target, .. } => Some(target),
-            Self::A(_)
-            | Self::Aaaa(_)
-            | Self::Caa { .. }
-            | Self::Ptr(_)
-            | Self::Soa { .. }
-            | Self::Txt(_)
-            | Self::Opt(_)
-            | Self::Unknown { .. } => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Record {
-    pub owner: Name,
-    pub class: u16,
-    pub ttl: u32,
-    pub value: RecordValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

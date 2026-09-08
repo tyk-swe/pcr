@@ -3,6 +3,8 @@
 
 //! DNS record, EDNS, and section output contracts.
 
+use packetcraftr_core::protocol::application::dns as dns_wire;
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use serde::Serialize;
@@ -86,8 +88,8 @@ pub struct Edns {
     pub options: Vec<EdnsOption>,
 }
 
-impl From<packetcraftr::dns::Edns> for Edns {
-    fn from(value: packetcraftr::dns::Edns) -> Self {
+impl From<dns_wire::Edns> for Edns {
+    fn from(value: dns_wire::Edns) -> Self {
         Self {
             udp_payload_size: value.udp_payload_size,
             extended_response_code: value.extended_response_code,
@@ -99,8 +101,8 @@ impl From<packetcraftr::dns::Edns> for Edns {
     }
 }
 
-impl From<packetcraftr::dns::EdnsOption> for EdnsOption {
-    fn from(value: packetcraftr::dns::EdnsOption) -> Self {
+impl From<dns_wire::EdnsOption> for EdnsOption {
+    fn from(value: dns_wire::EdnsOption) -> Self {
         Self {
             code: value.code,
             data_hex: compact_hex(&value.data),
@@ -118,34 +120,34 @@ pub struct Record {
 }
 
 impl Record {
-    pub(super) fn from_record(record: packetcraftr::dns::Record) -> Self {
+    pub(super) fn from_record(record: dns_wire::Record) -> Self {
         let data = match record.value {
-            packetcraftr::dns::RecordValue::A(address) => RecordData::A { address },
-            packetcraftr::dns::RecordValue::Aaaa(address) => RecordData::Aaaa { address },
-            packetcraftr::dns::RecordValue::Caa { flags, tag, value } => RecordData::Caa {
+            dns_wire::RecordValue::A(address) => RecordData::A { address },
+            dns_wire::RecordValue::Aaaa(address) => RecordData::Aaaa { address },
+            dns_wire::RecordValue::Caa { flags, tag, value } => RecordData::Caa {
                 flags,
                 tag: String::from_utf8_lossy(&tag).into_owned(),
                 tag_hex: compact_hex(&tag),
                 value: String::from_utf8_lossy(&value).into_owned(),
                 value_hex: compact_hex(&value),
             },
-            packetcraftr::dns::RecordValue::Cname(canonical_name) => RecordData::Cname {
+            dns_wire::RecordValue::Cname(canonical_name) => RecordData::Cname {
                 canonical_name: canonical_name.to_string(),
             },
-            packetcraftr::dns::RecordValue::Mx {
+            dns_wire::RecordValue::Mx {
                 preference,
                 exchange,
             } => RecordData::Mx {
                 preference,
                 exchange: exchange.to_string(),
             },
-            packetcraftr::dns::RecordValue::Ns(name_server) => RecordData::Ns {
+            dns_wire::RecordValue::Ns(name_server) => RecordData::Ns {
                 name_server: name_server.to_string(),
             },
-            packetcraftr::dns::RecordValue::Ptr(pointer) => RecordData::Ptr {
+            dns_wire::RecordValue::Ptr(pointer) => RecordData::Ptr {
                 pointer: pointer.to_string(),
             },
-            packetcraftr::dns::RecordValue::Soa {
+            dns_wire::RecordValue::Soa {
                 primary_name_server,
                 responsible_mailbox,
                 serial,
@@ -162,7 +164,7 @@ impl Record {
                 expire,
                 minimum,
             },
-            packetcraftr::dns::RecordValue::Srv {
+            dns_wire::RecordValue::Srv {
                 priority,
                 weight,
                 port,
@@ -173,15 +175,15 @@ impl Record {
                 port,
                 target: target.to_string(),
             },
-            packetcraftr::dns::RecordValue::Txt(strings) => RecordData::Txt {
+            dns_wire::RecordValue::Txt(strings) => RecordData::Txt {
                 strings: strings
                     .iter()
                     .map(|value| String::from_utf8_lossy(value).into_owned())
                     .collect(),
                 strings_hex: strings.iter().map(|value| compact_hex(value)).collect(),
             },
-            packetcraftr::dns::RecordValue::Opt(edns) => RecordData::Opt { edns: edns.into() },
-            packetcraftr::dns::RecordValue::Unknown { type_code, rdata } => RecordData::Unknown {
+            dns_wire::RecordValue::Opt(edns) => RecordData::Opt { edns: edns.into() },
+            dns_wire::RecordValue::Unknown { type_code, rdata } => RecordData::Unknown {
                 type_code,
                 rdata_hex: compact_hex(&rdata),
             },

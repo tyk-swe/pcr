@@ -8,6 +8,8 @@
 //! a Rust type drifting away from the contract. These tests check declared
 //! fields and frozen vocabularies while allowing additive payload fields.
 
+use packetcraftr_core::protocol::application::dns as dns_wire;
+
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -1028,8 +1030,8 @@ fn dns_timeout_case() -> Value {
     envelope_with_stats(Command::Dns, report, diagnostics, stats)
 }
 
-fn dns_name(value: &str) -> packetcraftr::dns::Name {
-    packetcraftr::dns::Name::from_labels(
+fn dns_name(value: &str) -> dns_wire::Name {
+    dns_wire::Name::from_labels(
         value
             .trim_end_matches('.')
             .split('.')
@@ -1038,14 +1040,14 @@ fn dns_name(value: &str) -> packetcraftr::dns::Name {
     .expect("fixture name is a valid DNS name")
 }
 
-fn dns_edns() -> packetcraftr::dns::Edns {
-    packetcraftr::dns::Edns {
+fn dns_edns() -> dns_wire::Edns {
+    dns_wire::Edns {
         udp_payload_size: 1_232,
         extended_response_code: 1,
         version: 0,
         dnssec_ok: true,
         flags: 0x8000,
-        options: vec![packetcraftr::dns::EdnsOption {
+        options: vec![dns_wire::EdnsOption {
             code: 10,
 
             data: Bytes::from_static(&[0xaa, 0xbb]),
@@ -1055,39 +1057,33 @@ fn dns_edns() -> packetcraftr::dns::Edns {
 
 /// Every `RecordValue` shape the v1 contract publishes, so a record variant
 /// the schema does not know about fails here.
-fn dns_records() -> Vec<packetcraftr::dns::Record> {
-    let record = |value| packetcraftr::dns::Record {
+fn dns_records() -> Vec<dns_wire::Record> {
+    let record = |value| dns_wire::Record {
         owner: dns_name("example.test."),
         class: 1,
         ttl: 300,
         value,
     };
     vec![
-        record(packetcraftr::dns::RecordValue::A(Ipv4Addr::new(
-            192, 0, 2, 1,
-        ))),
-        record(packetcraftr::dns::RecordValue::Aaaa(
+        record(dns_wire::RecordValue::A(Ipv4Addr::new(192, 0, 2, 1))),
+        record(dns_wire::RecordValue::Aaaa(
             "2001:db8::1".parse().expect("documentation address"),
         )),
-        record(packetcraftr::dns::RecordValue::Caa {
+        record(dns_wire::RecordValue::Caa {
             flags: 0,
             tag: Bytes::from_static(b"issue"),
             value: Bytes::from_static(b"ca.example.test"),
         }),
-        record(packetcraftr::dns::RecordValue::Cname(dns_name(
+        record(dns_wire::RecordValue::Cname(dns_name(
             "alias.example.test.",
         ))),
-        record(packetcraftr::dns::RecordValue::Mx {
+        record(dns_wire::RecordValue::Mx {
             preference: 10,
             exchange: dns_name("mail.example.test."),
         }),
-        record(packetcraftr::dns::RecordValue::Ns(dns_name(
-            "ns.example.test.",
-        ))),
-        record(packetcraftr::dns::RecordValue::Ptr(dns_name(
-            "ptr.example.test.",
-        ))),
-        record(packetcraftr::dns::RecordValue::Soa {
+        record(dns_wire::RecordValue::Ns(dns_name("ns.example.test."))),
+        record(dns_wire::RecordValue::Ptr(dns_name("ptr.example.test."))),
+        record(dns_wire::RecordValue::Soa {
             primary_name_server: dns_name("ns.example.test."),
             responsible_mailbox: dns_name("hostmaster.example.test."),
             serial: 1,
@@ -1096,17 +1092,17 @@ fn dns_records() -> Vec<packetcraftr::dns::Record> {
             expire: 4,
             minimum: 5,
         }),
-        record(packetcraftr::dns::RecordValue::Srv {
+        record(dns_wire::RecordValue::Srv {
             priority: 1,
             weight: 2,
             port: 443,
             target: dns_name("service.example.test."),
         }),
-        record(packetcraftr::dns::RecordValue::Txt(vec![
+        record(dns_wire::RecordValue::Txt(vec![
             Bytes::from_static(b"abc"),
             Bytes::from_static(&[0xff]),
         ])),
-        record(packetcraftr::dns::RecordValue::Unknown {
+        record(dns_wire::RecordValue::Unknown {
             type_code: 65_000,
             rdata: Bytes::from_static(&[9, 8, 7]),
         }),
@@ -1129,11 +1125,11 @@ fn dns_response_case() -> Value {
         },
         answers: dns_records(),
         authorities: Vec::new(),
-        additionals: vec![packetcraftr::dns::Record {
+        additionals: vec![dns_wire::Record {
             owner: dns_name("example.test."),
             class: 1_232,
             ttl: 0,
-            value: packetcraftr::dns::RecordValue::Opt(dns_edns()),
+            value: dns_wire::RecordValue::Opt(dns_edns()),
         }],
         rejected_records: vec![packetcraftr::dns::RejectedRecord {
             section: packetcraftr::dns::Section::Authority,

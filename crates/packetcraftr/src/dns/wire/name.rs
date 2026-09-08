@@ -3,9 +3,7 @@
 
 //! Canonical and compressed DNS name handling.
 
-use packetcraftr_core::protocol::application::dns::name::{
-    MAX_LABEL_LEN, MAX_NAME_LEN, decompress,
-};
+use packetcraftr_core::protocol::application::dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.
@@ -69,31 +67,29 @@ pub(super) fn decode_name(
     offset: usize,
     limits: crate::dns::MessageLimits,
 ) -> Result<(crate::dns::Name, usize), crate::dns::WireError> {
-    let expanded = decompress(message, offset, limits.max_name_pointers)?;
-    Ok((
-        crate::dns::Name {
-            labels: expanded.labels,
-        },
-        expanded.resume,
-    ))
+    packetcraftr_core::protocol::application::dns::decode_name(message, offset, limits.into())
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use packetcraftr_core::protocol::application::dns::DecodeError;
 
     #[test]
     fn compressed_names_reject_self_and_forward_pointers() {
         assert!(matches!(
             decode_name(&[0xc0, 0], 0, crate::dns::MessageLimits::default()),
-            Err(crate::dns::WireError::PointerLoop { offset: 0 })
+            Err(crate::dns::WireError::Decode(DecodeError::PointerLoop {
+                offset: 0
+            }))
         ));
         assert!(matches!(
             decode_name(&[0xc0, 2, 0], 0, crate::dns::MessageLimits::default()),
-            Err(crate::dns::WireError::ForwardPointer {
+            Err(crate::dns::WireError::Decode(DecodeError::ForwardPointer {
                 offset: 0,
                 pointer: 2
-            })
+            }))
         ));
     }
 }

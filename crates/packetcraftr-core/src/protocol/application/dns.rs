@@ -1,10 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS-over-UDP header and question dissection.
+//! Bounded, lossless DNS message dissection and resource-record decoding.
 
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 
 use bytes::Bytes;
 
@@ -21,14 +20,41 @@ use crate::protocol::common::{
 
 use crate::protocol::BuiltinProtocol;
 
+mod decode;
+mod error;
 pub mod name;
+mod records;
+mod reflection;
+
+pub use decode::decode_name;
+pub use error::DecodeError;
+pub use records::{Edns, EdnsOption, Name, Record, RecordValue};
 
 const NAME: &str = BuiltinProtocol::Dns.as_str();
-
-/// Octets in the fixed DNS message header, before the first question.
 pub(crate) const HEADER_LEN: usize = 12;
-const MAX_QUESTIONS: usize = 64;
-const MAX_NAME_POINTERS: usize = 32;
+
+/// Per-message resource bounds. Absolute ceilings remain 65,535 message/TXT
+/// bytes, 4,096 records/TXT strings, 128 name pointers, and 64 questions.
+/// Larger supplied limits are tightened to these ceilings; zero permits none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DecodeLimits {
+    pub max_message_bytes: usize,
+    pub max_records: usize,
+    pub max_name_pointers: usize,
+    pub max_txt_strings: usize,
+    pub max_txt_bytes: usize,
+}
+impl Default for DecodeLimits {
+    fn default() -> Self {
+        Self {
+            max_message_bytes: 65_535,
+            max_records: 512,
+            max_name_pointers: 32,
+            max_txt_strings: 256,
+            max_txt_bytes: 16_384,
+        }
+    }
+}
 
 /// The bounded, exact DNS-over-UDP layer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,57 +76,29 @@ pub struct Dns {
     pub qnames: Vec<String>,
     pub qtypes: Vec<u16>,
     pub qclasses: Vec<u16>,
+    pub answers: Vec<Record>,
+    pub authorities: Vec<Record>,
+    pub additionals: Vec<Record>,
     wire: Bytes,
 }
 
 impl Dns {
-    /// Parses a DNS message without interpreting resource records.
+    /// Parses a complete DNS message under the default bounded decoder limits.
     pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
-        let wire = wire.into();
-        let input = wire.as_ref();
-        let Some(header) = input.first_chunk::<HEADER_LEN>() else {
-            return Err(truncated(NAME, HEADER_LEN, input.len()));
-        };
-        let flags = u16::from_be_bytes([header[2], header[3]]);
-        let question_count = u16::from_be_bytes([header[4], header[5]]);
-        let answer_count = u16::from_be_bytes([header[6], header[7]]);
-        let authority_count = u16::from_be_bytes([header[8], header[9]]);
-        let additional_count = u16::from_be_bytes([header[10], header[11]]);
-        let count = usize::from(question_count);
-        if count > MAX_QUESTIONS {
-            return Err(invalid(
-                NAME,
-                format!("question count {count} exceeds the limit of {MAX_QUESTIONS}"),
-            ));
-        }
-
-        let ParsedQuestions {
-            qnames,
-            qtypes,
-            qclasses,
-        } = parse_questions(input, count)?;
-        Ok(Self {
-            id: u16::from_be_bytes([header[0], header[1]]),
-            response: flags & 0x8000 != 0,
-            opcode: u8::try_from((flags >> 11) & 0x0f)
-                .map_err(|_| invalid(NAME, "opcode exceeds four bits"))?,
-            authoritative_answer: flags & 0x0400 != 0,
-            truncated: flags & 0x0200 != 0,
-            recursion_desired: flags & 0x0100 != 0,
-            recursion_available: flags & 0x0080 != 0,
-            authenticated_data: flags & 0x0020 != 0,
-            checking_disabled: flags & 0x0010 != 0,
-            rcode: u8::try_from(flags & 0x000f)
-                .map_err(|_| invalid(NAME, "rcode exceeds four bits"))?,
-            question_count,
-            answer_count,
-            authority_count,
-            additional_count,
-            qnames,
-            qtypes,
-            qclasses,
-            wire,
+        Self::from_wire_with_limits(wire, DecodeLimits::default()).map_err(|error| match error {
+            DecodeError::MessageTooShort { actual, minimum } => truncated(NAME, minimum, actual),
+            error => invalid(NAME, error.to_string()),
         })
+    }
+
+    /// Decodes every declared section while retaining the complete original
+    /// wire. Malformed or truncated data returns a typed failure, never an
+    /// invented record. OPT records remain in their original section.
+    pub fn from_wire_with_limits(
+        wire: impl Into<Bytes>,
+        limits: DecodeLimits,
+    ) -> Result<Self, DecodeError> {
+        decode::decode(wire.into(), limits)
     }
 
     /// Returns the complete original DNS payload, including opaque records.
@@ -109,8 +107,25 @@ impl Dns {
     }
 
     fn validate_wire_consistency(&self) -> Result<(), crate::codec::Error> {
-        let parsed = Self::from_wire(self.wire.clone())?;
-        if parsed == *self {
+        let parsed = Self::from_wire_with_limits(
+            self.wire.clone(),
+            DecodeLimits {
+                max_records: 4096,
+                max_name_pointers: 128,
+                max_txt_strings: 4096,
+                max_txt_bytes: 65_535,
+                ..DecodeLimits::default()
+            },
+        )
+        .map_err(|error| invalid(NAME, error.to_string()))?;
+        // Name equality intentionally folds ASCII case for DNS semantics.
+        // Reflection preserves that case, so compare the exact presented fields
+        // before allowing the retained bytes to represent this layer.
+        if dns_schema()
+            .fields
+            .iter()
+            .all(|field| self.field(field.name) == parsed.field(field.name))
+        {
             Ok(())
         } else {
             Err(invalid(
@@ -119,117 +134,6 @@ impl Dns {
             ))
         }
     }
-}
-
-fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, crate::codec::Error> {
-    let end = checked_end(*cursor, 2)?;
-    let bytes = input
-        .get(*cursor..end)
-        .and_then(<[u8]>::first_chunk::<2>)
-        .ok_or_else(|| truncated(NAME, end, input.len()))?;
-    *cursor = end;
-    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
-}
-
-struct ParsedQuestions {
-    qnames: Vec<String>,
-    qtypes: Vec<u16>,
-    qclasses: Vec<u16>,
-}
-
-fn parse_questions(input: &[u8], count: usize) -> Result<ParsedQuestions, crate::codec::Error> {
-    let mut cursor = HEADER_LEN;
-    let mut qnames = Vec::with_capacity(count);
-    let mut qtypes = Vec::with_capacity(count);
-    let mut qclasses = Vec::with_capacity(count);
-    for _ in 0..count {
-        let (next, name) = parse_name(input, cursor)?;
-        cursor = next;
-        qnames.push(name);
-        qtypes.push(read_u16(input, &mut cursor)?);
-        qclasses.push(read_u16(input, &mut cursor)?);
-    }
-    Ok(ParsedQuestions {
-        qnames,
-        qtypes,
-        qclasses,
-    })
-}
-
-fn checked_end(offset: usize, length: usize) -> Result<usize, crate::codec::Error> {
-    offset
-        .checked_add(length)
-        .ok_or(crate::codec::Error::LengthOverflow {
-            protocol: protocol(NAME),
-        })
-}
-
-fn parse_name(input: &[u8], start: usize) -> Result<(usize, String), crate::codec::Error> {
-    let expanded = name::decompress(input, start, MAX_NAME_POINTERS)
-        .map_err(|error| name_error(input, error))?;
-    Ok((expanded.resume, format_name(&expanded.labels)))
-}
-
-/// Restates a decompression failure in this codec's own vocabulary.
-fn name_error(input: &[u8], error: name::Error) -> crate::codec::Error {
-    match error {
-        name::Error::TruncatedLabelLength { offset } => {
-            truncated(NAME, offset.saturating_add(1), input.len())
-        }
-        name::Error::TruncatedPointer { offset } => {
-            truncated(NAME, offset.saturating_add(2), input.len())
-        }
-        name::Error::TruncatedLabel { end, .. } => truncated(NAME, end, input.len()),
-        name::Error::PointerOutOfBounds { pointer, .. } => invalid(
-            NAME,
-            format!("compression pointer {pointer} is outside the message"),
-        ),
-        name::Error::SelfPointer { offset } => invalid(
-            NAME,
-            format!("compression pointer {offset} is not backward from {offset}"),
-        ),
-        name::Error::ForwardPointer { offset, pointer } => invalid(
-            NAME,
-            format!("compression pointer {pointer} is not backward from {offset}"),
-        ),
-        name::Error::PointerLoop { offset } => {
-            invalid(NAME, format!("compression pointer loop at {offset}"))
-        }
-        name::Error::PointerLimit { limit } => invalid(
-            NAME,
-            format!("compression pointer limit of {limit} exceeded"),
-        ),
-        name::Error::ReservedLabelLength { .. } => invalid(NAME, "reserved label length tag"),
-        name::Error::LabelTooLong { actual, .. } => invalid(
-            NAME,
-            format!("label length {actual} exceeds {}", name::MAX_LABEL_LEN),
-        ),
-        name::Error::NameTooLong => invalid(
-            NAME,
-            format!("expanded name exceeds {} wire bytes", name::MAX_NAME_LEN),
-        ),
-    }
-}
-
-fn format_name(labels: &[Bytes]) -> String {
-    if labels.is_empty() {
-        return ".".to_owned();
-    }
-    let mut name = String::new();
-    for (index, label) in labels.iter().enumerate() {
-        if index != 0 {
-            name.push('.');
-        }
-        for byte in label {
-            if (0x20..=0x7e).contains(byte) && !matches!(*byte, b'.' | b'\\') {
-                name.push(char::from(*byte));
-            } else {
-                let _ = write!(name, "\\{byte:03}");
-            }
-        }
-    }
-    name.push('.');
-    name
 }
 
 reflective_layer! {
@@ -251,7 +155,10 @@ reflective_layer! {
         "additional_count" => { kind: Unsigned, derived: false, required: false, description: "Additional-record count", get |layer| Some(FieldValue::from(layer.additional_count)), set |_layer, _value, name| read_only(dns_schema(), name), layout: (10, 12) },
         "qname" => { kind: List, derived: false, required: false, description: "Question names", get |layer| Some(text_list(&layer.qnames)), set |_layer, _value, name| read_only(dns_schema(), name) },
         "qtype" => { kind: List, derived: false, required: false, description: "Question type codes", get |layer| Some(unsigned_list(&layer.qtypes)), set |_layer, _value, name| read_only(dns_schema(), name) },
-        "qclass" => { kind: List, derived: false, required: false, description: "Question class codes", get |layer| Some(unsigned_list(&layer.qclasses)), set |_layer, _value, name| read_only(dns_schema(), name) }
+        "qclass" => { kind: List, derived: false, required: false, description: "Question class codes", get |layer| Some(unsigned_list(&layer.qclasses)), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "answers" => { kind: List, derived: false, required: false, description: "Answer records: [owner, type, class, TTL, RDATA]", get |layer| Some(reflection::records(&layer.answers)), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "authorities" => { kind: List, derived: false, required: false, description: "Authority records: [owner, type, class, TTL, RDATA]", get |layer| Some(reflection::records(&layer.authorities)), set |_layer, _value, name| read_only(dns_schema(), name) },
+        "additionals" => { kind: List, derived: false, required: false, description: "Additional records including EDNS: [owner, type, class, TTL, RDATA]", get |layer| Some(reflection::records(&layer.additionals)), set |_layer, _value, name| read_only(dns_schema(), name) }
     }
     layout pub(crate) fn dns_layout();
 }
@@ -291,6 +198,17 @@ impl LayerCodec for DnsCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
+        let maximum = DecodeLimits::default().max_message_bytes;
+        if input.len() > maximum {
+            return Err(invalid(
+                NAME,
+                DecodeError::MessageTooLarge {
+                    actual: input.len(),
+                    maximum,
+                }
+                .to_string(),
+            ));
+        }
         let layer = Dns::from_wire(Bytes::copy_from_slice(input))?;
         Ok(DecodedLayer {
             layer: Box::new(layer),

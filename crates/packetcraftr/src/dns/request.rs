@@ -269,3 +269,15 @@ impl Request {
         canonical_query_name(&self.query_name).map_err(Error::Query)
     }
 }
+
+impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::DecodeLimits {
+    fn from(limits: MessageLimits) -> Self {
+        Self {
+            max_message_bytes: limits.max_message_bytes,
+            max_records: limits.max_records,
+            max_name_pointers: limits.max_name_pointers,
+            max_txt_strings: limits.max_txt_strings,
+            max_txt_bytes: limits.max_txt_bytes,
+        }
+    }
+}

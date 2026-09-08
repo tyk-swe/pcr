@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::application::dns as dns_wire;
+
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -541,12 +543,12 @@ fn validate_active_event_variants() {
 
 fn validate_dns_event_variants() {
     let context = dns_context();
-    let owner = packetcraftr::dns::Name::from_labels([vec![b'a']]).unwrap();
-    let record = packetcraftr::dns::Record {
+    let owner = dns_wire::Name::from_labels([vec![b'a']]).unwrap();
+    let record = dns_wire::Record {
         owner,
         class: 1,
         ttl: 1,
-        value: packetcraftr::dns::RecordValue::A(Ipv4Addr::new(192, 0, 2, 1)),
+        value: dns_wire::RecordValue::A(Ipv4Addr::new(192, 0, 2, 1)),
     };
     let events = vec![
         packetcraftr::dns::Event::Attempt {

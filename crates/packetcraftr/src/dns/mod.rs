@@ -76,15 +76,10 @@ pub use execution::{Exchange, Execution, Probe, TcpExchange, TcpExecution, TcpEx
 pub use report::AttemptEvidence;
 pub use report::AttemptTransport;
 pub use report::Completion;
-pub use report::Edns;
-pub use report::EdnsOption;
 pub use report::Event;
 pub use report::EventContext;
 pub use report::EvidenceError;
-pub use report::Name;
 pub use report::Outcome;
-pub use report::Record;
-pub use report::RecordValue;
 pub use report::RejectedRecord;
 pub use report::Report;
 pub use report::ResponseMetadata;
@@ -97,3 +92,5 @@ pub use request::{Limits, MessageLimits, QueryType, Request};
 
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};
 pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};
+
+use packetcraftr_core::protocol::application::dns::{Edns, Name, Record, RecordValue};

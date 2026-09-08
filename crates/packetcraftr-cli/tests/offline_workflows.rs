@@ -1749,3 +1749,73 @@ fn protocol_details_discover_filter_spellings_and_their_comparison_semantics() {
         "published detail matches actual discovery"
     );
 }
+
+#[test]
+fn offline_dns_records_match_aggregate_stream_and_published_example_contracts() {
+    let capture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures/dns-response.pcap");
+    let stream = parse_ndjson(&run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path_text(&capture),
+        "--dissect",
+    ]));
+    assert_contiguous(&stream);
+    assert_eq!(stream.len(), 2);
+    assert_eq!(stream[1]["event"], "complete");
+    let frame = &stream[0]["result"]["frame"];
+    assert_eq!(
+        frame["timestamp"],
+        serde_json::json!({"unix_seconds":123,"nanoseconds":456789000})
+    );
+    let hex = frame["bytes_hex"].as_str().unwrap();
+    let aggregate = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "dissect",
+        "--link-type",
+        "228",
+        "--hex",
+        hex,
+    ]));
+    let published: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/output-dissect-dns-response.json"
+    ))
+    .unwrap();
+    assert_eq!(aggregate, published);
+    let packet = &aggregate["result"]["dissection"]["packet"];
+    assert_eq!(packet, &stream[0]["result"]["decoded"]["packet"]);
+    let dns = packet["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|layer| layer["protocol"] == "dns")
+        .unwrap();
+    let fields = &dns["fields"];
+    assert_eq!(
+        fields["answers"]["value"][0]["value"][4]["value"][1]["value"],
+        "192.0.2.8"
+    );
+    assert_eq!(
+        fields["authorities"]["value"][0]["value"][4]["value"][1]["value"],
+        "ns.example.test."
+    );
+    assert_eq!(
+        fields["additionals"]["value"][0]["value"][4]["value"][1],
+        serde_json::json!({"type":"bytes","value":[255,0,192,255]})
+    );
+    assert_eq!(
+        fields["additionals"]["value"][1]["value"][4]["value"][6]["value"][0]["value"][1],
+        serde_json::json!({"type":"bytes","value":[0,255,1]})
+    );
+    let text = run_success(&["read", path_text(&capture), "--dissect"]);
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(
+        text.contains("192.0.2.8")
+            && text.contains("ns.example.test.")
+            && text.contains("ff00c0ff")
+    );
+    let rewritten = run_success(&["--output", "pcap", "read", path_text(&capture)]);
+    assert_eq!(rewritten.stdout, std::fs::read(capture).unwrap());
+}

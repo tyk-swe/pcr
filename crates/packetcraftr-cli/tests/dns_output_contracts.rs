@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::application::dns as dns_wire;
+
 use packetcraftr_cli::output::stream::StreamRecord;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -150,11 +152,11 @@ fn representative_response() -> packetcraftr::dns::ValidatedResponse {
     )
     .expect("representative DNS response decodes");
     let edns = response.metadata.edns.clone().expect("EDNS metadata");
-    response.additionals.push(dns::Record {
+    response.additionals.push(dns_wire::Record {
         owner: response.answers[0].owner.clone(),
         class: 1_232,
         ttl: 0,
-        value: dns::RecordValue::Opt(edns),
+        value: dns_wire::RecordValue::Opt(edns),
     });
     response
         .rejected_records

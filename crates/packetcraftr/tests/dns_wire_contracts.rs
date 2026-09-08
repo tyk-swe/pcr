@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::protocol::application::dns::DecodeError;
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
-use packetcraftr::dns::{
-    self, MessageLimits as Limits, Name, QueryType, Record, RecordValue, Section, WireError,
-};
+use packetcraftr_core::protocol::application::dns::{Name, Record, RecordValue};
+
+use packetcraftr::dns::{self, MessageLimits as Limits, QueryType, Section, WireError};
 
 const ID: u16 = 0x4a5b;
 const RESPONSE: u16 = 0x8000;
@@ -165,24 +167,24 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
 
     let escaped = Name::from_labels([Bytes::from_static(b"a.b\\\0")]).expect("octet label");
     assert_eq!(escaped.to_string(), "a\\046b\\092\\000.");
-    type Expected = fn(&WireError) -> bool;
+    type Expected = fn(&DecodeError) -> bool;
     let cases: [(Vec<Bytes>, &str, Expected); 3] = [
         (vec![Bytes::new()], "empty label", |error| {
-            matches!(error, WireError::InvalidName { .. })
+            matches!(error, DecodeError::InvalidName { .. })
         }),
         (
             vec![Bytes::from(vec![b'a'; 64])],
             "64-octet label",
-            |error| matches!(error, WireError::InvalidName { .. }),
+            |error| matches!(error, DecodeError::InvalidName { .. }),
         ),
         (
             (0..4).map(|_| Bytes::from(vec![b'a'; 63])).collect(),
             "256-octet name",
-            |error| matches!(error, WireError::NameTooLong),
+            |error| matches!(error, DecodeError::NameTooLong),
         ),
     ];
     for (labels, description, is_expected) in cases {
-        let error = Name::from_labels(labels).expect_err(description);
+        let error: DecodeError = Name::from_labels(labels).expect_err(description);
         assert!(is_expected(&error), "{description}: {error:?}");
     }
     assert_eq!(Section::Answer.to_string(), "answer");
@@ -393,7 +395,9 @@ fn decoder_error_precedence_is_stable() {
             ID,
             Limits::default()
         ),
-        Err(WireError::TrailingBytes { remaining: 1 })
+        Err(WireError::Decode(DecodeError::TrailingBytes {
+            remaining: 1
+        }))
     ));
 }
 
@@ -407,7 +411,7 @@ fn header_and_question_validation_fail_closed() {
             ID,
             Limits::default()
         ),
-        Err(WireError::MessageTooShort { .. })
+        Err(WireError::Decode(DecodeError::MessageTooShort { .. }))
     ));
 
     let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
@@ -417,7 +421,7 @@ fn header_and_question_validation_fail_closed() {
     };
     assert!(matches!(
         dns::decode_response(&base, "example.test", QueryType::A, ID, limits),
-        Err(WireError::MessageTooLarge { .. })
+        Err(WireError::Decode(DecodeError::MessageTooLarge { .. }))
     ));
 
     let mut mutations = Vec::new();
@@ -609,7 +613,7 @@ fn caa_record_decodes_flags_tag_and_value() {
                 ID,
                 Limits::default()
             ),
-            Err(WireError::InvalidRdata { .. })
+            Err(WireError::Decode(DecodeError::InvalidRdata { .. }))
         ));
     }
 }
@@ -754,7 +758,7 @@ fn unsupported_edns_versions_and_invalid_option_lengths_are_rejected() {
             ID,
             Limits::default()
         ),
-        Err(WireError::InvalidEdns { .. })
+        Err(WireError::Decode(DecodeError::InvalidEdns { .. }))
     ));
 }
 
@@ -840,10 +844,10 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
     };
     assert!(matches!(
         dns::decode_response(&base, "example.test", QueryType::A, ID, limits),
-        Err(WireError::RecordLimit {
+        Err(WireError::Decode(DecodeError::RecordLimit {
             actual: 1,
             limit: 0
-        })
+        }))
     ));
 
     let mut trailing = base;
@@ -856,7 +860,9 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
             ID,
             Limits::default()
         ),
-        Err(WireError::TrailingBytes { remaining: 1 })
+        Err(WireError::Decode(DecodeError::TrailingBytes {
+            remaining: 1
+        }))
     ));
 
     for (query_type, malformed) in [
@@ -876,7 +882,7 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
         );
         assert!(matches!(
             dns::decode_response(&message, "example.test", query_type, ID, Limits::default()),
-            Err(WireError::InvalidRdata { .. })
+            Err(WireError::Decode(DecodeError::InvalidRdata { .. }))
         ));
     }
 }
@@ -897,7 +903,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
     };
     assert!(matches!(
         dns::decode_response(&message, "example.test", QueryType::Txt, ID, string_limit),
-        Err(WireError::TxtStringLimit { limit: 1 })
+        Err(WireError::Decode(DecodeError::TxtStringLimit { limit: 1 }))
     ));
     let byte_limit = Limits {
         max_txt_bytes: 1,
@@ -905,7 +911,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
     };
     assert!(matches!(
         dns::decode_response(&message, "example.test", QueryType::Txt, ID, byte_limit),
-        Err(WireError::TxtByteLimit { limit: 1 })
+        Err(WireError::Decode(DecodeError::TxtByteLimit { limit: 1 }))
     ));
 
     let pointer_limit = Limits {
@@ -928,7 +934,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
             ID,
             pointer_limit
         ),
-        Err(WireError::PointerLimit { limit: 0 })
+        Err(WireError::Decode(DecodeError::PointerLimit { limit: 0 }))
     ));
 
     for (question, expected) in [
@@ -985,7 +991,10 @@ fn dns_over_tcp_accepts_one_exact_complete_response() {
 fn dns_over_tcp_rejects_short_prefix_and_zero_length_message() {
     assert!(matches!(
         dns::decode_tcp_frame(&[0], "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::MessageTooShort { minimum: 2, .. })
+        Err(WireError::Decode(DecodeError::MessageTooShort {
+            minimum: 2,
+            ..
+        }))
     ));
     assert_eq!(
         dns::decode_tcp_frame(&[0, 0], "example.test", QueryType::A, ID, Limits::default()),
@@ -1001,10 +1010,10 @@ fn dns_over_tcp_rejects_oversized_declaration_before_incomplete_frame() {
     };
     assert_eq!(
         dns::decode_tcp_frame(&[0, 13], "example.test", QueryType::A, ID, limits),
-        Err(WireError::MessageTooLarge {
+        Err(WireError::Decode(DecodeError::MessageTooLarge {
             actual: 13,
             maximum: 12,
-        })
+        }))
     );
 }
 
@@ -1060,10 +1069,10 @@ fn dns_over_tcp_preserves_dns_malformed_trailing_and_identity_validation() {
             ID,
             Limits::default()
         ),
-        Err(WireError::MessageTooShort {
+        Err(WireError::Decode(DecodeError::MessageTooShort {
             actual: 11,
             minimum: 12,
-        })
+        }))
     ));
 
     let mut dns_trailing = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
@@ -1076,7 +1085,9 @@ fn dns_over_tcp_preserves_dns_malformed_trailing_and_identity_validation() {
             ID,
             Limits::default()
         ),
-        Err(WireError::TrailingBytes { remaining: 1 })
+        Err(WireError::Decode(DecodeError::TrailingBytes {
+            remaining: 1
+        }))
     );
 
     let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
@@ -1141,4 +1152,44 @@ fn response_code_names_cover_standard_and_extended_values() {
     for (code, name) in expected {
         assert_eq!(dns::response_code_name(code), name);
     }
+}
+
+#[test]
+fn non_in_address_rdata_is_audited_without_in_interpretation() {
+    let mut ch = record(1, [name("host.example.test."), vec![0, 1]].concat());
+    ch.class = 3;
+    let message = response("example.test.", QueryType::A, RESPONSE, &[ch], &[], &[]);
+    let decoded = dns::decode_response(
+        &message,
+        "example.test",
+        QueryType::A,
+        ID,
+        Limits::default(),
+    )
+    .unwrap();
+    assert!(decoded.answers.is_empty());
+    assert_eq!(decoded.metadata.rejected_record_count, 1);
+    assert_eq!(decoded.rejected_records[0].type_code, 1);
+    assert!(decoded.rejected_records[0].reason.contains("class"));
+}
+
+#[test]
+fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
+    use std::error::Error as _;
+    let error =
+        dns::decode_response(&[], "example.test", QueryType::A, ID, Limits::default()).unwrap_err();
+    let cause = error
+        .source()
+        .unwrap()
+        .downcast_ref::<DecodeError>()
+        .unwrap();
+    assert!(matches!(
+        cause,
+        DecodeError::MessageTooShort {
+            actual: 0,
+            minimum: 12
+        }
+    ));
+    assert_eq!(error.to_string(), cause.to_string());
+    assert!(packetcraftr_core::error::source_chain(&error).is_empty());
 }

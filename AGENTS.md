@@ -1,6 +1,6 @@
 # Repository guide
 
-Use `tyk/{branch-name}` for branches created by Codex.
+Use `tyk/{branch-name}` for branches created by coding agents.
 
 PacketcraftR has four directional Rust crates:
 

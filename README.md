@@ -5,9 +5,9 @@ interoperability testing, and authorized network diagnostics. It provides
 exact packet construction, bounded dissection, capture-file I/O, offline
 analysis, and policy-gated live networking.
 
-Development version: pre-1.0 beta `0.5.0-beta.3` (unreleased). Rust APIs and versioned
-serialized contracts may change between beta releases; review the
-[changelog](CHANGELOG.md) and [beta.3 migration note](docs/migration-beta.3.md) before upgrading.
+Current release: pre-1.0 beta `0.5.0-beta.3`. Rust APIs and versioned serialized
+contracts may change between beta releases; review the [changelog](CHANGELOG.md)
+and [beta.3 migration note](docs/migration-beta.3.md) before upgrading.
 
 > **Authorized use:** PacketcraftR is designed for controlled labs, protocol
 > testing, and diagnostics on systems and networks you own or are explicitly
@@ -104,12 +104,12 @@ Release archives produced by the current workflow include GitHub Artifact
 Attestations signed with Sigstore:
 
 ```console
-gh attestation verify packetcraftr-vVERSION-TARGET-VARIANT.EXT --owner tyk-swe
+gh attestation verify packetcraftr-v<version>-<target>-<variant>.<ext> --owner tyk-swe
 ```
 
-To build from source, install the toolchain in `rust-toolchain.toml`; the same supported version
-is declared in `Cargo.toml`. All-feature Linux builds also need libpcap
-development files such as `libpcap-dev`.
+To build from source, install the toolchain in `rust-toolchain.toml`; the same
+supported version is declared in `Cargo.toml`. All-feature Linux builds also
+need libpcap development files such as `libpcap-dev`.
 
 Choose the source profile before building:
 
@@ -154,8 +154,9 @@ sink cannot promise a terminal NDJSON record.
 
 Aggregate output consumers must ignore unknown fields in result objects and
 nested output records. Shared records follow this rule in NDJSON too. Envelope
-fields, enum vocabularies, and embedded packet documents remain strict. Changed machine contracts receive a new schema version; packet documents
-and command output are versioned independently.
+fields, enum vocabularies, and embedded packet documents remain strict. Changed
+machine contracts receive a new schema version; packet documents and command
+output are versioned independently.
 
 Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
@@ -214,7 +215,7 @@ Offline analysis exposes a physical `FrameRecord` with optional `TcpView` and
 conversation together. Derived datagrams do not add physical frames or bytes.
 
 ```console
-cargo doc --locked --all-features --no-deps --open
+cargo doc --locked --workspace --all-features --no-deps --open
 ```
 
 ## Live Networking

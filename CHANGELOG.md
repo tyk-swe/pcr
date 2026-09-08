@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Engineering review corrections (next: 0.5.0-beta.3)
 
+- Cancelled live fuzz and DNS operations stop before executor invocation,
+  including cancellation during campaign authorization or DNS resolution.
+  Interrupts during aggregate JSON publication preserve a single complete
+  stdout document and report late cancellation on stderr with exit code 130.
 - Live fuzz pacing preserves `io.cancelled` on interruption in JSON/NDJSON
   output instead of reporting a timer failure.
 - Correct distinct TLS conversation counting after frame filtering, repair the

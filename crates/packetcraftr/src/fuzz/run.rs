@@ -136,13 +136,15 @@ where
         packet,
         registry,
     } = input;
-    live.validate()?;
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+    deadline.check_cancelled()?;
+    live.validate()?;
     let live_dissector = Dissector::new(Arc::clone(&registry));
     let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
+    deadline.enforce()?;
     authorize_campaign(&prepared, live, authorizer)?;
-    deadline.check().map_err(duration_limit)?;
+    deadline.enforce()?;
 
     let PreparedCampaign {
         cases,
@@ -300,9 +302,9 @@ impl ExecutionPhase<'_> {
         let cases = std::mem::take(&mut self.cases);
         let mut built_ordinal = 0;
         for mut case in cases {
+            self.deadline.enforce()?;
             if case.prepared.built.is_some() {
                 self.pace(built_ordinal, case.prepared.index, clock)?;
-                self.deadline.check().map_err(duration_limit)?;
                 self.execute_case(&mut case, executor)?;
                 // one increment per case in `cases`, so the ordinal cannot exceed `cases.len()`
                 {
@@ -324,6 +326,7 @@ impl ExecutionPhase<'_> {
     where
         C: Clock,
     {
+        self.deadline.enforce()?;
         if ordinal == 0 {
             return Ok(());
         }
@@ -364,12 +367,13 @@ impl ExecutionPhase<'_> {
                 .bounded_timeout(self.live.timeout)
                 .map_err(duration_limit)?,
         };
-        let execution = executor
-            .execute(&execution_case)
-            .map_err(|source| Error::Execution {
-                case_index: case.prepared.index,
-                source,
-            })?;
+        self.deadline.enforce()?;
+        let execution = executor.execute(&execution_case);
+        self.deadline.enforce()?;
+        let execution = execution.map_err(|source| Error::Execution {
+            case_index: case.prepared.index,
+            source,
+        })?;
         if execution.permit != execution_case.permit {
             return Err(Error::InvalidEvidence {
                 case_index: case.prepared.index,
@@ -392,7 +396,7 @@ impl ExecutionPhase<'_> {
                 message: "executor substituted bytes for the route-materialized case".to_owned(),
             });
         }
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.enforce()?;
         self.deadline
             .account(execution.stats.elapsed)
             .map_err(duration_limit)?;
@@ -412,7 +416,7 @@ impl ExecutionPhase<'_> {
             self.request.limits,
             &mut case.prepared.diagnostics,
         );
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.enforce()?;
         case.prepared.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
         case.prepared.diagnostics.extend(execution.diagnostics);
@@ -437,7 +441,7 @@ impl ExecutionPhase<'_> {
         } else {
             CaseOutcome::Timeout
         };
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.enforce()?;
         Ok(())
     }
 
@@ -447,7 +451,7 @@ impl ExecutionPhase<'_> {
                 case_index: last_case_index(self.request),
             },
         )?;
-        self.deadline.check().map_err(duration_limit)?;
+        self.deadline.enforce()?;
 
         Ok(Summary {
             seed: self.request.seed,

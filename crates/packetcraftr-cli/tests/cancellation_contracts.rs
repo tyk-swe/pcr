@@ -4,17 +4,22 @@
 #![cfg(target_os = "linux")]
 
 use std::io::{Cursor, Write};
+use std::net::Ipv4Addr;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Format, Reader, Writer};
+use packetcraftr_core::build::Builder;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 
 mod support;
 
 // Every process assertion has finite cleanup, including failures before stdin
-// is released. Output files keep a generating child from blocking on stdout.
+// is released. Output files normally keep a generating child from blocking on
+// stdout; a piped stdout remains undrained until finish to test backpressure.
 struct Running {
     child: Child,
     stdout: tempfile::NamedTempFile,
@@ -22,11 +27,19 @@ struct Running {
 
 impl Running {
     fn start(arguments: &[&str]) -> Self {
+        Self::start_with_stdout_pipe(arguments, false)
+    }
+
+    fn start_with_stdout_pipe(arguments: &[&str], piped: bool) -> Self {
         let stdout = tempfile::NamedTempFile::new().unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
             .args(arguments)
             .stdin(Stdio::piped())
-            .stdout(stdout.reopen().unwrap())
+            .stdout(if piped {
+                Stdio::piped()
+            } else {
+                Stdio::from(stdout.reopen().unwrap())
+            })
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
@@ -57,6 +70,10 @@ impl Running {
 
     fn finish(&mut self) -> Output {
         use std::io::Read;
+        let stdout_worker = self.child.stdout.take().map(|mut pipe| {
+            let mut file = self.stdout.reopen().unwrap();
+            std::thread::spawn(move || std::io::copy(&mut pipe, &mut file))
+        });
         let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
             if let Some(status) = self.child.try_wait().unwrap() {
@@ -65,6 +82,9 @@ impl Running {
             assert!(Instant::now() < deadline, "interrupted child did not stop");
             std::thread::sleep(Duration::from_millis(10));
         };
+        if let Some(worker) = stdout_worker {
+            worker.join().unwrap().unwrap();
+        }
         let mut stderr = Vec::new();
         self.child
             .stderr
@@ -84,6 +104,71 @@ impl Drop for Running {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() {
+    let mut capture = tempfile::NamedTempFile::new().unwrap();
+    let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
+    {
+        let mut writer = Writer::new(&mut capture, Format::Pcap, LinkType::IPV4).unwrap();
+        for source_port in 10_000..11_000 {
+            let mut packet = Packet::new();
+            packet
+                .push(Ipv4 {
+                    source: Ipv4Addr::new(192, 0, 2, 1),
+                    destination: Ipv4Addr::new(192, 0, 2, 2),
+                    ..Ipv4::default()
+                })
+                .push(Udp {
+                    source_port,
+                    destination_port: 9,
+                    ..Udp::default()
+                });
+            let built = builder
+                .build(packet, Default::default(), Default::default())
+                .unwrap();
+            writer
+                .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, built.bytes).unwrap())
+                .unwrap();
+        }
+        writer.flush().unwrap();
+    }
+    for signal in ["INT", "TERM"] {
+        let mut process = Running::start_with_stdout_pipe(
+            &[
+                "--output",
+                "json",
+                "stats",
+                support::path_text(capture.path()),
+                "--top",
+                "1000",
+            ],
+            true,
+        );
+        // Observe the blocked write itself so the signal always lands after
+        // publication starts, regardless of process or analysis startup time.
+        process.wait_until(|p| {
+            std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
+                .unwrap()
+                .contains("pipe_write")
+        });
+        process.signal(signal);
+        // The handler consumes the signal while stdout remains blocked.
+        std::thread::sleep(Duration::from_millis(100));
+        let output = process.finish();
+        assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
+        let document = support::parse_json(&output);
+        assert_eq!(
+            document["result"]["conversations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1000
+        );
+        assert!(document.get("error").is_none());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("io.cancelled"));
     }
 }
 

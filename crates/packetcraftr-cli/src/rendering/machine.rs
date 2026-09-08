@@ -35,6 +35,7 @@ pub(crate) fn emit_aggregate<T: Serialize>(
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
 ) -> Result<(), CliError> {
+    crate::cancellation::check()?;
     emit_json(&output::envelope::Envelope::success(
         command,
         result,
@@ -48,5 +49,6 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: packetcraftr::Stats,
 ) -> Result<(), CliError> {
+    crate::cancellation::check()?;
     emit_json(&output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats))
 }

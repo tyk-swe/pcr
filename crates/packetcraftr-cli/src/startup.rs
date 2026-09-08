@@ -102,12 +102,22 @@ pub(crate) fn run() -> ExitCode {
         return command_failure(format, command, error, &stream);
     }
     match cli.command.run(format, &stream) {
-        Ok(()) => match crate::cancellation::check()
-            .and_then(|()| require_success_terminal(format, &stream))
-        {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => command_failure(format, command, error, &stream),
-        },
+        Ok(()) => {
+            if let Err(error) = crate::cancellation::check() {
+                if format == output::contract::Format::Json {
+                    // The aggregate document has already been published. A
+                    // late interrupt changes the exit status, but a second
+                    // stdout document would invalidate the completed JSON.
+                    let _ = emit_stderr_error(&error);
+                    return ExitCode::from(130);
+                }
+                return command_failure(format, command, error, &stream);
+            }
+            match require_success_terminal(format, &stream) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => command_failure(format, command, error, &stream),
+            }
+        }
         Err(error) => command_failure(format, command, error, &stream),
     }
 }

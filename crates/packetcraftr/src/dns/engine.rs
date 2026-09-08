@@ -266,6 +266,7 @@ fn prepare_operation<A: Authorizer>(
         &deadline,
         &Gates,
     )?;
+    deadline.enforce()?;
 
     Ok(PreparedOperation {
         deadline,
@@ -451,13 +452,16 @@ where
     }
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
+        self.deadline.enforce()?;
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
             self.request.address_family,
             &self.deadline,
             &Gates,
-        )?;
+        );
+        self.deadline.enforce()?;
+        let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
         if addresses.is_empty() {
@@ -505,6 +509,7 @@ where
             limits: self.request.limits,
             permit: crate::evidence::ExecutionPermit::new(),
         };
+        self.deadline.enforce()?;
         let execution = self.executor.execute(&execution_request);
         self.deadline.enforce()?;
         let mut execution = execution.map_err(|source| Error::Execution {

@@ -8,12 +8,12 @@ use crate::diagnostic::Severity;
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
-use crate::analysis::expert::{Finding, FlowKey};
+use crate::analysis::expert::{Finding, ScopedFlowKey};
 
 pub(super) fn observe_duplicate(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
-    reverse: &FlowKey,
+    reverse: &ScopedFlowKey,
     keep_alive: bool,
     findings: &mut Vec<Finding>,
 ) {
@@ -60,7 +60,7 @@ pub(super) fn observe_duplicate(
 }
 
 pub(super) fn update(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
     syn_renews: bool,
 ) -> bool {

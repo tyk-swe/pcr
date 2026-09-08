@@ -6,7 +6,7 @@ use std::io::Read;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::analysis::pcap::{Format, Interface, Reader};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::{
     link::Mode as LinkMode, route::Materialized as MaterializedRoute, route::Plan as RoutePlan,
@@ -72,7 +72,8 @@ where
     C: Clock,
     F: FnMut(FrameEvidence) -> Result<(), Error>,
 {
-    let mut deadline = Deadline::new(options.limits.max_duration);
+    let mut deadline =
+        Deadline::new(options.limits.max_duration).with_cancellation(clock.cancellation());
     options.limits.validate()?;
     options.timing.validate()?;
     let limits = options.limits;
@@ -392,7 +393,9 @@ fn pace<C: Clock>(
     deadline
         .start_accounting(delay)
         .map_err(|error| duration_limit(source_index, error))?;
-    clock.sleep(delay).map_err(|source| Error::Clock {
+    let slept = clock.sleep(delay);
+    deadline.check_cancelled()?;
+    slept.map_err(|source| Error::Clock {
         source_index,
         source: Box::new(source),
     })?;
@@ -451,9 +454,10 @@ fn finish_summary(
 }
 
 fn enforce_deadline(deadline: &Deadline, source_index: u64) -> Result<(), Error> {
-    deadline
-        .check()
-        .map_err(|error| duration_limit(source_index, error))
+    deadline.enforce().map_err(|interrupted| match interrupted {
+        Interrupted::Cancelled(cancelled) => cancelled.into(),
+        Interrupted::Exceeded(error) => duration_limit(source_index, error),
+    })
 }
 
 fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {

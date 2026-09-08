@@ -188,13 +188,13 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
                 Reader::with_options(Cursor::new(black_box(&pcap_data)), ReaderOptions::default())
                     .expect("reader");
             let mut count = 0_usize;
-            while let Ok(Some(f)) = reader.next_frame() {
+            while let Some(f) = reader.next_frame().expect("valid benchmark PCAP frame") {
                 black_box(f);
                 count = count
                     .checked_add(1)
                     .expect("benchmark frame count fits usize");
             }
-            black_box(count);
+            assert_eq!(count, 100);
         });
     });
 
@@ -206,13 +206,16 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
             )
             .expect("reader");
             let mut count = 0_usize;
-            while let Ok(Some(r)) = reader.next_record() {
+            while let Some(r) = reader.next_record().expect("valid benchmark PCAPNG record") {
                 black_box(r);
                 count = count
                     .checked_add(1)
                     .expect("benchmark record count fits usize");
             }
-            black_box(count);
+            assert_eq!(
+                count, 101,
+                "interface and all 100 packets; reader initialization consumed the section"
+            );
         });
     });
 

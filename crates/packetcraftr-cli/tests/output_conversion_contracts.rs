@@ -181,6 +181,9 @@ fn representative_stats_report() -> packetcraftr_core::analysis::stats::Report {
         .intern(None, Vec::new())
         .expect("representative scope fits");
     packetcraftr_core::analysis::stats::Report {
+        clock: Default::default(),
+        io_origin: Some(first),
+        io_underflow_frames: 0,
         interval: Duration::from_secs(2),
         frames: 7,
         bytes: 321,
@@ -192,6 +195,7 @@ fn representative_stats_report() -> packetcraftr_core::analysis::stats::Report {
             bytes: 321,
         }],
         conversations: vec![ConversationStat {
+            scope: scopes.definition(scope).unwrap().clone(),
             transport: AnalysisStreamTransport::Tcp,
             stream: 4,
             address_a: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
@@ -514,6 +518,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
     .collect();
     let expert_result = expert::Report::from_summary(
         packetcraftr_core::analysis::expert::Summary {
+            clock: Default::default(),
             findings: 3,
             errors: 1,
             warnings: 1,
@@ -548,11 +553,13 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     };
     let chunks: Vec<follow::Chunk> = [
         AnalysisChunk {
+            direction_generation: 0,
             direction: AnalysisDirection::ClientToServer,
             number: 2,
             bytes: Bytes::from_static(&[0x00, 0xff]),
         },
         AnalysisChunk {
+            direction_generation: 0,
             direction: AnalysisDirection::ServerToClient,
             number: 3,
             bytes: Bytes::from_static(b"ok"),
@@ -565,6 +572,8 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
         packetcraftr_core::analysis::StreamTransport::Tcp,
         2,
         packetcraftr_core::analysis::follow::Summary {
+            scope: None,
+            clock: Default::default(),
             client_flow: Some(flow),
             frames: 2,
             client_bytes: 2,

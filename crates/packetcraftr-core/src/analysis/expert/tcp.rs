@@ -8,7 +8,7 @@ use crate::diagnostic::Severity;
 use super::finding::new as new_finding;
 use super::generation;
 use super::observation::TcpObservation;
-use super::{Collector, Finding, FlowKey, FrameRecord, TcpEvent};
+use super::{Collector, Finding, FrameRecord, ScopedFlowKey, TcpEvent};
 
 mod acknowledgment;
 mod sequence;
@@ -107,7 +107,7 @@ impl Collector {
 }
 
 pub(super) fn finish(
-    streams: &HashMap<FlowKey, u64>,
+    streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,
 ) -> Vec<Finding> {

@@ -29,6 +29,7 @@ pub struct ProtocolStat {
 pub struct ConversationStat {
     pub transport: StreamTransport,
     pub stream: u64,
+    pub scope: crate::analysis::scope::Definition,
     pub address_a: IpAddr,
     pub port_a: u16,
     pub address_b: IpAddr,
@@ -79,6 +80,12 @@ pub struct IoBucketStat {
 /// Everything one statistics pass computed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
+    pub clock: crate::analysis::ClockReport,
+    /// Stable bucket epoch (first observed matched timestamp), independently
+    /// of `first_timestamp`, which is the minimum matched timestamp.
+    pub io_origin: Option<SystemTime>,
+    /// Earlier timestamps folded into bucket zero; never silently rebased.
+    pub io_underflow_frames: u64,
     /// I/O bucket width the series was computed with.
     pub interval: Duration,
     /// Matched frames and their captured bytes.

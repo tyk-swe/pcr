@@ -83,6 +83,7 @@ pub(super) fn render_record(
 }
 
 pub(super) fn render_text(summary: &analysis::Summary, state: &State) -> Result<(), CliError> {
+    crate::commands::offline_analysis::render_clock(&summary.clock)?;
     // BTreeMap iteration is code order, so the per-code lines are deterministic.
     for (code, findings) in &state.codes {
         write_stdout_line(format_args!("code={code} findings={findings}"))?;
@@ -126,6 +127,7 @@ fn result(
     include_findings: bool,
 ) -> output::expert::Report {
     output::expert::Report {
+        clock: summary.clock.clone(),
         frames_read: summary.frames_read,
         frames_matched: summary.frames_matched,
         errors: state.errors,

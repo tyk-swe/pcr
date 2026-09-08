@@ -4,15 +4,15 @@
 use std::collections::HashMap;
 
 use super::tcp::{DirectionState, window_scale};
-use super::{FlowKey, observation::TcpObservation};
+use super::{ScopedFlowKey, observation::TcpObservation};
 
 pub(super) struct GenerationTransition {
-    pub(super) reverse: FlowKey,
+    pub(super) reverse: ScopedFlowKey,
     pub(super) syn_renews: bool,
 }
 
 pub(super) fn apply(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
 ) -> GenerationTransition {
     let TcpObservation {
@@ -83,9 +83,9 @@ pub(super) fn apply(
 }
 
 pub(super) fn retire_reset(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
-    reverse: &FlowKey,
+    reverse: &ScopedFlowKey,
 ) {
     if observation.rst {
         flows.remove(observation.flow);

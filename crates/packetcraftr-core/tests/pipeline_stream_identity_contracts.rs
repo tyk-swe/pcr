@@ -244,7 +244,10 @@ fn vxlan_vni_scopes_inner_streams_and_preserves_reverse_direction_identity() {
     ];
     let mut capture = reader(&frames);
     let mut streams = Vec::new();
+    let mut definitions = Vec::new();
     run(&mut capture, registry, &Options::default(), |record| {
+        let flow = record.tcp.unwrap().conversation.unwrap().flow;
+        definitions.push(record.scope_definition(flow.scope).unwrap().clone());
         streams.push(
             record
                 .tcp
@@ -255,6 +258,14 @@ fn vxlan_vni_scopes_inner_streams_and_preserves_reverse_direction_identity() {
     })
     .expect("VXLAN analysis succeeds");
     assert_eq!(streams, vec![Some(0), Some(0), Some(1)]);
+    assert_eq!(definitions[0], definitions[1]);
+    for (definition, vni) in [(&definitions[0], 10), (&definitions[2], 20)] {
+        assert!(
+            definition.encapsulation.contains(
+                &packetcraftr_core::analysis::scope::EncapsulationIdentifier::Vxlan { vni }
+            )
+        );
+    }
 }
 
 #[test]

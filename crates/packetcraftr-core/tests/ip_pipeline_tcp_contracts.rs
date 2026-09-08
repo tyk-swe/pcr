@@ -208,7 +208,7 @@ fn fragmented_tcp_segments_assemble_a_tls_session() {
         server[1].clone(),
     ];
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);
-    let mut collector = Collector::new(TlsLimits::default());
+    let mut collector = Collector::new(TlsLimits::default()).unwrap();
     let mut sessions = Vec::new();
     let summary = packetcraftr_core::analysis::run(
         &mut capture,

@@ -10,40 +10,45 @@ use super::WORKFLOW;
 use super::{Batch, Probe, ProbeEndpoint, Request};
 use crate::probe::{Error, ErrorKind};
 
-pub(super) fn build_batches(
-    request: &Request,
-    addresses: &[IpAddr],
-    endpoints: &[ProbeEndpoint],
-) -> Result<Vec<Batch>, Error> {
-    let mut batches = Vec::new();
-    let mut sequence = 0_u64;
-    for address in addresses {
-        for attempt in 1..=request.attempts {
-            // Each exchange materializes its own correlated sequence and IP identifiers.
-            for endpoint in endpoints {
-                batches.push(Batch {
-                    probes: vec![Probe {
-                        sequence,
-                        address: *address,
-                        endpoint: *endpoint,
-                        attempt,
-                    }],
-                    timeout: request.timeout,
-                    permit: crate::evidence::ExecutionPermit::new(),
-                    sequence,
-                });
-                sequence = sequence.checked_add(1).ok_or(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field: "probes",
-                        value: u64::MAX,
-                        reason: "probe sequence overflowed".to_owned(),
-                    },
-                ))?;
-            }
-        }
-    }
-    Ok(batches)
+pub(super) fn build_batches<'a>(
+    request: &'a Request,
+    addresses: &'a [IpAddr],
+    endpoints: &'a [ProbeEndpoint],
+) -> Result<impl Iterator<Item = Batch> + 'a, Error> {
+    // Validate the complete sequence space before yielding any external effect.
+    addresses
+        .len()
+        .checked_mul(request.attempts as usize)
+        .and_then(|count| count.checked_mul(endpoints.len()))
+        .and_then(|count| u64::try_from(count).ok())
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                value: u64::MAX,
+                reason: "probe sequence overflowed".to_owned(),
+            },
+        ))?;
+    Ok(addresses
+        .iter()
+        .flat_map(move |address| {
+            (1..=request.attempts).flat_map(move |attempt| {
+                endpoints
+                    .iter()
+                    .map(move |endpoint| (*address, attempt, *endpoint))
+            })
+        })
+        .zip(0u64..)
+        .map(move |((address, attempt, endpoint), sequence)| Batch {
+            probe: Probe {
+                sequence,
+                address,
+                endpoint,
+                attempt,
+            },
+            timeout: request.timeout,
+            permit: crate::evidence::ExecutionPermit::new(),
+        }))
 }
 
 pub(super) fn worst_case_duration(

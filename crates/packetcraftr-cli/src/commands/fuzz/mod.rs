@@ -149,6 +149,7 @@ fn execute_offline(
     format: Format,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    crate::cancellation::check()?;
     if format == Format::Ndjson {
         let event_stream = stream.clone();
         let runtime = packetcraftr::progress::Runtime::default();
@@ -158,6 +159,7 @@ fn execute_offline(
             registry,
             &runtime,
             move |case| {
+                crate::cancellation::check().map_err(CliError::into_boundary_error)?;
                 output::fuzz::Event::try_from_offline(case)
                     .map_err(CliError::classified)
                     .and_then(|event| Ok(event_stream.emit_data(event, Vec::new())?))
@@ -167,7 +169,16 @@ fn execute_offline(
         .map_err(CliError::classified)?;
         return rendering::render_offline_complete(summary, stream);
     }
-    let result = core::fuzz::run(&request, packet, registry).map_err(CliError::classified)?;
+    let mut cases = Vec::new();
+    let summary = core::fuzz::run_observed(&request, packet, registry, |case, _| {
+        crate::cancellation::check().map_err(|error| core::fuzz::Error::Output {
+            source: error.into_boundary_error(),
+        })?;
+        cases.push(case);
+        Ok(())
+    })
+    .map_err(CliError::classified)?;
+    let result = core::fuzz::Report::from_summary(summary, cases);
     let (result, diagnostics, stats) =
         output::fuzz::Report::try_from_offline(result).map_err(CliError::classified)?;
     render_collected(result, diagnostics, stats, format)
@@ -187,7 +198,7 @@ fn execute_live(
         interface: live.interface,
     };
     let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::for_packets(&live.policy);
-    let mut clock = packetcraftr::clock::SystemClock;
+    let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
     if format == Format::Ndjson {
         let event_stream = stream.clone();
         let runtime = packetcraftr::progress::Runtime::default();
@@ -235,6 +246,7 @@ fn render_collected(
     stats: packetcraftr::Stats,
     format: Format,
 ) -> Result<(), CliError> {
+    crate::cancellation::check()?;
     match format {
         Format::Text => rendering::render_text(result, diagnostics, stats),
         Format::Json => {

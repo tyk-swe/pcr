@@ -33,9 +33,12 @@ pub struct Limits {
     pub max_frames: u64,
     pub max_bytes: u64,
     pub max_frame_bytes: usize,
-    /// Distinct conversations indexed per transport. A TCP conversation
-    /// additionally occupies one reassembly flow per direction.
+    /// Capture-global cumulative distinct conversations per transport. Expiry
+    /// releases payload state, not these indices. A TCP conversation additionally
+    /// occupies one reassembly flow per direction.
     pub max_flows: usize,
+    /// Conservative retained scope/path metadata charge, separate from payload state.
+    pub max_scope_bytes: usize,
     /// Retained TCP payload bytes in one direction. This is also the
     /// reordering window, so it may not exceed
     /// [`reassembly::tcp::MAX_BYTES_PER_FLOW`](crate::analysis::reassembly::tcp::MAX_BYTES_PER_FLOW).
@@ -72,6 +75,7 @@ impl Default for Limits {
             max_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
             max_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
+            max_scope_bytes: 16 * 1024 * 1024,
             max_tcp_bytes_per_flow: tcp.max_bytes_per_flow,
             max_tcp_reassembly_bytes: tcp.max_aggregate_bytes,
             max_tcp_segments_per_flow: tcp.max_segments_per_flow,
@@ -94,6 +98,7 @@ impl Limits {
             ("max_bytes", self.max_bytes),
             ("max_frame_bytes", self.max_frame_bytes as u64),
             ("max_flows", self.max_flows as u64),
+            ("max_scope_bytes", self.max_scope_bytes as u64),
             ("max_tcp_bytes_per_flow", self.max_tcp_bytes_per_flow as u64),
             (
                 "max_tcp_reassembly_bytes",
@@ -209,9 +214,16 @@ impl Limits {
 /// What one analysis run computes beyond dispatching matched frames.
 #[derive(Clone, Debug, Default)]
 pub struct Options<'a> {
+    pub cancellation: Option<crate::budget::Cancellation>,
     /// Keeps only matching frames; compiled by the caller so filter mistakes
     /// surface before any input is read. Conversation indices are assigned
     /// before the filter runs, so `tcp.stream` and `udp.stream` resolve.
+    /// This is input selection for TCP reassembly, not session presentation:
+    /// IP reconstruction sees all input, but TCP and collectors see only matches.
+    /// `tcp.stream == 7` preserves a conversation; `tls.sni == "example.test"`
+    /// removes its ServerHello and segmented handshake bytes. Apply TLS status
+    /// or SNI selection to completed sessions instead. Matching observations may
+    /// first expose stream indices out of numerical order.
     pub filter: Option<&'a Filter>,
     /// Drives bounded TCP reassembly over the matched frames and delivers
     /// its events with each record. Costs memory proportional to reordering,

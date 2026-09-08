@@ -34,10 +34,24 @@ pub enum Table {
     Fragments,
 }
 
+impl From<Table> for packetcraftr_core::analysis::stats::Table {
+    fn from(value: Table) -> Self {
+        match value {
+            Table::Conversations => Self::Conversations,
+            Table::Endpoints => Self::Endpoints,
+            Table::Protocols => Self::Protocols,
+            Table::Ports => Self::Ports,
+            Table::Io => Self::Io,
+            Table::Fragments => Self::Fragments,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Conversation {
     pub transport: Transport,
     pub stream: u64,
+    pub scope: packetcraftr_core::analysis::scope::Definition,
     pub address_a: IpAddr,
     pub port_a: u16,
     pub address_b: IpAddr,
@@ -54,6 +68,8 @@ pub struct Conversation {
 /// The I/O series with the bucket width it was computed under.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Io {
+    pub origin: Option<Timestamp>,
+    pub underflow_frames: u64,
     pub interval: Duration,
     pub buckets: Vec<IoBucket>,
 }
@@ -61,6 +77,7 @@ pub struct Io {
 /// Aggregate result of `stats`, carrying exactly the requested table.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
+    pub clock: packetcraftr_core::analysis::ClockReport,
     #[serde(flatten)]
     pub table: TableData,
     /// Frames the capture yielded, matched or not, and the frames the
@@ -125,6 +142,8 @@ impl Report {
             },
             Table::Io => TableData::Io {
                 io: Io {
+                    origin: convert_timestamp(report.io_origin)?,
+                    underflow_frames: report.io_underflow_frames,
                     interval: report.interval,
                     buckets: report.io,
                 },
@@ -134,6 +153,7 @@ impl Report {
             },
         };
         Ok(Self {
+            clock: report.clock,
             table,
             frames_read,
             frames_matched: report.frames,
@@ -149,9 +169,11 @@ fn convert_timestamp(value: Option<std::time::SystemTime>) -> Result<Option<Time
 }
 
 fn convert_conversation(row: ConversationStat) -> Result<Conversation, Error> {
+    let duration = row.duration();
     Ok(Conversation {
         transport: row.transport,
         stream: row.stream,
+        scope: row.scope,
         address_a: row.address_a,
         port_a: row.port_a,
         address_b: row.address_b,
@@ -162,6 +184,6 @@ fn convert_conversation(row: ConversationStat) -> Result<Conversation, Error> {
         bytes_b_to_a: row.bytes_b_to_a,
         first_timestamp: row.first_timestamp.try_into()?,
         last_timestamp: row.last_timestamp.try_into()?,
-        duration: row.duration(),
+        duration,
     })
 }

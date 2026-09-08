@@ -5,7 +5,7 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Cancellation, Deadline};
 
 /// Injectable delay seam shared by rate-limited and replay workflows.
 pub trait Clock {
@@ -18,6 +18,10 @@ pub trait Clock {
     }
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>;
+
+    fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
+        None
+    }
 }
 
 /// Production wall-clock implementation.
@@ -56,9 +60,50 @@ pub(crate) fn check_deadline<E>(
         .map_err(|error| duration_error(error.actual, error.limit))
 }
 
+/// Production pacing clock sharing an explicit operation cancellation signal.
+#[derive(Clone, Debug)]
+pub struct CancellableClock(pub packetcraftr_core::budget::Cancellation);
+
+impl Clock for CancellableClock {
+    type Error = packetcraftr_core::budget::Cancelled;
+    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
+        let start = Instant::now();
+        loop {
+            self.0.check()?;
+            let remaining = delay.saturating_sub(start.elapsed());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(remaining.min(Cancellation::POLL_INTERVAL));
+        }
+    }
+    fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
+        Some(self.0.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_signal_interrupts_a_long_pacing_wait() {
+        let signal = packetcraftr_core::budget::Cancellation::default();
+        let mut clock = CancellableClock(signal.clone());
+        let (started, entered) = std::sync::mpsc::channel();
+        let (finished, outcome) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            finished.send(clock.sleep(Duration::from_secs(60))).unwrap();
+        });
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        signal.cancel();
+        assert!(matches!(
+            outcome.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Err(packetcraftr_core::budget::Cancelled)
+        ));
+        worker.join().unwrap();
+    }
 
     #[test]
     fn rate_delay_uses_ceiling_division_and_rejects_invalid_rates() {

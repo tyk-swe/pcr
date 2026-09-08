@@ -40,7 +40,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     )?;
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
-    let mut clock = packetcraftr::clock::SystemClock;
+    let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
     if format == Format::Ndjson {
         let events = stream.clone();
         let summary = packetcraftr::traceroute::run_with_events(

@@ -33,6 +33,7 @@ mod dispatch;
 mod ip;
 mod limits;
 
+pub use clock::ClockReport;
 pub use ip::{
     IpCounters, IpDatagramOutcome, IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport,
 };
@@ -70,6 +71,7 @@ pub struct FrameRecord<'a> {
     pub timestamp: SystemTime,
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
+    scopes: &'a Interner,
     /// Innermost TCP and UDP observations, each tied to the decoded view
     /// that supplied it. A tunnel can carry one of each.
     pub tcp: Option<TcpView<'a>>,
@@ -107,6 +109,11 @@ pub struct UdpView<'a> {
 }
 
 impl FrameRecord<'_> {
+    /// Resolves a run-local scope into its capture interface and tunnel path.
+    pub fn scope_definition(&self, id: ScopeId) -> Option<&crate::analysis::scope::Definition> {
+        self.scopes.definition(id)
+    }
+
     /// Innermost completed network-layer view attached to this physical
     /// frame. It is never a second physical pipeline record and never
     /// contributes bytes to physical capture accounting.
@@ -130,6 +137,7 @@ impl FrameRecord<'_> {
 /// separately and cannot disagree.
 #[derive(Clone, Debug, Default)]
 pub struct Summary {
+    pub clock: ClockReport,
     pub frames_read: u64,
     pub frames_matched: u64,
     /// Data still buffered when the capture ended, flushed flow by flow.
@@ -188,7 +196,8 @@ where
 {
     options.limits.validate()?;
     let limits = &options.limits;
-    let deadline = Deadline::new(limits.max_duration);
+    let deadline =
+        Deadline::new(limits.max_duration).with_cancellation(options.cancellation.clone());
     let decoder = Dissector::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
@@ -199,7 +208,7 @@ where
     let scope_limit = usize::try_from(limits.max_frames)
         .unwrap_or(usize::MAX)
         .saturating_mul(3);
-    let mut scopes = Interner::with_limit(scope_limit);
+    let mut scopes = Interner::with_limits(scope_limit, limits.max_scope_bytes);
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
     let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
     let stage = FrameStage {
@@ -340,6 +349,7 @@ where
             timestamp,
             decoded: &decoded,
             derived_datagrams: &derived,
+            scopes: &scopes,
             tcp: tcp_view,
             udp: udp_view,
             tcp_events: &tcp_events,
@@ -363,6 +373,7 @@ where
     Ok(Summary {
         frames_read,
         frames_matched,
+        clock: ip_dispatch.clock_report().clone(),
         trailing_tcp_events: reassembly_dispatch.flush(),
         ip_reassembly: ip_dispatch.report().clone(),
     })
@@ -603,5 +614,5 @@ fn next_frame<R: Read>(
 
 /// Refuses to continue once the run's own processing budget is spent.
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
-    deadline.check().map_err(Error::from)
+    deadline.enforce().map_err(Error::from)
 }

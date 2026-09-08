@@ -260,7 +260,7 @@ fn tls_limits_reject_zero_ceilings() {
         }
         assert!(
             matches!(
-                limits.validate(),
+                Collector::new(limits),
                 Err(Error::InvalidLimit { field: actual, value: 0, .. }) if actual == field
             ),
             "{field} must be rejected when zero"
@@ -279,7 +279,7 @@ fn the_public_session_model_and_collector_keep_their_contracts() {
         collector.observe(record)
     }
 
-    let _: fn(TlsLimits) -> Collector = Collector::new;
+    let _: fn(TlsLimits) -> Result<Collector, Error> = Collector::new;
     let _: for<'record> fn(&mut Collector, &FrameRecord<'record>) -> Vec<SessionEvent> = observe;
     let _: Finish = Collector::finish;
 

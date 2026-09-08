@@ -62,6 +62,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .arm_capture(&request)
         .map_err(CliError::classified)?;
 
+    let capture =
+        net::capture::Cancellable::new(capture, Some(crate::cancellation::signal().clone()));
     let session = || execution::Session {
         capture,
         timeout,

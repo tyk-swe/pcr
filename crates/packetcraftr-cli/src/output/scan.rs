@@ -64,6 +64,7 @@ pub struct Endpoint {
 /// Aggregate result of `scan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
+    pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
@@ -75,6 +76,7 @@ impl Report {
         result: packetcraftr::scan::Report,
     ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
         let packetcraftr::scan::Report {
+            planned_duration,
             target,
             resolved_addresses,
             endpoints,
@@ -101,6 +103,7 @@ impl Report {
             .collect::<Result<Vec<_>, Error>>()?;
         Ok((
             Self {
+                planned_duration,
                 target,
                 resolved_addresses,
                 endpoints: endpoint_outputs,
@@ -125,6 +128,7 @@ pub enum Event {
     },
     Diagnostic {},
     Complete {
+        planned_duration: Duration,
         target: String,
         resolved_addresses: Vec<IpAddr>,
         counts: ClassificationCounts,
@@ -161,6 +165,7 @@ impl Event {
     ) -> (Self, Vec<PacketDiagnostic>, Stats) {
         (
             Self::Complete {
+                planned_duration: summary.planned_duration,
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 counts: summary.counts,

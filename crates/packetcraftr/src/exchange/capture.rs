@@ -354,6 +354,7 @@ mod tests {
             },
         };
         let prepared = Prepared {
+            cancellation: None,
             started,
             deadline,
             options,

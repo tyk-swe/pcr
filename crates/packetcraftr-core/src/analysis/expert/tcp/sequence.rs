@@ -9,10 +9,10 @@ use crate::protocol::transport::Tcp;
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
-use crate::analysis::expert::{Finding, FlowKey, TcpEvent, tcp_stream_ref};
+use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
 
 pub(super) fn reconcile_events(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
     events: &[TcpEvent],
     findings: &mut Vec<Finding>,
@@ -116,9 +116,9 @@ fn retransmission_message(
 }
 
 pub(super) fn observe(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
-    reverse: &FlowKey,
+    reverse: &ScopedFlowKey,
     probe_shape: bool,
     reassembly_retransmission: bool,
     findings: &mut Vec<Finding>,
@@ -233,7 +233,7 @@ fn update_next_sequences(
 }
 
 pub(super) fn record_clean_closures(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     events: &[TcpEvent],
 ) {
     // A clean close proves delivery only after this frame's header analysis.
@@ -245,7 +245,7 @@ pub(super) fn record_clean_closures(
 }
 
 pub(super) fn finish(
-    streams: &HashMap<FlowKey, u64>,
+    streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,
 ) -> Vec<Finding> {

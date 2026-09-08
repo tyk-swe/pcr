@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,7 +13,8 @@ use thiserror::Error;
 use crate::frame::GlobalInterfaceId;
 
 /// One semantic identifier in the ordered encapsulation path enclosing a flow.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EncapsulationIdentifier {
     Vlan {
@@ -71,6 +73,16 @@ impl ScopeId {
     }
 }
 
+/// Interpretable capture domain. `id` and `interface` are run-local, with
+/// `interface` indexing the reader's capture-wide interface table (across sections).
+/// Encapsulation preserves its enclosing order; reverse traffic shares a domain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Definition {
+    pub id: ScopeId,
+    pub interface: Option<GlobalInterfaceId>,
+    pub encapsulation: Arc<[EncapsulationIdentifier]>,
+}
+
 /// Failure to allocate another compact scope identity.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
@@ -83,13 +95,17 @@ pub enum Error {
     ReplayMismatch { scope: u32 },
     #[error("capture scope table reached configured limit {limit}")]
     Limit { limit: usize },
+    #[error("capture scope metadata needs {actual} charged bytes, exceeding {limit}")]
+    Bytes { actual: usize, limit: usize },
 }
 
 /// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug)]
 pub struct Interner {
     scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
-    definitions: Vec<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>)>,
+    definitions: Vec<Definition>,
+    retained_bytes: usize,
+    max_bytes: usize,
     next: u32,
     limit: usize,
 }
@@ -99,6 +115,8 @@ impl Default for Interner {
         Self {
             scopes: HashMap::new(),
             definitions: Vec::new(),
+            retained_bytes: 0,
+            max_bytes: usize::MAX,
             next: 0,
             limit: usize::MAX,
         }
@@ -118,6 +136,24 @@ impl Interner {
         }
     }
 
+    /// Finite count and conservative retained-byte ceilings. Zero refuses new
+    /// entries. Includes both path copies and table capacity headroom, not RSS.
+    #[must_use]
+    pub fn with_limits(limit: usize, max_bytes: usize) -> Self {
+        Self {
+            max_bytes,
+            ..Self::with_limit(limit)
+        }
+    }
+
+    pub fn definition(&self, id: ScopeId) -> Option<&Definition> {
+        self.definitions.get(id.get() as usize)
+    }
+
+    pub fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
+
     /// Returns the compact ID for an exact interface and encapsulation path.
     pub fn intern(
         &mut self,
@@ -131,11 +167,34 @@ impl Interner {
         if self.scopes.len() >= self.limit {
             return Err(Error::Limit { limit: self.limit });
         }
+        // Two owned paths, plus conservative table/header/capacity overhead.
+        let charge = scope
+            .1
+            .capacity()
+            .checked_add(scope.1.len())
+            .and_then(|count| count.checked_mul(size_of::<EncapsulationIdentifier>()))
+            .and_then(|bytes| bytes.checked_add(4 * size_of::<Definition>() + 128))
+            .ok_or(Error::Capacity)?;
+        let actual = self
+            .retained_bytes
+            .checked_add(charge)
+            .ok_or(Error::Capacity)?;
+        if actual > self.max_bytes {
+            return Err(Error::Bytes {
+                actual,
+                limit: self.max_bytes,
+            });
+        }
         let next = self.next.checked_add(1).ok_or(Error::Capacity)?;
         let id = ScopeId(self.next);
         self.next = next;
-        self.scopes.insert(scope.clone(), id);
-        self.definitions.push(scope);
+        self.definitions.push(Definition {
+            id,
+            interface: scope.0,
+            encapsulation: Arc::from(scope.1.as_slice()),
+        });
+        self.scopes.insert(scope, id);
+        self.retained_bytes = actual;
         Ok(id)
     }
 
@@ -148,11 +207,12 @@ impl Interner {
         replacement: &[EncapsulationIdentifier],
     ) -> Result<ScopeId, Error> {
         let index = usize::try_from(base.0).map_err(|_| Error::Unknown { scope: base.0 })?;
-        let (interface, mut path) = self
+        let definition = self
             .definitions
             .get(index)
-            .cloned()
             .ok_or(Error::Unknown { scope: base.0 })?;
+        let interface = definition.interface;
+        let mut path = definition.encapsulation.to_vec();
         if !path.ends_with(replayed) {
             return Err(Error::ReplayMismatch { scope: base.0 });
         }
@@ -282,5 +342,34 @@ mod tests {
             interner.intern(Some(1), tunnel_path(11)),
             Err(Error::Limit { limit: 1 })
         );
+    }
+}
+
+#[cfg(test)]
+mod byte_boundary_tests {
+    use super::*;
+    #[test]
+    fn scope_budget_rejects_before_admission_and_preserves_existing_identity() {
+        let path = vec![EncapsulationIdentifier::Vxlan { vni: 7 }; 16];
+        let mut measured = Interner::new();
+        measured.intern(Some(1), path.clone()).unwrap();
+        let charge = measured.retained_bytes();
+        for limit in [charge - 1, charge, charge + 1] {
+            let mut scopes = Interner::with_limits(2, limit);
+            let result = scopes.intern(Some(1), path.clone());
+            if limit < charge {
+                assert!(matches!(result, Err(Error::Bytes { .. })));
+                assert_eq!(scopes.retained_bytes(), 0);
+            } else {
+                let id = result.unwrap();
+                assert_eq!(scopes.intern(Some(1), path.clone()).unwrap(), id);
+                assert!(matches!(
+                    scopes.intern(Some(2), path.clone()),
+                    Err(Error::Bytes { .. })
+                ));
+                assert_eq!(scopes.retained_bytes(), charge);
+                assert_eq!(scopes.definition(id).unwrap().interface, Some(1));
+            }
+        }
     }
 }

@@ -1,13 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{FlowKey, StreamRef, Tcp, tcp_stream_ref};
+use super::{ScopedFlowKey, StreamRef, Tcp, tcp_stream_ref};
 
 #[derive(Clone, Copy)]
 pub(super) struct TcpObservation<'a> {
     pub(super) number: u64,
     pub(super) stream: Option<StreamRef>,
-    pub(super) flow: &'a FlowKey,
+    pub(super) flow: &'a ScopedFlowKey,
     pub(super) tcp: &'a Tcp,
     pub(super) payload_len: usize,
     pub(super) syn: bool,

@@ -18,7 +18,8 @@ use packetcraftr_cli::output;
 
 pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 
-/// One blocked output attempt may add this much time to a workflow budget.
+/// Per-write ceiling; max-duration publishers clip it to their remaining budget.
+/// A terminal error may use this separate cleanup allowance.
 const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Opens the process-wide NDJSON stream on stdout.

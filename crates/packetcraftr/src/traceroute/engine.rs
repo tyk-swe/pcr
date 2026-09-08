@@ -110,7 +110,9 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    let mut deadline = Deadline::new(request.limits.max_duration);
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+    enforce_deadline(WORKFLOW, &deadline)?;
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
     enforce_deadline(WORKFLOW, &deadline)?;
@@ -309,7 +311,7 @@ struct Lifecycle<'a, E, F> {
     emit: &'a mut F,
 }
 
-impl<E, F> ProbeLifecycle<Probe> for Lifecycle<'_, E, F>
+impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
 where
     E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -321,7 +323,8 @@ where
     fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
         validate_batch_evidence(
             WORKFLOW,
-            batch,
+            &batch.probes,
+            batch.timeout,
             execution,
             self.limits.evidence(),
             sent_probe_matches,

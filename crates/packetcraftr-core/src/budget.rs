@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 /// elapsed-time accounting. A blocked provider cannot be interrupted; callers
 /// must check immediately before and after each provider boundary.
 pub struct Deadline {
+    cancellation: Option<Cancellation>,
     baseline: Instant,
     accounted: Duration,
     limit: Duration,
@@ -38,11 +39,41 @@ impl Deadline {
     ) -> Self {
         let now = Arc::new(now);
         Self {
+            cancellation: None,
             baseline: now(),
             accounted: Duration::ZERO,
             limit,
             now,
         }
+    }
+
+    /// Shares a cooperative stop signal with the operation. Deadline checks
+    /// and cancellation checks remain distinct so cancellation is never reported
+    /// as fabricated elapsed time.
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: Option<Cancellation>) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
+    pub fn check_cancelled(&self) -> Result<(), Cancelled> {
+        self.cancellation
+            .as_ref()
+            .map_or(Ok(()), Cancellation::check)
+    }
+
+    /// Cooperative gate at a work boundary: cancellation is reported before
+    /// the elapsed budget so a stop request is never reported as fabricated
+    /// elapsed time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Interrupted::Cancelled`] when the shared signal fired, else
+    /// [`Interrupted::Exceeded`] once accounted time passes the limit.
+    pub fn enforce(&self) -> Result<(), Interrupted> {
+        self.check_cancelled()?;
+        self.check()?;
+        Ok(())
     }
 
     /// Reports whether the budget has already been spent.
@@ -140,6 +171,16 @@ impl Deadline {
         Ok(timeout)
     }
 
+    /// Starts a real-time boundary wait capped by the remaining operation
+    /// budget, carrying the same cancellation signal. Deterministic parent
+    /// accounting allocates the allowance; the actual wait uses wall time.
+    pub fn for_wait(&self, requested: Duration) -> Result<Self, DeadlineExceeded> {
+        Ok(
+            Self::new(self.bounded_timeout(requested)?)
+                .with_cancellation(self.cancellation.clone()),
+        )
+    }
+
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
     ///
@@ -164,4 +205,95 @@ impl Deadline {
 pub struct DeadlineExceeded {
     pub actual: Duration,
     pub limit: Duration,
+}
+
+/// Why a [`Deadline::enforce`] gate refused to continue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum Interrupted {
+    #[error(transparent)]
+    Cancelled(#[from] Cancelled),
+    #[error(transparent)]
+    Exceeded(#[from] DeadlineExceeded),
+}
+
+impl Interrupted {
+    /// Converts into any workflow error that already accepts both causes.
+    pub fn into_error<E: From<Cancelled> + From<DeadlineExceeded>>(self) -> E {
+        match self {
+            Self::Cancelled(cancelled) => cancelled.into(),
+            Self::Exceeded(exceeded) => exceeded.into(),
+        }
+    }
+}
+
+/// Cloneable cooperative stop signal. Construction starts no threads, and
+/// cancelling one operation does not affect independently constructed signals.
+#[derive(Clone, Debug, Default)]
+pub struct Cancellation(Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancellation {
+    /// Longest slice an uninterruptible wait should take between checks of
+    /// the signal, so a stop request is honored promptly without spinning.
+    pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+    pub fn check(&self) -> Result<(), Cancelled> {
+        if self.is_cancelled() {
+            Err(Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("operation cancelled; previously completed external effects are not undone")]
+pub struct Cancelled;
+
+impl crate::error::Classified for Cancelled {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "io.cancelled",
+            crate::error::Kind::Io,
+            Some(
+                "account for earlier records and confirmed transmissions; the operation is incomplete",
+            ),
+        )
+    }
+}
+
+impl Cancelled {
+    pub fn into_boundary_error(self) -> crate::error::BoundaryError {
+        use crate::error::Classified;
+        crate::error::BoundaryError::with_source(
+            self.to_string(),
+            self.classification(),
+            Vec::new(),
+            self,
+        )
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    #[test]
+    fn cancellation_is_shared_only_with_clones_and_never_fakes_elapsed_time() {
+        let signal = Cancellation::default();
+        let independent = Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
+        let wait = deadline.for_wait(Duration::from_secs(1)).unwrap();
+        signal.cancel();
+        assert!(wait.check_cancelled().is_err());
+        assert!(matches!(signal.check(), Err(Cancelled)));
+        assert!(deadline.check_cancelled().is_err());
+        assert!(deadline.check().is_ok());
+        assert!(independent.check().is_ok());
+    }
 }

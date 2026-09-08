@@ -22,6 +22,7 @@ where
     I: PacketIo,
 {
     pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {
+        self.check_cancelled()?;
         let started = Instant::now();
         self.policy.authorize(crate::policy::Operation::Budgeted(
             crate::policy::WireBudget::new(1, 0),
@@ -40,6 +41,7 @@ where
         let prepared = self.materialize_and_authorize(planned, &builder, &options, None)?;
         // Link-layer synthesis is already included in the exact build. The
         // typed frame selects the matching native provider boundary.
+        self.check_cancelled()?;
         let io_report = self.io.send(TransmissionFrame::try_new(
             &prepared.built.bytes,
             &prepared.route,

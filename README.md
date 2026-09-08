@@ -5,9 +5,9 @@ interoperability testing, and authorized network diagnostics. It provides
 exact packet construction, bounded dissection, capture-file I/O, offline
 analysis, and policy-gated live networking.
 
-Current release: pre-1.0 beta `0.5.0-beta.2`. Rust APIs and versioned
+Development version: pre-1.0 beta `0.5.0-beta.3` (unreleased). Rust APIs and versioned
 serialized contracts may change between beta releases; review the
-[changelog](CHANGELOG.md) before upgrading.
+[changelog](CHANGELOG.md) and [beta.3 migration note](docs/migration-beta.3.md) before upgrading.
 
 > **Authorized use:** PacketcraftR is designed for controlled labs, protocol
 > testing, and diagnostics on systems and networks you own or are explicitly
@@ -111,15 +111,40 @@ To build from source, install the toolchain in `rust-toolchain.toml`; the same s
 is declared in `Cargo.toml`. All-feature Linux builds also need libpcap
 development files such as `libpcap-dev`.
 
+Choose the source profile before building:
+
 ```console
-cargo build --locked --release -p packetcraftr-cli
-./target/release/packetcraftr --help
+# Offline construction, capture-file processing, and analysis
+cargo build --locked --release -p packetcraftr-cli --no-default-features
+# Passive routes/interfaces and raw Layer 3 I/O, without libpcap
+cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
+# Every native provider, including capture, Layer 2, and capture-ready exchanges
+cargo build --locked --release -p packetcraftr-cli --all-features
+./target/release/packetcraftr --version
 ```
 
-Use `--no-default-features` for offline-only builds,
-`--no-default-features --features native-layer3` for pcap-free
-native support, or `--all-features` for every native provider. See
-[Contributing](CONTRIBUTING.md) for the ordinary Cargo development loop.
+Default features provide passive routes/interfaces. Capture, exchange and
+capture-backed probes require the corresponding full-native provider; pcap-free
+is intended for offline work, routing, raw Layer 3 send and replay. See
+[Contributing](CONTRIBUTING.md) for the ordinary Cargo loop.
+
+Release artifacts use these runtime baselines: Ubuntu 24.04 (glibc 2.39), macOS 14
+on arm64, macOS 15 on x86_64, and Windows Server 2022 on x86_64. Older systems are
+not a tested binary baseline; build from source for another environment.
+Full-native Linux needs the shared libpcap runtime (Ubuntu `libpcap0.8t64`);
+Windows capture/Layer 2 needs a working Npcap installation exporting the symbols
+required by the loader. Pcap-free archives do not require libpcap/Npcap.
+`BUILD-METADATA.json` in each release archive records compiler, commit, target,
+feature variant and the executable digest. Linux packaging also runs offline
+smokes in a clean Ubuntu 24.04 container.
+
+Read [analysis resources and evidence](docs/analysis-resources.md) for cumulative
+versus concurrent limits, clock/filter semantics, cancellation and reproducible
+whole-workflow memory measurements. Binary output refuses interactive stdout
+unless `--force-binary-stdout` is supplied. For commands with cooperative
+cancellation, the first interrupt requests cleanup;
+the second forces exit. Cancellation exits 130; a killed process or unwritable
+sink cannot promise a terminal NDJSON record.
 
 ## Contracts
 

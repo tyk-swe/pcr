@@ -36,4 +36,5 @@ pub(crate) fn client(
         ),
         policy,
     )
+    .with_cancellation(crate::cancellation::signal().clone())
 }

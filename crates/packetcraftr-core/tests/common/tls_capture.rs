@@ -167,7 +167,7 @@ impl Capture {
 /// Runs a capture through the pipeline into a TLS collector.
 pub(crate) fn assemble(capture: &Capture, limits: TlsLimits) -> (Vec<Session>, TlsSummary) {
     let mut reader = reader(&capture.frames);
-    let mut collector = Collector::new(limits);
+    let mut collector = Collector::new(limits).expect("valid TLS limits");
     let mut sessions = Vec::new();
     let summary = run(
         &mut reader,

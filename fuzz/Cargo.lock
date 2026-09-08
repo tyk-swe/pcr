@@ -194,8 +194,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "packetcraftr"
+version = "0.5.0-beta.3"
+dependencies = [
+ "bytes",
+ "getrandom",
+ "packetcraftr-core",
+ "packetcraftr-netio",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "packetcraftr-core"
-version = "0.5.0-beta.2"
+version = "0.5.0-beta.3"
 dependencies = [
  "bytes",
  "md-5",
@@ -212,8 +224,19 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "libfuzzer-sys",
+ "packetcraftr",
  "packetcraftr-core",
  "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-netio"
+version = "0.5.0-beta.3"
+dependencies = [
+ "bytes",
+ "packetcraftr-core",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -40,17 +40,19 @@ pub(super) fn render_record(
 ) -> Result<(), CliError> {
     match format {
         Format::Text => write_stdout_line(format_args!(
-            "{} #{} {}",
+            "{} #{} generation={} {}",
             direction_marker(&chunk),
             chunk.number,
+            chunk.direction_generation,
             chunk.bytes.escape_ascii()
         )),
         Format::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(
-                "{} #{} {}",
+                "{} #{} generation={} {}",
                 direction_marker(&chunk),
                 rendered.frame,
+                rendered.direction_generation,
                 rendered.bytes_hex
             ))
         }
@@ -65,6 +67,10 @@ pub(super) fn render_record(
 }
 
 pub(super) fn render_text(selector: StreamRef, summary: &Summary) -> Result<(), CliError> {
+    crate::commands::offline_analysis::render_clock(&summary.clock)?;
+    if let Some(scope) = &summary.scope {
+        crate::commands::offline_analysis::render_scope(scope)?;
+    }
     let transport = selector.transport.as_str();
     match &summary.client_flow {
         Some(flow) => write_stdout_line(format_args!(

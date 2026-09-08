@@ -3,10 +3,8 @@
 
 //! Exact DNS probe construction and ephemeral source-port rotation.
 
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
+use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use std::net::IpAddr;
-use std::time::SystemTime;
 
 use packetcraftr_core::protocol::{
     application::Dns,
@@ -61,69 +59,61 @@ pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
     crate::probe::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
 
-/// An unpredictable DNS transaction ID for a new query.
-///
-/// Query-ID unpredictability is spoofing resistance: an off-path attacker who
-/// can guess the ID (and the source port below) can forge an answer that
-/// passes the same transaction and question checks a genuine response passes.
-/// Callers that need a fixed ID for reproducibility pass one explicitly.
-///
-/// This is a per-call mix of OS-seeded hasher state, the wall clock, and the
-/// process ID. It is deliberately not a cryptographic generator, and nothing
-/// in this crate treats it as one.
-#[must_use]
-pub fn unpredictable_transaction_id() -> u16 {
-    // the transaction ID is the low 16 bits of the mixed entropy; every bit of the 64-bit value is
-    // equally unpredictable, so the narrowing loses no unpredictability
-    entropy() as u16
+/// Draws a DNS transaction ID from the system random source.
+/// Entropy failures are returned before a query can be sent. Callers needing
+/// reproducible experiments supply a fixed identity in `Request` instead.
+pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
+    random_u16(getrandom::fill)
 }
 
-/// An unpredictable ephemeral source port for a new query, inside the IANA
-/// dynamic range.
-///
-/// Source-port unpredictability multiplies with
-/// [`unpredictable_transaction_id`] to widen the space an off-path spoofer has
-/// to guess. Retries rotate one step from this base rather than re-drawing, so
-/// the whole operation stays inside one predictable-to-the-caller range.
-#[must_use]
-pub fn unpredictable_source_port() -> u16 {
-    crate::probe::ephemeral_source_port(crate::probe::EPHEMERAL_SOURCE_PORT_BASE, entropy())
+/// Draws an ephemeral source port from the system random source.
+/// Retries retain deterministic rotation from this random base; this is not
+/// a claim of independent entropy on each retry.
+pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
+    random_u16(getrandom::fill).map(|value| {
+        crate::probe::ephemeral_source_port(
+            crate::probe::EPHEMERAL_SOURCE_PORT_BASE,
+            u64::from(value),
+        )
+    })
 }
 
-fn entropy() -> u64 {
-    let time = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut hasher = RandomState::new().build_hasher();
-    hasher.write_u128(time);
-    hasher.write_u32(std::process::id());
-    hasher.finish()
+fn random_u16(
+    fill: impl FnOnce(&mut [u8]) -> Result<(), getrandom::Error>,
+) -> Result<u16, BoundaryError> {
+    let mut bytes = [0; 2];
+    fill(&mut bytes).map_err(|source| {
+        BoundaryError::with_source(
+            "could not obtain system randomness for DNS identity",
+            Classification::new("io.dns_entropy", Kind::Io, None),
+            Vec::new(),
+            source,
+        )
+    })?;
+    Ok(u16::from_ne_bytes(bytes))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use packetcraftr_core::error::Classified;
 
-    /// Both values must vary between queries and the port must stay inside
-    /// the dynamic range the retry rotation assumes.
     #[test]
-    fn unpredictable_query_identity_varies_and_stays_in_the_dynamic_range() {
-        let ports: Vec<u16> = (0..64).map(|_| unpredictable_source_port()).collect();
-        assert!(
-            ports
-                .iter()
-                .all(|port| *port >= crate::probe::EPHEMERAL_SOURCE_PORT_BASE)
-        );
-        assert!(
-            ports.iter().any(|port| Some(port) != ports.first()),
-            "64 draws that all agree would mean the source port is fixed"
-        );
+    fn entropy_failure_is_not_replaced_with_a_predictable_identity() {
+        let error = random_u16(|_| Err(getrandom::Error::UNSUPPORTED)).unwrap_err();
+        assert_eq!(error.classification().code, "io.dns_entropy");
+        assert!(std::error::Error::source(&error).is_some());
+    }
 
-        let ids: Vec<u16> = (0..64).map(|_| unpredictable_transaction_id()).collect();
-        assert!(
-            ids.iter().any(|id| Some(id) != ids.first()),
-            "64 draws that all agree would mean the transaction ID is fixed"
+    #[test]
+    fn deterministic_entropy_uses_the_exact_supplied_bytes() {
+        assert_eq!(
+            random_u16(|bytes| {
+                bytes.copy_from_slice(&0x1234u16.to_ne_bytes());
+                Ok(())
+            })
+            .unwrap(),
+            0x1234
         );
     }
 

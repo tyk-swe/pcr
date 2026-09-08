@@ -35,6 +35,7 @@ impl AnalysisSetup {
     /// choose only whether the run drives TCP reassembly.
     pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
         analysis::Options {
+            cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
             tcp_events,
             ip_overlap: self.ip_overlap,
@@ -73,6 +74,7 @@ pub(super) fn prepare_with_tls_ports(
         max_bytes: capture.max_bytes,
         max_frame_bytes: capture.reader.max_frame_bytes,
         max_flows: limits.max_flows,
+        max_scope_bytes: limits.max_scope_bytes,
         max_tcp_bytes_per_flow: limits.max_tcp_bytes_per_flow,
         max_tcp_reassembly_bytes: limits.max_tcp_reassembly_bytes,
         max_tcp_segments_per_flow: limits.max_tcp_segments_per_flow,
@@ -187,6 +189,25 @@ pub(super) fn ip_event_sink(
         }
         Ok(())
     }
+}
+
+pub(super) fn render_scope(scope: &analysis::scope::Definition) -> Result<(), CliError> {
+    crate::rendering::write_stdout_line(format_args!(
+        "scope {}: interface {:?}, encapsulation {:?}",
+        scope.id.get(),
+        scope.interface,
+        scope.encapsulation
+    ))
+}
+
+pub(super) fn render_clock(clock: &analysis::ClockReport) -> Result<(), CliError> {
+    crate::rendering::write_stdout_line(format_args!(
+        "capture clock: {} regressing frame(s), largest rollback {:?}, largest forward step {:?} at frame {:?}; expiry follows the high-water mark",
+        clock.regressions,
+        clock.max_regression,
+        clock.max_forward_step,
+        clock.max_forward_step_frame,
+    ))
 }
 
 #[cfg(test)]

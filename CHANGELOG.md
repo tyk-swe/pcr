@@ -6,6 +6,48 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Engineering review corrections (next: 0.5.0-beta.3)
+
+- Correct distinct TLS conversation counting after frame filtering, repair the
+  output/v2 jq example, and fail capture benchmarks on parse errors and incomplete
+  fixture traversal.
+- **BREAKING:** DNS random-identity helpers now return fallible OS randomness;
+  TLS collector construction validates limits and returns `Result`.
+- Core statistics retain only requested aggregations. TLS JSON retention uses
+  `--max-output-sessions`, independently of concurrent `--max-tls-sessions`.
+- Analysis output exposes capture scopes, clock regressions/forward steps and
+  I/O bucket origins/clamping. Follow chunks identify direction generations.
+  `--max-scope-bytes` bounds retained scope metadata; flow help names cumulative
+  capture-global indexing. Scope metadata paths are shared with output.
+- NDJSON preparation enforces a 16 MiB encoded-record ceiling, retains atomic
+  record preparation and fails closed on partial writes/flush failures. Encoder
+  timing samples separate serialization, lock wait and output wait; max-duration
+  NDJSON commands pass their remaining publication budget through those stages.
+- Explicit cooperative cancellation spans analysis, pacing, live client checks,
+  capture polling and publication waits. CLI interrupts request cleanup first,
+  force exit second, and return 130 on cancellation. Binary terminal output
+  requires `--force-binary-stdout`. Progress runtime snapshots expose saturation
+  and timed-out callbacks still retaining capacity.
+- Capture rewriting/selection checks cancellation at every record and EOF;
+  offline fuzzing checks between cases in every output format. Interrupted
+  invocations cannot return success. Commands without cooperative cancellation
+  retain normal OS signal termination.
+- **BREAKING:** Scan batches own a single `probe`. Plans generate probes lazily
+  after total/policy validation, and reports
+  include the serial timeout/pacing estimate. IP reconstruction has a dedicated
+  owner; DNS transport and TLS generation invariants remain explicit.
+- Add provider-failure matrices, native-buffer boundary tests, trace properties,
+  structured DNS/TCP/TLS fuzzing, persisted/minimized fuzz corpora, independent
+  TShark vectors and generated workflow/RSS/allocator measurements.
+- CI executes pcap-free and platform feature contracts with explicit timeouts.
+  Release preflight reruns advisory policy; archives include verified build
+  metadata and a Linux runtime-baseline smoke. No advisory exceptions were added;
+  the exact nix 0.30 duplicate exception documents rtnetlink/ctrlc requirements.
+- See [migration](docs/migration-beta.3.md), [resource semantics](docs/analysis-resources.md)
+  and the [recommendation dispositions](docs/engineering-review.md). No release
+  tag or publication is implied by the development version bump.
+
+
 ### Maintainability redesign
 
 - **BREAKING:** Structured output uses `packetcraftr.output/v2`. Every NDJSON
@@ -71,8 +113,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   unknown. Core `analysis::pcap::select` exposes bounded, fallible frame selection
   with input/output accounting and source-frame error attribution.
 
-- Optional core `decrypt` feature with RustCrypto AES-GCM, ChaCha20-Poly1305,
-  and HKDF dependencies, covered by the supported feature matrix.
 - `build` and `dissect` expose `--max-layers` and `--max-packet-size`, and
   `traceroute` exposes a validated `--source-port` for UDP and TCP probes.
 - DNS queries and decoded records support CAA (type 257), and streamed scan
@@ -115,10 +155,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   presentation escaping and their own error mapping, so every published byte is
   unchanged; `packetcraftr::dns::WireError` gains `From<name::Error>` for the
   translation. A `dns_name` fuzz target covers the shared decoder.
-- A test that fails if any file outside `crates/packetcraftr-netio/src/platform/`
-  re-enables `unsafe_code`. The workspace's central safety claim previously
-  lived only in AGENTS.md and in a comment at the `packetcraftr-netio` crate
-  root, so a new opt-out anywhere else would have compiled silently.
 - `#[test] fn the_command_tree_is_valid`, which runs clap's `debug_assert()`
   over the whole command tree. `fuzz` adjusts sixteen arguments by id, eleven
   of them defined in other modules, and the tree is rebuilt on every
@@ -229,7 +265,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - **BREAKING:** scan and traceroute share one probe skeleton under `packetcraftr::probe`: `probe::Error { workflow, kind }` with `ErrorKind` and `Workflow` replaces `scan::Error` and `traceroute::Error` (the published codes and remediations are unchanged), `probe::{Transport, ProbeEndpoint, ProbeStatus}` replace the duplicated scan/traceroute enums (`traceroute::Strategy` and `traceroute::ProbeTarget` remain as aliases; `ProbeTarget::strategy()` is now `transport()`), and evidence retention, diagnostics, and batch validation live in one shared state type.
 
-- `packetcraftr-netio` platform internals share one worker-join helper (`platform::worker_reaper::join_with_deadline`), the capture queue plans oldest-first eviction separately from admission, the neighbor resolver keeps evidence in one `EvidenceBuffer`, `neighbor::Options::capture_limits()` exposes the discovery capture bounds, and the macOS and Windows route backends share `route_normalize::constrain_by_preferred_source`. The Npcap loader binds its symbols through one `load_symbols!` macro and the interface-identity module only opts out of `unsafe_code` on Linux and macOS.
+- `packetcraftr-netio` platform internals share one worker-join helper (`platform::workers::join_with_deadline`), the capture queue plans oldest-first eviction separately from admission, the neighbor resolver keeps evidence in one `EvidenceBuffer`, `neighbor::Options::capture_limits()` exposes the discovery capture bounds, and the macOS and Windows route backends share `route_normalize::constrain_by_preferred_source`. The Npcap loader binds its symbols through one `load_symbols!` macro and the interface-identity module only opts out of `unsafe_code` on Linux and macOS.
 - **BREAKING:** `packetcraftr_netio::PacketIo { sender, capture }` replaces the `(sender, capture)` tuple implementations of `transmit::Sender` and `capture::Provider`, and `transmit::Dispatch` is now `transmit::ModeSender`.
 - `packetcraftr-netio` now resolves native capabilities through build-script `cfg` flags (`native_route`, `pcap_backend`, `npcap_backend`, `native_layer3`, ...) and a single `platform::dispatch` module instead of five per-capability dispatch files. Platform backends are named after the operating-system facility they use (`netlink`, `af_route`, `iphelper`), route normalization lives in `platform::route_normalize`, and rules shared by the libpcap and Npcap backends live in `platform::pcap_common`. Npcap on targets other than x86_64 MSVC is now reported by the generic unsupported-capability message. No public API or error code changed.
 - **BREAKING:** `Registry` lookups take protocol names as `&str` and return `layer::Id` by value; `BuiltinProtocol::from_id` takes an `Id` by value; `codec::DecodedLayerValue` is now `codec::DecodedLayer`. Reassembly `contract` modules are named `model`, `Padding::excluded_from` is the single padding-exclusion rule, and offline analysis no longer materializes filter inputs when no filter is set.

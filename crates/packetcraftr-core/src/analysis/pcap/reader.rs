@@ -3,6 +3,7 @@
 
 use std::io::Read;
 
+use crate::budget::Cancellation;
 use crate::frame::{Frame, LinkType};
 
 use super::classic::{read_next_pcap_record, read_pcap_header};
@@ -38,6 +39,7 @@ pub struct Reader<R> {
     options: ReaderOptions,
     scratch: Vec<u8>,
     finished: bool,
+    cancellation: Option<Cancellation>,
 }
 
 fn wrap_pcap_header(
@@ -141,7 +143,16 @@ impl<R: Read> Reader<R> {
             options,
             scratch,
             finished: false,
+            cancellation: None,
         })
+    }
+
+    /// Checks a cooperative stop signal before and after each source record,
+    /// including metadata and EOF. An in-progress `Read` must return first.
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: Cancellation) -> Self {
+        self.cancellation = Some(cancellation);
+        self
     }
 
     /// Returns the detected capture format.
@@ -179,7 +190,26 @@ impl<R: Read> Reader<R> {
         if self.finished {
             return Ok(None);
         }
-        let result = match &mut self.state {
+        let result = self.read_record();
+        match result {
+            Ok(record) => {
+                if record.is_none() {
+                    self.finished = true;
+                }
+                Ok(record)
+            }
+            Err(error) => {
+                self.finished = true;
+                Err(error)
+            }
+        }
+    }
+
+    fn read_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
+        }
+        let record = match &mut self.state {
             ReaderState::Pcap {
                 endianness,
                 precision,
@@ -200,19 +230,11 @@ impl<R: Read> Reader<R> {
                 &self.options,
                 &mut self.scratch,
             ),
-        };
-        match result {
-            Ok(record) => {
-                if record.is_none() {
-                    self.finished = true;
-                }
-                Ok(record)
-            }
-            Err(error) => {
-                self.finished = true;
-                Err(error)
-            }
+        }?;
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
         }
+        Ok(record)
     }
 
     /// Reads the next frame, consuming but not returning metadata records.
@@ -247,5 +269,90 @@ impl<R: Read> Iterator for Reader<R> {
             Ok(None) => None,
             Err(error) => Some(Err(error)),
         }
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use crate::analysis::pcap::{Limits, Writer, rewrite, select};
+    use crate::error::Classified;
+    use std::io::{self, Cursor};
+    use std::time::UNIX_EPOCH;
+
+    struct CancelOnRead {
+        input: Cursor<Vec<u8>>,
+        signal: Cancellation,
+        armed: bool,
+    }
+
+    impl Read for CancelOnRead {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            let result = self.input.read(bytes);
+            if self.armed {
+                self.signal.cancel();
+            }
+            result
+        }
+    }
+
+    #[test]
+    fn cancellation_during_packet_metadata_or_eof_cannot_be_copied_or_complete() {
+        for format in [Format::Pcap, Format::PcapNg] {
+            for has_frame in [false, true] {
+                let mut bytes = Vec::new();
+                let mut writer = Writer::new(&mut bytes, format, LinkType::IPV4).unwrap();
+                if has_frame {
+                    writer
+                        .write_frame(&Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![0; 20]).unwrap())
+                        .unwrap();
+                }
+                writer.flush().unwrap();
+                drop(writer);
+                for selecting in [false, true] {
+                    let signal = Cancellation::default();
+                    let input = CancelOnRead {
+                        input: Cursor::new(bytes.clone()),
+                        signal: signal.clone(),
+                        armed: false,
+                    };
+                    let mut reader = Reader::new(input).unwrap().with_cancellation(signal);
+                    reader.get_mut().armed = true;
+                    let header_length = reader.header().raw().len();
+                    let mut output = Vec::new();
+                    let classification = if selecting {
+                        select(&mut reader, &mut output, Limits::default(), |_, _| {
+                            panic!("cancelled records cannot reach the selection predicate")
+                        })
+                        .unwrap_err()
+                        .classification()
+                    } else {
+                        rewrite(&mut reader, &mut output, Limits::default())
+                            .unwrap_err()
+                            .classification()
+                    };
+                    assert_eq!(classification.code, "io.cancelled");
+                    assert_eq!(output.len(), header_length);
+                    assert!(reader.next_record().unwrap().is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cancelled_reader_does_not_consume_another_record() {
+        let mut bytes = Vec::new();
+        Writer::pcap(&mut bytes, LinkType::IPV4)
+            .unwrap()
+            .flush()
+            .unwrap();
+        let signal = Cancellation::default();
+        let mut reader = Reader::new(Cursor::new(bytes))
+            .unwrap()
+            .with_cancellation(signal.clone());
+        let position = reader.get_ref().position();
+        signal.cancel();
+        assert!(matches!(reader.next_record(), Err(Error::Cancelled(_))));
+        assert_eq!(reader.get_ref().position(), position);
     }
 }

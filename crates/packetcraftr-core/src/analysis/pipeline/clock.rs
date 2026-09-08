@@ -7,6 +7,22 @@ use std::time::{Duration, Instant, SystemTime};
 
 use crate::analysis::Error;
 
+/// Capture-global clock evidence, including filtered-out physical frames.
+/// Expiry uses the maximum timestamp offset from the first frame. Regressions
+/// clamp expiry to that high-water mark; forward jumps advance it immediately.
+/// Original timestamps are never rewritten. Mixed-interface clocks share this
+/// policy: these observations describe skew as well as clock discontinuities.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ClockReport {
+    /// Frames earlier than the greatest timestamp already observed.
+    pub regressions: u64,
+    pub max_regression: Duration,
+    /// Largest advance beyond the high-water mark; can indicate an outlier
+    /// or a legitimate capture gap. No arbitrary anomaly threshold is applied.
+    pub max_forward_step: Duration,
+    pub max_forward_step_frame: Option<u64>,
+}
+
 /// Maps capture timestamps onto the monotonic instants reassembly expects.
 ///
 /// The first frame anchors the scale and later frames advance by their
@@ -18,6 +34,8 @@ pub(super) struct CaptureClock {
     origin: Option<SystemTime>,
     latest: Instant,
     swept: Option<Instant>,
+    latest_timestamp: Option<SystemTime>,
+    report: ClockReport,
 }
 
 /// How far capture time must advance before a pushless frame sweeps again.
@@ -36,6 +54,8 @@ impl CaptureClock {
             origin: None,
             latest: base,
             swept: None,
+            latest_timestamp: None,
+            report: ClockReport::default(),
         }
     }
 
@@ -43,6 +63,24 @@ impl CaptureClock {
     /// instant already returned, so a capture whose timestamps run backwards
     /// cannot rewind idle accounting and expire still-active state early.
     pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
+        if let Some(latest) = self.latest_timestamp {
+            match timestamp.duration_since(latest) {
+                Ok(step) if step > self.report.max_forward_step => {
+                    self.report.max_forward_step = step;
+                    self.report.max_forward_step_frame = Some(number);
+                }
+                Err(rollback) => {
+                    self.report.regressions = self.report.regressions.saturating_add(1);
+                    self.report.max_regression =
+                        self.report.max_regression.max(rollback.duration());
+                }
+                _ => {}
+            }
+        }
+        self.latest_timestamp = Some(
+            self.latest_timestamp
+                .map_or(timestamp, |latest| latest.max(timestamp)),
+        );
         let origin = *self.origin.get_or_insert(timestamp);
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         self.latest = self
@@ -51,6 +89,10 @@ impl CaptureClock {
             .ok_or(Error::TimestampRange { number })?
             .max(self.latest);
         Ok(self.latest)
+    }
+
+    pub(super) fn report(&self) -> &ClockReport {
+        &self.report
     }
 
     /// Whether capture time has advanced enough to justify an expiry sweep.
@@ -96,5 +138,23 @@ mod tests {
         assert!(clock.should_sweep(first + SWEEP_GRANULARITY));
         assert!(!clock.should_sweep(first));
         assert!(clock.should_sweep(first + SWEEP_GRANULARITY * 2));
+    }
+}
+
+#[cfg(test)]
+mod anomaly_tests {
+    use super::*;
+    #[test]
+    fn forward_outlier_pins_expiry_and_reports_subsequent_rollbacks() {
+        let mut clock = CaptureClock::new();
+        let time = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+        let first = clock.at(time(100), 1).unwrap();
+        let outlier = clock.at(time(10_000), 2).unwrap();
+        assert_eq!(outlier.duration_since(first), Duration::from_secs(9900));
+        assert_eq!(clock.at(time(90), 3).unwrap(), outlier);
+        assert_eq!(clock.at(time(101), 4).unwrap(), outlier);
+        assert_eq!(clock.report().regressions, 2);
+        assert_eq!(clock.report().max_regression, Duration::from_secs(9910));
+        assert_eq!(clock.report().max_forward_step_frame, Some(2));
     }
 }

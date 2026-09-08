@@ -941,3 +941,38 @@ fn published_quick_start_capture_reads_as_a_complete_stream() {
     assert!(records.len() > 1);
     assert_eq!(records.last().unwrap()["event"], "complete");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn binary_stdout_requires_deliberate_override_on_a_terminal() {
+    if Command::new("script").arg("--version").output().is_err() {
+        return;
+    }
+    let fixture = tempfile::NamedTempFile::new().unwrap();
+    let mut writer = Writer::pcap(fixture.reopen().unwrap(), LinkType::ETHERNET).unwrap();
+    writer
+        .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, b"fixture".to_vec()).unwrap())
+        .unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+    for force in [false, true] {
+        let mut command = Command::new("script");
+        command.env(
+            "BINARY_STDOUT_TEST_BINARY",
+            env!("CARGO_BIN_EXE_packetcraftr"),
+        );
+        command.env("BINARY_STDOUT_TEST_CAPTURE", fixture.path());
+        let override_flag = if force { "--force-binary-stdout" } else { "" };
+        command.args(["--quiet", "--return", "--command",
+            &format!("exec \"$BINARY_STDOUT_TEST_BINARY\" --output pcap {override_flag} read \"$BINARY_STDOUT_TEST_CAPTURE\""), "/dev/null"]);
+        let output = run_command_with_open_stdin(command);
+        if force {
+            assert_eq!(output.status.code(), Some(0), "{output:?}");
+            assert!(output.stdout.windows(7).any(|bytes| bytes == b"fixture"));
+        } else {
+            assert_eq!(output.status.code(), Some(2), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stdout).contains("--force-binary-stdout"));
+            assert!(!output.stdout.windows(7).any(|bytes| bytes == b"fixture"));
+        }
+    }
+}

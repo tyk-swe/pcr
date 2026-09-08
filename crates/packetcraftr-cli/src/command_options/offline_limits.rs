@@ -38,7 +38,7 @@ fn default_tcp_idle_expiry_ms() -> u64 {
 /// Capture-reader bounds shared by offline commands.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineCaptureLimitsArgs {
-    /// Maximum frames read from the capture stream.
+    /// Maximum physical input frames, including frames rejected by the filter.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
     pub(crate) max_frames: u64,
     /// Maximum aggregate captured payload bytes read from the input; a reader
@@ -74,9 +74,13 @@ impl OfflineCaptureLimitsArgs {
 pub(crate) struct OfflineLimitsArgs {
     #[command(flatten)]
     pub(crate) capture: OfflineCaptureLimitsArgs,
-    /// Maximum distinct conversations tracked per transport.
+    /// Maximum capture-global distinct conversations per transport.
+    /// Expiry does not release index entries; raising this increases retained metadata.
     #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
+    /// Maximum charged capture-scope and encapsulation metadata bytes.
+    #[arg(long, default_value_t = analysis::Limits::default().max_scope_bytes)]
+    pub(crate) max_scope_bytes: usize,
     /// Maximum retained TCP stream bytes in one direction.
     #[arg(long, default_value_t = analysis::Limits::default().max_tcp_bytes_per_flow)]
     pub(crate) max_tcp_bytes_per_flow: usize,

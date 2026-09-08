@@ -20,7 +20,11 @@ Port syntax:
   START-END, where START and END are both u16 ports and START <= END. Repeated
   ports and overlapping ranges keep their first-seen order and deduplicate.
   Expansion is bounded by --max-ports and stops as soon as another distinct
-  port would exceed that limit."#;
+  port would exceed that limit.
+
+Pacing is serial. The planned duration is the sum of every probe timeout and
+inter-probe delay. A high --rate does not bypass capture setup or response waits;
+completed reports include the planned duration and measured exchange/pacing rate."#;
 
 /// One CLI `--ports` token, parsed into the library's own port selection.
 ///
@@ -104,7 +108,8 @@ pub(crate) struct Args {
     /// Response window for each capture-ready probe.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) timeout_ms: u64,
-    /// Optional average probe-rate ceiling for single-probe exchanges.
+    /// Pacing ceiling for serial single-probe exchanges, not achieved throughput.
+    /// Each probe waits for its response window before the next exchange starts.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum distinct destination ports accepted by the request.

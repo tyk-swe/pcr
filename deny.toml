@@ -30,6 +30,8 @@ multiple-versions = "deny"
 wildcards = "deny"
 highlight = "simplest-path"
 skip = [
+    # rtnetlink 0.23 requires nix 0.30; ctrlc 3.5 uses 0.31 for portable signals.
+    { name = "nix", version = "=0.30.1" },
     # pcap 2.5 pins these older runtime and build dependencies.
     { name = "bitflags", version = "=1.3.2" },
     { name = "windows-sys", version = "=0.36.1" },

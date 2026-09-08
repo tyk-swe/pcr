@@ -240,7 +240,8 @@ fn capture_reader<R: Read>(
     source: R,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<R>, CliError> {
-    Reader::with_options(
+    crate::cancellation::check()?;
+    let reader = Reader::with_options(
         source,
         ReaderOptions {
             max_size: bounds.max_frame_bytes,
@@ -248,7 +249,9 @@ fn capture_reader<R: Read>(
             ..ReaderOptions::default()
         },
     )
-    .map_err(CliError::classified)
+    .map_err(CliError::classified)?;
+    crate::cancellation::check()?;
+    Ok(reader.with_cancellation(crate::cancellation::signal().clone()))
 }
 
 fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {

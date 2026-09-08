@@ -263,6 +263,7 @@ fn account_frame(
     frame: &core::frame::Frame,
     limits: OfflineCaptureLimitsArgs,
 ) -> Result<u64, CliError> {
+    crate::cancellation::check()?;
     let stream_limits = Limits {
         max_frames: limits.max_frames,
         max_bytes: limits.max_bytes,

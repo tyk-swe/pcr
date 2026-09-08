@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod cancellation;
 mod cli;
 mod command_options;
 mod commands;

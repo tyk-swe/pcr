@@ -47,13 +47,7 @@ pub fn run(request: &Request, packet: Packet, registry: Arc<Registry>) -> Result
         cases.push(case);
         Ok(())
     })?;
-    Ok(Report {
-        seed: summary.seed,
-        first_case: summary.first_case,
-        cases,
-        diagnostics: summary.diagnostics,
-        stats: summary.stats,
-    })
+    Ok(Report::from_summary(summary, cases))
 }
 
 /// Generates each deterministic case once and hands it to `emit` as soon as

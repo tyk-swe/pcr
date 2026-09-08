@@ -1,0 +1,62 @@
+{
+  "schema": "packetcraftr.output/v2",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 1,
+      "max_regression": {
+        "secs": 10,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "max_forward_step_frame": 3
+    },
+    "table": "io",
+    "io": {
+      "origin": {
+        "unix_seconds": 100,
+        "nanoseconds": 0
+      },
+      "underflow_frames": 1,
+      "interval": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "buckets": [
+        {
+          "offset": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "frames": 2,
+          "bytes": 80
+        },
+        {
+          "offset": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "frames": 1,
+          "bytes": 40
+        }
+      ]
+    },
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 120,
+    "first_timestamp": {
+      "unix_seconds": 90,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 101,
+      "nanoseconds": 0
+    }
+  },
+  "diagnostics": []
+}

@@ -87,6 +87,7 @@ pub struct Endpoint {
 
 #[derive(Clone, Debug)]
 pub struct Report {
+    pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
@@ -112,6 +113,8 @@ pub enum Event {
 /// [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Summary {
+    /// Sum of every serial exchange timeout and pacing gap, validated before sending.
+    pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub counts: ClassificationCounts,

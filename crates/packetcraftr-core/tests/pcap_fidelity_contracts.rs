@@ -559,3 +559,36 @@ fn selection_preserves_classic_precision_endianness_and_fcs() {
         }
     }
 }
+
+proptest::proptest! {
+    #[test]
+    fn generated_sections_preserve_unknown_metadata_and_physical_selection(
+        sections in proptest::collection::vec((proptest::bool::ANY,
+            proptest::collection::vec(proptest::num::u8::ANY, 0..128)), 1..5),
+        mask in proptest::num::u8::ANY,
+    ) {
+        let mut input = Vec::new();
+        let mut expected = Vec::new();
+        let mut selected = 0;
+        for (index, (big_endian, bytes)) in sections.iter().enumerate() {
+            let endian = if *big_endian { Endianness::Big } else { Endianness::Little };
+            for block in [section(endian, bytes), idb(endian), metadata_block(endian, 0x0000beef, bytes)] {
+                input.extend_from_slice(&block);
+                expected.extend_from_slice(&block);
+            }
+            let packet = epb(endian, index as u64 + 1);
+            input.extend_from_slice(&packet);
+            if mask & (1 << index) != 0 { expected.extend_from_slice(&packet); selected += 1; }
+        }
+        let mut source = Reader::new(Cursor::new(&input)).unwrap();
+        let (rewritten, _) = rewrite(&mut source, Vec::new(), Limits::default()).unwrap();
+        proptest::prop_assert_eq!(&rewritten, &input);
+        let mut source = Reader::new(Cursor::new(&input)).unwrap();
+        let (filtered, report) = packetcraftr_core::analysis::pcap::select(
+            &mut source, Vec::new(), Limits::default(), |number, _| Ok(mask & (1 << (number - 1)) != 0)
+        ).unwrap();
+        proptest::prop_assert_eq!(filtered, expected);
+        proptest::prop_assert_eq!(report.frames_read, sections.len() as u64);
+        proptest::prop_assert_eq!(report.frames_selected, selected);
+    }
+}

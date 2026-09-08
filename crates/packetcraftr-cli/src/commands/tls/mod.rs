@@ -137,7 +137,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     {
         return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
     }
-    tls_limits.validate().map_err(CliError::classified)?;
+    let mut collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
     // The stream filter narrows reassembly to one conversation while indices
     // stay capture-global, so the index reported is the one asked for.
@@ -151,8 +151,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
 
     // Assembly consumes the reassembler's in-order deliveries.
     let options = prepared.options(true);
-    let mut collector = Collector::new(tls_limits);
-    let mut state = State::new(arguments.max_tls_sessions);
+    let mut state = State::new(arguments.max_output_sessions);
     let run_summary = analysis::run_with_ip_events(
         &mut reader,
         prepared.registry.clone(),

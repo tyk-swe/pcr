@@ -16,6 +16,8 @@ use crate::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] crate::budget::Cancelled),
     #[error("invalid analysis limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -52,7 +54,9 @@ pub enum Error {
         #[source]
         source: crate::filter::Error,
     },
-    #[error("conversation table reached the configured limit of {limit} flows at frame {number}")]
+    #[error(
+        "capture-global conversation index reached its limit of {limit} distinct conversations per transport at frame {number}"
+    )]
     StreamLimit { number: u64, limit: usize },
     #[error("capture scope indexing failed at frame {number}: {source}")]
     Scope {
@@ -89,6 +93,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.analysis_limit",
                 Kind::Cli,
@@ -138,7 +143,8 @@ impl Classified for Error {
             Self::Scope {
                 source:
                     crate::analysis::scope::Error::Capacity
-                    | crate::analysis::scope::Error::Limit { .. },
+                    | crate::analysis::scope::Error::Limit { .. }
+                    | crate::analysis::scope::Error::Bytes { .. },
                 ..
             } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Scope { .. } => Classification::new(
@@ -188,8 +194,13 @@ impl From<DeadlineExceeded> for Error {
     }
 }
 
-const GENERAL_RESOURCE_REMEDIATION: &str =
-    "narrow the input with a filter or deliberately raise the finite analysis budget";
+impl From<crate::budget::Interrupted> for Error {
+    fn from(interrupted: crate::budget::Interrupted) -> Self {
+        interrupted.into_error()
+    }
+}
+
+const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
 const IP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
                                        relevant finite --max-ip-* analysis budget";
 const TCP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \

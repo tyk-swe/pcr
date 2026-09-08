@@ -28,9 +28,11 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         arguments.filter.as_deref(),
         &arguments.tls_ports.ports,
     )?;
-    let mut collector =
-        analysis::stats::Collector::new(Duration::from_millis(arguments.interval_ms))
-            .map_err(CliError::classified)?;
+    let mut collector = analysis::stats::Collector::for_table(
+        Duration::from_millis(arguments.interval_ms),
+        arguments.table.into(),
+    )
+    .map_err(CliError::classified)?;
 
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 

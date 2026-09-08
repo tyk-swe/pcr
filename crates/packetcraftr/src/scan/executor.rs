@@ -23,13 +23,7 @@ where
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let first = batch
-            .probes
-            .first()
-            .ok_or_else(|| EXECUTOR_FAULT.invalid("scan executor received an empty batch"))?;
-        if batch.probes.len() != 1 {
-            return Err(EXECUTOR_FAULT.invalid("scan batches require exactly one correlated probe"));
-        }
+        let first = &batch.probe;
         let packet = first.packet();
         if !super::probe::sent_probe_matches(first, &packet) {
             return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));
@@ -39,21 +33,20 @@ where
             |request_index: usize,
              sent: &packetcraftr_core::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
-                batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_response(
+                request_index == 0
+                    && classify_response(
                         self.client.registry(),
-                        probe.endpoint.transport(),
+                        first.endpoint.transport(),
                         sent,
                         response,
                     )
                     .is_some()
-                })
             };
         let exchange = self.exchange_for_workflow(
             &template,
             WorkflowOverrides {
                 timeout: batch.timeout,
-                max_template_packets: batch.probes.len(),
+                max_template_packets: 1,
                 destination: first.address,
                 max_responses: None,
             },

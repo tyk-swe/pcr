@@ -8,7 +8,7 @@ use crate::diagnostic::Severity;
 use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
-use crate::analysis::expert::{Finding, FlowKey};
+use crate::analysis::expert::{Finding, ScopedFlowKey};
 
 pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<Finding>) {
     if observation.tcp.window == 0 && !observation.rst {
@@ -26,7 +26,7 @@ pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<F
 }
 
 pub(super) fn update_advertisement(
-    flows: &mut HashMap<FlowKey, DirectionState>,
+    flows: &mut HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
 ) {
     let TcpObservation { flow, tcp, syn, .. } = *observation;
@@ -50,9 +50,9 @@ pub(super) fn update_advertisement(
 }
 
 pub(super) fn analyze_sender(
-    flows: &HashMap<FlowKey, DirectionState>,
+    flows: &HashMap<ScopedFlowKey, DirectionState>,
     observation: &TcpObservation<'_>,
-    reverse: &FlowKey,
+    reverse: &ScopedFlowKey,
     keep_alive: bool,
     findings: &mut Vec<Finding>,
 ) {

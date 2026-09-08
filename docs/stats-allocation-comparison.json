@@ -1,0 +1,19 @@
+{
+  "before": {
+    "allocations": 191355,
+    "binary_sha256": "029b3f371efa10236628ffe2ffc956583ce78e1356a31363773e4589f2200dcd"
+  },
+  "after": {
+    "allocations": 174973,
+    "binary_sha256": "617744806236fb90bebb8af1819803f0827004c468ed10b967b8596c0b2253ad"
+  },
+  "output_byte_identical": true,
+  "command_arguments": [
+    "--output",
+    "json",
+    "stats",
+    "target/analysis-measurements/flows-8192.pcap",
+    "--table",
+    "protocols"
+  ]
+}

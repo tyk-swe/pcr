@@ -23,7 +23,8 @@ fuzz_target!(|data: &[u8]| {
     let mut collector = Collector::new(Limits {
         max_sessions: 64,
         max_buffered_bytes: 1024 * 1024,
-    });
+    })
+    .expect("valid bounded TLS limits");
     let mut sessions = Vec::new();
     let options = Options {
         tcp_events: true,

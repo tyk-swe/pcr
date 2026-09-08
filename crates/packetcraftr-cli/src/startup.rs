@@ -8,6 +8,7 @@ use packetcraftr_core::error::Kind;
 
 mod context;
 
+use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use clap::Parser;
@@ -67,6 +68,22 @@ pub(crate) fn run() -> ExitCode {
     };
     cli.color.write_global();
     let format = cli.format;
+    if matches!(
+        format,
+        output::contract::Format::Raw
+            | output::contract::Format::Pcap
+            | output::contract::Format::PcapNg
+    ) && cli.command.kind().formats().contains(&format)
+        && std::io::stdout().is_terminal()
+        && !cli.force_binary_stdout
+    {
+        let error = CliError::new(
+            Kind::Cli,
+            "refusing binary output to a terminal; redirect stdout to a file or pipe, or pass --force-binary-stdout",
+        );
+        let _ = emit_stderr_error(&error);
+        return ExitCode::from(error.exit_code());
+    }
     let command = cli.command.kind();
     let stream = match if format == output::contract::Format::Ndjson {
         stdout_stream(command)
@@ -79,8 +96,15 @@ pub(crate) fn run() -> ExitCode {
             return ExitCode::from(error.exit_code());
         }
     };
+    if cli.command.supports_cancellation()
+        && let Err(error) = crate::cancellation::install()
+    {
+        return command_failure(format, command, error, &stream);
+    }
     match cli.command.run(format, &stream) {
-        Ok(()) => match require_success_terminal(format, &stream) {
+        Ok(()) => match crate::cancellation::check()
+            .and_then(|()| require_success_terminal(format, &stream))
+        {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => command_failure(format, command, error, &stream),
         },
@@ -122,7 +146,11 @@ fn command_failure(
     } else {
         error
     };
-    let exit_code = error.exit_code();
+    let exit_code = if crate::cancellation::signal().is_cancelled() {
+        130
+    } else {
+        error.exit_code()
+    };
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
             emit_json(&output::envelope::Envelope::<()>::error(

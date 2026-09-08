@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt::Write as _;
+
 use packetcraftr_cli::output::contract::Format;
 
 use packetcraftr_core as core;
@@ -20,7 +22,7 @@ use output::tls::{Client, Server, Session, Summary};
 /// What has been reported so far.
 ///
 /// The retention ceiling applies only to the JSON document, which holds every
-/// session in memory: past `--max-tls-sessions` it keeps what it has and reports
+/// session in memory: past `--max-output-sessions` it keeps what it has and reports
 /// the rest as omitted. Text and NDJSON write each session as it completes.
 pub(super) struct State {
     retained: Retained<Session>,
@@ -82,7 +84,13 @@ pub(super) fn render_text(
             None => render_empty(summary, extra_ports)?,
         }
     }
-    write_stdout_line(format_args!("{}", summary_line(summary)))
+    write_stdout_line(format_args!(
+        "{} clock_regressions={} max_rollback={:?} max_forward_step={:?}",
+        summary_line(summary),
+        summary.clock.regressions,
+        summary.clock.max_regression,
+        summary.clock.max_forward_step
+    ))
 }
 
 pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), CliError> {
@@ -166,6 +174,13 @@ fn session_line(session: &Session) -> String {
             .handshake_rtt_ms
             .map_or_else(|| "none".to_owned(), |value| format!("{value:.3}")),
     );
+    let _ = write!(
+        line,
+        " scope={} interface={:?} encapsulation={:?}",
+        session.scope.id.get(),
+        session.scope.interface,
+        session.scope.encapsulation
+    );
     if session.hello_retry {
         line.push_str(" hello_retry=true");
     }
@@ -178,7 +193,7 @@ fn session_line(session: &Session) -> String {
     if session.alerts_dropped > 0 {
         line.push_str(&format!(" alerts_dropped={}", session.alerts_dropped));
     }
-    // Last, because it is the one field that carries spaces.
+    // Last, because the free-text reason carries spaces.
     if let Some(reason) = &session.reason {
         line.push_str(" reason=");
         line.push_str(reason);
@@ -270,7 +285,10 @@ mod tests {
     }
 
     fn session() -> Session {
+        let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
+        let id = scopes.intern(None, Vec::new()).unwrap();
         Session {
+            scope: scopes.definition(id).unwrap().clone(),
             session: 0,
             tcp_stream: 3,
             client_endpoint: endpoint(1, 40_000),

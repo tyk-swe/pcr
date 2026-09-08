@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use crate::SentPacket;
-use crate::probe::runner::{Batch, Execution, Sequenced};
+use crate::probe::runner::{Execution, Sequenced};
 use crate::probe::{Error, ErrorKind, Workflow};
 
 use super::EvidenceLimits;
@@ -218,7 +218,8 @@ pub(crate) fn format_exchange_evidence_error(
 }
 
 pub(crate) fn validate_batch_exchange_evidence<P, F>(
-    batch: &Batch<P>,
+    probes: &[P],
+    timeout: Duration,
     execution: &Execution,
     max_captured_frames: usize,
     max_captured_bytes: usize,
@@ -227,16 +228,16 @@ pub(crate) fn validate_batch_exchange_evidence<P, F>(
 where
     F: FnMut(&P, &Packet) -> bool,
 {
-    if execution.sent.len() != batch.probes.len() {
+    if execution.sent.len() != probes.len() {
         return Err(ExchangeEvidenceError::SentCardinality {
-            expected: batch.probes.len(),
+            expected: probes.len(),
             receipts: execution.sent.len(),
         });
     }
     if execution
         .responses
         .iter()
-        .any(|response| response.request_index >= batch.probes.len())
+        .any(|response| response.request_index >= probes.len())
     {
         return Err(ExchangeEvidenceError::ResponseOutsideBatch);
     }
@@ -249,22 +250,17 @@ where
         max_captured_bytes,
     )?;
 
-    for (request_index, (sent, probe)) in execution.sent.iter().zip(&batch.probes).enumerate() {
+    for (request_index, (sent, probe)) in execution.sent.iter().zip(probes).enumerate() {
         if !sent_packet_matches(probe, &sent.built().packet) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
     }
 
     validate_sent_byte_accounting(&execution.sent, execution.stats.bytes)?;
-    validate_response_frames_and_deadlines(
-        &execution.responses,
-        &execution.unsolicited,
-        batch.timeout,
-    )?;
+    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)?;
     validate_capture_statistics_evidence(execution.stats.capture)?;
-    if execution.stats.packets_attempted != u64::try_from(batch.probes.len()).unwrap_or(u64::MAX)
-        || execution.stats.packets_completed
-            != u64::try_from(batch.probes.len()).unwrap_or(u64::MAX)
+    if execution.stats.packets_attempted != u64::try_from(probes.len()).unwrap_or(u64::MAX)
+        || execution.stats.packets_completed != u64::try_from(probes.len()).unwrap_or(u64::MAX)
     {
         return Err(ExchangeEvidenceError::IncompleteStatistics);
     }
@@ -275,13 +271,15 @@ where
 /// reports any inconsistency at the sequence of the probe it concerns.
 pub(crate) fn validate_batch_evidence<P: Sequenced>(
     workflow: Workflow,
-    batch: &Batch<P>,
+    probes: &[P],
+    timeout: Duration,
     execution: &Execution,
     limits: EvidenceLimits,
     sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
 ) -> Result<(), Error> {
     validate_batch_exchange_evidence(
-        batch,
+        probes,
+        timeout,
         execution,
         limits.max_frames,
         limits.max_bytes,
@@ -290,8 +288,8 @@ pub(crate) fn validate_batch_evidence<P: Sequenced>(
     .map_err(|error| {
         let sequence = error
             .request_index()
-            .and_then(|index| batch.probes.get(index))
-            .or_else(|| batch.probes.first())
+            .and_then(|index| probes.get(index))
+            .or_else(|| probes.first())
             .map_or(0, Sequenced::sequence);
         Error::new(
             workflow,

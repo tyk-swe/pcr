@@ -314,6 +314,9 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
         .intern(None, Vec::new())
         .expect("representative scope fits");
     packetcraftr_core::analysis::stats::Report {
+        clock: Default::default(),
+        io_origin: Some(first),
+        io_underflow_frames: 0,
         interval: Duration::from_secs(2),
         frames: 7,
         bytes: 321,
@@ -325,6 +328,7 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
             bytes: 321,
         }],
         conversations: vec![ConversationStat {
+            scope: scopes.definition(scope).unwrap().clone(),
             transport: StreamTransport::Tcp,
             stream: 4,
             address_a: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
@@ -629,6 +633,7 @@ fn scan_case() -> Value {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let (report, diagnostics, stats) =
         scan_output::Report::try_from_scan(packetcraftr::scan::Report {
+            planned_duration: std::time::Duration::ZERO,
             target: "host.example".to_owned(),
             resolved_addresses: vec![address],
             endpoints: vec![packetcraftr::scan::Endpoint {
@@ -673,6 +678,7 @@ fn scan_icmp_case() -> Value {
     let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     let (report, diagnostics, stats) =
         scan_output::Report::try_from_scan(packetcraftr::scan::Report {
+            planned_duration: std::time::Duration::ZERO,
             target: "host.example".to_owned(),
             resolved_addresses: vec![ipv4, ipv6],
             endpoints: vec![endpoint(ipv4), endpoint(ipv6)],
@@ -742,6 +748,7 @@ fn expert_case() -> Value {
     .collect();
     let report = expert_output::Report::from_summary(
         Summary {
+            clock: Default::default(),
             findings: 2,
             errors: 1,
             warnings: 0,
@@ -761,11 +768,13 @@ fn expert_case() -> Value {
 fn follow_case() -> Value {
     let chunks = [
         AnalysisChunk {
+            direction_generation: 0,
             direction: AnalysisDirection::ClientToServer,
             number: 2,
             bytes: Bytes::from_static(&[0x00, 0xff]),
         },
         AnalysisChunk {
+            direction_generation: 0,
             direction: AnalysisDirection::ServerToClient,
             number: 3,
             bytes: Bytes::from_static(b"ok"),
@@ -778,6 +787,8 @@ fn follow_case() -> Value {
         packetcraftr_core::analysis::StreamTransport::Tcp,
         2,
         FollowSummary {
+            scope: None,
+            clock: Default::default(),
             client_flow: Some(FlowKey {
                 source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                 source_port: 40_000,
@@ -812,6 +823,7 @@ fn tls_case() -> Value {
         port,
     };
     let session = tls_output::Session {
+        scope: fixture_scope(),
         session: 0,
         tcp_stream: 4,
         client_endpoint: endpoint(1, 40_000),
@@ -862,6 +874,7 @@ fn tls_case() -> Value {
         tls_output::Report {
             sessions: vec![session],
             summary: tls_output::Summary {
+                clock: Default::default(),
                 frames_read: 12,
                 frames_matched: 8,
                 sessions: 1,
@@ -893,6 +906,7 @@ fn tls_gap_case() -> Value {
         Command::Tls,
         tls_output::Report {
             sessions: vec![tls_output::Session {
+                scope: fixture_scope(),
                 session: 0,
                 tcp_stream: 4,
                 client_endpoint: endpoint(1, 40_000),
@@ -1663,4 +1677,10 @@ fn filter_discovery_metadata_is_required_and_validates_all_binding_kinds() {
         !validator.is_valid(&document),
         "bit extraction requires its mask"
     );
+}
+
+fn fixture_scope() -> packetcraftr_core::analysis::scope::Definition {
+    let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
+    let id = scopes.intern(None, Vec::new()).unwrap();
+    scopes.definition(id).unwrap().clone()
 }

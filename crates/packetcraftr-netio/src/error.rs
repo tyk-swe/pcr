@@ -43,6 +43,8 @@ pub enum SendEvidenceFault {
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error("live packet I/O is unavailable: {message}")]
     Unsupported {
         message: String,
@@ -153,6 +155,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::Unsupported { .. } => classified(
                 "capability.unsupported",
                 Kind::Capability,

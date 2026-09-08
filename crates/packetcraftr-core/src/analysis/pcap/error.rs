@@ -12,6 +12,8 @@ use crate::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] crate::budget::Cancelled),
     #[error("failed to allocate {requested} bytes for {kind}")]
     AllocationFailed {
         kind: &'static str,
@@ -103,6 +105,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::Io(_) => Classification::new(
                 "io.capture_file",
                 Kind::Io,

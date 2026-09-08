@@ -53,17 +53,11 @@ struct TimeoutExecutor {
 
 impl Executor<Batch> for TimeoutExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.batches.push((
-            batch.probes[0].attempt,
-            batch
-                .probes
-                .iter()
-                .map(|probe| probe.endpoint.port())
-                .collect(),
-        ));
+        self.batches
+            .push((batch.probe.attempt, vec![batch.probe.endpoint.port()]));
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
-        for probe in &batch.probes {
+        for probe in std::iter::once(&batch.probe) {
             let mut packet = probe_packet(probe);
             match probe.address {
                 IpAddr::V4(_) => {
@@ -90,8 +84,8 @@ impl Executor<Batch> for TimeoutExecutor {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: Stats {
-                packets_attempted: u64::try_from(batch.probes.len()).unwrap(),
-                packets_completed: u64::try_from(batch.probes.len()).unwrap(),
+                packets_attempted: 1,
+                packets_completed: 1,
                 bytes,
                 elapsed: Duration::from_millis(1),
                 capture: packetcraftr_netio::capture::Statistics::default(),

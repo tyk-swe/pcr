@@ -656,6 +656,9 @@
         "fragments": {
           "description": "Capture-global fragment accounting; derived bytes are separate from the physical matched frame and byte totals.",
           "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "#/$defs/captureClock"
         }
       },
       "allOf": [
@@ -983,6 +986,9 @@
         },
         "duration": {
           "$ref": "#/$defs/duration"
+        },
+        "scope": {
+          "$ref": "#/$defs/captureScope"
         }
       },
       "additionalProperties": true
@@ -1079,6 +1085,20 @@
           "items": {
             "$ref": "#/$defs/statsIoBucket"
           }
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "underflow_frames": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": true
@@ -1699,6 +1719,9 @@
         },
         "ip_reassembly": {
           "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "#/$defs/captureClock"
         }
       },
       "additionalProperties": true
@@ -1830,6 +1853,19 @@
         },
         "ip_reassembly": {
           "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "#/$defs/captureClock"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/captureScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "dependentRequired": {
@@ -1879,6 +1915,10 @@
         },
         "bytes_hex": {
           "$ref": "#/$defs/hexBytes"
+        },
+        "direction_generation": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "additionalProperties": true
@@ -2349,6 +2389,9 @@
           "description": "Why the status is what it is, for malformed, gap, and truncated.",
           "type": "string",
           "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/captureScope"
         }
       }
     },
@@ -2443,6 +2486,9 @@
         },
         "ip_reassembly": {
           "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "clock": {
+          "$ref": "#/$defs/captureClock"
         }
       }
     },
@@ -4063,6 +4109,9 @@
           "items": {
             "$ref": "#/$defs/frame"
           }
+        },
+        "planned_duration": {
+          "$ref": "#/$defs/duration"
         }
       },
       "additionalProperties": true
@@ -6522,6 +6571,271 @@
         {
           "minimum": 1
         }
+      ]
+    },
+    "encapsulationIdentifier": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "vlan"
+            },
+            "vlan_id": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "vlan_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "vlan8021ad"
+            },
+            "vlan_id": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "vlan_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "network"
+            },
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "first",
+            "second"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "vxlan"
+            },
+            "vni": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "vni"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "geneve"
+            },
+            "vni": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "vni"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "gre"
+            },
+            "key": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "key"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "mpls"
+            },
+            "label": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "label"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "pppoe"
+            },
+            "session_id": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "endpoints": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "array",
+                "minItems": 6,
+                "maxItems": 6,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "session_id",
+            "endpoints"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "l2tpv3"
+            },
+            "session_id": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "session_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "erspan"
+            },
+            "vlan": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "session_id": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "vlan",
+            "session_id"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "ah"
+            },
+            "spi": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "kind",
+            "spi"
+          ]
+        }
+      ]
+    },
+    "captureScope": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interface": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "encapsulation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/encapsulationIdentifier"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "interface",
+        "encapsulation"
+      ]
+    },
+    "captureClock": {
+      "type": "object",
+      "properties": {
+        "regressions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_regression": {
+          "$ref": "#/$defs/duration"
+        },
+        "max_forward_step": {
+          "$ref": "#/$defs/duration"
+        },
+        "max_forward_step_frame": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      },
+      "required": [
+        "regressions",
+        "max_regression",
+        "max_forward_step",
+        "max_forward_step_frame"
       ]
     }
   }

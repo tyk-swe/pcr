@@ -20,6 +20,7 @@ use packetcraftr_core::analysis::Endpoint;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Chunk {
     pub direction: Direction,
+    pub direction_generation: u64,
     /// Frame whose arrival delivered these bytes.
     pub frame: u64,
     pub bytes_hex: String,
@@ -29,6 +30,7 @@ impl From<AnalysisChunk> for Chunk {
     fn from(value: AnalysisChunk) -> Self {
         Self {
             direction: value.direction,
+            direction_generation: value.direction_generation,
             frame: value.number,
             bytes_hex: compact_hex(&value.bytes),
         }
@@ -38,8 +40,10 @@ impl From<AnalysisChunk> for Chunk {
 /// Aggregate result of `follow`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
+    pub clock: packetcraftr_core::analysis::ClockReport,
     pub transport: StreamTransport,
     pub stream: u64,
+    pub scope: Option<packetcraftr_core::analysis::scope::Definition>,
     /// Absent when the capture holds no frame of the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client: Option<Endpoint>,
@@ -72,10 +76,12 @@ impl Report {
             None => (None, None),
         };
         Self {
+            clock: summary.clock,
             transport,
             stream,
             client,
             server,
+            scope: summary.scope,
             frames: summary.frames,
             client_bytes: summary.client_bytes,
             server_bytes: summary.server_bytes,

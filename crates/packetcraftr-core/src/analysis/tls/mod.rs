@@ -46,7 +46,7 @@
 //! computed from is chosen by the peer, so treat a match as a hint about
 //! software identity, never as authentication.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -93,15 +93,16 @@ pub struct SessionEvent {
 /// Terminal counters for a completed session assembly pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
+    pub clock: crate::analysis::ClockReport,
     /// Sessions emitted, of every status.
     pub sessions: u64,
     /// Sessions per status, in [`Status`] order.
     pub by_status: BTreeMap<Status, u64>,
     /// TCP conversations this collector saw, whether or not they carried TLS.
     /// A capture with streams but no sessions means the traffic was not TLS,
-    /// or the handshake itself was not captured. Counted as conversations are
-    /// first seen, which the pipeline indexes in first-frame order, so a
-    /// four-tuple reused after a close counts once.
+    /// or the handshake itself was not captured. Each distinct observed index
+    /// counts once, even if filtering hides its first frame or TLS state was
+    /// evicted. A scoped four-tuple reused after a close still counts once.
     pub tcp_streams: u64,
     /// Sessions retired by a resource ceiling rather than by the capture.
     pub evicted_sessions: u64,
@@ -121,6 +122,12 @@ struct Entry {
 }
 
 #[derive(Debug)]
+// Generation transition invariants:
+// Live + terminal verdict -> Closed, releasing its recorded bytes and emitting
+// at most one SessionEvent. Closed + SYN -> absent -> fresh Live/deduplicator.
+// Expiry/gap/replacement is folded before current data; a clean close following
+// current data is deferred until that data is folded. EOF retires all remaining
+// Live entries and releases all charges. Never reopen from stale buffered bytes.
 enum Tracked {
     /// A handshake still being assembled.
     Live(Box<Live>),
@@ -141,11 +148,9 @@ pub struct Collector {
     entries: HashMap<CanonicalFlow, Entry>,
     /// Insertion rank to conversation, so the oldest is retired in O(log n).
     order: BTreeMap<u64, CanonicalFlow>,
-    /// Conversations seen, and the highest conversation index behind that
-    /// count. Stream indices are handed out in first-frame order, so counting
-    /// each rise is counting distinct conversations without a set of them.
-    streams: u64,
-    highest_stream: Option<u64>,
+    /// Distinct visible indices, bounded by the pipeline's capture-global
+    /// indexed-flow ceiling. Retained independently of active session eviction.
+    seen_streams: HashSet<u64>,
     next_order: u64,
     next_session: u64,
     buffered_bytes: usize,
@@ -155,22 +160,19 @@ pub struct Collector {
 impl Collector {
     /// Creates a collector bound to finite ceilings.
     ///
-    /// Validate the limits with [`Limits::validate`] first if they did not
-    /// come from [`Limits::default`]; a zero ceiling here simply retires
-    /// every session it touches.
-    #[must_use]
-    pub fn new(limits: Limits) -> Self {
-        Self {
+    /// Invalid ceilings fail before the collector consumes a frame.
+    pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
+        limits.validate()?;
+        Ok(Self {
             limits,
             entries: HashMap::new(),
             order: BTreeMap::new(),
-            streams: 0,
-            highest_stream: None,
+            seen_streams: HashSet::new(),
             next_order: 0,
             next_session: 0,
             buffered_bytes: 0,
             summary: Summary::default(),
-        }
+        })
     }
 
     /// Folds one matched frame, returning the sessions it ended.
@@ -235,7 +237,16 @@ impl Collector {
                 ..
             }) => return events,
             Some(_) => {}
-            None => self.track(&key, stream, flow.clone(), &mut events),
+            None => self.track(
+                &key,
+                stream,
+                flow.clone(),
+                record
+                    .scope_definition(flow.scope)
+                    .expect("indexed scope exists")
+                    .clone(),
+                &mut events,
+            ),
         }
         if let Some(live) = self.live_mut(&key) {
             live.note_frame(Some(record.timestamp));
@@ -288,7 +299,12 @@ impl Collector {
                 &mut events,
             );
         }
-        self.summary.tcp_streams = self.streams;
+        debug_assert_eq!(
+            self.buffered_bytes, 0,
+            "terminal paths release every handshake charge"
+        );
+        self.summary.clock = summary.clock.clone();
+        self.summary.tcp_streams = self.seen_streams.len() as u64;
         (events, self.summary)
     }
 
@@ -465,6 +481,7 @@ impl Collector {
         key: &CanonicalFlow,
         stream: u64,
         flow: ScopedFlowKey,
+        scope: crate::analysis::scope::Definition,
         events: &mut Vec<SessionEvent>,
     ) {
         while self.entries.len() >= self.limits.max_sessions {
@@ -479,20 +496,14 @@ impl Collector {
             key.clone(),
             Entry {
                 order,
-                state: Tracked::Live(Box::new(Live::new(stream, flow))),
+                state: Tracked::Live(Box::new(Live::new(stream, flow, scope))),
             },
         );
     }
 
-    /// Counts a conversation the first time one of its frames is seen.
-    /// Stream indices rise in first-seen order, so a rise is a new
-    /// conversation; a caller that filters frames before observing can hide
-    /// an earlier conversation's frames and undercount.
+    /// Filtering can expose older indices after newer ones, in either direction.
     fn note_stream(&mut self, stream: u64) {
-        if self.highest_stream.is_none_or(|highest| stream > highest) {
-            self.highest_stream = Some(stream);
-            self.streams = self.streams.saturating_add(1);
-        }
+        self.seen_streams.insert(stream);
     }
 
     /// Retires the oldest tracked conversation other than `protect`,

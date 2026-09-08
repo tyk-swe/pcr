@@ -35,7 +35,9 @@ pub struct Limits {
     pub max_sessions: usize,
     /// Handshake bytes buffered across every tracked conversation, including
     /// the alert records each one retained. Reaching it retires the oldest
-    /// tracked conversations until the new bytes fit.
+    /// tracked conversations until the new bytes fit. Any positive library
+    /// budget is valid, including deliberate small-budget experiments. The CLI
+    /// requires at least `MAX_DIRECTION_BUFFER` so a single direction can fit.
     pub max_buffered_bytes: usize,
 }
 

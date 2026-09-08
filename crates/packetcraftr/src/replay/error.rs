@@ -12,6 +12,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error("invalid replay limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -144,7 +146,8 @@ impl Error {
             | Self::InvalidEvidence { source_index, .. }
             | Self::Clock { source_index, .. }
             | Self::Output { source_index, .. } => *source_index,
-            Self::InvalidLimit { .. }
+            Self::Cancelled(_)
+            | Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => {
                 return None;
@@ -157,6 +160,7 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(

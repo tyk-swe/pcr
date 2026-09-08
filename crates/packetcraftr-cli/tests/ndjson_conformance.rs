@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 
 mod support;
 
-// The CLI ships no library target, so compile its error module into this test
-// binary to exercise the real cleanup composition.
+// Process errors are private to the CLI binary; compile that module here to
+// exercise the real cleanup composition without widening its public API.
 #[allow(dead_code)]
 #[path = "../src/errors.rs"]
 mod cli_errors;
@@ -314,6 +314,7 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_typed_event(
         output::contract::Command::Follow,
         output::follow::Chunk {
+            direction_generation: 0,
             direction: packetcraftr_core::analysis::follow::Direction::ClientToServer,
             frame: 1,
             bytes_hex: "01".to_owned(),
@@ -437,6 +438,8 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     validate_ip_event_stream(
         output::contract::Command::Follow,
         output::follow::Report {
+            clock: Default::default(),
+            scope: None,
             transport: packetcraftr_core::analysis::StreamTransport::Udp,
             stream: 0,
             client: None,
@@ -452,6 +455,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     validate_ip_event_stream(
         output::contract::Command::Expert,
         output::expert::Report {
+            clock: Default::default(),
             frames_read: 0,
             frames_matched: 0,
             errors: 0,
@@ -475,7 +479,10 @@ fn tls_session_event() -> output::tls::Event {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         port,
     };
+    let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
+    let id = scopes.intern(None, Vec::new()).unwrap();
     output::tls::Event::session(output::tls::Session {
+        scope: scopes.definition(id).unwrap().clone(),
         session: 0,
         tcp_stream: 4,
         client_endpoint: endpoint(1, 40_000),
@@ -757,4 +764,20 @@ fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
             .unwrap()
             .contains("cleanup failure")
     );
+}
+
+#[test]
+fn v2_rejects_legacy_event_placement_and_unknown_root_discriminators() {
+    let original: Value = serde_json::from_str(include_str!(
+        "../../../examples/documents/output-tls-event.json"
+    ))
+    .unwrap();
+    schema_validator().validate(&original).unwrap();
+    let mut legacy = original.clone();
+    let event = legacy.as_object_mut().unwrap().remove("event").unwrap();
+    legacy["result"]["event"] = event;
+    assert!(schema_validator().validate(&legacy).is_err());
+    let mut unknown = original;
+    unknown["event"] = "future_unknown_event".into();
+    assert!(schema_validator().validate(&unknown).is_err());
 }

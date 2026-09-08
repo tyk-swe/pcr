@@ -64,6 +64,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         ..evidence_free.clone()
     };
     let (output, _, _) = scan_output::Report::try_from_scan(scan::Report {
+        planned_duration: std::time::Duration::ZERO,
         target: "router.example".to_owned(),
         resolved_addresses: vec![ipv4, ipv6],
         endpoints: vec![

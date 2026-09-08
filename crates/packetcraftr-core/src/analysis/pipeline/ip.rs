@@ -139,6 +139,10 @@ impl IpDispatch {
         self.clock.at(timestamp, number)
     }
 
+    pub(super) fn clock_report(&self) -> &super::clock::ClockReport {
+        self.clock.report()
+    }
+
     /// Plans one derived decode against whatever the ledger already holds.
     ///
     /// Each committed layer consumes at least one input byte; only the final

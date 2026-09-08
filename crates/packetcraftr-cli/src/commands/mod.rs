@@ -139,6 +139,42 @@ impl Command {
         }
     }
 
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        let millis = match self {
+            Self::Expert(args) => args.limits.max_duration_ms,
+            Self::Follow(args) => args.limits.max_duration_ms,
+            Self::Tls(args) => args.limits.max_duration_ms,
+            Self::Replay(args) => args.max_duration_ms,
+            Self::Scan(args) => args.max_duration_ms,
+            Self::Traceroute(args) => args.max_duration_ms,
+            Self::Dns(args) => args.max_duration_ms,
+            Self::Fuzz(args) => args.max_duration_ms,
+            _ => return None,
+        };
+        Some(std::time::Duration::from_millis(millis))
+    }
+
+    /// Only intercept signals for workflows that consume the shared token.
+    /// Other commands retain OS termination, including while reading a recipe.
+    pub(crate) fn supports_cancellation(&self) -> bool {
+        matches!(
+            self,
+            Self::Read(_)
+                | Self::Send(_)
+                | Self::Capture(_)
+                | Self::Exchange(_)
+                | Self::Expert(_)
+                | Self::Follow(_)
+                | Self::Replay(_)
+                | Self::Scan(_)
+                | Self::Stats(_)
+                | Self::Tls(_)
+                | Self::Traceroute(_)
+                | Self::Dns(_)
+                | Self::Fuzz(_)
+        )
+    }
+
     /// Dispatches to the selected command.
     ///
     /// Rejects unsupported output formats before any command performs work.
@@ -146,6 +182,16 @@ impl Command {
         self.kind()
             .require_format(format)
             .map_err(CliError::classified)?;
+        let publisher = self
+            .publication_duration()
+            .filter(|_| format == Format::Ndjson)
+            .map(|duration| {
+                stream.clone().with_deadline(std::sync::Arc::new(
+                    packetcraftr_core::budget::Deadline::new(duration)
+                        .with_cancellation(Some(crate::cancellation::signal().clone())),
+                ))
+            });
+        let stream = publisher.as_ref().unwrap_or(stream);
         match self {
             Self::Build(arguments) => build::run(arguments, format),
             Self::Dissect(arguments) => dissect::run(arguments, format),

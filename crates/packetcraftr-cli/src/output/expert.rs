@@ -49,6 +49,7 @@ pub struct CodeCount {
 /// findings.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
+    pub clock: packetcraftr_core::analysis::ClockReport,
     pub frames_read: u64,
     pub frames_matched: u64,
     pub errors: u64,
@@ -68,6 +69,7 @@ impl Report {
         ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
     ) -> Self {
         Self {
+            clock: summary.clock,
             frames_read,
             frames_matched,
             errors: summary.errors,

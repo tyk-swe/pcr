@@ -243,3 +243,50 @@ fn deliveries_to_a_finished_direction_never_evict_another_session() {
         .expect("the bystander is still reported");
     assert_eq!(bystander.status, Status::Truncated);
 }
+
+#[test]
+fn filtered_first_observations_count_distinct_streams_across_direction_and_eviction() {
+    use packetcraftr_core::{analysis, filter};
+    let mut capture = Capture::new();
+    let mut a = Stream::new(40_000);
+    let mut b = Stream::new(40_001);
+    capture.client(&mut a, b""); // index 0 is assigned before filtering
+    capture.client(&mut b, b""); // first visible index is 1
+    capture.server(&mut a, b""); // reverse direction first exposes index 0
+    capture.client(&mut b, b""); // revisits an evicted collector entry
+    capture.client(&mut a, b"");
+    let filter = filter::Filter::compile(
+        "frame.number > 1",
+        &capture.registry,
+        filter::Options::default(),
+    )
+    .unwrap();
+    let mut collector = analysis::tls::Collector::new(TlsLimits {
+        max_sessions: 1,
+        ..TlsLimits::default()
+    })
+    .unwrap();
+    let mut indices = Vec::new();
+    let run = analysis::run(
+        &mut common::reader(&capture.frames),
+        capture.registry.clone(),
+        &analysis::Options {
+            filter: Some(&filter),
+            tcp_events: true,
+            limits: analysis::Limits {
+                max_flows: 2,
+                ..analysis::Limits::default()
+            },
+            ..analysis::Options::default()
+        },
+        |record| {
+            indices.push(record.tcp.unwrap().conversation.unwrap().index);
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(indices, [1, 0, 1, 0]);
+    let (_, summary) = collector.finish(&run);
+    assert_eq!(summary.tcp_streams, 2);
+}

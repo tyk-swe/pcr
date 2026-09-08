@@ -111,6 +111,7 @@ struct Codes {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    Cancelled(packetcraftr_core::budget::Cancelled),
     InvalidLimit {
         field: &'static str,
         value: u64,
@@ -176,6 +177,7 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let workflow = self.workflow;
         match &self.kind {
+            ErrorKind::Cancelled(source) => write!(formatter, "{workflow}: {source}"),
             ErrorKind::InvalidLimit {
                 field,
                 value,
@@ -244,6 +246,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
+            ErrorKind::Cancelled(source) => Some(source),
             ErrorKind::Authorization(source)
             | ErrorKind::Execution { source, .. }
             | ErrorKind::Output { source } => Some(source),
@@ -257,6 +260,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         let codes = self.workflow.codes();
         match &self.kind {
+            ErrorKind::Cancelled(source) => source.classification(),
             ErrorKind::InvalidLimit { .. }
             | ErrorKind::InvalidPort { .. }
             | ErrorKind::InvalidSourcePort

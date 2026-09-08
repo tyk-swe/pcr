@@ -1,0 +1,142 @@
+{
+  "schema": "packetcraftr.output/v2",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 0,
+      "max_regression": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 0,
+        "nanos": 1000
+      },
+      "max_forward_step_frame": 2
+    },
+    "table": "conversations",
+    "conversations": [
+      {
+        "transport": "tcp",
+        "stream": 0,
+        "scope": {
+          "id": 0,
+          "interface": null,
+          "encapsulation": [
+            {
+              "kind": "network",
+              "first": "198.51.100.2",
+              "second": "203.0.113.1"
+            },
+            {
+              "kind": "vxlan",
+              "vni": 1
+            }
+          ]
+        },
+        "address_a": "192.0.2.1",
+        "port_a": 1024,
+        "address_b": "198.51.100.2",
+        "port_b": 4444,
+        "frames_a_to_b": 1,
+        "bytes_a_to_b": 90,
+        "frames_b_to_a": 0,
+        "bytes_b_to_a": 0,
+        "first_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 1000
+        },
+        "last_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 1000
+        },
+        "duration": {
+          "secs": 0,
+          "nanos": 0
+        }
+      },
+      {
+        "transport": "tcp",
+        "stream": 1,
+        "scope": {
+          "id": 2,
+          "interface": null,
+          "encapsulation": [
+            {
+              "kind": "network",
+              "first": "198.51.100.2",
+              "second": "203.0.113.1"
+            },
+            {
+              "kind": "vxlan",
+              "vni": 2
+            }
+          ]
+        },
+        "address_a": "192.0.2.1",
+        "port_a": 1024,
+        "address_b": "198.51.100.2",
+        "port_b": 4444,
+        "frames_a_to_b": 1,
+        "bytes_a_to_b": 90,
+        "frames_b_to_a": 0,
+        "bytes_b_to_a": 0,
+        "first_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 2000
+        },
+        "last_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 2000
+        },
+        "duration": {
+          "secs": 0,
+          "nanos": 0
+        }
+      },
+      {
+        "transport": "udp",
+        "stream": 0,
+        "scope": {
+          "id": 1,
+          "interface": null,
+          "encapsulation": []
+        },
+        "address_a": "198.51.100.2",
+        "port_a": 4789,
+        "address_b": "203.0.113.1",
+        "port_b": 40000,
+        "frames_a_to_b": 0,
+        "bytes_a_to_b": 0,
+        "frames_b_to_a": 2,
+        "bytes_b_to_a": 180,
+        "first_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 1000
+        },
+        "last_timestamp": {
+          "unix_seconds": 100,
+          "nanoseconds": 2000
+        },
+        "duration": {
+          "secs": 0,
+          "nanos": 1000
+        }
+      }
+    ],
+    "frames_read": 2,
+    "frames_matched": 2,
+    "bytes_matched": 180,
+    "first_timestamp": {
+      "unix_seconds": 100,
+      "nanoseconds": 1000
+    },
+    "last_timestamp": {
+      "unix_seconds": 100,
+      "nanoseconds": 2000
+    }
+  },
+  "diagnostics": []
+}

@@ -111,9 +111,11 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    let mut deadline = Deadline::new(request.limits.max_duration);
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+    enforce_deadline(WORKFLOW, &deadline)?;
     let approved = approve_scan(request, authorizer, &deadline)?;
-    let mut batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
+    let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
     enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = EvidenceState::default();
     let mut winners = HashMap::new();
@@ -129,7 +131,7 @@ where
         };
         run_batches(
             WORKFLOW,
-            &mut batches,
+            batches,
             request.probes_per_second,
             &mut deadline,
             clock,
@@ -143,6 +145,7 @@ where
     }
 
     Ok(Summary {
+        planned_duration: approved.planned_duration,
         target: approved.declared_target,
         resolved_addresses: approved.addresses,
         counts,
@@ -189,6 +192,7 @@ impl Collector {
 
     pub(super) fn finish(self, summary: Summary) -> Report {
         Report {
+            planned_duration: summary.planned_duration,
             target: summary.target,
             resolved_addresses: summary.resolved_addresses,
             endpoints: self.endpoints,
@@ -200,6 +204,7 @@ impl Collector {
 }
 
 struct ApprovedScan {
+    planned_duration: std::time::Duration,
     declared_target: String,
     addresses: Vec<IpAddr>,
     endpoints: Vec<ProbeEndpoint>,
@@ -255,6 +260,7 @@ fn approve_scan<A: Authorizer>(
 
     let endpoints = probe_endpoints(request.transport, ports);
     Ok(ApprovedScan {
+        planned_duration: worst_case,
         declared_target: resolved.declared,
         addresses: resolved.addresses,
         endpoints,
@@ -358,7 +364,7 @@ struct Lifecycle<'a, E, F> {
     emit: &'a mut F,
 }
 
-impl<E, F> ProbeLifecycle<Probe> for Lifecycle<'_, E, F>
+impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
 where
     E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -370,7 +376,8 @@ where
     fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
         validate_batch_evidence(
             WORKFLOW,
-            batch,
+            std::slice::from_ref(&batch.probe),
+            batch.timeout,
             execution,
             self.limits.evidence(),
             sent_probe_matches,
@@ -413,7 +420,7 @@ where
             return Err(Error::new(
                 WORKFLOW,
                 ErrorKind::InvalidEvidence {
-                    sequence: batch.sequence,
+                    sequence: batch.probe.sequence,
                     message: "executor returned evidence for a different execution permit"
                         .to_owned(),
                 },
@@ -422,7 +429,9 @@ where
         self.record_diagnostics(batch_diagnostics, deadline)?;
         enforce_deadline(WORKFLOW, deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);
-        for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
+        for (request_index, (probe, sent)) in
+            std::iter::once(&batch.probe).zip(sent.iter()).enumerate()
+        {
             let evidence = self.classify_probe(
                 probe,
                 sent,

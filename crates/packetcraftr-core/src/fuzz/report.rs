@@ -105,6 +105,21 @@ pub struct Report {
     pub stats: Stats,
 }
 
+impl Report {
+    /// Reattaches the collected cases to the campaign metadata that
+    /// [`run_observed`](crate::fuzz::run_observed) reports after publishing them.
+    #[must_use]
+    pub fn from_summary(summary: Summary, cases: Vec<Case>) -> Self {
+        Self {
+            seed: summary.seed,
+            first_case: summary.first_case,
+            cases,
+            diagnostics: summary.diagnostics,
+            stats: summary.stats,
+        }
+    }
+}
+
 /// Final offline campaign metadata after every case event was published.
 #[derive(Clone, Debug)]
 pub struct Summary {

@@ -7,14 +7,14 @@
 use std::{
     cell::Cell,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
         mpsc::{self, RecvTimeoutError, SyncSender, TrySendError},
     },
     thread,
 };
 
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 /// Maximum concurrent callback workers admitted by one runtime.
@@ -36,7 +36,21 @@ impl Runtime {
             budget: Arc::new(WorkerBudget {
                 capacity: capacity.min(MAX_WORKER_CAPACITY),
                 active: AtomicUsize::new(0),
+                rejected: AtomicUsize::new(0),
+                timed_out: AtomicUsize::new(0),
             }),
+        }
+    }
+
+    /// Diagnostic samples; active means admitted workers, including idle sinks.
+    /// Counts can change as callbacks complete. Timed-out
+    /// work continues consuming `active` capacity until callback cleanup ends.
+    pub fn snapshot(&self) -> RuntimeSnapshot {
+        RuntimeSnapshot {
+            capacity: self.capacity(),
+            active: self.budget.active.load(Ordering::Acquire),
+            rejected_admissions: self.budget.rejected.load(Ordering::Acquire),
+            timed_out_retaining_capacity: self.budget.timed_out.load(Ordering::Acquire),
         }
     }
 
@@ -51,13 +65,45 @@ impl Default for Runtime {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeSnapshot {
+    pub capacity: usize,
+    pub active: usize,
+    pub rejected_admissions: usize,
+    pub timed_out_retaining_capacity: usize,
+}
+
 #[derive(Debug)]
 struct WorkerBudget {
     capacity: usize,
     active: AtomicUsize,
+    rejected: AtomicUsize,
+    timed_out: AtomicUsize,
 }
 
-struct WorkerPermit(Arc<WorkerBudget>);
+#[derive(Clone, Copy)]
+enum WorkerState {
+    Running,
+    TimedOut,
+    Finished,
+}
+
+struct WorkerStatus {
+    budget: Arc<WorkerBudget>,
+    state: Mutex<WorkerState>,
+}
+
+impl WorkerStatus {
+    fn mark_timed_out(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if matches!(*state, WorkerState::Running) {
+            self.budget.timed_out.fetch_add(1, Ordering::AcqRel);
+            *state = WorkerState::TimedOut;
+        }
+    }
+}
+
+struct WorkerPermit(Arc<WorkerStatus>);
 
 impl WorkerBudget {
     fn acquire(self: &Arc<Self>) -> Result<WorkerPermit, BoundaryError> {
@@ -65,14 +111,33 @@ impl WorkerBudget {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < self.capacity).then(|| active + 1)
             })
-            .map_err(|_| worker_budget_exhausted(self.capacity))?;
-        Ok(WorkerPermit(Arc::clone(self)))
+            .map_err(|_| {
+                let _ = self
+                    .rejected
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                        Some(value.saturating_add(1))
+                    });
+                worker_budget_exhausted(self.capacity)
+            })?;
+        Ok(WorkerPermit(Arc::new(WorkerStatus {
+            budget: Arc::clone(self),
+            state: Mutex::new(WorkerState::Running),
+        })))
     }
 }
 
 impl Drop for WorkerPermit {
     fn drop(&mut self) {
-        self.0.active.fetch_sub(1, Ordering::AcqRel);
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if matches!(*state, WorkerState::TimedOut) {
+            self.0.budget.timed_out.fetch_sub(1, Ordering::AcqRel);
+        }
+        *state = WorkerState::Finished;
+        self.0.budget.active.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -107,6 +172,15 @@ pub enum EmitError {
     Output(#[from] BoundaryError),
 }
 
+impl From<Interrupted> for EmitError {
+    fn from(interrupted: Interrupted) -> Self {
+        match interrupted {
+            Interrupted::Cancelled(cancelled) => Self::Output(cancelled.into_boundary_error()),
+            Interrupted::Exceeded(exceeded) => Self::Deadline(exceeded),
+        }
+    }
+}
+
 /// One callback worker and a single in-flight event. Closing the sink closes
 /// its channels; the worker exits after any active callback returns. A timed-out
 /// sink never accepts a second event, and its worker still consumes capacity.
@@ -114,6 +188,7 @@ pub struct Sink<T> {
     events: SyncSender<T>,
     outcomes: mpsc::Receiver<Result<(), BoundaryError>>,
     in_flight: Cell<bool>,
+    worker: Arc<WorkerStatus>,
 }
 
 impl<T: Send + 'static> Sink<T> {
@@ -125,6 +200,7 @@ impl<T: Send + 'static> Sink<T> {
             callback: emit,
             _permit: runtime.budget.acquire()?,
         };
+        let status = Arc::clone(&worker._permit.0);
         let (events, receiver) = mpsc::sync_channel(1);
         let (outcomes, outcome_receiver) = mpsc::sync_channel(1);
         // The thread owns every resource it needs. Dropping its join handle
@@ -147,13 +223,14 @@ impl<T: Send + 'static> Sink<T> {
             events,
             outcomes: outcome_receiver,
             in_flight: Cell::new(false),
+            worker: status,
         })
     }
 
     /// Waits no longer than the deadline for acknowledgment. This cannot
     /// interrupt a callback already running on the worker.
     pub fn emit(&self, event: T, deadline: &Deadline) -> Result<(), EmitError> {
-        deadline.check()?;
+        deadline.enforce()?;
         if self.in_flight.replace(true) {
             return Err(unavailable("progressive output already has an in-flight callback").into());
         }
@@ -165,25 +242,33 @@ impl<T: Send + 'static> Sink<T> {
             })
             .into());
         }
-        loop {
-            let remaining = deadline.remaining()?;
-            match self.outcomes.recv_timeout(remaining) {
-                Ok(outcome) => {
-                    self.in_flight.set(false);
-                    return outcome.map_err(EmitError::Output);
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    self.in_flight.set(false);
-                    return Err(
-                        unavailable("progressive output worker stopped without a result").into(),
-                    );
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    deadline.check()?;
-                    thread::yield_now();
+        let result = (|| {
+            loop {
+                deadline.enforce()?;
+                let remaining = deadline.remaining()?.min(Cancellation::POLL_INTERVAL);
+                match self.outcomes.recv_timeout(remaining) {
+                    Ok(outcome) => {
+                        self.in_flight.set(false);
+                        return outcome.map_err(EmitError::Output);
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        self.in_flight.set(false);
+                        return Err(unavailable(
+                            "progressive output worker stopped without a result",
+                        )
+                        .into());
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        deadline.enforce()?;
+                        thread::yield_now();
+                    }
                 }
             }
+        })();
+        if matches!(result, Err(EmitError::Deadline(_))) {
+            self.worker.mark_timed_out();
         }
+        result
     }
 }
 
@@ -194,7 +279,7 @@ fn unavailable(message: impl Into<String>) -> BoundaryError {
 fn worker_budget_exhausted(capacity: usize) -> BoundaryError {
     BoundaryError::new(
         format!(
-            "progressive output worker capacity {capacity} is exhausted by callbacks that have not returned"
+            "progressive output worker capacity {capacity} is exhausted by admitted sinks or callbacks retaining resources"
         ),
         Classification::new(
             "internal.progressive_output_worker_exhausted",
@@ -263,6 +348,9 @@ mod tests {
         );
         drop(sink);
         assert!(Sink::<()>::new_in(&runtime, |_| Ok(())).is_err());
+        assert_eq!(runtime.snapshot().active, 1);
+        assert_eq!(runtime.snapshot().rejected_admissions, 1);
+        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
         release.send(()).unwrap();
         wait_for_cleanup(&runtime);
         assert!(Sink::<()>::new_in(&runtime, |_| Ok(())).is_ok());
@@ -344,5 +432,45 @@ mod tests {
         assert!(Sink::<()>::new_in(&runtime, |_| Ok(())).is_err());
         release.send(()).unwrap();
         wait_for_cleanup(&runtime);
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use packetcraftr_core::{budget::Cancellation, error::Classified};
+    use std::time::Duration;
+
+    #[test]
+    fn cancellation_interrupts_publication_wait_without_releasing_callback_resources() {
+        let runtime = Runtime::new(1);
+        let signal = Cancellation::default();
+        let (entered, started) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let sink = Sink::new_in(&runtime, move |()| {
+            entered.send(()).unwrap();
+            wait.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let cancelled = signal.clone();
+        let canceller = thread::spawn(move || {
+            started.recv_timeout(Duration::from_secs(1)).unwrap();
+            cancelled.cancel();
+        });
+        let result = sink.emit(
+            (),
+            &Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal)),
+        );
+        let Err(EmitError::Output(error)) = result else {
+            panic!("expected cancellation");
+        };
+        assert_eq!(error.classification().code, "io.cancelled");
+        assert_eq!(runtime.snapshot().active, 1);
+        assert!(sink.in_flight.get());
+        assert!(Sink::<()>::new_in(&runtime, |_| Ok(())).is_err());
+        drop(sink);
+        release.send(()).unwrap();
+        canceller.join().unwrap();
     }
 }

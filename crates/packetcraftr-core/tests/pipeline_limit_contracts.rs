@@ -438,3 +438,22 @@ fn tcp_idle_expiry_follows_the_configured_capture_time_interval() {
     assert_eq!(evictions(Duration::from_secs(120)), 0);
     assert_eq!(evictions(Duration::from_secs(5)), 1);
 }
+
+#[test]
+fn cancellation_stops_before_reading_input_and_is_not_a_timeout() {
+    // Reader construction needs the header, so cancel after opening a real header.
+    let signal = packetcraftr_core::budget::Cancellation::default();
+    let registry = registry();
+    let mut input = reader(&[]);
+    signal.cancel();
+    let result = run(
+        &mut input,
+        registry,
+        &Options {
+            cancellation: Some(signal),
+            ..Options::default()
+        },
+        |_| panic!("cancelled collector was called"),
+    );
+    assert!(matches!(result, Err(Error::Cancelled(_))));
+}

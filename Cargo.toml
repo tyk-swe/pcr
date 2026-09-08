@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.5.0-beta.2"
+version = "0.5.0-beta.3"
 edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-only"
@@ -21,20 +21,22 @@ undocumented_unsafe_blocks = "deny"
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
-packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.2", default-features = false }
-packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.2" }
-packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.2" }
+packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
+packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.3" }
+packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.3" }
 
 anstream = "1.0.0"
+getrandom = { version = "0.4.3", features = ["std"] }
 bytes = { version = "1.12.1", features = ["serde"] }
 clap = { version = "4.6.6", features = ["derive"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 noyalib = { version = "0.0.39", default-features = false, features = ["std", "fast-int", "fast-float"] }
 jsonschema = { version = "0.55.0", default-features = false }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
 md-5 = { version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
-serde = { version = "1.0.229", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["unbounded_depth"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"

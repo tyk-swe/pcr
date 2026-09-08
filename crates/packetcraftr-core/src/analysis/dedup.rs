@@ -11,7 +11,7 @@
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
-use crate::analysis::reassembly::tcp::ScopedFlowKey as FlowKey;
+use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
 /// Who sent a chunk, relative to the conversation's first captured frame.
 ///
@@ -35,6 +35,8 @@ pub(crate) struct Deduplicator {
     /// a cleanly closed flow, so a retransmitted closing segment re-delivers
     /// from a fresh generation; this edge is what keeps extraction
     /// exactly-once across that seam.
+    client_generation: u64,
+    server_generation: u64,
     client_delivered: Option<u32>,
     server_delivered: Option<u32>,
     /// Base each direction's latest SYN implied, distinguishing a
@@ -50,26 +52,31 @@ pub(crate) struct Deduplicator {
 }
 
 impl Deduplicator {
-    pub(crate) fn mark_evicted(&mut self, flow: &FlowKey, client: &FlowKey) {
-        let (delivered, syn_base, closed) = if flow == client {
+    pub(crate) fn mark_evicted(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) {
+        let (delivered, syn_base, closed, generation) = if flow == client {
             (
                 &mut self.client_delivered,
                 &mut self.client_syn_base,
                 &mut self.client_closed,
+                &mut self.client_generation,
             )
         } else {
             (
                 &mut self.server_delivered,
                 &mut self.server_syn_base,
                 &mut self.server_closed,
+                &mut self.server_generation,
             )
         };
+        if delivered.is_some() || syn_base.is_some() || *closed {
+            *generation = generation.saturating_add(1);
+        }
         *delivered = None;
         *syn_base = None;
         *closed = false;
     }
 
-    pub(crate) fn mark_closed(&mut self, flow: &FlowKey, client: &FlowKey) {
+    pub(crate) fn mark_closed(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey) {
         let closed = if flow == client {
             &mut self.client_closed
         } else {
@@ -78,27 +85,39 @@ impl Deduplicator {
         *closed = true;
     }
 
-    pub(crate) fn observe_syn(&mut self, flow: &FlowKey, client: &FlowKey, tcp: &Tcp) {
+    pub(crate) fn observe_syn(&mut self, flow: &ScopedFlowKey, client: &ScopedFlowKey, tcp: &Tcp) {
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
-            let (recorded, closed, delivered) = if flow == client {
+            let (recorded, closed, delivered, generation) = if flow == client {
                 (
                     &mut self.client_syn_base,
                     &mut self.client_closed,
                     &mut self.client_delivered,
+                    &mut self.client_generation,
                 )
             } else {
                 (
                     &mut self.server_syn_base,
                     &mut self.server_closed,
                     &mut self.server_delivered,
+                    &mut self.server_generation,
                 )
             };
             if *recorded != Some(first) || *closed {
+                if recorded.is_some() || delivered.is_some() || *closed {
+                    *generation = generation.saturating_add(1);
+                }
                 *recorded = Some(first);
                 *delivered = None;
                 *closed = false;
             }
+        }
+    }
+
+    pub(crate) fn generation(&self, direction: Direction) -> u64 {
+        match direction {
+            Direction::ClientToServer => self.client_generation,
+            Direction::ServerToClient => self.server_generation,
         }
     }
 

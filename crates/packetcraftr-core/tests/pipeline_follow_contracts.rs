@@ -193,6 +193,13 @@ fn tcp_follow_starts_a_fresh_delivery_generation_for_four_tuple_reuse() {
             .collect::<Vec<_>>(),
         [b"A".as_slice(), b"B".as_slice()]
     );
+    assert_eq!(
+        chunks
+            .iter()
+            .map(|chunk| chunk.direction_generation)
+            .collect::<Vec<_>>(),
+        [0, 1]
+    );
     assert_eq!(summary.client_bytes, 2);
     assert_eq!(summary.server_bytes, 0);
 }

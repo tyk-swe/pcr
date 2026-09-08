@@ -31,14 +31,14 @@ Selectors run on assembled sessions, not on frames, so there is deliberately no 
 
 The per-frame 'tls' layer is a different view: read --filter 'tls.sni contains "x"' sees only the hellos that fit in a single segment, and 'tls.incomplete' filters the frames whose record continues into the next one. Use this command for the assembled answer.
 
-Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-tls-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
+Text prints each selected session as it is assembled and leaves none out. JSON holds every selected session in memory to emit one document, bounded by --max-output-sessions, and reports what that bound left out as sessions_omitted. NDJSON streams each session as it completes and is the format for large captures.
 
 Examples:
   packetcraftr tls examples/captures/tls-handshake.pcapng
   packetcraftr tls capture.pcapng --sni '*.example.test' --status complete
   packetcraftr tls capture.pcapng --stream tcp:12
   packetcraftr tls capture.pcapng --server-port 4433 --status complete --status alert
-  packetcraftr --output ndjson tls capture.pcapng | jq -r 'select(.result.event == "session") | .result.client.ja4'"#;
+  packetcraftr --output ndjson tls capture.pcapng | jq -r 'select(.event == "session") | .result.client.ja4'"#;
 
 /// Session status selector for `tls`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -99,10 +99,13 @@ pub(crate) struct Args {
     /// conversation may buffer on its own.
     #[arg(long, default_value_t = TlsLimits::default().max_buffered_bytes)]
     pub(crate) max_tls_buffer_bytes: usize,
-    /// Maximum TLS conversations tracked at once, and sessions retained by
-    /// the JSON document. Text and NDJSON report every selected session.
+    /// Maximum TLS conversations tracked concurrently (including closed state).
     #[arg(long, default_value_t = TlsLimits::default().max_sessions)]
     pub(crate) max_tls_sessions: usize,
+    /// Maximum selected sessions retained by aggregate JSON; zero retains none.
+    /// Does not change analysis state. Text and NDJSON emit all selected sessions.
+    #[arg(long, default_value_t = TlsLimits::default().max_sessions)]
+    pub(crate) max_output_sessions: usize,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }

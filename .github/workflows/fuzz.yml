@@ -1,12 +1,19 @@
-name: Fuzz Smoke
+name: Fuzz
 
 on:
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
+    inputs:
+      seconds:
+        description: Per-target exploration seconds (30 smoke, up to 900 campaign)
+        type: choice
+        options: ["30", "300", "900"]
+        default: "30"
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,8 +21,9 @@ concurrency:
 
 jobs:
   fuzz-smoke:
-    name: Fuzz Smoke (${{ matrix.target }})
+    name: Fuzz (${{ matrix.target }}, ${{ inputs.seconds || 30 }}s)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -30,17 +38,38 @@ jobs:
           - tls_assembly
           - filter_parse
           - dns_name
+          - dns_message
+          - tcp_schedule
           - packet_build
           - tls_session
+          - tls_schedule
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install nightly toolchain for libfuzzer
-        run: rustup toolchain install nightly --component llvm-tools-preview
+        run: rustup toolchain install nightly-2026-08-28 --component llvm-tools-preview
       - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
         with:
           tool: cargo-fuzz@0.13.2
-      - name: Run fuzz target bounded (30s)
+      - name: Restore latest successful target corpus
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FUZZ_TARGET: ${{ matrix.target }}
         run: |
+          mkdir -p "fuzz/corpora/$FUZZ_TARGET"
+          artifact="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="fuzz-corpus-$FUZZ_TARGET" --jq '[.artifacts[] | select(.expired == false)][0].id // empty')"
+          if [[ -n "$artifact" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/corpus.zip"
+            unzip -q "$RUNNER_TEMP/corpus.zip" -d "fuzz/corpora/$FUZZ_TARGET"
+          fi
+      - name: Run bounded smoke or campaign
+        env:
+          FUZZ_SECONDS: ${{ inputs.seconds || 30 }}
+        run: |
+          [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]] && (( FUZZ_SECONDS >= 1 && FUZZ_SECONDS <= 900 ))
+          rustc +nightly-2026-08-28 --version --verbose > fuzz-run-metadata.txt
+          git rev-parse HEAD >> fuzz-run-metadata.txt
+          sha256sum Cargo.lock >> fuzz-run-metadata.txt
+          printf 'target=%s seconds=%s\n' '${{ matrix.target }}' "$FUZZ_SECONDS" >> fuzz-run-metadata.txt
           corpus=()
           dictionary=()
           mkdir -p "corpora/${{ matrix.target }}"
@@ -59,8 +88,20 @@ jobs:
           esac
           # Prebuilt cargo-fuzz may default to its own musl build target;
           # AddressSanitizer needs the runner's dynamically linked GNU target.
-          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time=30
+          cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time="$FUZZ_SECONDS" -rss_limit_mb=2048 -max_len=1048576
         working-directory: fuzz
+      - name: Minimize and bound successful corpus
+        working-directory: fuzz
+        run: |
+          cargo +nightly-2026-08-28 fuzz cmin --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "corpora/${{ matrix.target }}" -- -max_total_time=60 -rss_limit_mb=2048
+          test "$(du -sm 'corpora/${{ matrix.target }}' | cut -f1)" -le 32
+      - name: Persist successful target corpus
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: fuzz/corpora/${{ matrix.target }}/*
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Upload artifacts on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -69,5 +110,6 @@ jobs:
           path: |
             fuzz/artifacts/${{ matrix.target }}/*
             fuzz/crash-*
+            fuzz/fuzz-run-metadata.txt
           if-no-files-found: ignore
           retention-days: 7

@@ -18,6 +18,7 @@ native-layer2 = ["packetcraftr/native-layer2"]
 native-layer3 = ["packetcraftr/native-layer3"]
 
 [dependencies]
+ctrlc.workspace = true
 bytes.workspace = true
 anstream.workspace = true
 packetcraftr-core.workspace = true
@@ -30,6 +31,7 @@ serde_json.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+proptest.workspace = true
 jsonschema.workspace = true
 
 [[bin]]

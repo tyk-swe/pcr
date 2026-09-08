@@ -331,3 +331,65 @@ fn socket_address_ip(
         _ => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+
+    #[test]
+    fn adapter_views_reject_short_misaligned_and_cyclic_owned_nodes() {
+        let mut node = Box::<IP_ADAPTER_ADDRESSES_LH>::default();
+        let pointer = &mut *node as *mut IP_ADAPTER_ADDRESSES_LH;
+        let size = size_of::<IP_ADAPTER_ADDRESSES_LH>();
+        for length in [0, size - 1] {
+            let bounds = BufferBounds::new(pointer.cast(), length).unwrap();
+            assert!(matches!(
+                parse_adapters(pointer, bounds),
+                Err(SystemError::InvalidResponse { .. })
+            ));
+        }
+        let bounds = BufferBounds::new(pointer.cast(), size).unwrap();
+        assert!(parse_adapters(pointer, bounds).unwrap().is_empty());
+        let misaligned = pointer.cast::<u8>().wrapping_add(1).cast();
+        assert!(matches!(
+            parse_adapters(misaligned, bounds),
+            Err(SystemError::InvalidResponse { .. })
+        ));
+        // SAFETY: `pointer` names the live initialized Box above. No reference
+        // from the completed parser calls escapes; writing through this same
+        // raw pointer preserves the provenance used by the synthetic cycle.
+        unsafe {
+            (*pointer).Next = pointer;
+        }
+        assert!(
+            matches!(parse_adapters(pointer, bounds), Err(SystemError::InvalidResponse { message }) if message.contains("traversal bound"))
+        );
+    }
+
+    #[test]
+    fn strings_are_bounded_by_the_owned_buffer_and_require_alignment_and_termination() {
+        let mut units = [65u16, 66];
+        let pointer = units.as_mut_ptr();
+        let bounds = BufferBounds::new(pointer.cast(), size_of_val(&units)).unwrap();
+        assert!(wide_string(windows::core::PWSTR(pointer), bounds).is_err());
+        assert!(
+            wide_string(
+                windows::core::PWSTR(pointer.cast::<u8>().wrapping_add(1).cast()),
+                bounds
+            )
+            .is_err()
+        );
+        units[1] = 0;
+        // Reborrow after mutation; the view refers to this initialized array.
+        let pointer = units.as_mut_ptr();
+        let bounds = BufferBounds::new(pointer.cast(), size_of_val(&units)).unwrap();
+        assert_eq!(
+            wide_string(windows::core::PWSTR(pointer), bounds)
+                .unwrap()
+                .as_deref(),
+            Some("A")
+        );
+        assert!(!bounds.contains_bytes(pointer.cast(), usize::MAX));
+        assert!(BufferBounds::new(std::ptr::without_provenance(u64::MAX as usize), 1).is_err());
+    }
+}

@@ -23,6 +23,10 @@ pub use crate::analysis::dedup::Direction;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
     pub direction: Direction,
+    /// Run-local reassembly generation within this direction, starting at zero.
+    /// Reuse/eviction starts a new generation; this is not a claim of a complete
+    /// TCP connection handshake. UDP always uses zero.
+    pub direction_generation: u64,
     /// Frame whose arrival delivered these bytes. An out-of-order segment
     /// is delivered by the later frame that filled the hole before it.
     pub number: u64,
@@ -32,10 +36,12 @@ pub struct Chunk {
 /// Terminal accounting for one followed conversation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
+    pub clock: crate::analysis::ClockReport,
     /// The flow of the conversation's first captured frame: its source is
     /// the client and its destination the server. `None` when the capture
     /// holds no frame of the selected conversation.
     pub client_flow: Option<FlowKey>,
+    pub scope: Option<crate::analysis::scope::Definition>,
     /// Matched frames belonging to the followed conversation.
     pub frames: u64,
     pub client_bytes: u64,
@@ -83,6 +89,7 @@ impl Collector {
     /// followed conversation still buffered behind missing segments was
     /// captured but never deliverable.
     pub fn finish(mut self, summary: &RunSummary) -> Summary {
+        self.summary.clock = summary.clock.clone();
         if let Some(client) = self.client_flow.clone() {
             for event in &summary.trailing_tcp_events {
                 if let TcpEvent::Evicted {
@@ -145,6 +152,7 @@ impl Collector {
             .client_flow
             .get_or_insert_with(|| {
                 self.summary.client_flow = Some(flow.flow.clone());
+                self.summary.scope = record.scope_definition(flow.scope).cloned();
                 flow.clone()
             })
             .clone();
@@ -175,6 +183,7 @@ impl Collector {
                 self.tally(direction, bytes.len());
                 chunks.push(Chunk {
                     direction,
+                    direction_generation: self.dedup.generation(direction),
                     number: record.number,
                     bytes,
                 });
@@ -198,6 +207,7 @@ impl Collector {
             .client_flow
             .get_or_insert_with(|| {
                 self.summary.client_flow = Some(flow.flow.clone());
+                self.summary.scope = record.scope_definition(flow.scope).cloned();
                 flow.clone()
             })
             .clone();
@@ -213,6 +223,7 @@ impl Collector {
         self.tally(direction, bytes.len());
         vec![Chunk {
             direction,
+            direction_generation: 0,
             number: record.number,
             bytes,
         }]

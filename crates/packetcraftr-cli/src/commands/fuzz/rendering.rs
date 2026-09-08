@@ -25,6 +25,7 @@ pub(super) fn render_text(
         result.cases_rejected,
     ))?;
     for case in &result.cases {
+        crate::cancellation::check()?;
         write_stdout_line(format_args!(
             "case={} seed={} strategy={} target={}.{} outcome={} length={} reproduce=--seed {} --first-case {} --cases 1",
             case.index,
@@ -65,6 +66,7 @@ pub(super) fn render_text(
         }
         render_diagnostics_text(&case.diagnostics)?;
     }
+    crate::cancellation::check()?;
     write_stdout_line(format_args!(
         "fuzz completed {} case(s), {} packet operation(s), {} byte(s)",
         result.cases_generated, stats.packets_completed, stats.bytes

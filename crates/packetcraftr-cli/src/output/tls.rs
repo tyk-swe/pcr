@@ -149,6 +149,7 @@ pub struct Session {
     pub session: u64,
     /// The `tcp.stream` conversation index this handshake rode on.
     pub tcp_stream: u64,
+    pub scope: packetcraftr_core::analysis::scope::Definition,
     pub client_endpoint: Endpoint,
     pub server_endpoint: Endpoint,
     /// First capture frame that delivered handshake bytes for this session.
@@ -189,6 +190,7 @@ impl From<AnalysisSession> for Session {
         Self {
             session: value.session,
             tcp_stream: value.tcp_stream,
+            scope: value.scope,
             client_endpoint: value.client_endpoint,
             server_endpoint: value.server_endpoint,
             first_frame: value.first_frame,
@@ -235,6 +237,7 @@ impl StatusCounts {
 /// Terminal counters for one assembly pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
+    pub clock: packetcraftr_core::analysis::ClockReport,
     pub frames_read: u64,
     pub frames_matched: u64,
     /// Sessions assembled, of every status, whether or not a selector kept
@@ -277,6 +280,7 @@ impl Summary {
             *by_status.slot(status) = count;
         }
         Self {
+            clock: analysis.clock,
             frames_read,
             frames_matched,
             sessions: analysis.sessions,
@@ -316,7 +320,7 @@ pub enum Event {
     },
     Complete {
         #[serde(flatten)]
-        summary: Summary,
+        summary: Box<Summary>,
     },
 }
 
@@ -331,8 +335,10 @@ impl Event {
 
     /// Wraps the terminal counters as the stream's last event.
     #[must_use]
-    pub const fn complete(summary: Summary) -> Self {
-        Self::Complete { summary }
+    pub fn complete(summary: Summary) -> Self {
+        Self::Complete {
+            summary: Box::new(summary),
+        }
     }
 }
 

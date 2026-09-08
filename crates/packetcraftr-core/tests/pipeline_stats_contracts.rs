@@ -66,6 +66,9 @@ fn stats_collect_all_tables_with_directional_and_time_accounting() {
     assert_eq!(report.bytes, total_bytes);
     assert_eq!(report.first_timestamp, Some(epoch + Duration::from_secs(1)));
     assert_eq!(report.last_timestamp, Some(epoch + Duration::from_secs(4)));
+    assert_eq!(report.io_origin, Some(epoch + Duration::from_secs(2)));
+    assert_eq!(report.io_underflow_frames, 1);
+    assert_eq!(report.clock.regressions, 1);
     assert_eq!(report.io.len(), 2);
     assert_eq!(report.io[0].offset, Duration::ZERO);
     assert_eq!(report.io[0].frames, 2);
@@ -162,4 +165,59 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     assert_eq!(report.ip_reassembly, ip_reassembly);
     assert_eq!(report.frames, 0);
     assert_eq!(report.bytes, 0);
+}
+
+#[test]
+fn selected_stats_equal_all_tables_without_retaining_other_aggregations() {
+    use packetcraftr_core::analysis::stats::{Collector, Table};
+    let registry = registry();
+    let frames = [udp_frame(
+        &registry,
+        SystemTime::UNIX_EPOCH,
+        CLIENT,
+        SERVER,
+        1000,
+        9999,
+        b"query",
+    )];
+    let collect = |table| {
+        let mut collector = Collector::for_table(Duration::from_secs(1), table).unwrap();
+        let summary = run(
+            &mut reader(&frames),
+            registry.clone(),
+            &Options::default(),
+            |record| {
+                collector.observe(&record);
+                Ok(())
+            },
+        )
+        .unwrap();
+        collector.finish(&summary)
+    };
+    let all = collect(Table::All);
+    for table in [
+        Table::Protocols,
+        Table::Endpoints,
+        Table::Conversations,
+        Table::Ports,
+        Table::Io,
+        Table::Fragments,
+    ] {
+        let selected = collect(table);
+        assert_eq!((selected.frames, selected.bytes), (all.frames, all.bytes));
+        macro_rules! check {
+            ($variant:ident, $field:ident) => {
+                if table == Table::$variant {
+                    assert_eq!(selected.$field, all.$field);
+                } else {
+                    assert!(selected.$field.is_empty());
+                }
+            };
+        }
+        check!(Protocols, protocols);
+        check!(Endpoints, endpoints);
+        check!(Conversations, conversations);
+        check!(Ports, ports);
+        check!(Io, io);
+    }
 }

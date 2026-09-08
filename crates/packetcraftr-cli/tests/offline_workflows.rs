@@ -732,7 +732,10 @@ fn expert_text_with_zero_findings_adds_no_code_lines() {
     );
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
-        ["found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 2 of 5 frame(s)"],
+        [
+            "capture clock: 0 regressing frame(s), largest rollback 0ns, largest forward step 1s at frame Some(2); expiry follows the high-water mark",
+            "found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 2 of 5 frame(s)",
+        ],
     );
 }
 

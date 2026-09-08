@@ -101,6 +101,7 @@ fn assert_expert(
     assert_eq!(
         summary,
         packetcraftr_core::analysis::expert::Summary {
+            clock: summary.clock.clone(),
             findings: u64::try_from(expected.len()).expect("fixture count fits u64"),
             errors,
             warnings,
@@ -471,8 +472,16 @@ fn non_tcp_sweep_retires_expired_expert_generation() {
     let (findings, summary) = analyze_frames(registry, &frames);
     assert!(findings.is_empty());
     assert_eq!(
+        summary.clock.max_forward_step,
+        std::time::Duration::from_secs(121)
+    );
+    assert_eq!(summary.clock.max_forward_step_frame, Some(7));
+    assert_eq!(
         summary,
-        packetcraftr_core::analysis::expert::Summary::default()
+        packetcraftr_core::analysis::expert::Summary {
+            clock: summary.clock.clone(),
+            ..Default::default()
+        }
     );
 }
 

@@ -18,6 +18,20 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey;
 mod report;
 pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
 
+/// Aggregations retained by a statistics collector. Shared frame/byte/time
+/// totals and capture-global fragment evidence are available for every choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Table {
+    #[default]
+    All,
+    Protocols,
+    Conversations,
+    Endpoints,
+    Ports,
+    Io,
+    Fragments,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Tally {
     frames: u64,
@@ -40,6 +54,7 @@ struct DirectionalTally {
 #[derive(Clone, Debug)]
 struct ConversationState {
     flow: CanonicalFlow,
+    scope: crate::analysis::scope::Definition,
     tally: DirectionalTally,
     first_timestamp: SystemTime,
     last_timestamp: SystemTime,
@@ -60,12 +75,14 @@ struct EndpointTally {
 /// capture-global fragment accounting is attached only when the pass finishes.
 #[derive(Debug)]
 pub struct Collector {
+    table: Table,
     interval: Duration,
     frames: u64,
     bytes: u64,
     first_timestamp: Option<SystemTime>,
     last_timestamp: Option<SystemTime>,
     io_origin: Option<SystemTime>,
+    io_underflow_frames: u64,
     protocols: BTreeMap<String, Tally>,
     conversations: BTreeMap<(StreamTransport, u64), ConversationState>,
     endpoints: BTreeMap<IpAddr, EndpointTally>,
@@ -76,6 +93,11 @@ pub struct Collector {
 impl Collector {
     /// Creates a collector with the given I/O bucket width.
     pub fn new(interval: Duration) -> Result<Self, Error> {
+        Self::for_table(interval, Table::All)
+    }
+
+    /// Retains only the requested aggregation; unselected tables remain empty.
+    pub fn for_table(interval: Duration, table: Table) -> Result<Self, Error> {
         if interval.is_zero() {
             return Err(Error::InvalidLimit {
                 field: "interval",
@@ -84,12 +106,14 @@ impl Collector {
             });
         }
         Ok(Self {
+            table,
             interval,
             frames: 0,
             bytes: 0,
             first_timestamp: None,
             last_timestamp: None,
             io_origin: None,
+            io_underflow_frames: 0,
             protocols: BTreeMap::new(),
             conversations: BTreeMap::new(),
             endpoints: BTreeMap::new(),
@@ -98,7 +122,7 @@ impl Collector {
         })
     }
 
-    /// Folds one matched frame into every table.
+    /// Folds one matched physical frame into the selected tables.
     pub fn observe(&mut self, record: &FrameRecord<'_>) {
         let bytes = u64::from(record.decoded.frame.captured_length());
         let timestamp = record.timestamp;
@@ -106,23 +130,30 @@ impl Collector {
         self.bytes = self.bytes.saturating_add(bytes);
         self.observe_time(timestamp, bytes);
 
-        // Protocol presence: once per distinct protocol per frame.
-        let mut seen: Vec<&str> = Vec::new();
-        for layer in record.decoded.packet.iter() {
-            let name = layer.protocol_id().as_str();
-            if !seen.contains(&name) {
-                seen.push(name);
+        if self.collects(Table::Protocols) {
+            // Protocol presence: once per distinct protocol per frame.
+            let mut seen: Vec<&str> = Vec::new();
+            for layer in record.decoded.packet.iter() {
+                let name = layer.protocol_id().as_str();
+                if !seen.contains(&name) {
+                    seen.push(name);
+                }
             }
-        }
-        for name in seen {
-            self.protocols
-                .entry(name.to_owned())
-                .or_default()
-                .add(bytes);
+            for name in seen {
+                if let Some(tally) = self.protocols.get_mut(name) {
+                    tally.add(bytes);
+                } else {
+                    let mut tally = Tally::default();
+                    tally.add(bytes);
+                    self.protocols.insert(name.to_owned(), tally);
+                }
+            }
         }
 
         // Count innermost-network endpoints as sender and receiver.
-        if let Some((source, destination)) = innermost_network(record) {
+        if self.collects(Table::Endpoints)
+            && let Some((source, destination)) = innermost_network(record)
+        {
             self.endpoints.entry(source).or_default().tx.add(bytes);
             self.endpoints.entry(destination).or_default().rx.add(bytes);
         }
@@ -139,13 +170,28 @@ impl Collector {
             ),
         ] {
             if let Some(stream) = conversation {
-                self.record_conversation(transport, stream.index, stream.flow, bytes, timestamp);
+                if self.collects(Table::Conversations) {
+                    self.record_conversation(
+                        transport,
+                        stream.index,
+                        stream.flow,
+                        bytes,
+                        timestamp,
+                        record,
+                    );
+                }
+                if self.collects(Table::Ports) {
+                    self.record_ports(transport, stream.flow, bytes);
+                }
             }
         }
     }
 
+    fn collects(&self, table: Table) -> bool {
+        self.table == Table::All || self.table == table
+    }
+
     fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {
-        let origin = *self.io_origin.get_or_insert(timestamp);
         self.first_timestamp = Some(
             self.first_timestamp
                 .map_or(timestamp, |first| first.min(timestamp)),
@@ -155,7 +201,14 @@ impl Collector {
             None => timestamp,
         });
 
-        // Bucket timestamps before the capture origin at zero.
+        if !self.collects(Table::Io) {
+            return;
+        }
+        let origin = *self.io_origin.get_or_insert(timestamp);
+        if timestamp < origin {
+            self.io_underflow_frames = self.io_underflow_frames.saturating_add(1);
+        }
+        // Bucket timestamps before the capture origin at zero and report clamping.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         // the divisor is forced to at least 1 by `max(1)`
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
@@ -172,6 +225,7 @@ impl Collector {
         flow: &ScopedFlowKey,
         bytes: u64,
         timestamp: SystemTime,
+        record: &FrameRecord<'_>,
     ) {
         let canonical = CanonicalFlow::from_flow(flow);
         let state = self
@@ -179,6 +233,10 @@ impl Collector {
             .entry((transport, stream))
             .or_insert_with(|| ConversationState {
                 flow: canonical,
+                scope: record
+                    .scope_definition(flow.scope)
+                    .expect("indexed scope exists")
+                    .clone(),
                 tally: DirectionalTally::default(),
                 first_timestamp: timestamp,
                 last_timestamp: timestamp,
@@ -190,7 +248,9 @@ impl Collector {
         }
         state.first_timestamp = state.first_timestamp.min(timestamp);
         state.last_timestamp = state.last_timestamp.max(timestamp);
+    }
 
+    fn record_ports(&mut self, transport: StreamTransport, flow: &ScopedFlowKey, bytes: u64) {
         // Each distinct port a frame touches counts once.
         let mut ports = [flow.flow.source_port, flow.flow.destination_port];
         ports.sort_unstable();
@@ -233,6 +293,7 @@ impl Collector {
             .map(|((transport, stream), state)| ConversationStat {
                 transport,
                 stream,
+                scope: state.scope,
                 address_a: state.flow.first.0,
                 port_a: state.flow.first.1,
                 address_b: state.flow.second.0,
@@ -284,6 +345,9 @@ impl Collector {
             .collect();
 
         Report {
+            clock: summary.clock.clone(),
+            io_origin: self.io_origin,
+            io_underflow_frames: self.io_underflow_frames,
             interval,
             frames: self.frames,
             bytes: self.bytes,

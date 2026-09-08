@@ -23,6 +23,16 @@ pub(super) fn render_text(
         result.target,
         comma_separated(&result.resolved_addresses)
     ))?;
+    write_stdout_line(format_args!(
+        "planned timeout+pacing {:?}; achieved {:.2} probes/s over {:?}",
+        result.planned_duration,
+        if stats.elapsed.is_zero() {
+            0.0
+        } else {
+            stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
+        },
+        stats.elapsed
+    ))?;
     for endpoint in &result.endpoints {
         // ICMP has no port, so it names itself; the port-bearing transports
         // name the endpoint they probed.
@@ -120,6 +130,7 @@ mod tests {
 
     fn summary() -> scan::Summary {
         scan::Summary {
+            planned_duration: std::time::Duration::ZERO,
             target: "192.0.2.10".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))],
             counts: packetcraftr::scan::ClassificationCounts {

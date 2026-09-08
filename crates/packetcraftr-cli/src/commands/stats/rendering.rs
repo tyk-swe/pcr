@@ -22,9 +22,11 @@ pub(super) fn render_text(
         "matched {} of {} frame(s), {} byte(s)",
         report.frames, frames_read, report.bytes
     ))?;
+    crate::commands::offline_analysis::render_clock(&report.clock)?;
     match table {
         Table::Conversations => {
             for row in &report.conversations {
+                crate::commands::offline_analysis::render_scope(&row.scope)?;
                 write_stdout_line(format_args!(
                     "{} stream {}: {} <-> {} frames {} ({} fwd / {} rev) bytes {} ({} fwd / {} rev) duration {:?}",
                     row.transport.as_str(),
@@ -72,6 +74,10 @@ pub(super) fn render_text(
             }
         }
         Table::Io => {
+            write_stdout_line(format_args!(
+                "bucket origin {:?}; {} earlier frame(s) clamped to bucket zero",
+                report.io_origin, report.io_underflow_frames
+            ))?;
             for row in &report.io {
                 write_stdout_line(format_args!(
                     "+{:?}: frames {} bytes {}",

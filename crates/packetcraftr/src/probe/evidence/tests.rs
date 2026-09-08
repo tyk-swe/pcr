@@ -177,13 +177,17 @@ fn evidence_aggregate_validation_reports_cardinality_and_byte_accounting_failure
     };
     let (batch, mut execution) = batch_execution(sent.into(), Vec::new(), Vec::new(), stats);
     assert_eq!(
-        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| false),
+        validate_batch_exchange_evidence(&batch.probes, batch.timeout, &execution, 1, 2, |_, _| {
+            false
+        }),
         Err(ExchangeEvidenceError::SentPacketMismatch { request_index: 0 })
     );
 
     execution.stats.bytes = 1;
     assert_eq!(
-        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch.probes, batch.timeout, &execution, 1, 2, |_, _| {
+            true
+        }),
         Err(ExchangeEvidenceError::SentByteCountMismatch {
             reported: 1,
             actual: 2,
@@ -207,7 +211,9 @@ fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
     };
     let (batch, mut execution) = batch_execution(sent.into(), vec![response], Vec::new(), stats);
     assert_eq!(
-        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch.probes, batch.timeout, &execution, 1, 2, |_, _| {
+            true
+        }),
         Err(ExchangeEvidenceError::TimestampUnavailable {
             evidence: "matched response"
         })
@@ -216,7 +222,9 @@ fn evidence_aggregate_validation_rejects_untimestamped_capture_evidence() {
     execution.responses.clear();
     execution.unsolicited.push(decoded_without_timestamp(&[3]));
     assert_eq!(
-        validate_batch_exchange_evidence(&batch, &execution, 1, 2, |_, _| true),
+        validate_batch_exchange_evidence(&batch.probes, batch.timeout, &execution, 1, 2, |_, _| {
+            true
+        }),
         Err(ExchangeEvidenceError::TimestampUnavailable {
             evidence: "unsolicited response"
         })

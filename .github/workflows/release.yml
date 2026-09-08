@@ -62,6 +62,15 @@ jobs:
               --jq '[.workflow_runs[] | select(.event == "push")] | length'
           )"
           test "$successful_runs" -gt 0
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Recheck current advisories and dependency policy for release contents
+        run: |
+          cargo deny --locked check
+          cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories
       - name: Validate tag and extract changelog section
         id: metadata
         shell: bash
@@ -177,6 +186,7 @@ jobs:
       TARGET: ${{ matrix.target.triple }}
       VARIANT: ${{ matrix.variant.name }}
       VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SHA: ${{ needs.preflight.outputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -198,6 +208,14 @@ jobs:
         run: >-
           cargo build --locked --release --package packetcraftr-cli
           --target ${{ matrix.target.triple }} ${{ matrix.variant.cargo_args }}
+      - name: Record packaged build identity
+        shell: bash
+        run: |
+          executable="target/$TARGET/release/packetcraftr"
+          if [[ "$RUNNER_OS" == Windows ]]; then executable="$executable.exe"; fi
+          python scripts/build-manifest.py --binary "$executable" \
+            --output "$RUNNER_TEMP/BUILD-METADATA.json" --commit "$RELEASE_SHA" \
+            --target "$TARGET" --variant "$VARIANT"
       - if: runner.os != 'Windows'
         name: Package Unix archive
         shell: bash
@@ -209,7 +227,9 @@ jobs:
           cp LICENSE "$staging/LICENSE"
           cp README.md "$staging/README.md"
           cp CHANGELOG.md "$staging/CHANGELOG.md"
+          cp "$RUNNER_TEMP/BUILD-METADATA.json" "$staging/BUILD-METADATA.json"
           cp -R schemas "$staging/schemas"
+          cp -R docs "$staging/docs"
           mkdir -p "$staging/examples/captures" "$staging/examples/documents"
           cp examples/captures/tls-handshake.pcapng "$staging/examples/captures/"
           cp examples/documents/packet-ipv4-udp.json "$staging/examples/documents/"
@@ -227,7 +247,9 @@ jobs:
           Copy-Item "LICENSE" $staging
           Copy-Item "README.md" $staging
           Copy-Item "CHANGELOG.md" $staging
+          Copy-Item "$env:RUNNER_TEMP/BUILD-METADATA.json" $staging
           Copy-Item "schemas" (Join-Path $staging "schemas") -Recurse
+          Copy-Item "docs" (Join-Path $staging "docs") -Recurse
           New-Item -ItemType Directory -Path `
             (Join-Path $staging "examples/captures"), `
             (Join-Path $staging "examples/documents") | Out-Null
@@ -244,10 +266,14 @@ jobs:
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
           test -x "$executable"
+          python scripts/build-manifest.py --binary "$executable" --verify "$extraction/$ARCHIVE_BASENAME/BUILD-METADATA.json"
           for document in \
             LICENSE \
             README.md \
             CHANGELOG.md \
+            docs/migration-beta.3.md \
+            docs/analysis-resources.md \
+            BUILD-METADATA.json \
             schemas/packetcraftr.packet.v1.schema.json \
             schemas/packetcraftr.output.v2.schema.json \
             examples/captures/tls-handshake.pcapng \
@@ -298,6 +324,8 @@ jobs:
           Expand-Archive -Path $archive -DestinationPath $extraction
           $packagedPath = "$($env:ARCHIVE_BASENAME)/packetcraftr.exe"
           $executable = Join-Path $extraction $packagedPath
+          python scripts/build-manifest.py --binary $executable --verify (Join-Path (Split-Path $executable) "BUILD-METADATA.json")
+          if ($LASTEXITCODE -ne 0) { throw "packaged build identity verification failed" }
           if (-not (Test-Path -PathType Leaf $executable)) {
             throw "packaged executable is missing"
           }
@@ -305,6 +333,9 @@ jobs:
             "LICENSE",
             "README.md",
             "CHANGELOG.md",
+            "docs/migration-beta.3.md",
+            "docs/analysis-resources.md",
+            "BUILD-METADATA.json",
             "schemas/packetcraftr.packet.v1.schema.json",
             "schemas/packetcraftr.output.v2.schema.json",
             "examples/captures/tls-handshake.pcapng",
@@ -383,6 +414,12 @@ jobs:
         name: Verify pcap-free Linux binary does not link libpcap
         shell: bash
         run: "! ldd \"target/$TARGET/release/packetcraftr\" | grep -Eq 'libpcap\\.so'"
+      - if: runner.os == 'Linux'
+        name: Smoke-test the Ubuntu 24.04 runtime baseline
+        shell: bash
+        run: |
+          docker run --rm -e VARIANT -v "$RUNNER_TEMP/archive-smoke-test/$ARCHIVE_BASENAME:/work:ro" ubuntu:24.04 \
+            sh -ec 'if [ "$VARIANT" = all-features ]; then apt-get update -qq; apt-get install -y --no-install-recommends libpcap0.8t64 >/dev/null; fi; /work/packetcraftr --version; /work/packetcraftr protocols >/dev/null; /work/packetcraftr tls /work/examples/captures/tls-handshake.pcapng'
       - name: Upload binary archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -403,6 +440,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VERSION: ${{ needs.preflight.outputs.version }}
+      RELEASE_SHA: ${{ needs.preflight.outputs.release_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

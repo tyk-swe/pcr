@@ -51,6 +51,7 @@ impl OperationError {
 pub(crate) struct Transaction<C: Session> {
     pub(super) registry: Arc<Registry>,
     pub(super) capture: CaptureGuard<C>,
+    pub(super) cancellation: Option<packetcraftr_core::budget::Cancellation>,
     pub(super) started: Instant,
     pub(super) deadline: Instant,
     pub(super) options: super::Options,
@@ -71,6 +72,7 @@ impl<C: Session> Transaction<C> {
             dissector: Dissector::new(Arc::clone(&registry)),
             registry,
             capture: CaptureGuard::new(capture),
+            cancellation: prepared.cancellation,
             started: prepared.started,
             deadline: prepared.deadline,
             options: prepared.options,
@@ -191,6 +193,9 @@ impl<C: Session> Transaction<C> {
         let built = &prepared.built;
         let route = &prepared.route;
         let frame = TransmissionFrame::try_new(&built.bytes, route)?;
+        if let Some(signal) = &self.cancellation {
+            signal.check().map_err(LiveIoError::from)?;
+        }
         let report = io.send(frame)?;
         let sent = Arc::new(crate::SentPacket::try_new(
             built.clone(),

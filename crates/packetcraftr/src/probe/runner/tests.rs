@@ -14,7 +14,7 @@ struct Lifecycle {
     late_response: bool,
 }
 
-impl ProbeLifecycle<()> for Lifecycle {
+impl ProbeLifecycle<Batch<()>> for Lifecycle {
     fn execute(&mut self, batch: &Batch<()>) -> Result<Execution, BoundaryError> {
         self.executed.push(batch.clone());
         let responses = if self.late_response && batch.sequence == 1 {
@@ -129,7 +129,7 @@ fn zero_and_exhausted_operation_budgets_never_execute() {
         let mut lifecycle = Lifecycle::default();
         let error = run_batches(
             Workflow::Scan,
-            &mut batches(),
+            batches(),
             None,
             &mut deadline_with_spent(spent),
             &mut RecordingClock::default(),
@@ -149,7 +149,7 @@ fn evidence_inside_original_timeout_but_outside_remaining_budget_is_rejected() {
     };
     let error = run_batches(
         Workflow::Scan,
-        &mut batches(),
+        batches(),
         Some(5),
         &mut deadline_with_spent(Duration::ZERO),
         &mut RecordingClock::default(),

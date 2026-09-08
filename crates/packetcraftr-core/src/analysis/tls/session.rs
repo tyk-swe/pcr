@@ -223,6 +223,7 @@ pub struct Session {
     pub session: u64,
     /// The `tcp.stream` conversation index this handshake rode on.
     pub tcp_stream: u64,
+    pub scope: crate::analysis::scope::Definition,
     pub client_endpoint: Endpoint,
     pub server_endpoint: Endpoint,
     /// First capture frame that delivered handshake bytes for this session.
@@ -355,6 +356,7 @@ impl Side {
 #[derive(Debug)]
 pub(super) struct Live {
     tcp_stream: u64,
+    scope: crate::analysis::scope::Definition,
     /// Flow of the conversation's first captured frame. [`Side::First`] is
     /// this flow and [`Side::Reverse`] its reverse, for the whole life of the
     /// session: deduplication edges stay bound to the captured direction even
@@ -381,9 +383,14 @@ pub(super) struct Live {
 }
 
 impl Live {
-    pub(super) fn new(tcp_stream: u64, first_flow: ScopedFlowKey) -> Self {
+    pub(super) fn new(
+        tcp_stream: u64,
+        first_flow: ScopedFlowKey,
+        scope: crate::analysis::scope::Definition,
+    ) -> Self {
         Self {
             tcp_stream,
+            scope,
             first_flow,
             client_side: Side::First,
             swapped: false,
@@ -805,6 +812,7 @@ impl Live {
         Session {
             session,
             tcp_stream: self.tcp_stream,
+            scope: self.scope,
             client_endpoint: Endpoint {
                 address: client_flow.flow.source,
                 port: client_flow.flow.source_port,
@@ -835,6 +843,12 @@ mod tests {
     use crate::analysis::reassembly::tcp::FlowKey;
     use crate::analysis::scope::Interner;
 
+    fn test_scope() -> crate::analysis::scope::Definition {
+        let mut interner = crate::analysis::scope::Interner::new();
+        let id = interner.intern(None, Vec::new()).unwrap();
+        interner.definition(id).unwrap().clone()
+    }
+
     fn first_flow() -> ScopedFlowKey {
         let scope = Interner::new()
             .intern(None, Vec::new())
@@ -853,7 +867,7 @@ mod tests {
     #[test]
     fn sides_are_named_relative_to_the_first_captured_flow() {
         let flow = first_flow();
-        let live = Live::new(7, flow.clone());
+        let live = Live::new(7, flow.clone(), test_scope());
 
         assert_eq!(live.direction_of(&flow), Some(Side::First));
         assert_eq!(live.direction_of(&flow.reverse()), Some(Side::Reverse));
@@ -871,7 +885,7 @@ mod tests {
 
     #[test]
     fn a_stopped_side_retains_nothing_and_a_live_side_up_to_the_cap() {
-        let mut live = Live::new(7, first_flow());
+        let mut live = Live::new(7, first_flow(), test_scope());
         assert_eq!(live.retainable(Side::Reverse, 100, 64), Some(64));
         live.side_mut(Side::Reverse).finish();
         assert_eq!(live.retainable(Side::Reverse, 100, 64), None);

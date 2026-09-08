@@ -30,5 +30,27 @@ impl crate::probe::runner::Sequenced for Probe {
     }
 }
 
-pub type Batch = crate::probe::Batch<Probe>;
+/// One correlated scan probe and its admitted execution context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Batch {
+    pub probe: Probe,
+    pub timeout: std::time::Duration,
+    pub(crate) permit: crate::evidence::ExecutionPermit,
+}
+
+impl crate::probe::Request for Batch {
+    type Execution = Execution;
+}
+
+impl crate::probe::runner::BatchPlan for Batch {
+    fn sequence(&self) -> u64 {
+        self.probe.sequence
+    }
+    fn probe_count(&self) -> usize {
+        1
+    }
+    fn timeout_mut(&mut self) -> &mut std::time::Duration {
+        &mut self.timeout
+    }
+}
 pub use crate::probe::{Execution, Executor};

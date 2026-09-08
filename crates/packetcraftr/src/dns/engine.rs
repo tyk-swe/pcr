@@ -126,7 +126,7 @@ where
         registry,
         executor,
         clock,
-        Deadline::new(request.limits.max_duration),
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation()),
         emit,
     )
 }
@@ -146,6 +146,7 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    deadline.check_cancelled()?;
     let PreparedOperation {
         deadline,
         query,
@@ -328,7 +329,7 @@ where
                 break;
             }
         }
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         self.summary.stats.elapsed = self
             .summary
             .stats
@@ -428,14 +429,14 @@ where
 
     fn wait_before_attempt(&mut self, attempt: u32) -> Result<(), Error> {
         if attempt != 1 {
-            self.deadline.check()?;
+            self.deadline.enforce()?;
             self.deadline.start_accounting(self.delay)?;
-            self.clock
-                .sleep(self.delay)
-                .map_err(|source| Error::Clock {
-                    attempt,
-                    source: Box::new(source),
-                })?;
+            let slept = self.clock.sleep(self.delay);
+            self.deadline.check_cancelled()?;
+            slept.map_err(|source| Error::Clock {
+                attempt,
+                source: Box::new(source),
+            })?;
             self.deadline.account(self.delay)?;
             self.state.scheduled_delay =
                 self.state
@@ -505,7 +506,7 @@ where
             permit: crate::evidence::ExecutionPermit::new(),
         };
         let execution = self.executor.execute(&execution_request);
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         let mut execution = execution.map_err(|source| Error::Execution {
             attempt: probe.attempt,
             source,
@@ -519,7 +520,7 @@ where
         self.deadline.account(execution.stats.elapsed)?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
         validate_dns_execution(probe, &execution, self.request.limits, timeout)?;
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         self.summary
             .stats
             .checked_add_assign(&execution.stats)
@@ -689,7 +690,7 @@ where
             &self.deadline,
             &Gates,
         );
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }
@@ -771,7 +772,7 @@ where
 
     fn publish(&mut self, event: Event) -> Result<(), Error> {
         (self.emit)(event, &self.deadline)?;
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         Ok(())
     }
 
@@ -790,7 +791,7 @@ where
             |frame| Event::Undecoded(UndecodedEvidence { attempt, frame }),
             Event::Diagnostic,
             |event| (self.emit)(event, &self.deadline),
-            || self.deadline.check().map_err(Into::into),
+            || self.deadline.enforce().map_err(Into::into),
         )
     }
 
@@ -804,7 +805,7 @@ where
         state
             .diagnostics
             .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))?;
-        self.deadline.check()?;
+        self.deadline.enforce()?;
         Ok(())
     }
 }
@@ -820,7 +821,7 @@ fn select_response<'a>(
     let sent_packet = &execution.sent.built().packet;
     let mut best = None;
     for matched in &execution.responses {
-        deadline.check()?;
+        deadline.enforce()?;
         if response_within_deadline(matched.latency, timeout)
             && let Some(classification) = classify_response(
                 registry,
@@ -842,7 +843,7 @@ fn select_response<'a>(
                 |_| (),
             );
         }
-        deadline.check()?;
+        deadline.enforce()?;
     }
     Ok(best)
 }

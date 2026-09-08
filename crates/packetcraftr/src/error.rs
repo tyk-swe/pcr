@@ -11,6 +11,8 @@ use crate::{policy, target};
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error("{authorizer} does not authorize {operation} operations")]
     UnsupportedOperation {
         authorizer: &'static str,
@@ -80,6 +82,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::UnsupportedOperation { .. } => Classification::new(
                 "internal.unsupported_operation",
                 Kind::Internal,
@@ -162,7 +165,8 @@ impl Classified for Error {
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
-            | Self::InvalidExchangeOption { .. } => None,
+            | Self::InvalidExchangeOption { .. }
+            | Self::Cancelled(_) => None,
         }
     }
 

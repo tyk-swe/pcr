@@ -9,7 +9,7 @@ use crate::diagnostic::Severity;
 use crate::protocol::transport::Tcp;
 
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
-use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey as FlowKey};
+use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::{StreamRef, StreamTransport};
 
 use tcp::DirectionState;
@@ -54,6 +54,7 @@ pub struct Finding {
 /// Per-severity and per-code totals for a completed pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
+    pub clock: crate::analysis::ClockReport,
     pub findings: u64,
     pub errors: u64,
     pub warnings: u64,
@@ -84,8 +85,8 @@ impl Summary {
 /// reassembly deliberately does not carry.
 #[derive(Debug, Default)]
 pub struct Collector {
-    flows: HashMap<FlowKey, DirectionState>,
-    streams: HashMap<FlowKey, u64>,
+    flows: HashMap<ScopedFlowKey, DirectionState>,
+    streams: HashMap<ScopedFlowKey, u64>,
     summary: Summary,
 }
 
@@ -115,6 +116,7 @@ impl Collector {
     /// is evidence the per-frame view cannot carry. Returned findings are
     /// attributed to the run's last frame read.
     pub fn finish(mut self, summary: &RunSummary) -> (Vec<Finding>, Summary) {
+        self.summary.clock = summary.clock.clone();
         let findings = tcp::finish(
             &self.streams,
             &summary.trailing_tcp_events,

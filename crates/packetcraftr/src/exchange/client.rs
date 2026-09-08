@@ -57,7 +57,7 @@ where
     where
         F: FnMut(crate::exchange::Event) -> Result<(), crate::BoundaryError> + Send + 'static,
     {
-        let deadline = Deadline::new(options.timeout);
+        let deadline = Deadline::new(options.timeout).with_cancellation(self.cancellation.clone());
         let sink = crate::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
             Error::ExchangeOutput {
                 source: Box::new(source),
@@ -114,7 +114,10 @@ where
     fn arm_capture(
         &self,
         prepared: Prepared,
-    ) -> Result<Transaction<<I as CaptureProvider>::Capture>, Error> {
+    ) -> Result<
+        Transaction<packetcraftr_netio::capture::Cancellable<<I as CaptureProvider>::Capture>>,
+        Error,
+    > {
         let Some(first_packet) = prepared.packets.first() else {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -122,6 +125,7 @@ where
         };
         let first_route = &first_packet.route.plan;
         ensure_preparation_deadline(prepared.deadline)?;
+        self.check_cancelled()?;
         let capture = self.io.arm_capture(&CaptureRequest {
             interface: first_route.decision.interface.clone(),
             limits: prepared.options.capture,
@@ -130,7 +134,7 @@ where
         })?;
         Ok(Transaction::new(
             Arc::clone(&self.registry),
-            capture,
+            packetcraftr_netio::capture::Cancellable::new(capture, self.cancellation.clone()),
             prepared,
         ))
     }
@@ -155,6 +159,7 @@ fn exchange_sink_error(error: crate::progress::EmitError) -> BoundaryError {
 }
 
 pub(crate) struct Prepared {
+    pub(crate) cancellation: Option<packetcraftr_core::budget::Cancellation>,
     pub(crate) started: Instant,
     pub(crate) deadline: Instant,
     pub(crate) options: Options,
@@ -174,6 +179,7 @@ where
         template: &template::Template,
         options: Options,
     ) -> Result<Prepared, Error> {
+        self.check_cancelled()?;
         let started = Instant::now();
         options.validate()?;
         let deadline = started
@@ -207,6 +213,7 @@ where
         let packets = self.materialize_packets(planned_packets, deadline, &options, &builder)?;
 
         Ok(Prepared {
+            cancellation: self.cancellation.clone(),
             started,
             deadline,
             options,
@@ -228,14 +235,17 @@ where
         let mut planned_packets: Vec<PlannedPacket> = Vec::with_capacity(expanded_packets.len());
         let mut total_bytes = 0u64;
         loop {
+            self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
             let Some(expanded_packet) = expanded_packets.next() else {
                 break;
             };
+            self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
             let packet_to_send = expanded_packet.map_err(|source| Error::Template {
                 message: source.to_string(),
             })?;
+            self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
             let plan = self.plan_with_provider(
                 &packet_to_send,
@@ -244,6 +254,7 @@ where
                 routes,
                 Some(deadline),
             )?;
+            self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
             let planned = self.plan_and_authorize(
                 packet_to_send,
@@ -285,6 +296,7 @@ where
         // route, permissive-build, and aggregate byte-policy checks.
         let mut prepared_packets = Vec::with_capacity(planned_packets.len());
         for planned_packet in planned_packets {
+            self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;
             prepared_packets.push(self.materialize_and_authorize(
                 planned_packet,

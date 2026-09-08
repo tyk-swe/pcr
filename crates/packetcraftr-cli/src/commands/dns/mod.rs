@@ -43,7 +43,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     )?;
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
-    let mut clock = packetcraftr::clock::SystemClock;
+    let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
     if format == Format::Ndjson {
         let events = stream.clone();
         let summary = packetcraftr::dns::run_with_events(
@@ -91,14 +91,18 @@ fn prepare_request(
         server: parse_target(arguments.server.clone())?,
         address_family: arguments.family.into(),
         server_port: arguments.port,
-        source_port: arguments
-            .source_port
-            .unwrap_or_else(packetcraftr::dns::unpredictable_source_port),
+        source_port: match arguments.source_port {
+            Some(port) => port,
+            None => packetcraftr::dns::unpredictable_source_port().map_err(CliError::classified)?,
+        },
         query_name: arguments.name.clone(),
         query_type: arguments.query_type.into(),
-        transaction_id: arguments
-            .transaction_id
-            .unwrap_or_else(packetcraftr::dns::unpredictable_transaction_id),
+        transaction_id: match arguments.transaction_id {
+            Some(id) => id,
+            None => {
+                packetcraftr::dns::unpredictable_transaction_id().map_err(CliError::classified)?
+            }
+        },
         recursion_desired: !arguments.no_recursion,
         tcp_fallback: packetcraftr::dns::DEFAULT_TCP_FALLBACK && !arguments.udp_only,
         attempts: arguments.attempts,

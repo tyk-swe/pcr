@@ -40,7 +40,7 @@ fn the_published_capture_assembles_one_complete_session_in_every_format() {
          status=complete sni=api.example.test version=TLS1.3 \
          cipher=0x1301(TLS_AES_128_GCM_SHA256) group=x25519 alpn=h2,http/1.1 \
          selected_alpn=none ja3=54e2a2e989457808c77e4464d9361826 \
-         ja4=t13d0406h2_77f0cd3447db_5d4d534e3685 frames=4..5 rtt_ms=24.000"
+         ja4=t13d0406h2_77f0cd3447db_5d4d534e3685 frames=4..5 rtt_ms=24.000 scope=0 interface=Some(0) encapsulation=[]"
     );
     let summary = lines.next().expect("one summary line");
     assert!(
@@ -425,7 +425,7 @@ fn the_retention_ceiling_reports_what_it_left_out() {
         "json",
         "tls",
         path,
-        "--max-tls-sessions",
+        "--max-output-sessions",
         "2",
     ]));
     assert_eq!(
@@ -441,7 +441,7 @@ fn the_retention_ceiling_reports_what_it_left_out() {
         "ndjson",
         "tls",
         path,
-        "--max-tls-sessions",
+        "--max-output-sessions",
         "2",
     ]));
     assert_eq!(records.len(), 4);

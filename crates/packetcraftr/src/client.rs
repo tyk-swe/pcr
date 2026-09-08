@@ -35,6 +35,7 @@ pub struct Client<R, N, I> {
     /// thread until an exchange actually publishes events, and scoping it here
     /// keeps one client's publication failures out of every other client.
     pub(crate) runtime: Runtime,
+    pub(crate) cancellation: Option<packetcraftr_core::budget::Cancellation>,
 }
 
 impl<R, N, I> Client<R, N, I>
@@ -57,7 +58,17 @@ where
             io,
             policy: policy.into(),
             runtime: Runtime::default(),
+            cancellation: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_cancellation(
+        mut self,
+        cancellation: packetcraftr_core::budget::Cancellation,
+    ) -> Self {
+        self.cancellation = Some(cancellation);
+        self
     }
 
     pub fn registry(&self) -> &Arc<Registry> {
@@ -66,6 +77,13 @@ where
 }
 
 impl<R, N, I> Client<R, N, I> {
+    pub(crate) fn check_cancelled(&self) -> Result<(), Error> {
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
+        }
+        Ok(())
+    }
+
     pub fn policy(&self) -> &Policy {
         &self.policy
     }
@@ -96,10 +114,12 @@ where
         // Route selection precedes all route-dependent materialization.
         materialize_network_fields(&mut packet, &plan)?;
         materialize_link_structure(&mut packet, &plan)?;
+        self.check_cancelled()?;
         ensure_deadline(deadline)?;
         let build_context = build_context(&plan);
         let preliminary_build =
             builder.build(packet.clone(), build_context.clone(), options.build.clone())?;
+        self.check_cancelled()?;
         ensure_deadline(deadline)?;
         validate_mtu(&preliminary_build, plan.decision.mtu)?;
         self.policy
@@ -137,21 +157,25 @@ where
         let preliminary_len = preliminary_build.bytes.len();
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
+        self.check_cancelled()?;
         let route = match route::materialize(plan, &self.neighbors, deadline) {
             Ok(route) => route,
             Err(error) => {
+                self.check_cancelled()?;
                 ensure_deadline(deadline)?;
                 return Err(error.into());
             }
         };
         let link_changed = materialize_link_fields(&mut packet, &route)?;
         let built = if link_changed {
+            self.check_cancelled()?;
             ensure_deadline(deadline)?;
             builder.build(packet, build_context, options.build.clone())?
         } else {
             preliminary_build
         };
         require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
+        self.check_cancelled()?;
         ensure_deadline(deadline)?;
         self.policy
             .authorize_built_packet(&built, options.allow_permissive_live)?;

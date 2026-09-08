@@ -25,8 +25,13 @@ use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet, budget::Deadline, decode::DecodedPacket, diagnostic::Diagnostic, packet::semantics,
-    protocol::BuiltinProtocol, registry::Registry,
+    Packet,
+    budget::{Deadline, Interrupted},
+    decode::DecodedPacket,
+    diagnostic::Diagnostic,
+    packet::semantics,
+    protocol::BuiltinProtocol,
+    registry::Registry,
 };
 
 /// Maps an operation-local sequence to an IPv4 identification that native
@@ -72,8 +77,9 @@ pub fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
 /// traceroute share this gate; the workflow tag keeps the code and remediation
 /// workflow-specific.
 pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Result<(), Error> {
-    crate::clock::check_deadline(deadline, |actual, limit| {
-        duration_limit(workflow, actual, limit)
+    deadline.enforce().map_err(|interrupted| match interrupted {
+        Interrupted::Cancelled(source) => Error::new(workflow, ErrorKind::Cancelled(source)),
+        Interrupted::Exceeded(error) => duration_limit(workflow, error.actual, error.limit),
     })
 }
 

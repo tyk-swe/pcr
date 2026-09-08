@@ -95,6 +95,9 @@ pub(crate) struct Cli {
         default_value_t = Format::Text
     )]
     pub(crate) format: Format,
+    /// Allow binary raw/PCAP/PCAPNG bytes to be written to an interactive terminal.
+    #[arg(long, global = true, help_heading = "Global options")]
+    pub(crate) force_binary_stdout: bool,
     /// Control terminal colours in human-facing output.
     #[arg(
         long,

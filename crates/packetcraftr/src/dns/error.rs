@@ -133,6 +133,8 @@ impl WireError {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
+    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
+    #[error(transparent)]
     BudgetOverflow(#[from] crate::policy::BudgetOverflow),
     #[error(transparent)]
     IncoherentReport(#[from] super::EvidenceError),
@@ -198,9 +200,16 @@ impl From<DeadlineExceeded> for Error {
     }
 }
 
+impl From<packetcraftr_core::budget::Interrupted> for Error {
+    fn from(interrupted: packetcraftr_core::budget::Interrupted) -> Self {
+        interrupted.into_error()
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidPort
             | Self::InvalidSourcePort

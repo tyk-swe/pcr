@@ -196,6 +196,7 @@ fn prepare_campaign(
         .count();
     let built_case_count = u64::try_from(built_cases).unwrap_or(u64::MAX);
 
+    deadline.enforce()?;
     let worst_case = worst_case_duration(live, built_cases)?;
     deadline
         .check_additional(worst_case)

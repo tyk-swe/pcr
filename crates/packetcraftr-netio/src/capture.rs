@@ -190,11 +190,16 @@ impl<C: Session> Session for Cancellable<C> {
         }
         loop {
             self.check()?;
-            let remaining = timeout.saturating_sub(start.elapsed());
-            let frame = self
-                .inner
-                .next_captured_frame(remaining.min(Cancellation::POLL_INTERVAL))?;
+            let poll_started = Instant::now();
+            let remaining = timeout.saturating_sub(poll_started.duration_since(start));
+            let poll_timeout = remaining.min(Cancellation::POLL_INTERVAL);
+            let frame = self.inner.next_captured_frame(poll_timeout)?;
             self.check()?;
+            if frame.is_none() {
+                // Empty polls may return early, including after a backend stops.
+                std::thread::sleep(poll_timeout.saturating_sub(poll_started.elapsed()));
+                self.check()?;
+            }
             if frame.is_some() || start.elapsed() >= timeout {
                 return Ok(frame);
             }

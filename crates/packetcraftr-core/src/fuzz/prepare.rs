@@ -44,6 +44,7 @@ pub(super) fn prepare_with_events<F>(
 where
     F: FnMut(Case, &Deadline) -> Result<(), Error>,
 {
+    deadline.check_cancelled()?;
     deadline
         .start_accounting(Duration::ZERO)
         .map_err(Error::from)?;
@@ -79,6 +80,7 @@ where
     };
     let mut campaign = prepare_cases(&inputs, deadline, emit)?;
     campaign.elapsed = started.elapsed();
+    deadline.check_cancelled()?;
     deadline.account(campaign.elapsed).map_err(Error::from)?;
     Ok(campaign)
 }
@@ -117,7 +119,7 @@ where
 {
     let mut counters = Counters::default();
     for offset in 0..inputs.request.cases {
-        deadline.check().map_err(Error::from)?;
+        deadline.enforce()?;
         let case = prepare_case(inputs, offset, &mut counters)?;
         emit(case, deadline)?;
     }
@@ -488,5 +490,58 @@ fn strategy_compatible(strategy: Strategy, field: &ResolvedField) -> bool {
         Strategy::Boundary | Strategy::Random => true,
         Strategy::BitFlip => field.kind == FieldKind::Bytes,
         Strategy::Malformed => field.is_derived,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::Cancellation;
+    use crate::error::Classified;
+    use crate::layer::Raw;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn cancellation_precedes_expired_preparation_budget_between_cases_and_at_completion() {
+        for cases in [1, 2] {
+            let signal = Cancellation::default();
+            let expired = Arc::new(AtomicBool::new(false));
+            let time_expired = expired.clone();
+            let started = Instant::now();
+            let mut deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+                started
+                    + Duration::from_secs(if time_expired.load(Ordering::SeqCst) {
+                        2
+                    } else {
+                        0
+                    })
+            })
+            .with_cancellation(Some(signal.clone()));
+            let request = Request {
+                cases,
+                strategies: vec![Strategy::BitFlip],
+                targets: vec!["0.bytes".parse().unwrap()],
+                ..Request::default()
+            };
+            let mut packet = Packet::new();
+            packet.push(Raw::new(vec![1, 2, 3]));
+            let mut emitted = 0;
+            let error = prepare_with_events(
+                &request,
+                packet,
+                crate::protocol::builtin::registry(),
+                &mut deadline,
+                &mut |_, _| {
+                    emitted += 1;
+                    signal.cancel();
+                    expired.store(true, Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+            .err()
+            .expect("cancelled preparation must fail");
+            assert_eq!(emitted, 1);
+            assert_eq!(error.classification().code, "io.cancelled");
+        }
     }
 }

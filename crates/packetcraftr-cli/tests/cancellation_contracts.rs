@@ -275,7 +275,19 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
                 "ndjson" => {
                     let records = support::parse_ndjson(&output);
                     support::assert_contiguous(&records);
-                    assert_eq!(records.last().unwrap()["error"]["code"], "io.cancelled");
+                    if records.last().unwrap()["event"] == "error" {
+                        assert_eq!(records.last().unwrap()["error"]["code"], "io.cancelled");
+                    } else {
+                        // Cancellation can interrupt acknowledgment of an active
+                        // write. The encoder then fails closed without a terminal.
+                        assert!(records.iter().all(|record| record["event"] == "case"));
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        assert!(
+                            stderr.contains("error[io.stdout]: NDJSON stream is incomplete"),
+                            "{stderr}"
+                        );
+                        assert!(stderr.contains("operation cancelled"), "{stderr}");
+                    }
                     assert!(!records.iter().any(|record| record["event"] == "complete"));
                 }
                 _ => {

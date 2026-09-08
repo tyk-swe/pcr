@@ -10,6 +10,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_core::{Packet, layer::Raw};
 use packetcraftr_core::{
@@ -325,6 +326,7 @@ impl capture::Provider for NoCapture {
                 link_type: LinkType::LINUX_SLL,
                 snap_length: request.limits.snap_length,
             },
+            polls: Arc::default(),
         })
     }
 }
@@ -332,6 +334,7 @@ impl capture::Provider for NoCapture {
 #[derive(Debug)]
 struct EmptySession {
     metadata: capture::Metadata,
+    polls: Arc<AtomicUsize>,
 }
 
 impl capture::Session for EmptySession {
@@ -347,6 +350,7 @@ impl capture::Session for EmptySession {
         &mut self,
         _timeout: Duration,
     ) -> Result<Option<capture::Captured>, Error> {
+        self.polls.fetch_add(1, Ordering::SeqCst);
         Ok(None)
     }
 
@@ -356,6 +360,36 @@ impl capture::Session for EmptySession {
 
     fn statistics(&self) -> capture::Statistics {
         capture::Statistics::default()
+    }
+}
+
+#[test]
+fn cancellable_capture_backs_off_after_early_empty_polls() {
+    for (timeout, maximum_polls) in [
+        (Duration::ZERO, 1),
+        (Cancellation::POLL_INTERVAL / 5, 1),
+        (Cancellation::POLL_INTERVAL * 4, 4),
+    ] {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let mut session = capture::Cancellable::new(
+            EmptySession {
+                metadata: capture::Metadata {
+                    interface: interface(),
+                    link_type: LinkType::IPV4,
+                    snap_length: 128,
+                },
+                polls: polls.clone(),
+            },
+            Some(Cancellation::default()),
+        );
+        let started = Instant::now();
+        assert!(session.next_captured_frame(timeout).unwrap().is_none());
+        assert!(started.elapsed() >= timeout);
+        let polls = polls.load(Ordering::SeqCst);
+        assert!(
+            (1..=maximum_polls).contains(&polls),
+            "{polls} polls in {timeout:?}"
+        );
     }
 }
 

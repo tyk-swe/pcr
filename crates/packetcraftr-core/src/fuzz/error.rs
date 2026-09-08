@@ -13,6 +13,8 @@ use super::request::Target;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] crate::budget::Cancelled),
     #[error("invalid fuzz limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -49,6 +51,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Cancelled(source) => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidStrategies
             | Self::CaseIndexOverflow
@@ -108,5 +111,11 @@ impl From<DeadlineExceeded> for Error {
             actual: error.actual,
             limit: error.limit,
         }
+    }
+}
+
+impl From<crate::budget::Interrupted> for Error {
+    fn from(interrupted: crate::budget::Interrupted) -> Self {
+        interrupted.into_error()
     }
 }

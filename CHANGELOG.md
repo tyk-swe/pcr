@@ -8,6 +8,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Engineering review corrections (next: 0.5.0-beta.3)
 
+- Live fuzz preparation checks cancellation between cases and before duration
+  validation, preserving `io.cancelled`. Cancellable capture waits back off when
+  providers return empty polls early, avoiding busy loops.
 - Cancelled live fuzz and DNS operations stop before executor invocation,
   including cancellation during campaign authorization or DNS resolution.
   Interrupts during aggregate JSON publication preserve a single complete

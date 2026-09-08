@@ -2,6 +2,33 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
+## Numeric DNS types and output/v3
+
+All structured command envelopes now identify `packetcraftr.output/v3` and
+validate against `schemas/packetcraftr.output.v3.schema.json`. Packet documents
+remain `packetcraftr.packet/v1`.
+
+DNS `query_type` is an integer in `0..=65535` wherever it appears in aggregate
+summaries and NDJSON DNS events. For example, `"query_type": "aaaa"` becomes
+`"query_type": 28`; `"any"` becomes `255`. Update consumers that compare strings
+or require the output/v2 envelope. Named and unknown record data retain their
+existing representations and exact bytes.
+
+`--type` accepts existing aliases, 1–5 ASCII decimal digits, or `TYPE` followed
+by 1–5 digits. Aliases and `TYPE` are case-insensitive; codes must fit `u16`.
+Signs, whitespace, Unicode digits, and out-of-range values are rejected before
+I/O. Text displays known aliases and `TYPE<n>` for other codes.
+
+The Rust `dns::QueryType` enum becomes a numeric value storing a private `u16`,
+with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CNAME`,
+`MX`, `NS`, `PTR`, `SOA`, `SRV`, `TXT`, and `ANY`; update names such as `Aaaa` to
+`AAAA`. Match constants or numeric codes with a fallback for other values.
+Use `Display` for presentation and integer serde values for data. The CLI
+contract constant is now `SCHEMA_V3`.
+The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
+Text parsing returns `QueryTypeParseError`, preserving the original integer
+parse error for out-of-range values.
+
 ## Offline DNS records
 
 Import DNS `Name`, `Record`, `RecordValue`, `Edns`, and `EdnsOption` from

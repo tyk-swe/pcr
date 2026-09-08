@@ -144,3 +144,4 @@ All eligible nonconflicting tasks run up to the three-agent limit. I03/I04/I01/I
 - Wave 2 final integrated cleanup and common validation in progress.
 - Wave 2 complete: final debt pass was a no-op; full workspace formatting, Clippy, all-feature tests/doctests, and warning-denied API docs passed. [CI run 34259079407](https://github.com/tyk-swe/pcr/actions/runs/34259079407) passed all five native/portable/archive jobs.
 - Wave 3 in progress: I01 numeric DNS QTYPEs and output/v3 migration; packet/v1 remains unchanged.
+- I01 implementation integrated after independent review with no findings. Required workflow/default and CLI/portable suites, both formatting checks, full workspace all-target/all-feature Clippy, and seven archive tests (including a current Linux binary) passed. Final bounded fuzz and integrated wave checks remain in progress.

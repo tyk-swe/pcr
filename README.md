@@ -155,7 +155,7 @@ sink cannot promise a terminal NDJSON record.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
-- Structured command output: [`packetcraftr.output/v2`](schemas/packetcraftr.output.v2.schema.json)
+- Structured command output: [`packetcraftr.output/v3`](schemas/packetcraftr.output.v3.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
@@ -168,7 +168,7 @@ Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`; invalid
-combinations fail explicitly. Every output-v2 NDJSON envelope has an `event`
+combinations fail explicitly. Every output-v3 NDJSON envelope has an `event`
 discriminator, including `frame`, `finding`, `chunk`, `session`, `complete`,
 and `error`. The payload is in `result` or `error`; consumers never need to
 infer a record kind from payload fields. `sequence` starts at zero and advances
@@ -263,6 +263,12 @@ Library callers opt into fallback by composing an exchange executor with
 `packetcraftr_netio::tcp::SystemProvider`; injected UDP executors default to
 unsupported TCP fallback. The standard-library TCP provider is available
 independently of the native packet-I/O feature flags.
+
+`--type` accepts `a`, `aaaa`, `caa`, `cname`, `mx`, `ns`, `ptr`, `soa`, `srv`,
+`txt`, and `any`, or any decimal code in `0..=65535`, optionally prefixed with
+`TYPE` (for example, `TYPE65`). Aliases and the prefix are case-insensitive.
+JSON and NDJSON report `query_type` as the exact integer wire code; text keeps
+named aliases and uses `TYPE<n>` for other codes.
 
 Kernel TCP control and retransmission packets are OS-managed, so DNS
 authorization does not mislabel them as an exact raw-packet count. It instead

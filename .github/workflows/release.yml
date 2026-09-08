@@ -62,6 +62,8 @@ jobs:
               --jq '[.workflow_runs[] | select(.event == "push")] | length'
           )"
           test "$successful_runs" -gt 0
+      - name: Test archive verifier failure fixtures
+        run: python3 scripts/test-verify-archive.py
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
@@ -266,54 +268,8 @@ jobs:
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
           test -x "$executable"
-          python scripts/build-manifest.py --binary "$executable" --verify "$extraction/$ARCHIVE_BASENAME/BUILD-METADATA.json"
-          for document in \
-            LICENSE \
-            README.md \
-            CHANGELOG.md \
-            docs/migration-beta.3.md \
-            docs/analysis-resources.md \
-            BUILD-METADATA.json \
-            schemas/packetcraftr.packet.v1.schema.json \
-            schemas/packetcraftr.output.v2.schema.json \
-            examples/captures/tls-handshake.pcapng \
-            examples/documents/packet-ipv4-udp.json
-          do
-            test -s "$extraction/$ARCHIVE_BASENAME/$document"
-          done
-          reported_version="$("$executable" --version)"
-          test "${reported_version%%$'\n'*}" = "packetcraftr $VERSION"
-          protocols="$("$executable" protocols)"
-          test -n "$protocols"
-          expected=450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f
-          built="$(
-            "$executable" --output hex build \
-              --packet 'ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)'
-          )"
-          test "$built" = "$expected"
-          dissected="$(
-            "$executable" --output hex dissect --link-type 228 --hex "$built"
-          )"
-          test "$dissected" = "$built"
-          cd "$extraction/$ARCHIVE_BASENAME"
-          read_output="$(
-            "$executable" --output ndjson read examples/captures/tls-handshake.pcapng \
-              --max-frames 100
-          )"
-          printf '%s\n' "$read_output" | python3 -c '
-          import json, sys
-          records = [json.loads(line) for line in sys.stdin]
-          assert records and records[-1]["event"] == "complete"
-          assert all(record["schema"] == "packetcraftr.output/v2" for record in records)
-          assert [record["sequence"] for record in records] == list(range(len(records)))
-          '
-          tls_output="$("$executable" tls examples/captures/tls-handshake.pcapng)"
-          test -n "$tls_output"
-          recipe_build="$(
-            "$executable" --output json build \
-              --packet-file examples/documents/packet-ipv4-udp.json
-          )"
-          test -n "$recipe_build"
+          python scripts/verify-archive.py --root "$extraction/$ARCHIVE_BASENAME" \
+            --version "$VERSION" --commit "$RELEASE_SHA" --target "$TARGET" --variant "$VARIANT"
       - if: runner.os == 'Windows'
         name: Smoke-test Windows archive
         shell: pwsh
@@ -322,90 +278,9 @@ jobs:
           $extraction = Join-Path $env:RUNNER_TEMP "archive-smoke-test"
           $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
           Expand-Archive -Path $archive -DestinationPath $extraction
-          $packagedPath = "$($env:ARCHIVE_BASENAME)/packetcraftr.exe"
-          $executable = Join-Path $extraction $packagedPath
-          python scripts/build-manifest.py --binary $executable --verify (Join-Path (Split-Path $executable) "BUILD-METADATA.json")
-          if ($LASTEXITCODE -ne 0) { throw "packaged build identity verification failed" }
-          if (-not (Test-Path -PathType Leaf $executable)) {
-            throw "packaged executable is missing"
-          }
-          foreach ($document in @(
-            "LICENSE",
-            "README.md",
-            "CHANGELOG.md",
-            "docs/migration-beta.3.md",
-            "docs/analysis-resources.md",
-            "BUILD-METADATA.json",
-            "schemas/packetcraftr.packet.v1.schema.json",
-            "schemas/packetcraftr.output.v2.schema.json",
-            "examples/captures/tls-handshake.pcapng",
-            "examples/documents/packet-ipv4-udp.json"
-          )) {
-            $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
-            if (
-              -not (Test-Path -PathType Leaf $documentPath) -or
-              (Get-Item $documentPath).Length -eq 0
-            ) {
-              throw "packaged $document is missing or empty"
-            }
-          }
-          $reportedVersion = (& $executable --version | Select-Object -First 1 | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw "packaged executable failed with exit code $LASTEXITCODE"
-          }
-          if ($reportedVersion -ne "packetcraftr $env:VERSION") {
-            throw "unexpected packaged version: $reportedVersion"
-          }
-          $protocols = (& $executable protocols | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($protocols)) {
-            throw "packaged executable failed to list protocols"
-          }
-          $expected = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f"
-          $built = (
-            & $executable --output hex build `
-              --packet "ipv4(src=192.0.2.1,dst=198.51.100.2)/udp(sport=12345,dport=9)/raw(text=hello)" |
-              Out-String
-          ).Trim()
-          if ($LASTEXITCODE -ne 0 -or $built -ne $expected) {
-            throw "packaged executable produced unexpected build bytes: $built"
-          }
-          $dissected = (
-            & $executable --output hex dissect --link-type 228 --hex $built |
-              Out-String
-          ).Trim()
-          if ($LASTEXITCODE -ne 0 -or $dissected -ne $built) {
-            throw "packaged executable did not preserve exact dissect bytes: $dissected"
-          }
-          Set-Location (Join-Path $extraction $env:ARCHIVE_BASENAME)
-          $readOutput = (
-            & $executable --output ndjson read examples/captures/tls-handshake.pcapng `
-              --max-frames 100 | Out-String
-          ).Trim()
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($readOutput)) {
-            throw "packaged executable failed the README read example"
-          }
-          $readRecords = @($readOutput -split "\r?\n" | ForEach-Object { $_ | ConvertFrom-Json })
-          if ($readRecords.Count -eq 0 -or $readRecords[-1].event -ne "complete") {
-            throw "packaged stream has no terminal completion"
-          }
-          for ($i = 0; $i -lt $readRecords.Count; $i++) {
-            if ($readRecords[$i].schema -ne "packetcraftr.output/v2" -or $readRecords[$i].sequence -ne $i) {
-              throw "packaged stream has an invalid schema or sequence"
-            }
-          }
-          $tlsOutput = (
-            & $executable tls examples/captures/tls-handshake.pcapng | Out-String
-          ).Trim()
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tlsOutput)) {
-            throw "packaged executable failed the README TLS example"
-          }
-          $recipeBuild = (
-            & $executable --output json build `
-              --packet-file examples/documents/packet-ipv4-udp.json | Out-String
-          ).Trim()
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($recipeBuild)) {
-            throw "packaged executable failed the README packet-file build example"
-          }
+          python scripts/verify-archive.py --root (Join-Path $extraction $env:ARCHIVE_BASENAME) `
+            --version $env:VERSION --commit $env:RELEASE_SHA --target $env:TARGET --variant $env:VARIANT
+          if ($LASTEXITCODE -ne 0) { throw "packaged archive verification failed" }
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Verify full Linux binary links libpcap
         shell: bash

@@ -19,15 +19,19 @@ args = parser.parse_args()
 digest = hashlib.sha256(args.binary.read_bytes()).hexdigest()
 if args.verify:
     document = json.loads(args.verify.read_text())
+    for field, expected in (('commit', args.commit), ('target', args.target),
+                            ('feature_variant', args.variant)):
+        if expected is not None and document.get(field) != expected:
+            raise SystemExit(f'packaged {field} does not match release metadata')
     if document['binary_sha256'] != digest or document['binary'] != args.binary.name:
         raise SystemExit('packaged binary does not match BUILD-METADATA.json')
-    if document['version'] != subprocess.check_output([args.binary, '--version'], text=True).strip():
+    if document['version'] != subprocess.check_output([args.binary, '--version'], text=True, timeout=30).strip():
         raise SystemExit('packaged version does not match BUILD-METADATA.json')
 else:
     if not all([args.output, args.commit, args.target, args.variant]):
         parser.error('writing requires --output, --commit, --target and --variant')
     document = dict(commit=args.commit, target=args.target, feature_variant=args.variant,
-                    rustc=subprocess.check_output(['rustc', '--version', '--verbose'], text=True).strip(),
-                    version=subprocess.check_output([args.binary, '--version'], text=True).strip(),
+                    rustc=subprocess.check_output(['rustc', '--version', '--verbose'], text=True, timeout=30).strip(),
+                    version=subprocess.check_output([args.binary, '--version'], text=True, timeout=30).strip(),
                     binary=args.binary.name, binary_sha256=digest)
     args.output.write_text(json.dumps(document, indent=2) + '\n')

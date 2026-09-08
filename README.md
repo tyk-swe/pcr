@@ -270,6 +270,12 @@ independently of the native packet-I/O feature flags.
 JSON and NDJSON report `query_type` as the exact integer wire code; text keeps
 named aliases and uses `TYPE<n>` for other codes.
 
+`--edns-udp-payload-size SIZE` adds one EDNS v0 OPT record, with `SIZE` in
+`512..=65535`. `--dnssec-ok` requires that setting and sets the DO bit to request
+DNSSEC data; it does not enable signature validation. EDNS is disabled by
+default. The advertised UDP receive size is independent of the
+`--max-message-bytes` decoder ceiling.
+
 Kernel TCP control and retransmission packets are OS-managed, so DNS
 authorization does not mislabel them as an exact raw-packet count. It instead
 charges bounded connection and framed-message traffic units, application

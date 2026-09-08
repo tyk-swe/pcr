@@ -28,6 +28,27 @@ contract constant is now `SCHEMA_V3`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
 Text parsing returns `QueryTypeParseError`, preserving the original integer
 parse error for out-of-range values.
+CLI DNS output structs store `query_type` as `u16`; use `.code()` when
+constructing their summaries or events from a `QueryType`.
+
+## Opt-in EDNS requests
+
+`dns::Request` gains `edns: Option<EdnsRequest>`. Add `edns: None` to existing
+Rust request literals. Deserializing a request without this field defaults to
+`None`. `encode_query(name, query_type, id, recursion_desired, edns)` now takes
+the option as its fifth argument; `None` preserves the original query bytes.
+
+`EdnsRequest` contains `udp_payload_size: u16` in `512..=65535` and
+`dnssec_ok: bool`. Version 0 is fixed. The encoder adds exactly one OPT record
+with the root DNS name and no options, and validates settings before I/O. All eleven
+added bytes count toward UDP and framed TCP authorization budgets. Each TCP
+continuation sends the same DNS message as its triggering UDP attempt.
+
+The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
+that flag. DO requests DNSSEC data and performs no signature validation. The
+advertised receive size is independent of `--max-message-bytes`, which bounds
+response decoding. Existing output `edns` fields still describe the response;
+the output/v3 and packet/v1 contracts are unchanged by these request settings.
 
 ## Offline DNS records
 

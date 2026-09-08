@@ -8,6 +8,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
+  set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
 - DNS `--type` accepts bounded decimal and `TYPE<n>` codes alongside named
   aliases, preserving exact question codes and unknown response RDATA.
 - Offline DNS inspection decodes answer, authority, and additional records,
@@ -17,6 +19,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
+  that option as its fifth argument. `None` preserves the original query bytes.
 - Structured command output advances to `packetcraftr.output/v3`. DNS
   `query_type` values are integers in `0..=65535` in summaries and events;
   packet documents remain `packetcraftr.packet/v1`.

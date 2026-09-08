@@ -88,6 +88,12 @@ input packets count toward the finite frame/byte limits, and an empty selection
 is valid. Errors can leave partial output. Without `--filter` or `--normalize`,
 capture output remains a byte-for-byte rewrite.
 
+`read --dissect` and `dissect` decode DNS answer, authority, and additional
+records, including EDNS and exact unknown RDATA. Malformed or truncated DNS
+messages produce diagnostics while retaining their captured bytes. The
+[migration notes](docs/migration-unreleased.md#offline-dns-records) describe
+the structured record fields and bounded core decoder.
+
 ## Install
 
 [GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux

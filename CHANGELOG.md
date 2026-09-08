@@ -6,6 +6,24 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Offline DNS inspection decodes answer, authority, and additional records,
+  including EDNS and exact unknown RDATA. Core exposes bounded DNS record
+  decoding shared by live queries, with typed failures for malformed or
+  truncated messages and explicit message, record, name, and TXT limits.
+
+### Changed
+
+- Release archives share one verifier for required assets, binary identity,
+  exact offline packet bytes, and complete NDJSON output on Unix and Windows.
+- Netio interface-snapshot and packet-routing validation retain their original
+  typed error sources. Route errors `InvalidSourceRouting` and
+  `InvalidSegmentRouting` gain an optional `source` field; classification codes
+  remain unchanged. See [the migration notes](docs/migration-unreleased.md).
+- DNS record and name types move to `packetcraftr_core`; malformed declared
+  records now produce offline diagnostics instead of a header-only DNS layer.
+
 ## [0.5.0-beta.3] - 2026-09-08
 
 See [docs/migration-beta.3.md](docs/migration-beta.3.md) for the migration

@@ -128,4 +128,11 @@ All eligible nonconflicting tasks run up to the three-agent limit. I03/I04/I01/I
 
 ## Execution log
 
-- Wave 0: partial-work audit in progress; baseline formatting, Clippy and full workspace tests running.
+- Wave 0 complete: finish-partials and debt-collector audits found only intentional fail-closed providers, lifetime/trait test helpers and consumed public exports; no cleanup changes. Passed `cargo fmt --all -- --check`, `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`, and `cargo test --locked --workspace --all-features` (including doctests).
+- Wave 1 in progress: I04, I05 and I06 in isolated `tyk/i04`, `tyk/i05`, `tyk/i06` worktrees.
+
+- I05: committed and independently reviewed with no findings; netio all-feature tests and affected Clippy passed. Integrated typed sources and migration note.
+- I06: committed and independently reviewed with no findings; six stdlib fixture tests passed, real extracted Linux all-feature archive verifier passed, and Ubuntu 24.04 clean-runtime smoke passed with libpcap linkage confirmed. Native Windows/macOS archive execution remains pending CI.
+- I06 follow-up: independent review accepted strict read-event checking and real tar/ZIP extraction smokes in native CI jobs. Seven local Python tests passed with the real Linux binary. Pcap-free extracted archive verification, absent libpcap linkage, and clean Ubuntu 24.04 runtime smoke also passed.
+- I04: integrated after independent review and correction of non-IN RDATA interpretation. Portable core/workflow/CLI tests, doctests, schemas/examples, both rustfmt checks and full Clippy passed. DNS fuzz smoke: 85,975 executions in 31 seconds, no crash. Task debt removed duplicate name-error mapping/adapters and unused offset; 6 core record and 27 workflow wire regressions plus full Clippy passed.
+- Wave 1 integrated; final wave cleanup and full workspace validation in progress.

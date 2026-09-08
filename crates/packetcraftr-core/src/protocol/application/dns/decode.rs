@@ -14,7 +14,11 @@ pub(super) fn advance(
 ) -> Result<usize, DecodeError> {
     offset
         .checked_add(delta)
-        .ok_or(DecodeError::TruncatedField { field, offset })
+        .ok_or(DecodeError::TruncatedField {
+            field,
+            offset,
+            needed: usize::MAX,
+        })
 }
 
 /// Decompresses one bounded, lossless name and returns its wire resume offset.

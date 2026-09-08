@@ -85,9 +85,13 @@ pub struct Dns {
 impl Dns {
     /// Parses a complete DNS message under the default bounded decoder limits.
     pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
-        Self::from_wire_with_limits(wire, DecodeLimits::default()).map_err(|error| match error {
-            DecodeError::MessageTooShort { actual, minimum } => truncated(NAME, minimum, actual),
-            error => invalid(NAME, error.to_string()),
+        let wire = wire.into();
+        let available = wire.len();
+        Self::from_wire_with_limits(wire, DecodeLimits::default()).map_err(|error| {
+            error.truncation_needed().map_or_else(
+                || invalid(NAME, error.to_string()),
+                |needed| truncated(NAME, needed, available),
+            )
         })
     }
 

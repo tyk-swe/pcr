@@ -39,6 +39,7 @@ pub(super) fn decode_records(
             .ok_or(WireError::TruncatedField {
                 field: "RDATA",
                 offset: rdata_offset,
+                needed: rdata_end,
             })?;
         let value = decode_rdata(
             message,
@@ -222,6 +223,7 @@ fn decode_rdata(
     let bytes = message.get(offset..end).ok_or(WireError::TruncatedField {
         field: "RDATA",
         offset,
+        needed: end,
     })?;
     let rdata = Rdata {
         message,

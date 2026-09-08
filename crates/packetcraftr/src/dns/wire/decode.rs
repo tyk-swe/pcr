@@ -3,9 +3,9 @@
 
 //! Ordered DNS response validation and decoding orchestration.
 
-use packetcraftr_core::protocol::application::dns::DecodeError;
+use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name};
 
-use super::name::{canonical_query_name, decode_name};
+use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
 use crate::dns::error::WireError;
 use crate::dns::{
@@ -206,8 +206,8 @@ fn decode_question(
     expected_name: &Name,
     query_type: QueryType,
     limits: MessageLimits,
-) -> Result<usize, WireError> {
-    let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits)?;
+) -> Result<(), WireError> {
+    let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits.into())?;
     if actual_name != *expected_name {
         return Err(WireError::QuestionNameMismatch {
             expected: query_name.to_owned(),
@@ -223,13 +223,12 @@ fn decode_question(
         });
     }
     let actual_class = read_u16(message, offset, "question class")?;
-    offset = advance(offset, 2, "answer section")?;
     if actual_class != CLASS_IN {
         return Err(WireError::QuestionClassMismatch {
             actual: actual_class,
         });
     }
-    Ok(offset)
+    Ok(())
 }
 
 fn truncated_response(flags: u16) -> ValidatedResponse {

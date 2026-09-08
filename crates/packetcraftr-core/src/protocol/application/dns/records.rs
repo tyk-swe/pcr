@@ -3,7 +3,7 @@
 
 use super::{
     DecodeError,
-    name::{MAX_LABEL_LEN, MAX_NAME_LEN},
+    name::{self, MAX_LABEL_LEN, MAX_NAME_LEN},
 };
 use bytes::Bytes;
 use serde::Serialize;
@@ -39,9 +39,9 @@ impl Name {
             }
             wire_length = wire_length
                 .checked_add(label.len() + 1)
-                .ok_or(DecodeError::NameTooLong)?;
+                .ok_or(name::Error::NameTooLong)?;
             if wire_length > MAX_NAME_LEN {
-                return Err(DecodeError::NameTooLong);
+                return Err(name::Error::NameTooLong.into());
             }
             bounded.push(label);
         }

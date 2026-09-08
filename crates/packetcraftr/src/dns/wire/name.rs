@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Canonical and compressed DNS name handling.
+//! Canonical DNS query name handling.
 
 use packetcraftr_core::protocol::application::dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
@@ -60,36 +60,4 @@ pub(super) fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), crate:
     }
     output.push(0);
     Ok(())
-}
-
-pub(super) fn decode_name(
-    message: &[u8],
-    offset: usize,
-    limits: crate::dns::MessageLimits,
-) -> Result<(crate::dns::Name, usize), crate::dns::WireError> {
-    packetcraftr_core::protocol::application::dns::decode_name(message, offset, limits.into())
-        .map_err(Into::into)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use packetcraftr_core::protocol::application::dns::DecodeError;
-
-    #[test]
-    fn compressed_names_reject_self_and_forward_pointers() {
-        assert!(matches!(
-            decode_name(&[0xc0, 0], 0, crate::dns::MessageLimits::default()),
-            Err(crate::dns::WireError::Decode(DecodeError::PointerLoop {
-                offset: 0
-            }))
-        ));
-        assert!(matches!(
-            decode_name(&[0xc0, 2, 0], 0, crate::dns::MessageLimits::default()),
-            Err(crate::dns::WireError::Decode(DecodeError::ForwardPointer {
-                offset: 0,
-                pointer: 2
-            }))
-        ));
-    }
 }

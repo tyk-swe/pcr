@@ -39,10 +39,6 @@ pub struct Decompressed {
 }
 
 /// Why a DNS name could not be decompressed.
-///
-/// Deliberately not `#[non_exhaustive]`: the message decoder translates this
-/// into its published error taxonomy with an exhaustive `match`, so new
-/// failures cannot silently fall into a catch-all arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The label-length byte at `offset` is past the end of the message.

@@ -8,7 +8,7 @@ use packetcraftr_core::{
     frame::{Frame, LinkType},
     layer::{Layer, Malformed, Raw},
     protocol::{
-        application::dns::{DecodeError, DecodeLimits, Dns, Name, RecordValue},
+        application::dns::{DecodeError, DecodeLimits, Dns, Name, RecordValue, name},
         builtin,
         network::Ipv4,
         transport::Udp,
@@ -20,6 +20,38 @@ fn question() -> Vec<u8> {
     let mut wire = vec![0x12, 0x34, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0];
     wire.extend_from_slice(b"\x07example\x04test\0\0\x01\0\x01");
     wire
+}
+
+#[test]
+fn malformed_names_retain_the_original_typed_cause() {
+    use std::error::Error as _;
+
+    for (suffix, expected) in [
+        (
+            &b"\x03a"[..],
+            name::Error::TruncatedLabel {
+                offset: 13,
+                end: 16,
+            },
+        ),
+        (&b"\xc0\x0c"[..], name::Error::SelfPointer { offset: 12 }),
+        (
+            &b"\x01a\xc0\x0c"[..],
+            name::Error::PointerLoop { offset: 12 },
+        ),
+    ] {
+        let mut wire = question();
+        wire.truncate(12);
+        wire.extend_from_slice(suffix);
+        let error = Dns::from_wire_with_limits(wire, DecodeLimits::default()).unwrap_err();
+        assert_eq!(error, DecodeError::Name(expected));
+        assert_eq!(
+            error.source().unwrap().downcast_ref::<name::Error>(),
+            Some(&expected)
+        );
+        assert_eq!(error.to_string(), expected.to_string());
+        assert!(packetcraftr_core::error::source_chain(&error).is_empty());
+    }
 }
 
 fn record(wire: &mut Vec<u8>, owner: &[u8], kind: u16, class: u16, ttl: u32, data: &[u8]) {
@@ -258,7 +290,7 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
                 max_name_pointers: 0,
                 ..defaults
             },
-            |e| matches!(e, DecodeError::PointerLimit { limit: 0 }),
+            |e| matches!(e, DecodeError::Name(name::Error::PointerLimit { limit: 0 })),
         ),
         (
             DecodeLimits {
@@ -305,11 +337,11 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
     overlong.extend_from_slice(&[0, 0, 1, 0, 1]);
     assert!(matches!(
         Dns::from_wire_with_limits(overlong, defaults),
-        Err(DecodeError::NameTooLong)
+        Err(DecodeError::Name(name::Error::NameTooLong))
     ));
     assert!(matches!(
         Name::from_labels(std::iter::repeat(Bytes::from_static(b"a"))),
-        Err(DecodeError::NameTooLong)
+        Err(DecodeError::Name(name::Error::NameTooLong))
     ));
     let unbounded = DecodeLimits {
         max_message_bytes: usize::MAX,

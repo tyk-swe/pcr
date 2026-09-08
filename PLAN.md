@@ -142,3 +142,5 @@ All eligible nonconflicting tasks run up to the three-agent limit. I03/I04/I01/I
 - I07 integrated: `offline_workflows` passed 32 tests; CLI portable all-target Clippy and rustfmt passed. Targeted CLI checks covered every stats table, absent/zero/below/equal/above limits, ordering, diagnostics, text/JSON parity, and the fragments exception.
 - I03 integrated after independent review with no findings. Netio/workflow/CLI all-feature and portable suites (including doctests, endpoint/route refusals, framing/timeouts and cancellation) passed; full workspace all-target/all-feature Clippy and rustfmt passed. Migration/profile notes and new TCP CODEOWNERS routing are updated.
 - Wave 2 final integrated cleanup and common validation in progress.
+- Wave 2 complete: final debt pass was a no-op; full workspace formatting, Clippy, all-feature tests/doctests, and warning-denied API docs passed. [CI run 34259079407](https://github.com/tyk-swe/pcr/actions/runs/34259079407) passed all five native/portable/archive jobs.
+- Wave 3 in progress: I01 numeric DNS QTYPEs and output/v3 migration; packet/v1 remains unchanged.

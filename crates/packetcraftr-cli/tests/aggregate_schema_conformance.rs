@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Serializes a real Rust aggregate payload for every command that publishes
-//! one and validates the emitted envelope against the published v1 schema.
+//! one and validates the emitted envelope against the published v2 schema.
 //!
 //! The published-example tests validate hand-written JSON, so they cannot see
 //! a Rust type drifting away from the contract. These tests check declared

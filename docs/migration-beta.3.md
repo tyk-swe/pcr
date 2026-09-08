@@ -1,9 +1,7 @@
 # Migrating to 0.5.0-beta.3
 
-This is the next development release, currently recorded under `[Unreleased]`.
-Publication still requires a matching version, dated changelog section, tag,
-exact-commit CI, and current dependency policy. No legacy reader or facade was
-restored.
+This note covers the changes between 0.5.0-beta.2 and 0.5.0-beta.3. No legacy
+reader or facade was restored; update call sites as described below.
 
 - Output envelopes use `packetcraftr.output/v2`. NDJSON discriminators live at
   the root: `jq 'select(.event == "session") | .result.client.ja4'`. One
@@ -42,11 +40,10 @@ restored.
   matched timestamp; `underflow_frames` counts earlier frames clamped to bucket 0.
 - NDJSON records have a 16 MiB encoded limit including the newline. A record that
   exceeds it is refused before publication; an error terminal is emitted if the
-  sink remains writable. `StreamEncoder::timings()` distinguishes serialization,
-  lock waiting, and output waiting. Arbitrary `Serialize` implementations are
-  synchronous; the writer timeout does not preempt them. `with_deadline` bounds
-  lock and bounded-writer waiting by the remaining operation budget; max-duration
-  NDJSON commands use it. Capture/exchange response-window timeouts retain their
+  sink remains writable. Arbitrary `Serialize` implementations are synchronous;
+  the writer timeout does not preempt them. `with_deadline` bounds lock and
+  bounded-writer waiting by the remaining operation budget; max-duration NDJSON
+  commands use it. Capture/exchange response-window timeouts retain their
   distinct meaning. The original encoder handle can report an error after a
   publication deadline; cleanup/error output has its own finite writer wait.
 - Commands with cooperative cancellation handle Ctrl-C and, on Unix,

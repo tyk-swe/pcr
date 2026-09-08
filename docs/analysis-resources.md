@@ -67,6 +67,25 @@ must return before their next cooperative check. Capture polling and cancellable
 pacing check at intervals of at most 25 ms while scheduled, excluding provider
 overshoot and scheduler delays.
 
+## Example captures
+
+Two small published captures exercise the clock and scope evidence described
+above, and the checked-in `stats` documents are generated from them:
+
+```sh
+packetcraftr --output json stats examples/captures/clock-regression.pcap \
+  --table io --interval-ms 1000   # examples/documents/output-stats-clock.json
+packetcraftr --output json stats examples/captures/scoped-vxlan.pcap \
+  --table conversations           # examples/documents/output-stats-scopes.json
+```
+
+`clock-regression.pcap` carries a 100/90/101-second timestamp sequence, so the
+report shows one regression, the largest forward step, and an I/O bucket origin
+with one underflow frame. `scoped-vxlan.pcap` carries TCP conversations under
+two VXLAN network identifiers, so conversation rows expose scope identifiers and
+ordered encapsulation metadata. A CLI contract test keeps both documents equal
+to the current output.
+
 ## Reproducing measurements
 
 Run `scripts/measure-memory.sh --sizes 128 1024 8192` for release-profile CLI
@@ -101,7 +120,7 @@ workload point, not an upper bound for other captures or larger limits.
 The [allocation comparison](stats-allocation-comparison.json) records the two
 binary digests and the command used for the protocol-name lookup experiment.
 
-The September 7 local measurement of 8,192 unique flows with protocols-only
+A local measurement of 8,192 unique flows with protocols-only
 stats recorded 191,355 allocator calls before borrowed protocol-name lookup and
 174,973 after it (16,382 fewer; output byte-identical). Heaptrack measured about
 1.58 MB peak heap before the lookup change. Decoder/layout allocation remained a

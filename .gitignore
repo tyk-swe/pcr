@@ -11,3 +11,9 @@
 *.profraw
 *.profdata
 junit.xml
+lcov.info
+
+# Files the CI workflows write into the working tree
+linked-libraries.txt
+fuzz/fuzz-run-metadata.txt
+fuzz/crash-*

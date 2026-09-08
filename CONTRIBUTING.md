@@ -44,12 +44,12 @@ locally with cargo-fuzz and the known-working nightly-2026-08-28 toolchain, for 
 
 ```sh
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
-(cd fuzz && cargo +nightly-2026-08-28 fuzz run ip_reassembly corpora/ip_reassembly -- -max_total_time=30)
+(cd fuzz && cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu ip_reassembly corpora/ip_reassembly -- -max_total_time=30)
 ```
 
 Scheduled fuzz runs restore and minimize each target's successful corpus, capped
-at 32 MiB. Manual campaigns accept 1–900 seconds per target; 30-second smoke
-success is not a coverage claim. Failures retain the compiler, commit and lockfile
+at 32 MiB. Manual campaigns run 30, 300, or 900 seconds per target; 30-second
+smoke success is not a coverage claim. Failures retain the compiler, commit and lockfile
 identity. Minimize fixed crashes with `cargo fuzz tmin` and check the tiny input
 into the owning crate's regression fixtures, not only CI artifacts. Update the
 nightly pin intentionally after a local smoke and record it with corpus changes.

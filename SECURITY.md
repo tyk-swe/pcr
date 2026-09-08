@@ -12,7 +12,8 @@ Security fixes target `main` and the latest published release, currently the
 ## Dependency advisories
 
 An unresolved advisory fails `cargo deny check` in CI. `deny.toml` is the
-enforced policy and carries no exceptions today. Do not add an `ignore` entry
+enforced policy and carries no advisory exceptions today; its duplicate-version
+skips each name the dependency that requires them. Do not add an `ignore` entry
 without a dated remediation plan in the pull request that adds it; the entry
 has no automatic expiry, so the date has to be policed by hand.
 

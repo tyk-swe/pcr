@@ -8,6 +8,8 @@ edition = "2024"
 rust-version = "1.98.1"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/pcr"
+homepage = "https://github.com/tyk-swe/pcr"
+readme = "README.md"
 publish = false
 
 [workspace.lints.rust]

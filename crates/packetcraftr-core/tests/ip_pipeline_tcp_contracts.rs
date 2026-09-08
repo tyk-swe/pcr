@@ -58,7 +58,10 @@ fn ipv4_tcp_fragments(registry: &Arc<packetcraftr_core::registry::Registry>) -> 
     ]
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fixture builder mirrors the wire fields"
+)]
 fn fragmented_tcp_datagram(
     registry: &Arc<packetcraftr_core::registry::Registry>,
     timestamp: SystemTime,

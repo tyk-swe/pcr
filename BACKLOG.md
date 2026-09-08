@@ -2,7 +2,7 @@
 
 | Context | Decision |
 |---|---|
-| Baseline | `a71795a1` (`0.5.0-beta.3`); implementation started; progress and validation recorded in PLAN.md |
+| Baseline | `a71795a1` (`0.5.0-beta.3`); all seven items implemented; validation recorded in PLAN.md and PR checks |
 | Review | 7 raised → 7 kept; 0 merges. Four exploration lenses; three independent per-ID reviews |
 | Split | I04: 2 KEEP / 1 DROP; main confirmed opaque-only core DNS records and required actual offline inspection, addressing the speculative-extraction objection |
 | Sizing | S = local change; M = coordinated change; L = cross-layer change. Impact 1–3, higher is better |
@@ -33,4 +33,21 @@
 | Architecture | Follow AGENTS.md; core independent of native I/O/workflows; unsafe only in netio platform with specific SAFETY invariants; expose capabilities, keep assembly private |
 | Contracts | Changed machine contracts require a new version; keep packet/output versioning independent and synchronize schemas, examples, tests, release assets and migrations. Do not silently widen output-v2 enums |
 | Evidence and live I/O | Preserve malformed/unknown bytes, capture scope/timestamps, finite budgets, authorization before discovery and final endpoint/byte checks; fixtures, loopback or documentation addresses only |
-| Delivery | Future branches `tyk/<task>`; focused Conventional Commits; user-visible/breaking changes in `[Unreleased]`; exact validation results and applicable CODEOWNERS review |
+| Delivery | Implementation branches `tyk/<task>`; focused Conventional Commits; user-visible/breaking changes in `[Unreleased]`; exact validation results and applicable CODEOWNERS review |
+
+## Implementation results
+
+All seven items are implemented. Evidence references above describe the original
+`a71795a1` baseline; current APIs and breaking changes are documented in
+[the migration notes](docs/migration-unreleased.md). Reviews and exact checks
+are recorded in [PLAN.md](PLAN.md).
+
+| ID | Status | Implementation commit |
+|---|---|---|
+| I04 | Done | `c28b7bed`, cleanup `32020a88` |
+| I05 | Done | `af96f0f3` |
+| I06 | Done | `1eed0bb1`, native CI `020a5023` |
+| I03 | Done | `fbee18ef` |
+| I07 | Done | `322dcc6a` |
+| I01 | Done | `75795739` |
+| I02 | Done | `d449f5c1` |

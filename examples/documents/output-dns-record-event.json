@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v2",
+  "schema": "packetcraftr.output/v3",
   "command": "dns",
   "mode": "stream",
   "sequence": 2,
@@ -10,7 +10,7 @@
     "server": "resolver.lab",
     "server_port": 53,
     "query_name": "www.example.test.",
-    "query_type": "a",
+    "query_type": 1,
     "section": "answer",
     "record": {
       "owner": "www.example.test.",

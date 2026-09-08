@@ -5,6 +5,7 @@
 
 mod capture_file;
 mod capture_writer;
+mod dns;
 mod human;
 mod machine;
 mod ndjson;
@@ -12,6 +13,8 @@ mod style;
 
 pub(crate) use capture_file::{stdout_error, stream_capture_error, write_capture_file, write_raw};
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter};
+
+pub(crate) use dns::render_dns_records;
 
 pub(crate) use human::{
     captured_frame_text, comma_separated, compact_hex, emit_stderr_document, emit_stderr_error,

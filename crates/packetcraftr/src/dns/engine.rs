@@ -245,6 +245,7 @@ fn prepare_operation<A: Authorizer>(
         request.query_type,
         request.transaction_id,
         request.recursion_desired,
+        request.edns,
     )
     .map_err(Error::Query)?;
     let budget = operation_budget(request, query.len())?;

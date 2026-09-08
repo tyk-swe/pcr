@@ -4,7 +4,7 @@
 use packetcraftr_core::protocol;
 
 use packetcraftr_cli::output::{
-    contract::{Command, Format, SCHEMA_V2},
+    contract::{Command, Format, SCHEMA_V3},
     envelope::Envelope,
     stream::StreamEncoder,
 };
@@ -36,7 +36,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
         Vec::new(),
     ))
     .expect("aggregate must serialize");
-    assert_eq!(aggregate["schema"], SCHEMA_V2);
+    assert_eq!(aggregate["schema"], SCHEMA_V3);
     assert_eq!(aggregate["command"], "protocols");
     assert_eq!(aggregate["mode"], "aggregate");
     assert_eq!(aggregate["status"], "success");
@@ -50,7 +50,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
             .expect("stream must serialize");
     }
     let stream = output.records().pop().expect("eighth record");
-    assert_eq!(stream["schema"], SCHEMA_V2);
+    assert_eq!(stream["schema"], SCHEMA_V3);
     assert_eq!(stream["mode"], "stream");
     assert_eq!(stream["sequence"], 7);
 }
@@ -60,7 +60,7 @@ fn schema_retains_output_version_and_broadcast_selection() {
     let schema = output_schema();
     assert_eq!(
         schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
-        SCHEMA_V2
+        SCHEMA_V3
     );
     assert!(
         schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]
@@ -151,5 +151,37 @@ fn published_stats_examples_reproduce_from_their_example_captures() {
             published,
             "{example} must equal the current `stats` output for {capture}"
         );
+    }
+}
+
+#[test]
+fn v3_dns_query_codes_are_bounded_in_aggregate_and_every_stream_shape() {
+    let validator = schema_validator();
+    for example in [
+        include_str!("../../../examples/documents/output-dns-success.json"),
+        include_str!("../../../examples/documents/output-dns-event.json"),
+        include_str!("../../../examples/documents/output-dns-record-event.json"),
+        include_str!("../../../examples/documents/output-dns-rejected-event.json"),
+        include_str!("../../../examples/documents/output-dns-complete.json"),
+    ] {
+        let mut document: Value = serde_json::from_str(example).unwrap();
+        for code in [0, 1, 65000, 65535] {
+            document["result"]["query_type"] = json!(code);
+            validator.validate(&document).unwrap();
+        }
+        for invalid in [
+            json!(-1),
+            json!(65536),
+            json!(1.5),
+            json!("a"),
+            json!("65000"),
+            json!("TYPE65000"),
+        ] {
+            document["result"]["query_type"] = invalid;
+            assert!(validator.validate(&document).is_err());
+        }
+        document["result"]["query_type"] = json!(1);
+        document["schema"] = json!("packetcraftr.output/v2");
+        assert!(validator.validate(&document).is_err());
     }
 }

@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::dns::{
-    MessageLimits, QueryType, decode_response, decode_tcp_frame, encode_query,
+    EdnsRequest, MessageLimits, QueryType, decode_response, decode_tcp_frame, encode_query,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -14,15 +14,66 @@ fuzz_target!(|data: &[u8]| {
         max_rejected_records: 8,
         ..MessageLimits::default()
     };
+    let offline_limits = packetcraftr_core::protocol::application::dns::DecodeLimits::from(limits);
+    if let Ok(decoded) = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
+        bytes::Bytes::copy_from_slice(data),
+        offline_limits,
+    ) {
+        assert_eq!(decoded.wire().as_ref(), data);
+        assert!(
+            decoded.answers.len() + decoded.authorities.len() + decoded.additionals.len() <= 64
+        );
+        // Reflection must remain bounded for binary names, TXT, OPT options,
+        // and unknown records as well as ordinary address answers.
+        use packetcraftr_core::layer::Layer;
+        for section in ["answers", "authorities", "additionals"] {
+            assert!(decoded.field(section).is_some());
+        }
+    }
+    // Numeric query types must preserve all wire codes and reject adjacent
+    // question codes, independent of whether their RDATA is understood.
+    let code = data
+        .first_chunk::<2>()
+        .copied()
+        .map(u16::from_be_bytes)
+        .unwrap_or(0);
+    let query_type = QueryType::new(code);
+    let settings = EdnsRequest {
+        udp_payload_size: code,
+        dnssec_ok: data.get(2).is_some_and(|byte| byte & 1 != 0),
+    };
+    let encoded = encode_query("example.test", query_type, 0x1234, true, Some(settings));
+    assert_eq!(encoded.is_ok(), code >= 512);
+    let edns = (code >= 512).then_some(settings);
+    if let Ok(text) = std::str::from_utf8(data) {
+        if let Ok(parsed) = text.parse::<QueryType>() {
+            assert_eq!(parsed.to_string().parse::<QueryType>().unwrap(), parsed);
+        }
+    }
+    let mut numeric = encode_query("example.test", query_type, 0x1234, true, edns)
+        .unwrap()
+        .to_vec();
+    numeric[2] |= 0x80;
+    assert!(decode_response(&numeric, "example.test", query_type, 0x1234, limits).is_ok());
+    assert!(
+        decode_response(
+            &numeric,
+            "example.test",
+            QueryType::new(code ^ 1),
+            0x1234,
+            limits
+        )
+        .is_err()
+    );
     let id = 0x1234;
     let _ = decode_tcp_frame(data, "example.test", QueryType::A, id, limits);
     if decode_response(data, "example.test", QueryType::A, id, limits).is_ok() {
         assert!(decode_response(data, "example.test", QueryType::A, id ^ 1, limits).is_err());
         assert!(decode_response(data, "other.test", QueryType::A, id, limits).is_err());
-        assert!(decode_response(data, "example.test", QueryType::Aaaa, id, limits).is_err());
+        assert!(decode_response(data, "example.test", QueryType::AAAA, id, limits).is_err());
     }
     // Near-valid mutations reach the question/record relations, not just the header.
-    let mut message = encode_query("example.test", QueryType::A, id, true)
+    let mut message = encode_query("example.test", QueryType::A, id, true, edns)
         .unwrap()
         .to_vec();
     message[2] |= 0x80;
@@ -63,7 +114,7 @@ fn correlate_endpoints(control: u8, message: &[u8], limits: MessageLimits) {
         transaction_id: 0x1234,
         query_name: "example.test".to_owned(),
         query_type: QueryType::A,
-        query: encode_query("example.test", QueryType::A, 0x1234, true).unwrap(),
+        query: encode_query("example.test", QueryType::A, 0x1234, true, None).unwrap(),
     };
     let mut sent = probe.packet();
     sent.get_mut::<Ipv4>().unwrap().source = client;

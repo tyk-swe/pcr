@@ -9,10 +9,10 @@ use bytes::Bytes;
 
 use super::advance;
 use super::primitives::{read_u16, read_u32};
-use crate::dns::TYPE_OPT;
-use crate::dns::error::WireError;
-use crate::dns::wire::name::decode_name;
-use crate::dns::{Edns, EdnsOption, MessageLimits, Name, Record, RecordValue};
+const TYPE_OPT: u16 = 41;
+use super::super::DecodeError as WireError;
+use super::super::{DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record, RecordValue};
+use super::decode_name;
 
 pub(super) fn decode_records(
     message: &[u8],
@@ -39,6 +39,7 @@ pub(super) fn decode_records(
             .ok_or(WireError::TruncatedField {
                 field: "RDATA",
                 offset: rdata_offset,
+                needed: rdata_end,
             })?;
         let value = decode_rdata(
             message,
@@ -222,6 +223,7 @@ fn decode_rdata(
     let bytes = message.get(offset..end).ok_or(WireError::TruncatedField {
         field: "RDATA",
         offset,
+        needed: end,
     })?;
     let rdata = Rdata {
         message,
@@ -231,28 +233,30 @@ fn decode_rdata(
         end,
         limits,
     };
-    match type_code {
-        1 => {
+    // Resource-record interpretation is class-dependent (notably CH A).
+    // Only IN is supported here; OPT repurposes CLASS as its UDP byte size.
+    match (type_code, class) {
+        (1, 1) => {
             let bytes: [u8; 4] = bytes
                 .try_into()
                 .map_err(|_| rdata.invalid("A RDATA must be 4 bytes"))?;
             Ok(RecordValue::A(Ipv4Addr::from(bytes)))
         }
-        2 => Ok(RecordValue::Ns(rdata.exact_name(offset)?)),
-        5 => Ok(RecordValue::Cname(rdata.exact_name(offset)?)),
-        6 => rdata.decode_soa(),
-        12 => Ok(RecordValue::Ptr(rdata.exact_name(offset)?)),
-        15 => rdata.decode_mx(),
-        16 => rdata.decode_txt(),
-        28 => {
+        (2, 1) => Ok(RecordValue::Ns(rdata.exact_name(offset)?)),
+        (5, 1) => Ok(RecordValue::Cname(rdata.exact_name(offset)?)),
+        (6, 1) => rdata.decode_soa(),
+        (12, 1) => Ok(RecordValue::Ptr(rdata.exact_name(offset)?)),
+        (15, 1) => rdata.decode_mx(),
+        (16, 1) => rdata.decode_txt(),
+        (28, 1) => {
             let bytes: [u8; 16] = bytes
                 .try_into()
                 .map_err(|_| rdata.invalid("AAAA RDATA must be 16 bytes"))?;
             Ok(RecordValue::Aaaa(Ipv6Addr::from(bytes)))
         }
-        33 => rdata.decode_srv(),
-        257 => rdata.decode_caa(),
-        TYPE_OPT => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
+        (33, 1) => rdata.decode_srv(),
+        (257, 1) => rdata.decode_caa(),
+        (TYPE_OPT, _) => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
         _ => Ok(RecordValue::Unknown {
             type_code,
             rdata: Bytes::copy_from_slice(bytes),
@@ -264,9 +268,6 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
     let ttl_bytes = ttl.to_be_bytes();
     let extended_response_code = ttl_bytes[0];
     let version = ttl_bytes[1];
-    if version != 0 {
-        return Err(WireError::UnsupportedEdnsVersion { version });
-    }
     let flags = u16::from_be_bytes([ttl_bytes[2], ttl_bytes[3]]);
     let mut options = Vec::new();
     let mut cursor = 0usize;

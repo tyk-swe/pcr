@@ -96,7 +96,7 @@ fn prepare_request(
             None => packetcraftr::dns::unpredictable_source_port().map_err(CliError::classified)?,
         },
         query_name: arguments.name.clone(),
-        query_type: arguments.query_type.into(),
+        query_type: arguments.query_type,
         transaction_id: match arguments.transaction_id {
             Some(id) => id,
             None => {
@@ -104,6 +104,12 @@ fn prepare_request(
             }
         },
         recursion_desired: !arguments.no_recursion,
+        edns: arguments.edns_udp_payload_size.map(|udp_payload_size| {
+            packetcraftr::dns::EdnsRequest {
+                udp_payload_size,
+                dnssec_ok: arguments.dnssec_ok,
+            }
+        }),
         tcp_fallback: packetcraftr::dns::DEFAULT_TCP_FALLBACK && !arguments.udp_only,
         attempts: arguments.attempts,
         timeout: Duration::from_millis(arguments.timeout_ms),

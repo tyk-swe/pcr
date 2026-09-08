@@ -21,8 +21,8 @@ use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use crate::rendering::{
-    compact_hex, emit_aggregate, emit_stderr_message, render_diagnostics_text, write_plain_line,
-    write_raw, write_stdout_line, write_summary_line,
+    compact_hex, emit_aggregate, emit_stderr_message, render_diagnostics_text, render_dns_records,
+    write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
 pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
@@ -80,6 +80,9 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             for (index, layer) in decoded.packet.iter().enumerate() {
                 write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
             }
+            render_dns_records(&packetcraftr_core::document::Packet::from_packet(
+                &decoded.packet,
+            ))?;
             render_diagnostics_text(&decoded.diagnostics)
         }
         Format::Hex => write_plain_line(format_args!("{}", compact_hex(&decoded.original))),

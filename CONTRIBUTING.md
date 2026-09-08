@@ -17,12 +17,14 @@ doctests. There is no required test runner or command wrapper.
 
 | Profile | Cargo arguments | Capability |
 |---|---|---|
-| Portable | `--no-default-features` | Offline processing; native providers report unavailable |
+| Portable | `--no-default-features` | Offline processing; native packet and route providers report unavailable |
 | Default | none | Passive interface enumeration and route lookup |
 | Pcap-free | `--no-default-features --features native-layer3` | Default capabilities and raw Layer 3 I/O |
 | Full native | `--all-features` | All providers, including Layer 2 capture/injection |
 
 Features belong to netio; workflow and CLI features select those capabilities.
+The explicitly selected standard-library TCP provider is independent of these
+packet-I/O feature flags; it remains available in the portable library profile.
 CI tests full native, portable and the exact pcap-free feature profile on Linux.
 macOS and Windows execute deterministic contracts with all native features.
 The pcap-free binary is built independently and checked for absence of libpcap. Release checks cover

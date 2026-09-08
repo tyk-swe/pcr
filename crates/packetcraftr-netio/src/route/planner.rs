@@ -90,10 +90,11 @@ impl PacketIntent {
             protocol.is_ip().then_some(protocol)
         });
         let ip_path = semantics::outer_ip_path(packet).map_err(|source| {
-            let message = source.to_string();
+            let message = "packet route interpretation failed".to_owned();
+            let source: Option<Box<dyn std::error::Error + Send + Sync>> = Some(Box::new(source));
             match outer_ip_protocol {
-                Some(BuiltinProtocol::Ipv4) => Error::InvalidSourceRouting { message },
-                _ => Error::InvalidSegmentRouting { message },
+                Some(BuiltinProtocol::Ipv4) => Error::InvalidSourceRouting { message, source },
+                _ => Error::InvalidSegmentRouting { message, source },
             }
         })?;
         if ip_path.as_ref().is_some_and(|path| {
@@ -103,6 +104,7 @@ impl PacketIntent {
             return Err(Error::InvalidSourceRouting {
                 message: "the IPv4 header destination must name the active LSRR/SSRR hop"
                     .to_owned(),
+                source: None,
             });
         }
 

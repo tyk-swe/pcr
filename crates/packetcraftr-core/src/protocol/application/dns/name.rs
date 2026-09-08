@@ -39,11 +39,6 @@ pub struct Decompressed {
 }
 
 /// Why a DNS name could not be decompressed.
-///
-/// Deliberately not `#[non_exhaustive]`: both in-workspace callers translate
-/// this into their own published error taxonomy with an exhaustive `match`, so
-/// a new variant here has to be a compile error at every translation instead of
-/// silently falling into a catch-all arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The label-length byte at `offset` is past the end of the message.

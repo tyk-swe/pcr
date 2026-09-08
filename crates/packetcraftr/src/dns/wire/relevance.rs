@@ -82,7 +82,7 @@ fn accepted_answers(
                 continue;
             };
             let keep = matches!(record.value, RecordValue::Cname(_))
-                || query_type == QueryType::Any
+                || query_type == QueryType::ANY
                 || record.value.type_code() == query_type.code();
             if let Some(slot) = accepted.get_mut(index) {
                 *slot = keep;
@@ -100,7 +100,7 @@ fn accepted_answers(
 }
 
 fn canonical(name: &Name) -> Vec<Vec<u8>> {
-    name.labels
+    name.labels()
         .iter()
         .map(|label| label.to_ascii_lowercase())
         .collect()
@@ -137,7 +137,7 @@ fn referenced_names(
         .zip(accepted_answers)
         .chain(authorities.iter().zip(accepted_authorities))
         .filter(|(_, accepted)| **accepted)
-        .filter_map(|(record, _)| record.value.referenced_name())
+        .filter_map(|(record, _)| referenced_name(&record.value))
         .map(canonical)
         .collect()
 }
@@ -260,13 +260,29 @@ fn rejection_reason<'a>(record: &Record, default: &'a str) -> &'a str {
     }
 }
 
+fn referenced_name(value: &RecordValue) -> Option<&Name> {
+    match value {
+        RecordValue::Cname(value) | RecordValue::Ns(value) => Some(value),
+        RecordValue::Mx { exchange, .. } => Some(exchange),
+        RecordValue::Srv { target, .. } => Some(target),
+        RecordValue::A(_)
+        | RecordValue::Aaaa(_)
+        | RecordValue::Caa { .. }
+        | RecordValue::Ptr(_)
+        | RecordValue::Soa { .. }
+        | RecordValue::Txt(_)
+        | RecordValue::Opt(_)
+        | RecordValue::Unknown { .. } => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn reverse_chain_with_cycle_and_case_variants_retains_only_relevant_records() {
-        let name = |index| Name::from_canonical_ascii(&format!("N{index}.example"));
+        let name = |index| Name::from_labels([format!("N{index}"), "example".to_owned()]).unwrap();
         let mut answers = vec![Record {
             owner: name(2000),
             class: CLASS_IN,
@@ -285,7 +301,7 @@ mod tests {
             owner: name(2000),
             class: CLASS_IN,
             ttl: 1,
-            value: RecordValue::Cname(Name::from_canonical_ascii("n0.EXAMPLE")),
+            value: RecordValue::Cname(Name::from_labels(["n0", "EXAMPLE"]).unwrap()),
         });
         answers.push(Record {
             owner: name(3000),
@@ -297,7 +313,7 @@ mod tests {
         assert_eq!(names.len(), 2001);
         assert!(accepted[..2002].iter().all(|keep| *keep));
         assert!(!accepted[2002]);
-        let (_, cname_only) = accepted_answers(&name(0), QueryType::Cname, &answers);
+        let (_, cname_only) = accepted_answers(&name(0), QueryType::CNAME, &answers);
         assert!(!cname_only[0]);
         assert!(cname_only[1..2002].iter().all(|keep| *keep));
     }
@@ -305,12 +321,8 @@ mod tests {
     #[test]
     fn canonical_keys_preserve_binary_label_boundaries() {
         use bytes::Bytes;
-        let one = Name {
-            labels: vec![Bytes::from_static(b"a.b")],
-        };
-        let two = Name {
-            labels: vec![Bytes::from_static(b"a"), Bytes::from_static(b"b")],
-        };
+        let one = Name::from_labels([Bytes::from_static(b"a.b")]).unwrap();
+        let two = Name::from_labels([Bytes::from_static(b"a"), Bytes::from_static(b"b")]).unwrap();
         assert_ne!(canonical(&one), canonical(&two));
     }
 }

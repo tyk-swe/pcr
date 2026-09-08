@@ -794,7 +794,7 @@ mod trace_properties {
             prop_assert_eq!(records.len(), count);
             for (sequence, record) in records.iter().enumerate() {
                 prop_assert_eq!(record["sequence"].as_u64(), Some(sequence as u64));
-                prop_assert_eq!(&record["schema"], "packetcraftr.output/v2");
+                prop_assert_eq!(&record["schema"], "packetcraftr.output/v3");
                 prop_assert_eq!(&record["command"], command.as_str());
                 let terminal = matches!(record["event"].as_str(), Some("complete" | "error"));
                 prop_assert_eq!(terminal, sequence + 1 == records.len());

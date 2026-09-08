@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v2.schema.json",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v3.schema.json",
   "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1.",
-  "title": "PacketcraftR command output v2",
+  "title": "PacketcraftR command output v3",
   "description": "Aggregate JSON and sequenced NDJSON. Every stream record declares event in its envelope; complete and error are terminal.",
   "oneOf": [
     {
@@ -30,7 +30,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v2"
+          "const": "packetcraftr.output/v3"
         },
         "command": {
           "type": [
@@ -5420,20 +5420,9 @@
       "additionalProperties": true
     },
     "dnsQueryType": {
-      "type": "string",
-      "enum": [
-        "a",
-        "aaaa",
-        "caa",
-        "cname",
-        "mx",
-        "ns",
-        "ptr",
-        "soa",
-        "srv",
-        "txt",
-        "any"
-      ]
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
     },
     "dnsTransport": {
       "type": "string",

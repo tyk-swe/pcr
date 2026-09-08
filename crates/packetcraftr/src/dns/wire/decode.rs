@@ -3,7 +3,9 @@
 
 //! Ordered DNS response validation and decoding orchestration.
 
-use super::name::{canonical_query_name, decode_name};
+use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name};
+
+use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
 use crate::dns::error::WireError;
 use crate::dns::{
@@ -16,10 +18,8 @@ use crate::dns::{
 };
 
 use primitives::read_u16;
-use records::decode_records;
 
 mod primitives;
-mod records;
 
 /// Decodes the length prefix of a single DNS-over-TCP frame, then applies the
 /// same transaction, question, bounds, and relevance validation as UDP.
@@ -30,24 +30,29 @@ pub fn decode_tcp_frame(
     transaction_id: u16,
     limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
-    let prefix = frame.first_chunk::<2>().ok_or(WireError::MessageTooShort {
-        actual: frame.len(),
-        minimum: 2,
-    })?;
+    let prefix =
+        frame
+            .first_chunk::<2>()
+            .ok_or(WireError::Decode(DecodeError::MessageTooShort {
+                actual: frame.len(),
+                minimum: 2,
+            }))?;
     let declared = usize::from(u16::from_be_bytes(*prefix));
     if declared == 0 {
         return Err(WireError::TcpFrameZeroLength);
     }
     if declared > limits.max_message_bytes {
-        return Err(WireError::MessageTooLarge {
+        return Err(WireError::Decode(DecodeError::MessageTooLarge {
             actual: declared,
             maximum: limits.max_message_bytes,
-        });
+        }));
     }
-    let payload = frame.get(2..).ok_or(WireError::MessageTooShort {
-        actual: frame.len(),
-        minimum: 2,
-    })?;
+    let payload = frame
+        .get(2..)
+        .ok_or(WireError::Decode(DecodeError::MessageTooShort {
+            actual: frame.len(),
+            minimum: 2,
+        }))?;
     if declared != payload.len() {
         return Err(WireError::TcpFrameLength {
             declared,
@@ -71,17 +76,26 @@ pub fn decode_response(
     limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
     let query_name = canonical_query_name(query_name)?;
-    let expected_name = Name::from_canonical_ascii(&query_name);
+    let expected_name = Name::from_labels(
+        query_name
+            .trim_end_matches('.')
+            .split('.')
+            .filter(|label| !label.is_empty())
+            .map(|label| bytes::Bytes::copy_from_slice(label.as_bytes())),
+    )?;
     validate_message_bounds(message, limits)?;
     let header = decode_header(message, transaction_id)?;
-    let offset = decode_question(message, &query_name, &expected_name, query_type, limits)?;
+    decode_question(message, &query_name, &expected_name, query_type, limits)?;
 
     if header.flags & FLAG_TRUNCATED != 0 {
         return Ok(truncated_response(header.flags));
     }
 
-    validate_record_count(&header, limits)?;
-    let sections = decode_sections(message, offset, &header, limits)?;
+    let decoded = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
+        bytes::Bytes::copy_from_slice(message),
+        limits.into(),
+    )?;
+    let sections = validate_sections(decoded.answers, decoded.authorities, decoded.additionals)?;
     let response_code = (sections
         .edns
         .as_ref()
@@ -123,9 +137,6 @@ pub fn decode_response(
 
 struct ResponseHeader {
     flags: u16,
-    answer_count: usize,
-    authority_count: usize,
-    additional_count: usize,
 }
 
 struct ResponseSections {
@@ -139,21 +150,24 @@ struct ResponseSections {
 fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
     offset
         .checked_add(delta)
-        .ok_or(WireError::TruncatedField { field, offset })
+        .ok_or(WireError::Decode(DecodeError::TruncatedField {
+            field,
+            offset,
+        }))
 }
 
 fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), WireError> {
     if message.len() < HEADER_BYTES {
-        return Err(WireError::MessageTooShort {
+        return Err(WireError::Decode(DecodeError::MessageTooShort {
             actual: message.len(),
             minimum: HEADER_BYTES,
-        });
+        }));
     }
     if message.len() > limits.max_message_bytes {
-        return Err(WireError::MessageTooLarge {
+        return Err(WireError::Decode(DecodeError::MessageTooLarge {
             actual: message.len(),
             maximum: limits.max_message_bytes,
-        });
+        }));
     }
     Ok(())
 }
@@ -183,12 +197,7 @@ fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, 
             actual: question_count,
         });
     }
-    Ok(ResponseHeader {
-        flags,
-        answer_count: usize::from(read_u16(message, 6, "answer count")?),
-        authority_count: usize::from(read_u16(message, 8, "authority count")?),
-        additional_count: usize::from(read_u16(message, 10, "additional count")?),
-    })
+    Ok(ResponseHeader { flags })
 }
 
 fn decode_question(
@@ -197,8 +206,8 @@ fn decode_question(
     expected_name: &Name,
     query_type: QueryType,
     limits: MessageLimits,
-) -> Result<usize, WireError> {
-    let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits)?;
+) -> Result<(), WireError> {
+    let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits.into())?;
     if actual_name != *expected_name {
         return Err(WireError::QuestionNameMismatch {
             expected: query_name.to_owned(),
@@ -214,13 +223,12 @@ fn decode_question(
         });
     }
     let actual_class = read_u16(message, offset, "question class")?;
-    offset = advance(offset, 2, "answer section")?;
     if actual_class != CLASS_IN {
         return Err(WireError::QuestionClassMismatch {
             actual: actual_class,
         });
     }
-    Ok(offset)
+    Ok(())
 }
 
 fn truncated_response(flags: u16) -> ValidatedResponse {
@@ -245,38 +253,11 @@ fn truncated_response(flags: u16) -> ValidatedResponse {
     }
 }
 
-fn validate_record_count(header: &ResponseHeader, limits: MessageLimits) -> Result<(), WireError> {
-    let record_count = header
-        .answer_count
-        .checked_add(header.authority_count)
-        .and_then(|count| count.checked_add(header.additional_count))
-        .ok_or(WireError::RecordLimit {
-            actual: usize::MAX,
-            limit: limits.max_records,
-        })?;
-    if record_count > limits.max_records {
-        return Err(WireError::RecordLimit {
-            actual: record_count,
-            limit: limits.max_records,
-        });
-    }
-    Ok(())
-}
-
-fn decode_sections(
-    message: &[u8],
-    offset: usize,
-    header: &ResponseHeader,
-    limits: MessageLimits,
+fn validate_sections(
+    answers: Vec<Record>,
+    authorities: Vec<Record>,
+    additionals: Vec<Record>,
 ) -> Result<ResponseSections, WireError> {
-    let (answers, next) = decode_records(message, offset, header.answer_count, limits)?;
-    let (authorities, next) = decode_records(message, next, header.authority_count, limits)?;
-    let (additionals, next) = decode_records(message, next, header.additional_count, limits)?;
-    if next != message.len() {
-        return Err(WireError::TrailingBytes {
-            remaining: message.len().saturating_sub(next),
-        });
-    }
     if answers
         .iter()
         .chain(&authorities)
@@ -301,6 +282,12 @@ fn extract_edns(additionals: Vec<Record>) -> Result<(Option<Edns>, Vec<Record>),
     for record in additionals {
         match &record.value {
             RecordValue::Opt(value) => {
+                if value.version != 0 {
+                    return Err(WireError::UnsupportedEdnsVersion {
+                        version: value.version,
+                    });
+                }
+
                 if !record.owner.is_root() {
                     return Err(WireError::InvalidEdns {
                         message: "OPT owner name must be the root".to_owned(),

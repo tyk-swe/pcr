@@ -1,0 +1,631 @@
+{
+  "schema": "packetcraftr.output/v3",
+  "command": "dissect",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "matched": true,
+    "dissection": {
+      "bytes_hex": "4500007d0000000040118dffc0000235c63364080035c00000690000123481800001000100010002076578616d706c6504746573740000010001c00c000100010000003c0004c0000208c00c000200010000012c0005026e73c00cc00cfde80001000000070004ff00c0ff00002904d0010080400007000c000300ff01",
+      "length": 125,
+      "link_type": 228,
+      "packet": {
+        "schema": "packetcraftr.packet/v1",
+        "layers": [
+          {
+            "protocol": "ipv4",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 36351
+              },
+              "destination": {
+                "type": "ipv4",
+                "value": "198.51.100.8"
+              },
+              "dont_fragment": {
+                "type": "bool",
+                "value": false
+              },
+              "dscp_ecn": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "fragment_offset": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "identification": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "more_fragments": {
+                "type": "bool",
+                "value": false
+              },
+              "options": {
+                "type": "bytes",
+                "value": []
+              },
+              "protocol": {
+                "type": "unsigned",
+                "value": 17
+              },
+              "reserved_flag": {
+                "type": "bool",
+                "value": false
+              },
+              "source": {
+                "type": "ipv4",
+                "value": "192.0.2.53"
+              },
+              "total_length": {
+                "type": "unsigned",
+                "value": 125
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 64
+              }
+            }
+          },
+          {
+            "protocol": "udp",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "destination_port": {
+                "type": "unsigned",
+                "value": 49152
+              },
+              "length": {
+                "type": "unsigned",
+                "value": 105
+              },
+              "source_port": {
+                "type": "unsigned",
+                "value": 53
+              }
+            }
+          },
+          {
+            "protocol": "dns",
+            "fields": {
+              "additional_count": {
+                "type": "unsigned",
+                "value": 2
+              },
+              "additionals": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "list",
+                    "value": [
+                      {
+                        "type": "text",
+                        "value": "example.test."
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 65000
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 1
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 7
+                      },
+                      {
+                        "type": "list",
+                        "value": [
+                          {
+                            "type": "text",
+                            "value": "unknown"
+                          },
+                          {
+                            "type": "bytes",
+                            "value": [
+                              255,
+                              0,
+                              192,
+                              255
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "list",
+                    "value": [
+                      {
+                        "type": "text",
+                        "value": "."
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 41
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 1232
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 16810048
+                      },
+                      {
+                        "type": "list",
+                        "value": [
+                          {
+                            "type": "text",
+                            "value": "opt"
+                          },
+                          {
+                            "type": "unsigned",
+                            "value": 1232
+                          },
+                          {
+                            "type": "unsigned",
+                            "value": 1
+                          },
+                          {
+                            "type": "unsigned",
+                            "value": 0
+                          },
+                          {
+                            "type": "bool",
+                            "value": true
+                          },
+                          {
+                            "type": "unsigned",
+                            "value": 32832
+                          },
+                          {
+                            "type": "list",
+                            "value": [
+                              {
+                                "type": "list",
+                                "value": [
+                                  {
+                                    "type": "unsigned",
+                                    "value": 12
+                                  },
+                                  {
+                                    "type": "bytes",
+                                    "value": [
+                                      0,
+                                      255,
+                                      1
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "answer_count": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "answers": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "list",
+                    "value": [
+                      {
+                        "type": "text",
+                        "value": "example.test."
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 1
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 1
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 60
+                      },
+                      {
+                        "type": "list",
+                        "value": [
+                          {
+                            "type": "text",
+                            "value": "a"
+                          },
+                          {
+                            "type": "ipv4",
+                            "value": "192.0.2.8"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "authenticated_data": {
+                "type": "bool",
+                "value": false
+              },
+              "authoritative_answer": {
+                "type": "bool",
+                "value": false
+              },
+              "authorities": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "list",
+                    "value": [
+                      {
+                        "type": "text",
+                        "value": "example.test."
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 2
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 1
+                      },
+                      {
+                        "type": "unsigned",
+                        "value": 300
+                      },
+                      {
+                        "type": "list",
+                        "value": [
+                          {
+                            "type": "text",
+                            "value": "ns"
+                          },
+                          {
+                            "type": "text",
+                            "value": "ns.example.test."
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "authority_count": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "checking_disabled": {
+                "type": "bool",
+                "value": false
+              },
+              "id": {
+                "type": "unsigned",
+                "value": 4660
+              },
+              "opcode": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "qclass": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "unsigned",
+                    "value": 1
+                  }
+                ]
+              },
+              "qname": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "text",
+                    "value": "example.test."
+                  }
+                ]
+              },
+              "qtype": {
+                "type": "list",
+                "value": [
+                  {
+                    "type": "unsigned",
+                    "value": 1
+                  }
+                ]
+              },
+              "question_count": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "rcode": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "recursion_available": {
+                "type": "bool",
+                "value": true
+              },
+              "recursion_desired": {
+                "type": "bool",
+                "value": true
+              },
+              "response": {
+                "type": "bool",
+                "value": true
+              },
+              "truncated": {
+                "type": "bool",
+                "value": false
+              }
+            }
+          }
+        ]
+      },
+      "layout": {
+        "layers": [
+          {
+            "index": 0,
+            "protocol": "ipv4",
+            "range": {
+              "start": 0,
+              "end": 20
+            },
+            "fields": [
+              {
+                "name": "dscp_ecn",
+                "range": {
+                  "start": 1,
+                  "end": 2
+                }
+              },
+              {
+                "name": "total_length",
+                "range": {
+                  "start": 2,
+                  "end": 4
+                }
+              },
+              {
+                "name": "identification",
+                "range": {
+                  "start": 4,
+                  "end": 6
+                }
+              },
+              {
+                "name": "reserved_flag",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "dont_fragment",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "more_fragments",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "fragment_offset",
+                "range": {
+                  "start": 6,
+                  "end": 8
+                }
+              },
+              {
+                "name": "ttl",
+                "range": {
+                  "start": 8,
+                  "end": 9
+                }
+              },
+              {
+                "name": "protocol",
+                "range": {
+                  "start": 9,
+                  "end": 10
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 10,
+                  "end": 12
+                }
+              },
+              {
+                "name": "source",
+                "range": {
+                  "start": 12,
+                  "end": 16
+                }
+              },
+              {
+                "name": "destination",
+                "range": {
+                  "start": 16,
+                  "end": 20
+                }
+              },
+              {
+                "name": "options",
+                "range": {
+                  "start": 20,
+                  "end": 20
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "protocol": "udp",
+            "range": {
+              "start": 20,
+              "end": 28
+            },
+            "fields": [
+              {
+                "name": "source_port",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "destination_port",
+                "range": {
+                  "start": 22,
+                  "end": 24
+                }
+              },
+              {
+                "name": "length",
+                "range": {
+                  "start": 24,
+                  "end": 26
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 26,
+                  "end": 28
+                }
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "protocol": "dns",
+            "range": {
+              "start": 28,
+              "end": 125
+            },
+            "fields": [
+              {
+                "name": "id",
+                "range": {
+                  "start": 28,
+                  "end": 30
+                }
+              },
+              {
+                "name": "response",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "opcode",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "authoritative_answer",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "truncated",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "recursion_desired",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "recursion_available",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "authenticated_data",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "checking_disabled",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "rcode",
+                "range": {
+                  "start": 30,
+                  "end": 32
+                }
+              },
+              {
+                "name": "question_count",
+                "range": {
+                  "start": 32,
+                  "end": 34
+                }
+              },
+              {
+                "name": "answer_count",
+                "range": {
+                  "start": 34,
+                  "end": 36
+                }
+              },
+              {
+                "name": "authority_count",
+                "range": {
+                  "start": 36,
+                  "end": 38
+                }
+              },
+              {
+                "name": "additional_count",
+                "range": {
+                  "start": 38,
+                  "end": 40
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "diagnostics": []
+}

@@ -10,6 +10,7 @@
 # Coverage and test reports written outside target/
 *.profraw
 *.profdata
+scripts/__pycache__/
 junit.xml
 lcov.info
 

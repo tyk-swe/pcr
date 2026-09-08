@@ -3,6 +3,7 @@
 # Native adapters and live I/O seams.
 /crates/packetcraftr-netio/src/platform/** @tyk-swe
 /crates/packetcraftr-netio/src/transmit.rs @tyk-swe
+/crates/packetcraftr-netio/src/tcp.rs @tyk-swe
 /crates/packetcraftr-netio/src/capture.rs @tyk-swe
 /crates/packetcraftr-netio/src/route/** @tyk-swe
 /crates/packetcraftr-netio/src/interface.rs @tyk-swe

@@ -6,6 +6,40 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
+  set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
+- DNS `--type` accepts bounded decimal and `TYPE<n>` codes alongside named
+  aliases, preserving exact question codes and unknown response RDATA.
+- Offline DNS inspection decodes answer, authority, and additional records,
+  including EDNS and exact unknown RDATA. Core exposes bounded DNS record
+  decoding shared by live queries, with typed failures for malformed or
+  truncated messages and explicit message, record, name, and TXT limits.
+
+### Changed
+
+- Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
+  that option as its fifth argument. `None` preserves the original query bytes.
+- Structured command output advances to `packetcraftr.output/v3`. DNS
+  `query_type` values are integers in `0..=65535` in summaries and events;
+  packet documents remain `packetcraftr.packet/v1`.
+- Rust DNS `QueryType` is a numeric value with `new`/`code` methods and uppercase
+  named constants. Its serde representation is an integer; `Display` retains
+  human-readable aliases. See [the migration notes](docs/migration-unreleased.md).
+- DNS TCP fallback requires explicit provider composition. Native socket
+  ownership moves to netio; the workflow retains DNS framing, shared deadlines,
+  and evidence. Library exchange executors opt in with `.with_dns_tcp(provider)`;
+  the CLI explicitly selects the standard-library TCP provider.
+- Release archives share one verifier for required assets, binary identity,
+  exact offline packet bytes, and complete NDJSON output on Unix and Windows.
+- Netio interface-snapshot and packet-routing validation retain their original
+  typed error sources. Route errors `InvalidSourceRouting` and
+  `InvalidSegmentRouting` gain an optional `source` field; classification codes
+  remain unchanged. See [the migration notes](docs/migration-unreleased.md).
+- DNS record and name types move to `packetcraftr_core`; malformed declared
+  records now produce offline diagnostics instead of a header-only DNS layer.
+
 ## [0.5.0-beta.3] - 2026-09-08
 
 See [docs/migration-beta.3.md](docs/migration-beta.3.md) for the migration

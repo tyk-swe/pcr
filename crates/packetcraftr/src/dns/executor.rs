@@ -99,20 +99,50 @@ where
     }
 }
 
-/// Continues a truncated UDP answer over kernel TCP, which cannot honour
-/// packet-oriented route overrides.
-impl<R, N, I> TcpExecutor for ExchangeExecutor<'_, R, N, I> {
-    fn execute_tcp(
-        &mut self,
-        exchange: &TcpExchange,
-    ) -> Result<TcpExecution, crate::dns::tcp::Error> {
-        validate_tcp_route_options(&self.options.send.plan)?;
-        let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
-            endpoint: exchange.endpoint,
-            query: &exchange.query,
-            timeout: exchange.timeout,
-            max_message_bytes: exchange.max_message_bytes,
-        })?;
+/// A client exchange with an explicitly selected DNS TCP provider.
+pub struct TcpExchangeExecutor<'a, R, N, I, P> {
+    udp: ExchangeExecutor<'a, R, N, I>,
+    tcp: P,
+}
+
+impl<'a, R, N, I> ExchangeExecutor<'a, R, N, I> {
+    /// Enables DNS TCP fallback using only the supplied provider.
+    pub fn with_dns_tcp<P>(self, provider: P) -> TcpExchangeExecutor<'a, R, N, I, P> {
+        TcpExchangeExecutor {
+            udp: self,
+            tcp: provider,
+        }
+    }
+}
+
+// A packet provider alone never implicitly selects system TCP.
+impl<R, N, I> TcpExecutor for ExchangeExecutor<'_, R, N, I> {}
+
+impl<R, N, I, P> Executor<Exchange> for TcpExchangeExecutor<'_, R, N, I, P>
+where
+    R: packetcraftr_netio::route::Provider,
+    N: packetcraftr_netio::neighbor::Resolver,
+    I: PacketIo + CaptureProvider,
+{
+    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+        self.udp.execute(exchange)
+    }
+}
+
+impl<R, N, I, P: packetcraftr_netio::tcp::Provider> TcpExecutor
+    for TcpExchangeExecutor<'_, R, N, I, P>
+{
+    fn execute_tcp(&mut self, exchange: &TcpExchange) -> Result<TcpExecution, super::tcp::Error> {
+        validate_tcp_route_options(&self.udp.options.send.plan)?;
+        let response = super::tcp::exchange(
+            super::tcp::Request {
+                endpoint: exchange.endpoint,
+                query: &exchange.query,
+                timeout: exchange.timeout,
+                max_message_bytes: exchange.max_message_bytes,
+            },
+            &self.tcp,
+        )?;
         Ok(TcpExecution::new(exchange.permit, response))
     }
 }
@@ -137,6 +167,64 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use super::validate_tcp_route_options;
+
+    struct RefusingTcp(std::cell::Cell<usize>);
+
+    impl packetcraftr_netio::tcp::Provider for RefusingTcp {
+        type Stream = packetcraftr_netio::tcp::SystemStream;
+
+        fn connect(
+            &self,
+            endpoint: std::net::SocketAddr,
+            timeout: std::time::Duration,
+        ) -> std::io::Result<Self::Stream> {
+            assert_eq!(endpoint, "127.0.0.1:53".parse().unwrap());
+            assert!(!timeout.is_zero());
+            assert!(timeout <= std::time::Duration::from_secs(1));
+            self.0.set(self.0.get() + 1);
+            Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                "injected TCP refusal",
+            ))
+        }
+    }
+
+    #[test]
+    fn tcp_requires_explicit_composition_and_rejects_overrides_before_provider_io() {
+        use super::*;
+        let client = crate::Client {
+            registry: packetcraftr_core::protocol::builtin::registry(),
+            routes: (),
+            neighbors: (),
+            io: (),
+            policy: std::sync::Arc::new(crate::policy::Policy::default()),
+            runtime: crate::progress::Runtime::default(),
+            cancellation: None,
+        };
+        let exchange = TcpExchange {
+            attempt: 1,
+            endpoint: "127.0.0.1:53".parse().unwrap(),
+            query: bytes::Bytes::from_static(b"query"),
+            timeout: std::time::Duration::from_secs(1),
+            max_message_bytes: 512,
+            permit: crate::evidence::ExecutionPermit::new(),
+        };
+        let mut bare = ExchangeExecutor::new(&client, crate::exchange::Options::default());
+        assert!(matches!(
+            bare.execute_tcp(&exchange),
+            Err(super::super::tcp::Error::Unsupported { .. })
+        ));
+        let mut explicit = bare.with_dns_tcp(RefusingTcp(std::cell::Cell::new(0)));
+        let error = explicit.execute_tcp(&exchange).unwrap_err();
+        assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
+        assert_eq!(explicit.tcp.0.get(), 1);
+        explicit.udp.options.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
+        assert!(matches!(
+            explicit.execute_tcp(&exchange),
+            Err(super::super::tcp::Error::Unsupported { .. })
+        ));
+        assert_eq!(explicit.tcp.0.get(), 1);
+    }
 
     #[test]
     fn tcp_route_validation_rejects_every_packet_oriented_override() {

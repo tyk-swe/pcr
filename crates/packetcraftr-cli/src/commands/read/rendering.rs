@@ -7,8 +7,8 @@ use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, captured_frame_text, render_diagnostics_text, spaced_hex, write_plain_line,
-    write_stdout_line,
+    StreamEncoder, captured_frame_text, render_diagnostics_text, render_dns_records, spaced_hex,
+    write_plain_line, write_stdout_line,
 };
 
 pub(super) fn render_record(
@@ -42,6 +42,7 @@ pub(super) fn render_record(
                         .join("/"),
                     spaced_hex(frame.bytes())
                 ))?;
+                render_dns_records(&decoded.packet)?;
                 if !decoded.diagnostics.is_empty() {
                     write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
                     render_diagnostics_text(&decoded.diagnostics)?;

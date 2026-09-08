@@ -64,12 +64,15 @@ fn run_fragmented_success(listener: TcpListener) -> SocketAddr {
         }
     });
 
-    let response = dns_tcp::exchange(dns_tcp::Request {
-        endpoint,
-        query: QUERY,
-        timeout: SERVER_TIMEOUT,
-        max_message_bytes: 512,
-    })
+    let response = dns_tcp::exchange(
+        dns_tcp::Request {
+            endpoint,
+            query: QUERY,
+            timeout: SERVER_TIMEOUT,
+            max_message_bytes: 512,
+        },
+        &packetcraftr_netio::tcp::SystemProvider,
+    )
     .expect("bounded loopback exchange");
     server.join().expect("loopback server");
     assert_eq!(response.peer_address, endpoint);
@@ -110,12 +113,15 @@ fn loopback_read_timeout_uses_the_exchange_deadline() {
             let _ = released.recv_timeout(SERVER_TIMEOUT);
         }
     });
-    let error = dns_tcp::exchange(dns_tcp::Request {
-        endpoint,
-        query: QUERY,
-        timeout: Duration::from_millis(20),
-        max_message_bytes: 512,
-    })
+    let error = dns_tcp::exchange(
+        dns_tcp::Request {
+            endpoint,
+            query: QUERY,
+            timeout: Duration::from_millis(20),
+            max_message_bytes: 512,
+        },
+        &packetcraftr_netio::tcp::SystemProvider,
+    )
     .expect_err("silent peer must time out");
     let _ = release.send(());
     server.join().expect("loopback server");
@@ -142,12 +148,15 @@ fn loopback_early_close_reports_prefix_and_body_progress() {
             read_query(&mut stream);
             stream.write_all(&response).expect("partial response");
         });
-        let error = dns_tcp::exchange(dns_tcp::Request {
-            endpoint,
-            query: QUERY,
-            timeout: SERVER_TIMEOUT,
-            max_message_bytes: 512,
-        })
+        let error = dns_tcp::exchange(
+            dns_tcp::Request {
+                endpoint,
+                query: QUERY,
+                timeout: SERVER_TIMEOUT,
+                max_message_bytes: 512,
+            },
+            &packetcraftr_netio::tcp::SystemProvider,
+        )
         .expect_err("early close must fail");
         server.join().expect("loopback server");
         match (error, expected) {

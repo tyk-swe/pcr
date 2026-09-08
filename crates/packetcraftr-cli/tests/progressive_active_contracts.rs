@@ -670,6 +670,7 @@ fn dns_sink_failure_stops_after_capture_shutdown() {
         query_type: dns::QueryType::A,
         transaction_id: 7,
         recursion_desired: true,
+        edns: None,
         tcp_fallback: false,
         attempts: 2,
         timeout: Duration::from_millis(100),

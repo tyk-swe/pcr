@@ -100,10 +100,17 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
             source: Some(std::sync::Arc::new(error)),
         },
     })?;
+    validate_interface_snapshot(interfaces)
+}
+
+#[cfg(native_route)]
+fn validate_interface_snapshot(
+    interfaces: Vec<interface::Info>,
+) -> Result<Vec<interface::Info>, Error> {
     super::interface_validation::validate_native_interfaces(interfaces).map_err(|error| {
         Error::InterfaceDiscovery {
-            message: error.to_string(),
-            source: None,
+            message: "the native route adapter returned an invalid interface snapshot".to_owned(),
+            source: Some(std::sync::Arc::new(error)),
         }
     })
 }
@@ -236,4 +243,72 @@ mod tests {
         }];
         assert_eq!(capture_netmask(&ipv6_only), None);
     }
+}
+
+#[cfg(all(test, native_route))]
+mod interface_validation_tests {
+    use std::error::Error as _;
+
+    use packetcraftr_core::{error::Classified, frame::LinkType};
+
+    use super::*;
+
+    #[test]
+    fn discovery_retains_actual_snapshot_validation_failures() {
+        let valid = interface::Info {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: interface::Flags::default(),
+            mtu: None,
+            capability: crate::link::Capability::Layer3,
+            link_type: LinkType::RAW,
+        };
+        assert_eq!(
+            validate_interface_snapshot(vec![valid.clone()]).unwrap(),
+            std::slice::from_ref(&valid)
+        );
+        let mut invalid_identity = valid.clone();
+        invalid_identity.id.index = 0;
+        let mut invalid_prefix = valid.clone();
+        invalid_prefix.addresses.push(interface::Address {
+            address: "192.0.2.1".parse().unwrap(),
+            prefix_length: 33,
+        });
+        for snapshot in [
+            vec![invalid_identity],
+            vec![invalid_prefix],
+            vec![valid.clone(), valid],
+        ] {
+            let error = validate_interface_snapshot(snapshot).unwrap_err();
+            // SystemFault already uses Arc storage; thiserror exposes that Arc as the source.
+            let source = error
+                .source()
+                .unwrap()
+                .downcast_ref::<crate::SystemFault>()
+                .unwrap()
+                .as_ref()
+                .downcast_ref::<SystemError>()
+                .unwrap();
+            assert!(matches!(source, SystemError::InvalidResponse { .. }));
+            assert_eq!(error.classification().code, "io.interface_discovery");
+            assert_eq!(source.classification().code, "internal.route_response");
+            assert_eq!(error.causes(), [source.to_string()]);
+            assert!(!error.to_string().contains(&source.to_string()));
+            assert!(source.source().is_none());
+        }
+    }
+}
+
+/// Standard TCP uses the standard library's platform implementation on every
+/// target; it does not require packet route/capture/injection features.
+pub(crate) fn system_tcp_connect(
+    endpoint: std::net::SocketAddr,
+    timeout: std::time::Duration,
+) -> std::io::Result<crate::tcp::SystemStream> {
+    std::net::TcpStream::connect_timeout(&endpoint, timeout).map(crate::tcp::SystemStream)
 }

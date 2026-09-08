@@ -227,12 +227,15 @@ impl TcpExecutor for LoopbackExecutor {
         &mut self,
         exchange: &super::TcpExchange,
     ) -> Result<super::TcpExecution, crate::dns::tcp::Error> {
-        let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
-            endpoint: exchange.endpoint,
-            query: &exchange.query,
-            timeout: exchange.timeout,
-            max_message_bytes: exchange.max_message_bytes,
-        })?;
+        let response = crate::dns::tcp::exchange(
+            crate::dns::tcp::Request {
+                endpoint: exchange.endpoint,
+                query: &exchange.query,
+                timeout: exchange.timeout,
+                max_message_bytes: exchange.max_message_bytes,
+            },
+            &packetcraftr_netio::tcp::SystemProvider,
+        )?;
         Ok(super::TcpExecution::new(exchange.permit, response))
     }
 }
@@ -257,6 +260,8 @@ struct ScriptedExecutor {
     udp_calls: usize,
     tcp_calls: usize,
     tcp_timeouts: Vec<Duration>,
+    udp_queries: Vec<Bytes>,
+    tcp_queries: Vec<Bytes>,
 }
 
 impl ScriptedExecutor {
@@ -268,6 +273,8 @@ impl ScriptedExecutor {
             udp_calls: 0,
             tcp_calls: 0,
             tcp_timeouts: Vec::new(),
+            udp_queries: Vec::new(),
+            tcp_queries: Vec::new(),
         }
     }
 
@@ -280,6 +287,7 @@ impl ScriptedExecutor {
 impl Executor<Exchange> for ScriptedExecutor {
     fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
         self.udp_calls += 1;
+        self.udp_queries.push(exchange.probe.query.clone());
         let payload = self.udp_payloads.pop_front().unwrap_or(None);
         Ok(scripted_udp_execution(exchange, payload, self.udp_elapsed))
     }
@@ -292,6 +300,7 @@ impl TcpExecutor for ScriptedExecutor {
     ) -> Result<super::TcpExecution, crate::dns::tcp::Error> {
         self.tcp_calls += 1;
         self.tcp_timeouts.push(exchange.timeout);
+        self.tcp_queries.push(exchange.query.clone());
         match self.tcp_scripts.pop_front().unwrap_or_else(|| {
             TcpScript::Error(crate::dns::tcp::Error::Connect {
                 endpoint: exchange.endpoint,
@@ -591,6 +600,7 @@ fn dns_request(address: IpAddr) -> super::Request {
         query_type: super::QueryType::A,
         transaction_id: 0x1234,
         recursion_desired: true,
+        edns: None,
         tcp_fallback: false,
         attempts: 1,
         timeout: Duration::from_millis(1),
@@ -1484,13 +1494,26 @@ fn loopback_fallback_server_terminates_without_a_tcp_connection() {
 
 #[test]
 fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
+    for edns in [
+        None,
+        Some(super::EdnsRequest {
+            udp_payload_size: 1232,
+            dnssec_ok: true,
+        }),
+    ] {
+        loopback_fallback(edns);
+    }
+}
+
+fn loopback_fallback(edns: Option<super::EdnsRequest>) {
     let tcp = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("TCP loopback listener");
     let endpoint = tcp.local_addr().unwrap();
     let udp = UdpSocket::bind(endpoint).expect("same-port UDP loopback listener");
     udp.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
     udp.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
-    let expected_query = super::encode_query("example.com", super::QueryType::A, 0x1234, true)
-        .expect("fixture query");
+    let expected_query =
+        super::encode_query("example.com", super::QueryType::A, 0x1234, true, edns)
+            .expect("fixture query");
     let udp_query = expected_query.clone();
     let udp_server = thread::spawn(move || {
         let mut query = [0u8; 512];
@@ -1518,6 +1541,7 @@ fn loopback_udp_truncation_continues_over_fragmented_tcp_response() {
     let address = endpoint.ip();
     let mut request = dns_request(address);
     request.server_port = endpoint.port();
+    request.edns = edns;
     request.tcp_fallback = true;
     request.timeout = Duration::from_secs(1);
     let result = super::engine::run(
@@ -1585,4 +1609,135 @@ fn loopback_udp_only_truncation_never_connects_tcp() {
         Some(super::Transport::Udp)
     );
     assert!(matches!(tcp.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+}
+
+#[test]
+fn edns_validation_precedes_authorization_and_execution() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    for udp_payload_size in [0, 511] {
+        let mut request = dns_request(address);
+        request.edns = Some(super::EdnsRequest {
+            udp_payload_size,
+            dnssec_ok: true,
+        });
+        let mut authorizer = RecordingAuthorizer::new(address);
+        let mut executor = ScriptedExecutor::new([]);
+        let error = super::run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            super::Error::Query(super::error::WireError::InvalidEdns { .. })
+        ));
+        assert!(authorizer.budgets.is_empty());
+        assert!(authorizer.targets.is_empty());
+        assert_eq!(executor.udp_calls + executor.tcp_calls, 0);
+    }
+}
+
+#[test]
+fn edns_bytes_are_shared_and_budgeted_across_fallback_and_retries() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    for edns in [
+        None,
+        Some(super::EdnsRequest {
+            udp_payload_size: 1232,
+            dnssec_ok: true,
+        }),
+    ] {
+        let mut request = dns_request(address);
+        request.edns = edns;
+        request.tcp_fallback = true;
+        request.attempts = 2;
+        request.timeout = Duration::from_secs(1);
+        let query = super::encode_query(
+            &request.query_name,
+            request.query_type,
+            request.transaction_id,
+            request.recursion_desired,
+            edns,
+        )
+        .unwrap();
+        let mut authorizer = RecordingAuthorizer::new(address);
+        let mut executor =
+            ScriptedExecutor::new([None, Some(truncated_dns_response())]).with_tcp([
+                TcpScript::Response {
+                    message: dns_response(),
+                    elapsed: Duration::from_millis(10),
+                },
+            ]);
+        let result = super::run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap();
+        assert_eq!(
+            result.summary().completion.accepted_transport(),
+            Some(super::Transport::Tcp)
+        );
+        assert_eq!(executor.udp_queries, vec![query.clone(), query.clone()]);
+        assert_eq!(executor.tcp_queries, vec![query.clone()]);
+        assert!(executor.tcp_timeouts[0] < request.timeout);
+        let length = u64::try_from(query.len()).unwrap();
+        assert_eq!(
+            authorizer.socket_budgets[0].application_bytes(),
+            2 * (length + 2)
+        );
+        assert_eq!(
+            authorizer.budgets[0].wire_bytes(),
+            2 * (length + super::MAX_PROBE_OVERHEAD) + 2 * (length + 2)
+        );
+        assert_eq!(authorizer.budgets[0].packets(), 6);
+    }
+}
+
+#[test]
+fn added_edns_bytes_can_exceed_policy_before_any_io() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    for tcp_fallback in [false, true] {
+        let mut request = dns_request(address);
+        request.tcp_fallback = tcp_fallback;
+        let plain = super::encode_query(
+            &request.query_name,
+            request.query_type,
+            request.transaction_id,
+            request.recursion_desired,
+            None,
+        )
+        .unwrap();
+        let length = u64::try_from(plain.len()).unwrap();
+        let policy = crate::policy::Policy {
+            max_bytes_per_operation: length
+                + super::MAX_PROBE_OVERHEAD
+                + if tcp_fallback { length + 2 } else { 0 },
+            ..crate::policy::Policy::default()
+        };
+        request.edns = Some(super::EdnsRequest {
+            udp_payload_size: 1232,
+            dnssec_ok: false,
+        });
+        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let mut executor = ScriptedExecutor::new([]);
+        let error = super::run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert_eq!(
+            packetcraftr_core::error::Classified::classification(&error).code,
+            "policy.traffic_byte_limit"
+        );
+        assert_eq!(executor.udp_calls + executor.tcp_calls, 0);
+    }
 }

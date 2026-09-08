@@ -753,6 +753,39 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
             ..
         })
     ));
+    let mut truncated_name = vec![0; 12];
+    truncated_name[4..6].copy_from_slice(&1_u16.to_be_bytes());
+    truncated_name.extend_from_slice(&[3, b'w', b'w']);
+    assert!(matches!(
+        Dns::from_wire(truncated_name),
+        Err(packetcraftr_core::codec::Error::Truncated {
+            needed: 16,
+            available: 15,
+            ..
+        })
+    ));
+    let mut truncated_question_type = vec![0; 12];
+    truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
+    truncated_question_type.extend_from_slice(&[0, 0]);
+    assert!(matches!(
+        Dns::from_wire(truncated_question_type),
+        Err(packetcraftr_core::codec::Error::Truncated {
+            needed: 15,
+            available: 14,
+            ..
+        })
+    ));
+    let mut truncated_rdata = vec![0; 12];
+    truncated_rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
+    truncated_rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
+    assert!(matches!(
+        Dns::from_wire(truncated_rdata),
+        Err(packetcraftr_core::codec::Error::Truncated {
+            needed: 27,
+            available: 25,
+            ..
+        })
+    ));
     let mut too_many = vec![0; 12];
     too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
     let record_cap = Dns::from_wire(too_many).expect_err("record count above the cap");

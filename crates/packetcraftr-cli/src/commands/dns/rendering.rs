@@ -31,7 +31,7 @@ pub(super) fn render_text(
         server,
         comma_separated(&result.resolved_addresses),
         result.query_name,
-        result.query_type,
+        packetcraftr::dns::QueryType::new(result.query_type),
         result.transaction_id,
         result.fallback_attempted,
         optional_display(result.accepted_transport),

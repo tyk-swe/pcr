@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v2",
+  "schema": "packetcraftr.output/v3",
   "command": "dns",
   "mode": "stream",
   "sequence": 1,
@@ -10,7 +10,7 @@
     "server": "resolver.lab",
     "server_port": 53,
     "query_name": "10.2.0.192.in-addr.arpa.",
-    "query_type": "ptr",
+    "query_type": 12,
     "section": "answer",
     "record": {
       "owner": "10.2.0.192.in-addr.arpa.",

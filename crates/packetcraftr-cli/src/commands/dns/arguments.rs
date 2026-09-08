@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use clap::ValueEnum;
+use packetcraftr::dns::QueryType;
 
 use crate::command_options::{
     AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
@@ -14,40 +14,6 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. Each attempt starts over UDP. By default, one validated matching response with the truncation flag triggers at most one DNS-over-TCP continuation to the same reauthorized numeric server. UDP and TCP share the same --timeout-ms attempt window. --udp-only disables fallback for compatibility, transport diagnostics, or packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport.";
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-pub(crate) enum QueryType {
-    #[default]
-    A,
-    Aaaa,
-    Caa,
-    Cname,
-    Mx,
-    Ns,
-    Ptr,
-    Soa,
-    Srv,
-    Txt,
-    Any,
-}
-
-impl From<QueryType> for packetcraftr::dns::QueryType {
-    fn from(value: QueryType) -> Self {
-        match value {
-            QueryType::A => Self::A,
-            QueryType::Aaaa => Self::Aaaa,
-            QueryType::Caa => Self::Caa,
-            QueryType::Cname => Self::Cname,
-            QueryType::Mx => Self::Mx,
-            QueryType::Ns => Self::Ns,
-            QueryType::Ptr => Self::Ptr,
-            QueryType::Soa => Self::Soa,
-            QueryType::Srv => Self::Srv,
-            QueryType::Txt => Self::Txt,
-            QueryType::Any => Self::Any,
-        }
-    }
-}
-
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Explicit DNS server IP address or hostname.
@@ -56,8 +22,8 @@ pub(crate) struct Args {
     /// Bounded ASCII DNS owner name to query.
     #[arg(value_name = "NAME")]
     pub(crate) name: String,
-    /// DNS question type.
-    #[arg(long = "type", value_enum, default_value_t = QueryType::A)]
+    /// DNS type alias, decimal code, or TYPE<n> (0..=65535; at most five digits).
+    #[arg(long = "type", default_value_t = QueryType::A)]
     pub(crate) query_type: QueryType,
     /// Select the first authorized server address or one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
@@ -74,6 +40,13 @@ pub(crate) struct Args {
     /// Disable the recursion-desired query flag.
     #[arg(long)]
     pub(crate) no_recursion: bool,
+    /// Enable EDNS v0 with this advertised UDP response size (512..=65535).
+    /// Capture and decoding limits remain independently configured.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(512..))]
+    pub(crate) edns_udp_payload_size: Option<u16>,
+    /// Request DNSSEC records via EDNS DO; does not validate signatures.
+    #[arg(long, requires = "edns_udp_payload_size")]
+    pub(crate) dnssec_ok: bool,
     /// Keep DNS attempts UDP-only and report validated truncation as terminal.
     #[arg(long)]
     pub(crate) udp_only: bool,
@@ -143,9 +116,38 @@ mod tests {
     }
 
     #[test]
-    fn caa_query_type_maps_to_the_workflow_model() {
-        let query_type: packetcraftr::dns::QueryType =
-            dns_args(&["--type", "caa"]).query_type.into();
-        assert_eq!(query_type, packetcraftr::dns::QueryType::Caa);
+    fn query_types_parse_directly_into_the_workflow_model() {
+        for (text, code) in [
+            ("caa", 257),
+            ("AAAA", 28),
+            ("TYPE65000", 65000),
+            ("0", 0),
+            ("65535", 65535),
+        ] {
+            assert_eq!(dns_args(&["--type", text]).query_type, QueryType::new(code));
+        }
+        assert_eq!(dns_args(&[]).query_type, QueryType::A);
+    }
+    #[test]
+    fn edns_is_explicit_and_dnssec_requires_a_payload_size() {
+        assert_eq!(dns_args(&[]).edns_udp_payload_size, None);
+        assert!(!dns_args(&[]).dnssec_ok);
+        for size in ["512", "1232", "65535"] {
+            let args = dns_args(&["--edns-udp-payload-size", size, "--dnssec-ok"]);
+            assert_eq!(args.edns_udp_payload_size, Some(size.parse().unwrap()));
+            assert!(args.dnssec_ok);
+        }
+        assert!(!dns_args(&["--edns-udp-payload-size", "1232"]).dnssec_ok);
+        for extra in [
+            vec!["--dnssec-ok"],
+            vec!["--edns-udp-payload-size", "0"],
+            vec!["--edns-udp-payload-size", "511"],
+            vec!["--edns-udp-payload-size", "65536"],
+            vec!["--edns-udp-payload-size", "-1"],
+        ] {
+            let mut command = vec!["packetcraftr", "dns", "192.0.2.53", "example.test"];
+            command.extend(extra);
+            assert!(Cli::try_parse_from(command).is_err());
+        }
     }
 }

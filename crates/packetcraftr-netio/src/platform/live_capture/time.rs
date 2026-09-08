@@ -72,12 +72,11 @@ mod tests {
             monotonic_packet_time(packet_wall, observed_wall, observed_at),
             observed_at.checked_sub(Duration::from_millis(25))
         );
+        // Windows SystemTime has 100 ns precision, so a 1 ns offset rounds away.
+        let future_wall = observed_wall + Duration::from_secs(1);
+        assert!(future_wall > observed_wall);
         assert_eq!(
-            monotonic_packet_time(
-                observed_wall + Duration::from_nanos(1),
-                observed_wall,
-                observed_at
-            ),
+            monotonic_packet_time(future_wall, observed_wall, observed_at),
             None
         );
     }

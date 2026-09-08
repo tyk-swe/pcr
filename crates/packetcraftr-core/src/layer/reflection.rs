@@ -174,7 +174,6 @@ macro_rules! reflective_layer {
     }};
 }
 
-#[doc(hidden)]
 pub(crate) use reflective_layer;
 
 /// Why a reflective setter refused a value, before the field name and

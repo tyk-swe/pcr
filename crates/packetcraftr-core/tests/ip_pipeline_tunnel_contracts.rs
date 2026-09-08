@@ -257,7 +257,10 @@ fn scope_isolated_nested_fragment_frames(
     [first, first_tail, second, second_tail]
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fixture builder mirrors the wire fields"
+)]
 fn outer_ipv4_fragment_frame(
     registry: &Arc<packetcraftr_core::registry::Registry>,
     timestamp: SystemTime,

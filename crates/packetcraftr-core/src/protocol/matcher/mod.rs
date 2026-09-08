@@ -11,6 +11,8 @@ use crate::{
 };
 
 pub(crate) use echo::EchoMatcher;
+// Exported for the workflow crate's probe classification; not part of the
+// documented public API.
 #[doc(hidden)]
 pub use quoted_icmp::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
 pub(crate) use reverse_flow::ReverseFlowMatcher;

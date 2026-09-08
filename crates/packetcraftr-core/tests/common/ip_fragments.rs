@@ -104,7 +104,12 @@ pub(crate) fn client_ack_frame(
     Frame::new(timestamp, LinkType::IPV4, build(registry, packet)).expect("valid TCP frame")
 }
 
-#[allow(clippy::too_many_arguments)]
+// Shared by several test binaries, not all of which call this builder, so a
+// lint expectation would be unfulfilled where it is unused.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "fixture builder mirrors the wire fields"
+)]
 pub(crate) fn ipv4_protocol_fragment_frame(
     registry: &Arc<packetcraftr_core::registry::Registry>,
     timestamp: SystemTime,

@@ -50,7 +50,10 @@ fn root_after_help() -> String {
 
 /// The `--version` body: package version plus enabled native features.
 ///
-/// Built from `cfg!` so no new dependency is needed.
+/// Built from `cfg!` so no new dependency is needed. The release workflow's
+/// `scripts/build-manifest.py --verify` compares the complete two-line
+/// `--version` text against `BUILD-METADATA.json`, so this format is part of
+/// release packaging.
 fn long_version() -> &'static str {
     static LONG_VERSION: OnceLock<String> = OnceLock::new();
     LONG_VERSION.get_or_init(|| {

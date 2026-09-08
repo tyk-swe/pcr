@@ -32,6 +32,12 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
+      - name: Verify an extracted native archive
+        env:
+          PACKETCRAFTR_ARCHIVE_BINARY: target/debug/packetcraftr
+        run: |
+          cargo build --locked -p packetcraftr-cli --all-features
+          python3 scripts/test-verify-archive.py
 
   portable:
     name: Portable and pcap-free isolation
@@ -69,3 +75,10 @@ jobs:
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
       - name: Execute deterministic contracts with every native backend enabled
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli --all-features
+      - name: Verify an extracted native archive
+        shell: bash
+        env:
+          PACKETCRAFTR_ARCHIVE_BINARY: target/debug/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          cargo build --locked -p packetcraftr-cli --all-features
+          python scripts/test-verify-archive.py

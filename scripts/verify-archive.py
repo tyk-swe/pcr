@@ -66,7 +66,7 @@ def verify(root, version, commit, target, variant):
         if (record.get('schema') != 'packetcraftr.output/v2'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
-                or (index < len(records) - 1 and record.get('event') == 'complete')):
+                or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):
             raise ValueError('stream has invalid schema, sequence or completion')
     cli('tls', 'examples/captures/tls-handshake.pcapng')
     json.loads(cli('--output', 'json', 'build', '--packet-file',

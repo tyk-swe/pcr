@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Behavioral archive-verifier fixtures (run on Unix; no native builds required)."""
+"""Verifier failure fixtures and optional real-binary archive smoke on each CI OS."""
 import hashlib
 import importlib.util
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,9 @@ elif command == 'read':
     if mode == 'boolean-sequence': records[0]['sequence'] = False
     if mode == 'no-completion': records.pop()
     if mode == 'early-completion': records[0]['event'] = 'complete'
+    if mode == 'early-error': records[0]['event'] = 'error'
+    if mode == 'unknown-event': records[0]['event'] = 'unknown'
+    if mode == 'missing-event': del records[0]['event']
     if mode == 'non-object': records[0] = []
     output = '\n'.join(json.dumps(r) for r in records) + '\n'
     if mode == 'unterminated': output = output.rstrip('\n')
@@ -132,11 +136,56 @@ class ArchiveTests(unittest.TestCase):
     def test_invalid_outputs(self):
         for mode in ('empty-protocols', 'empty-tls', 'bytes-build', 'bytes-dissect', 'exit-recipe',
                      'bad-recipe', 'bad-schema', 'bad-sequence', 'boolean-sequence',
-                     'no-completion', 'early-completion', 'non-object',
+                     'no-completion', 'early-completion', 'early-error', 'unknown-event',
+                     'missing-event', 'non-object',
                      'unterminated', 'malformed', 'empty-read'):
             with self.subTest(mode=mode):
                 self.mode(mode)
                 self.check()
+
+
+@unittest.skipUnless(os.environ.get('PACKETCRAFTR_ARCHIVE_BINARY'),
+                     'set PACKETCRAFTR_ARCHIVE_BINARY to smoke-test a native archive')
+class NativeArchiveTests(unittest.TestCase):
+    def test_extracted_archive(self):
+        repository = SCRIPT.resolve().parent.parent
+        binary = pathlib.Path(os.environ['PACKETCRAFTR_ARCHIVE_BINARY']).resolve()
+        metadata = json.loads(subprocess.check_output(
+            ['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'],
+            cwd=repository, text=True, timeout=60))
+        version = next(package['version'] for package in metadata['packages']
+                       if package['name'] == 'packetcraftr-cli')
+        rustc = subprocess.check_output(['rustc', '--version', '--verbose'], text=True, timeout=30)
+        target = next(line.removeprefix('host: ') for line in rustc.splitlines()
+                      if line.startswith('host: '))
+        commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repository,
+                                         text=True, timeout=30).strip()
+        with tempfile.TemporaryDirectory(prefix='native archive smoke ') as directory:
+            temporary = pathlib.Path(directory)
+            staging = temporary / 'staging' / 'packetcraftr-package'
+            staging.mkdir(parents=True)
+            shutil.copy2(binary, staging / binary.name)
+            for asset in VERIFIER.ASSETS:
+                if asset == 'BUILD-METADATA.json':
+                    continue
+                destination = staging / asset
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(repository / asset, destination)
+            subprocess.run([
+                sys.executable, str(SCRIPT.with_name('build-manifest.py')),
+                '--binary', str(staging / binary.name), '--output', str(staging / 'BUILD-METADATA.json'),
+                '--commit', commit, '--target', target, '--variant', 'all-features',
+            ], check=True, timeout=60)
+            archive = shutil.make_archive(str(temporary / 'archive'),
+                                          'zip' if os.name == 'nt' else 'gztar',
+                                          root_dir=staging.parent)
+            extracted = temporary / 'extracted'
+            shutil.unpack_archive(archive, extracted)
+            subprocess.run([
+                sys.executable, str(SCRIPT), '--root', str(extracted / staging.name),
+                '--version', version, '--commit', commit, '--target', target,
+                '--variant', 'all-features',
+            ], check=True, timeout=300)
 
 
 if __name__ == '__main__':

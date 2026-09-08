@@ -104,6 +104,12 @@ fn prepare_request(
             }
         },
         recursion_desired: !arguments.no_recursion,
+        edns: arguments.edns_udp_payload_size.map(|udp_payload_size| {
+            packetcraftr::dns::EdnsRequest {
+                udp_payload_size,
+                dnssec_ok: arguments.dnssec_ok,
+            }
+        }),
         tcp_fallback: packetcraftr::dns::DEFAULT_TCP_FALLBACK && !arguments.udp_only,
         attempts: arguments.attempts,
         timeout: Duration::from_millis(arguments.timeout_ms),

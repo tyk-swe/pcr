@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::dns::{
-    MessageLimits, QueryType, decode_response, decode_tcp_frame, encode_query,
+    EdnsRequest, MessageLimits, QueryType, decode_response, decode_tcp_frame, encode_query,
 };
 
 fuzz_target!(|data: &[u8]| {
@@ -38,12 +38,19 @@ fuzz_target!(|data: &[u8]| {
         .map(u16::from_be_bytes)
         .unwrap_or(0);
     let query_type = QueryType::new(code);
+    let settings = EdnsRequest {
+        udp_payload_size: code,
+        dnssec_ok: data.get(2).is_some_and(|byte| byte & 1 != 0),
+    };
+    let encoded = encode_query("example.test", query_type, 0x1234, true, Some(settings));
+    assert_eq!(encoded.is_ok(), code >= 512);
+    let edns = (code >= 512).then_some(settings);
     if let Ok(text) = std::str::from_utf8(data) {
         if let Ok(parsed) = text.parse::<QueryType>() {
             assert_eq!(parsed.to_string().parse::<QueryType>().unwrap(), parsed);
         }
     }
-    let mut numeric = encode_query("example.test", query_type, 0x1234, true)
+    let mut numeric = encode_query("example.test", query_type, 0x1234, true, edns)
         .unwrap()
         .to_vec();
     numeric[2] |= 0x80;
@@ -66,7 +73,7 @@ fuzz_target!(|data: &[u8]| {
         assert!(decode_response(data, "example.test", QueryType::AAAA, id, limits).is_err());
     }
     // Near-valid mutations reach the question/record relations, not just the header.
-    let mut message = encode_query("example.test", QueryType::A, id, true)
+    let mut message = encode_query("example.test", QueryType::A, id, true, edns)
         .unwrap()
         .to_vec();
     message[2] |= 0x80;
@@ -107,7 +114,7 @@ fn correlate_endpoints(control: u8, message: &[u8], limits: MessageLimits) {
         transaction_id: 0x1234,
         query_name: "example.test".to_owned(),
         query_type: QueryType::A,
-        query: encode_query("example.test", QueryType::A, 0x1234, true).unwrap(),
+        query: encode_query("example.test", QueryType::A, 0x1234, true, None).unwrap(),
     };
     let mut sent = probe.packet();
     sent.get_mut::<Ipv4>().unwrap().source = client;

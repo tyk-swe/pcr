@@ -68,59 +68,68 @@ impl TcpExecutor for CountingExecutor {}
 
 #[test]
 fn cancellation_during_authorization_or_resolution_prevents_dns_execution() {
-    for progressive in [false, true] {
-        for cancel_during_resolution in [true, false] {
-            let signal = Cancellation::default();
-            let request = dns::Request {
-                server: "dns.example.test".parse().unwrap(),
-                address_family: Family::Any,
-                server_port: 53,
-                source_port: 40_000,
-                query_name: "example.test".to_owned(),
-                query_type: dns::QueryType::A,
-                transaction_id: 0x1234,
-                recursion_desired: true,
-                tcp_fallback: false,
-                attempts: 1,
-                timeout: Duration::from_secs(1),
-                queries_per_second: None,
-                limits: dns::Limits::default(),
-            };
-            let mut authorizer = CancellingAuthorizer {
-                signal: signal.clone(),
-                cancel_during_resolution,
-                resolutions: 0,
-            };
-            let registry = packetcraftr_core::protocol::builtin::registry();
-            let mut executor = CountingExecutor::default();
-            let mut clock = CancellableClock(signal);
-            let error = if progressive {
-                dns::run_with_events(
-                    &request,
-                    &mut authorizer,
-                    &registry,
-                    &mut executor,
-                    &mut clock,
-                    &Runtime::default(),
-                    |_| panic!("cancelled DNS operation must not publish an event"),
-                )
-                .unwrap_err()
-            } else {
-                dns::run(
-                    &request,
-                    &mut authorizer,
-                    &registry,
-                    &mut executor,
-                    &mut clock,
-                )
-                .unwrap_err()
-            };
-            assert_eq!(executor.0, 0);
-            assert_eq!(
-                authorizer.resolutions,
-                usize::from(cancel_during_resolution)
-            );
-            assert_eq!(error.classification().code, "io.cancelled");
+    for edns in [
+        None,
+        Some(dns::EdnsRequest {
+            udp_payload_size: 1232,
+            dnssec_ok: true,
+        }),
+    ] {
+        for progressive in [false, true] {
+            for cancel_during_resolution in [true, false] {
+                let signal = Cancellation::default();
+                let request = dns::Request {
+                    server: "dns.example.test".parse().unwrap(),
+                    address_family: Family::Any,
+                    server_port: 53,
+                    source_port: 40_000,
+                    query_name: "example.test".to_owned(),
+                    query_type: dns::QueryType::A,
+                    transaction_id: 0x1234,
+                    recursion_desired: true,
+                    edns,
+                    tcp_fallback: false,
+                    attempts: 1,
+                    timeout: Duration::from_secs(1),
+                    queries_per_second: None,
+                    limits: dns::Limits::default(),
+                };
+                let mut authorizer = CancellingAuthorizer {
+                    signal: signal.clone(),
+                    cancel_during_resolution,
+                    resolutions: 0,
+                };
+                let registry = packetcraftr_core::protocol::builtin::registry();
+                let mut executor = CountingExecutor::default();
+                let mut clock = CancellableClock(signal);
+                let error = if progressive {
+                    dns::run_with_events(
+                        &request,
+                        &mut authorizer,
+                        &registry,
+                        &mut executor,
+                        &mut clock,
+                        &Runtime::default(),
+                        |_| panic!("cancelled DNS operation must not publish an event"),
+                    )
+                    .unwrap_err()
+                } else {
+                    dns::run(
+                        &request,
+                        &mut authorizer,
+                        &registry,
+                        &mut executor,
+                        &mut clock,
+                    )
+                    .unwrap_err()
+                };
+                assert_eq!(executor.0, 0);
+                assert_eq!(
+                    authorizer.resolutions,
+                    usize::from(cancel_during_resolution)
+                );
+                assert_eq!(error.classification().code, "io.cancelled");
+            }
         }
     }
 }

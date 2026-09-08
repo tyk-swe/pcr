@@ -142,15 +142,15 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
         assert_eq!(query_type.to_string(), label);
     }
 
-    let recursive =
-        dns::encode_query("WWW.Example.COM", QueryType::A, ID, true).expect("canonical query");
+    let recursive = dns::encode_query("WWW.Example.COM", QueryType::A, ID, true, None)
+        .expect("canonical query");
     assert_eq!(&recursive[..2], &ID.to_be_bytes());
     assert_eq!(&recursive[2..4], &RECURSION_DESIRED.to_be_bytes());
     assert_eq!(&recursive[4..12], &[0, 1, 0, 0, 0, 0, 0, 0]);
     assert_eq!(&recursive[12..29], &name("www.example.com."));
     assert_eq!(&recursive[29..], &[0, 1, 0, 1]);
 
-    let root = dns::encode_query(".", QueryType::ANY, ID, false).expect("root query");
+    let root = dns::encode_query(".", QueryType::ANY, ID, false, None).expect("root query");
     assert_eq!(&root[12..], &[0, 0, 255, 0, 1]);
 }
 
@@ -1199,7 +1199,7 @@ fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
 fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
     for code in [0_u16, 65000, 65535] {
         let query_type = QueryType::new(code);
-        let query = dns::encode_query("example.test", query_type, ID, true).unwrap();
+        let query = dns::encode_query("example.test", query_type, ID, true, None).unwrap();
         assert_eq!(
             &query[query.len() - 4..],
             &[code.to_be_bytes(), 1_u16.to_be_bytes()].concat()
@@ -1237,6 +1237,55 @@ fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
         assert!(matches!(
             dns::decode_tcp_frame(&framed, "example.test", wrong_type, ID, Limits::default()),
             Err(WireError::QuestionTypeMismatch { .. })
+        ));
+    }
+}
+
+#[test]
+fn edns_query_has_one_exact_bounded_opt_and_no_options() {
+    use packetcraftr_core::protocol::application::dns::{Dns, RecordValue};
+    let plain = dns::encode_query("example.test", QueryType::A, ID, true, None).unwrap();
+    assert_eq!(&plain[10..12], &[0, 0]);
+    for udp_payload_size in [512, 1232, u16::MAX] {
+        for dnssec_ok in [false, true] {
+            let settings = dns::EdnsRequest {
+                udp_payload_size,
+                dnssec_ok,
+            };
+            let query =
+                dns::encode_query("example.test", QueryType::A, ID, true, Some(settings)).unwrap();
+            let mut expected = plain.to_vec();
+            expected[11] = 1;
+            expected.extend_from_slice(&[0, 0, 41]);
+            expected.extend_from_slice(&udp_payload_size.to_be_bytes());
+            expected.extend_from_slice(&[0, 0, if dnssec_ok { 0x80 } else { 0 }, 0, 0, 0]);
+            assert_eq!(query.as_ref(), expected);
+            assert_eq!(query.len(), plain.len() + 11);
+            let decoded = Dns::from_wire(query).unwrap();
+            assert_eq!(decoded.additionals.len(), 1);
+            let RecordValue::Opt(opt) = &decoded.additionals[0].value else {
+                panic!("expected OPT")
+            };
+            assert_eq!(opt.udp_payload_size, udp_payload_size);
+            assert_eq!(opt.version, 0);
+            assert_eq!(opt.extended_response_code, 0);
+            assert_eq!(opt.dnssec_ok, dnssec_ok);
+            assert!(opt.options.is_empty());
+        }
+    }
+    for udp_payload_size in [0, 511] {
+        assert!(matches!(
+            dns::encode_query(
+                ".",
+                QueryType::ANY,
+                ID,
+                false,
+                Some(dns::EdnsRequest {
+                    udp_payload_size,
+                    dnssec_ok: true,
+                })
+            ),
+            Err(WireError::InvalidEdns { .. })
         ));
     }
 }

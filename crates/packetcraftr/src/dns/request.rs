@@ -253,6 +253,31 @@ impl Limits {
     }
 }
 
+/// Opt-in EDNS version 0 query settings. No custom options are emitted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EdnsRequest {
+    /// Advertised UDP response capacity, within 512..=65535 bytes.
+    /// This does not change capture or message decoding limits.
+    pub udp_payload_size: u16,
+    /// Request DNSSEC records; this does not perform signature validation.
+    pub dnssec_ok: bool,
+}
+
+impl EdnsRequest {
+    /// Validates the advertised UDP response capacity before query construction.
+    pub fn validate(&self) -> Result<(), crate::dns::error::WireError> {
+        if self.udp_payload_size < 512 {
+            return Err(crate::dns::error::WireError::InvalidEdns {
+                message: format!(
+                    "request UDP payload size {} must be within 512..=65535",
+                    self.udp_payload_size
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
     pub server: Target,
@@ -263,6 +288,9 @@ pub struct Request {
     pub query_type: QueryType,
     pub transaction_id: u16,
     pub recursion_desired: bool,
+    /// Optional EDNS v0 settings; absent settings preserve the plain DNS query.
+    #[serde(default)]
+    pub edns: Option<EdnsRequest>,
     /// Whether a validated truncated UDP response may trigger one TCP
     /// continuation within the same attempt deadline. Scoped IPv6 link-local
     /// servers require UDP-only mode because [`Target`] does not carry a TCP
@@ -277,9 +305,12 @@ pub struct Request {
 impl Request {
     /// Rejects every request this workflow cannot execute: an out-of-range
     /// limit, port, attempt count, timeout, or rate, and a query name that is
-    /// not a valid DNS name.
+    /// not a valid DNS name, or invalid EDNS request settings.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
+        if let Some(edns) = self.edns {
+            edns.validate().map_err(Error::Query)?;
+        }
         if self.server_port == 0 {
             return Err(Error::InvalidPort);
         }

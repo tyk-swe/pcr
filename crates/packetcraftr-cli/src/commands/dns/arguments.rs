@@ -40,6 +40,13 @@ pub(crate) struct Args {
     /// Disable the recursion-desired query flag.
     #[arg(long)]
     pub(crate) no_recursion: bool,
+    /// Enable EDNS v0 with this advertised UDP response size (512..=65535).
+    /// Capture and decoding limits remain independently configured.
+    #[arg(long, value_parser = clap::value_parser!(u16).range(512..))]
+    pub(crate) edns_udp_payload_size: Option<u16>,
+    /// Request DNSSEC records via EDNS DO; does not validate signatures.
+    #[arg(long, requires = "edns_udp_payload_size")]
+    pub(crate) dnssec_ok: bool,
     /// Keep DNS attempts UDP-only and report validated truncation as terminal.
     #[arg(long)]
     pub(crate) udp_only: bool,
@@ -120,5 +127,27 @@ mod tests {
             assert_eq!(dns_args(&["--type", text]).query_type, QueryType::new(code));
         }
         assert_eq!(dns_args(&[]).query_type, QueryType::A);
+    }
+    #[test]
+    fn edns_is_explicit_and_dnssec_requires_a_payload_size() {
+        assert_eq!(dns_args(&[]).edns_udp_payload_size, None);
+        assert!(!dns_args(&[]).dnssec_ok);
+        for size in ["512", "1232", "65535"] {
+            let args = dns_args(&["--edns-udp-payload-size", size, "--dnssec-ok"]);
+            assert_eq!(args.edns_udp_payload_size, Some(size.parse().unwrap()));
+            assert!(args.dnssec_ok);
+        }
+        assert!(!dns_args(&["--edns-udp-payload-size", "1232"]).dnssec_ok);
+        for extra in [
+            vec!["--dnssec-ok"],
+            vec!["--edns-udp-payload-size", "0"],
+            vec!["--edns-udp-payload-size", "511"],
+            vec!["--edns-udp-payload-size", "65536"],
+            vec!["--edns-udp-payload-size", "-1"],
+        ] {
+            let mut command = vec!["packetcraftr", "dns", "192.0.2.53", "example.test"];
+            command.extend(extra);
+            assert!(Cli::try_parse_from(command).is_err());
+        }
     }
 }

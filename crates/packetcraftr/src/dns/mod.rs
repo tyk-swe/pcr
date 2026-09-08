@@ -89,7 +89,7 @@ pub use report::Summary;
 pub use report::Transport;
 pub use report::UndecodedEvidence;
 pub use report::ValidatedResponse;
-pub use request::{Limits, MessageLimits, QueryType, QueryTypeParseError, Request};
+pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, QueryTypeParseError, Request};
 
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};
 pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};

@@ -158,7 +158,9 @@ impl Classified for Error {
             Self::Query(_) => Classification::new(
                 "packet.dns_query",
                 Kind::Packet,
-                Some("use a bounded ASCII DNS name and a supported query type"),
+                Some(
+                    "use a bounded ASCII DNS name, a 16-bit query type, and an EDNS payload size within 512..=65535 when enabled",
+                ),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Family { .. } => Classification::new(

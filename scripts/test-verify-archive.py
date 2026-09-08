@@ -150,6 +150,8 @@ class NativeArchiveTests(unittest.TestCase):
     def test_extracted_archive(self):
         repository = SCRIPT.resolve().parent.parent
         binary = pathlib.Path(os.environ['PACKETCRAFTR_ARCHIVE_BINARY']).resolve()
+        variant = os.environ.get('PACKETCRAFTR_ARCHIVE_VARIANT', 'all-features')
+        self.assertIn(variant, ('all-features', 'pcap-free'))
         metadata = json.loads(subprocess.check_output(
             ['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'],
             cwd=repository, text=True, timeout=60))
@@ -174,7 +176,7 @@ class NativeArchiveTests(unittest.TestCase):
             subprocess.run([
                 sys.executable, str(SCRIPT.with_name('build-manifest.py')),
                 '--binary', str(staging / binary.name), '--output', str(staging / 'BUILD-METADATA.json'),
-                '--commit', commit, '--target', target, '--variant', 'all-features',
+                '--commit', commit, '--target', target, '--variant', variant,
             ], check=True, timeout=60)
             archive = shutil.make_archive(str(temporary / 'archive'),
                                           'zip' if os.name == 'nt' else 'gztar',
@@ -184,7 +186,7 @@ class NativeArchiveTests(unittest.TestCase):
             subprocess.run([
                 sys.executable, str(SCRIPT), '--root', str(extracted / staging.name),
                 '--version', version, '--commit', commit, '--target', target,
-                '--variant', 'all-features',
+                '--variant', variant,
             ], check=True, timeout=300)
 
 

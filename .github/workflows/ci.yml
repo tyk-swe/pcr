@@ -32,12 +32,26 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
-      - name: Verify an extracted native archive
+      - name: Verify an extracted full-native release archive
         env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/debug/packetcraftr
+          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
         run: |
-          cargo build --locked -p packetcraftr-cli --all-features
+          cargo build --locked --release -p packetcraftr-cli --all-features
+          ldd target/release/packetcraftr > linked-libraries.txt
+          grep -Eq 'libpcap\.so' linked-libraries.txt
           python3 scripts/test-verify-archive.py
+      - name: Verify an extracted pcap-free release archive
+        env:
+          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
+          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
+        run: |
+          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
+          ldd target/release/packetcraftr > linked-libraries.txt
+          if grep -Eq 'libpcap\.so' linked-libraries.txt; then
+            echo "pcap-free release unexpectedly links libpcap" >&2
+            exit 1
+          fi
+          python3 scripts/test-verify-archive.py NativeArchiveTests
 
   portable:
     name: Portable and pcap-free isolation
@@ -75,10 +89,18 @@ jobs:
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
       - name: Execute deterministic contracts with every native backend enabled
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli --all-features
-      - name: Verify an extracted native archive
+      - name: Verify an extracted full-native release archive
         shell: bash
         env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/debug/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
+          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
         run: |
-          cargo build --locked -p packetcraftr-cli --all-features
-          python scripts/test-verify-archive.py
+          cargo build --locked --release -p packetcraftr-cli --all-features
+          python scripts/test-verify-archive.py NativeArchiveTests
+      - name: Verify an extracted pcap-free release archive
+        shell: bash
+        env:
+          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
+          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
+        run: |
+          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
+          python scripts/test-verify-archive.py NativeArchiveTests

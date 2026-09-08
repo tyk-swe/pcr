@@ -14,7 +14,7 @@ use packetcraftr_core::analysis;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{Retained, omitted_diagnostic, prepare_with_tls_ports};
+use super::offline_analysis::{omitted_diagnostic, prepare_with_tls_ports};
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::emit_aggregate;
@@ -75,12 +75,8 @@ fn cap_table(
         code: &'static str,
         subject: &str,
     ) -> Vec<core::diagnostic::Diagnostic> {
-        let mut retained = Retained::new(limit);
-        for row in std::mem::take(rows) {
-            retained.push(|| row);
-        }
-        let omitted = retained.omitted();
-        *rows = retained.into_items();
+        let omitted = u64::try_from(rows.len().saturating_sub(limit)).unwrap_or(u64::MAX);
+        rows.truncate(limit);
         omitted_diagnostic(code, subject, omitted, "--top")
     }
     match table {

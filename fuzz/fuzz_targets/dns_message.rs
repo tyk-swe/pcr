@@ -30,12 +30,40 @@ fuzz_target!(|data: &[u8]| {
             assert!(decoded.field(section).is_some());
         }
     }
+    // Numeric query types must preserve all wire codes and reject adjacent
+    // question codes, independent of whether their RDATA is understood.
+    let code = data
+        .first_chunk::<2>()
+        .copied()
+        .map(u16::from_be_bytes)
+        .unwrap_or(0);
+    let query_type = QueryType::new(code);
+    if let Ok(text) = std::str::from_utf8(data) {
+        if let Ok(parsed) = text.parse::<QueryType>() {
+            assert_eq!(parsed.to_string().parse::<QueryType>().unwrap(), parsed);
+        }
+    }
+    let mut numeric = encode_query("example.test", query_type, 0x1234, true)
+        .unwrap()
+        .to_vec();
+    numeric[2] |= 0x80;
+    assert!(decode_response(&numeric, "example.test", query_type, 0x1234, limits).is_ok());
+    assert!(
+        decode_response(
+            &numeric,
+            "example.test",
+            QueryType::new(code ^ 1),
+            0x1234,
+            limits
+        )
+        .is_err()
+    );
     let id = 0x1234;
     let _ = decode_tcp_frame(data, "example.test", QueryType::A, id, limits);
     if decode_response(data, "example.test", QueryType::A, id, limits).is_ok() {
         assert!(decode_response(data, "example.test", QueryType::A, id ^ 1, limits).is_err());
         assert!(decode_response(data, "other.test", QueryType::A, id, limits).is_err());
-        assert!(decode_response(data, "example.test", QueryType::Aaaa, id, limits).is_err());
+        assert!(decode_response(data, "example.test", QueryType::AAAA, id, limits).is_err());
     }
     // Near-valid mutations reach the question/record relations, not just the header.
     let mut message = encode_query("example.test", QueryType::A, id, true)

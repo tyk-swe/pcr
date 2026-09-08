@@ -19,60 +19,110 @@ use crate::dns::{
     MAX_DURATION, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
 };
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QueryType {
-    #[default]
-    A,
-    Aaaa,
-    Caa,
-    Cname,
-    Mx,
-    Ns,
-    Ptr,
-    Soa,
-    Srv,
-    Txt,
-    Any,
-}
+/// A DNS question's exact 16-bit wire code, including unassigned codes.
+///
+/// Text accepts the named constants' aliases, decimal codes, or `TYPE<n>`.
+/// Numeric syntax contains one to five ASCII digits in `0..=65535`.
+/// Serialization uses the numeric code; display uses a lowercase known alias
+/// or `TYPE<n>` for other codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct QueryType(u16);
 
 impl QueryType {
-    pub const fn code(self) -> u16 {
-        match self {
-            Self::A => 1,
-            Self::Ns => 2,
-            Self::Cname => 5,
-            Self::Soa => 6,
-            Self::Ptr => 12,
-            Self::Mx => 15,
-            Self::Txt => 16,
-            Self::Aaaa => 28,
-            Self::Srv => 33,
-            Self::Caa => 257,
-            Self::Any => 255,
-        }
+    pub const A: Self = Self(1);
+    pub const NS: Self = Self(2);
+    pub const CNAME: Self = Self(5);
+    pub const SOA: Self = Self(6);
+    pub const PTR: Self = Self(12);
+    pub const MX: Self = Self(15);
+    pub const TXT: Self = Self(16);
+    pub const AAAA: Self = Self(28);
+    pub const SRV: Self = Self(33);
+    pub const ANY: Self = Self(255);
+    pub const CAA: Self = Self(257);
+
+    const ALIASES: [(Self, &'static str); 11] = [
+        (Self::A, "a"),
+        (Self::AAAA, "aaaa"),
+        (Self::CAA, "caa"),
+        (Self::CNAME, "cname"),
+        (Self::MX, "mx"),
+        (Self::NS, "ns"),
+        (Self::PTR, "ptr"),
+        (Self::SOA, "soa"),
+        (Self::SRV, "srv"),
+        (Self::TXT, "txt"),
+        (Self::ANY, "any"),
+    ];
+
+    /// Preserves any 16-bit code without assigning it record semantics.
+    pub const fn new(code: u16) -> Self {
+        Self(code)
     }
 
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::A => "a",
-            Self::Aaaa => "aaaa",
-            Self::Caa => "caa",
-            Self::Cname => "cname",
-            Self::Mx => "mx",
-            Self::Ns => "ns",
-            Self::Ptr => "ptr",
-            Self::Soa => "soa",
-            Self::Srv => "srv",
-            Self::Txt => "txt",
-            Self::Any => "any",
-        }
+    pub const fn code(self) -> u16 {
+        self.0
+    }
+}
+
+impl Default for QueryType {
+    fn default() -> Self {
+        Self::A
     }
 }
 
 impl fmt::Display for QueryType {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
+        match Self::ALIASES
+            .iter()
+            .find(|(query_type, _)| query_type == self)
+        {
+            Some((_, alias)) => formatter.write_str(alias),
+            None => write!(formatter, "TYPE{}", self.0),
+        }
+    }
+}
+
+/// Invalid bounded DNS query-type text.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum QueryTypeParseError {
+    #[error("expected a DNS type alias, 1–5 decimal digits, or TYPE followed by 1–5 digits")]
+    Syntax,
+    #[error("DNS query type must be within 0..=65535")]
+    OutOfRange(#[source] std::num::ParseIntError),
+}
+
+impl std::str::FromStr for QueryType {
+    type Err = QueryTypeParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() > 9 {
+            return Err(QueryTypeParseError::Syntax);
+        }
+        for (query_type, alias) in Self::ALIASES {
+            if value.eq_ignore_ascii_case(alias) {
+                return Ok(query_type);
+            }
+        }
+        let digits = if value
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("type"))
+        {
+            &value[4..]
+        } else {
+            value
+        };
+        if digits.is_empty()
+            || digits.len() > 5
+            || !digits.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(QueryTypeParseError::Syntax);
+        }
+        digits
+            .parse()
+            .map(Self)
+            .map_err(QueryTypeParseError::OutOfRange)
     }
 }
 
@@ -278,6 +328,87 @@ impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::Deco
             max_name_pointers: limits.max_name_pointers,
             max_txt_strings: limits.max_txt_strings,
             max_txt_bytes: limits.max_txt_bytes,
+        }
+    }
+}
+
+#[cfg(test)]
+mod query_type_tests {
+    use super::{QueryType, QueryTypeParseError};
+
+    #[test]
+    fn aliases_and_numeric_syntax_share_exact_codes_and_canonical_display() {
+        for (alias, code) in [
+            ("a", 1),
+            ("aaaa", 28),
+            ("caa", 257),
+            ("cname", 5),
+            ("mx", 15),
+            ("ns", 2),
+            ("ptr", 12),
+            ("soa", 6),
+            ("srv", 33),
+            ("txt", 16),
+            ("any", 255),
+        ] {
+            for text in [
+                alias.to_owned(),
+                alias.to_uppercase(),
+                code.to_string(),
+                format!("TyPe{code}"),
+            ] {
+                let parsed: QueryType = text.parse().expect("supported query type");
+                assert_eq!(parsed.code(), code);
+                assert_eq!(parsed.to_string(), alias);
+            }
+        }
+        for code in [0, 41, 65000, 65535] {
+            let parsed: QueryType = format!("TYPE{code}").parse().unwrap();
+            assert_eq!(parsed, QueryType::new(code));
+            assert_eq!(parsed.to_string(), format!("TYPE{code}"));
+            assert_eq!(serde_json::to_value(parsed).unwrap(), code);
+            assert_eq!(
+                serde_json::from_str::<QueryType>(&code.to_string()).unwrap(),
+                parsed
+            );
+        }
+        assert_eq!("00001".parse::<QueryType>().unwrap(), QueryType::default());
+    }
+
+    #[test]
+    fn invalid_query_types_are_bounded_and_typed() {
+        for text in [
+            "",
+            "TYPE",
+            "TYPE-1",
+            "-1",
+            "+1",
+            "1.0",
+            "0x1",
+            " 1",
+            "1 ",
+            "１",
+            "type１２",
+            "000001",
+            "TYPE000001",
+            "unknown",
+        ] {
+            assert!(
+                matches!(text.parse::<QueryType>(), Err(QueryTypeParseError::Syntax)),
+                "{text:?}"
+            );
+        }
+        for text in ["65536", "TYPE65536", "99999"] {
+            let error = text.parse::<QueryType>().unwrap_err();
+            assert!(matches!(error, QueryTypeParseError::OutOfRange(_)));
+            assert!(
+                std::error::Error::source(&error)
+                    .unwrap()
+                    .is::<std::num::ParseIntError>()
+            );
+        }
+        for json in ["-1", "65536", "1.5", "\"a\"", "\"65000\""] {
+            assert!(serde_json::from_str::<QueryType>(json).is_err());
         }
     }
 }

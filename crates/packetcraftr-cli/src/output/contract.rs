@@ -10,7 +10,7 @@ use serde::Serialize;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
-pub const SCHEMA_V2: &str = "packetcraftr.output/v2";
+pub const SCHEMA_V3: &str = "packetcraftr.output/v3";
 
 /// Declares the command vocabulary once: the enum, [`Command::ALL`], and
 /// [`Command::as_str`] all come from the single list below, in canonical order.

@@ -82,7 +82,7 @@ fn accepted_answers(
                 continue;
             };
             let keep = matches!(record.value, RecordValue::Cname(_))
-                || query_type == QueryType::Any
+                || query_type == QueryType::ANY
                 || record.value.type_code() == query_type.code();
             if let Some(slot) = accepted.get_mut(index) {
                 *slot = keep;
@@ -313,7 +313,7 @@ mod tests {
         assert_eq!(names.len(), 2001);
         assert!(accepted[..2002].iter().all(|keep| *keep));
         assert!(!accepted[2002]);
-        let (_, cname_only) = accepted_answers(&name(0), QueryType::Cname, &answers);
+        let (_, cname_only) = accepted_answers(&name(0), QueryType::CNAME, &answers);
         assert!(!cname_only[0]);
         assert!(cname_only[1..2002].iter().all(|keep| *keep));
     }

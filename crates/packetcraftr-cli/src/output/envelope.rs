@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use super::contract::{Command, Mode, SCHEMA_V2};
+use super::contract::{Command, Mode, SCHEMA_V3};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
@@ -90,7 +90,7 @@ impl<T> Envelope<T> {
     /// One aggregate JSON success.
     pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
-            schema: SCHEMA_V2,
+            schema: SCHEMA_V3,
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
@@ -110,7 +110,7 @@ impl<T> Envelope<T> {
         diagnostics: Vec<Diagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA_V2,
+            schema: SCHEMA_V3,
             command: Some(command),
             mode: Mode::Stream,
             sequence: Some(sequence),
@@ -133,7 +133,7 @@ impl Envelope<()> {
     /// before command selection.
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V2,
+            schema: SCHEMA_V3,
             command,
             mode: Mode::Aggregate,
             sequence: None,
@@ -147,7 +147,7 @@ impl Envelope<()> {
     /// One terminal NDJSON error record at `sequence`.
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V2,
+            schema: SCHEMA_V3,
             command,
             mode: Mode::Stream,
             sequence: Some(sequence),

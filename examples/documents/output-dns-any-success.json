@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v2",
+  "schema": "packetcraftr.output/v3",
   "command": "dns",
   "mode": "aggregate",
   "status": "success",
@@ -10,7 +10,7 @@
       "192.168.56.53"
     ],
     "query_name": "example.test.",
-    "query_type": "any",
+    "query_type": 255,
     "transaction_id": 4660,
     "outcome": "response",
     "fallback_attempted": false,

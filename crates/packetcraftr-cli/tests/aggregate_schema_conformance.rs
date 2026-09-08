@@ -1167,7 +1167,7 @@ fn dns_response_case() -> Value {
                 server_port: 53,
                 resolved_addresses: vec![server_address],
                 query_name: "example.test".to_owned(),
-                query_type: packetcraftr::dns::QueryType::Any,
+                query_type: packetcraftr::dns::QueryType::ANY,
                 transaction_id: 0x4a5b,
                 stats: workflow_stats(),
                 completion: packetcraftr::dns::Completion::new(
@@ -1651,7 +1651,7 @@ fn filter_discovery_metadata_is_required_and_validates_all_binding_kinds() {
         let fields = detail.remove("filter_fields").expect("metadata is present");
         assert!(
             !validator.is_valid(&document),
-            "output v2 requires filter discovery metadata"
+            "output v3 requires filter discovery metadata"
         );
         document["result"]["protocol"]["filter_fields"] = fields;
         document["result"]["protocol"]["filter_fields"][0]["kind"] = "unknown".into();

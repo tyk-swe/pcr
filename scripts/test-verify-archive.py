@@ -38,8 +38,8 @@ elif command in ('build', 'dissect'):
     print('00' if mode == 'bytes-' + command else expected)
 elif command == 'read':
     assert pathlib.Path('examples/captures/tls-handshake.pcapng').is_file()
-    records = [dict(schema='packetcraftr.output/v2', sequence=0, event='frame'),
-               dict(schema='packetcraftr.output/v2', sequence=1, event='complete')]
+    records = [dict(schema='packetcraftr.output/v3', sequence=0, event='frame'),
+               dict(schema='packetcraftr.output/v3', sequence=1, event='complete')]
     if mode == 'bad-schema': records[0]['schema'] = 'wrong'
     if mode == 'bad-sequence': records[1]['sequence'] = 3
     if mode == 'boolean-sequence': records[0]['sequence'] = False

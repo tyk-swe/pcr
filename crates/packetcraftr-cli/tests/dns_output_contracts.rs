@@ -94,7 +94,7 @@ fn response_message(answers: &[WireRecord], additionals: &[WireRecord]) -> Vec<u
             .to_be_bytes(),
     );
     message.extend_from_slice(&wire_name("example.test."));
-    message.extend_from_slice(&dns::QueryType::Any.code().to_be_bytes());
+    message.extend_from_slice(&dns::QueryType::ANY.code().to_be_bytes());
     message.extend_from_slice(&1_u16.to_be_bytes());
     for answer in answers {
         push_record(&mut message, answer);
@@ -146,7 +146,7 @@ fn representative_response() -> packetcraftr::dns::ValidatedResponse {
     let mut response = dns::decode_response(
         &message,
         "example.test",
-        dns::QueryType::Any,
+        dns::QueryType::ANY,
         TRANSACTION_ID,
         dns::MessageLimits::default(),
     )
@@ -216,7 +216,7 @@ fn event_context() -> Arc<dns::EventContext> {
         server: Arc::from("resolver.example.test"),
         server_port: 53,
         query_name: Arc::from("example.test"),
-        query_type: dns::QueryType::Any,
+        query_type: dns::QueryType::ANY,
     })
 }
 
@@ -232,7 +232,7 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
                 query_name: "example.test".to_owned(),
-                query_type: dns::QueryType::Any,
+                query_type: dns::QueryType::ANY,
                 transaction_id: TRANSACTION_ID,
                 stats: stats(),
                 completion: packetcraftr::dns::Completion::new(
@@ -361,7 +361,8 @@ fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
 
 #[test]
 fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
-    let context = event_context();
+    let mut context = event_context();
+    Arc::make_mut(&mut context).query_type = dns::QueryType::new(65000);
     let response = representative_response();
     let record = response.answers[0].clone();
     let rejected = response.rejected_records[0].clone();
@@ -395,7 +396,11 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
             dns_output::Event::try_from_dns(event).expect("progressive event converts");
         assert!(diagnostics.is_empty());
         assert_eq!(event.event_name(), expected_kind);
-        assert!(serde_json::to_value(event).unwrap().get("event").is_none());
+        let json = serde_json::to_value(event).unwrap();
+        assert!(json.get("event").is_none());
+        if expected_kind != "undecoded" {
+            assert_eq!(json["query_type"], 65000);
+        }
     }
 
     let diagnostic = Diagnostic::warning("dns.progressive_fixture", "fixture warning");
@@ -411,7 +416,7 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
             server_port: 53,
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
             query_name: "example.test".to_owned(),
-            query_type: dns::QueryType::Any,
+            query_type: dns::QueryType::new(65535),
             transaction_id: TRANSACTION_ID,
             stats: stats(),
             completion: packetcraftr::dns::Completion::new(
@@ -426,6 +431,7 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
     assert_eq!(converted_stats.bytes, 128);
     assert_eq!(complete.event_name(), "complete");
     let complete = serde_json::to_value(complete).expect("completion payload serializes");
+    assert_eq!(complete["query_type"], 65535);
     assert_eq!(complete["response_code"], 18);
     assert_eq!(complete["response_code_name"], "bad_time");
     assert_eq!(complete["rejected_record_count"], 1);
@@ -441,7 +447,7 @@ fn dns_timeout_output_omits_response_only_fields() {
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
                 query_name: "example.test".to_owned(),
-                query_type: dns::QueryType::A,
+                query_type: dns::QueryType::new(0),
                 transaction_id: TRANSACTION_ID,
                 stats: Stats::default(),
                 completion: packetcraftr::dns::Completion::new(
@@ -464,6 +470,7 @@ fn dns_timeout_output_omits_response_only_fields() {
     assert!(output.answers.is_empty());
 
     let json = serde_json::to_value(output).expect("timeout output serializes");
+    assert_eq!(json["query_type"], 0);
     for response_only in [
         "response_code",
         "response_code_name",
@@ -487,7 +494,7 @@ fn dns_timeout_output_omits_response_only_fields() {
             server_port: 53,
             resolved_addresses: Vec::new(),
             query_name: "example.test".to_owned(),
-            query_type: dns::QueryType::A,
+            query_type: dns::QueryType::new(0),
             transaction_id: TRANSACTION_ID,
             stats: Stats::default(),
             completion: packetcraftr::dns::Completion::new(

@@ -10,9 +10,9 @@ import sys
 
 ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md',
-    'docs/migration-beta.3.md', 'docs/analysis-resources.md',
+    'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
     'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v1.schema.json',
-    'schemas/packetcraftr.output.v2.schema.json',
+    'schemas/packetcraftr.output.v3.schema.json',
     'examples/captures/tls-handshake.pcapng',
     'examples/documents/packet-ipv4-udp.json',
 )
@@ -63,7 +63,7 @@ def verify(root, version, commit, target, variant):
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v2'
+        if (record.get('schema') != 'packetcraftr.output/v3'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):

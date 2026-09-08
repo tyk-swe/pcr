@@ -126,20 +126,19 @@ fn public_decode_functions_share_their_contract() {
 fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
     let cases = [
         (QueryType::A, 1, "a"),
-        (QueryType::Ns, 2, "ns"),
-        (QueryType::Cname, 5, "cname"),
-        (QueryType::Soa, 6, "soa"),
-        (QueryType::Ptr, 12, "ptr"),
-        (QueryType::Mx, 15, "mx"),
-        (QueryType::Txt, 16, "txt"),
-        (QueryType::Aaaa, 28, "aaaa"),
-        (QueryType::Srv, 33, "srv"),
-        (QueryType::Caa, 257, "caa"),
-        (QueryType::Any, 255, "any"),
+        (QueryType::NS, 2, "ns"),
+        (QueryType::CNAME, 5, "cname"),
+        (QueryType::SOA, 6, "soa"),
+        (QueryType::PTR, 12, "ptr"),
+        (QueryType::MX, 15, "mx"),
+        (QueryType::TXT, 16, "txt"),
+        (QueryType::AAAA, 28, "aaaa"),
+        (QueryType::SRV, 33, "srv"),
+        (QueryType::CAA, 257, "caa"),
+        (QueryType::ANY, 255, "any"),
     ];
     for (query_type, code, label) in cases {
         assert_eq!(query_type.code(), code);
-        assert_eq!(query_type.as_str(), label);
         assert_eq!(query_type.to_string(), label);
     }
 
@@ -151,7 +150,7 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
     assert_eq!(&recursive[12..29], &name("www.example.com."));
     assert_eq!(&recursive[29..], &[0, 1, 0, 1]);
 
-    let root = dns::encode_query(".", QueryType::Any, ID, false).expect("root query");
+    let root = dns::encode_query(".", QueryType::ANY, ID, false).expect("root query");
     assert_eq!(&root[12..], &[0, 0, 255, 0, 1]);
 }
 
@@ -445,7 +444,7 @@ fn header_and_question_validation_fail_closed() {
     mutations.push((qname, "qname"));
     let mut qtype = base.clone();
     let type_offset = qtype.len() - 4;
-    qtype[type_offset..type_offset + 2].copy_from_slice(&QueryType::Aaaa.code().to_be_bytes());
+    qtype[type_offset..type_offset + 2].copy_from_slice(&QueryType::AAAA.code().to_be_bytes());
     mutations.push((qtype, "qtype"));
     let mut qclass = base;
     let class_offset = qclass.len() - 2;
@@ -476,7 +475,7 @@ fn unrelated_question_errors_are_distinct_from_malformed_messages() {
         dns::decode_response(
             &base,
             "example.test",
-            QueryType::Aaaa,
+            QueryType::AAAA,
             ID,
             Limits::default(),
         )
@@ -531,13 +530,13 @@ fn decoder_supports_every_modeled_rdata_shape() {
     ];
     let message = response(
         "example.test.",
-        QueryType::Any,
+        QueryType::ANY,
         RESPONSE,
         &records,
         &[],
         &[],
     );
-    let decoded = decode(&message, "example.test", QueryType::Any);
+    let decoded = decode(&message, "example.test", QueryType::ANY);
     assert_eq!(decoded.answers.len(), records.len());
     let values = decoded
         .answers
@@ -579,13 +578,13 @@ fn caa_record_decodes_flags_tag_and_value() {
     rdata.extend_from_slice(b"letsencrypt.org");
     let message = response(
         "example.test.",
-        QueryType::Caa,
+        QueryType::CAA,
         RESPONSE,
         &[record(257, rdata)],
         &[],
         &[],
     );
-    let decoded = decode(&message, "example.test", QueryType::Caa);
+    let decoded = decode(&message, "example.test", QueryType::CAA);
     assert_eq!(decoded.answers.len(), 1);
     assert_eq!(decoded.answers[0].value.type_code(), 257);
     assert!(matches!(
@@ -599,7 +598,7 @@ fn caa_record_decodes_flags_tag_and_value() {
     for malformed in [Vec::new(), vec![0], vec![0, 5, b'i', b's'], vec![0, 0]] {
         let message = response(
             "example.test.",
-            QueryType::Caa,
+            QueryType::CAA,
             RESPONSE,
             &[record(257, malformed)],
             &[],
@@ -609,7 +608,7 @@ fn caa_record_decodes_flags_tag_and_value() {
             dns::decode_response(
                 &message,
                 "example.test",
-                QueryType::Caa,
+                QueryType::CAA,
                 ID,
                 Limits::default()
             ),
@@ -867,10 +866,10 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
 
     for (query_type, malformed) in [
         (QueryType::A, record(1, vec![1, 2, 3])),
-        (QueryType::Aaaa, record(28, vec![0; 15])),
-        (QueryType::Mx, record(15, vec![0, 1])),
-        (QueryType::Srv, record(33, vec![0; 6])),
-        (QueryType::Txt, record(16, vec![3, b'a'])),
+        (QueryType::AAAA, record(28, vec![0; 15])),
+        (QueryType::MX, record(15, vec![0, 1])),
+        (QueryType::SRV, record(33, vec![0; 6])),
+        (QueryType::TXT, record(16, vec![3, b'a'])),
     ] {
         let message = response(
             "example.test.",
@@ -891,7 +890,7 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
 fn txt_limits_and_name_compression_safety_are_enforced() {
     let message = response(
         "example.test.",
-        QueryType::Txt,
+        QueryType::TXT,
         RESPONSE,
         &[record(16, vec![1, b'a', 1, b'b'])],
         &[],
@@ -902,7 +901,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&message, "example.test", QueryType::Txt, ID, string_limit),
+        dns::decode_response(&message, "example.test", QueryType::TXT, ID, string_limit),
         Err(WireError::Decode(DecodeError::TxtStringLimit { limit: 1 }))
     ));
     let byte_limit = Limits {
@@ -910,7 +909,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&message, "example.test", QueryType::Txt, ID, byte_limit),
+        dns::decode_response(&message, "example.test", QueryType::TXT, ID, byte_limit),
         Err(WireError::Decode(DecodeError::TxtByteLimit { limit: 1 }))
     ));
 
@@ -1194,4 +1193,50 @@ fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
     ));
     assert_eq!(error.to_string(), cause.to_string());
     assert!(packetcraftr_core::error::source_chain(&error).is_empty());
+}
+
+#[test]
+fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
+    for code in [0_u16, 65000, 65535] {
+        let query_type = QueryType::new(code);
+        let query = dns::encode_query("example.test", query_type, ID, true).unwrap();
+        assert_eq!(
+            &query[query.len() - 4..],
+            &[code.to_be_bytes(), 1_u16.to_be_bytes()].concat()
+        );
+        let rdata = vec![0, 0xff, 0xc0, 0x0c, 0x80];
+        let message = response(
+            "example.test",
+            query_type,
+            RESPONSE,
+            &[record(code, rdata.clone()), record(code ^ 1, vec![0; 4])],
+            &[],
+            &[],
+        );
+        let decoded = decode(&message, "example.test", query_type);
+        assert_eq!(decoded.answers.len(), 1);
+        assert_eq!(
+            decoded.answers[0].value,
+            RecordValue::Unknown {
+                type_code: code,
+                rdata: Bytes::from(rdata)
+            }
+        );
+        assert_eq!(decoded.metadata.rejected_record_count, 1);
+        let wrong_type = QueryType::new(code ^ 1);
+        assert!(
+            matches!(dns::decode_response(&message, "example.test", wrong_type, ID, Limits::default()), Err(WireError::QuestionTypeMismatch { expected, actual }) if expected == code ^ 1 && actual == code)
+        );
+        let mut framed = u16::try_from(message.len()).unwrap().to_be_bytes().to_vec();
+        framed.extend_from_slice(&message);
+        assert_eq!(
+            dns::decode_tcp_frame(&framed, "example.test", query_type, ID, Limits::default())
+                .unwrap(),
+            decoded
+        );
+        assert!(matches!(
+            dns::decode_tcp_frame(&framed, "example.test", wrong_type, ID, Limits::default()),
+            Err(WireError::QuestionTypeMismatch { .. })
+        ));
+    }
 }

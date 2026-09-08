@@ -96,7 +96,7 @@ fn prepare_request(
             None => packetcraftr::dns::unpredictable_source_port().map_err(CliError::classified)?,
         },
         query_name: arguments.name.clone(),
-        query_type: arguments.query_type.into(),
+        query_type: arguments.query_type,
         transaction_id: match arguments.transaction_id {
             Some(id) => id,
             None => {

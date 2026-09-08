@@ -242,7 +242,7 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     ]);
     assert_no_terminal_style(&json_output.stdout);
     let value = parse_json(&json_output);
-    assert_eq!(value["schema"], "packetcraftr.output/v2");
+    assert_eq!(value["schema"], "packetcraftr.output/v3");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
     let text = run_success(&["--output", "text", "build", "--packet", "raw(text=hello)"]);
@@ -974,5 +974,27 @@ fn binary_stdout_requires_deliberate_override_on_a_terminal() {
             assert!(String::from_utf8_lossy(&output.stdout).contains("--force-binary-stdout"));
             assert!(!output.stdout.windows(7).any(|bytes| bytes == b"fixture"));
         }
+    }
+}
+
+#[test]
+fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
+    for query_type in [
+        "65536",
+        "TYPE65536",
+        "TYPE",
+        "TYPE-1",
+        "1.5",
+        " 1",
+        "000001",
+        "TYPE000001",
+        "１",
+    ] {
+        let output = run(&["dns", "192.0.2.53", "example.test", "--type", query_type]);
+        assert_eq!(output.status.code(), Some(2), "{query_type}");
+        assert!(output.stdout.is_empty());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("invalid value"), "{stderr}");
+        assert!(stderr.contains("--type"), "{stderr}");
     }
 }

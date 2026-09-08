@@ -15,6 +15,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- DNS TCP fallback requires explicit provider composition. Native socket
+  ownership moves to netio; the workflow retains DNS framing, shared deadlines,
+  and evidence. Library exchange executors opt in with `.with_dns_tcp(provider)`;
+  the CLI explicitly selects the standard-library TCP provider.
 - Release archives share one verifier for required assets, binary identity,
   exact offline packet bytes, and complete NDJSON output on Unix and Windows.
 - Netio interface-snapshot and packet-routing validation retain their original

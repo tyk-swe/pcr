@@ -258,6 +258,12 @@ terminal-truncation behavior, or when packet-oriented `--interface`, `--source`,
 or `--link-mode` overrides must be preserved. IPv6 link-local DNS servers also
 require `--udp-only` because the target syntax does not carry a TCP scope ID.
 
+Library callers opt into fallback by composing an exchange executor with
+`.with_dns_tcp(provider)`. The CLI explicitly selects
+`packetcraftr_netio::tcp::SystemProvider`; injected UDP executors default to
+unsupported TCP fallback. The standard-library TCP provider is available
+independently of the native packet-I/O feature flags.
+
 Kernel TCP control and retransmission packets are OS-managed, so DNS
 authorization does not mislabel them as an exact raw-packet count. It instead
 charges bounded connection and framed-message traffic units, application

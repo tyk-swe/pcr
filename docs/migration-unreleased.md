@@ -65,3 +65,18 @@ Wrapped errors display route context; inspect `std::error::Error::source()` or
 `Classified::causes()` for the validation detail. Native interface-snapshot
 validation similarly retains its original `SystemError` in the existing
 `SystemFault` shared-source representation. Classification codes are unchanged.
+
+## Explicit DNS TCP providers
+
+A bare `packetcraftr::probe::ExchangeExecutor` now reports unsupported TCP
+fallback. Opt in with `.with_dns_tcp(provider)`; the CLI selects
+`packetcraftr_netio::tcp::SystemProvider` explicitly. Injected UDP providers
+therefore cannot silently open a system TCP socket after a truncated response.
+
+Low-level callers pass a provider to `dns::tcp::exchange(request, &provider)`.
+`packetcraftr_netio::tcp::{Provider, Stream}` owns the narrow connection and
+stream capability; `dns::tcp` retains framing, finite deadlines, and evidence.
+The standard-library provider works independently of native packet and route
+feature flags. Interface, preferred-source, and link-mode overrides remain
+unsupported for kernel TCP, and each fallback retains endpoint reauthorization
+and final query-byte checks.

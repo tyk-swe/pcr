@@ -210,6 +210,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::InvalidSegmentRouting {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "packet.plan",
             Kind::Packet,
@@ -217,6 +218,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::InvalidSourceRouting {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "packet.plan",
             Kind::Packet,
@@ -642,4 +644,103 @@ fn live_io_mode_mismatch_display_names_both_modes() {
     let rendered = error.to_string();
     assert!(rendered.contains("Layer2"));
     assert!(rendered.contains("Layer3"));
+}
+
+/// Packet interpretation failures retain their typed cause through the public planner,
+/// before an injected provider can perform any I/O.
+#[test]
+fn route_planning_retains_semantic_failures_before_provider_io() {
+    use packetcraftr_core::{
+        Packet,
+        field::WireValue,
+        packet::semantics::Error as SemanticsError,
+        protocol::{
+            ipv6::SegmentRoutingHeader,
+            network::{Ipv4, Ipv6},
+        },
+    };
+    use packetcraftr_netio::{interface, route};
+    use std::error::Error as _;
+
+    struct NoIo;
+    impl route::Provider for NoIo {
+        type Error = io::Error;
+        fn lookup_with_preferences(
+            &self,
+            _: IpAddr,
+            _: Option<&interface::Id>,
+            _: Option<IpAddr>,
+        ) -> Result<route::Decision, Self::Error> {
+            panic!("invalid route must fail before provider I/O")
+        }
+    }
+
+    let mut ipv4_packet = Packet::new();
+    ipv4_packet.push(Ipv4 {
+        destination: "192.0.2.1".parse().unwrap(),
+        options: vec![131, 7, 5, 192, 0, 2, 2].into(),
+        ..Ipv4::default()
+    });
+    let mut ipv6_packet = Packet::new();
+    ipv6_packet.push(Ipv6 {
+        destination: "2001:db8::1".parse().unwrap(),
+        ..Ipv6::default()
+    });
+    ipv6_packet.push(SegmentRoutingHeader {
+        segments: vec!["2001:db8::1".parse().unwrap()],
+        last_entry: WireValue::Exact(1),
+        ..SegmentRoutingHeader::default()
+    });
+    for (packet, expected) in [
+        (
+            ipv4_packet,
+            SemanticsError::Ipv4SourceRoutePointer {
+                option: 131,
+                pointer: 5,
+            },
+        ),
+        (
+            ipv6_packet,
+            SemanticsError::SegmentLastEntry {
+                last_entry: 1,
+                expected: 0,
+            },
+        ),
+    ] {
+        let error = route::plan(&packet, None, &route::Options::default(), &NoIo).unwrap_err();
+        assert!(matches!(
+            (&error, &expected),
+            (
+                RouteError::InvalidSourceRouting { .. },
+                SemanticsError::Ipv4SourceRoutePointer { .. }
+            ) | (
+                RouteError::InvalidSegmentRouting { .. },
+                SemanticsError::SegmentLastEntry { .. }
+            )
+        ));
+        let source = error
+            .source()
+            .unwrap()
+            .downcast_ref::<SemanticsError>()
+            .unwrap();
+        assert_eq!(source, &expected);
+        assert_eq!(error.classification().code, "packet.plan");
+        assert_eq!(error.causes(), [expected.to_string()]);
+        assert!(!error.to_string().contains(&expected.to_string()));
+        assert!(source.source().is_none());
+    }
+
+    let mut local_failure = Packet::new();
+    local_failure.push(Ipv4 {
+        options: vec![131, 7, 4, 192, 0, 2, 2].into(),
+        ..Ipv4::default()
+    });
+    let error = route::plan(&local_failure, None, &route::Options::default(), &NoIo).unwrap_err();
+    assert!(matches!(
+        error,
+        RouteError::InvalidSourceRouting { source: None, .. }
+    ));
+    assert!(error.source().is_none());
+    assert!(error.causes().is_empty());
+    assert_eq!(error.classification().code, "packet.plan");
 }

@@ -83,9 +83,19 @@ pub enum Error {
     #[error("route did not select a source address for the packet")]
     MissingPacketSource,
     #[error("invalid Segment Routing Header route state: {message}")]
-    InvalidSegmentRouting { message: String },
+    InvalidSegmentRouting {
+        message: String,
+        /// Original packet-semantics rejection, absent for locally detected route failures.
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
+    },
     #[error("invalid IPv4 source-route state: {message}")]
-    InvalidSourceRouting { message: String },
+    InvalidSourceRouting {
+        message: String,
+        /// Original packet-semantics rejection, absent for locally detected route failures.
+        #[source]
+        source: Option<Box<dyn StdError + Send + Sync>>,
+    },
     #[error("packet carries an invalid neighbor-discovery VLAN stack: {message}")]
     InvalidNeighborVlan {
         message: String,

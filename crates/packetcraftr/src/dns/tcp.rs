@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS-over-TCP framing over portable system sockets.
+//! Bounded DNS-over-TCP framing over an explicitly selected TCP provider.
 //!
 //! This module deliberately exposes a DNS-specific exchange rather than a
 //! general stream-socket abstraction. Higher-level workflows remain
@@ -9,11 +9,11 @@
 //! One exchange consumes the first declared response frame and then drops the
 //! connection; later messages on the stream are outside that frame.
 
+use packetcraftr_netio::tcp::{Provider, Stream};
 use std::error::Error as StdError;
 use std::fmt;
-use std::io::{self, Read, Write};
+use std::io;
 use std::net::SocketAddr;
-use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
@@ -301,63 +301,17 @@ pub struct Response {
     pub frame: Bytes,
 }
 
-/// Runs one bounded DNS-over-TCP exchange over a portable system socket.
-///
-/// Connects, writes one framed query, and reads the first framed response; a
-/// subsequent message on the same stream is not part of that response. Backed
-/// by `std::net::TcpStream`.
-pub fn exchange(request: Request<'_>) -> Result<Response, Error> {
-    exchange_with_connector(request, &SystemConnector)
+/// Runs one bounded DNS-over-TCP exchange through the selected provider.
+/// Writes one framed query and reads the first framed response. Subsequent
+/// messages on the stream are outside this response.
+pub fn exchange<P: Provider>(request: Request<'_>, provider: &P) -> Result<Response, Error> {
+    exchange_with_clock(request, provider, Instant::now)
 }
 
-trait Stream: Read + Write {
-    fn peer_addr(&self) -> io::Result<SocketAddr>;
-    fn local_addr(&self) -> io::Result<SocketAddr>;
-    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
-    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
-}
-
-impl Stream for TcpStream {
-    fn peer_addr(&self) -> io::Result<SocketAddr> {
-        Self::peer_addr(self)
-    }
-
-    fn local_addr(&self) -> io::Result<SocketAddr> {
-        Self::local_addr(self)
-    }
-
-    fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        Self::set_read_timeout(self, timeout)
-    }
-
-    fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        Self::set_write_timeout(self, timeout)
-    }
-}
-
-trait Connector {
-    type Stream: Stream;
-
-    fn now(&self) -> Instant {
-        Instant::now()
-    }
-
-    fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream>;
-}
-
-struct SystemConnector;
-
-impl Connector for SystemConnector {
-    type Stream = TcpStream;
-
-    fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream> {
-        TcpStream::connect_timeout(&endpoint, timeout)
-    }
-}
-
-fn exchange_with_connector<C: Connector>(
+fn exchange_with_clock<P: Provider>(
     request: Request<'_>,
-    connector: &C,
+    connector: &P,
+    now: impl Fn() -> Instant,
 ) -> Result<Response, Error> {
     let maximum = usize::from(u16::MAX);
     if request.timeout.is_zero() {
@@ -379,7 +333,6 @@ fn exchange_with_connector<C: Connector>(
         });
     }
 
-    let now = || connector.now();
     let started = now();
     let deadline = started
         .checked_add(request.timeout)
@@ -646,7 +599,7 @@ fn is_timeout(error: &io::Error) -> bool {
 mod tests {
 
     use std::collections::VecDeque;
-    use std::io::Cursor;
+    use std::io::{Cursor, Read, Write};
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Mutex;
 
@@ -663,18 +616,23 @@ mod tests {
     const ENDPOINT: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53);
     const LOCAL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 49_152);
 
+    fn exchange_with_connector(
+        request: Request<'_>,
+        connector: &ScriptedConnector,
+    ) -> Result<Response, Error> {
+        exchange_with_clock(request, connector, || {
+            connector.stream.state.lock().unwrap().now
+        })
+    }
+
     #[derive(Clone)]
     struct ScriptedConnector {
         stream: ScriptedStream,
         connect_error: Option<io::ErrorKind>,
     }
 
-    impl Connector for ScriptedConnector {
+    impl Provider for ScriptedConnector {
         type Stream = ScriptedStream;
-
-        fn now(&self) -> Instant {
-            self.stream.state.lock().unwrap().now
-        }
 
         fn connect(&self, _endpoint: SocketAddr, _timeout: Duration) -> io::Result<Self::Stream> {
             if let Some(kind) = self.connect_error {
@@ -687,6 +645,7 @@ mod tests {
     #[derive(Clone)]
     struct ScriptedStream {
         state: Arc<Mutex<ScriptedState>>,
+        peer: SocketAddr,
     }
 
     struct ScriptedState {
@@ -702,6 +661,8 @@ mod tests {
         read_timeouts: Vec<Duration>,
         write_timeouts: Vec<Duration>,
         write_submissions: Vec<usize>,
+        read_error: Option<io::ErrorKind>,
+        write_error: Option<io::ErrorKind>,
     }
 
     impl ScriptedStream {
@@ -720,7 +681,10 @@ mod tests {
                     read_timeouts: Vec::new(),
                     write_timeouts: Vec::new(),
                     write_submissions: Vec::new(),
+                    read_error: None,
+                    write_error: None,
                 })),
+                peer: ENDPOINT,
             }
         }
     }
@@ -742,6 +706,9 @@ mod tests {
         fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
             let overrun = {
                 let mut state = self.state.lock().unwrap();
+                if let Some(kind) = state.read_error.take() {
+                    return Err(io::Error::from(kind));
+                }
                 if state.read_interrupts != 0 {
                     state.read_interrupts -= 1;
                     return Err(io::Error::from(io::ErrorKind::Interrupted));
@@ -775,6 +742,9 @@ mod tests {
                 self.state.lock().unwrap().now += delay;
             }
             let mut state = self.state.lock().unwrap();
+            if let Some(kind) = state.write_error.take() {
+                return Err(io::Error::from(kind));
+            }
             if state.write_interrupts != 0 {
                 state.write_interrupts -= 1;
                 return Err(io::Error::from(io::ErrorKind::Interrupted));
@@ -794,7 +764,7 @@ mod tests {
 
     impl Stream for ScriptedStream {
         fn peer_addr(&self) -> io::Result<SocketAddr> {
-            Ok(ENDPOINT)
+            Ok(self.peer)
         }
 
         fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -836,6 +806,42 @@ mod tests {
             query,
             timeout: Duration::from_secs(1),
             max_message_bytes: usize::from(u16::MAX),
+        }
+    }
+
+    #[test]
+    fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
+        let mut provider = connector(vec![0, 1, 1]);
+        provider.stream.peer = "127.0.0.2:53".parse().unwrap();
+        let error = exchange(request(b"q"), &provider).unwrap_err();
+        assert!(matches!(error, Error::Connect { source: None, .. }));
+        assert!(provider.stream.state.lock().unwrap().output.is_empty());
+    }
+
+    #[test]
+    fn provider_read_and_write_timeouts_preserve_phase_and_query_progress() {
+        for phase in [Phase::Write, Phase::ReadPrefix] {
+            let provider = connector(vec![0, 1, 1]);
+            {
+                let mut state = provider.stream.state.lock().unwrap();
+                match phase {
+                    Phase::Write => state.write_error = Some(io::ErrorKind::TimedOut),
+                    Phase::ReadPrefix => state.read_error = Some(io::ErrorKind::WouldBlock),
+                    _ => unreachable!(),
+                }
+            }
+            let error = exchange(request(b"q"), &provider).unwrap_err();
+            assert_same_error(
+                &error,
+                &Error::Timeout {
+                    phase,
+                    transferred: 0,
+                },
+            );
+            assert_eq!(
+                error.query_bytes_written(3),
+                if phase == Phase::Write { 0 } else { 3 }
+            );
         }
     }
 

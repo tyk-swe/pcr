@@ -76,7 +76,9 @@ impl packetcraftr::dns::TcpExecutor for Executor {
     ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::dns::tcp::Error> {
         // TCP only continues a truncated UDP answer, so the UDP execution has
         // already bound the interface; the kernel socket cannot honour it.
-        Exchange::new(&self.client, self.exchange.clone()).execute_tcp(exchange)
+        Exchange::new(&self.client, self.exchange.clone())
+            .with_dns_tcp(net::tcp::SystemProvider)
+            .execute_tcp(exchange)
     }
 }
 

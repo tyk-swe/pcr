@@ -227,12 +227,15 @@ impl TcpExecutor for LoopbackExecutor {
         &mut self,
         exchange: &super::TcpExchange,
     ) -> Result<super::TcpExecution, crate::dns::tcp::Error> {
-        let response = crate::dns::tcp::exchange(crate::dns::tcp::Request {
-            endpoint: exchange.endpoint,
-            query: &exchange.query,
-            timeout: exchange.timeout,
-            max_message_bytes: exchange.max_message_bytes,
-        })?;
+        let response = crate::dns::tcp::exchange(
+            crate::dns::tcp::Request {
+                endpoint: exchange.endpoint,
+                query: &exchange.query,
+                timeout: exchange.timeout,
+                max_message_bytes: exchange.max_message_bytes,
+            },
+            &packetcraftr_netio::tcp::SystemProvider,
+        )?;
         Ok(super::TcpExecution::new(exchange.permit, response))
     }
 }

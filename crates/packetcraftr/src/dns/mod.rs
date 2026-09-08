@@ -73,6 +73,7 @@ pub use classification::{ResponseClassification, classify_response, response_cod
 pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use execution::{Exchange, Execution, Probe, TcpExchange, TcpExecution, TcpExecutor};
+pub use executor::TcpExchangeExecutor;
 pub use report::AttemptEvidence;
 pub use report::AttemptTransport;
 pub use report::Completion;

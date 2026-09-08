@@ -21,6 +21,7 @@ pub mod link;
 pub mod neighbor;
 mod platform;
 pub mod route;
+pub mod tcp;
 pub mod transmit;
 
 pub use error::{Error, SendEvidenceFault, SystemFault};

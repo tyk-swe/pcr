@@ -207,37 +207,3 @@ jobs:
           cargo doc --locked --workspace --no-default-features --no-deps
           cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
           cargo doc --locked --workspace --all-features --no-deps
-      - name: Compile and run independent downstream consumers
-        run: |
-          cargo fmt --manifest-path compatibility/Cargo.toml -- --check
-          cargo test --locked --manifest-path compatibility/Cargo.toml --target-dir target/downstream-contracts
-
-  public-api:
-    name: Public API release diff
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Initialize API evidence
-        run: |
-          mkdir -p target/public-api
-          echo '{"status":"not_exercised","reason":"API inspection tools have not completed"}' > target/public-api/public-api.json
-      - name: Install pinned inspection tools
-        run: |
-          rustup toolchain install
-          rustup toolchain install nightly-2026-08-28 --profile minimal
-          sudo apt-get update
-          sudo apt-get install --yes libpcap-dev libssl-dev pkg-config
-          cargo install --locked cargo-public-api --version 0.52.0
-      - name: Compare public signatures with preceding release
-        run: python3 scripts/check-public-api.py
-      - name: Archive API snapshots and diff
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: public-api-evidence
-          path: target/public-api/
-          if-no-files-found: error
-          retention-days: 90

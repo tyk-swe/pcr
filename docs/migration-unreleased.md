@@ -147,4 +147,4 @@ A previously accepted capture near an aggregate limit can be rejected earlier;
 raise an explicit budget only after considering the hosting process limit.
 Packet-document key reordering no longer changes semantic acceptance. Existing
 input/depth and duplicate-field checks still apply. See
-[resource contracts](analysis-resources.md) and [API policy](public-api.md).
+[resource contracts](analysis-resources.md).

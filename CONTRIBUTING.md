@@ -34,10 +34,8 @@ packaging, checksums, and provenance separately.
 
 Use `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps` for API docs,
 `cargo bench -p packetcraftr-core` for benchmarks, and
-`./scripts/measure-memory.sh` for Linux peak-RSS profiling. Coverage is a manual
-workflow. Review unsafe wrappers, parser boundaries, rejected authorization and
-cleanup branches to choose a short risk backlog; there is no global coverage
-percentage gate. Dependency advisory/license checks run weekly, for dependency
+`python3 scripts/measure-analysis.py` against a release build of the portable
+CLI for Linux peak-RSS profiling. Dependency advisory/license checks run weekly, for dependency
 changes and at release preflight; `cargo deny --locked check` runs the same policy locally.
 
 Fuzzing has its own manifest and lockfile. Update both dependency graphs when
@@ -77,18 +75,15 @@ For restricted hosts, prebuild the test executable and use `sudo` with
 `--native-test-binary PATH`; the launcher maps namespace root to the invoking
 checkout owner's UID. It does not relax host namespace policy or file permissions.
 
-These are required Linux CI checks. The repository ruleset definition is
-[.github/required-checks.json](.github/required-checks.json); keep its GitHub
-Actions check names synchronized with the workflow job names. Missing prerequisites, failed namespace
+These are required Linux CI checks; keep the GitHub Actions job names
+synchronized with the branch ruleset's required check names. Missing prerequisites, failed namespace
 creation and skipped scenarios are failures, never passing native evidence.
 Windows/macOS privileged runtime scenarios remain explicitly unexercised.
 Reports are archived on failure as well as success. Release preflight requires
 clean, exact-commit reports from a successful push CI run.
 
-See [public API policy](docs/public-api.md) for the API inventory, pinned
-signature-diff tooling, documentation profiles and independent downstream
-contracts. Run `cargo test --locked --manifest-path compatibility/Cargo.toml
---target-dir target/downstream-contracts` for those consumers. Dependency upgrades
+CI builds documentation with warnings denied for the portable, pcap-free and
+full-native profiles. Dependency upgrades
 must also pass `document_limit_contracts::yaml_stream_exhaustion_dependency_contract`
 until the YAML dependency provides a typed streaming end signal.
 

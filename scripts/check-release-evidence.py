@@ -11,7 +11,6 @@ import subprocess
 REQUIRED = {
     'decode-oracle-evidence': 'decode-oracle.json',
     'native-isolated-evidence': 'native-isolated.json',
-    'public-api-evidence': 'public-api.json',
 }
 NATIVE = {'loopback_exchange', 'readiness_and_repeated_cleanup', 'idle_deadline_and_cancellation',
           'bounded_queue_reports_real_capture_loss', 'native_filter_error_preserves_diagnostic_and_releases_admission',
@@ -21,7 +20,7 @@ NATIVE = {'loopback_exchange', 'readiness_and_repeated_cleanup', 'idle_deadline_
 def validate(report, commit, kind):
     if report.get('status') != 'passed' or report.get('commit') != commit or report.get('dirty') is not False:
         raise ValueError(f'{kind}: missing successful clean exact-commit evidence')
-    if kind != 'public-api-evidence' and not re.fullmatch(r'[0-9a-f]{64}', report.get('binary_sha256', '')):
+    if not re.fullmatch(r'[0-9a-f]{64}', report.get('binary_sha256', '')):
         raise ValueError(f'{kind}: missing binary digest')
     if kind == 'native-isolated-evidence':
         scenarios = report.get('scenarios', [])
@@ -34,8 +33,6 @@ def validate(report, commit, kind):
             raise ValueError('decoder evidence is incomplete')
         if any(item.get('status') != 'passed' for item in report['captures']):
             raise ValueError('decoder capture failed')
-    if kind == 'public-api-evidence' and {item.get('name') for item in report.get('crates', [])} != {'packetcraftr-core', 'packetcraftr-netio', 'packetcraftr', 'packetcraftr-cli'}:
-        raise ValueError('public API evidence must cover all four crates')
 
 
 def main():

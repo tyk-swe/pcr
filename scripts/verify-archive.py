@@ -11,7 +11,6 @@ import sys
 ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
-    'docs/public-api.md',
     'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v1.schema.json',
     'schemas/packetcraftr.output.v3.schema.json',
     'examples/captures/tls-handshake.pcapng',

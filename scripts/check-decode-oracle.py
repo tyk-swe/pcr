@@ -10,9 +10,11 @@ import pathlib
 import re
 import runpy
 import socket
+import shutil
 import struct
 import subprocess
 import tempfile
+from validation_evidence import digest, provenance
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 helpers = runpy.run_path(str(ROOT / 'scripts/measure-analysis.py'))
@@ -69,13 +71,13 @@ def pcap(frames):
     return bytes(output)
 
 
-def tshark(data, fields):
+def tshark(data, fields, binary="tshark"):
     # stdin also works when an OS confines TShark's filesystem access.
-    command = ['tshark', '-n', '-r', '-', '-o', 'ip.defragment:FALSE',
+    command = [binary, '-n', '-r', '-', '-o', 'ip.defragment:FALSE',
                '-o', 'tcp.desegment_tcp_streams:FALSE', '-T', 'fields', '-E', 'occurrence=a']
     for field in fields:
         command.extend(['-e', field])
-    return subprocess.check_output(command, input=data, stderr=subprocess.PIPE).decode().splitlines()
+    return subprocess.check_output(command, input=data, stderr=subprocess.PIPE, timeout=30).decode().splitlines()
 
 
 def normalize(value, kind, core=False):
@@ -88,54 +90,91 @@ def normalize(value, kind, core=False):
     return value
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--binary', type=pathlib.Path, default=ROOT / 'target/release/packetcraftr')
-    parser.add_argument('--tshark-version', default='4.6.4')
-    parser.add_argument('--report', type=pathlib.Path, default=ROOT / 'target/decode-oracle.json')
-    args = parser.parse_args()
-    version = subprocess.check_output(['tshark', '--version'], text=True).splitlines()[0]
+def compare(args, report):
+    report.update(provenance(args.binary))
+    version = subprocess.check_output([args.tshark, '--version'], text=True, timeout=10).splitlines()[0]
+    report['tshark'] = version
+    report['tshark_sha256'] = digest(shutil.which(args.tshark))
     if not re.search(r'\b' + re.escape(args.tshark_version) + r'\b', version):
-        raise SystemExit(f'expected TShark {args.tshark_version}; found {version}')
+        raise RuntimeError(f'expected TShark {args.tshark_version}; found {version}')
     captures = [('spec-vectors', pcap(curated())),
                 ('tls-handshake', (ROOT / 'examples/captures/tls-handshake.pcapng').read_bytes())]
-    report = dict(tshark=version, allowances=["Fragmented physical children remain opaque in PacketcraftR; compare network fields only on those frames."], captures=[])
+    if args.full:
+        captures.extend((kind, pcap(packets(kind, 64))) for kind in
+                        ['flows', 'segments', 'overlaps', 'fragments', 'scopes', 'tls-gaps'])
+        captures.extend((f'{kind}-{size}', pcap(packets(kind, size)))
+                        for kind in ['tcp-growth', 'tcp-growth-reverse'] for size in [128, 1024, 8192])
     for name, data in captures:
+        capture_report = dict(name=name, sha256=hashlib.sha256(data).hexdigest(), status='failed')
+        report['captures'].append(capture_report)
         with tempfile.NamedTemporaryFile(suffix='.pcap') as capture:
             capture.write(data)
             capture.flush()
-            encoded = subprocess.check_output([args.binary, '--output', 'ndjson', 'read', capture.name, '--dissect'])
+            encoded = subprocess.check_output([str(args.binary), '--output', 'ndjson', 'read', capture.name, '--dissect'], timeout=60)
         records = [json.loads(line) for line in encoded.splitlines()]
-        assert records[-1]['event'] == 'complete'
+        if not records or records[-1]['event'] != 'complete':
+            raise RuntimeError(f'{name}: incomplete PacketcraftR output')
         records = [record['result'] for record in records if record['event'] == 'frame']
-        reference = tshark(data, [field[2] for field in FIELDS])
-        assert len(records) == len(reference), name
+        reference = tshark(data, [field[2] for field in FIELDS], args.tshark)
+        if len(records) != len(reference):
+            raise RuntimeError(f'{name}: frame count {len(records)} != {len(reference)}')
+        capture_report['frames'] = len(records)
+        mismatches = 0
         for index, (record, row) in enumerate(zip(records, reference), 1):
+            if len(row.split('\t')) != len(FIELDS):
+                raise RuntimeError(f'{name}: incomplete oracle field row {index}')
             layers = record['decoded']['packet']['layers']
             fragmented = any(layer['protocol'] == 'ipv4' and
                              (layer['fields']['more_fragments']['value'] or layer['fields']['fragment_offset']['value'])
                              for layer in layers)
             for (protocol, field, oracle_field, kind), reference_value in zip(FIELDS, row.split('\t')):
-                # Physical decoding keeps fragmented children opaque. With IP
-                # reassembly disabled, TShark still decodes first-fragment headers.
                 if fragmented and protocol in ('tcp', 'udp', 'dns'):
                     continue
-                observed = [layer['fields'][field]['value'] for layer in record['decoded']['packet']['layers']
+                observed = [layer['fields'][field]['value'] for layer in layers
                             if layer['protocol'] == protocol and field in layer['fields']]
                 if kind == 'names': observed = [name['value'] for names in observed for name in names]
                 if kind == 'bytes': observed = [value for value in observed if value]
                 observed = [normalize(value, kind, True) for value in observed]
                 expected = [normalize(value, kind) for value in reference_value.split(',') if value]
-                assert observed == expected, (name, index, oracle_field, observed, expected)
-        report['captures'].append(dict(name=name, sha256=hashlib.sha256(data).hexdigest(), frames=len(records)))
+                if observed != expected:
+                    mismatches += 1
+                    if len(report['mismatches']) < 100:
+                        report['mismatches'].append(dict(capture=name, frame=index, field=oracle_field,
+                                                         observed=observed, expected=expected))
+        capture_report.update(status='failed' if mismatches else 'passed', mismatches=mismatches)
     data = captures[1][1]
-    session = json.loads(subprocess.check_output([args.binary, '--output', 'json', 'tls', ROOT / 'examples/captures/tls-handshake.pcapng']))['result']['sessions'][0]
-    ja3 = [value for value in tshark(data, ['tls.handshake.ja3']) if value]
-    assert ja3 == [session['client']['ja3']]
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + '\n')
-    print(f"Compared {sum(item['frames'] for item in report['captures'])} physical frames and TLS JA3; {args.report}")
+    session = json.loads(subprocess.check_output([str(args.binary), '--output', 'json', 'tls',
+                         str(ROOT / 'examples/captures/tls-handshake.pcapng')], timeout=30))['result']['sessions'][0]
+    ja3 = [value for value in tshark(data, ['tls.handshake.ja3'], args.tshark) if value]
+    report['tls_ja3'] = dict(expected=ja3, observed=[session['client']['ja3']])
+    if ja3 != [session['client']['ja3']] or any(item['mismatches'] for item in report['captures']):
+        raise RuntimeError('independent decode comparison failed; see mismatches and tls_ja3')
+    report['status'] = 'passed'
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=pathlib.Path, default=ROOT / 'target/release/packetcraftr')
+    parser.add_argument('--tshark-version', default='4.6.4')
+    parser.add_argument('--tshark', default='tshark', help='path to the pinned TShark executable')
+    parser.add_argument('--report', type=pathlib.Path, default=ROOT / 'target/decode-oracle.json')
+    parser.add_argument('--full', action='store_true', help='include growth, overlap and generated protocol captures')
+    args = parser.parse_args()
+    args.binary = args.binary.resolve()
+    report = dict(status='failed', profile='full' if args.full else 'pull-request',
+                  expected_tshark=args.tshark_version, fields=[field[2] for field in FIELDS],
+                  allowances=['Fragmented physical children remain opaque in PacketcraftR; compare network fields only on those frames.'],
+                  captures=[], mismatches=[])
+    try:
+        compare(args, report)
+    except Exception as error:
+        report['error'] = str(error)
+    finally:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, indent=2) + '\n')
+    print(args.report)
+    return 0 if report['status'] == 'passed' else 1
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

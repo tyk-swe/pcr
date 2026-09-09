@@ -97,6 +97,9 @@
           "type": "string",
           "minLength": 1,
           "description": "Stream record discriminator; complete and error terminate the stream."
+        },
+        "resources": {
+          "$ref": "#/$defs/resourceReport"
         }
       }
     },
@@ -6826,6 +6829,134 @@
         "max_forward_step",
         "max_forward_step_frame"
       ]
+    },
+    "resourceReport": {
+      "type": "object",
+      "required": [
+        "settings",
+        "workers",
+        "cooperative_deadlines",
+        "hard_rss_limit"
+      ],
+      "properties": {
+        "settings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resourceSetting"
+          }
+        },
+        "workers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resourceWorker"
+          }
+        },
+        "cooperative_deadlines": {
+          "const": true
+        },
+        "hard_rss_limit": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceSetting": {
+      "type": "object",
+      "required": [
+        "name",
+        "value",
+        "unit",
+        "stage",
+        "scope",
+        "source",
+        "enabled"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "unit": {
+          "enum": [
+            "milliseconds",
+            "bytes",
+            "count",
+            "policy"
+          ]
+        },
+        "stage": {
+          "enum": [
+            "physical_input",
+            "indexed_metadata",
+            "active_state",
+            "result_retention",
+            "native_capture",
+            "operation",
+            "output"
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "default",
+            "override",
+            "fixed",
+            "derived"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "resourceWorker": {
+      "type": "object",
+      "required": [
+        "name",
+        "supported",
+        "capacity",
+        "active",
+        "rejected_admissions",
+        "cleanup_retaining_capacity"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected_admissions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cleanup_retaining_capacity": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

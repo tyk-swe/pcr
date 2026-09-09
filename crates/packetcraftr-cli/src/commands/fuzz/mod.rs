@@ -152,7 +152,8 @@ fn execute_offline(
     crate::cancellation::check()?;
     if format == Format::Ndjson {
         let event_stream = stream.clone();
-        let runtime = packetcraftr::progress::Runtime::default();
+        let runtime =
+            crate::resources::runtime("fuzz_progress", packetcraftr::progress::MAX_WORKER_CAPACITY);
         let summary = packetcraftr::fuzz::run_offline_with_events(
             &request,
             packet,
@@ -201,7 +202,8 @@ fn execute_live(
     let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
     if format == Format::Ndjson {
         let event_stream = stream.clone();
-        let runtime = packetcraftr::progress::Runtime::default();
+        let runtime =
+            crate::resources::runtime("fuzz_progress", packetcraftr::progress::MAX_WORKER_CAPACITY);
         let summary = packetcraftr::fuzz::run_with_events(
             packetcraftr::fuzz::RunInput {
                 request: &request,

@@ -25,9 +25,10 @@ pub enum Format {
 
 /// Resource envelope one packet document may occupy while it is parsed.
 ///
-/// Every limit is enforced inside the JSON and YAML deserializers, before the
-/// bounded item is allocated or inserted, so the two formats accept exactly
-/// the same documents. [`DocumentLimits::default`] is conservative for the
+/// Semantic limits are enforced inside the JSON and YAML deserializers when
+/// a value's tag is resolved, independent of object-key order. Temporary values
+/// use a separate input-derived storage envelope before becoming typed values,
+/// so staging cannot consume semantic list/node budgets for byte arrays. [`DocumentLimits::default`] is conservative for the
 /// documents the registry can describe and is far below the raw byte ceiling;
 /// widen individual fields with struct update syntax.
 ///

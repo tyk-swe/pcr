@@ -98,6 +98,12 @@ pub(crate) struct Cli {
         default_value_t = Format::Text
     )]
     pub(crate) format: Format,
+    /// Include effective resource settings and worker snapshots in JSON/NDJSON.
+    #[arg(long, global = true, help_heading = "Global options")]
+    pub(crate) resource_diagnostics: bool,
+    /// NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000).
+    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options")]
+    pub(crate) output_timeout_ms: Option<u64>,
     /// Allow binary raw/PCAP/PCAPNG bytes to be written to an interactive terminal.
     #[arg(long, global = true, help_heading = "Global options")]
     pub(crate) force_binary_stdout: bool,

@@ -1,0 +1,240 @@
+{
+  "schema": "packetcraftr.output/v3",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 1,
+      "max_regression": {
+        "secs": 10,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "max_forward_step_frame": 3
+    },
+    "table": "io",
+    "io": {
+      "origin": {
+        "unix_seconds": 100,
+        "nanoseconds": 0
+      },
+      "underflow_frames": 1,
+      "interval": {
+        "secs": 1,
+        "nanos": 0
+      },
+      "buckets": [
+        {
+          "offset": {
+            "secs": 0,
+            "nanos": 0
+          },
+          "frames": 2,
+          "bytes": 80
+        },
+        {
+          "offset": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "frames": 1,
+          "bytes": 40
+        }
+      ]
+    },
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 120,
+    "first_timestamp": {
+      "unix_seconds": 90,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 101,
+      "nanoseconds": 0
+    }
+  },
+  "diagnostics": [],
+  "resources": {
+    "settings": [
+      {
+        "name": "--ip-idle-expiry-ms",
+        "value": 30000,
+        "unit": "milliseconds",
+        "stage": "active_state",
+        "scope": "IP datagram inactivity interval in capture-time milliseconds",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--ip-overlap",
+        "value": "reject",
+        "unit": "policy",
+        "stage": "active_state",
+        "scope": "Policy for conflicting bytes in overlapping IPv4 or IPv6 fragments",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-bytes",
+        "value": 268435456,
+        "unit": "bytes",
+        "stage": "physical_input",
+        "scope": "Maximum aggregate captured payload bytes read from the input; a reader bound, unrelated to the live traffic budget of the same name",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-duration-ms",
+        "value": 3600000,
+        "unit": "milliseconds",
+        "stage": "operation",
+        "scope": "Maximum analysis run time in milliseconds",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-flows",
+        "value": 8192,
+        "unit": "count",
+        "stage": "indexed_metadata",
+        "scope": "Maximum capture-global distinct conversations per transport. Expiry does not release index entries; raising this increases retained metadata",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-frame-bytes",
+        "value": 16777216,
+        "unit": "bytes",
+        "stage": "physical_input",
+        "scope": "Maximum bytes accepted from any one captured frame or PCAPNG block",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-frames",
+        "value": 7,
+        "unit": "count",
+        "stage": "physical_input",
+        "scope": "Maximum physical input frames, including frames rejected by the filter",
+        "source": "override",
+        "enabled": true
+      },
+      {
+        "name": "--max-interfaces",
+        "value": 4096,
+        "unit": "count",
+        "stage": "indexed_metadata",
+        "scope": "Maximum PCAPNG interfaces accepted from the input",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-ip-bytes-per-datagram",
+        "value": 65535,
+        "unit": "bytes",
+        "stage": "active_state",
+        "scope": "Maximum fragmentable payload bytes accepted for one IP datagram",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-ip-datagrams",
+        "value": 8192,
+        "unit": "count",
+        "stage": "active_state",
+        "scope": "Maximum incomplete IPv4 and IPv6 datagrams retained concurrently",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-ip-fragments-per-datagram",
+        "value": 256,
+        "unit": "count",
+        "stage": "active_state",
+        "scope": "Maximum physical fragments accepted for one retained IP datagram",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-ip-outcomes",
+        "value": 8192,
+        "unit": "count",
+        "stage": "result_retention",
+        "scope": "Maximum per-datagram IP outcomes retained for aggregate reporting",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-ip-reassembly-bytes",
+        "value": 67108864,
+        "unit": "bytes",
+        "stage": "active_state",
+        "scope": "Maximum retained IP, derived cascade, and metadata bytes",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-scope-bytes",
+        "value": 16777216,
+        "unit": "bytes",
+        "stage": "indexed_metadata",
+        "scope": "Maximum charged capture-scope and encapsulation metadata bytes",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-tcp-bytes-per-flow",
+        "value": 1048576,
+        "unit": "bytes",
+        "stage": "active_state",
+        "scope": "Maximum retained TCP stream bytes in one direction",
+        "source": "default",
+        "enabled": false
+      },
+      {
+        "name": "--max-tcp-reassembly-bytes",
+        "value": 268435456,
+        "unit": "bytes",
+        "stage": "active_state",
+        "scope": "Maximum retained TCP payload and metadata bytes",
+        "source": "default",
+        "enabled": false
+      },
+      {
+        "name": "--max-tcp-segments-per-flow",
+        "value": 4096,
+        "unit": "count",
+        "stage": "active_state",
+        "scope": "Maximum pending out-of-order segments retained for one TCP direction",
+        "source": "default",
+        "enabled": false
+      },
+      {
+        "name": "--tcp-idle-expiry-ms",
+        "value": 120000,
+        "unit": "milliseconds",
+        "stage": "active_state",
+        "scope": "TCP flow inactivity interval in capture-time milliseconds",
+        "source": "default",
+        "enabled": false
+      }
+    ],
+    "workers": [
+      {
+        "name": "native_process",
+        "supported": true,
+        "capacity": 16,
+        "active": 0,
+        "rejected_admissions": 0,
+        "cleanup_retaining_capacity": 0
+      }
+    ],
+    "cooperative_deadlines": true,
+    "hard_rss_limit": false
+  }
+}

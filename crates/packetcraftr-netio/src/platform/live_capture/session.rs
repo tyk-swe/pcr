@@ -269,6 +269,7 @@ impl NativeCaptureSession {
                     });
                 match join_with_deadline(worker, timeout, SHUTDOWN_POLL_INTERVAL) {
                     JoinAttempt::TimedOut(worker) => {
+                        permit.retention_marker().mark_retained();
                         // The deadline expired with the worker still running,
                         // so this session keeps the complete bundle and an
                         // explicit retry stays possible.
@@ -283,12 +284,19 @@ impl NativeCaptureSession {
                     }
                     // The worker is finished, so the native interrupt and the
                     // cleanup permit are released here and only here.
-                    JoinAttempt::Finished(join_result) => join_result
-                        .map_err(|_| Error::Capture {
-                            message: "native capture worker panicked during shutdown".to_owned(),
-                            source: None,
-                        })
-                        .and(interrupt_result),
+                    JoinAttempt::Finished(join_result) => {
+                        // A user-supplied interrupt may own resources with a
+                        // destructor. Release it before returning admission.
+                        drop(interrupt);
+                        drop(permit);
+                        join_result
+                            .map_err(|_| Error::Capture {
+                                message: "native capture worker panicked during shutdown"
+                                    .to_owned(),
+                                source: None,
+                            })
+                            .and(interrupt_result)
+                    }
                 }
             }
         };
@@ -753,6 +761,57 @@ mod tests {
         finished_receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("capture reaper should eventually join the worker");
+    }
+
+    #[test]
+    fn successful_shutdown_keeps_admission_through_interrupt_destruction() {
+        struct BlockingDrop {
+            entered: Sender<()>,
+            release: std::sync::Mutex<Receiver<()>>,
+        }
+        impl CaptureInterrupt for BlockingDrop {
+            fn interrupt(&self) {}
+        }
+        impl Drop for BlockingDrop {
+            fn drop(&mut self) {
+                self.entered.send(()).unwrap();
+                self.release
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap();
+            }
+        }
+        let (reaper, _receiver) = client_with_receiver(1, 1);
+        let (entered, waiting) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let mut session = NativeCaptureSession::spawn_with_reaper(
+            NativeCaptureParts {
+                source: Box::new(CountingSource {
+                    calls: Arc::new(AtomicUsize::new(0)),
+                }),
+                interrupt: Arc::new(BlockingDrop {
+                    entered,
+                    release: std::sync::Mutex::new(released),
+                }),
+                metadata: metadata("destructor", 1),
+            },
+            Limits::default(),
+            Duration::from_secs(1),
+            Ok(reaper.clone()),
+        )
+        .unwrap();
+        let worker = std::thread::spawn(move || {
+            let _ = session.shutdown();
+        });
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            reaper.reserve().is_err(),
+            "interrupt destructor still owns admission"
+        );
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(reaper.reserve().is_ok());
     }
 
     #[test]

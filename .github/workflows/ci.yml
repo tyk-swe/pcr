@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"
 
 permissions:
   contents: read
@@ -104,3 +106,138 @@ jobs:
         run: |
           cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
           python scripts/test-verify-archive.py NativeArchiveTests
+
+  decoder-oracle:
+    name: Decoder oracle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize evidence
+        run: |
+          mkdir -p target/validation
+          echo '{"status":"not_exercised","reason":"oracle provisioning has not completed"}' > target/validation/decode-oracle.json
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: target/decode-oracle-tool
+          key: tshark-ubuntu-24.04-4.6.4-fbeab3d85c6c8a57
+      - name: Install pinned Rust toolchain and oracle build dependencies
+        run: |
+          rustup toolchain install
+          sudo apt-get update
+          sudo apt-get install --yes cmake ninja-build flex bison libglib2.0-dev libgcrypt20-dev libc-ares-dev libpcre2-dev libxml2-dev libspeexdsp-dev zlib1g-dev
+      - name: Build checksum-pinned offline decoder
+        run: scripts/build-decode-oracle.sh > target/validation/oracle-build.log 2>&1
+      - name: Build portable CLI
+        run: cargo build --locked --release -p packetcraftr-cli --no-default-features
+      - name: Compare independent decoder results
+        env:
+          FULL_CORPUS: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
+        run: |
+          args=()
+          if [[ "$FULL_CORPUS" == true ]]; then args+=(--full); fi
+          python3 scripts/check-decode-oracle.py --report target/validation/decode-oracle.json "${args[@]}"
+      - name: Preserve decoder evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: decode-oracle-evidence
+          path: target/validation/
+          if-no-files-found: error
+          retention-days: 90
+
+  native-isolated:
+    name: Isolated Linux native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize native evidence
+        run: |
+          mkdir -p target/validation
+          echo '{"status":"not_exercised","reason":"namespace launcher has not completed"}' > target/validation/native-isolated.json
+      - name: Install prerequisites
+        run: |
+          rustup toolchain install
+          sudo apt-get update
+          sudo apt-get install --yes libpcap-dev iproute2 util-linux
+      - name: Build native CLI and native contract executable
+        run: |
+          cargo build --locked --release -p packetcraftr-cli --all-features
+          cargo test --locked -p packetcraftr-netio --all-features --test native_isolated --no-run --message-format=json > target/native-test-build.jsonl
+          python3 - <<'PY'
+          import json, os
+          records = [json.loads(line) for line in open('target/native-test-build.jsonl')]
+          binary, = [r['executable'] for r in records if r.get('reason') == 'compiler-artifact' and r.get('executable') and r['target']['name'] == 'native_isolated']
+          with open(os.environ['GITHUB_ENV'], 'a') as out:
+              out.write(f'NATIVE_TEST_BINARY={binary}\n')
+          PY
+      - name: Exercise native I/O in a fresh isolated namespace
+        run: |
+          sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraftr \
+            --native-test-binary "$NATIVE_TEST_BINARY" --report target/validation/native-isolated.json
+      - name: Preserve native evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-isolated-evidence
+          path: target/validation/
+          if-no-files-found: error
+          retention-days: 90
+
+  docs-contracts:
+    name: Documentation and downstream contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install prerequisites
+        run: |
+          rustup toolchain install
+          sudo apt-get update
+          sudo apt-get install --yes libpcap-dev
+      - name: Check dependency direction and validation failure fixtures
+        run: |
+          python3 scripts/check-architecture.py
+          python3 scripts/test-validation-evidence.py
+      - name: Documentation for supported feature profiles
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --locked --workspace --no-default-features --no-deps
+          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
+          cargo doc --locked --workspace --all-features --no-deps
+      - name: Compile and run independent downstream consumers
+        run: |
+          cargo fmt --manifest-path compatibility/Cargo.toml -- --check
+          cargo test --locked --manifest-path compatibility/Cargo.toml --target-dir target/downstream-contracts
+
+  public-api:
+    name: Public API release diff
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Initialize API evidence
+        run: |
+          mkdir -p target/public-api
+          echo '{"status":"not_exercised","reason":"API inspection tools have not completed"}' > target/public-api/public-api.json
+      - name: Install pinned inspection tools
+        run: |
+          rustup toolchain install
+          rustup toolchain install nightly-2026-08-28 --profile minimal
+          sudo apt-get update
+          sudo apt-get install --yes libpcap-dev libssl-dev pkg-config
+          cargo install --locked cargo-public-api --version 0.52.0
+      - name: Compare public signatures with preceding release
+        run: python3 scripts/check-public-api.py
+      - name: Archive API snapshots and diff
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-api-evidence
+          path: target/public-api/
+          if-no-files-found: error
+          retention-days: 90

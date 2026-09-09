@@ -27,6 +27,7 @@ pub(super) struct PushAccountingInput<'a> {
     pub(super) limits: &'a Limits,
     pub(super) state: &'a TcpFlowState,
     pub(super) pending_bytes: usize,
+    pub(super) storage_bytes: usize,
     pub(super) emitted_segment_bytes: usize,
     pub(super) segment_count: usize,
     pub(super) old_retained_bytes: usize,
@@ -43,6 +44,7 @@ pub(super) fn plan_push_accounting(
         limits,
         state,
         pending_bytes,
+        storage_bytes,
         emitted_segment_bytes,
         segment_count,
         old_retained_bytes,
@@ -81,19 +83,11 @@ pub(super) fn plan_push_accounting(
         },
     )?;
     let prospective_memory = if retains_flow_state {
-        flow_memory_charge_parts(
-            final_pending_bytes,
-            final_pending_segments,
-            history_allocation,
-        )
+        flow_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
     } else {
         // An immediately closed generation never enters the flow table, but
         // buffers materialized while processing it remain budgeted.
-        buffer_memory_charge_parts(
-            final_pending_bytes,
-            final_pending_segments,
-            history_allocation,
-        )
+        buffer_memory_charge_parts(storage_bytes, final_pending_segments, history_allocation)
     }
     .ok_or(ResourceError::AggregateByteLimit {
         limit: limits.max_aggregate_bytes,

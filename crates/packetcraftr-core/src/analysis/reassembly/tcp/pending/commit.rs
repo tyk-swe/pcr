@@ -6,6 +6,7 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::{PendingMergePlan, PushPlan};
+use crate::analysis::reassembly::tcp::pages;
 use crate::analysis::reassembly::tcp::state::{
     TcpFlowState, append_emitted_history, trim_emitted_history,
 };
@@ -48,6 +49,7 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
             max_bytes_per_flow,
             plan,
             direct_payload,
+            &payload,
         );
         (Some(state), events)
     } else {
@@ -55,7 +57,15 @@ pub(in crate::analysis::reassembly::tcp) fn commit_push(
             .flows
             .get_mut(&flow)
             .expect("an unchanged generation has an established flow");
-        let events = commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, direct_payload);
+        let events = commit_flow_push(
+            state,
+            &flow,
+            now,
+            max_bytes_per_flow,
+            plan,
+            direct_payload,
+            &payload,
+        );
         state.deadline = deadline;
         (None, events)
     };
@@ -82,6 +92,7 @@ fn commit_flow_push(
     max_bytes_per_flow: usize,
     plan: PushPlan,
     direct_payload: Option<Bytes>,
+    incoming_payload: &[u8],
 ) -> Vec<Event> {
     let PushPlan {
         payload_sequence,
@@ -102,7 +113,7 @@ fn commit_flow_push(
     if let Some(history) = history_replacement {
         state.emitted_history = history;
     }
-    apply_pending_merge(state, merge);
+    let output = apply_pending_merge(state, merge, incoming_payload);
     state.pending_bytes = pending_bytes;
     if state.fin_offset.is_none() {
         state.fin_offset = incoming_fin_offset;
@@ -123,32 +134,12 @@ fn commit_flow_push(
         emit_data(state, flow, bytes, max_bytes_per_flow, &mut events);
     }
 
-    loop {
-        let next_start = state
-            .pending
-            .range(..=state.next_offset)
-            .next_back()
-            .map(|(start, _)| *start);
-        let Some(start) = next_start else {
-            break;
-        };
-        let (_, bytes) = state
-            .pending
-            .remove_entry(&start)
-            .expect("pending entry selected for emission exists");
-        let end = start
-            .checked_add(bytes.len() as u64)
-            .expect("pending entry end was validated while planning");
-        if end <= state.next_offset {
-            state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
-            continue;
-        }
-        let skip = usize::try_from(state.next_offset.saturating_sub(start))
-            .expect("pending entry skip fits its byte length");
-        let output =
-            crate::byte_slice::checked_slice(&bytes, skip, bytes.len()).unwrap_or_default();
-        state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
-        emit_data(state, flow, output, max_bytes_per_flow, &mut events);
+    if let Some(bytes) = output {
+        state.pending_bytes = state
+            .pending_bytes
+            .checked_sub(bytes.len())
+            .expect("planned delivery charge");
+        emit_data(state, flow, bytes, max_bytes_per_flow, &mut events);
     }
     events
 }
@@ -177,37 +168,83 @@ fn emit_data(
     });
 }
 
-fn apply_pending_merge(state: &mut TcpFlowState, merge: PendingMergePlan) {
+fn apply_pending_merge(
+    state: &mut TcpFlowState,
+    merge: PendingMergePlan,
+    payload: &[u8],
+) -> Option<Bytes> {
     let PendingMergePlan {
+        added_bytes,
         first_affected,
         affected_segment_count,
-        replacement,
         segment_count,
         direct_output,
+        emitted_segment_bytes,
+        union_start,
+        union_end,
+        offset,
+        payload_start,
+        new_pages,
+        output,
         ..
     } = merge;
-    if let Some(replacement) = replacement {
-        let mut current = first_affected;
-        for index in 0..affected_segment_count {
-            let start = current.expect("pending merge entry was validated while planning");
-            state
-                .pending
-                .remove(&start)
-                .expect("pending merge entry was validated while planning");
-            if index.saturating_add(1) < affected_segment_count {
-                current = state
-                    .pending
-                    .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-                    .next()
-                    .map(|(start, _)| *start);
+    if added_bytes == 0 || direct_output {
+        return output;
+    }
+    if emitted_segment_bytes == 0 {
+        for (key, page) in new_pages {
+            assert!(
+                state.pages.insert(key, page).is_none(),
+                "prepared page is new"
+            );
+        }
+        let payload = &payload[payload_start..];
+        let payload_end = offset + payload.len() as u64;
+        let mut cursor = offset;
+        if let Some(first) = first_affected {
+            for (&start, &end) in state.pending.range(first..).take(affected_segment_count) {
+                let stop = start.min(payload_end);
+                if cursor < stop {
+                    pages::insert(
+                        &mut state.pages,
+                        cursor,
+                        &payload[(cursor - offset) as usize..(stop - offset) as usize],
+                    );
+                }
+                cursor = cursor.max(end).min(payload_end);
             }
         }
-        let replaced = state.pending.insert(replacement.start, replacement.bytes);
-        debug_assert!(replaced.is_none());
+        if cursor < payload_end {
+            pages::insert(
+                &mut state.pages,
+                cursor,
+                &payload[(cursor - offset) as usize..],
+            );
+        }
     }
-    if direct_output {
-        debug_assert_eq!(state.pending.len().saturating_add(1), segment_count);
-    } else {
-        debug_assert_eq!(state.pending.len(), segment_count);
+    if let Some(first) = first_affected {
+        for _ in 0..affected_segment_count {
+            let start = *state
+                .pending
+                .range(first..)
+                .next()
+                .expect("planned interval exists")
+                .0;
+            let end = state
+                .pending
+                .remove(&start)
+                .expect("planned interval exists");
+            if emitted_segment_bytes != 0 {
+                pages::remove(&mut state.pages, start..end);
+            }
+        }
     }
+    if emitted_segment_bytes == 0 {
+        assert!(state.pending.insert(union_start, union_end).is_none());
+    }
+    debug_assert_eq!(
+        state.pending.len(),
+        segment_count - usize::from(emitted_segment_bytes != 0)
+    );
+    output
 }

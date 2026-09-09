@@ -153,6 +153,7 @@ fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Wi
         .ok_or(WireError::Decode(DecodeError::TruncatedField {
             field,
             offset,
+            needed: offset.saturating_add(delta),
         }))
 }
 

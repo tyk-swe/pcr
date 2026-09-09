@@ -8,6 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Clients can share an explicitly supplied progress runtime and inspect its
+  admission snapshot. Netio exposes read-only process-wide native resource
+  capacity, rejection and retained-cleanup diagnostics.
+- Opt-in `--resource-diagnostics` adds effective settings and worker samples to
+  existing JSON/NDJSON envelopes. `--output-timeout-ms` configures the finite
+  NDJSON writer wait; its default remains one second.
+- Required independent TShark and isolated Linux native CI validation, API
+  signature diffs, warnings-as-errors documentation profiles and independently
+  compiled downstream compatibility fixtures. Releases retain exact-commit
+  evidence and explicitly identify unexercised Windows/macOS runtime lanes.
 - Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
   set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
 - DNS `--type` accepts bounded decimal and `TYPE<n>` codes alongside named
@@ -39,6 +49,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   remain unchanged. See [the migration notes](docs/migration-unreleased.md).
 - DNS record and name types move to `packetcraftr_core`; malformed declared
   records now produce offline diagnostics instead of a header-only DNS layer.
+
+### Fixed
+
+- TCP pending growth no longer recopies its retained range on adjacent or
+  reverse extension. Bounded payload pages and interval metadata are charged
+  independently; transient output/history allocations are admitted before commit.
+  Tight memory budgets may reject earlier because page slack and peaks are charged.
+- Packet-document semantic budgets are independent of object-key order in JSON
+  and YAML, including byte arrays, address widths and nested lists. Temporary
+  staging remains bounded separately from semantic node/list/payload limits.
+- TCP retransmission history uses an explicitly sized ring instead of assuming
+  `VecDeque::try_reserve_exact` returns an exact capacity.
+- Live DNS truncation errors include their required byte widths, fixing
+  workspace compilation after the shared DNS decoder error gained that field.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

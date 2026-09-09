@@ -20,6 +20,7 @@ pub mod interface;
 pub mod link;
 pub mod neighbor;
 mod platform;
+pub mod resources;
 pub mod route;
 pub mod tcp;
 pub mod transmit;

@@ -36,5 +36,9 @@ pub(crate) fn client(
         ),
         policy,
     )
+    .with_progress_runtime(crate::resources::runtime(
+        "client_progress",
+        packetcraftr::progress::MAX_WORKER_CAPACITY,
+    ))
     .with_cancellation(crate::cancellation::signal().clone())
 }

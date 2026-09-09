@@ -132,7 +132,10 @@ pub(super) fn prepare(
         policy,
         registry,
         executor,
-        runtime: packetcraftr::progress::Runtime::default(),
+        runtime: crate::resources::runtime(
+            "workflow_progress",
+            packetcraftr::progress::MAX_WORKER_CAPACITY,
+        ),
     })
 }
 

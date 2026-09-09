@@ -1,0 +1,109 @@
+{
+  "schema": "packetcraftr.output/v3",
+  "command": "read",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "frame",
+  "status": "success",
+  "result": {
+    "source_frame": 1,
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 100,
+        "nanoseconds": 0
+      },
+      "captured_length": 40,
+      "original_length": 40,
+      "link_type": 228,
+      "bytes_hex": "450000280000000040068e99c0000201c63364020400115c000003e800000000500220008a670000"
+    }
+  },
+  "diagnostics": [],
+  "resources": {
+    "settings": [
+      {
+        "name": "--max-bytes",
+        "value": 268435456,
+        "unit": "bytes",
+        "stage": "physical_input",
+        "scope": "Maximum aggregate captured payload bytes read from the input; a reader bound, unrelated to the live traffic budget of the same name",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-frame-bytes",
+        "value": 16777216,
+        "unit": "bytes",
+        "stage": "physical_input",
+        "scope": "Maximum bytes accepted from any one captured frame or PCAPNG block",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-frames",
+        "value": 10000,
+        "unit": "count",
+        "stage": "physical_input",
+        "scope": "Maximum physical input frames, including frames rejected by the filter",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--max-interfaces",
+        "value": 4096,
+        "unit": "count",
+        "stage": "indexed_metadata",
+        "scope": "Maximum PCAPNG interfaces accepted from the input",
+        "source": "default",
+        "enabled": true
+      },
+      {
+        "name": "--output-timeout-ms",
+        "value": 1500,
+        "unit": "milliseconds",
+        "stage": "output",
+        "scope": "NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000)",
+        "source": "override",
+        "enabled": true
+      },
+      {
+        "name": "output_record_bytes",
+        "value": 16777216,
+        "unit": "bytes",
+        "stage": "output",
+        "scope": "One prepared NDJSON line, including newline",
+        "source": "fixed",
+        "enabled": true
+      },
+      {
+        "name": "terminal_error_timeout_ms",
+        "value": 1000,
+        "unit": "milliseconds",
+        "stage": "output",
+        "scope": "Separate terminal-error cleanup wait; cannot repair a failed write",
+        "source": "fixed",
+        "enabled": true
+      }
+    ],
+    "workers": [
+      {
+        "name": "native_process",
+        "supported": true,
+        "capacity": 16,
+        "active": 0,
+        "rejected_admissions": 0,
+        "cleanup_retaining_capacity": 0
+      },
+      {
+        "name": "output_writer",
+        "supported": true,
+        "capacity": 1,
+        "active": 1,
+        "rejected_admissions": 0,
+        "cleanup_retaining_capacity": 0
+      }
+    ],
+    "cooperative_deadlines": true,
+    "hard_rss_limit": false
+  }
+}

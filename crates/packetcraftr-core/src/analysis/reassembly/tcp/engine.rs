@@ -83,6 +83,7 @@ impl Reassembler {
                 !changes_generation,
                 aggregate_bytes,
                 aggregate_memory_charge,
+                self.aggregate_memory_charge,
                 &segment,
             )?
         };

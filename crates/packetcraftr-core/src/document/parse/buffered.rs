@@ -1,38 +1,31 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Retention of a `value` that arrived before its `type`.
-
-use bytes::Bytes;
-use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
+//! Tag-independent, bounded staging. Numbers in arrays occupy one byte;
+//! only tagged objects consume semantic list items and nodes.
 
 use std::fmt;
+
+use bytes::Bytes;
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Unexpected, Visitor};
 
 use crate::document::types::Limit;
 use crate::field::FieldValue;
 
-use super::budget::{BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES};
-use super::seed::{BoundedString, FieldValueSeed, Tag};
+use super::budget::{
+    BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV4_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES,
+    MAC_PAYLOAD_BYTES,
+};
+use super::seed::{FieldValueSeed, Tag};
 
-/// A `value` that arrived before its `type`.
-///
-/// The value is retained under the most expensive interpretation it could
-/// still have: strings are text, and sequence elements are charged as list
-/// items, nodes, and payload bytes at once. A document that puts `value`
-/// first therefore fits a slightly narrower envelope than the same document
-/// with `type` first, but never a wider one.
 pub(super) enum Buffered {
     Bool(bool),
     Unsigned(u64),
     Signed(i64),
     Text(String),
-    Seq(Vec<BufferedItem>),
-}
-
-pub(super) enum BufferedItem {
-    Unsigned(u64),
-    Signed(i64),
-    Value(FieldValue),
+    Empty,
+    Bytes(Vec<u8>),
+    List(Vec<FieldValue>),
 }
 
 impl Buffered {
@@ -40,63 +33,64 @@ impl Buffered {
         self,
         tag: Tag,
         budget: &Budget<'_>,
+        depth: usize,
     ) -> Result<FieldValue, E> {
-        match (tag, self) {
-            (Tag::Bool, Self::Bool(value)) => Ok(FieldValue::Bool(value)),
-            (Tag::Unsigned, Self::Unsigned(value)) => Ok(FieldValue::Unsigned(value)),
-            (Tag::Signed, Self::Signed(value)) => Ok(FieldValue::Signed(value)),
-            (Tag::Signed, Self::Unsigned(value)) => i64::try_from(value)
-                .map(FieldValue::Signed)
-                .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a signed integer")),
-            (Tag::Text, Self::Text(value)) => Ok(FieldValue::Text(value)),
-            (Tag::Ipv4, Self::Text(value)) => value
-                .parse()
-                .map(FieldValue::Ipv4)
-                .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv4 address")),
-            (Tag::Ipv6, Self::Text(value)) => {
-                // The buffered string has already been charged by its text
-                // length. A compressed address can be shorter than the
-                // retained 16-byte value, so reserve the difference now.
-                budget.charge_payload(IPV6_PAYLOAD_BYTES.saturating_sub(value.len()))?;
+        let value = match (tag, self) {
+            (Tag::Bool, Self::Bool(value)) => FieldValue::Bool(value),
+            (Tag::Unsigned, Self::Unsigned(value)) => FieldValue::Unsigned(value),
+            (Tag::Signed, Self::Signed(value)) => FieldValue::Signed(value),
+            (Tag::Signed, Self::Unsigned(value)) => {
+                FieldValue::Signed(i64::try_from(value).map_err(|_| {
+                    E::invalid_value(Unexpected::Unsigned(value), &"a signed integer")
+                })?)
+            }
+            (Tag::Text, Self::Text(value)) => {
+                budget.check_width(value.len(), Limit::TextBytes)?;
+                FieldValue::Text(value)
+            }
+            (Tag::Ipv4, Self::Text(value)) => FieldValue::Ipv4(
                 value
                     .parse()
-                    .map(FieldValue::Ipv6)
-                    .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv6 address"))
+                    .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv4 address"))?,
+            ),
+            (Tag::Ipv6, Self::Text(value)) => FieldValue::Ipv6(
+                value
+                    .parse()
+                    .map_err(|_| E::invalid_value(Unexpected::Str(&value), &"an IPv6 address"))?,
+            ),
+            (Tag::Bytes, Self::Bytes(value)) => {
+                budget.check_width(value.len(), Limit::ByteValueBytes)?;
+                FieldValue::Bytes(Bytes::from(value))
             }
-            (Tag::Bytes, Self::Seq(items)) => {
-                budget.check_width(items.len(), Limit::ByteValueBytes)?;
-                items
-                    .into_iter()
-                    .map(BufferedItem::into_byte)
-                    .collect::<Result<Vec<u8>, E>>()
-                    .map(|bytes| FieldValue::Bytes(Bytes::from(bytes)))
+            (Tag::Bytes, Self::Empty) => FieldValue::Bytes(Bytes::new()),
+            (Tag::Mac, Self::Bytes(value)) => {
+                FieldValue::Mac(value.try_into().map_err(|value: Vec<u8>| {
+                    E::invalid_length(value.len(), &"6 MAC address bytes")
+                })?)
             }
-            (Tag::Mac, Self::Seq(items)) => {
-                let bytes = items
-                    .into_iter()
-                    .map(BufferedItem::into_byte)
-                    .collect::<Result<Vec<u8>, E>>()?;
-                <[u8; 6]>::try_from(bytes)
-                    .map(FieldValue::Mac)
-                    .map_err(|bytes| E::invalid_length(bytes.len(), &"6 MAC address bytes"))
+            (Tag::List, Self::List(value)) => {
+                budget.enter_list(depth)?;
+                FieldValue::List(value)
             }
-            (Tag::List, Self::Seq(items)) => items
-                .into_iter()
-                .map(|item| match item {
-                    BufferedItem::Value(value) => Ok(value),
-                    BufferedItem::Unsigned(value) => Err(E::invalid_type(
-                        Unexpected::Unsigned(value),
-                        &"a tagged field value object",
-                    )),
-                    BufferedItem::Signed(value) => Err(E::invalid_type(
-                        Unexpected::Signed(value),
-                        &"a tagged field value object",
-                    )),
-                })
-                .collect::<Result<Vec<_>, E>>()
-                .map(FieldValue::List),
-            (tag, other) => Err(E::invalid_type(other.unexpected(), &tag.expected())),
-        }
+            (Tag::List, Self::Empty) => {
+                budget.enter_list(depth)?;
+                FieldValue::List(Vec::new())
+            }
+            (tag, other) => return Err(E::invalid_type(other.unexpected(), &tag.expected())),
+        };
+        let width = match &value {
+            FieldValue::Bool(_) => BOOL_PAYLOAD_BYTES,
+            FieldValue::Unsigned(_) | FieldValue::Signed(_) => INTEGER_PAYLOAD_BYTES,
+            FieldValue::Text(value) => value.len(),
+            FieldValue::Bytes(value) => value.len(),
+            FieldValue::Ipv4(_) => IPV4_PAYLOAD_BYTES,
+            FieldValue::Ipv6(_) => IPV6_PAYLOAD_BYTES,
+            FieldValue::Mac(_) => MAC_PAYLOAD_BYTES,
+            // Children were charged when their tags were resolved.
+            FieldValue::List(_) => 0,
+        };
+        budget.charge_payload(width)?;
+        Ok(value)
     }
 
     fn unexpected(&self) -> Unexpected<'_> {
@@ -105,18 +99,7 @@ impl Buffered {
             Self::Unsigned(value) => Unexpected::Unsigned(*value),
             Self::Signed(value) => Unexpected::Signed(*value),
             Self::Text(value) => Unexpected::Str(value),
-            Self::Seq(_) => Unexpected::Seq,
-        }
-    }
-}
-
-impl BufferedItem {
-    fn into_byte<E: de::Error>(self) -> Result<u8, E> {
-        match self {
-            Self::Unsigned(value) => u8::try_from(value)
-                .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a byte")),
-            Self::Signed(value) => Err(E::invalid_value(Unexpected::Signed(value), &"a byte")),
-            Self::Value(_) => Err(E::invalid_type(Unexpected::Map, &"a byte")),
+            Self::Empty | Self::Bytes(_) | Self::List(_) => Unexpected::Seq,
         }
     }
 }
@@ -129,137 +112,146 @@ pub(super) struct BufferedSeed<'b, 'l> {
 
 impl<'de> DeserializeSeed<'de> for BufferedSeed<'_, '_> {
     type Value = Buffered;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Buffered, D::Error> {
         deserializer.deserialize_any(self)
     }
 }
 
 impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
     type Value = Buffered;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a boolean, integer, string, or array field value")
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a boolean, integer, string, or array field value")
     }
-
-    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Self::Value, E> {
-        self.budget.charge_payload(BOOL_PAYLOAD_BYTES)?;
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<Buffered, E> {
         Ok(Buffered::Bool(value))
     }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Buffered, E> {
         Ok(Buffered::Unsigned(value))
     }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
-        u64::try_from(value).map_or(Ok(Buffered::Signed(value)), |value| {
-            Ok(Buffered::Unsigned(value))
-        })
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Buffered, E> {
+        Ok(u64::try_from(value).map_or(Buffered::Signed(value), Buffered::Unsigned))
     }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        BoundedString {
-            budget: self.budget,
-            limit: Limit::TextBytes,
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Buffered, E> {
+        // The only possible string tags are text, IPv4 and IPv6. Even an
+        // uncompressed IPv6 address with a dotted IPv4 tail is at most 45
+        // bytes. Reject impossible candidates before copying their text.
+        if value.len() > self.budget.limits.max_text_bytes.max(45) {
+            return Err(self.budget.exceeded(Limit::TextBytes));
         }
-        .visit_str(value)
-        .map(Buffered::Text)
+        self.budget.charge_temporary(value.len())?;
+        Ok(Buffered::Text(value.to_owned()))
     }
-
-    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-        BoundedString {
-            budget: self.budget,
-            limit: Limit::TextBytes,
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Buffered, E> {
+        if value.len() > self.budget.limits.max_text_bytes.max(45) {
+            return Err(self.budget.exceeded(Limit::TextBytes));
         }
-        .visit_string(value)
-        .map(Buffered::Text)
+        self.budget.charge_temporary(value.capacity())?;
+        Ok(Buffered::Text(value))
     }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        self.budget.enter_list(self.depth)?;
-        if let Some(hint) = sequence.size_hint() {
-            self.budget.check_width(hint, Limit::ListItems)?;
-        }
-        let mut items = Vec::with_capacity(
-            self.budget
-                .bounded_capacity(sequence.size_hint(), Limit::ListItems),
-        );
-        loop {
-            if let Some(limit) = self.budget.list_budget_full(items.len()) {
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(self.budget.exceeded(limit));
-                }
-                return Ok(Buffered::Seq(items));
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Buffered, A::Error> {
+        let mut result = Buffered::Empty;
+        let mut count = 0usize;
+        while let Some(item) = sequence.next_element_seed(ItemSeed {
+            parent: self,
+            count,
+        })? {
+            if count == 0 {
+                self.budget
+                    .charge_temporary(std::mem::size_of::<FieldValue>())?;
             }
-            self.budget.charge_list_item()?;
-            let Some(item) = sequence.next_element_seed(BufferedItemSeed {
-                budget: self.budget,
-                depth: self.depth.saturating_add(1),
-            })?
-            else {
-                self.budget.refund_list_item();
-                return Ok(Buffered::Seq(items));
-            };
-            items.push(item);
+            match (&mut result, item) {
+                (Buffered::Empty, Item::Byte(value)) => result = Buffered::Bytes(vec![value]),
+                (Buffered::Empty, Item::Value(value)) => result = Buffered::List(vec![value]),
+                (Buffered::Bytes(values), Item::Byte(value)) => {
+                    grow(values, self.budget)?;
+                    values.push(value);
+                }
+                (Buffered::List(values), Item::Value(value)) => {
+                    grow(values, self.budget)?;
+                    values.push(value);
+                }
+                _ => {
+                    return Err(de::Error::custom(
+                        "mixed bytes and tagged values in an array",
+                    ));
+                }
+            }
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| self.budget.exceeded(Limit::InputBytes))?;
         }
+        Ok(result)
     }
 }
 
-#[derive(Clone, Copy)]
-struct BufferedItemSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
+fn grow<T, E: de::Error>(values: &mut Vec<T>, budget: &Budget<'_>) -> Result<(), E> {
+    if values.len() == values.capacity() {
+        let extra = values.capacity().max(1);
+        let bytes = extra
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| budget.exceeded(Limit::InputBytes))?;
+        budget.charge_temporary(bytes)?;
+        values.try_reserve_exact(extra).map_err(E::custom)?;
+    }
+    Ok(())
 }
 
-impl<'de> DeserializeSeed<'de> for BufferedItemSeed<'_, '_> {
-    type Value = BufferedItem;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
+enum Item {
+    Byte(u8),
+    Value(FieldValue),
+}
+struct ItemSeed<'b, 'l> {
+    parent: BufferedSeed<'b, 'l>,
+    count: usize,
+}
+impl<'de> DeserializeSeed<'de> for ItemSeed<'_, '_> {
+    type Value = Item;
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Item, D::Error> {
         deserializer.deserialize_any(self)
     }
 }
-
-impl<'de> Visitor<'de> for BufferedItemSeed<'_, '_> {
-    type Value = BufferedItem;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a byte or a tagged field value object")
+impl<'de> Visitor<'de> for ItemSeed<'_, '_> {
+    type Value = Item;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a byte or a tagged field value object")
     }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.budget.charge_node()?;
-        self.budget.charge_payload(1)?;
-        Ok(BufferedItem::Unsigned(value))
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Item, E> {
+        let byte = u8::try_from(value)
+            .map_err(|_| E::invalid_value(Unexpected::Unsigned(value), &"a byte"))?;
+        // Until the tag arrives the array can be bytes or a six-byte MAC.
+        if self.count
+            >= self
+                .parent
+                .budget
+                .limits
+                .max_byte_value_bytes
+                .max(MAC_PAYLOAD_BYTES)
+        {
+            return Err(self.parent.budget.exceeded(Limit::ByteValueBytes));
+        }
+        Ok(Item::Byte(byte))
     }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.budget.charge_node()?;
-        self.budget.charge_payload(1)?;
-        u64::try_from(value).map_or(Ok(BufferedItem::Signed(value)), |value| {
-            Ok(BufferedItem::Unsigned(value))
-        })
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Item, E> {
+        let value = u64::try_from(value)
+            .map_err(|_| E::invalid_value(Unexpected::Signed(value), &"a byte"))?;
+        self.visit_u64(value)
     }
-
-    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let seed = FieldValueSeed {
-            budget: self.budget,
-            depth: self.depth,
-        };
-        seed.budget.charge_node()?;
-        seed.visit_map(map).map(BufferedItem::Value)
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Item, A::Error> {
+        let budget = self.parent.budget;
+        budget.enter_list(self.parent.depth)?;
+        if let Some(limit) = budget.list_budget_full(self.count) {
+            return Err(budget.exceeded(limit));
+        }
+        budget.charge_list_item()?;
+        budget.charge_node()?;
+        FieldValueSeed {
+            budget,
+            depth: self.parent.depth + 1,
+        }
+        .visit_map(map)
+        .map(Item::Value)
     }
 }

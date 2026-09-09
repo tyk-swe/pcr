@@ -31,6 +31,7 @@ pub(super) fn transfer_capture_worker(
     permit: WorkerPermit,
     reaper: &ReaperClient,
 ) -> TransferOutcome {
+    permit.retention_marker().mark_retained();
     reaper.transfer(Box::new(move || {
         // The permit and interrupt are intentionally captured by this task so
         // neither can be released before the worker has actually stopped.

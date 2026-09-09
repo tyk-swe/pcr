@@ -35,6 +35,7 @@ where
             message: format!("native worker capacity {} is exhausted", error.capacity),
             source: None,
         })?;
+    let retention = permit.retention_marker();
     let (setup, initialized) = mpsc::sync_channel(1);
     let (response, finished) = mpsc::sync_channel(1);
     // The new thread inherits the caller's network namespace. It owns the
@@ -50,12 +51,16 @@ where
         .map_err(|error| os_error("spawn netlink worker", error))?;
     match initialized.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
         Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-        Err(mpsc::RecvTimeoutError::Timeout) => return Err(netlink_timeout("initialize netlink")),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            retention.mark_retained();
+            return Err(netlink_timeout("initialize netlink"));
+        }
     }
     let result = match finished.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(netlink_worker_panicked()),
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            retention.mark_retained();
             return Err(netlink_timeout("wait for netlink response"));
         }
     };
@@ -64,6 +69,7 @@ where
         JoinAttempt::Finished(Err(_)) => Err(netlink_worker_panicked()),
         JoinAttempt::TimedOut(worker) => {
             // The worker, including its permit, still owns its resources.
+            retention.mark_retained();
             drop(worker);
             Err(netlink_timeout("shut down netlink worker"))
         }

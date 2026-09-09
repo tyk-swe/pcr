@@ -21,9 +21,9 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 pub const MAX_WORKER_CAPACITY: usize = 8;
 
 /// The finite worker budget shared by an application's progressive operations.
-/// Construction starts no threads. A worker owns its permit until its callback
+/// Cloning shares admission and diagnostic counters. Construction starts no threads. A worker owns its permit until its callback
 /// and captured resources have been dropped, even if its sink or runtime ends.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Runtime {
     budget: Arc<WorkerBudget>,
 }

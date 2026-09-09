@@ -575,7 +575,7 @@ fn duplicate_fields_are_rejected_deliberately_in_both_formats() {
 }
 
 #[test]
-fn value_before_type_is_accepted_and_budgeted_conservatively() {
+fn value_before_type_has_the_same_semantic_budget() {
     let yaml = format!(
         "schema: {SCHEMA}\nlayers:\n  - protocol: raw\n    fields:\n      bytes:\n        value: [222, 173, 190, 239]\n        type: bytes\n      name:\n        value: host\n        type: text\n      addr:\n        value: 192.0.2.1\n        type: ipv4\n      mac:\n        value: [1, 2, 3, 4, 5, 6]\n        type: mac\n      items:\n        value: [{{type: unsigned, value: 7}}]\n        type: list\n      count:\n        value: -3\n        type: signed\n"
     );
@@ -598,21 +598,12 @@ fn value_before_type_is_accepted_and_budgeted_conservatively() {
     );
     assert_eq!(fields["count"], FieldValue::Signed(-3));
 
-    // A buffered byte array is charged as list items and nodes as well, so it
-    // fits a narrower envelope than the type-first form, never a wider one.
     let narrow = DocumentLimits {
         max_list_items: 3,
         ..DocumentLimits::DEFAULT
     };
-    let value_first = "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,2,3,4],\"type\":\"bytes\"}}}]}";
-    assert_eq!(
-        limit_of(Packet::parse_with_limits(
-            value_first,
-            Format::Json,
-            &narrow
-        )),
-        Limit::ListItems
-    );
+    let value_first = r#"{"schema":"packetcraftr.packet/v1","layers":[{"protocol":"raw","fields":{"b":{"value":[1,2,3,4],"type":"bytes"}}}]}"#;
+    parse_both(value_first, &narrow).expect("byte elements are not list items");
     parse_both(&document(&layer("raw", &[bytes("b", 4)])), &narrow)
         .expect("type-first bytes are not list items");
     // Type mismatches after buffering are format errors.
@@ -858,5 +849,106 @@ fn fuzz_regressions_stay_fixed() {
         };
         let result = Packet::parse_with_limits(input, format, &limits);
         assert!(result.is_err(), "{input:?} unexpectedly parsed: {result:?}");
+    }
+}
+
+#[test]
+fn recursive_key_permutations_preserve_semantic_acceptance() {
+    fn render(value: &serde_json::Value, state: &mut u64) -> String {
+        match value {
+            serde_json::Value::Object(map) => {
+                let mut entries = map.iter().collect::<Vec<_>>();
+                *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if !entries.is_empty() {
+                    let rotate = (*state as usize) % entries.len();
+                    entries.rotate_left(rotate);
+                    if *state & 8 != 0 {
+                        entries.reverse();
+                    }
+                }
+                format!(
+                    "{{{}}}",
+                    entries
+                        .into_iter()
+                        .map(|(k, v)| format!(
+                            "{}:{}",
+                            serde_json::to_string(k).unwrap(),
+                            render(v, state)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+            serde_json::Value::Array(items) => format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(|v| render(v, state))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+            other => other.to_string(),
+        }
+    }
+    for size in [4096, 4097] {
+        for address in ["::", "2001:0db8:0000:0000:0000:0000:0000:0001"] {
+            let value = serde_json::json!({"schema": SCHEMA, "layers": [{"protocol": "raw", "fields": {
+                "b": {"type":"bytes", "value": vec![0; size]},
+                "ip": {"type":"ipv6", "value": address},
+                "ipv4": {"type":"ipv4", "value":"192.0.2.1"},
+                "mac": {"type":"mac", "value":[0,1,2,3,4,5]},
+                "list": {"type":"list", "value":[{"type":"list", "value":[{"type":"unsigned", "value":1}]}]}
+            }}]});
+            for maximum in [size + 33, size + 34, size + 35] {
+                let limits = DocumentLimits {
+                    max_total_payload_bytes: maximum,
+                    max_list_items: 1,
+                    max_total_list_items: 2,
+                    max_total_nodes: 7,
+                    // A long IPv6 address must not consume the text budget.
+                    max_text_bytes: SCHEMA.len(),
+                    ..DocumentLimits::DEFAULT
+                };
+                for format in [Format::Json, Format::Yaml] {
+                    let expected = Packet::parse_with_limits(&value.to_string(), format, &limits);
+                    assert_eq!(expected.is_ok(), maximum >= size + 34);
+                    for mut seed in 0..8 {
+                        // JSON is also a YAML flow document, preserving key order.
+                        let actual =
+                            Packet::parse_with_limits(&render(&value, &mut seed), format, &limits);
+                        match (&expected, actual) {
+                            (Ok(expected), Ok(actual)) => assert_eq!(*expected, actual),
+                            (Err(expected), Err(actual)) => {
+                                assert_eq!(expected.limit(), actual.limit())
+                            }
+                            other => panic!("key order changed acceptance: {other:?}"),
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn yaml_stream_exhaustion_dependency_contract() {
+    let valid = document(&layer("raw", &[bytes("b", 1)]));
+    for suffix in ["", "\n", "\n# comment\n", "\n...\n", "\n...\n# end\n "] {
+        Packet::parse_with_limits(
+            &format!("{valid}{suffix}"),
+            Format::Yaml,
+            &DocumentLimits::DEFAULT,
+        )
+        .unwrap_or_else(|error| panic!("suffix {suffix:?}: {error}"));
+    }
+    for invalid in [
+        "".to_owned(),
+        "# empty\n".to_owned(),
+        format!("{valid}\n---\n{valid}"),
+        format!("{valid}\n...\n---\n{valid}"),
+    ] {
+        assert!(
+            Packet::parse_with_limits(&invalid, Format::Yaml, &DocumentLimits::DEFAULT).is_err()
+        );
     }
 }

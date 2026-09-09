@@ -88,6 +88,8 @@ pub struct StreamEncoder {
     deadline: Option<Arc<Deadline>>,
     command: Command,
     output: Arc<Mutex<EncoderOutput>>,
+    resources: Option<Arc<dyn Fn() -> super::resources::Report + Send + Sync>>,
+    terminal_error_timeout: Option<Duration>,
 }
 
 impl StreamEncoder {
@@ -101,9 +103,30 @@ impl StreamEncoder {
         self
     }
 
+    /// Samples resource metadata on the first and terminal records. The
+    /// observer must return promptly; like serialization it is cooperative.
+    #[must_use]
+    pub fn with_resource_diagnostics(
+        mut self,
+        observe: impl Fn() -> super::resources::Report + Send + Sync + 'static,
+    ) -> Self {
+        self.resources = Some(Arc::new(observe));
+        self
+    }
+
+    /// Selects a separate finite wait for terminal error cleanup. The default
+    /// remains the timeout supplied to `new_bounded`.
+    #[must_use]
+    pub fn with_terminal_error_timeout(mut self, timeout: Duration) -> Self {
+        self.terminal_error_timeout = Some(timeout);
+        self
+    }
+
     pub fn new(command: Command, writer: impl Write + Send + 'static) -> Self {
         Self {
             deadline: None,
+            resources: None,
+            terminal_error_timeout: None,
             command,
             output: Arc::new(Mutex::new(EncoderOutput {
                 state: EncoderState::Open,
@@ -140,6 +163,8 @@ impl StreamEncoder {
         })?;
         Ok(Self {
             deadline: None,
+            resources: None,
+            terminal_error_timeout: None,
             command,
             output: Arc::new(Mutex::new(EncoderOutput {
                 state: EncoderState::Open,
@@ -182,7 +207,10 @@ impl StreamEncoder {
         let mut output = self.lock_output()?;
         output.require_open()?;
         let sequence = output.sequence;
-        let record = Envelope::error_record(Some(self.command), sequence, error);
+        let mut record = Envelope::error_record(Some(self.command), sequence, error);
+        if let Some(observe) = &self.resources {
+            record = record.with_resources(observe());
+        }
         let line = serialize_line(&record, sequence)?;
         check_publication_budget(self.deadline.as_deref(), "serialization")?;
         write_line(
@@ -191,6 +219,7 @@ impl StreamEncoder {
             sequence,
             EncoderState::Error,
             self.deadline.as_deref(),
+            self.terminal_error_timeout,
         )
     }
 
@@ -235,6 +264,11 @@ impl StreamEncoder {
             )
         };
         let mut record = Envelope::record(self.command, sequence, event, result, diagnostics);
+        if (sequence == 0 || terminal)
+            && let Some(observe) = &self.resources
+        {
+            record = record.with_resources(observe());
+        }
         if let Some(stats) = stats {
             record = record.with_stats(stats);
         }
@@ -250,6 +284,7 @@ impl StreamEncoder {
                 EncoderState::Open
             },
             self.deadline.as_deref(),
+            None,
         )?;
         if let Some(next) = next {
             output.sequence = next;
@@ -287,21 +322,23 @@ fn write_line(
     sequence: u64,
     next_state: EncoderState,
     deadline: Option<&Deadline>,
+    timeout_override: Option<Duration>,
 ) -> Result<(), EncodeError> {
     check_publication_budget(deadline, "publication")?;
     let written = match &mut output.writer {
         EncoderWriter::Direct(writer) => writer.write_all(&line).and_then(|()| writer.flush()),
         EncoderWriter::Bounded { sink, timeout } => {
+            let timeout = timeout_override.unwrap_or(*timeout);
             let wait = match deadline {
                 Some(deadline) => {
                     deadline
-                        .for_wait(*timeout)
+                        .for_wait(timeout)
                         .map_err(|source| EncodeError::Deadline {
                             phase: "publication",
                             source,
                         })?
                 }
-                None => Deadline::new(*timeout),
+                None => Deadline::new(timeout),
             };
             sink.emit(line, &wait).map_err(io::Error::other)
         }
@@ -937,5 +974,58 @@ mod publication_budget_tests {
         );
         assert!(!owner.is_open());
         assert!(!owner.is_complete());
+    }
+}
+
+#[cfg(test)]
+mod configurable_timeout_tests {
+    use super::fixtures::Data;
+    use super::*;
+    use std::sync::mpsc;
+
+    struct WaitingWriter(mpsc::Sender<()>, mpsc::Receiver<()>);
+    impl Write for WaitingWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.send(()).unwrap();
+            self.1
+                .recv_timeout(Duration::from_secs(3))
+                .map_err(io::Error::other)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn extended_wait_accepts_a_slow_writer_and_cleanup_uses_its_own_ceiling() {
+        let runtime = Runtime::new(1);
+        let (entered, waiting) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let stream = StreamEncoder::new_bounded(
+            Command::Read,
+            WaitingWriter(entered, released),
+            &runtime,
+            Duration::from_secs(2),
+        )
+        .unwrap()
+        .with_terminal_error_timeout(Duration::from_millis(10));
+        let publisher = stream.clone();
+        let worker = std::thread::spawn(move || publisher.emit_data(Data, Vec::new()));
+        waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Coordinate release rather than asserting wall-time performance.
+        release.send(()).unwrap();
+        worker.join().unwrap().unwrap();
+        let result = stream.emit_error(Error::new(
+            Classification::new("io.fixture", Kind::Io, None),
+            "stop",
+            Vec::new(),
+        ));
+        assert!(matches!(
+            result,
+            Err(EncodeError::Write { sequence: 1, .. })
+        ));
+        assert_eq!(runtime.snapshot().timed_out_retaining_capacity, 1);
+        release.send(()).unwrap();
+        assert!(!stream.is_complete());
     }
 }

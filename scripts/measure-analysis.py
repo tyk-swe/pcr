@@ -64,6 +64,13 @@ def client_hello_record():
 
 
 def packets(kind, size):
+    if kind in ('tcp-growth', 'tcp-growth-reverse'):
+        yield tcp(0)
+        indices = range(size) if kind == 'tcp-growth' else range(size - 1, -1, -1)
+        for index in indices:
+            # Leave the first expected byte absent: one ever-growing interval.
+            yield tcp(0, 1002 + index * 100, 16, b'x' * 100)
+        return
     for index in range(size):
         if kind == 'flows':
             yield tcp(index)
@@ -149,7 +156,7 @@ def main():
     for command in ['read', 'follow', 'tls', 'stats']:
         (out / f'{command}-limits.txt').write_bytes(subprocess.check_output([binary, command, '--help']))
     for size in options.sizes:
-        for kind in ['flows', 'segments', 'overlaps', 'fragments', 'scopes', 'tls-gaps']:
+        for kind in ['flows', 'segments', 'overlaps', 'fragments', 'scopes', 'tls-gaps', 'tcp-growth', 'tcp-growth-reverse']:
             path = out / f'{kind}-{size}.pcap'
             count = write_capture(path, kind, size)
             limits = ['--max-frames', str(count), '--max-flows', str(size)]

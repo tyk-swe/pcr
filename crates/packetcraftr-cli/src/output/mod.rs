@@ -25,6 +25,7 @@ pub mod protocols;
 pub mod read;
 pub mod reassembly;
 pub mod replay;
+pub mod resources;
 pub mod routes;
 pub mod scan;
 pub mod send;

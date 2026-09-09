@@ -108,6 +108,8 @@ Do not interpret a process that has exited as an in-process heap-retention sampl
 Shared-runner timings are observations, not performance gates. Keep full report
 files with the binary digest when comparing versions.
 
+The checked-in snapshot predates paged TCP storage; use its binary digest when
+comparing results, and regenerate measurements for the current implementation.
 A checked-in [measurement snapshot](analysis-measurements.json) records 56 runs
 at cardinalities 128, 1,024 and 8,192. Six intentionally tight flow/scope limits
 returned policy errors; the other 50 runs completed. These are single shared-
@@ -141,3 +143,90 @@ larger contributor, so no hasher, unsafe storage, or decoder rewrite followed.
 The configured CLI flags and typed library errors identify the corresponding
 ceilings; these existing counters/codes remain the canonical evidence rather
 than a second generic loss taxonomy.
+
+## Effective settings and resource ownership
+
+Use `--resource-diagnostics` with `--output json` or `--output ndjson` to add a
+`resources` member to the existing envelope. Settings report their resolved
+value, unit, stage, scope, whether the stage is enabled, and source
+(`default`, `override`, `derived`, or `fixed`). They are
+read from the same argument definitions and parsed values that execute the
+command. Domain reports and classified errors remain the canonical usage and
+loss evidence; resource metadata does not introduce a second loss taxonomy.
+The [stats resource example](../examples/documents/output-stats-resources.json)
+and [read resource example](../examples/documents/output-read-resources.json)
+were generated with the Linux full-native profile. A worker's `supported` field
+identifies its compiled resource owner, not device availability or permissions.
+NDJSON includes settings and worker samples on the first and terminal records,
+without inserting extra events. A failed writer cannot publish a trustworthy
+final snapshot or completion, even if it later finishes writing a partial line.
+
+`--output-timeout-ms N` accepts 1 through 3,600,000 milliseconds for each NDJSON
+write/flush acknowledgment. Its default remains 1,000 ms. The remaining operation
+deadline takes precedence. Terminal-error cleanup uses a separate 1,000 ms
+allowance; it never retries an already failed output stream. One record remains
+in flight at a time. This option does not make synchronous serialization or an
+arbitrary writer preemptible.
+
+Embedders can clone a `progress::Runtime` and give it to multiple clients with
+`Client::with_progress_runtime`; `Client::progress_runtime` exposes that owner's
+snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
+and their captured-resource destructors keep their permits until cleanup ends.
+`packetcraftr_netio::resources::native_snapshot()` reports the process-wide
+16-permit native pool, active reservations, rejected admissions and retained
+cleanup. Unsupported profiles say so explicitly. These counts describe admission
+reservations, not all OS threads, handles, or process memory.
+
+TCP pending ranges now use separately charged 4 KiB payload pages and interval
+descriptors. A direction's sequence window bounds the number of pages; the
+aggregate memory ceiling includes page storage/slack and metadata. Adjacent and
+reverse growth do not copy retained bytes. Delivery flattens an interval once,
+and admission accounts for old storage coexisting with prepared output/history.
+Sparse captures or tight aggregate budgets can therefore reject earlier than
+under payload-only accounting. History keeps and charges its allocation while
+trimming its logical retained tail. These remain conservative charges, not RSS.
+The measurement generator includes `tcp-growth` and `tcp-growth-reverse`; unit
+tests assert deterministic copy/allocation scaling separately from timings.
+
+## Hosting untrusted captures with a hard stop
+
+Run each untrusted analysis in its own OS-limited process when a hard memory or
+execution stop is required. On a system with delegated user cgroups, for example:
+
+```sh
+systemd-run --user --wait --pipe \
+  -p MemoryMax=512M -p MemorySwapMax=0 -p TasksMax=32 -p RuntimeMaxSec=60s \
+  -p KillMode=control-group -p KillSignal=SIGKILL \
+  ./target/release/packetcraftr --output ndjson --resource-diagnostics \
+  tls CAPTURE.pcap --max-duration-ms 55000
+```
+
+Provision cgroup permissions and verify those limits in the deployment. A
+supervisor should constrain filesystem access, disable networking for offline
+workers, capture exit status, and terminate the worker process/cgroup when the
+outer deadline expires. Memory/CPU/task limits and wall-clock termination solve
+different problems. Budget for serialization, allocator and runtime overhead
+alongside configured state ceilings. Never treat a killed worker's output prefix
+as complete; keep it marked incomplete unless its terminal record was
+acknowledged and the invocation succeeded. In-process providers, generic `Read`,
+serialization and callbacks remain cooperative.
+
+### Deterministic pending-copy regression
+
+One SYN followed by N adjacent 100-byte segments leaves the first expected byte
+missing. Both insertion directions are tested. The former contiguous replacement
+path requested `100 × N × (N + 1) / 2` cumulative buffer bytes; these are a
+source-derived work model, not peak memory or measured elapsed time.
+
+| Segments | Former requested replacement bytes | New page allocations | New copies of previously pending bytes before gap fill |
+| ---: | ---: | ---: | ---: |
+| 128 | 825,600 | 4 | 0 |
+| 1,024 | 52,480,000 | 26 | 0 |
+| 8,192 | 3,355,852,800 | 201 | 0 |
+
+The page counters instrument allocation and copy sites in tests. Incoming
+pending payload is copied exactly once (100 × N bytes); filling the gap performs
+one output allocation and copies the retained interval once. These counters
+exclude decoder work, history copies, serialization and allocator internals.
+The 8,192-segment capture has 8,193 physical frames, 819,200 pending bytes and an
+819,201-byte directional reordering window, within the default limits.

@@ -14,8 +14,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Opt-in `--resource-diagnostics` adds effective settings and worker samples to
   existing JSON/NDJSON envelopes. `--output-timeout-ms` configures the finite
   NDJSON writer wait; its default remains one second.
-- Required independent TShark and isolated Linux native CI validation and
-  warnings-as-errors documentation profiles. Releases retain exact-commit
+- Independent TShark and isolated Linux native validation on main pushes,
+  weekly runs, and manual CI dispatch, plus warnings-as-errors documentation
+  profiles on every PR. Releases retain exact-commit
   evidence and explicitly identify unexercised Windows/macOS runtime lanes.
 - Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
   set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
@@ -28,6 +29,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- PR CI runs five jobs, with documentation and validation failure fixtures
+  folded into Linux. Release-archive builds and smoke checks run in the release
+  workflow; decoder and isolated native validation run outside PRs.
 - Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
   that option as its fifth argument. `None` preserves the original query bytes.
 - Structured command output advances to `packetcraftr.output/v3`. DNS

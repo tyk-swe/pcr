@@ -34,26 +34,19 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-features
-      - name: Verify an extracted full-native release archive
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
+      - name: Check dependency direction and validation failure fixtures
         run: |
-          cargo build --locked --release -p packetcraftr-cli --all-features
-          ldd target/release/packetcraftr > linked-libraries.txt
-          grep -Eq 'libpcap\.so' linked-libraries.txt
-          python3 scripts/test-verify-archive.py
-      - name: Verify an extracted pcap-free release archive
+          python3 scripts/check-architecture.py
+          python3 scripts/test-validation-evidence.py
+      - name: Test archive verifier failure fixtures
+        run: python3 scripts/test-verify-archive.py
+      - name: Documentation for supported feature profiles
         env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
-          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
+          RUSTDOCFLAGS: -D warnings
         run: |
-          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
-          ldd target/release/packetcraftr > linked-libraries.txt
-          if grep -Eq 'libpcap\.so' linked-libraries.txt; then
-            echo "pcap-free release unexpectedly links libpcap" >&2
-            exit 1
-          fi
-          python3 scripts/test-verify-archive.py NativeArchiveTests
+          cargo doc --locked --workspace --no-default-features --no-deps
+          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
+          cargo doc --locked --workspace --all-features --no-deps
 
   portable:
     name: Portable and pcap-free isolation
@@ -91,23 +84,9 @@ jobs:
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
       - name: Execute deterministic contracts with every native backend enabled
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli --all-features
-      - name: Verify an extracted full-native release archive
-        shell: bash
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --all-features
-          python scripts/test-verify-archive.py NativeArchiveTests
-      - name: Verify an extracted pcap-free release archive
-        shell: bash
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
-          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
-          python scripts/test-verify-archive.py NativeArchiveTests
 
   decoder-oracle:
+    if: github.event_name != 'pull_request'
     name: Decoder oracle
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -147,6 +126,7 @@ jobs:
           retention-days: 90
 
   native-isolated:
+    if: github.event_name != 'pull_request'
     name: Isolated Linux native
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -184,26 +164,3 @@ jobs:
           path: target/validation/
           if-no-files-found: error
           retention-days: 90
-
-  docs-contracts:
-    name: Documentation and downstream contracts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install prerequisites
-        run: |
-          rustup toolchain install
-          sudo apt-get update
-          sudo apt-get install --yes libpcap-dev
-      - name: Check dependency direction and validation failure fixtures
-        run: |
-          python3 scripts/check-architecture.py
-          python3 scripts/test-validation-evidence.py
-      - name: Documentation for supported feature profiles
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: |
-          cargo doc --locked --workspace --no-default-features --no-deps
-          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
-          cargo doc --locked --workspace --all-features --no-deps

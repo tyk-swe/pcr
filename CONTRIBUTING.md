@@ -26,9 +26,12 @@ Features belong to netio; workflow and CLI features select those capabilities.
 The explicitly selected standard-library TCP provider is independent of these
 packet-I/O feature flags; it remains available in the portable library profile.
 CI tests full native, portable and the exact pcap-free feature profile on Linux.
-macOS and Windows execute deterministic contracts with all native features.
-The pcap-free binary is built independently and checked for absence of libpcap. Release checks cover
-packaging, checksums, and provenance separately.
+Default and all-features contracts run on Intel macOS, Apple Silicon macOS,
+and Windows. PRs run five jobs: full-native Linux, portable
+Linux, and the three platform jobs. The pcap-free binary is built independently
+and checked for absence of libpcap. Linux also runs architecture and validation
+failure fixtures, archive-verifier failure fixtures, and documentation checks.
+Release builds verify packaged archives, linkage, checksums, and provenance.
 
 ## Optional tools
 
@@ -60,8 +63,9 @@ with TShark 4.6.4. It explicitly accounts for opaque physical fragment children;
 no live traffic is involved. See [resource measurements](docs/analysis-resources.md)
 for complete workflow/scaling/RSS and separate heaptrack profiles.
 
-The decoder oracle runs on every PR and main push; a weekly run adds the
-full generated growth/overlap corpus. `scripts/build-decode-oracle.sh` builds
+The decoder oracle and isolated Linux native validation run on main pushes,
+weekly, and through manual CI dispatch; PRs skip both jobs. The weekly decoder
+run adds the full generated growth/overlap corpus. `scripts/build-decode-oracle.sh` builds
 TShark 4.6.4 from checksum-pinned upstream source when the exact tool is absent.
 Reports include input/binary digests, tool identity, allowances and failures.
 
@@ -75,8 +79,7 @@ For restricted hosts, prebuild the test executable and use `sudo` with
 `--native-test-binary PATH`; the launcher maps namespace root to the invoking
 checkout owner's UID. It does not relax host namespace policy or file permissions.
 
-These are required Linux CI checks; keep the GitHub Actions job names
-synchronized with the branch ruleset's required check names. Missing prerequisites, failed namespace
+When these validation jobs run, missing prerequisites, failed namespace
 creation and skipped scenarios are failures, never passing native evidence.
 Windows/macOS privileged runtime scenarios remain explicitly unexercised.
 Reports are archived on failure as well as success. Release preflight requires

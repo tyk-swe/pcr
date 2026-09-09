@@ -88,8 +88,9 @@ to the current output.
 
 ## Reproducing measurements
 
-Run `scripts/measure-memory.sh --sizes 128 1024 8192` for release-profile CLI
-measurements. It generates unique flows, tiny reverse-ordered TCP segments,
+Build the portable CLI with `cargo build --locked --release -p packetcraftr-cli
+--no-default-features`, then run `python3 scripts/measure-analysis.py --sizes 128
+1024 8192` for release-profile CLI measurements. It generates unique flows, tiny reverse-ordered TCP segments,
 retransmissions, reverse fragments, VNI scopes and TLS gaps, and measures read,
 follow, TLS, selected/filtered stats, file/pipe input and intentional limit
 failures. `target/analysis-measurements/report.json` records exact commands,
@@ -107,26 +108,6 @@ an operation leak; engine and callback cleanup tests check their own ownership.
 Do not interpret a process that has exited as an in-process heap-retention sample.
 Shared-runner timings are observations, not performance gates. Keep full report
 files with the binary digest when comparing versions.
-
-The checked-in snapshot predates paged TCP storage; use its binary digest when
-comparing results, and regenerate measurements for the current implementation.
-A checked-in [measurement snapshot](analysis-measurements.json) records 56 runs
-at cardinalities 128, 1,024 and 8,192. Six intentionally tight flow/scope limits
-returned policy errors; the other 50 runs completed. These are single shared-
-container observations, with 0.01-second wall-time resolution. In this snapshot,
-TLS NDJSON peaked at about 30.1 MiB for 8,192 gapped handshakes; this is a measured
-workload point, not an upper bound for other captures or larger limits.
-
-![Observed CLI RSS and wall-time scaling](analysis-scaling.svg)
-
-The [allocation comparison](stats-allocation-comparison.json) records the two
-binary digests and the command used for the protocol-name lookup experiment.
-
-A local measurement of 8,192 unique flows with protocols-only
-stats recorded 191,355 allocator calls before borrowed protocol-name lookup and
-174,973 after it (16,382 fewer; output byte-identical). Heaptrack measured about
-1.58 MB peak heap before the lookup change. Decoder/layout allocation remained a
-larger contributor, so no hasher, unsafe storage, or decoder rewrite followed.
 
 ## Interpreting loss and empty results
 

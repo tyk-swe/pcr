@@ -198,7 +198,7 @@ fn execute_live(
         exchange: live.exchange,
         interface: live.interface,
     };
-    let mut authorizer = packetcraftr::fuzz::PolicyAuthorizer::for_packets(&live.policy);
+    let mut authorizer = packetcraftr::policy::PolicyAuthorizer::for_packets(&live.policy);
     let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
     if format == Format::Ndjson {
         let event_stream = stream.clone();

@@ -7,11 +7,11 @@
 //! level transmission and diagnostic workflows remain policy-gated in
 //! `packetcraftr`.
 
-// This crate is the only one permitted to contain `unsafe`. Every module
-// inherits the denial; the files under `platform/` that wrap a native API opt
-// out with their own inner attribute, and `tests/unsafe_boundary.rs` fails if
-// any file outside `platform/` re-enables the lint.
-#![deny(unsafe_code)]
+// This crate is the only one permitted to contain `unsafe`. The workspace
+// lints deny it in every module; the files under `platform/` that wrap a
+// native API opt out with their own inner attribute, and
+// `tests/unsafe_boundary.rs` fails if any file outside `platform/` re-enables
+// the lint.
 
 pub mod capture;
 mod deadline;

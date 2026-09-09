@@ -21,7 +21,6 @@ mod run;
 #[cfg(test)]
 mod tests;
 
-pub use crate::policy::PolicyAuthorizer;
 pub use crate::probe::Executor;
 pub use error::Error;
 pub use execution::{Execution, ExecutionCase};

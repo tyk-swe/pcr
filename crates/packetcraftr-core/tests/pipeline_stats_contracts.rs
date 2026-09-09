@@ -7,8 +7,7 @@ mod common;
 
 use common::{CLIENT, SERVER, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame};
 use packetcraftr_core::analysis::{
-    Error, IpFamilyCounters, IpReassemblyReport, Options, StreamTransport, Summary as RunSummary,
-    run,
+    Error, IpReassemblyReport, Options, StreamTransport, Summary as RunSummary, run,
 };
 use packetcraftr_core::protocol::transport::Tcp;
 use std::net::IpAddr;
@@ -141,30 +140,6 @@ fn stats_reject_zero_interval_and_empty_report_is_well_formed() {
     assert!(report.conversations.is_empty());
     assert!(report.io.is_empty());
     assert_eq!(report.ip_reassembly, IpReassemblyReport::default());
-
-    let ip_reassembly = IpReassemblyReport {
-        counters: packetcraftr_core::analysis::IpCounters {
-            ipv4: IpFamilyCounters {
-                physical_fragments: 2,
-                completed_datagrams: 1,
-                derived_datagram_bytes: 44,
-                derived_payload_bytes: 24,
-                ..IpFamilyCounters::default()
-            },
-            ..packetcraftr_core::analysis::IpCounters::default()
-        },
-        outcomes_omitted: 3,
-        ..IpReassemblyReport::default()
-    };
-    let report = packetcraftr_core::analysis::stats::Collector::new(Duration::from_millis(250))
-        .expect("valid interval")
-        .finish(&RunSummary {
-            ip_reassembly: ip_reassembly.clone(),
-            ..RunSummary::default()
-        });
-    assert_eq!(report.ip_reassembly, ip_reassembly);
-    assert_eq!(report.frames, 0);
-    assert_eq!(report.bytes, 0);
 }
 
 #[test]

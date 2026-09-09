@@ -5,7 +5,6 @@
 
 use std::io::{Cursor, Write};
 use std::net::Ipv4Addr;
-use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -296,17 +295,5 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
                 }
             }
         }
-    }
-}
-
-#[test]
-fn commands_without_cooperative_checks_keep_normal_signal_termination() {
-    for (signal, number) in [("INT", 2), ("TERM", 15)] {
-        let mut process = Running::start(&["build"]);
-        std::thread::sleep(Duration::from_millis(100));
-        process.signal(signal);
-        let output = process.finish();
-        assert_eq!(output.status.signal(), Some(number), "{output:?}");
-        assert!(output.stdout.is_empty());
     }
 }

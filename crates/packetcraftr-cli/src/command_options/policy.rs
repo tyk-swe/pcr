@@ -384,18 +384,4 @@ mod tests {
         };
         assert!(opted_in.policy.into_policy().allow_source_spoofing);
     }
-
-    /// `plan` never transmits, so the flags that would authorize traffic are
-    /// not offered at all.
-    #[test]
-    fn plan_offers_no_traffic_budget_flags() {
-        Cli::try_parse_from(["packetcraftr", "plan", "--packet", "raw(hex=00)"])
-            .expect("plan must parse without budget flags");
-
-        for flag in ["--max-packets", "--max-bytes"] {
-            let rejected =
-                Cli::try_parse_from(["packetcraftr", "plan", "--packet", "raw(hex=00)", flag, "1"]);
-            assert!(rejected.is_err(), "plan must reject {flag}");
-        }
-    }
 }

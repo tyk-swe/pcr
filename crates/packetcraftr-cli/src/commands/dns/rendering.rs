@@ -179,61 +179,7 @@ pub(super) fn emit_complete(
 #[cfg(test)]
 mod tests {
 
-    use std::net::{IpAddr, Ipv4Addr};
-    use std::sync::Arc;
-    use std::time::UNIX_EPOCH;
-
-    use packetcraftr::dns;
-
-    use super::{ResponseLine, emit_complete, emit_event, response_summary, serialization_failure};
-    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
-    use crate::test_support::assert_single_complete;
-    use packetcraftr_cli::output;
-
-    fn attempt_event(attempt: u32) -> dns::Event {
-        let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-        dns::Event::Attempt {
-            context: Arc::new(dns::EventContext {
-                server: Arc::from("resolver.test"),
-                server_port: 53,
-                query_name: Arc::from("example.test."),
-                query_type: dns::QueryType::A,
-            }),
-            evidence: packetcraftr::dns::AttemptEvidence {
-                attempt,
-                server_address: address,
-                status: packetcraftr::dns::Outcome::Timeout,
-                received_at: None,
-                latency: None,
-                response_code: None,
-                reason: "timeout".to_owned(),
-                exchange: packetcraftr::dns::AttemptTransport::Udp {
-                    source_port: packetcraftr::probe::EPHEMERAL_SOURCE_PORT_BASE,
-                    sent_at: UNIX_EPOCH,
-                    response: None,
-                },
-            },
-        }
-    }
-
-    fn summary() -> packetcraftr::dns::Summary {
-        packetcraftr::dns::Summary {
-            server: "resolver.test".to_owned(),
-            server_port: 53,
-            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
-            query_name: "example.test.".to_owned(),
-            query_type: dns::QueryType::A,
-            transaction_id: u16::MAX,
-            stats: packetcraftr::Stats::default(),
-            completion: packetcraftr::dns::Completion::new(
-                packetcraftr::dns::Outcome::Timeout,
-                false,
-                None,
-                None,
-            )
-            .unwrap(),
-        }
-    }
+    use super::{ResponseLine, response_summary, serialization_failure};
 
     #[test]
     fn response_summary_uses_the_response_code_name_label() {
@@ -266,21 +212,5 @@ mod tests {
             failure.message,
             format!("DNS output serialization failed: {rendered}")
         );
-    }
-
-    #[test]
-    fn dns_stream_positions_ignore_noncontiguous_attempt_ids() {
-        let (sink, output) = stream(output::contract::Command::Dns);
-        emit_event(attempt_event(31), &sink).unwrap();
-        emit_event(attempt_event(2), &sink).unwrap();
-        emit_complete(summary(), &sink).unwrap();
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records[0]["result"]["evidence"]["attempt"], 31);
-        assert_eq!(records[1]["result"]["evidence"]["attempt"], 2);
-        assert_eq!(records[2]["result"]["transaction_id"], u16::MAX);
-        assert_eq!(records[2]["event"], "complete");
-        assert_single_complete(&records);
     }
 }

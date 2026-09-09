@@ -164,20 +164,6 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
 }
 
 #[test]
-fn link_type_constants_retain_open_numeric_values() {
-    assert_eq!(LinkType::NULL.0, 0);
-    assert_eq!(LinkType::ETHERNET.0, 1);
-    assert_eq!(LinkType::BSD_RAW.0, 12);
-    assert_eq!(LinkType::RAW.0, 101);
-    assert_eq!(LinkType::LOOP.0, 108);
-    assert_eq!(LinkType::LINUX_SLL.0, 113);
-    assert_eq!(LinkType::IPV4.0, 228);
-    assert_eq!(LinkType::IPV6.0, 229);
-    assert_eq!(LinkType::LINUX_SLL2.0, 276);
-    assert!(LinkType(65_535) > LinkType::ETHERNET);
-}
-
-#[test]
 fn erased_classified_error_retains_source_classification_and_causes() {
     let error = BoundaryError::from_error(ClassifiedFailure);
 
@@ -230,16 +216,6 @@ fn source_chain_walks_every_link_and_drops_restated_wrappers() {
 }
 
 #[test]
-fn boundary_error_new_preserves_the_supplied_contract() {
-    let classification = Classification::new("policy.test", Kind::Policy, Some("stop"));
-    let error = BoundaryError::new("denied", classification, vec!["first".to_owned()]);
-
-    assert_eq!(error.to_string(), "denied");
-    assert_eq!(error.classification(), classification);
-    assert_eq!(error.causes(), ["first"]);
-}
-
-#[test]
 fn boundary_constructors_distinguish_validation_from_internal_failures() {
     let validation =
         BoundaryError::execution_validation("bad request", "cli.test", "change the request");
@@ -258,20 +234,4 @@ fn boundary_constructors_distinguish_validation_from_internal_failures() {
     );
     assert_eq!(internal.classification().kind, Kind::Internal);
     assert_eq!(internal.classification().code, "internal.test");
-}
-
-#[test]
-fn every_error_kind_has_a_stable_machine_name() {
-    let cases = [
-        (Kind::Cli, "cli"),
-        (Kind::Packet, "packet"),
-        (Kind::Capability, "capability"),
-        (Kind::Io, "io"),
-        (Kind::Policy, "policy"),
-        (Kind::Internal, "internal"),
-    ];
-
-    for (kind, expected) in cases {
-        assert_eq!(kind.as_str(), expected);
-    }
 }

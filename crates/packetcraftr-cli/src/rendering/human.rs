@@ -298,38 +298,17 @@ mod tests {
 
     #[test]
     fn classified_errors_without_causes_or_remediation_have_no_empty_sections() {
-        let error = CliError::from_classification(
-            Classification::new("io.fixture", Kind::Io, None),
-            "primary failure",
-            Vec::new(),
-        );
-
-        assert_eq!(plain(&error), "error[io.fixture]: primary failure");
-    }
-
-    #[test]
-    fn empty_causes_and_remediation_do_not_create_empty_sections() {
-        let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("  ")),
-            "primary failure",
-            vec![String::new(), "\t".to_owned()],
-        );
-
-        assert_eq!(plain(&error), "error[cli.fixture]: primary failure");
-    }
-
-    #[test]
-    fn fallback_classifications_for_every_kind_are_rendered() {
-        for (kind, code) in [
-            (Kind::Cli, "cli.error"),
-            (Kind::Packet, "packet.error"),
-            (Kind::Capability, "capability.unavailable"),
-            (Kind::Io, "io.runtime"),
-            (Kind::Policy, "policy.denied"),
-            (Kind::Internal, "internal.error"),
+        for (remediation, causes) in [
+            (None, Vec::new()),
+            (Some("  "), vec![String::new(), "\t".to_owned()]),
         ] {
-            let error = CliError::new(kind, "fallback failure");
-            assert_eq!(plain(&error), format!("error[{code}]: fallback failure"));
+            let error = CliError::from_classification(
+                Classification::new("io.fixture", Kind::Io, remediation),
+                "primary failure",
+                causes,
+            );
+
+            assert_eq!(plain(&error), "error[io.fixture]: primary failure");
         }
     }
 

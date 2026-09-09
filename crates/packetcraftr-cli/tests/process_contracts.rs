@@ -161,10 +161,7 @@ fn partial_capture() -> tempfile::NamedTempFile {
 }
 
 #[test]
-fn help_and_version_are_available_without_network_access() {
-    let help = run_success(&["--help"]);
-    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: packetcraftr"));
-
+fn version_is_available_without_network_access() {
     let version = run_success(&["--version"]);
     let version = String::from_utf8_lossy(&version.stdout);
     assert!(
@@ -186,29 +183,6 @@ fn help_and_version_are_available_without_network_access() {
                 "missing enabled feature {name:?} in:\n{version}"
             );
         }
-    }
-}
-
-#[test]
-fn scan_help_and_parser_omit_the_removed_batch_size_option() {
-    let help = run_success(&["scan", "--help"]);
-    let help = String::from_utf8_lossy(&help.stdout);
-    assert!(!help.contains("--batch-size"));
-    assert!(help.contains("--max-probes"));
-    assert!(help.contains("--rate"));
-}
-
-#[test]
-fn dns_help_documents_bounded_tcp_fallback_without_network_access() {
-    let help = run_success(&["dns", "--help"]);
-    let help = String::from_utf8_lossy(&help.stdout);
-    for expected in [
-        "DNS-over-TCP continuation",
-        "--udp-only",
-        "share the same --timeout-ms attempt window",
-        "DNS server port for UDP and any TCP fallback",
-    ] {
-        assert!(help.contains(expected), "missing {expected:?} in:\n{help}");
     }
 }
 

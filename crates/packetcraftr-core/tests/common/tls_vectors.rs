@@ -26,8 +26,6 @@ pub(crate) struct HelloVector {
     pub(crate) name: &'static str,
     /// Where the expectation comes from.
     pub(crate) source: &'static str,
-    /// How much of the expectation is published, and what is synthetic.
-    pub(crate) provenance: &'static str,
     /// A complete TLS record carrying the handshake message, as hex.
     pub(crate) record_hex: &'static str,
     /// The full JA3 (or JA3S) string the vector must produce.
@@ -41,7 +39,6 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
     HelloVector {
         name: "Salesforce JA3 README example string",
         source: "https://github.com/salesforce/ja3#how-it-works",
-        provenance: "published JA3 string, synthetic ClientHello bytes built to reproduce it",
         record_hex: concat!(
             "16030100700100006c0301000102030405060708090a0b0c0d0e0f1011121314",
             "15161718191a1b1c1d1e1f000018002f00350005000ac009c00ac013c0140032",
@@ -56,11 +53,6 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
     HelloVector {
         name: "FoxIO JA4 README example JA4_a component",
         source: "https://github.com/FoxIO-LLC/ja4/blob/main/technical_details/JA4.md",
-        provenance: "published JA4_a component t13d1516h2, synthetic ClientHello bytes built \
-                     to reproduce it: TLS 1.3 offered, server name present, 15 non-GREASE \
-                     cipher suites, 16 non-GREASE extensions, ALPN h2 first. The JA4_b and \
-                     JA4_c hashes of the published fingerprint belong to a capture this \
-                     repository does not have, so they are deliberately not asserted here.",
         record_hex: concat!(
             "16030101400100013c0303000102030405060708090a0b0c0d0e0f1011121314",
             "15161718191a1b1c1d1e1f20000102030405060708090a0b0c0d0e0f10111213",
@@ -83,9 +75,6 @@ pub(crate) const CLIENT_HELLO_VECTORS: &[HelloVector] = &[
 pub(crate) const SERVER_HELLO_VECTORS: &[HelloVector] = &[HelloVector {
     name: "TLS 1.3 ServerHello field order",
     source: "https://github.com/salesforce/ja3#ja3s",
-    provenance: "published JA3S field order (version,cipher,extensions) over synthetic \
-                 ServerHello bytes; no published JA3S string with matching bytes exists, so \
-                 the expectation checks the documented field order and separators only",
     record_hex: concat!(
         "160303007a020000760303555555555555555555555555555555555555555555",
         "555555555555555555555520000102030405060708090a0b0c0d0e0f10111213",

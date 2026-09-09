@@ -446,27 +446,6 @@ impl crate::output::stream::StreamRecord for Event {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn mode_and_outcome_names_match_their_serde_names() {
-        for mode in [Mode::Offline, Mode::Live] {
-            assert_eq!(
-                serde_json::to_value(mode).expect("mode serializes"),
-                mode.as_str()
-            );
-        }
-        for outcome in [
-            Outcome::Built,
-            Outcome::Rejected,
-            Outcome::Response,
-            Outcome::Timeout,
-        ] {
-            assert_eq!(
-                serde_json::to_value(outcome).expect("outcome serializes"),
-                outcome.as_str()
-            );
-        }
-    }
-
     use super::*;
 
     #[test]

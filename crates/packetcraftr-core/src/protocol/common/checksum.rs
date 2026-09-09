@@ -139,18 +139,41 @@ pub(crate) fn network_from_addresses(source: IpAddr, destination: IpAddr) -> Net
 
 #[cfg(test)]
 mod tests {
-    use super::{checksum, checksum_parts};
+    use super::{ChecksumAccumulator, checksum, checksum_parts};
+
+    /// RFC 1071 IPv4 header vector whose checksum field is zeroed.
+    const IPV4_HEADER: [u8; 20] = [
+        0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0xc0, 0xa8, 0x00,
+        0x01, 0xc0, 0xa8, 0x00, 0xc7,
+    ];
 
     #[test]
     fn known_ipv4_header_vector_matches_rfc_checksum() {
-        let mut header = [
-            0x45, 0x00, 0x00, 0x73, 0x00, 0x00, 0x40, 0x00, 0x40, 0x11, 0x00, 0x00, 0xc0, 0xa8,
-            0x00, 0x01, 0xc0, 0xa8, 0x00, 0xc7,
-        ];
+        let mut header = IPV4_HEADER;
         assert_eq!(checksum(&header), 0xb861);
 
         header[10..12].copy_from_slice(&0xb861_u16.to_be_bytes());
         assert_eq!(checksum(&header), 0);
+    }
+
+    #[test]
+    fn odd_length_chunks_and_single_bytes_accumulate_to_the_contiguous_checksum() {
+        let mut byte_by_byte = ChecksumAccumulator::default();
+        for byte in IPV4_HEADER {
+            byte_by_byte.add(&[byte]);
+        }
+        assert_eq!(byte_by_byte.finish(), 0xb861);
+
+        let mut odd_chunks = ChecksumAccumulator::default();
+        for chunk in [
+            &IPV4_HEADER[..3],
+            &IPV4_HEADER[3..10],
+            &IPV4_HEADER[10..15],
+            &IPV4_HEADER[15..],
+        ] {
+            odd_chunks.add(chunk);
+        }
+        assert_eq!(odd_chunks.finish(), 0xb861);
     }
 
     #[test]

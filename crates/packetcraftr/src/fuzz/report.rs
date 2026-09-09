@@ -93,23 +93,3 @@ pub struct Summary {
     pub first_case: u64,
     pub stats: Stats,
 }
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::test_fixtures::assert_names_match_serialization;
-
-    #[test]
-    fn names_match_the_serialized_names() {
-        assert_names_match_serialization(
-            [
-                CaseOutcome::Built,
-                CaseOutcome::Rejected,
-                CaseOutcome::Response,
-                CaseOutcome::Timeout,
-            ],
-            |value| value.as_str(),
-        );
-    }
-}

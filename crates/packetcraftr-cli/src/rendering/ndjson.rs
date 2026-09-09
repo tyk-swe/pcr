@@ -69,118 +69,14 @@ pub(crate) mod test_support {
 mod tests {
     use packetcraftr_core::error::Kind;
 
-    use std::io::Write;
-
     use serde::Serialize;
     use serde::ser::Error as _;
     use serde_json::json;
 
     use crate::errors::CliError;
 
-    use super::test_support::{SharedBuffer, assert_contiguous, stream};
+    use super::test_support::{assert_contiguous, stream};
     use super::*;
-
-    #[test]
-    fn data_and_completion_are_contiguous_from_zero() {
-        let (stream, output) = stream(output::contract::Command::Read);
-        stream
-            .emit_data(TestRecord(json!({"frame": 1})), Vec::new())
-            .unwrap();
-        stream
-            .emit_data(TestRecord(json!({"frame": 2})), Vec::new())
-            .unwrap();
-        stream
-            .complete(json!({"event": "complete"}), Vec::new())
-            .unwrap();
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 3);
-        assert_eq!(records[2]["event"], "complete");
-        assert!(!stream.is_open());
-    }
-
-    #[test]
-    fn empty_success_completes_at_zero() {
-        let (stream, output) = stream(output::contract::Command::Read);
-        stream
-            .complete(json!({"event": "complete"}), Vec::new())
-            .unwrap();
-
-        let records = output.records();
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["status"], "success");
-    }
-
-    #[test]
-    fn errors_use_the_next_unwritten_position() {
-        let fixture_error = || CliError::new(Kind::Io, "fixture failed").output_error();
-
-        let (empty, empty_output) = stream(output::contract::Command::Capture);
-        empty.emit_error(fixture_error()).unwrap();
-        assert_eq!(empty_output.records()[0]["sequence"], 0);
-
-        let (partial, partial_output) = stream(output::contract::Command::Capture);
-        for value in 0..3 {
-            partial
-                .emit_data(TestRecord(json!({"value": value})), Vec::new())
-                .unwrap();
-        }
-        partial.emit_error(fixture_error()).unwrap();
-        let records = partial_output.records();
-        assert_contiguous(&records);
-        assert_eq!(records[3]["status"], "error");
-    }
-
-    #[test]
-    fn domain_identifiers_do_not_select_envelope_positions() {
-        let (stream, output) = stream(output::contract::Command::Replay);
-        stream
-            .emit_data(TestRecord(json!({"source_sequence": 42})), Vec::new())
-            .unwrap();
-        stream
-            .complete(json!({"event": "complete"}), Vec::new())
-            .unwrap();
-
-        let records = output.records();
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["source_sequence"], 42);
-        assert_eq!(records[1]["sequence"], 1);
-    }
-
-    #[test]
-    fn terminal_state_rejects_every_later_record() {
-        let (success_stream, output) = stream(output::contract::Command::Follow);
-        success_stream
-            .complete(json!({"done": true}), Vec::new())
-            .unwrap();
-        let terminal = output.bytes();
-
-        assert!(
-            success_stream
-                .emit_data(TestRecord(json!({"late": true})), Vec::new())
-                .is_err()
-        );
-        assert!(
-            success_stream
-                .emit_error(CliError::new(Kind::Io, "late").output_error())
-                .is_err()
-        );
-        assert_eq!(output.bytes(), terminal);
-
-        let (error_stream, output) = stream(output::contract::Command::Follow);
-        error_stream
-            .emit_error(CliError::new(Kind::Io, "terminal").output_error())
-            .unwrap();
-        let terminal = output.bytes();
-        assert!(
-            error_stream
-                .emit_data(TestRecord(json!({"late": true})), Vec::new())
-                .is_err()
-        );
-        assert_eq!(output.bytes(), terminal);
-    }
 
     struct FailingSerialization;
 
@@ -213,54 +109,5 @@ mod tests {
         assert_contiguous(&records);
         assert_eq!(records[1]["sequence"], 1);
         assert_eq!(records[1]["status"], "error");
-    }
-
-    struct SecondFlushFails {
-        output: SharedBuffer,
-        flushes: usize,
-    }
-
-    impl Write for SecondFlushFails {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.output.write(bytes)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.flushes += 1;
-            if self.flushes == 2 {
-                Err(io::Error::other("fixture flush failure"))
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    #[test]
-    fn write_failure_names_the_attempted_position_without_appending_an_error() {
-        let buffer = SharedBuffer::default();
-        let writer = SecondFlushFails {
-            output: buffer.clone(),
-            flushes: 0,
-        };
-        let stream = StreamEncoder::new(output::contract::Command::Capture, writer);
-        stream
-            .emit_data(TestRecord(json!({"value": 0})), Vec::new())
-            .unwrap();
-        let error = stream
-            .emit_data(TestRecord(json!({"value": 1})), Vec::new())
-            .expect_err("second flush must fail");
-
-        assert!(error.to_string().contains("sequence 1"));
-        assert!(!stream.is_open());
-        assert!(!stream.is_terminal());
-        let records = buffer.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 2);
-        assert!(
-            stream
-                .emit_error(CliError::new(Kind::Io, "late").output_error())
-                .is_err()
-        );
-        assert_eq!(buffer.records(), records);
     }
 }

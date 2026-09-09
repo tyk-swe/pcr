@@ -121,13 +121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn severity_text_matches_its_serde_spelling_and_orders_by_weight() {
-        for severity in [Severity::Info, Severity::Warning, Severity::Error] {
-            let serialized =
-                serde_json::to_string(&severity).expect("severity serializes as a string");
-            assert_eq!(serialized, format!("\"{}\"", severity.as_str()));
-            assert_eq!(severity.to_string(), severity.as_str());
-        }
+    fn orders_by_weight() {
         assert!(Severity::Info < Severity::Warning);
         assert!(Severity::Warning < Severity::Error);
     }

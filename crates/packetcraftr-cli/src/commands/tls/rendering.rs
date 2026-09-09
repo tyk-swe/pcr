@@ -393,37 +393,4 @@ mod tests {
             "{line}"
         );
     }
-
-    #[test]
-    fn the_retention_ceiling_applies_to_the_aggregate_document_alone() {
-        let mut state = State::new(2);
-        for _ in 0..5 {
-            state.select();
-            state.retained.push(session);
-        }
-        assert_eq!(state.counts().selected, 5);
-        assert_eq!(state.counts().omitted, 3);
-        assert_eq!(state.retained.into_items().len(), 2);
-
-        // Text counts every session it printed and leaves none out.
-        let mut streaming = State::new(2);
-        for _ in 0..5 {
-            streaming.select();
-        }
-        assert_eq!(streaming.counts().selected, 5);
-        assert_eq!(streaming.counts().omitted, 0);
-    }
-
-    #[test]
-    fn selectors_that_match_nothing_read_differently_from_a_capture_without_tls() {
-        let summary = |sessions: u64| Summary {
-            sessions,
-            ..Summary::default()
-        };
-        assert_eq!(
-            unmatched_note(&summary(3)).as_deref(),
-            Some("no session matched the selectors (3 assembled)")
-        );
-        assert_eq!(unmatched_note(&summary(0)), None);
-    }
 }

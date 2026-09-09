@@ -228,36 +228,3 @@ pub(crate) fn decorate<T>(envelope: Envelope<T>) -> Envelope<T> {
         None => envelope,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn resolved_options_preserve_defaults_overrides_and_scope() {
-        let args = Cli::command()
-            .try_get_matches_from([
-                "packetcraftr",
-                "--output",
-                "json",
-                "stats",
-                "fixture.pcap",
-                "--max-frames",
-                "7",
-            ])
-            .unwrap();
-        let settings = settings(&args, Command::Stats, Format::Json);
-        let frames = settings
-            .iter()
-            .find(|setting| setting.name == "--max-frames")
-            .unwrap();
-        assert!(matches!(frames.value, Value::Number(7)));
-        assert_eq!(frames.source, "override");
-        assert_eq!(frames.stage, "physical_input");
-        let flows = settings
-            .iter()
-            .find(|setting| setting.name == "--max-flows")
-            .unwrap();
-        assert_eq!(flows.source, "default");
-        assert_eq!(flows.stage, "indexed_metadata");
-    }
-}

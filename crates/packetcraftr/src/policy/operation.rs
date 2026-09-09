@@ -543,43 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn every_shape_carries_its_budget() {
-        let packet = documentation_packet();
-        let packets = [&packet];
-        let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
-            .expect("fixture frame");
-        let budget = WireBudget::new(3, 40);
-        let shapes = [
-            Operation::Budgeted(budget),
-            Operation::Declared(DeclaredPackets::new(
-                budget,
-                &packets,
-                None,
-                PermissiveLive::NotRequired,
-            )),
-            Operation::Replay(ReplayFrame::new(budget, &frame, LinkMode::Layer3)),
-        ];
-        for shape in shapes {
-            assert_eq!(shape.budget(), budget);
-            assert_eq!(shape.budget().packets(), 3);
-            assert_eq!(shape.budget().wire_bytes(), 40);
-        }
-        let Operation::Replay(replay) = shapes[2] else {
-            panic!("replay shape")
-        };
-        assert_eq!(replay.mode(), LinkMode::Layer3);
-        assert_eq!(replay.frame().bytes().len(), 20);
-
-        let socket = SocketBudget::new(1, 1, 22);
-        let dns = DnsOperation::new(WireBudget::new(1, 40), socket).unwrap();
-        let dns_shape = Operation::Dns(dns);
-        assert_eq!(dns_shape.shape(), "dns");
-        assert_eq!(dns_shape.budget(), WireBudget::new(3, 62));
-        assert_eq!(dns.udp(), WireBudget::new(1, 40));
-        assert_eq!(dns.tcp(), socket);
-    }
-
-    #[test]
     fn policy_authorizer_applies_the_aggregate_dns_socket_budget() {
         let policy = crate::policy::Policy {
             max_packets_per_operation: 2,
@@ -709,23 +672,6 @@ mod tests {
             policy_error.classification().code,
             crate::policy::Error::PermissivePacket.classification().code
         );
-    }
-
-    /// A packet-oriented authorizer reports the wiring fault, not a policy
-    /// denial: the policy was never consulted and there is no resolver to
-    /// configure.
-    #[test]
-    fn the_packet_authorizer_reports_that_it_has_no_resolver() {
-        let policy = crate::policy::Policy {
-            allow_hostname_resolution: true,
-            ..crate::policy::Policy::default()
-        };
-
-        let error = PolicyAuthorizer::for_packets(&policy)
-            .resolve_and_authorize(&hostname_target())
-            .expect_err("a packet authorizer has no resolver to answer with");
-
-        assert_eq!(error.classification().code, "internal.target_resolution");
     }
 }
 

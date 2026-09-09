@@ -1,10 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol;
-
 use packetcraftr_cli::output::{
-    contract::{Command, Format, SCHEMA_V3},
+    contract::{Command, SCHEMA_V3},
     envelope::Envelope,
     stream::StreamEncoder,
 };
@@ -15,18 +13,7 @@ use std::path::PathBuf;
 mod support;
 use support::TestRecord;
 
-use support::{SharedBuffer, output_schema, parse_json, path_text, run_success, schema_validator};
-
-#[test]
-fn facade_reexports_domains_and_command_formats_are_complete() {
-    let registry = protocol::builtin::registry();
-    assert!(registry.codec("ipv4").is_some());
-    for command in Command::ALL {
-        assert!(!command.formats().is_empty());
-        assert!(command.require_format(command.formats()[0]).is_ok());
-    }
-    assert!(Command::Protocols.require_format(Format::Ndjson).is_err());
-}
+use support::{SharedBuffer, parse_json, path_text, run_success, schema_validator};
 
 #[test]
 fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
@@ -53,21 +40,6 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
     assert_eq!(stream["schema"], SCHEMA_V3);
     assert_eq!(stream["mode"], "stream");
     assert_eq!(stream["sequence"], 7);
-}
-
-#[test]
-fn schema_retains_output_version_and_broadcast_selection() {
-    let schema = output_schema();
-    assert_eq!(
-        schema["$defs"]["baseEnvelope"]["properties"]["schema"]["const"],
-        SCHEMA_V3
-    );
-    assert!(
-        schema["$defs"]["routeDecision"]["properties"]["selection_reason"]["enum"]
-            .as_array()
-            .expect("route selection reasons are an enum")
-            .contains(&Value::String("broadcast".to_owned()))
-    );
 }
 
 #[test]

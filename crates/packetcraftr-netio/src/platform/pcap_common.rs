@@ -122,16 +122,13 @@ mod tests {
             (DLT_PPP_BSDOS, LINKTYPE_PPP_BSDOS),
             (DLT_ATM_CLIP, LINKTYPE_ATM_CLIP),
             (LinkType::LINUX_SLL2.0, LinkType::LINUX_SLL2),
+            #[cfg(target_os = "macos")]
+            (DLT_PFSYNC, LINKTYPE_PFSYNC),
+            #[cfg(target_os = "macos")]
+            (DLT_PKTAP, LINKTYPE_PKTAP),
         ] {
             assert_eq!(canonical_link_type(datalink), expected);
         }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_native_datalink_types_use_portable_savefile_linktypes() {
-        assert_eq!(canonical_link_type(DLT_PFSYNC), LINKTYPE_PFSYNC);
-        assert_eq!(canonical_link_type(DLT_PKTAP), LINKTYPE_PKTAP);
     }
 
     #[test]

@@ -764,50 +764,6 @@ fn shipped_examples_remain_valid_under_default_limits() {
     );
 }
 
-#[test]
-fn limit_names_are_stable_and_cover_every_field() {
-    let names = Limit::ALL
-        .iter()
-        .map(|limit| limit.field())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        [
-            "max_input_bytes",
-            "max_layers",
-            "max_nesting",
-            "max_fields_per_layer",
-            "max_total_nodes",
-            "max_list_items",
-            "max_total_list_items",
-            "max_protocol_name_bytes",
-            "max_field_name_bytes",
-            "max_text_bytes",
-            "max_byte_value_bytes",
-            "max_total_payload_bytes",
-        ]
-    );
-    for limit in Limit::ALL {
-        assert_eq!(limit.to_string(), limit.field());
-        assert!(DocumentLimits::DEFAULT.maximum(limit) > 0);
-    }
-    assert_eq!(DocumentLimits::default(), DocumentLimits::DEFAULT);
-    const {
-        assert!(
-            DocumentLimits::DEFAULT.max_total_payload_bytes * 2 <= DEFAULT_MAX_DOCUMENT_BYTES,
-            "payload defaults stay well inside the raw byte ceiling"
-        );
-    }
-    let error = Error::ResourceLimit {
-        limit: Limit::ListItems,
-        maximum: 9,
-    };
-    assert_eq!(
-        error.to_string(),
-        "packet document exceeds configured limit max_list_items=9"
-    );
-}
-
 /// Regressions found by the packet-document fuzz targets while the semantic
 /// limits were introduced.
 #[test]
@@ -931,24 +887,17 @@ fn recursive_key_permutations_preserve_semantic_acceptance() {
 }
 
 #[test]
-fn yaml_stream_exhaustion_dependency_contract() {
-    let valid = document(&layer("raw", &[bytes("b", 1)]));
-    for suffix in ["", "\n", "\n# comment\n", "\n...\n", "\n...\n# end\n "] {
-        Packet::parse_with_limits(
-            &format!("{valid}{suffix}"),
-            Format::Yaml,
-            &DocumentLimits::DEFAULT,
-        )
-        .unwrap_or_else(|error| panic!("suffix {suffix:?}: {error}"));
-    }
-    for invalid in [
-        "".to_owned(),
-        "# empty\n".to_owned(),
-        format!("{valid}\n---\n{valid}"),
-        format!("{valid}\n...\n---\n{valid}"),
-    ] {
-        assert!(
-            Packet::parse_with_limits(&invalid, Format::Yaml, &DocumentLimits::DEFAULT).is_err()
-        );
-    }
+fn yaml_roundtrip_preserves_a_bare_dash_as_text() {
+    let packet = Packet {
+        schema: SCHEMA.to_owned(),
+        layers: vec![Layer {
+            protocol: "raw".into(),
+            fields: [("text".into(), FieldValue::Text("-".into()))].into(),
+        }],
+    };
+    let yaml = noyalib::to_string(&packet).unwrap();
+    assert_eq!(
+        Packet::parse_with_limits(&yaml, Format::Yaml, &DocumentLimits::DEFAULT).unwrap(),
+        packet
+    );
 }

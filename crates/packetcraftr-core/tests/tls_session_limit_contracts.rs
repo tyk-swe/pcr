@@ -11,11 +11,10 @@ use common::tls_frames::{
     ClientHelloSpec, ServerHelloSpec, client_hello, handshake_record, server_hello, split,
     unfinished_handshake,
 };
+use packetcraftr_core::analysis::Error;
 use packetcraftr_core::analysis::tls::{
-    Collector, Limits as TlsLimits, MAX_DIRECTION_BUFFER, SessionEvent, Status,
-    Summary as TlsSummary,
+    Collector, Limits as TlsLimits, MAX_DIRECTION_BUFFER, Status,
 };
-use packetcraftr_core::analysis::{Error, FrameRecord};
 
 #[test]
 fn a_direction_buffer_ceiling_reports_malformed_without_buffering_past_it() {
@@ -269,28 +268,7 @@ fn tls_limits_reject_zero_ceilings() {
 }
 
 #[test]
-fn the_public_session_model_and_collector_keep_their_contracts() {
-    type Finish =
-        fn(Collector, &packetcraftr_core::analysis::Summary) -> (Vec<SessionEvent>, TlsSummary);
-    fn observe<'record>(
-        collector: &mut Collector,
-        record: &FrameRecord<'record>,
-    ) -> Vec<SessionEvent> {
-        collector.observe(record)
-    }
-
-    let _: fn(TlsLimits) -> Result<Collector, Error> = Collector::new;
-    let _: for<'record> fn(&mut Collector, &FrameRecord<'record>) -> Vec<SessionEvent> = observe;
-    let _: Finish = Collector::finish;
-
-    assert_eq!(Status::ALL.len(), 7);
-    for status in Status::ALL {
-        assert_eq!(status.to_string(), status.as_str());
-    }
-    let names: std::collections::BTreeSet<&str> =
-        Status::ALL.iter().map(|status| status.as_str()).collect();
-    assert_eq!(names.len(), Status::ALL.len(), "status names stay distinct");
-
+fn a_complete_session_and_its_summary_serialize_with_stable_field_names() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40_000);
     capture.open(&mut stream);

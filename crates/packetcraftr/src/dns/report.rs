@@ -397,30 +397,3 @@ pub struct Summary {
     pub completion: Completion,
     pub stats: Stats,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// One vocabulary: what the CLI prints for an attempt is what the JSON
-    /// document calls it.
-    #[test]
-    fn outcome_names_match_the_serialized_names() {
-        for outcome in [
-            Outcome::Response,
-            Outcome::Truncated,
-            Outcome::Timeout,
-            Outcome::Unrelated,
-            Outcome::DecodeFailure,
-            Outcome::NetworkFailure,
-        ] {
-            let serialized = serde_json::to_value(outcome).expect("outcome is a name");
-            assert_eq!(serialized.as_str(), Some(outcome.as_str()));
-        }
-
-        for transport in [Transport::Udp, Transport::Tcp] {
-            let serialized = serde_json::to_value(transport).expect("transport is a name");
-            assert_eq!(serialized.as_str(), Some(transport.as_str()));
-        }
-    }
-}

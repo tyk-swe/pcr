@@ -1741,3 +1741,106 @@ fn added_edns_bytes_can_exceed_policy_before_any_io() {
         assert_eq!(executor.udp_calls + executor.tcp_calls, 0);
     }
 }
+
+fn timeout_summary(fallback: bool) -> super::Summary {
+    super::Summary {
+        server: "resolver.example.test".to_owned(),
+        server_port: DEFAULT_SERVER_PORT,
+        resolved_addresses: Vec::new(),
+        query_name: "example.com".to_owned(),
+        query_type: super::QueryType::A,
+        transaction_id: 0x1234,
+        completion: super::Completion::new(super::Outcome::Timeout, fallback, None, None).unwrap(),
+        stats: Stats::default(),
+    }
+}
+
+fn udp_attempt_evidence() -> super::AttemptEvidence {
+    super::AttemptEvidence {
+        attempt: 1,
+        server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+        status: super::Outcome::Response,
+        received_at: Some(UNIX_EPOCH + Duration::from_secs(2)),
+        latency: Some(Duration::from_secs(1)),
+        response_code: Some(18),
+        reason: "validated DNS response".to_owned(),
+        exchange: super::AttemptTransport::Udp {
+            source_port: 49_152,
+            sent_at: UNIX_EPOCH + Duration::from_secs(1),
+            response: Some(Frame::new(UNIX_EPOCH, LinkType::IPV4, dns_response()).unwrap()),
+        },
+    }
+}
+
+#[test]
+fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
+    let metadata = super::decode_response(
+        &dns_response(),
+        "example.com",
+        super::QueryType::A,
+        0x1234,
+        super::MessageLimits::default(),
+    )
+    .unwrap()
+    .metadata;
+    for (outcome, fallback, transport, header) in [
+        (
+            super::Outcome::Response,
+            false,
+            None,
+            Some(metadata.clone()),
+        ),
+        (
+            super::Outcome::Response,
+            false,
+            Some(super::Transport::Udp),
+            None,
+        ),
+        (
+            super::Outcome::Timeout,
+            false,
+            Some(super::Transport::Udp),
+            None,
+        ),
+        (
+            super::Outcome::Truncated,
+            true,
+            Some(super::Transport::Tcp),
+            Some(metadata.clone()),
+        ),
+        (
+            super::Outcome::Response,
+            false,
+            Some(super::Transport::Tcp),
+            Some(metadata),
+        ),
+    ] {
+        let has_header = header.is_some();
+        assert!(
+            super::Completion::new(outcome, fallback, transport, header).is_err(),
+            "{outcome:?} fallback={fallback} transport={transport:?} header={has_header}"
+        );
+    }
+}
+
+#[test]
+fn report_construction_requires_fallback_and_attempts_to_agree() {
+    let mut tcp = udp_attempt_evidence();
+    tcp.exchange = super::AttemptTransport::Tcp {
+        source_port: None,
+        sent_at: None,
+    };
+    for (fallback, attempts) in [(false, vec![tcp]), (true, vec![udp_attempt_evidence()])] {
+        assert!(
+            super::Report::new(
+                timeout_summary(fallback),
+                None,
+                attempts,
+                Vec::new(),
+                Vec::new()
+            )
+            .is_err(),
+            "fallback={fallback}"
+        );
+    }
+}

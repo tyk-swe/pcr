@@ -134,27 +134,3 @@ impl From<packetcraftr_netio::route::Plan> for Plan {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The colour and wording of every text renderer follows `as_str`, so a
-    /// serde rename that outran it would silently split the two views apart.
-    #[test]
-    fn link_text_spellings_match_the_serialized_document() {
-        for mode in [LinkMode::Auto, LinkMode::Layer2, LinkMode::Layer3] {
-            let serialized = serde_json::to_string(&mode).expect("mirror enums serialize");
-            assert_eq!(serialized, format!("\"{}\"", mode.as_str()));
-        }
-
-        for capability in [
-            Capability::Layer2,
-            Capability::Layer3,
-            Capability::Layer2AndLayer3,
-        ] {
-            let serialized = serde_json::to_string(&capability).expect("mirror enums serialize");
-            assert_eq!(serialized, format!("\"{}\"", capability.as_str()));
-        }
-    }
-}

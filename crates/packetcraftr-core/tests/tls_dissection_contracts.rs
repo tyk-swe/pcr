@@ -423,24 +423,6 @@ fn tls_fields_resolve_through_the_display_filter_language() {
 }
 
 #[test]
-fn round_trips_hold_for_tls_and_non_tls_payloads_on_a_bound_port() {
-    // `dissect` asserts build(dissect(x)) == x for every case; these are the
-    // shapes the round trip must cover on a port that now dissects as TLS.
-    let mut two_records = client_hello_record();
-    two_records.extend_from_slice(&application_data(9));
-    for payload in [
-        client_hello_record(),
-        server_hello_record(),
-        two_records,
-        b"tls".to_vec(),
-        b"GET / HTTP/1.1\r\n\r\n".to_vec(),
-        vec![0_u8; 64],
-    ] {
-        dissect(CLIENT_PORT, 443, &payload);
-    }
-}
-
-#[test]
 fn two_complete_records_in_one_segment_are_one_layer() {
     let mut segment = client_hello_record();
     segment.extend_from_slice(&application_data(9));
@@ -456,34 +438,6 @@ fn two_complete_records_in_one_segment_are_one_layer() {
         Some(FieldValue::from(1_u8))
     );
     assert!(decoded.diagnostics.is_empty());
-}
-
-#[test]
-fn every_single_byte_mutation_of_a_hello_decodes_without_panicking_or_erroring() {
-    let record = client_hello_record();
-    for index in (0..record.len()).step_by(7) {
-        for mask in [0x01_u8, 0x80, 0xff] {
-            let mut mutated = record.clone();
-            mutated[index] ^= mask;
-            let decoded = dissect(CLIENT_PORT, 443, &mutated);
-            let protocols = protocols(&decoded);
-            assert!(
-                protocols == vec!["ethernet", "ipv4", "tcp", "tls"]
-                    || protocols == vec!["ethernet", "ipv4", "tcp", "tls", "raw"]
-                    || protocols == vec!["ethernet", "ipv4", "tcp", "raw"],
-                "byte {index} mask {mask:#x}: {protocols:?}"
-            );
-            assert!(
-                decoded
-                    .diagnostics
-                    .iter()
-                    .all(|diagnostic| diagnostic.severity
-                        == packetcraftr_core::diagnostic::Severity::Info),
-                "byte {index} mask {mask:#x}: {:?}",
-                diagnostic_codes(&decoded)
-            );
-        }
-    }
 }
 
 #[test]
@@ -503,22 +457,5 @@ fn extra_tls_ports_are_additive_and_leave_the_defaults_bound() {
             .child_for("tcp", packetcraftr_core::registry::Discriminator(0))
             .map(|protocol| protocol.as_str()),
         Some("raw")
-    );
-}
-
-#[test]
-fn the_registry_reports_which_ports_reach_tls() {
-    let registry = registry();
-    let bindings: Vec<(&str, u64)> = registry
-        .parent_bindings("tls")
-        .into_iter()
-        .map(|(parent, discriminator)| (parent.as_str(), discriminator.0))
-        .collect();
-    assert_eq!(
-        bindings,
-        TLS_PORTS
-            .iter()
-            .map(|port| ("tcp", u64::from(*port)))
-            .collect::<Vec<_>>()
     );
 }

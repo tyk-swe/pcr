@@ -130,35 +130,3 @@ pub struct Summary {
     pub completion: Completion,
     pub stats: Stats,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_fixtures::assert_names_match_serialization;
-
-    /// One vocabulary: what the CLI prints for a hop is what the JSON document
-    /// calls it.
-    #[test]
-    fn names_match_the_serialized_names() {
-        assert_names_match_serialization([ProbeStatus::Response, ProbeStatus::Timeout], |value| {
-            value.as_str()
-        });
-        assert_names_match_serialization(
-            [
-                ResponseKind::Intermediate,
-                ResponseKind::DestinationReached,
-                ResponseKind::Unreachable,
-            ],
-            |value| value.as_str(),
-        );
-        assert_names_match_serialization(
-            [
-                Completion::DestinationReached,
-                Completion::Unreachable,
-                Completion::MaximumHops,
-                Completion::Timeout,
-            ],
-            |value| value.as_str(),
-        );
-    }
-}

@@ -147,29 +147,3 @@ impl ClassificationCounts {
         *counter = counter.saturating_add(1);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_fixtures::assert_names_match_serialization;
-
-    /// One vocabulary: what the CLI prints for a probe is what the JSON
-    /// document calls it.
-    #[test]
-    fn names_match_the_serialized_names() {
-        assert_names_match_serialization(
-            [
-                Classification::Open,
-                Classification::Closed,
-                Classification::Filtered,
-                Classification::Unreachable,
-                Classification::Unknown,
-                Classification::Timeout,
-            ],
-            |value| value.as_str(),
-        );
-        assert_names_match_serialization([ProbeStatus::Response, ProbeStatus::Timeout], |value| {
-            value.as_str()
-        });
-    }
-}

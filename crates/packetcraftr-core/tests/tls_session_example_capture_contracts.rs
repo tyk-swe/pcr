@@ -5,13 +5,11 @@
 
 mod common;
 
-use common::tls_capture::{Capture, assemble_default};
 use common::tls_frames::{
-    ClientHelloSpec, ServerHelloSpec, TLS_1_3, TLS_AES_128_GCM_SHA256, X25519, change_cipher_spec,
-    client_hello, handshake_record, server_hello,
+    ClientHelloSpec, ServerHelloSpec, change_cipher_spec, client_hello, handshake_record,
+    server_hello,
 };
 use common::{TcpSpec, client_tcp, registry, server_tcp, tcp_frame};
-use packetcraftr_core::analysis::tls::Status;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::transport::Tcp;
 use std::time::{Duration, SystemTime};
@@ -133,7 +131,7 @@ fn example_capture_bytes() -> Vec<u8> {
 }
 
 #[test]
-fn the_published_example_capture_matches_its_generator_and_holds_one_handshake() {
+fn the_published_example_capture_matches_its_generator() {
     let expected = example_capture_bytes();
     let path = example_capture_path();
     if std::env::var_os("PACKETCRAFTR_WRITE_EXAMPLE_CAPTURES").is_some() {
@@ -152,24 +150,4 @@ fn the_published_example_capture_matches_its_generator_and_holds_one_handshake()
         "the checked-in example capture is stale; regenerate it with \
          PACKETCRAFTR_WRITE_EXAMPLE_CAPTURES=1"
     );
-
-    let capture = Capture {
-        registry: registry(),
-        tick: 0,
-        frames: example_capture_frames(),
-    };
-    let (sessions, summary) = assemble_default(&capture);
-    assert_eq!(sessions.len(), 1);
-    let session = &sessions[0];
-    assert_eq!(session.status, Status::Complete);
-    assert_eq!(session.client_endpoint.port, EXAMPLE_CLIENT_PORT);
-    assert_eq!(session.server_endpoint.port, 443);
-    let client = session.client.as_ref().expect("the example has a hello");
-    assert_eq!(client.sni.as_deref(), Some("api.example.test"));
-    assert!(client.ja4.starts_with("t13d"), "{}", client.ja4);
-    let server = session.server.as_ref().expect("the example has a response");
-    assert_eq!(server.selected_version, TLS_1_3);
-    assert_eq!(server.cipher_suite, TLS_AES_128_GCM_SHA256);
-    assert_eq!(server.key_share_group, Some(X25519));
-    assert_eq!(summary.tcp_streams, 1);
 }

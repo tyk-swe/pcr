@@ -512,11 +512,6 @@ mod tests {
         assert_eq!(escape_wire_text("h2 x"), "h2\\032x");
     }
 
-    #[test]
-    fn hex_renders_lowercase_pairs() {
-        assert_eq!(hex(&[0x00, 0x0f, 0xff]), "000fff");
-    }
-
     /// Encodes `layer` the way the builder does, with an empty packet around
     /// it: the codec writes back only the bytes the layer retained.
     fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {

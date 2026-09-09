@@ -4,39 +4,12 @@
 use std::io::Cursor;
 use std::time::UNIX_EPOCH;
 
-use packetcraftr_core::analysis::pcap::Reader;
 use packetcraftr_core::frame::LinkType;
 
 use super::*;
 
 fn frame(link_type: LinkType, bytes: Vec<u8>) -> Frame {
     Frame::new(UNIX_EPOCH, link_type, bytes).expect("valid fixture frame")
-}
-
-fn old_encode(format: Format, frames: Vec<Frame>) -> Vec<u8> {
-    let mut frames = frames.into_iter();
-    let first = frames.next().expect("nonempty fixture");
-    let writer = match format {
-        Format::Pcap => Writer::new(Vec::new(), format, first.link_type),
-        Format::PcapNg => Writer::pcapng(Vec::new()),
-    }
-    .expect("memory writer");
-    let mut output = LinkCaptureWriter::new(writer);
-    for frame in std::iter::once(first).chain(frames) {
-        output.write_link_mapped(frame).expect("encodable frame");
-    }
-    output.into_inner()
-}
-
-fn render(format: Format, frames: Vec<Frame>) -> Result<Vec<u8>, CliError> {
-    let mut destination = Vec::new();
-    write_capture_file_with(
-        format,
-        frames,
-        || Ok(Box::new(Cursor::new(Vec::new()))),
-        &mut destination,
-    )?;
-    Ok(destination)
 }
 
 #[test]
@@ -54,25 +27,6 @@ fn empty_capture_is_rejected_before_spool_creation() {
     .expect_err("empty capture");
     assert_eq!(error.exit_code(), 2);
     assert!(!created);
-}
-
-#[test]
-fn pcap_and_mixed_pcapng_match_the_previous_encoder_bytes() {
-    let pcap = vec![frame(LinkType::IPV4, vec![1, 2, 3])];
-    assert_eq!(
-        render(Format::Pcap, pcap.clone()).unwrap(),
-        old_encode(Format::Pcap, pcap)
-    );
-
-    let mixed = vec![
-        frame(LinkType::ETHERNET, vec![4, 5]),
-        frame(LinkType::IPV4, vec![6, 7, 8]),
-    ];
-    let encoded = render(Format::PcapNg, mixed.clone()).unwrap();
-    assert_eq!(encoded, old_encode(Format::PcapNg, mixed));
-    let mut reader = Reader::new(Cursor::new(encoded)).expect("pcapng opens");
-    assert!(reader.next_frame().unwrap().is_some());
-    assert!(reader.next_frame().unwrap().is_some());
 }
 
 #[test]

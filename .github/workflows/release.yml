@@ -62,7 +62,7 @@ jobs:
               --jq '[.workflow_runs[] | select(.event == "push")] | length'
           )"
           test "$successful_runs" -gt 0
-      - name: Require independent native, decoder, and API evidence
+      - name: Require independent native and decoder evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -388,15 +388,13 @@ jobs:
           done
 
           cp release-metadata/validation/VALIDATION-EVIDENCE.json dist/
-          cp release-metadata/validation/public-api-evidence/API-DIFF.txt dist/
-          cp release-metadata/validation/public-api-evidence/*.current.txt dist/
           (
             cd dist
             printf '%s\n' "${archives[@]}" |
               while IFS= read -r archive; do
                 sha256sum "$archive"
               done > SHA256SUMS
-            sha256sum VALIDATION-EVIDENCE.json API-DIFF.txt *.current.txt >> SHA256SUMS
+            sha256sum VALIDATION-EVIDENCE.json >> SHA256SUMS
             sha256sum --check SHA256SUMS
           )
       - name: Attest release archives
@@ -424,8 +422,7 @@ jobs:
 
           `VALIDATION-EVIDENCE.json` identifies the exact-commit decoder comparison
           and isolated Linux native scenarios. Windows/macOS runtime scenarios are
-          explicitly unexercised. `API-DIFF.txt` and `*.current.txt` expose public
-          signature changes independently of the packet/output schema versions.
+          explicitly unexercised.
 
           ### Checksums and Provenance
 

@@ -25,18 +25,20 @@ doctests. There is no required test runner or command wrapper.
 Features belong to netio; workflow and CLI features select those capabilities.
 The explicitly selected standard-library TCP provider is independent of these
 packet-I/O feature flags; it remains available in the portable library profile.
-CI tests full native, portable and the exact pcap-free feature profile on Linux.
-macOS and Windows execute deterministic contracts with all native features.
-The pcap-free binary is built independently and checked for absence of libpcap. Release checks cover
-packaging, checksums, and provenance separately.
+CI tests full native, portable and the exact pcap-free feature profile on Linux,
+checks that the pcap-free binary does not link libpcap, builds documentation with
+warnings denied for those profiles, and checks crate dependency direction with
+`scripts/check-architecture.py`. macOS and Windows execute deterministic contracts
+with all native features. Release checks cover packaging, checksums, and provenance
+separately.
 
 ## Optional tools
 
 Use `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps` for API docs,
 `cargo bench -p packetcraftr-core` for benchmarks, and
 `python3 scripts/measure-analysis.py` against a release build of the portable
-CLI for Linux peak-RSS profiling. Dependency advisory/license checks run weekly, for dependency
-changes and at release preflight; `cargo deny --locked check` runs the same policy locally.
+CLI for Linux peak-RSS profiling. Dependency advisory/license checks run in CI and
+at release preflight; `cargo deny --locked check` runs the same policy locally.
 
 Fuzzing has its own manifest and lockfile. Update both dependency graphs when
 changing shared dependencies. Bounded fuzz runs are scheduled and can also run
@@ -47,23 +49,12 @@ cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 (cd fuzz && cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu ip_reassembly corpora/ip_reassembly -- -max_total_time=30)
 ```
 
-Scheduled fuzz runs restore and minimize each target's successful corpus, capped
-at 32 MiB. Manual campaigns run 30, 300, or 900 seconds per target; 30-second
-smoke success is not a coverage claim. Failures retain the compiler, commit and lockfile
-identity. Minimize fixed crashes with `cargo fuzz tmin` and check the tiny input
-into the owning crate's regression fixtures, not only CI artifacts. Update the
-nightly pin intentionally after a local smoke and record it with corpus changes.
-
-`python3 scripts/check-decode-oracle.py --binary target/release/packetcraftr`
-compares curated IPv4/IPv6/extension/fragment/TCP-option/DNS fields and TLS JA3
-with TShark 4.6.4. It explicitly accounts for opaque physical fragment children;
-no live traffic is involved. See [resource measurements](docs/analysis-resources.md)
-for complete workflow/scaling/RSS and separate heaptrack profiles.
-
-The decoder oracle runs on every PR and main push; a weekly run adds the
-full generated growth/overlap corpus. `scripts/build-decode-oracle.sh` builds
-TShark 4.6.4 from checksum-pinned upstream source when the exact tool is absent.
-Reports include input/binary digests, tool identity, allowances and failures.
+Scheduled fuzz runs seed from the checked-in `fuzz/corpora` and published
+examples. Manual campaigns run 30, 300, or 900 seconds per target; 30-second
+smoke success is not a coverage claim. Crash inputs are uploaded as artifacts.
+Minimize fixed crashes with `cargo fuzz tmin` and check the tiny input into the
+owning crate's regression fixtures, not only CI artifacts. Update the nightly pin
+intentionally after a local smoke.
 
 `python3 scripts/test-native-isolated.py --binary PATH_TO_FULL_NATIVE` builds and
 runs the ignored native contract target in a fresh Linux user/network namespace.
@@ -75,15 +66,11 @@ For restricted hosts, prebuild the test executable and use `sudo` with
 `--native-test-binary PATH`; the launcher maps namespace root to the invoking
 checkout owner's UID. It does not relax host namespace policy or file permissions.
 
-These are required Linux CI checks; keep the GitHub Actions job names
-synchronized with the branch ruleset's required check names. Missing prerequisites, failed namespace
-creation and skipped scenarios are failures, never passing native evidence.
-Windows/macOS privileged runtime scenarios remain explicitly unexercised.
-Reports are archived on failure as well as success. Release preflight requires
-clean, exact-commit reports from a successful push CI run.
+This suite runs in Linux CI. Missing prerequisites, failed namespace creation and
+skipped scenarios are failures. Windows/macOS privileged runtime scenarios remain
+unexercised.
 
-CI builds documentation with warnings denied for the portable, pcap-free and
-full-native profiles. Dependency upgrades
+Dependency upgrades
 must also pass `document_limit_contracts::yaml_stream_exhaustion_dependency_contract`
 until the YAML dependency provides a typed streaming end signal.
 

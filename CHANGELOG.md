@@ -14,9 +14,6 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Opt-in `--resource-diagnostics` adds effective settings and worker samples to
   existing JSON/NDJSON envelopes. `--output-timeout-ms` configures the finite
   NDJSON writer wait; its default remains one second.
-- Required independent TShark and isolated Linux native CI validation and
-  warnings-as-errors documentation profiles. Releases retain exact-commit
-  evidence and explicitly identify unexercised Windows/macOS runtime lanes.
 - Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
   set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
 - DNS `--type` accepts bounded decimal and `TYPE<n>` codes alongside named
@@ -56,10 +53,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   are covered by the workspace integration tests.
 - The public API signature-diff CI job, `scripts/check-public-api.py`,
   `docs/public-api.md`, and the `API-DIFF.txt`/`*.current.txt` release
-  assets. `VALIDATION-EVIDENCE.json` carries decoder and native evidence only.
+  assets.
 - The manual coverage workflow, the checked-in branch-ruleset mirror,
   `scripts/measure-memory.sh`, and the static measurement snapshot, scaling
   chart and allocation comparison under `docs/`.
+- The TShark decoder-oracle CI job and its scripts, the release
+  `VALIDATION-EVIDENCE.json` asset and release-evidence scripts, the archive
+  verifier fixture tests, per-PR release-archive smoke tests, and fuzz corpus
+  persistence. CI is one workflow with `Linux`, `Native (<os>)`,
+  `Isolated Linux native`, and `Dependency advisories and licenses` jobs.
 - **Breaking:** the `packetcraftr::fuzz::PolicyAuthorizer` and
   `packetcraftr::replay::{ReplayFrame, WireBudget}` re-exports; import them
   from `packetcraftr::policy`.

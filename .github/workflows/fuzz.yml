@@ -13,14 +13,13 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  fuzz-smoke:
+  fuzz:
     name: Fuzz (${{ matrix.target }}, ${{ inputs.seconds || 30 }}s)
     runs-on: ubuntu-24.04
     timeout-minutes: 40
@@ -50,67 +49,34 @@ jobs:
       - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
         with:
           tool: cargo-fuzz@0.13.2
-      - name: Restore latest successful target corpus
-        env:
-          GH_TOKEN: ${{ github.token }}
-          FUZZ_TARGET: ${{ matrix.target }}
-        run: |
-          mkdir -p "fuzz/corpora/$FUZZ_TARGET"
-          artifact="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/artifacts" -f name="fuzz-corpus-$FUZZ_TARGET" --jq '[.artifacts[] | select(.expired == false)][0].id // empty')"
-          if [[ -n "$artifact" ]]; then
-            gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$RUNNER_TEMP/corpus.zip"
-            unzip -q "$RUNNER_TEMP/corpus.zip" -d "fuzz/corpora/$FUZZ_TARGET"
-          fi
-      - name: Run bounded smoke or campaign
+      - name: Run bounded fuzzing
+        working-directory: fuzz
         env:
           FUZZ_SECONDS: ${{ inputs.seconds || 30 }}
+          FUZZ_TARGET: ${{ matrix.target }}
         run: |
-          [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]] && (( FUZZ_SECONDS >= 1 && FUZZ_SECONDS <= 900 ))
-          rustc +nightly-2026-08-28 --version --verbose > fuzz-run-metadata.txt
-          git rev-parse HEAD >> fuzz-run-metadata.txt
-          sha256sum Cargo.lock >> fuzz-run-metadata.txt
-          printf 'target=%s seconds=%s\n' '${{ matrix.target }}' "$FUZZ_SECONDS" >> fuzz-run-metadata.txt
-          corpus=()
+          mkdir -p "corpora/$FUZZ_TARGET"
+          corpus=("corpora/$FUZZ_TARGET")
           dictionary=()
-          mkdir -p "corpora/${{ matrix.target }}"
-          corpus+=("corpora/${{ matrix.target }}")
-          # Published examples double as seeds; document contract tests
-          # validate packet and output JSON examples against their schemas.
-          case "${{ matrix.target }}" in
+          # Published examples double as seeds.
+          case "$FUZZ_TARGET" in
             packet_document_json|packet_build) corpus+=("../examples/documents") ;;
             pcap_parse|pcapng_parse|tls_session) corpus+=("../examples/captures") ;;
           esac
-          case "${{ matrix.target }}" in
-            packet_document_json) dictionary+=("-dict=dictionaries/json.dict") ;;
+          case "$FUZZ_TARGET" in
+            packet_document_json|packet_build) dictionary+=("-dict=dictionaries/json.dict") ;;
             packet_document_yaml) dictionary+=("-dict=dictionaries/yaml.dict") ;;
             tls_assembly) dictionary+=("-dict=dictionaries/tls.dict") ;;
             filter_parse) dictionary+=("-dict=dictionaries/filter.dict") ;;
-            packet_build) dictionary+=("-dict=dictionaries/json.dict") ;;
           esac
           # Prebuilt cargo-fuzz may default to its own musl build target;
           # AddressSanitizer needs the runner's dynamically linked GNU target.
-          cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time="$FUZZ_SECONDS" -rss_limit_mb=2048 -max_len=1048576
-        working-directory: fuzz
-      - name: Minimize and bound successful corpus
-        working-directory: fuzz
-        run: |
-          cargo +nightly-2026-08-28 fuzz cmin --target x86_64-unknown-linux-gnu "${{ matrix.target }}" "corpora/${{ matrix.target }}" -- -max_total_time=60 -rss_limit_mb=2048
-          test "$(du -sm 'corpora/${{ matrix.target }}' | cut -f1)" -le 32
-      - name: Persist successful target corpus
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: fuzz-corpus-${{ matrix.target }}
-          path: fuzz/corpora/${{ matrix.target }}/*
-          if-no-files-found: ignore
-          retention-days: 30
-      - name: Upload artifacts on failure
+          cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu "$FUZZ_TARGET" "${corpus[@]}" -- "${dictionary[@]}" -max_total_time="$FUZZ_SECONDS" -rss_limit_mb=2048 -max_len=1048576
+      - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-artifacts-${{ matrix.target }}
-          path: |
-            fuzz/artifacts/${{ matrix.target }}/*
-            fuzz/crash-*
-            fuzz/fuzz-run-metadata.txt
+          path: fuzz/artifacts/${{ matrix.target }}/*
           if-no-files-found: ignore
           retention-days: 7

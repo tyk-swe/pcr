@@ -9,8 +9,3 @@
 
 # Tool residue written outside target/
 scripts/__pycache__/
-
-# Files the CI workflows write into the working tree
-linked-libraries.txt
-fuzz/fuzz-run-metadata.txt
-fuzz/crash-*

@@ -17,62 +17,41 @@ concurrency:
 
 jobs:
   linux:
-    name: Linux full native
+    name: Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install native development library
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
+      - name: Install prerequisites
+        run: |
+          rustup toolchain install
+          sudo apt-get update
+          sudo apt-get install --yes libpcap-dev
       - name: Format
         run: |
           cargo fmt --all -- --check
           cargo fmt --manifest-path fuzz/Cargo.toml -- --check
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: Test
+      - name: Dependency direction
+        run: python3 scripts/check-architecture.py
+      - name: Test full native
         run: cargo test --locked --workspace --all-features
-      - name: Verify an extracted full-native release archive
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --all-features
-          ldd target/release/packetcraftr > linked-libraries.txt
-          grep -Eq 'libpcap\.so' linked-libraries.txt
-          python3 scripts/test-verify-archive.py
-      - name: Verify an extracted pcap-free release archive
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr
-          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
-          ldd target/release/packetcraftr > linked-libraries.txt
-          if grep -Eq 'libpcap\.so' linked-libraries.txt; then
-            echo "pcap-free release unexpectedly links libpcap" >&2
-            exit 1
-          fi
-          python3 scripts/test-verify-archive.py NativeArchiveTests
-
-  portable:
-    name: Portable and pcap-free isolation
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install the pinned toolchain
-        run: rustup toolchain install
-      - name: Test without native capabilities
+      - name: Test portable
         run: cargo test --locked --workspace --no-default-features
-      - name: Test the shipped pcap-free feature profile
+      - name: Test pcap-free
         run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
-      - name: Build the isolated pcap-free CLI
-        run: cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
-      - name: Verify the binary has no libpcap dependency
+      - name: Verify the pcap-free CLI does not link libpcap
         run: |
-          ldd target/debug/packetcraftr > linked-libraries.txt
-          ! grep -q libpcap linked-libraries.txt
+          cargo build --locked -p packetcraftr-cli --no-default-features --features native-layer3
+          ! ldd target/debug/packetcraftr | grep -q libpcap
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo doc --locked --workspace --no-default-features --no-deps
+          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
+          cargo doc --locked --workspace --all-features --no-deps
 
   platforms:
     name: Native (${{ matrix.os }})
@@ -87,64 +66,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the pinned toolchain
         run: rustup toolchain install
-      - name: Test passive native providers and CLI integration
+      - name: Test default features
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli
-      - name: Execute deterministic contracts with every native backend enabled
+      - name: Test all features
         run: cargo test --locked -p packetcraftr-netio -p packetcraftr-cli --all-features
-      - name: Verify an extracted full-native release archive
-        shell: bash
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --all-features
-          python scripts/test-verify-archive.py NativeArchiveTests
-      - name: Verify an extracted pcap-free release archive
-        shell: bash
-        env:
-          PACKETCRAFTR_ARCHIVE_BINARY: target/release/packetcraftr${{ runner.os == 'Windows' && '.exe' || '' }}
-          PACKETCRAFTR_ARCHIVE_VARIANT: pcap-free
-        run: |
-          cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
-          python scripts/test-verify-archive.py NativeArchiveTests
-
-  decoder-oracle:
-    name: Decoder oracle
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Initialize evidence
-        run: |
-          mkdir -p target/validation
-          echo '{"status":"not_exercised","reason":"oracle provisioning has not completed"}' > target/validation/decode-oracle.json
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: target/decode-oracle-tool
-          key: tshark-ubuntu-24.04-4.6.4-fbeab3d85c6c8a57
-      - name: Install pinned Rust toolchain and oracle build dependencies
-        run: |
-          rustup toolchain install
-          sudo apt-get update
-          sudo apt-get install --yes cmake ninja-build flex bison libglib2.0-dev libgcrypt20-dev libc-ares-dev libpcre2-dev libxml2-dev libspeexdsp-dev zlib1g-dev
-      - name: Build checksum-pinned offline decoder
-        run: scripts/build-decode-oracle.sh > target/validation/oracle-build.log 2>&1
-      - name: Build portable CLI
-        run: cargo build --locked --release -p packetcraftr-cli --no-default-features
-      - name: Compare independent decoder results
-        env:
-          FULL_CORPUS: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-        run: |
-          args=()
-          if [[ "$FULL_CORPUS" == true ]]; then args+=(--full); fi
-          python3 scripts/check-decode-oracle.py --report target/validation/decode-oracle.json "${args[@]}"
-      - name: Preserve decoder evidence even on failure
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: decode-oracle-evidence
-          path: target/validation/
-          if-no-files-found: error
-          retention-days: 90
 
   native-isolated:
     name: Isolated Linux native
@@ -152,16 +77,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Initialize native evidence
-        run: |
-          mkdir -p target/validation
-          echo '{"status":"not_exercised","reason":"namespace launcher has not completed"}' > target/validation/native-isolated.json
       - name: Install prerequisites
         run: |
           rustup toolchain install
           sudo apt-get update
           sudo apt-get install --yes libpcap-dev iproute2 util-linux
-      - name: Build native CLI and native contract executable
+      - name: Build the native CLI and the native test executable
         run: |
           cargo build --locked --release -p packetcraftr-cli --all-features
           cargo test --locked -p packetcraftr-netio --all-features --test native_isolated --no-run --message-format=json > target/native-test-build.jsonl
@@ -175,35 +96,20 @@ jobs:
       - name: Exercise native I/O in a fresh isolated namespace
         run: |
           sudo python3 scripts/test-native-isolated.py --binary target/release/packetcraftr \
-            --native-test-binary "$NATIVE_TEST_BINARY" --report target/validation/native-isolated.json
-      - name: Preserve native evidence even on failure
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: native-isolated-evidence
-          path: target/validation/
-          if-no-files-found: error
-          retention-days: 90
+            --native-test-binary "$NATIVE_TEST_BINARY" --report target/native-isolated.json
 
-  docs-contracts:
-    name: Documentation and downstream contracts
+  deny:
+    name: Dependency advisories and licenses
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install prerequisites
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Check dependency policy
         run: |
-          rustup toolchain install
-          sudo apt-get update
-          sudo apt-get install --yes libpcap-dev
-      - name: Check dependency direction and validation failure fixtures
-        run: |
-          python3 scripts/check-architecture.py
-          python3 scripts/test-validation-evidence.py
-      - name: Documentation for supported feature profiles
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: |
-          cargo doc --locked --workspace --no-default-features --no-deps
-          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
-          cargo doc --locked --workspace --all-features --no-deps
+          cargo deny --locked check
+          cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories

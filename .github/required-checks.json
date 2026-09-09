@@ -1,0 +1,59 @@
+{
+  "name": "PacketcraftR required validation",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "Linux full native",
+            "integration_id": 15368
+          },
+          {
+            "context": "Portable and pcap-free isolation",
+            "integration_id": 15368
+          },
+          {
+            "context": "Native (macos-14)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Native (macos-15-intel)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Native (windows-2022)",
+            "integration_id": 15368
+          },
+          {
+            "context": "Decoder oracle",
+            "integration_id": 15368
+          },
+          {
+            "context": "Isolated Linux native",
+            "integration_id": 15368
+          },
+          {
+            "context": "Documentation and downstream contracts",
+            "integration_id": 15368
+          },
+          {
+            "context": "Public API release diff",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

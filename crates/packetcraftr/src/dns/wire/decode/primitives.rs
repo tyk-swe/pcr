@@ -14,7 +14,29 @@ pub(super) fn read_u16(
         .get(offset..offset.saturating_add(2))
         .and_then(|slice| <[u8; 2]>::try_from(slice).ok())
         .ok_or(crate::dns::error::WireError::Decode(
-            DecodeError::TruncatedField { field, offset },
+            DecodeError::TruncatedField {
+                field,
+                offset,
+                needed: offset.saturating_add(2),
+            },
         ))?;
     Ok(u16::from_be_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn truncation_reports_the_minimum_message_extent() {
+        let error = read_u16(&[0; 4], 3, "test field").unwrap_err();
+        assert!(matches!(
+            error,
+            crate::dns::error::WireError::Decode(DecodeError::TruncatedField {
+                offset: 3,
+                needed: 5,
+                ..
+            })
+        ));
+        assert_eq!(read_u16(&[0, 0, 0, 1, 2], 3, "test field").unwrap(), 0x0102);
+    }
 }

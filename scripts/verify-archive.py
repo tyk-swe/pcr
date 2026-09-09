@@ -11,10 +11,13 @@ import sys
 ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
+    'docs/public-api.md',
     'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v1.schema.json',
     'schemas/packetcraftr.output.v3.schema.json',
     'examples/captures/tls-handshake.pcapng',
     'examples/documents/packet-ipv4-udp.json',
+    'examples/documents/output-stats-resources.json',
+    'examples/documents/output-read-resources.json',
 )
 EXPECTED = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
 

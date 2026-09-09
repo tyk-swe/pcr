@@ -15,6 +15,7 @@ mod errors;
 mod filtering;
 mod input;
 mod rendering;
+mod resources;
 mod startup;
 mod system;
 #[cfg(test)]

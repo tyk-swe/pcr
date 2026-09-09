@@ -45,7 +45,7 @@ fn parse(arguments: &[OsString]) -> Context {
                 .split_once('=')
                 .map_or((argument, None), |(name, value)| (name, Some(value)))
         });
-        if matches!(name, "--output" | "--color") {
+        if matches!(name, "--output" | "--color" | "--output-timeout-ms") {
             let value = inline.or_else(|| {
                 arguments
                     .next_if(|value| {
@@ -59,7 +59,9 @@ fn parse(arguments: &[OsString]) -> Context {
                 if let Some(format) = value.and_then(parse_machine_format) {
                     context.format = format;
                 }
-            } else if let Some(color) = value.and_then(parse_color_choice) {
+            } else if name == "--color"
+                && let Some(color) = value.and_then(parse_color_choice)
+            {
                 context.color = color;
             }
         } else if !saw_root_positional

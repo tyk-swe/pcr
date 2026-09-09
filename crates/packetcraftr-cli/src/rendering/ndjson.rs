@@ -23,8 +23,13 @@ pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Opens the process-wide NDJSON stream on stdout.
-pub(crate) fn stdout_stream(command: output::contract::Command) -> Result<StreamEncoder, CliError> {
-    StreamEncoder::new_bounded(command, io::stdout(), &Runtime::new(1), OUTPUT_TIMEOUT)
+pub(crate) fn stdout_stream(
+    command: output::contract::Command,
+    timeout: Duration,
+) -> Result<StreamEncoder, CliError> {
+    let runtime = crate::resources::runtime("output_writer", 1);
+    StreamEncoder::new_bounded(command, io::stdout(), &runtime, timeout)
+        .map(|stream| stream.with_terminal_error_timeout(OUTPUT_TIMEOUT))
         .map_err(CliError::classified)
 }
 

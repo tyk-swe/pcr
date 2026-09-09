@@ -32,7 +32,7 @@ packaging, checksums, and provenance separately.
 
 ## Optional tools
 
-Use `cargo doc --locked --workspace --all-features --no-deps` for API docs,
+Use `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps` for API docs,
 `cargo bench -p packetcraftr-core` for benchmarks, and
 `./scripts/measure-memory.sh` for Linux peak-RSS profiling. Coverage is a manual
 workflow. Review unsafe wrappers, parser boundaries, rejected authorization and
@@ -62,13 +62,35 @@ with TShark 4.6.4. It explicitly accounts for opaque physical fragment children;
 no live traffic is involved. See [resource measurements](docs/analysis-resources.md)
 for complete workflow/scaling/RSS and separate heaptrack profiles.
 
-The opt-in `python3 scripts/test-native-isolated.py --binary PATH_TO_FULL_NATIVE`
-requires Linux user/network namespaces and iproute2. It refuses an unchanged
-namespace or any interface besides loopback, creates a local UDP responder and
-checks a capture-ready native exchange plus its terminal trace. It records OS,
-binary feature/version and packet evidence. It is not an ordinary PR gate;
-unavailable namespaces are a reported capability limit, not a passing native test.
-Hardware Layer 2/neighbor and macOS/Windows live tests still need dedicated labs.
+The decoder oracle runs on every PR and main push; a weekly run adds the
+full generated growth/overlap corpus. `scripts/build-decode-oracle.sh` builds
+TShark 4.6.4 from checksum-pinned upstream source when the exact tool is absent.
+Reports include input/binary digests, tool identity, allowances and failures.
+
+`python3 scripts/test-native-isolated.py --binary PATH_TO_FULL_NATIVE` builds and
+runs the ignored native contract target in a fresh Linux user/network namespace.
+It checks a local UDP exchange, readiness, idle deadlines/cancellation, repeated
+cleanup, queue saturation, native filter errors and interface disappearance.
+The initial namespace must contain only loopback; the disappearance case creates
+and deletes a namespace-local dummy interface. No external destinations are used.
+For restricted hosts, prebuild the test executable and use `sudo` with
+`--native-test-binary PATH`; the launcher maps namespace root to the invoking
+checkout owner's UID. It does not relax host namespace policy or file permissions.
+
+These are required Linux CI checks. The repository ruleset definition is
+[.github/required-checks.json](.github/required-checks.json); keep its GitHub
+Actions check names synchronized with the workflow job names. Missing prerequisites, failed namespace
+creation and skipped scenarios are failures, never passing native evidence.
+Windows/macOS privileged runtime scenarios remain explicitly unexercised.
+Reports are archived on failure as well as success. Release preflight requires
+clean, exact-commit reports from a successful push CI run.
+
+See [public API policy](docs/public-api.md) for the API inventory, pinned
+signature-diff tooling, documentation profiles and independent downstream
+contracts. Run `cargo test --locked --manifest-path compatibility/Cargo.toml
+--target-dir target/downstream-contracts` for those consumers. Dependency upgrades
+must also pass `document_limit_contracts::yaml_stream_exhaustion_dependency_contract`
+until the YAML dependency provides a typed streaming end signal.
 
 Keep the existing integration-test layout unless clean, incremental and focused
 compile measurements justify a change. Narrow regressions remain runnable as

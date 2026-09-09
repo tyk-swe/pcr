@@ -25,7 +25,9 @@ fuzz_target!(|data: &[u8]| {
     let limits = Limits {
         max_flows: 2,
         max_bytes_per_flow: 128,
-        max_aggregate_bytes: 4096,
+        // Leave room for one charged payload page per scope, so schedules
+        // continue exercising pending overlaps and delivery after page admission.
+        max_aggregate_bytes: 16 * 1024,
         idle_expiry: Duration::from_millis(4),
         ..Limits::default()
     };
@@ -92,7 +94,7 @@ fuzz_target!(|data: &[u8]| {
                 _ => {}
             }
         }
-        assert!(engine.aggregate_memory_charge() <= 4096);
+        assert!(engine.aggregate_memory_charge() <= 16 * 1024);
         assert!(engine.flow_count() <= 2);
     }
     engine.flush();

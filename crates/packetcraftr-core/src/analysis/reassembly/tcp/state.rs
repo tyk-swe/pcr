@@ -1,12 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
-use bytes::Bytes;
+use super::history::History;
+use super::pages::{PAGE_CHARGE, Page};
 
-use super::{Error, ResourceError};
+use super::Error;
 use super::{PENDING_SEGMENT_METADATA_CHARGE, TCP_FLOW_STATE_METADATA_CHARGE};
 
 #[derive(Debug)]
@@ -17,8 +18,9 @@ pub(super) struct TcpFlowState {
     // by the same per-flow budget as pending data so retransmission checking
     // cannot turn a long-lived stream into an unbounded byte log.
     pub(super) history_start_offset: u64,
-    pub(super) emitted_history: VecDeque<u8>,
-    pub(super) pending: BTreeMap<u64, Bytes>,
+    pub(super) emitted_history: History,
+    pub(super) pending: BTreeMap<u64, u64>,
+    pub(super) pages: BTreeMap<u64, Page>,
     pub(super) pending_bytes: usize,
     pub(super) fin_offset: Option<u64>,
     pub(super) last_update: Instant,
@@ -31,8 +33,9 @@ impl TcpFlowState {
             base_sequence,
             next_offset: 0,
             history_start_offset: 0,
-            emitted_history: VecDeque::new(),
+            emitted_history: History::default(),
             pending: BTreeMap::new(),
+            pages: BTreeMap::new(),
             pending_bytes: 0,
             fin_offset: None,
             last_update: now,
@@ -41,10 +44,13 @@ impl TcpFlowState {
     }
 }
 
-pub(super) fn pending_memory_charge(pending_bytes: usize, segment_count: usize) -> Option<usize> {
+pub(super) fn pending_memory_charge(
+    pending_storage_charge: usize,
+    segment_count: usize,
+) -> Option<usize> {
     segment_count
         .checked_mul(PENDING_SEGMENT_METADATA_CHARGE)
-        .and_then(|metadata| pending_bytes.checked_add(metadata))
+        .and_then(|metadata| pending_storage_charge.checked_add(metadata))
 }
 
 pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
@@ -52,32 +58,34 @@ pub(super) fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
 }
 
 pub(super) fn buffer_memory_charge_parts(
-    pending_bytes: usize,
+    pending_storage_charge: usize,
     segment_count: usize,
     history_capacity: usize,
 ) -> Option<usize> {
-    pending_memory_charge(pending_bytes, segment_count)?.checked_add(history_capacity)
+    pending_memory_charge(pending_storage_charge, segment_count)?.checked_add(history_capacity)
 }
 
 pub(super) fn flow_memory_charge_parts(
-    pending_bytes: usize,
+    pending_storage_charge: usize,
     segment_count: usize,
     history_capacity: usize,
 ) -> Option<usize> {
-    buffer_memory_charge_parts(pending_bytes, segment_count, history_capacity)
+    buffer_memory_charge_parts(pending_storage_charge, segment_count, history_capacity)
         .and_then(|charge| charge.checked_add(TCP_FLOW_STATE_METADATA_CHARGE))
 }
 
 pub(super) fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
     flow_memory_charge_parts(
-        state.pending_bytes,
+        state.pages.len().checked_mul(PAGE_CHARGE)?,
         state.pending.len(),
         state.emitted_history.capacity(),
     )
 }
 
 pub(super) fn planned_history_allocation(current: usize, required: usize, limit: usize) -> usize {
-    let retained = current.min(limit);
+    // Logical history is trimmed independently; retain and charge storage
+    // instead of reallocating its shrinking tail on every pending insertion.
+    let retained = current;
     if required <= retained {
         return retained;
     }
@@ -128,22 +136,11 @@ pub(super) fn prepare_emitted_history(
     state: &TcpFlowState,
     retained_capacity: usize,
     capacity: usize,
-) -> Result<Option<VecDeque<u8>>, Error> {
+) -> Result<Option<History>, Error> {
     if state.emitted_history.capacity() == capacity {
         return Ok(None);
     }
-    let mut resized = VecDeque::new();
-    resized
-        .try_reserve_exact(capacity)
-        .map_err(|_| ResourceError::AllocationFailed {
-            requested: capacity,
-        })?;
-    if resized.capacity() != capacity {
-        return Err(ResourceError::AllocationFailed {
-            requested: capacity,
-        }
-        .into());
-    }
+    let mut resized = History::new(capacity)?;
     let skip = state
         .emitted_history
         .len()
@@ -196,27 +193,6 @@ pub(super) fn append_emitted_history(
     state.history_start_offset = history_start_offset;
 }
 
-fn checked_drain_prefix<T>(values: &mut VecDeque<T>, end: usize) -> bool {
-    if end > values.len() {
-        return false;
-    }
-    values.drain(..end);
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::checked_drain_prefix;
-    use std::collections::VecDeque;
-
-    #[test]
-    fn drain_endpoint_at_length_succeeds_and_one_past_is_rejected() {
-        let mut exact = VecDeque::from([1, 2, 3]);
-        assert!(checked_drain_prefix(&mut exact, 3));
-        assert!(exact.is_empty());
-
-        let mut past = VecDeque::from([1, 2, 3]);
-        assert!(!checked_drain_prefix(&mut past, 4));
-        assert_eq!(past, VecDeque::from([1, 2, 3]));
-    }
+fn checked_drain_prefix(values: &mut History, end: usize) -> bool {
+    values.drain_prefix(end)
 }

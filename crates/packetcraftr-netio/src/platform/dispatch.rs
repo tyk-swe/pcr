@@ -200,6 +200,24 @@ fn capture_netmask(interface: &interface::Info) -> Option<u32> {
     Some(u32::MAX.checked_shl(shift).unwrap_or(0).to_be())
 }
 
+/// A diagnostic read never creates native workers or starts the reaper.
+pub(crate) fn native_resource_snapshot() -> crate::resources::NativeSnapshot {
+    #[cfg(native_workers)]
+    {
+        super::workers::shared_budget().snapshot()
+    }
+    #[cfg(not(native_workers))]
+    {
+        crate::resources::NativeSnapshot {
+            supported: false,
+            capacity: 0,
+            active: 0,
+            rejected_admissions: 0,
+            cleanup_retaining_capacity: 0,
+        }
+    }
+}
+
 #[cfg(all(test, native_layer2))]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

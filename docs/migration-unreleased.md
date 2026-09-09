@@ -128,3 +128,23 @@ The standard-library provider works independently of native packet and route
 feature flags. Interface, preferred-source, and link-mode overrides remain
 unsupported for kernel TCP, and each fallback retains endpoint reauthorization
 and final query-byte checks.
+
+## Resource and output hardening
+
+Existing client constructors, public limit structs and default output/v3 records
+remain compatible. Share callback admission explicitly with
+`client.with_progress_runtime(runtime.clone())`; inspect it with
+`client.progress_runtime().snapshot()`. Native admission remains process-wide.
+
+`--resource-diagnostics` opts into an optional `resources` envelope member.
+Older strict output schemas may reject this member, so upgrade those consumers
+before enabling it. No additional NDJSON events or sequence positions are added.
+`--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
+cleanup allowance remain one second, and operation deadlines take precedence.
+
+TCP memory charges now include payload-page slack and transient allocations.
+A previously accepted capture near an aggregate limit can be rejected earlier;
+raise an explicit budget only after considering the hosting process limit.
+Packet-document key reordering no longer changes semantic acceptance. Existing
+input/depth and duplicate-field checks still apply. See
+[resource contracts](analysis-resources.md) and [API policy](public-api.md).

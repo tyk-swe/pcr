@@ -6,19 +6,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::net::{Ipv4Addr, Ipv6Addr};
 
-use bytes::Bytes;
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 use crate::document::types::{Layer, Limit, Packet};
 use crate::field::FieldValue;
 
-use super::budget::{
-    BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV4_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES,
-    MAC_PAYLOAD_BYTES,
-};
+use super::budget::Budget;
 use super::buffered::{Buffered, BufferedSeed};
 
 #[derive(Deserialize)]
@@ -411,8 +406,9 @@ impl<'de> Visitor<'de> for FieldValueSeed<'_, '_> {
     where
         A: MapAccess<'de>,
     {
+        // Both key orders use identical staging and semantic charging.
+        let _temporary = self.budget.temporary_scope();
         let mut tag: Option<Tag> = None;
-        let mut value: Option<FieldValue> = None;
         let mut buffered: Option<Buffered> = None;
         while let Some(field) = map.next_key::<ValueField>()? {
             match field {
@@ -420,228 +416,22 @@ impl<'de> Visitor<'de> for FieldValueSeed<'_, '_> {
                     if tag.is_some() {
                         return Err(de::Error::duplicate_field("type"));
                     }
-                    let parsed = map.next_value::<Tag>()?;
-                    if let Some(pending) = buffered.take() {
-                        value = Some(pending.into_value(parsed, self.budget)?);
-                    }
-                    tag = Some(parsed);
+                    tag = Some(map.next_value::<Tag>()?);
                 }
                 ValueField::Value => {
-                    if value.is_some() || buffered.is_some() {
+                    if buffered.is_some() {
                         return Err(de::Error::duplicate_field("value"));
                     }
-                    match tag {
-                        Some(tag) => {
-                            value = Some(map.next_value_seed(TypedValueSeed {
-                                budget: self.budget,
-                                depth: self.depth,
-                                tag,
-                            })?);
-                        }
-                        None => {
-                            buffered = Some(map.next_value_seed(BufferedSeed {
-                                budget: self.budget,
-                                depth: self.depth,
-                            })?);
-                        }
-                    }
+                    buffered = Some(map.next_value_seed(BufferedSeed {
+                        budget: self.budget,
+                        depth: self.depth,
+                    })?);
                 }
             }
         }
-        match (tag, value) {
-            (Some(_), Some(value)) => Ok(value),
-            (None, _) => Err(de::Error::missing_field("type")),
-            (Some(_), None) => Err(de::Error::missing_field("value")),
-        }
-    }
-}
-
-/// The `value` of a field whose `type` is already known.
-#[derive(Clone, Copy)]
-struct TypedValueSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
-    tag: Tag,
-}
-
-impl<'de> DeserializeSeed<'de> for TypedValueSeed<'_, '_> {
-    type Value = FieldValue;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let budget = self.budget;
-        match self.tag {
-            Tag::Bool => {
-                budget.charge_payload(BOOL_PAYLOAD_BYTES)?;
-                bool::deserialize(deserializer).map(FieldValue::Bool)
-            }
-            Tag::Unsigned => {
-                budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
-                u64::deserialize(deserializer).map(FieldValue::Unsigned)
-            }
-            Tag::Signed => {
-                budget.charge_payload(INTEGER_PAYLOAD_BYTES)?;
-                i64::deserialize(deserializer).map(FieldValue::Signed)
-            }
-            Tag::Text => BoundedString {
-                budget,
-                limit: Limit::TextBytes,
-            }
-            .deserialize(deserializer)
-            .map(FieldValue::Text),
-            Tag::Bytes => BytesSeed { budget }
-                .deserialize(deserializer)
-                .map(FieldValue::Bytes),
-            Tag::Ipv4 => {
-                budget.charge_payload(IPV4_PAYLOAD_BYTES)?;
-                Ipv4Addr::deserialize(deserializer).map(FieldValue::Ipv4)
-            }
-            Tag::Ipv6 => {
-                budget.charge_payload(IPV6_PAYLOAD_BYTES)?;
-                Ipv6Addr::deserialize(deserializer).map(FieldValue::Ipv6)
-            }
-            Tag::Mac => {
-                budget.charge_payload(MAC_PAYLOAD_BYTES)?;
-                <[u8; 6]>::deserialize(deserializer).map(FieldValue::Mac)
-            }
-            Tag::List => ListSeed {
-                budget,
-                depth: self.depth,
-            }
-            .deserialize(deserializer)
-            .map(FieldValue::List),
-        }
-    }
-}
-
-/// A byte value: each byte is charged against the per-value and total payload
-/// budgets before it is pushed.
-#[derive(Clone, Copy)]
-struct BytesSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-}
-
-impl<'de> DeserializeSeed<'de> for BytesSeed<'_, '_> {
-    type Value = Bytes;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(self)
-    }
-}
-
-impl<'de> Visitor<'de> for BytesSeed<'_, '_> {
-    type Value = Bytes;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "an array of at most {} byte values",
-            self.budget.limits.max_byte_value_bytes
-        )
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let maximum = self.budget.limits.max_byte_value_bytes;
-        if let Some(hint) = sequence.size_hint() {
-            self.budget.check_width(hint, Limit::ByteValueBytes)?;
-        }
-        let mut bytes = Vec::with_capacity(
-            self.budget
-                .bounded_capacity(sequence.size_hint(), Limit::ByteValueBytes),
-        );
-        while let Some(byte) = sequence.next_element::<u8>()? {
-            if bytes.len() >= maximum {
-                return Err(self.budget.exceeded(Limit::ByteValueBytes));
-            }
-            self.budget.charge_payload(1)?;
-            bytes.push(byte);
-        }
-        Ok(Bytes::from(bytes))
-    }
-
-    fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<Self::Value, E> {
-        self.budget
-            .check_width(value.len(), Limit::ByteValueBytes)?;
-        self.budget.charge_payload(value.len())?;
-        Ok(Bytes::copy_from_slice(value))
-    }
-
-    fn visit_byte_buf<E: de::Error>(self, value: Vec<u8>) -> Result<Self::Value, E> {
-        self.budget
-            .check_width(value.len(), Limit::ByteValueBytes)?;
-        self.budget.charge_payload(value.len())?;
-        Ok(Bytes::from(value))
-    }
-}
-
-/// A list value at `depth` enclosing lists. Entering it consumes nesting;
-/// every item consumes per-list and aggregate list budget before it is
-/// deserialized, and the item itself charges its own node.
-#[derive(Clone, Copy)]
-struct ListSeed<'b, 'l> {
-    budget: &'b Budget<'l>,
-    depth: usize,
-}
-
-impl<'de> DeserializeSeed<'de> for ListSeed<'_, '_> {
-    type Value = Vec<FieldValue>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        self.budget.enter_list(self.depth)?;
-        deserializer.deserialize_seq(self)
-    }
-}
-
-impl<'de> Visitor<'de> for ListSeed<'_, '_> {
-    type Value = Vec<FieldValue>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "a list of at most {} tagged field values",
-            self.budget.limits.max_list_items
-        )
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        if let Some(hint) = sequence.size_hint() {
-            self.budget.check_width(hint, Limit::ListItems)?;
-        }
-        let mut values = Vec::with_capacity(
-            self.budget
-                .bounded_capacity(sequence.size_hint(), Limit::ListItems),
-        );
-        loop {
-            if let Some(limit) = self.budget.list_budget_full(values.len()) {
-                if sequence.next_element::<IgnoredAny>()?.is_some() {
-                    return Err(self.budget.exceeded(limit));
-                }
-                return Ok(values);
-            }
-            self.budget.charge_list_item()?;
-            let Some(value) = sequence.next_element_seed(FieldValueSeed {
-                budget: self.budget,
-                depth: self.depth.saturating_add(1),
-            })?
-            else {
-                self.budget.refund_list_item();
-                return Ok(values);
-            };
-            values.push(value);
-        }
+        let tag = tag.ok_or_else(|| de::Error::missing_field("type"))?;
+        buffered
+            .ok_or_else(|| de::Error::missing_field("value"))?
+            .into_value(tag, self.budget, self.depth)
     }
 }

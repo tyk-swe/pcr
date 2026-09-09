@@ -14,11 +14,13 @@ pub use model::{Error, Event, FlowKey, MalformedError, ResourceError, ScopedFlow
 mod engine;
 mod limits;
 pub use limits::{Limits, MAX_BYTES_PER_FLOW};
+mod history;
+mod pages;
 mod pending;
 mod state;
 
-// Conservative accounting for a BTree node, key, and Bytes handle. The
-// allocator may use more; without a fixed charge, sparse one-byte segments
+// Conservative accounting for an interval BTree entry. The allocator may
+// use more; without a fixed charge, sparse one-byte segments
 // bypass the aggregate resource ceiling entirely.
 const PENDING_SEGMENT_METADATA_CHARGE: usize = 64;
 // Conservative accounting for the flow-table entry, expiry-index entry, key,

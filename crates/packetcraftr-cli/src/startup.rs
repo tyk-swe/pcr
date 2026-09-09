@@ -11,7 +11,7 @@ mod context;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use packetcraftr_cli::output;
 
 use self::context::{MachineFormat, from_env};
@@ -25,8 +25,11 @@ use super::rendering::{
 pub(crate) fn run() -> ExitCode {
     let context = from_env();
     context.color.write_global();
-    let cli = match Cli::try_parse() {
-        Ok(cli) => cli,
+    let (cli, matches) = match Cli::command()
+        .try_get_matches()
+        .and_then(|matches| Cli::from_arg_matches(&matches).map(|cli| (cli, matches)))
+    {
+        Ok(parsed) => parsed,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).unwrap_or(70);
             let raw_message = error.to_string();
@@ -85,8 +88,19 @@ pub(crate) fn run() -> ExitCode {
         return ExitCode::from(error.exit_code());
     }
     let command = cli.command.kind();
+    if cli.resource_diagnostics
+        && matches!(
+            format,
+            output::contract::Format::Json | output::contract::Format::Ndjson
+        )
+    {
+        crate::resources::configure(&matches, command, format);
+    }
     let stream = match if format == output::contract::Format::Ndjson {
-        stdout_stream(command)
+        stdout_stream(
+            command,
+            std::time::Duration::from_millis(cli.output_timeout_ms.unwrap_or(1000)),
+        )
     } else {
         Ok(StreamEncoder::new(command, std::io::stdout()))
     } {
@@ -95,6 +109,37 @@ pub(crate) fn run() -> ExitCode {
             let _ = emit_stderr_error(&error);
             return ExitCode::from(error.exit_code());
         }
+    };
+    if cli.resource_diagnostics
+        && !matches!(
+            format,
+            output::contract::Format::Json | output::contract::Format::Ndjson
+        )
+    {
+        return command_failure(
+            format,
+            command,
+            CliError::new(
+                Kind::Cli,
+                "--resource-diagnostics requires --output json or ndjson",
+            ),
+            &stream,
+        );
+    }
+    if cli.output_timeout_ms.is_some() && format != output::contract::Format::Ndjson {
+        return command_failure(
+            format,
+            command,
+            CliError::new(Kind::Cli, "--output-timeout-ms requires --output ndjson"),
+            &stream,
+        );
+    }
+    let stream = if cli.resource_diagnostics {
+        stream.with_resource_diagnostics(|| {
+            crate::resources::snapshot().expect("diagnostics configured")
+        })
+    } else {
+        stream
     };
     if cli.command.supports_cancellation()
         && let Err(error) = crate::cancellation::install()
@@ -163,9 +208,8 @@ fn command_failure(
     };
     let (emitted, report_write_error) = match format {
         output::contract::Format::Json => (
-            emit_json(&output::envelope::Envelope::<()>::error(
-                Some(command),
-                error.output_error(),
+            emit_json(&crate::resources::decorate(
+                output::envelope::Envelope::<()>::error(Some(command), error.output_error()),
             )),
             true,
         ),

@@ -84,6 +84,8 @@ pub struct Envelope<T> {
     diagnostics: Vec<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stats: Option<Stats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resources: Option<super::resources::Report>,
 }
 
 impl<T> Envelope<T> {
@@ -98,6 +100,7 @@ impl<T> Envelope<T> {
             payload: OutputPayload::Success { result },
             diagnostics,
             stats: None,
+            resources: None,
         }
     }
 
@@ -118,7 +121,15 @@ impl<T> Envelope<T> {
             payload: OutputPayload::Success { result },
             diagnostics,
             stats: None,
+            resources: None,
         }
+    }
+
+    /// Adds explicitly requested resource metadata without changing default records.
+    #[must_use]
+    pub fn with_resources(mut self, resources: super::resources::Report) -> Self {
+        self.resources = Some(resources);
+        self
     }
 
     #[must_use]
@@ -141,6 +152,7 @@ impl Envelope<()> {
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
+            resources: None,
         }
     }
 
@@ -155,6 +167,7 @@ impl Envelope<()> {
             payload: OutputPayload::Error { error },
             diagnostics: Vec::new(),
             stats: None,
+            resources: None,
         }
     }
 }

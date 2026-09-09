@@ -32,9 +32,10 @@ impl Packet {
     /// Parses one packet document while enforcing every [`DocumentLimits`]
     /// field during streaming deserialization.
     ///
-    /// The input byte ceiling is checked first; every other limit is charged
-    /// inside the deserializer before the bounded item is allocated, and both
-    /// formats report the same [`Error`] for the same document.
+    /// The input byte ceiling is checked first. Tag-independent staging uses
+    /// its own finite, input-derived charge; semantic limits are applied when
+    /// the tag is resolved. Both key orders use the same staging and charging
+    /// path, and both formats classify semantic limit failures alike.
     pub fn parse_with_limits(
         input: &str,
         format: Format,

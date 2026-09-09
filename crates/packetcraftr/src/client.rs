@@ -77,6 +77,19 @@ where
 }
 
 impl<R, N, I> Client<R, N, I> {
+    /// Selects a shared callback admission budget. The default constructor
+    /// creates an isolated runtime; cloning a supplied runtime shares it.
+    #[must_use]
+    pub fn with_progress_runtime(mut self, runtime: Runtime) -> Self {
+        self.runtime = runtime;
+        self
+    }
+
+    /// The callback budget used by this client's progressive operations.
+    pub fn progress_runtime(&self) -> &Runtime {
+        &self.runtime
+    }
+
     pub(crate) fn check_cancelled(&self) -> Result<(), Error> {
         if let Some(signal) = &self.cancellation {
             signal.check()?;

@@ -29,6 +29,7 @@ pub(super) struct Budget<'l> {
     list_items: Cell<usize>,
     payload_bytes: Cell<usize>,
     breach: Cell<Option<Limit>>,
+    temporary: Cell<usize>,
 }
 
 impl<'l> Budget<'l> {
@@ -39,7 +40,34 @@ impl<'l> Budget<'l> {
             list_items: Cell::new(0),
             payload_bytes: Cell::new(0),
             breach: Cell::new(None),
+            temporary: Cell::new(0),
         }
+    }
+
+    pub(super) fn temporary_scope(&self) -> TemporaryScope<'_, 'l> {
+        TemporaryScope {
+            budget: self,
+            previous: self.temporary.get(),
+        }
+    }
+
+    /// A finite outer staging envelope, separate from semantic budgets. A
+    /// source byte cannot introduce more than one staged value; the factor
+    /// two covers geometric container growth and conversion overlap. This
+    /// is a conservative storage charge, not an allocator/RSS guarantee.
+    pub(super) fn charge_temporary<E: de::Error>(&self, amount: usize) -> Result<(), E> {
+        let maximum = self
+            .limits
+            .max_input_bytes
+            .saturating_mul(2 * std::mem::size_of::<crate::field::FieldValue>());
+        let next = self
+            .temporary
+            .get()
+            .checked_add(amount)
+            .filter(|value| *value <= maximum)
+            .ok_or_else(|| self.exceeded(Limit::InputBytes))?;
+        self.temporary.set(next);
+        Ok(())
     }
 
     /// The first limit this budget rejected, if any.
@@ -94,10 +122,6 @@ impl<'l> Budget<'l> {
         self.charge(&self.list_items, 1, Limit::TotalListItems)
     }
 
-    pub(super) fn refund_list_item(&self) {
-        self.list_items.set(self.list_items.get().saturating_sub(1));
-    }
-
     pub(super) fn charge_payload<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
         self.charge(&self.payload_bytes, bytes, Limit::TotalPayloadBytes)
     }
@@ -121,5 +145,17 @@ impl<'l> Budget<'l> {
     /// the remaining budget.
     pub(super) fn bounded_capacity(&self, hint: Option<usize>, limit: Limit) -> usize {
         hint.unwrap_or(0).min(self.limits.maximum(limit))
+    }
+}
+
+/// Nested staging releases its charge on success and every error path.
+pub(super) struct TemporaryScope<'b, 'l> {
+    budget: &'b Budget<'l>,
+    previous: usize,
+}
+
+impl Drop for TemporaryScope<'_, '_> {
+    fn drop(&mut self) {
+        self.budget.temporary.set(self.previous);
     }
 }

@@ -16,8 +16,8 @@ use crate::materialize::{
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 use crate::policy::Policy;
-use packetcraftr_core::Packet;
 use packetcraftr_core::build::Builder;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::{neighbor, route, transmit};
 use std::time::Instant;
 

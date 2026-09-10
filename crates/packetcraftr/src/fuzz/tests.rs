@@ -11,7 +11,7 @@ use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
-use packetcraftr_core::{Packet, layer::Raw};
+use packetcraftr_core::{layer::Raw, packet::Packet};
 use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
 use crate::test_fixtures::NoopClock;
@@ -692,7 +692,7 @@ fn live_fuzz_authorizes_a_campaign_where_no_case_built() {
 fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmission() {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let permissive_build = packetcraftr_core::build::Options {
-        mode: packetcraftr_core::build::Mode::Permissive,
+        mode: packetcraftr_core::codec::Mode::Permissive,
         ..packetcraftr_core::build::Options::default()
     };
     let malformed = packet_fuzz::Request {

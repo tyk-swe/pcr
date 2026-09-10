@@ -7,10 +7,10 @@ use crate::frame::Frame;
 use bytes::Bytes;
 
 use crate::{
-    Packet,
     diagnostic::Diagnostic,
     layer::{Malformed, Padding, Raw},
     layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout},
+    packet::Packet,
     protocol::BuiltinProtocol,
 };
 

@@ -11,7 +11,7 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::{Tcp, Udp},
 };
-use packetcraftr_core::{Packet, protocol::BuiltinProtocol};
+use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 

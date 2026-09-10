@@ -5,14 +5,13 @@
 
 use std::time::{Duration, Instant};
 
-use crate::analysis::pcap::{
-    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as CaptureLimits,
-};
+use crate::analysis::pcap::{DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as CaptureLimits};
 use crate::analysis::reassembly::ip::{Limits as IpReassemblyLimits, OverlapPolicy};
 use crate::analysis::reassembly::tcp::{
     Limits as TcpReassemblyLimits, MAX_BYTES_PER_FLOW as MAX_TCP_BYTES_PER_FLOW,
 };
 use crate::filter::Filter;
+use crate::frame::DEFAULT_SIZE_LIMIT;
 
 use crate::analysis::Error;
 

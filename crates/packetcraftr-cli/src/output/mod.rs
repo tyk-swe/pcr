@@ -17,7 +17,7 @@ pub mod expert;
 pub mod follow;
 pub mod frame;
 pub mod fuzz;
-mod hex;
+pub mod hex;
 pub mod interfaces;
 pub mod network;
 pub mod plan;

@@ -194,7 +194,7 @@ impl<L: Layer> FromIterator<L> for Packet {
     }
 }
 
-/// Why a structural [`crate::Packet`] operation was refused.
+/// Why a structural [`crate::packet::Packet`] operation was refused.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PacketError {

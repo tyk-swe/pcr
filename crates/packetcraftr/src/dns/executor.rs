@@ -44,14 +44,14 @@ where
         let stop_limits = exchange.limits.message;
         let mut matches_request =
             |_request_index: usize,
-             sent: &packetcraftr_core::Packet,
+             sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
                 probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
                     .is_some()
             };
         let mut stop_after_response =
             |_request_index: usize,
-             sent: &packetcraftr_core::Packet,
+             sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
                 matches!(
                     classify_response(&registry, &stop_probe, sent, response, stop_limits),

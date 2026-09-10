@@ -16,8 +16,8 @@ use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::{
-    Packet,
     layer::Raw,
+    packet::Packet,
     protocol::{link::Ethernet, network::Ipv4},
 };
 use packetcraftr_netio::{

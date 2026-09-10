@@ -14,7 +14,6 @@
 // the lint.
 
 pub mod capture;
-mod deadline;
 mod error;
 pub mod interface;
 pub mod link;

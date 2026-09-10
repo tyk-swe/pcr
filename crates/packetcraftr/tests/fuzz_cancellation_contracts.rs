@@ -14,13 +14,13 @@ use packetcraftr::fuzz::{self, Execution, ExecutionCase, LiveOptions, RunInput};
 use packetcraftr::policy::{Authorizer, Operation};
 use packetcraftr::probe::Executor;
 use packetcraftr::progress::Runtime;
-use packetcraftr_core::Packet;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::codec::{self, LayerCodec};
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::{Id, Layer, Raw};
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::registry::Registry;
 

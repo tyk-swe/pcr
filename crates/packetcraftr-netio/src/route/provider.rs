@@ -131,7 +131,7 @@ impl Classified for SystemError {
     }
 }
 
-#[cfg(all(test, not(feature = "native-route")))]
+#[cfg(all(test, not(native_route)))]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 

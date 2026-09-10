@@ -47,7 +47,9 @@ pub(crate) struct Args {
     /// Positive multiplier for captured replay speed (2 means twice as fast).
     #[arg(long, conflicts_with = "rate")]
     pub(crate) speed: Option<f64>,
-    /// Positive fixed frame rate, overriding captured intervals.
+    /// Positive fixed frame rate in frames per second, overriding captured
+    /// intervals; unlike the live commands' `--rate` ceiling, replay sends at
+    /// exactly this rate.
     #[arg(long, conflicts_with = "speed")]
     pub(crate) rate: Option<f64>,
     /// Maximum cumulative intentional replay delay in milliseconds.

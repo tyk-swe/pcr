@@ -103,7 +103,7 @@ pub(crate) struct Args {
     #[arg(long, value_delimiter = ',', num_args = 1..)]
     pub(crate) ports: Vec<PortSpec>,
     /// Number of bounded attempts per selected endpoint.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
     /// Response window for each capture-ready probe.
     #[arg(long, default_value_t = 1_000)]

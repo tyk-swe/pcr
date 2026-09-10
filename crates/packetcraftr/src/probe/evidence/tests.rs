@@ -7,7 +7,7 @@ use crate::Stats;
 use crate::probe::runner::Batch;
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::{Packet, decode::DecodedPacket, layer::Raw, layout::PacketLayout};
+use packetcraftr_core::{decode::DecodedPacket, layer::Raw, layout::PacketLayout, packet::Packet};
 
 use super::exact_validation::validate_batch_exchange_evidence;
 use super::exact_validation::validate_decoded_frame;

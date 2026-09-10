@@ -5,11 +5,11 @@
 
 use std::net::IpAddr;
 
-use crate::Packet;
 use crate::byte_slice::checked_slice;
 use crate::decode::DecodedPacket;
 use crate::layer::Layer;
 use crate::layer::Padding;
+use crate::packet::Packet;
 use crate::protocol::gre::Gre;
 use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
 use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};

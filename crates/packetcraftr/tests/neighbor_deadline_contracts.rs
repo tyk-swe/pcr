@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use packetcraftr::{Client, policy};
-use packetcraftr_core::Packet;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_netio::capture;

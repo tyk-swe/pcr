@@ -179,6 +179,7 @@ pub(crate) use reflective_layer;
 /// Why a reflective setter refused a value, before the field name and
 /// protocol that [`reflect_set`] attaches are known.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReflectiveFieldError {
     #[error("value is not {0}")]
     WrongType(&'static str),

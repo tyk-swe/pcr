@@ -13,7 +13,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Malformed, Raw, raw_layout};
 use packetcraftr_core::layout::ByteRange;
 use packetcraftr_core::registry::{Discriminator, FilterFieldBinding};
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{build, codec, decode, packet::Packet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -64,7 +64,7 @@ fn build_and_decode_probe(
     packet.push(Child { value: 4 });
     let builder = build::Builder::new(Arc::clone(registry));
     let built = builder
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .expect("bound packet builds");
     assert_eq!(built.bytes.as_ref(), &[9, 4]);
     assert_eq!(built.layout.layers.len(), 2);
@@ -94,15 +94,15 @@ fn assert_failed_packet_lookups(decoded: decode::DecodedPacket) {
     assert!(failed_lookups.layer_mut(99).is_none());
     assert!(matches!(
         failed_lookups.insert(99, Probe::default()),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.replace(99, Probe::default()),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.remove(99),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert_eq!(
         structure(&failed_lookups),
@@ -155,7 +155,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             Packet::new(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default()
         ),
         Err(build::Error::EmptyPacket)
@@ -165,7 +165,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             one.clone(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
                 max_layers: 0,
                 ..build::Options::default()
@@ -179,7 +179,7 @@ fn assert_build_decode_limits(
     assert!(matches!(
         builder.build(
             one,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
                 max_packet_size: 0,
                 ..build::Options::default()

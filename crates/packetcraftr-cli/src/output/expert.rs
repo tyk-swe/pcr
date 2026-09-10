@@ -16,7 +16,7 @@ use packetcraftr_core::diagnostic::Severity;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub severity: Severity,
-    pub code: String,
+    pub code: &'static str,
     pub frame: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<StreamTransport>,
@@ -41,7 +41,7 @@ impl From<AnalysisFinding> for Finding {
 /// Total findings under one code.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CodeCount {
-    pub code: String,
+    pub code: &'static str,
     pub findings: u64,
 }
 

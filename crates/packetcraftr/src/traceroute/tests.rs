@@ -18,7 +18,7 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Udp,
 };
-use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::DEFAULT_UDP_PORT;
 use super::classification::classify_response;

@@ -134,7 +134,7 @@ pub(crate) fn resolve_envelope(
     }
 }
 
-pub(super) fn is_outer_network_layer(packet: &crate::Packet, index: usize) -> bool {
+pub(super) fn is_outer_network_layer(packet: &crate::packet::Packet, index: usize) -> bool {
     !packet
         .iter()
         .take(index)

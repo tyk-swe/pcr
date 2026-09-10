@@ -4,10 +4,10 @@
 use crate::frame::Frame;
 use bytes::Bytes;
 
-use crate::Packet;
 use crate::diagnostic::Diagnostic;
 use crate::layout::PacketLayout;
 use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
+use crate::packet::Packet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {

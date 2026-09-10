@@ -6,10 +6,10 @@
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use packetcraftr_core::{
-    Packet,
     decode::{DecodedPacket, Dissector},
     diagnostic::Diagnostic,
     frame::Frame,
+    packet::Packet,
     registry::Registry,
 };
 use packetcraftr_netio::capture::RecordIdentity;

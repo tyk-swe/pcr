@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::{BuiltinProtocol, builtin};
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
     "bsd_loop", "bsd_null", "erspan", "esp", "icmpv6", "ipv6_srh", "llc", "padding", "pppoe",
@@ -48,7 +48,7 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
         packet.push_boxed(codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
             panic!("{} default construction failed: {error}", protocol.as_str())
         }));
-        let Ok(first) = builder.build(packet, build::Context::default(), build::Options::default())
+        let Ok(first) = builder.build(packet, codec::Context::default(), build::Options::default())
         else {
             rejected.push(protocol.as_str());
             continue;
@@ -62,7 +62,7 @@ fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
         let rebuilt = builder
             .build(
                 decoded.packet,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default(),
             )
             .unwrap_or_else(|error| {

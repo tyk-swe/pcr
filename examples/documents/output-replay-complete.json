@@ -1,0 +1,42 @@
+{
+  "schema": "packetcraftr.output/v3",
+  "command": "replay",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 1,
+  "result": {
+    "source_format": "pcap",
+    "timing": "immediate",
+    "requested_interface": {
+      "name": "lab0",
+      "index": 2
+    },
+    "requested_link_mode": "auto",
+    "frames_attempted": 1,
+    "frames_completed": 1,
+    "bytes_completed": 4,
+    "scheduled_duration": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "frames": []
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 4,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 250000
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  },
+  "event": "complete"
+}

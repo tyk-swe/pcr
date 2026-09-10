@@ -12,7 +12,7 @@ use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layout::PacketLayout;
-use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::executor::{Executor, Request};
 use crate::BoundaryError;

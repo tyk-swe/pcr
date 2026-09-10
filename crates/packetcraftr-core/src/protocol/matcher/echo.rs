@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    Packet,
     field::FieldValue,
     matcher::{Match, ResponseMatcher},
+    packet::Packet,
     protocol::BuiltinProtocol,
 };
 

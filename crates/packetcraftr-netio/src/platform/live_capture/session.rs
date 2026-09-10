@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use packetcraftr_core::budget::remaining_before;
+
 use crate::platform::workers::{JoinAttempt, WorkerPermit, join_with_deadline};
 
 use crate::{
@@ -177,7 +179,7 @@ impl Session for NativeCaptureSession {
         let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock();
         while !state.ready && !state.closed && state.error.is_none() {
-            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            let Some(remaining) = remaining_before(deadline) else {
                 return Err(Error::CaptureReadiness {
                     message: "capture readiness deadline expired".to_owned(),
                 });
@@ -227,7 +229,7 @@ impl Session for NativeCaptureSession {
             if state.closed || timeout.is_zero() {
                 return Ok(None);
             }
-            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            let Some(remaining) = remaining_before(deadline) else {
                 return Ok(None);
             };
             let (next_state, timed_out) = self.shared.wait_timeout(state, remaining);

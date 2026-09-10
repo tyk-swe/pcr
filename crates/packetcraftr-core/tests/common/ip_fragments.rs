@@ -5,12 +5,13 @@
 
 use super::{CLIENT, SERVER};
 use bytes::Bytes;
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::build::{Builder, Context as BuildContext, Options as BuildOptions};
+use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::codec::Context as BuildContext;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};

@@ -7,12 +7,12 @@
 mod common;
 
 use common::{CLIENT, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
@@ -54,7 +54,7 @@ fn build_ipv4_frame(
     let built = Builder::new(Arc::clone(registry))
         .build(
             packet,
-            packetcraftr_core::build::Context::default(),
+            packetcraftr_core::codec::Context::default(),
             packetcraftr_core::build::Options::default(),
         )
         .expect("tunnel fixture must build");

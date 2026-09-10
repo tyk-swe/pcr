@@ -6,16 +6,16 @@ use std::net::Ipv4Addr;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
 use packetcraftr_core::analysis::pcap::Reader;
 use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::build::Builder;
-use packetcraftr_core::build::Context;
 use packetcraftr_core::build::Options;
+use packetcraftr_core::codec::Context;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
@@ -359,6 +359,30 @@ fn explicit_files_ignore_an_unrelated_open_stdin_pipe() {
         parse_json(&frame)["result"]["dissection"]["bytes_hex"],
         IPV4_FRAME_HEX
     );
+}
+
+/// The root help publishes the same exit-code table the README documents,
+/// including the cancellation code, which is not a classified failure.
+#[test]
+fn root_help_publishes_every_documented_exit_code() {
+    let output = run_success(&["--help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let table = stdout
+        .split_once("Exit codes:")
+        .map(|(_, rest)| rest)
+        .expect("root help contains the exit code table");
+    let codes = table
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.split_whitespace()
+                .next()
+                .expect("each row starts with a code")
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["0", "2", "3", "4", "5", "6", "70", "130"]);
 }
 
 #[test]

@@ -3,9 +3,10 @@
 
 mod common;
 
-use packetcraftr_core::protocol::application::tls::{
-    Handshake, Outcome, Transport, ja3, ja3s, ja4, looks_like_record_start, parse_handshake,
-    parse_record,
+use packetcraftr_core::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
+use packetcraftr_core::protocol::application::tls::model::Handshake;
+use packetcraftr_core::protocol::application::tls::parse::{
+    Outcome, looks_like_record_start, parse_handshake, parse_record,
 };
 
 use common::tls_vectors::{CLIENT_HELLO_VECTORS, HelloVector, SERVER_HELLO_VECTORS, decode_hex};

@@ -8,10 +8,10 @@ use std::net::Ipv4Addr;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Format, Reader, Writer};
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 
 mod support;

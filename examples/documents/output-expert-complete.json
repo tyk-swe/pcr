@@ -1,0 +1,68 @@
+{
+  "schema": "packetcraftr.output/v3",
+  "command": "expert",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "clock": {
+      "regressions": 0,
+      "max_regression": {
+        "secs": 0,
+        "nanos": 0
+      },
+      "max_forward_step": {
+        "secs": 0,
+        "nanos": 24000000
+      },
+      "max_forward_step_frame": 5
+    },
+    "frames_read": 8,
+    "frames_matched": 8,
+    "errors": 0,
+    "warnings": 0,
+    "notes": 0,
+    "codes": [],
+    "findings": [],
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
+  },
+  "diagnostics": []
+}

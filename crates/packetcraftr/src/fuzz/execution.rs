@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{Packet, diagnostic::Diagnostic};
+use packetcraftr_core::{diagnostic::Diagnostic, packet::Packet};
 
 #[derive(Clone, Debug)]
 pub struct ExecutionCase {

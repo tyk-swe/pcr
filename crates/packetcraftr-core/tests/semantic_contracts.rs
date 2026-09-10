@@ -17,7 +17,7 @@ use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
-use packetcraftr_core::{Packet, reflective_layer};
+use packetcraftr_core::{packet::Packet, reflective_layer};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RouteMimic {

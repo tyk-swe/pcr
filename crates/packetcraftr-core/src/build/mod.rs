@@ -5,10 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::Packet;
-use crate::codec::LayerEncodeContext;
+use crate::codec::{Context, LayerEncodeContext, Mode};
 use crate::layer::{Id, Malformed, Padding};
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
+use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
 use crate::registry::Registry;
 
@@ -19,11 +19,6 @@ mod error;
 mod options;
 mod validation;
 
-/// Re-exported so a builder caller names the encoding mode, the address
-/// context, and the default ceilings without importing the codec contract or
-/// the layout module.
-pub use crate::codec::{Context, Mode};
-pub use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 pub use error::Error;
 pub use options::{BuiltPacket, Options};
 

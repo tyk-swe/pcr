@@ -16,7 +16,7 @@ use packetcraftr_core::protocol::{
     network::{Ipv4, Ipv6},
     transport::Tcp,
 };
-use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};

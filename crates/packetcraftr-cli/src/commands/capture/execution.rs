@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::policy::CaptureBudget;
 use packetcraftr_core as core;
+use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio as net;
 
@@ -81,9 +82,11 @@ fn wait_ready<C: net::capture::Session>(
     if timeout.is_zero() {
         return Ok(());
     }
-    let remaining = deadline
-        .checked_duration_since(Instant::now())
-        .unwrap_or(Duration::ZERO);
+    let Some(remaining) = remaining_before(deadline) else {
+        return Err(CliError::classified(net::Error::CaptureReadiness {
+            message: "capture readiness deadline expired".to_owned(),
+        }));
+    };
     capture.wait_ready(remaining).map_err(CliError::classified)
 }
 
@@ -98,12 +101,9 @@ where
     F: FnMut(Frame, u64) -> Result<(), CliError>,
 {
     while !progress.budget.is_exhausted() {
-        let Some(remaining) = progress.deadline.checked_duration_since(Instant::now()) else {
+        let Some(remaining) = remaining_before(progress.deadline) else {
             break;
         };
-        if remaining.is_zero() {
-            break;
-        }
         let Some(frame) = capture
             .next_captured_frame(remaining)
             .map_err(CliError::classified)?

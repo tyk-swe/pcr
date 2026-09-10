@@ -3,7 +3,7 @@
 
 use bytes::Bytes;
 
-use crate::{Packet, field::FieldValue};
+use crate::{field::FieldValue, packet::Packet};
 
 pub(super) fn sctp_initiate_tag(
     packet: &Packet,

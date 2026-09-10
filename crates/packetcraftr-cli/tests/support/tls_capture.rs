@@ -13,13 +13,13 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core as core;
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
 use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::application::tls::model::CONTENT_TYPE_HANDSHAKE;
 use packetcraftr_core::protocol::application::tls::model::HANDSHAKE_CLIENT_HELLO;
 use packetcraftr_core::protocol::application::tls::model::HANDSHAKE_SERVER_HELLO;
@@ -227,7 +227,7 @@ fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
     core::build::Builder::new(Arc::clone(registry))
         .build(
             packet,
-            core::build::Context::default(),
+            core::codec::Context::default(),
             core::build::Options::default(),
         )
         .expect("fixture frame must build")

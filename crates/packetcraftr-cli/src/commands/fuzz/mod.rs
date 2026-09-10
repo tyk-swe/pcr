@@ -129,7 +129,7 @@ fn prepare_live(
 
 fn execute_and_render(
     request: core::fuzz::Request,
-    packet: core::Packet,
+    packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
     format: Format,
@@ -144,7 +144,7 @@ fn execute_and_render(
 
 fn execute_offline(
     request: core::fuzz::Request,
-    packet: core::Packet,
+    packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     format: Format,
     stream: &StreamEncoder,
@@ -187,7 +187,7 @@ fn execute_offline(
 
 fn execute_live(
     request: core::fuzz::Request,
-    packet: core::Packet,
+    packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     live: PreparedLive,
     format: Format,

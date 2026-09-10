@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::net::IpAddr;
 
-use packetcraftr_core::Packet;
+use packetcraftr_core::packet::Packet;
 
 pub use crate::probe::ProbeEndpoint;
 

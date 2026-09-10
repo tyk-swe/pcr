@@ -28,10 +28,6 @@ pub mod parse;
 #[cfg(test)]
 mod test_wire;
 
-pub use fingerprint::{Ja3, Transport, ja3, ja3s, ja4};
-pub use model::{ClientHello, Extension, Handshake, Record, ServerHello};
-pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
-
 /// Renders bytes as lowercase hexadecimal, two characters per byte.
 ///
 /// Shared by the fingerprint digests and the codec's raw-byte fields so both

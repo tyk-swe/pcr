@@ -3,10 +3,11 @@
 
 use bytes::Bytes;
 use packetcraftr_core::{
-    Packet, build, decode,
+    build, codec, decode,
     field::FieldValue,
     frame::{Frame, LinkType},
     layer::{Layer, Malformed, Raw},
+    packet::Packet,
     protocol::{
         application::dns::{DecodeError, DecodeLimits, Dns, Name, RecordValue, name},
         builtin,
@@ -131,7 +132,7 @@ fn captured(message: &[u8]) -> Frame {
             packet,
             Default::default(),
             build::Options {
-                mode: build::Mode::Permissive,
+                mode: codec::Mode::Permissive,
                 ..Default::default()
             },
         )

@@ -11,7 +11,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use bytes::Bytes;
 use packetcraftr_cli::output::{build as build_output, dissect as dissect_output};
 use packetcraftr_cli::output::{capture, contract, expert, follow, read, stats};
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::IpCounters;
 use packetcraftr_core::analysis::IpDatagramOutcome;
 use packetcraftr_core::analysis::IpFamilyCounters;
@@ -34,12 +33,14 @@ use packetcraftr_core::analysis::stats::IoBucketStat;
 use packetcraftr_core::analysis::stats::PortStat;
 use packetcraftr_core::analysis::stats::ProtocolStat;
 use packetcraftr_core::build;
+use packetcraftr_core::codec;
 use packetcraftr_core::decode;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Direction as CaptureDirection;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
@@ -63,7 +64,7 @@ fn built_udp_packet() -> (
     });
     packet.push(Raw::new(b"payload".to_vec()));
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .expect("representative packet must build");
     (registry, built)
 }
@@ -366,7 +367,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
     let findings: Vec<expert::Finding> = [
         AnalysisFinding {
             severity: packetcraftr_core::diagnostic::Severity::Error,
-            code: "tcp.reset".to_owned(),
+            code: "tcp.reset",
             number: 8,
             stream: Some(StreamRef {
                 transport: AnalysisStreamTransport::Tcp,
@@ -376,7 +377,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
         },
         AnalysisFinding {
             severity: packetcraftr_core::diagnostic::Severity::Warning,
-            code: "udp.gap".to_owned(),
+            code: "udp.gap",
             number: 9,
             stream: Some(StreamRef {
                 transport: AnalysisStreamTransport::Udp,
@@ -386,7 +387,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
         },
         AnalysisFinding {
             severity: packetcraftr_core::diagnostic::Severity::Info,
-            code: "capture.note".to_owned(),
+            code: "capture.note",
             number: 10,
             stream: None,
             message: "capture note".to_owned(),
@@ -402,11 +403,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
             errors: 1,
             warnings: 1,
             notes: 1,
-            codes: BTreeMap::from([
-                ("capture.note".to_owned(), 1),
-                ("tcp.reset".to_owned(), 1),
-                ("udp.gap".to_owned(), 1),
-            ]),
+            codes: BTreeMap::from([("capture.note", 1), ("tcp.reset", 1), ("udp.gap", 1)]),
         },
         12,
         11,

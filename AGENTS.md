@@ -7,7 +7,9 @@ PacketcraftR has four directional Rust crates:
 - `packetcraftr-core`: packets, codecs/reflection, bounded documents, capture
   formats, filters, and offline analysis.
 - `packetcraftr-netio`: provider contracts and native resources. Platform
-  selection stays in `build.rs` and `platform::dispatch`.
+  selection stays in `build.rs` and `platform::dispatch`; code outside
+  `platform/` gates on the capability cfgs `build.rs` emits (`native_route`
+  and friends), never on `target_os` directly.
 - `packetcraftr`: live workflows, policy, preparation, budgets, and evidence.
 - `packetcraftr-cli`: arguments, provider composition, rendering, and the
   versioned machine-output contract.

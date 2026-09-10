@@ -11,7 +11,7 @@ use crate::probe::{Error, ErrorKind, Workflow};
 
 use super::EvidenceLimits;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{Packet, decode::DecodedPacket};
+use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
 use packetcraftr_netio::capture::Statistics;
 
 use super::budget::{checked_frame_bytes, checked_frame_count};

@@ -8,6 +8,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr_core::budget::remaining_before` is the one helper every crate
+  uses to turn a deadline into a remaining wait; the previous netio-private copy
+  is gone. Core exposes `protocol::application::dns::{read_u16, read_u32}` and
+  the CLI library exposes `output::hex` for the compact hex rendering shared by
+  rendering and machine output, with borrowed formatting for `--output hex`.
+  `scan::DEFAULT_ATTEMPTS` names the scan attempts default.
+- Published `output-expert-complete.json` and `output-replay-complete.json`
+  examples; every NDJSON-capable command now publishes its terminal record.
 - Clients can share an explicitly supplied progress runtime and inspect its
   admission snapshot. Netio exposes read-only process-wide native resource
   capacity, rejection and retained-cleanup diagnostics.
@@ -29,6 +37,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `packetcraftr --help` lists exit code 130 for interrupted operations next to
+  the classified codes.
+- `traceroute --port`, `--source-port`, and `--first-hop` reject zero during
+  argument parsing. `tls --max-tls-buffer-bytes 0` is rejected like any other
+  value below the per-direction floor instead of disabling buffering.
+  `replay --rate` help states that replay sends at exactly that rate, unlike
+  the live commands' ceiling.
+- Rust: `analysis::expert::Finding::code` and `Summary::codes` use the static
+  code strings directly; `ReflectiveFieldError`, DNS name `Error`,
+  `QueryTypeParseError`, and progress `EmitError` are `#[non_exhaustive]`.
 - PR CI runs five jobs, with documentation and validation failure fixtures
   folded into Linux. Release-archive builds and smoke checks run in the release
   workflow; decoder and isolated native validation run outside PRs.
@@ -55,6 +73,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Removed
 
+- Rust: the equivalent public paths `packetcraftr_core::{Packet, PacketError}`
+  (use `packet::`), `build::{Context, Mode, DEFAULT_MAX_LAYERS,
+  DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `layout::`),
+  `protocol::application::{Dns, Tls}` (use `dns::Dns` and `tls::codec::Tls`),
+  the `protocol::application::tls` facade re-exports (use `fingerprint::`,
+  `model::`, and `parse::`), `analysis::pcap::DEFAULT_SIZE_LIMIT` (use
+  `frame::DEFAULT_SIZE_LIMIT`), and `packetcraftr::dns::tcp::SocketFault` (use
+  `packetcraftr_netio::SystemFault`).
 - The independent downstream compatibility workspace (`compatibility/`); its
   codec, offline collector, provider composition and output-consumer checks
   are covered by the workspace integration tests.
@@ -70,6 +96,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `routes` failures keep the provider's classification, context, and cause
+  chain instead of collapsing to a generic I/O message. DNS query construction
+  errors and neighbor operation-and-cleanup errors expose their cause through
+  `std::error::Error::source`, so `causes()` and rendered help include it.
 - Unix and Windows release archives include the resource-diagnostics output
   examples required by archive verification.
 - TCP pending growth no longer recopies its retained range on adjacent or

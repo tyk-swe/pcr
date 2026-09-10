@@ -141,7 +141,7 @@ fn frame(bytes: &[u8]) -> core::frame::Frame {
 
 fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
     let frame = frame(bytes);
-    let mut packet = core::Packet::new();
+    let mut packet = core::packet::Packet::new();
     packet.push(core::layer::Raw::new(bytes.to_vec()));
     core::decode::DecodedPacket {
         packet,
@@ -217,7 +217,7 @@ fn dns_attempt() -> packetcraftr::dns::AttemptEvidence {
 }
 
 fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
-    let mut packet = core::Packet::new();
+    let mut packet = core::packet::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));
     let request = core::fuzz::Request {
         cases: 1,
@@ -239,13 +239,13 @@ fn sent_packet() -> packetcraftr::SentPacket {
     use packetcraftr_netio::link::{Capability, Mode};
     use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
 
-    let mut packet = core::Packet::new();
+    let mut packet = core::packet::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));
     let registry = core::protocol::builtin::registry();
     let built = core::build::Builder::new(registry)
         .build(
             packet,
-            core::build::Context::default(),
+            core::codec::Context::default(),
             core::build::Options::default(),
         )
         .expect("sent fixture builds");
@@ -321,7 +321,7 @@ fn production_typed_event_variants_are_schema_valid() {
         output::contract::Command::Expert,
         output::expert::Finding {
             severity: packetcraftr_core::diagnostic::Severity::Warning,
-            code: "fixture.warning".to_owned(),
+            code: "fixture.warning",
             frame: 1,
             transport: None,
             stream: None,

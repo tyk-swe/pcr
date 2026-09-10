@@ -5,9 +5,12 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::build::{self, BuiltPacket};
+use packetcraftr_core::build::BuiltPacket;
+use packetcraftr_core::codec;
 use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::{Packet, field::FieldValue, packet::semantics, protocol::BuiltinProtocol};
+use packetcraftr_core::{
+    field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
+};
 use packetcraftr_netio::route;
 
 use super::target::Family;
@@ -18,7 +21,7 @@ use crate::Error;
 pub(crate) struct PlannedPacket {
     pub(crate) packet: Packet,
     pub(crate) plan: route::Plan,
-    pub(crate) build_context: build::Context,
+    pub(crate) build_context: codec::Context,
     pub(crate) preliminary_build: BuiltPacket,
 }
 
@@ -31,8 +34,8 @@ pub(crate) struct PreparedPacket {
 
 pub(crate) fn build_context(
     plan: &packetcraftr_netio::route::Plan,
-) -> packetcraftr_core::build::Context {
-    packetcraftr_core::build::Context {
+) -> packetcraftr_core::codec::Context {
+    packetcraftr_core::codec::Context {
         source: plan.packet_source,
         destination: plan.final_destination,
     }
@@ -217,9 +220,9 @@ pub(crate) fn require_fixed_width_link_materialization(
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use packetcraftr_core::Packet;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::packet::Packet;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, network::Ipv6};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::{Capability, MacAddress, Mode};
@@ -278,7 +281,7 @@ mod tests {
 
         assert_eq!(
             build_context(&route),
-            packetcraftr_core::build::Context {
+            packetcraftr_core::codec::Context {
                 source: Some(ipv4(1)),
                 destination: Some(ipv4(2)),
             }

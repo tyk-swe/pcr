@@ -4,7 +4,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    Packet, codec::NetworkEnvelope, field::FieldValue, layer::Layer, packet::semantics,
+    codec::NetworkEnvelope, field::FieldValue, layer::Layer, packet::Packet, packet::semantics,
     protocol::BuiltinProtocol,
 };
 

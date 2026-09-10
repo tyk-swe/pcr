@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
-use crate::Packet;
+use crate::packet::Packet;
 
 use crate::error::{Classification, Classified, Kind};
 use crate::field::{FieldValue, parse_mac};

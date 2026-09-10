@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 use crate::budget::Deadline;
 use crate::error::{Classification, Kind};
 use crate::{
-    Packet,
     build::Builder,
     decode::Dissector,
     field::{FieldKind, FieldValue},
+    packet::Packet,
     registry::Registry,
 };
 

@@ -31,7 +31,7 @@ where
         let template = packetcraftr_core::template::Template::new(packet);
         let mut matches_request =
             |request_index: usize,
-             sent: &packetcraftr_core::Packet,
+             sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
                 request_index == 0
                     && classify_response(

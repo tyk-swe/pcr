@@ -17,7 +17,7 @@ use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 const PAYLOAD: &[u8] = b"GET /index HTTP/1.1";
 
@@ -25,7 +25,7 @@ const PAYLOAD: &[u8] = b"GET /index HTTP/1.1";
 fn decoded(packet: Packet) -> decode::DecodedPacket {
     let registry = registry();
     let built = build::Builder::new(Arc::clone(&registry))
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .unwrap_or_else(|error| panic!("fixture build: {error}"));
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH + Duration::from_secs(123),

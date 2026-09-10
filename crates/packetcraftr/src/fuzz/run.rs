@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
-    Packet,
     build::{Builder, BuiltPacket},
     decode::Dissector,
     frame::LinkType,
     fuzz as packet_fuzz,
+    packet::Packet,
     registry::Registry,
 };
 
@@ -492,7 +492,7 @@ fn expected_live_build(
 fn build_packet(
     builder: &Builder,
     packet: Packet,
-    context: packetcraftr_core::build::Context,
+    context: packetcraftr_core::codec::Context,
     request: &packet_fuzz::Request,
 ) -> Result<BuiltPacket, String> {
     stringify(builder.build(packet, context, request.build.clone()))

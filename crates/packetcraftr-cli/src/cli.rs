@@ -8,7 +8,7 @@ use clap::{Parser, ValueEnum};
 use packetcraftr_cli::output::contract::Format;
 
 use crate::commands::Command;
-use crate::errors::{KINDS, exit_code_description, exit_code_for};
+use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
 
 const ROOT_HELP_FORMATS: &str = r#"Output formats:
   text    Human-readable summaries and diagnostics.
@@ -43,6 +43,10 @@ fn root_after_help() -> String {
             exit_code_description(kind)
         );
     }
+    let _ = writeln!(
+        help,
+        "  {CANCELLED_EXIT_CODE} cancelled: the operation was interrupted before it completed."
+    );
     help.push('\n');
     help.push_str(ROOT_HELP_EXAMPLES);
     help

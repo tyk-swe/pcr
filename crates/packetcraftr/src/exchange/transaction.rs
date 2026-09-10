@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::{decode::Dissector, registry::Registry};
 use packetcraftr_netio::{
     Error as LiveIoError,
@@ -127,11 +128,10 @@ impl<C: Session> Transaction<C> {
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
-        let readiness_timeout = self.deadline.checked_duration_since(Instant::now()).ok_or(
-            LiveIoError::DeadlineExceeded {
+        let readiness_timeout =
+            remaining_before(self.deadline).ok_or(LiveIoError::DeadlineExceeded {
                 operation: "waiting for capture readiness",
-            },
-        )?;
+            })?;
         self.capture.inner.wait_ready(readiness_timeout)
     }
 }

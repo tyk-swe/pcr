@@ -21,7 +21,7 @@ use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
 use crate::rendering::{
-    compact_hex, emit_aggregate, emit_stderr_message, render_diagnostics_text, render_dns_records,
+    emit_aggregate, emit_stderr_message, render_diagnostics_text, render_dns_records,
     write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
@@ -85,7 +85,10 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             ))?;
             render_diagnostics_text(&decoded.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!("{}", compact_hex(&decoded.original))),
+        Format::Hex => write_plain_line(format_args!(
+            "{}",
+            output::hex::CompactHex(&decoded.original)
+        )),
         Format::Raw => write_raw(&decoded.original),
         Format::Json => {
             let (dissection, diagnostics) = if kept {

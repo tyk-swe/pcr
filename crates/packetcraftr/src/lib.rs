@@ -12,14 +12,14 @@
 //! [`policy::Policy`] and finite resource budgets.
 //!
 //! ```rust
-//! use packetcraftr_core::{build, layer::Raw, protocol, Packet};
+//! use packetcraftr_core::{build, codec, layer::Raw, packet::Packet, protocol};
 //!
 //! let registry = protocol::builtin::registry();
 //! let mut packet = Packet::new();
 //! packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
 //! let built = build::Builder::new(registry).build(
 //!     packet,
-//!     build::Context::default(),
+//!     codec::Context::default(),
 //!     build::Options::default(),
 //! )?;
 //! assert_eq!(built.bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);

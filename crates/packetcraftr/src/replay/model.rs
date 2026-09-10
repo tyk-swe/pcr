@@ -5,9 +5,9 @@
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::analysis::pcap::{
-    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Format, Interface,
+    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Format, Interface,
 };
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
     route::Materialized as MaterializedRoute, transmit::Report as IoSendReport,

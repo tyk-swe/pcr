@@ -22,7 +22,7 @@ fn matches_selector(
     if finding.severity < min_severity.into() {
         return false;
     }
-    if !codes.is_empty() && !codes.iter().any(|c| c == &finding.code) {
+    if !codes.is_empty() && !codes.iter().any(|c| c == finding.code) {
         return false;
     }
     true

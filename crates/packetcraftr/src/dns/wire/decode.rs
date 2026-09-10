@@ -3,7 +3,7 @@
 
 //! Ordered DNS response validation and decoding orchestration.
 
-use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name};
+use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name, read_u16};
 
 use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
@@ -16,10 +16,6 @@ use crate::dns::{
 use crate::dns::{
     Edns, MessageLimits, Name, QueryType, Record, RecordValue, ResponseMetadata, ValidatedResponse,
 };
-
-use primitives::read_u16;
-
-mod primitives;
 
 /// Decodes the length prefix of a single DNS-over-TCP frame, then applies the
 /// same transaction, question, bounds, and relevance validation as UDP.

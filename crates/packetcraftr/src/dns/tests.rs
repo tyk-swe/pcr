@@ -17,7 +17,7 @@ use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
-use packetcraftr_core::{Packet, decode::DecodedPacket, frame::Frame, frame::LinkType};
+use packetcraftr_core::{decode::DecodedPacket, frame::Frame, frame::LinkType, packet::Packet};
 
 use crate::policy::Authorizer;
 use crate::policy::Operation;
@@ -1634,6 +1634,10 @@ fn edns_validation_precedes_authorization_and_execution() {
             error,
             super::Error::Query(super::error::WireError::InvalidEdns { .. })
         ));
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "query construction failures keep their wire cause"
+        );
         assert!(authorizer.budgets.is_empty());
         assert!(authorizer.targets.is_empty());
         assert_eq!(executor.udp_calls + executor.tcp_calls, 0);

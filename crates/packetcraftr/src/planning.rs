@@ -4,7 +4,8 @@
 use std::net::IpAddr;
 use std::time::Instant;
 
-use packetcraftr_core::Packet;
+use packetcraftr_core::budget::remaining_before;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::{
     Error as LiveIoError, route::plan as plan_route, transmit::Sender as PacketIo,
 };
@@ -20,7 +21,7 @@ use crate::Error;
 /// Preparation callers retain the error vocabulary of their operation.
 #[must_use]
 pub(crate) fn expired(deadline: Instant) -> bool {
-    deadline.checked_duration_since(Instant::now()).is_none()
+    remaining_before(deadline).is_none()
 }
 
 pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error> {

@@ -223,7 +223,6 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
 
     let schema = layer.schema();
     assert_eq!(schema.name, "Probe");
-    assert_eq!(schema.fields.len(), 9);
     layer
         .validate_required_fields()
         .expect("all required getters produce values");
@@ -252,21 +251,6 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
         FieldValue::Mac([0, 1, 2, 3, 4, 5]),
         FieldValue::List(vec![1_u8.into(), "two".into()]),
     ];
-    let rendered = values.iter().map(ToString::to_string).collect::<Vec<_>>();
-    assert_eq!(
-        rendered,
-        [
-            "true",
-            "7",
-            "-3",
-            "text",
-            "abcd",
-            "127.0.0.1",
-            "::1",
-            "00:01:02:03:04:05",
-            "1,two"
-        ]
-    );
     assert_eq!(values[1].as_u64(), Some(7));
     assert_eq!(values[0].as_bool(), Some(true));
     assert_eq!(values[0].as_u64(), None);

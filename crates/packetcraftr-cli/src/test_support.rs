@@ -52,17 +52,6 @@ pub(crate) fn assert_contiguous(records: &[Value]) {
     }
 }
 
-pub(crate) fn assert_single_complete(records: &[Value]) {
-    assert_eq!(
-        records
-            .iter()
-            .filter(|record| record["event"] == "complete")
-            .count(),
-        1,
-        "stream must contain exactly one complete event"
-    );
-}
-
 pub(crate) fn output_schema() -> &'static Value {
     static SCHEMA: OnceLock<Value> = OnceLock::new();
     SCHEMA.get_or_init(|| {

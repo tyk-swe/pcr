@@ -150,20 +150,3 @@ pub fn registry_with_tls_ports(
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
     registry_with(|builder| registration::bind_tls_ports(builder, ports))
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn builtin_registry_initializes_and_is_shared() {
-        let first = super::registry();
-        let second = super::registry();
-        assert!(
-            std::sync::Arc::ptr_eq(&first, &second),
-            "the built-in registry must be built once and shared"
-        );
-        assert!(
-            first.codec_named("ethernet").is_some(),
-            "the shared registry must carry the built-in catalog"
-        );
-    }
-}

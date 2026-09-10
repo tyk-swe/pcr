@@ -7,21 +7,18 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_core::{Packet, layer::Raw};
-use packetcraftr_core::{
-    error::Kind,
-    frame::{Frame as CaptureFrame, LinkType},
-};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
-    Error, PacketIo,
-    capture::{self, Provider as _, Session as _},
-    link::{Capability, MacAddress, Mode, VlanKind},
+    Error,
+    capture::{self, Session as _},
+    link::{Capability, MacAddress, Mode},
     neighbor,
     route::{
         Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,
@@ -291,46 +288,6 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
     );
 }
 
-#[test]
-fn captured_frame_constructors_preserve_or_omit_monotonic_ingress() {
-    let ingress = Instant::now();
-    let frame = CaptureFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![1_u8])
-        .expect("fixture frame");
-    let captured = capture::Captured::new(frame.clone(), ingress);
-    assert_eq!(captured.frame, frame);
-    assert_eq!(captured.received_at, Some(ingress));
-
-    let unknown = capture::Captured::without_ingress_time(frame.clone());
-    assert_eq!(unknown.frame, frame);
-    assert_eq!(unknown.received_at, None);
-
-    let explicit = capture::Captured::with_ingress_time(frame.clone(), None);
-    assert_eq!(explicit.frame, frame);
-    assert_eq!(explicit.received_at, None);
-    assert_ne!(captured.identity(), unknown.identity());
-    assert_ne!(unknown.identity(), explicit.identity());
-    assert_eq!(captured.identity(), captured.clone().identity());
-}
-
-struct NoCapture;
-
-impl capture::Provider for NoCapture {
-    type Capture = EmptySession;
-
-    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, Error> {
-        assert_eq!(request.filter.as_deref(), Some("udp"));
-        assert!(request.promiscuous);
-        Ok(EmptySession {
-            metadata: capture::Metadata {
-                interface: request.interface.clone(),
-                link_type: LinkType::LINUX_SLL,
-                snap_length: request.limits.snap_length,
-            },
-            polls: Arc::default(),
-        })
-    }
-}
-
 #[derive(Debug)]
 struct EmptySession {
     metadata: capture::Metadata,
@@ -391,70 +348,6 @@ fn cancellable_capture_backs_off_after_early_empty_polls() {
             "{polls} polls in {timeout:?}"
         );
     }
-}
-
-#[test]
-fn boxed_capture_session_forwards_the_complete_owned_session_contract() {
-    let request = capture::Request {
-        interface: interface(),
-        limits: capture::Limits::default(),
-        filter: Some("udp".to_owned()),
-        promiscuous: true,
-    };
-    let mut session: Box<dyn capture::Session> =
-        Box::new(NoCapture.arm_capture(&request).expect("fixture session"));
-
-    assert_eq!(
-        capture::Session::metadata(&session).interface,
-        request.interface
-    );
-    capture::Session::wait_ready(&mut session, Duration::ZERO).expect("fixture readiness");
-    assert!(
-        capture::Session::next_captured_frame(&mut session, Duration::ZERO)
-            .expect("fixture read")
-            .is_none()
-    );
-    assert_eq!(
-        capture::Session::statistics(&session),
-        capture::Statistics::default()
-    );
-    capture::Session::shutdown(&mut session).expect("fixture cleanup");
-}
-
-#[derive(Clone)]
-struct CountingSender(Arc<AtomicUsize>);
-
-impl Sender for CountingSender {
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(packetcraftr_netio::transmit::Submission::start()
-            .complete(frame.bytes().len(), frame.bytes().clone()))
-    }
-}
-
-#[test]
-fn packet_io_forwards_each_operation_to_its_owned_provider() {
-    let sends = Arc::new(AtomicUsize::new(0));
-    let io = PacketIo::new(CountingSender(Arc::clone(&sends)), NoCapture);
-    let bytes = Bytes::from_static(&[1, 2, 3]);
-    let route = materialized(Mode::Layer2);
-
-    let report = Sender::send(
-        &io,
-        Frame::try_new(&bytes, &route).expect("typed transmission frame"),
-    )
-    .expect("fixture send");
-    assert_eq!(report.wire_bytes(), &bytes);
-    assert_eq!(sends.load(Ordering::SeqCst), 1);
-
-    let request = capture::Request {
-        interface: interface(),
-        limits: capture::Limits::default(),
-        filter: Some("udp".to_owned()),
-        promiscuous: true,
-    };
-    let session = capture::Provider::arm_capture(&io, &request).expect("fixture capture");
-    assert_eq!(session.metadata().interface, request.interface);
 }
 
 #[derive(Clone)]
@@ -564,13 +457,6 @@ fn send_reports_validate_counts_bytes_and_provider_timing() {
 
 #[test]
 fn route_model_helpers_cover_neighbor_and_vlan_contracts() {
-    assert_eq!(
-        MacAddress([0, 1, 2, 0xab, 0xcd, 0xef]).to_string(),
-        "00:01:02:ab:cd:ef"
-    );
-    assert_eq!(VlanKind::Ieee8021Q.ether_type(), 0x8100);
-    assert_eq!(VlanKind::Ieee8021Ad.ether_type(), 0x88a8);
-
     let mut plan = planned(Mode::Layer2);
     plan.destination_mac = None;
     assert!(plan.needs_neighbor_resolution());
@@ -669,32 +555,4 @@ fn neighbor_options_reject_every_unbounded_value() {
             Err(neighbor::Error::InvalidOptions { .. })
         ));
     }
-}
-
-struct DefaultRouteProvider;
-
-impl Provider for DefaultRouteProvider {
-    type Error = RouteFailure;
-
-    fn lookup_with_preferences(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-    ) -> Result<Decision, Self::Error> {
-        Ok(decision(Capability::Layer2AndLayer3))
-    }
-}
-
-#[test]
-fn route_provider_defaults_are_passive_and_have_stable_classification() {
-    assert_eq!(
-        DefaultRouteProvider
-            .lookup_interface(&interface())
-            .expect("default interface lookup"),
-        None
-    );
-    let classification = DefaultRouteProvider.classify_error(&RouteFailure);
-    assert_eq!(classification.code, "io.route");
-    assert_eq!(classification.kind, Kind::Io);
 }

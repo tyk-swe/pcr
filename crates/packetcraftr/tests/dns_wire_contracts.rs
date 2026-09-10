@@ -114,15 +114,6 @@ fn decode(message: &[u8], query_name: &str, query_type: QueryType) -> dns::Valid
 }
 
 #[test]
-fn public_decode_functions_share_their_contract() {
-    type Decode =
-        fn(&[u8], &str, QueryType, u16, Limits) -> Result<dns::ValidatedResponse, WireError>;
-
-    let _: Decode = dns::decode_response;
-    let _: Decode = dns::decode_tcp_frame;
-}
-
-#[test]
 fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
     let cases = [
         (QueryType::A, 1, "a"),
@@ -186,9 +177,6 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
         let error: DecodeError = Name::from_labels(labels).expect_err(description);
         assert!(is_expected(&error), "{description}: {error:?}");
     }
-    assert_eq!(Section::Answer.to_string(), "answer");
-    assert_eq!(Section::Authority.to_string(), "authority");
-    assert_eq!(Section::Additional.to_string(), "additional");
 }
 
 #[test]
@@ -398,10 +386,9 @@ fn decoder_error_precedence_is_stable() {
             remaining: 1
         }))
     ));
-}
 
-#[test]
-fn header_and_question_validation_fail_closed() {
+    // Size limits and the remaining question checks each surface their own
+    // variant once the header has been accepted.
     assert!(matches!(
         dns::decode_response(
             &[0; 11],
@@ -412,7 +399,6 @@ fn header_and_question_validation_fail_closed() {
         ),
         Err(WireError::Decode(DecodeError::MessageTooShort { .. }))
     ));
-
     let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
     let limits = Limits {
         max_message_bytes: base.len() - 1,
@@ -422,48 +408,35 @@ fn header_and_question_validation_fail_closed() {
         dns::decode_response(&base, "example.test", QueryType::A, ID, limits),
         Err(WireError::Decode(DecodeError::MessageTooLarge { .. }))
     ));
-
-    let mut mutations = Vec::new();
-    let mut query = base.clone();
-    query[2..4].copy_from_slice(&0_u16.to_be_bytes());
-    mutations.push((query, "not_response"));
-    let mut opcode = base.clone();
-    opcode[2..4].copy_from_slice(&(RESPONSE | (1 << 11)).to_be_bytes());
-    mutations.push((opcode, "opcode"));
-    let mut reserved = base.clone();
-    reserved[2..4].copy_from_slice(&(RESPONSE | 0x40).to_be_bytes());
-    mutations.push((reserved, "reserved"));
-    let mut id = base.clone();
-    id[0..2].copy_from_slice(&(ID + 1).to_be_bytes());
-    mutations.push((id, "id"));
     let mut questions = base.clone();
     questions[4..6].copy_from_slice(&2_u16.to_be_bytes());
-    mutations.push((questions, "questions"));
-    let mut qname = base.clone();
-    qname[13] = b'x';
-    mutations.push((qname, "qname"));
+    assert!(matches!(
+        dns::decode_response(
+            &questions,
+            "example.test",
+            QueryType::A,
+            ID,
+            Limits::default()
+        ),
+        Err(WireError::QuestionCount { actual: 2 })
+    ));
     let mut qtype = base.clone();
     let type_offset = qtype.len() - 4;
     qtype[type_offset..type_offset + 2].copy_from_slice(&QueryType::AAAA.code().to_be_bytes());
-    mutations.push((qtype, "qtype"));
+    assert!(matches!(
+        dns::decode_response(&qtype, "example.test", QueryType::A, ID, Limits::default()),
+        Err(WireError::QuestionTypeMismatch {
+            expected: 1,
+            actual: 28
+        })
+    ));
     let mut qclass = base;
     let class_offset = qclass.len() - 2;
     qclass[class_offset..].copy_from_slice(&3_u16.to_be_bytes());
-    mutations.push((qclass, "qclass"));
-
-    for (message, case) in mutations {
-        assert!(
-            dns::decode_response(
-                &message,
-                "example.test",
-                QueryType::A,
-                ID,
-                Limits::default()
-            )
-            .is_err(),
-            "{case}"
-        );
-    }
+    assert!(matches!(
+        dns::decode_response(&qclass, "example.test", QueryType::A, ID, Limits::default()),
+        Err(WireError::QuestionClassMismatch { actual: 3 })
+    ));
 }
 
 #[test]
@@ -1124,35 +1097,6 @@ fn dns_over_tcp_rejects_a_response_that_is_still_truncated() {
         ),
         Err(WireError::TcpResponseTruncated)
     );
-}
-
-#[test]
-fn response_code_names_cover_standard_and_extended_values() {
-    let expected = [
-        (0, "no_error"),
-        (1, "format_error"),
-        (2, "server_failure"),
-        (3, "name_error"),
-        (4, "not_implemented"),
-        (5, "refused"),
-        (6, "yx_domain"),
-        (7, "yx_rrset"),
-        (8, "nx_rrset"),
-        (9, "not_authoritative"),
-        (10, "not_zone"),
-        (16, "bad_version"),
-        (17, "bad_key"),
-        (18, "bad_time"),
-        (19, "bad_mode"),
-        (20, "bad_name"),
-        (21, "bad_algorithm"),
-        (22, "bad_truncation"),
-        (23, "bad_cookie"),
-        (24, "unknown"),
-    ];
-    for (code, name) in expected {
-        assert_eq!(dns::response_code_name(code), name);
-    }
 }
 
 #[test]

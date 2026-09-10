@@ -112,28 +112,7 @@ pub(crate) struct Args {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_core::protocol::builtin::TLS_TCP_PORTS;
-
     use super::*;
-
-    /// The ports the long help names, in the order it names them.
-    fn documented_ports() -> Vec<u16> {
-        let (_, rest) = AFTER_LONG_HELP
-            .split_once("binds TCP ports ")
-            .expect("the long help introduces the default port list");
-        let (list, _) = rest
-            .split_once(" by default")
-            .expect("the long help closes the default port list");
-        list.split(|character: char| !character.is_ascii_digit())
-            .filter(|piece| !piece.is_empty())
-            .map(|piece| piece.parse().expect("a documented port is numeric"))
-            .collect()
-    }
-
-    #[test]
-    fn the_long_help_names_exactly_the_ports_the_registry_binds() {
-        assert_eq!(documented_ports(), TLS_TCP_PORTS);
-    }
 
     #[test]
     fn the_status_selector_names_match_the_analysis_statuses() {

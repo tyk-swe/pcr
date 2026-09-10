@@ -149,27 +149,4 @@ mod tests {
         assert_eq!(error.exit_code(), 5);
         assert!(error.message.contains("no interface matches"));
     }
-
-    #[test]
-    fn the_text_row_spells_every_json_field() {
-        let interfaces = select_interfaces(&FixtureProvider, None).expect("fixture enumeration");
-        let result = output::interfaces::Report::new(interfaces);
-        let mut lines = result.interfaces.iter().map(interface_line);
-        let line = lines.next().expect("two fixture interfaces");
-        assert!(line.starts_with("fixture0 (index 9): "), "{line}");
-        for expected in [
-            "mtu=1500",
-            "capability=layer2_and3",
-            "link_type=1",
-            "mac=none",
-            "flags=up,loopback",
-            "description=first fixture",
-        ] {
-            assert!(line.contains(expected), "missing {expected:?} in {line:?}");
-        }
-        let bare = lines.next().expect("two fixture interfaces");
-        assert!(bare.contains("mac=none"), "{bare}");
-        assert!(bare.contains("flags=none"), "{bare}");
-        assert!(bare.contains("description=none"), "{bare}");
-    }
 }

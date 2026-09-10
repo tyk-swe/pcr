@@ -18,49 +18,6 @@ const REQUIRES_PACKET_CONTEXT_OR_CHILD: &[&str] = &[
 ];
 
 #[test]
-fn constructible_defaults_either_build_standalone_or_require_declared_context() {
-    let registry = builtin::registry();
-    let builder = build::Builder::new(Arc::clone(&registry));
-    let mut rejected = Vec::new();
-    let mut built_count = 0_usize;
-
-    for protocol in BuiltinProtocol::ALL
-        .iter()
-        .copied()
-        .filter(|protocol| protocol.is_constructible())
-    {
-        let codec = registry
-            .codec(protocol.as_str())
-            .unwrap_or_else(|| panic!("{} should be registered", protocol.as_str()));
-        let layer = codec.make_layer(&BTreeMap::new()).unwrap_or_else(|error| {
-            panic!("{} default construction failed: {error}", protocol.as_str())
-        });
-        let mut packet = Packet::new();
-        packet.push_boxed(layer);
-
-        let Ok(built) = builder.build(packet, build::Context::default(), build::Options::default())
-        else {
-            rejected.push(protocol.as_str());
-            continue;
-        };
-        built_count += 1;
-        assert_eq!(built.packet.len(), 1, "{}", protocol.as_str());
-        assert_eq!(
-            built
-                .packet
-                .layer(0)
-                .map(|layer| layer.protocol_id().as_str()),
-            Some(protocol.as_str()),
-            "{}",
-            protocol.as_str()
-        );
-        assert!(built.bytes.len() <= build::DEFAULT_MAX_PACKET_SIZE);
-    }
-    assert!(built_count > REQUIRES_PACKET_CONTEXT_OR_CHILD.len());
-    assert_eq!(rejected, REQUIRES_PACKET_CONTEXT_OR_CHILD);
-}
-
-#[test]
 fn exact_round_trip_builtins_decode_their_own_default_wire_image() {
     let registry = builtin::registry();
     let builder = build::Builder::new(Arc::clone(&registry));

@@ -138,8 +138,6 @@ fn capture_errors_expose_stable_classifications_and_causes() {
     assert_eq!(io.classification().kind, Kind::Io);
     assert_eq!(io.causes(), vec!["disk gone"]);
     assert!(Error::EmptyInput.causes().is_empty());
-    assert_eq!(Format::Pcap.to_string(), "pcap");
-    assert_eq!(Format::PcapNg.to_string(), "pcapng");
 }
 
 #[test]

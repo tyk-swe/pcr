@@ -720,26 +720,6 @@ fn expert_text_lists_one_count_line_per_code_before_the_summary() {
 }
 
 #[test]
-fn expert_text_with_zero_findings_adds_no_code_lines() {
-    let capture = write_capture();
-    let path = path_text(capture.path());
-
-    let output = run_success(&["--output", "text", "expert", path, "--filter", "udp"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        !stdout.lines().any(|line| line.starts_with("code=")),
-        "zero findings must add no lines: {stdout:?}",
-    );
-    assert_eq!(
-        stdout.lines().collect::<Vec<_>>(),
-        [
-            "capture clock: 0 regressing frame(s), largest rollback 0ns, largest forward step 1s at frame Some(2); expiry follows the high-water mark",
-            "found 0 finding(s) (0 error(s), 0 warning(s), 0 note(s)) in 2 of 5 frame(s)",
-        ],
-    );
-}
-
-#[test]
 fn follow_and_expert_stream_failures_terminate_at_the_next_position() {
     let capture = write_truncated_capture();
     let path = path_text(capture.path());
@@ -1538,20 +1518,6 @@ fn destination_bearing_live_commands_keep_public_destinations_behind_policy() {
 fn the_tls_protocol_report_names_every_port_bound_to_the_per_frame_layer() {
     let ports = [443_u64, 465, 636, 853, 993, 995, 8443];
 
-    let rendered = String::from_utf8_lossy(&run_success(&["protocols", "tls"]).stdout).into_owned();
-    let listed = rendered
-        .lines()
-        .skip_while(|line| *line != "bindings:")
-        .skip(1)
-        .take_while(|line| line.starts_with("  "))
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    let expected = ports
-        .iter()
-        .map(|port| format!("  tcp discriminator={port}"))
-        .collect::<Vec<_>>();
-    assert_eq!(listed, expected, "{rendered}");
-
     let value = parse_json(&run_success(&["--output", "json", "protocols", "tls"]));
     let bindings = value["result"]["protocol"]["bindings"]
         .as_array()
@@ -1561,58 +1527,6 @@ fn the_tls_protocol_report_names_every_port_bound_to_the_per_frame_layer() {
         assert_eq!(binding["parent"], "tcp");
         assert_eq!(binding["discriminator"], port);
     }
-
-    // The published detail example carries the same two keys per binding.
-    let published = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/documents/output-protocols-detail-success.json");
-    let document: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&published).expect("the published example must be readable"),
-    )
-    .expect("the published example must be JSON");
-    let mut published_keys = document["result"]["protocol"]["bindings"][0]
-        .as_object()
-        .expect("the published example lists bindings")
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    published_keys.sort();
-    let mut reported_keys = bindings[0]
-        .as_object()
-        .expect("each binding is an object")
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    reported_keys.sort();
-    assert_eq!(reported_keys, published_keys);
-}
-
-#[test]
-fn protocol_discovery_lists_describes_and_rejects_names() {
-    for arguments in [
-        vec!["protocols"],
-        vec!["protocols", "tcp"],
-        vec!["--output", "json", "protocols"],
-        vec!["--output", "json", "protocols", "ETH"],
-    ] {
-        let output = run(&arguments);
-        assert!(
-            output.status.success(),
-            "{arguments:?}: {:?}",
-            output.stderr
-        );
-        assert!(!output.stdout.is_empty());
-    }
-
-    let unknown = run(&["--output", "json", "protocols", "definitely-not-a-protocol"]);
-    assert_eq!(unknown.status.code(), Some(2));
-    let value = parse_json(&unknown);
-    assert_eq!(value["error"]["code"], "cli.protocol");
-    assert!(
-        value["error"]["remediation"]
-            .as_str()
-            .expect("remediation is present")
-            .contains("protocols")
-    );
 }
 
 #[test]

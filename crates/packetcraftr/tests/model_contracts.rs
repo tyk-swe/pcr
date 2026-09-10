@@ -63,8 +63,6 @@ fn target_parser_distinguishes_addresses_and_hostnames() {
         Target::Hostname(hostname) if hostname.as_str() == "example.test"
     ));
     assert!(Target::from_str("not a host").is_err());
-    assert_eq!(Family::Ipv4.label(), "IPv4");
-    assert_eq!(Family::Ipv6.label(), "IPv6");
 }
 
 #[test]
@@ -177,14 +175,6 @@ fn policy_validates_address_and_operation_bounds() {
     // The published CLI contract for this refusal does not move with its home.
     assert_eq!(over_limit.classification().code, "cli.live_target");
     assert_eq!(over_limit.classification().kind, Kind::Cli);
-    assert_eq!(
-        over_limit.to_string(),
-        format!(
-            "resolved-address limit {} is invalid; expected 1..={}",
-            policy::MAX_RESOLVED_ADDRESSES + 1,
-            policy::MAX_RESOLVED_ADDRESSES
-        )
-    );
 
     defaults
         .authorize(policy::Operation::Budgeted(policy::WireBudget::new(

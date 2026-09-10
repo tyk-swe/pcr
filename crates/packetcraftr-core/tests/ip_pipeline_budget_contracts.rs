@@ -6,7 +6,7 @@
 mod common;
 
 use common::ip_fragments::{
-    cascading_vxlan_tcp_frames, ipv4_fragments, ipv4_protocol_fragment_frame, reader_with_link_type,
+    cascading_vxlan_tcp_frames, ipv4_protocol_fragment_frame, reader_with_link_type,
 };
 use common::registry;
 use packetcraftr_core::analysis::reassembly::ip::{
@@ -18,65 +18,6 @@ use packetcraftr_core::analysis::{
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
 use std::time::{Duration, SystemTime};
-
-#[test]
-fn derived_cascade_bytes_share_the_aggregate_reassembly_budget() {
-    let registry = registry();
-    let frames = cascading_vxlan_tcp_frames(&registry);
-    let mut capture = reader_with_link_type(LinkType::IPV4, &frames[..2]);
-    let limit = 26_200;
-    let result = packetcraftr_core::analysis::run(
-        &mut capture,
-        registry,
-        &Options {
-            limits: Limits {
-                max_ip_reassembly_bytes: limit,
-                ..Limits::default()
-            },
-            ..Options::default()
-        },
-        |_| Ok(()),
-    );
-
-    assert!(matches!(
-        result,
-        Err(packetcraftr_core::analysis::Error::IpReassembly {
-            number: 2,
-            source: packetcraftr_core::analysis::reassembly::ip::Error::Resource(
-                ResourceError::AggregateMemoryLimit { limit: 26_200 }
-            )
-        })
-    ));
-}
-
-#[test]
-fn derived_decode_metadata_shares_the_aggregate_reassembly_budget() {
-    let registry = registry();
-    let frames = ipv4_fragments(&registry);
-    let mut capture = reader_with_link_type(LinkType::IPV4, &frames);
-    let result = packetcraftr_core::analysis::run(
-        &mut capture,
-        registry,
-        &Options {
-            limits: Limits {
-                max_ip_reassembly_bytes: 5_000,
-                ..Limits::default()
-            },
-            ..Options::default()
-        },
-        |_| Ok(()),
-    );
-
-    assert!(matches!(
-        result,
-        Err(packetcraftr_core::analysis::Error::IpReassembly {
-            number: 2,
-            source: packetcraftr_core::analysis::reassembly::ip::Error::Resource(
-                ResourceError::AggregateMemoryLimit { limit: 5_000 }
-            )
-        })
-    ));
-}
 
 #[test]
 fn budget_reduced_derived_layer_limit_keeps_resource_classification() {

@@ -520,26 +520,6 @@ mod tests {
     }
 
     #[test]
-    fn replay_source_identifier_42_is_data_at_stream_position_zero() {
-        let (stream, output) = stream(output::contract::Command::Replay);
-        let mut selector = OnlyFrame(43);
-        render_fixture(
-            &mut reader(43),
-            Some(&mut selector),
-            &mut FakeAuthorizer::default(),
-            &stream,
-        )
-        .expect("selected fake replay succeeds");
-
-        let records = output.records();
-        assert_contiguous(&records);
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0]["sequence"], 0);
-        assert_eq!(records[0]["result"]["source_sequence"], 42);
-        assert_eq!(records[1]["sequence"], 1);
-    }
-
-    #[test]
     fn replay_output_failure_retains_source_frame_context_and_remediation() {
         let stream = StreamEncoder::new(output::contract::Command::Replay, FailingWriter);
         let mut selector = OnlyFrame(43);

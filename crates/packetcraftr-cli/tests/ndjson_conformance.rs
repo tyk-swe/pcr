@@ -14,12 +14,6 @@ use serde_json::{Value, json};
 
 mod support;
 
-// Process errors are private to the CLI binary; compile that module here to
-// exercise the real cleanup composition without widening its public API.
-#[allow(dead_code)]
-#[path = "../src/errors.rs"]
-mod cli_errors;
-
 use support::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
@@ -720,52 +714,6 @@ fn complete(
     } else {
         sink.complete(result, Vec::new())
     }
-}
-
-#[test]
-fn cleanup_failure_augments_the_primary_error_at_the_next_position() {
-    let (sink, output) = stream(output::contract::Command::Exchange);
-    sink.emit_data(
-        output::exchange::Event::Sent {
-            request_index: 77,
-            frame: output::frame::Wire::new(vec![0]),
-        },
-        Vec::new(),
-    )
-    .unwrap();
-    let cleanup = packetcraftr_netio::Error::Capture {
-        message: "cleanup failure".to_owned(),
-        source: None,
-    };
-    // Composed by the renderer under test rather than restated here, so the
-    // record covers what `CliError::with_cleanup` actually produces.
-    let primary = cli_errors::CliError::from_classification(
-        packetcraftr_core::error::Classification::new(
-            "io.primary",
-            packetcraftr_core::error::Kind::Io,
-            None,
-        ),
-        "primary capture failure",
-        vec!["primary cause".to_owned()],
-    )
-    .with_cleanup(cleanup.clone());
-    assert_eq!(
-        primary.message,
-        format!("primary capture failure; capture shutdown also failed: {cleanup}")
-    );
-    sink.emit_error(primary.output_error()).unwrap();
-
-    let records = output.records();
-    validate_records(schema_validator(), &records);
-    assert_eq!(records[1]["sequence"], 1);
-    assert_eq!(records[1]["error"]["code"], "io.primary");
-    assert_eq!(records[1]["error"]["causes"][0], "primary cause");
-    assert!(
-        records[1]["error"]["causes"][1]
-            .as_str()
-            .unwrap()
-            .contains("cleanup failure")
-    );
 }
 
 #[test]

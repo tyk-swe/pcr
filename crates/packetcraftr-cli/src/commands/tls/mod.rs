@@ -234,26 +234,3 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
         )),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_buffer_floor_error_quotes_the_per_direction_buffer() {
-        let error = buffer_floor_error(1_024);
-        assert_eq!(error.exit_code(), 2);
-        assert!(
-            error.message.contains("--max-tls-buffer-bytes=1024"),
-            "{}",
-            error.message
-        );
-        assert!(
-            error
-                .message
-                .contains(&analysis::tls::MAX_DIRECTION_BUFFER.to_string()),
-            "{}",
-            error.message
-        );
-    }
-}

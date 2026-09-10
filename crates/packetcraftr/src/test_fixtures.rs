@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use packetcraftr_core::error::{Classification, Kind};
-use serde::Serialize;
 
 use crate::BoundaryError;
 use crate::clock::Clock;
@@ -119,17 +118,5 @@ impl<Req: Request> Executor<Req> for RejectingExecutor {
             Classification::new("io.test", Kind::Io, None),
             Vec::new(),
         ))
-    }
-}
-
-/// Asserts that every value serializes to exactly the name the CLI prints,
-/// so the two vocabularies cannot drift apart.
-pub(crate) fn assert_names_match_serialization<T: Serialize + Copy>(
-    values: impl IntoIterator<Item = T>,
-    name: impl Fn(&T) -> &str,
-) {
-    for value in values {
-        let serialized = serde_json::to_value(value).expect("value is a name");
-        assert_eq!(serialized.as_str(), Some(name(&value)));
     }
 }

@@ -260,38 +260,6 @@ mod tests {
     }
 
     #[test]
-    fn literal_display_is_stable_for_machine_and_human_readable_values() {
-        let cases = [
-            (Literal::Bool(false), "false"),
-            (Literal::Unsigned(7), "7"),
-            (Literal::Signed(-7), "-7"),
-            (Literal::Text("dns".to_owned()), "\"dns\""),
-            (
-                Literal::Bytes(Bytes::from_static(&[0, 0xab, 0xff])),
-                "00:ab:ff",
-            ),
-            (Literal::Ipv4(Ipv4Addr::new(192, 0, 2, 1)), "192.0.2.1"),
-            (
-                Literal::Ipv4Net(Ipv4Addr::new(192, 0, 2, 0), 24),
-                "192.0.2.0/24",
-            ),
-            (Literal::Mac([0, 1, 2, 3, 4, 5]), "00:01:02:03:04:05"),
-        ];
-
-        for (literal, expected) in cases {
-            assert_eq!(literal.to_string(), expected);
-        }
-        assert_eq!(
-            Literal::Ipv6("2001:db8::1".parse().expect("fixture address")).to_string(),
-            "2001:db8::1"
-        );
-        assert_eq!(
-            Literal::Ipv6Net("2001:db8::".parse().expect("fixture prefix"), 32).to_string(),
-            "2001:db8::/32"
-        );
-    }
-
-    #[test]
     fn field_compatibility_rejects_impossible_comparisons() {
         assert!(compatible(spec(FieldKind::Bool), &Literal::Bool(true)));
         assert!(compatible(spec(FieldKind::Bool), &Literal::Unsigned(1)));

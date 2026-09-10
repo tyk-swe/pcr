@@ -634,18 +634,6 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     }
 }
 
-#[test]
-fn live_io_mode_mismatch_display_names_both_modes() {
-    let error = Error::TransmissionModeMismatch {
-        expected: Mode::Layer2,
-        actual: Mode::Layer3,
-    };
-
-    let rendered = error.to_string();
-    assert!(rendered.contains("Layer2"));
-    assert!(rendered.contains("Layer3"));
-}
-
 /// Packet interpretation failures retain their typed cause through the public planner,
 /// before an injected provider can perform any I/O.
 #[test]

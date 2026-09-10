@@ -96,6 +96,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Release evidence requires versioned, complete named decoder/native results,
+  pinned decoder identity, input/tool digests, exact corpus frame counts,
+  matching TLS JA3 evidence, and successful native scenario/launcher exits.
+  Missing parent namespace IDs and contradictory or duplicate results are
+  rejected. Producers and release validation share the evidence contract.
 - `routes` failures keep the provider's classification, context, and cause
   chain instead of collapsing to a generic I/O message. DNS query construction
   errors and neighbor operation-and-cleanup errors expose their cause through

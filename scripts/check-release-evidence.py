@@ -8,31 +8,29 @@ import pathlib
 import re
 import subprocess
 
+from validation_evidence import EVIDENCE_VERSION, valid_digest, validate_decoder, validate_native
+
 REQUIRED = {
     'decode-oracle-evidence': 'decode-oracle.json',
     'native-isolated-evidence': 'native-isolated.json',
 }
-NATIVE = {'loopback_exchange', 'readiness_and_repeated_cleanup', 'idle_deadline_and_cancellation',
-          'bounded_queue_reports_real_capture_loss', 'native_filter_error_preserves_diagnostic_and_releases_admission',
-          'interface_disappearance_reports_driver_failure_and_cleans_up'}
 
 
 def validate(report, commit, kind):
+    if kind not in REQUIRED:
+        raise ValueError(f'unknown evidence kind: {kind}')
+    if not isinstance(report, dict):
+        raise ValueError(f'{kind}: report must be an object')
+    if type(report.get('schema_version')) is not int or report['schema_version'] != EVIDENCE_VERSION:
+        raise ValueError(f'{kind}: unsupported evidence schema version')
     if report.get('status') != 'passed' or report.get('commit') != commit or report.get('dirty') is not False:
         raise ValueError(f'{kind}: missing successful clean exact-commit evidence')
-    if not re.fullmatch(r'[0-9a-f]{64}', report.get('binary_sha256', '')):
+    if not valid_digest(report.get('binary_sha256')):
         raise ValueError(f'{kind}: missing binary digest')
     if kind == 'native-isolated-evidence':
-        scenarios = report.get('scenarios', [])
-        if {item['name'] for item in scenarios} != NATIVE or any(item['status'] != 'passed' for item in scenarios):
-            raise ValueError('native evidence omits or skips required scenarios')
-        if report.get('namespace') == report.get('parent_namespace') or not report.get('namespace'):
-            raise ValueError('native evidence lacks namespace isolation')
-    if kind == 'decode-oracle-evidence':
-        if report.get('expected_tshark') != '4.6.4' or not report.get('captures') or report.get('mismatches'):
-            raise ValueError('decoder evidence is incomplete')
-        if any(item.get('status') != 'passed' for item in report['captures']):
-            raise ValueError('decoder capture failed')
+        validate_native(report)
+    else:
+        validate_decoder(report)
 
 
 def main():

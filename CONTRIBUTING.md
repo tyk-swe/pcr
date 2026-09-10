@@ -83,7 +83,19 @@ When these validation jobs run, missing prerequisites, failed namespace
 creation and skipped scenarios are failures, never passing native evidence.
 Windows/macOS privileged runtime scenarios remain explicitly unexercised.
 Reports are archived on failure as well as success. Release preflight requires
-clean, exact-commit reports from a successful push CI run.
+clean, exact-commit reports from a successful push CI run. Evidence schema version
+1 also requires the complete named corpus for the declared decoder profile,
+exact physical-frame counts, all comparison fields, input/tool digests, the
+pinned TShark product/version and a matching nonempty TLS JA3 comparison.
+Native evidence must identify both distinct positive namespace IDs, the test
+executable, every required scenario with a successful exit code, and a successful
+namespace launcher. Duplicate, skipped, missing or contradictory results fail
+validation. Producers check the same content contract before publishing success
+and emit the version through shared provenance. Reports from before this contract
+must be regenerated, not edited or relabeled. Update the evidence version and
+shared inventory deliberately when changing required coverage. This is
+an internal validation-artifact contract, not a product output-schema change.
+The weekly full-corpus policy and exact-commit push-CI selection are unchanged.
 
 CI builds documentation with warnings denied for the portable, pcap-free and
 full-native profiles. Dependency upgrades

@@ -41,14 +41,14 @@ use super::plan::{OperationBudget, operation_budget};
 use super::probe::rotated_source_port;
 use super::{
     AttemptEvidence, Event, EventContext, Exchange, Execution, Limits, Outcome, Probe, Record,
-    Report, Request, Section, Summary, TcpExchange, TcpExecutor, Transport, UndecodedEvidence,
-    ValidatedResponse,
+    Report, Request, Section, Summary, TcpExchange, TcpExecutor, Transport, TransportMode,
+    UndecodedEvidence, ValidatedResponse,
 };
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
-/// resolution, and resolved-answer authorization before each UDP probe. A
-/// configured TCP fallback reauthorizes the selected numeric address and uses
-/// only the time left in that attempt.
+/// resolution, and resolved-answer authorization before each attempt. Direct
+/// TCP and configured fallback reauthorize the selected numeric address and
+/// use only the time left in that attempt.
 pub fn run<A, E, C>(
     request: &Request,
     authorizer: &mut A,
@@ -347,6 +347,11 @@ where
     fn execute_attempt(&mut self, attempt: u32) -> Result<bool, Error> {
         self.wait_before_attempt(attempt)?;
         let probe = self.prepare_probe(attempt)?;
+        if self.request.transport == TransportMode::Tcp {
+            self.state.attempts_completed = attempt;
+            let mut attempt_deadline = self.deadline.for_wait(self.request.timeout)?;
+            return self.query_over_tcp(&probe, &mut attempt_deadline);
+        }
         let ProbeExecution {
             execution,
             timeout,
@@ -387,8 +392,12 @@ where
             }
             // A truncated response continues over TCP when — and only when —
             // a continuation was configured.
-            Some(_) if udp_status == Outcome::Truncated && self.request.tcp_fallback => {
-                self.continue_over_tcp(&probe, &mut attempt_deadline)?
+            Some(_)
+                if udp_status == Outcome::Truncated
+                    && self.request.transport == TransportMode::UdpThenTcp =>
+            {
+                self.summary.completion.fallback_attempted = true;
+                self.query_over_tcp(&probe, &mut attempt_deadline)?
             }
             Some(response) => {
                 self.accept_response(attempt, Transport::Udp, response)?;
@@ -398,14 +407,14 @@ where
         Ok(terminal)
     }
 
-    /// Runs the one DNS-over-TCP continuation a validated truncated response
-    /// permits, and reports whether it ended the operation.
-    fn continue_over_tcp(
+    /// Runs a direct query or an admitted continuation under the attempt's
+    /// remaining deadline, and reports whether it ended the operation.
+    fn query_over_tcp(
         &mut self,
         probe: &Probe,
         attempt_deadline: &mut Deadline,
     ) -> Result<bool, Error> {
-        let tcp = self.execute_tcp_fallback(probe, attempt_deadline)?;
+        let tcp = self.execute_tcp_query(probe, attempt_deadline)?;
         let tcp_status = tcp.evidence.status;
         self.emit_attempt(tcp.evidence)?;
         if tcp_status != Outcome::Response {
@@ -414,7 +423,7 @@ where
         }
         let response = tcp.response.ok_or(Error::InvalidEvidence {
             attempt: probe.attempt,
-            message: "successful TCP fallback omitted its validated response".to_owned(),
+            message: "successful TCP query omitted its validated response".to_owned(),
         })?;
         self.accept_response(probe.attempt, Transport::Tcp, response)?;
         Ok(true)
@@ -482,7 +491,7 @@ where
             .unwrap_or(0);
         // address_index is a remainder modulo addresses.len(), which is non-empty
         let server_address = addresses[address_index];
-        if self.request.tcp_fallback
+        if self.request.transport != TransportMode::Udp
             && let IpAddr::V6(address) = server_address
             && address.is_unicast_link_local()
         {
@@ -543,16 +552,15 @@ where
         })
     }
 
-    fn execute_tcp_fallback(
+    fn execute_tcp_query(
         &mut self,
         probe: &Probe,
         attempt_deadline: &mut Deadline,
     ) -> Result<ClassifiedAttempt, Error> {
-        self.summary.completion.fallback_attempted = true;
         if !self.authorize_tcp_destination(probe, attempt_deadline)? {
             return Ok(tcp_timeout_evidence(
                 probe,
-                "the shared UDP/TCP attempt deadline expired before connection",
+                "the DNS attempt deadline expired before connection",
             ));
         }
         let mut exchange = TcpExchange {
@@ -567,7 +575,7 @@ where
         if attempt_deadline.start_accounting(Duration::ZERO).is_err() {
             return Ok(tcp_timeout_evidence(
                 probe,
-                "the shared UDP/TCP attempt deadline expired before connection",
+                "the DNS attempt deadline expired before connection",
             ));
         }
         let timeout = attempt_deadline
@@ -580,7 +588,7 @@ where
         if timeout.is_zero() {
             return Ok(tcp_timeout_evidence(
                 probe,
-                "the shared UDP/TCP attempt deadline expired before connection",
+                "the DNS attempt deadline expired before connection",
             ));
         }
         exchange.timeout = timeout;

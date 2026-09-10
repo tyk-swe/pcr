@@ -8,11 +8,14 @@ use clap::ValueEnum;
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 
-Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. Transmitted frames keep their original spacing: the delay before a kept frame spans any skipped frames in between.
+Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. With original/scaled timing, the delay before a kept frame spans any skipped frames in between.
+
+--bps counts exact submitted frame bytes, with no synthetic link overhead. The first selected frame is immediate; subsequent targets use the cumulative bytes already sent. Filtered frames do not consume bit-rate timing. Scheduled duration and transmitted bytes describe the run; the requested bit rate is not a throughput guarantee.
 
 Examples:
   packetcraftr replay capture.pcapng --interface eth0 --timing immediate
   packetcraftr replay capture.pcap --interface 2 --rate 100
+  packetcraftr replay capture.pcap --interface 2 --bps 8000000
   packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -52,6 +55,10 @@ pub(crate) struct Args {
     /// exactly this rate.
     #[arg(long, conflicts_with = "speed")]
     pub(crate) rate: Option<f64>,
+    /// Positive integer bit rate, counting submitted frame bytes without
+    /// synthetic media overhead. Scheduling is best effort; first frame is immediate.
+    #[arg(long, conflicts_with_all = ["rate", "speed"], value_parser = clap::value_parser!(u64).range(1..))]
+    pub(crate) bps: Option<u64>,
     /// Maximum cumulative intentional replay delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,

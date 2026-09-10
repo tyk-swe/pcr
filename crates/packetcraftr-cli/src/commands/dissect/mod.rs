@@ -16,7 +16,6 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::registry_with_tls_ports;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
@@ -26,7 +25,7 @@ use crate::rendering::{
 };
 
 pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
-    let registry = registry_with_tls_ports(&arguments.tls_ports.ports)?;
+    let registry = arguments.decode.registry()?;
     let max_packet_size = arguments.budget.max_packet_size;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.

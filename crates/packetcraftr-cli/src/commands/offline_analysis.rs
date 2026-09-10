@@ -15,8 +15,7 @@ use packetcraftr_core::registry::Registry;
 
 use analysis::{StreamRef, StreamTransport};
 
-use super::registry_with_tls_ports;
-use crate::command_options::OfflineLimitsArgs;
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::validate_capture_stream_limits;
@@ -49,23 +48,12 @@ impl AnalysisSetup {
 pub(super) fn prepare(
     limits: OfflineLimitsArgs,
     filter_source: Option<&str>,
-) -> Result<AnalysisSetup, CliError> {
-    prepare_with_tls_ports(limits, filter_source, &[])
-}
-
-/// [`prepare`], with extra TCP ports dissected as TLS.
-///
-/// The registry is immutable once built, so the extra bindings must be
-/// supplied here.
-pub(super) fn prepare_with_tls_ports(
-    limits: OfflineLimitsArgs,
-    filter_source: Option<&str>,
-    tls_ports: &[u16],
+    decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
     let capture = limits.capture;
     let ip_overlap = limits.ip_overlap.into();
     validate_capture_stream_limits(capture)?;
-    let registry = registry_with_tls_ports(tls_ports)?;
+    let registry = decode.registry()?;
     let filter = filter_source
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
         .transpose()?;

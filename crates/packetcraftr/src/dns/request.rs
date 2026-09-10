@@ -279,11 +279,27 @@ impl EdnsRequest {
     }
 }
 
+/// How each independently authorized DNS attempt reaches the server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(rename_all = "snake_case")]
+pub enum TransportMode {
+    /// Start with UDP and continue a validated truncated response over TCP.
+    #[default]
+    UdpThenTcp,
+    /// Use UDP and report validated truncation without a continuation.
+    Udp,
+    /// Open a framed TCP query directly; the operating system selects its source port.
+    Tcp,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Request {
     pub server: Target,
     pub address_family: Family,
     pub server_port: u16,
+    /// Initial UDP source port; unused in TCP-only mode.
     pub source_port: u16,
     pub query_name: String,
     pub query_type: QueryType,
@@ -292,11 +308,10 @@ pub struct Request {
     /// Optional EDNS v0 settings; absent settings preserve the plain DNS query.
     #[serde(default)]
     pub edns: Option<EdnsRequest>,
-    /// Whether a validated truncated UDP response may trigger one TCP
-    /// continuation within the same attempt deadline. Scoped IPv6 link-local
-    /// servers require UDP-only mode because [`Target`] does not carry a TCP
-    /// scope identifier.
-    pub tcp_fallback: bool,
+    /// Transport selection for every retry. Scoped IPv6 link-local servers
+    /// require UDP because [`Target`] carries no TCP scope identifier.
+    #[serde(default)]
+    pub transport: TransportMode,
     pub attempts: u32,
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,
@@ -315,7 +330,7 @@ impl Request {
         if self.server_port == 0 {
             return Err(Error::InvalidPort);
         }
-        if self.source_port == 0 {
+        if self.transport != TransportMode::Tcp && self.source_port == 0 {
             return Err(Error::InvalidSourcePort);
         }
         if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {

@@ -45,6 +45,7 @@ pub(super) fn build_batches<'a>(
                 address,
                 endpoint,
                 attempt,
+                udp_payload: request.udp_payload.clone(),
             },
             timeout: request.timeout,
             permit: crate::evidence::ExecutionPermit::new(),
@@ -112,6 +113,7 @@ mod tests {
             attempts: 1,
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
+            udp_payload: bytes::Bytes::new(),
             limits: crate::scan::Limits::default(),
         };
         for (addresses, endpoints, expected) in [

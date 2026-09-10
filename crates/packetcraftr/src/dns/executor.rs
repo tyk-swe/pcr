@@ -106,7 +106,7 @@ pub struct TcpExchangeExecutor<'a, R, N, I, P> {
 }
 
 impl<'a, R, N, I> ExchangeExecutor<'a, R, N, I> {
-    /// Enables DNS TCP fallback using only the supplied provider.
+    /// Enables direct DNS TCP queries and fallback using only the supplied provider.
     pub fn with_dns_tcp<P>(self, provider: P) -> TcpExchangeExecutor<'a, R, N, I, P> {
         TcpExchangeExecutor {
             udp: self,

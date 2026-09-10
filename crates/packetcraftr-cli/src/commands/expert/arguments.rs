@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, ValueEnum};
 
-use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -52,7 +52,7 @@ pub(crate) struct Args {
     #[arg(long = "code", value_name = "CODE", action = ArgAction::Append)]
     pub(crate) codes: Vec<String>,
     #[command(flatten)]
-    pub(crate) tls_ports: TlsPortArgs,
+    pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }

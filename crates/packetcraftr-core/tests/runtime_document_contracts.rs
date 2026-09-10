@@ -13,26 +13,29 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 #[test]
-fn templates_expand_one_axis_and_report_limits_and_edit_errors() {
+fn templates_expand_cartesian_axes_and_report_limits_and_edit_errors() {
     let mut base = Packet::new();
     base.push(Probe::default());
     let template = template::Template::new(base)
-        .axis(0, "label", vec![FieldValue::Text("replaced".to_owned())])
+        .axis(
+            0,
+            "label",
+            vec![
+                FieldValue::Text("a".to_owned()),
+                FieldValue::Text("b".to_owned()),
+            ],
+        )
         .axis(0, "value", vec![10_u8.into(), 11_u8.into(), 12_u8.into()]);
-    assert_eq!(
-        template.expansion_len(),
-        3,
-        "a second axis replaces the first rather than multiplying with it"
-    );
+    assert_eq!(template.expansion_len().unwrap(), 6);
     assert!(matches!(
-        template.expand(2),
+        template.expand(5),
         Err(template::Error::ExpansionLimit {
-            requested: 3,
-            limit: 2
+            requested: 6,
+            limit: 5
         })
     ));
     let expanded = template
-        .expand(3)
+        .expand(6)
         .expect("within limit")
         .collect::<Result<Vec<_>, _>>()
         .expect("valid edits");
@@ -45,30 +48,81 @@ fn templates_expand_one_axis_and_report_limits_and_edit_errors() {
         .collect::<Vec<_>>();
     assert_eq!(
         values,
-        [(10, "probe"), (11, "probe"), (12, "probe")],
-        "only the surviving axis is applied; the replaced one leaves no trace"
+        [
+            (10, "a"),
+            (11, "a"),
+            (12, "a"),
+            (10, "b"),
+            (11, "b"),
+            (12, "b")
+        ]
     );
 
     let axisless = template::Template::new(Packet::new());
-    assert_eq!(axisless.expansion_len(), 1);
+    assert_eq!(axisless.expansion_len().unwrap(), 1);
     assert_eq!(axisless.expand(1).expect("one ordinal").len(), 1);
-
     let empty = template::Template::new(Packet::new()).axis(0, "value", Vec::new());
-    assert_eq!(empty.expansion_len(), 0);
+    assert_eq!(empty.expansion_len().unwrap(), 0);
     assert_eq!(empty.expand(0).expect("empty expansion").len(), 0);
 
     let bad_index = template::Template::new(Packet::new()).axis(1, "value", vec![1_u8.into()]);
     assert!(matches!(
-        bad_index.expand(1).expect("one ordinal").next(),
-        Some(Err(template::Error::LayerIndex { index: 1, len: 0 }))
+        bad_index.expand(1),
+        Err(template::Error::LayerIndex { index: 1, len: 0 })
     ));
     let mut packet = Packet::new();
     packet.push(Probe::default());
     let bad_field = template::Template::new(packet).axis(0, "missing", vec![1_u8.into()]);
     assert!(matches!(
-        bad_field.expand(1).expect("one ordinal").next(),
-        Some(Err(template::Error::Field { layer: 0, .. }))
+        bad_field.expand(1),
+        Err(template::Error::Field { layer: 0, .. })
     ));
+}
+
+#[test]
+fn template_aliases_value_errors_and_overflow_are_rejected_before_iteration() {
+    use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
+    let mut base = Packet::new();
+    base.push(Udp::default());
+    let repeated = template::Template::new(base.clone())
+        .axis(0, "sport", vec![1_u16.into()])
+        .axis(0, "source_port", vec![2_u16.into()]);
+    assert!(matches!(
+        repeated.expand(1),
+        Err(template::Error::DuplicateAxis { layer: 0, .. })
+    ));
+    let invalid = template::Template::new(base).axis(
+        0,
+        "sport",
+        vec![1_u16.into(), FieldValue::Unsigned(65_536)],
+    );
+    assert!(matches!(
+        invalid.expand(2),
+        Err(template::Error::Field { .. })
+    ));
+
+    let mut base = Packet::new();
+    for _ in 0..usize::BITS {
+        base.push(Ipv4::default());
+    }
+    let mut product = template::Template::new(base);
+    for index in 0..usize::BITS as usize {
+        product = product.axis(index, "ttl", vec![1_u8.into(), 2_u8.into()]);
+    }
+    assert!(matches!(
+        product.expansion_len(),
+        Err(template::Error::ExpansionOverflow)
+    ));
+    assert!(matches!(
+        product.expand(usize::MAX),
+        Err(template::Error::ExpansionOverflow)
+    ));
+    let empty = product.axis(0, "tos", vec![]);
+    assert_eq!(
+        empty.expansion_len().unwrap(),
+        0,
+        "an empty factor makes the entire product empty"
+    );
 }
 
 fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) -> Packet {

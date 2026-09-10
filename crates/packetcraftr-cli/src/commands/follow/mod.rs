@@ -37,7 +37,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         selector.transport.as_str(),
         selector.index
     );
-    let prepared = prepare(arguments.limits, Some(&source))?;
+    let prepared = prepare(arguments.limits, Some(&source), &arguments.decode)?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Only TCP needs reassembly; UDP chunks come straight from frames.

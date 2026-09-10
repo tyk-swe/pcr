@@ -8,7 +8,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_netio as net;
 
 use super::interface;
-use crate::command_options::RouteArgs;
+use crate::command_options::{RouteArgs, RouteSelectionArgs};
 use crate::errors::CliError;
 use crate::input::read_recipe;
 
@@ -32,6 +32,15 @@ pub(crate) fn prepare_route(
         route,
     } = arguments;
     let packet = read_recipe(recipe, registry, core::layout::DEFAULT_MAX_LAYERS)?;
+    prepare_packet_route(packet, destination, route, policy)
+}
+
+pub(crate) fn prepare_packet_route(
+    packet: Packet,
+    destination: Option<String>,
+    route: RouteSelectionArgs,
+    policy: packetcraftr::policy::Policy,
+) -> Result<RoutedPacket, CliError> {
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy

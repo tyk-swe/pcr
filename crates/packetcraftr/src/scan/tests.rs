@@ -41,6 +41,7 @@ fn tcp_scan_request(target: Target) -> Request {
         attempts: 1,
         timeout: Duration::from_millis(1),
         probes_per_second: None,
+        udp_payload: bytes::Bytes::new(),
         limits: Limits::default(),
     }
 }
@@ -49,6 +50,7 @@ fn tcp_scan_request(target: Target) -> Request {
 struct TimeoutExecutor {
     batches: Vec<(u32, Vec<Option<u16>>)>,
     invalid_sent_sequence: Option<u64>,
+    invalid_udp_payload: bool,
 }
 
 impl Executor<Batch> for TimeoutExecutor {
@@ -72,6 +74,12 @@ impl Executor<Batch> for TimeoutExecutor {
             if self.invalid_sent_sequence == Some(probe.sequence) {
                 packet.get_mut::<Tcp>().unwrap().sequence ^= 1;
             }
+            if self.invalid_udp_payload {
+                packet
+                    .get_mut::<packetcraftr_core::layer::Raw>()
+                    .unwrap()
+                    .bytes = bytes::Bytes::from_static(b"changed");
+            }
             let receipt = crate::evidence::test_sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
@@ -92,6 +100,65 @@ impl Executor<Batch> for TimeoutExecutor {
             },
         })
     }
+}
+
+#[test]
+fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
+    use packetcraftr_core::error::Classified as _;
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.transport = Transport::Udp;
+    request.udp_payload = bytes::Bytes::from_static(b"payload");
+    let mut policy = private_policy();
+    policy.max_bytes_per_operation = super::IPV4_PROBE_BYTES;
+    let mut executor = TimeoutExecutor::default();
+    let error = run(
+        &request,
+        &mut PolicyAuthorizer::for_packets(&policy),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, "policy.byte_limit");
+    assert!(executor.batches.is_empty());
+
+    let mut executor = TimeoutExecutor {
+        invalid_udp_payload: true,
+        ..TimeoutExecutor::default()
+    };
+    let error = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error.kind, ErrorKind::InvalidEvidence { .. }),
+        "{error:?}"
+    );
+
+    let mut executor = TimeoutExecutor::default();
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap();
+    assert_eq!(report.stats.bytes, 20 + 8 + 7);
+    request.udp_payload = vec![0; super::MAX_UDP_PAYLOAD_BYTES + 1].into();
+    assert!(request.validate().is_err());
+    request.udp_payload = bytes::Bytes::from_static(b"x");
+    request.transport = Transport::Tcp;
+    assert!(request.validate().is_err());
 }
 
 struct LateResponseExecutor(TimeoutExecutor);

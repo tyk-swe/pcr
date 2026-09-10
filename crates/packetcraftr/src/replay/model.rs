@@ -26,6 +26,9 @@ pub enum Timing {
     Original,
     Scaled(f64),
     FixedRate(f64),
+    /// Positive bits per second, counting exact submitted frame bytes without
+    /// synthetic media overhead. The first selected frame is immediate.
+    BitRate(u64),
     Immediate,
 }
 
@@ -33,6 +36,10 @@ impl Timing {
     /// Validates any numeric timing parameter before frames are read.
     pub fn validate(&self) -> Result<(), Error> {
         match *self {
+            Self::BitRate(0) => Err(Error::InvalidTiming {
+                mode: "bit_rate",
+                value: 0.0,
+            }),
             Self::Scaled(value) if !value.is_finite() || value <= 0.0 => {
                 Err(Error::InvalidTiming {
                     mode: "scaled",
@@ -54,6 +61,8 @@ impl Timing {
         previous: Option<SystemTime>,
         current: Option<SystemTime>,
         source_index: u64,
+        transmitted_bytes: u64,
+        scheduled_duration: Duration,
     ) -> Result<Duration, Error> {
         self.validate()?;
         match self {
@@ -96,6 +105,20 @@ impl Timing {
                 Ok(delay)
             }
             Self::Immediate => Ok(Duration::ZERO),
+            Self::BitRate(rate) => {
+                // u64 bytes * eight bits * one billion nanoseconds fits u128.
+                // Round the cumulative target, rather than each frame's gap,
+                // so fractional nanoseconds do not accumulate scheduling drift.
+                let nanos =
+                    (u128::from(transmitted_bytes) * 8 * 1_000_000_000).div_ceil(u128::from(rate));
+                let seconds =
+                    u64::try_from(nanos / 1_000_000_000).map_err(|_| Error::InvalidTiming {
+                        mode: "bit_rate",
+                        value: rate as f64,
+                    })?;
+                let fraction = (nanos % 1_000_000_000) as u32;
+                Ok(Duration::new(seconds, fraction).saturating_sub(scheduled_duration))
+            }
         }
     }
 }

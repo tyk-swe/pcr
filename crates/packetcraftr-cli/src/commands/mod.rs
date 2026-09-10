@@ -13,7 +13,6 @@
 //! commands share.
 
 use packetcraftr_cli::output::contract::Format;
-
 use packetcraftr_core::error::Kind;
 
 use std::sync::Arc;
@@ -100,7 +99,7 @@ pub(crate) enum Command {
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
     Traceroute(traceroute::arguments::Args),
-    /// Run DNS with bounded UDP-to-TCP fallback.
+    /// Run bounded DNS over UDP, TCP, or UDP with TCP fallback.
     #[command(
         long_about = dns::arguments::LONG_ABOUT,
         after_long_help = dns::arguments::AFTER_LONG_HELP
@@ -154,8 +153,8 @@ impl Command {
         Some(std::time::Duration::from_millis(millis))
     }
 
-    /// Only intercept signals for workflows that consume the shared token.
-    /// Other commands retain OS termination, including while reading a recipe.
+    /// Install shared cancellation before dispatch for these workflows.
+    /// Build installs its handler after loading its blocking recipe input.
     pub(crate) fn supports_cancellation(&self) -> bool {
         matches!(
             self,
@@ -193,7 +192,7 @@ impl Command {
             });
         let stream = publisher.as_ref().unwrap_or(stream);
         match self {
-            Self::Build(arguments) => build::run(arguments, format),
+            Self::Build(arguments) => build::run(arguments, format, stream),
             Self::Dissect(arguments) => dissect::run(arguments, format),
             Self::Protocols(arguments) => protocols::run(arguments, format),
             Self::Read(arguments) => read::run(arguments, format, stream),
@@ -217,7 +216,7 @@ impl Command {
 }
 
 fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
-    registry_with_tls_ports(&[])
+    Ok(core::protocol::builtin::registry())
 }
 
 /// Renders one aggregate row per text line, or the whole result as one JSON
@@ -239,22 +238,6 @@ fn render_aggregate_rows<T, R: serde::Serialize>(
         Format::Json => emit_aggregate(command, result, Vec::new()),
         _ => unreachable!("command dispatch validated the output format"),
     }
-}
-
-/// The built-in registry with extra TCP ports dissected as TLS.
-///
-/// `--tls-port` reaches every command that dissects capture bytes, so the
-/// per-frame view of `read` and `dissect` agrees with the assembled view of
-/// `tls`.
-fn registry_with_tls_ports(ports: &[u16]) -> Result<Arc<core::registry::Registry>, CliError> {
-    core::protocol::builtin::registry_with_tls_ports(ports)
-        .map(Arc::new)
-        .map_err(|source| {
-            CliError::new(
-                Kind::Internal,
-                format!("built-in registry invariant failed: {source}"),
-            )
-        })
 }
 
 fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {

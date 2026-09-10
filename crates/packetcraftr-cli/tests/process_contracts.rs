@@ -216,7 +216,7 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     ]);
     assert_no_terminal_style(&json_output.stdout);
     let value = parse_json(&json_output);
-    assert_eq!(value["schema"], "packetcraftr.output/v3");
+    assert_eq!(value["schema"], "packetcraftr.output/v4");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
     let text = run_success(&["--output", "text", "build", "--packet", "raw(text=hello)"]);

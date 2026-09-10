@@ -172,6 +172,56 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
 }
 
 #[test]
+fn build_retains_signal_termination_while_recipe_stdin_is_open() {
+    use std::os::unix::process::ExitStatusExt;
+
+    for (signal, number) in [("INT", 2), ("TERM", 15)] {
+        let mut process = Running::start(&["--output", "ndjson", "build"]);
+        process.wait_until(|p| {
+            std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
+                .unwrap()
+                .contains("pipe_read")
+        });
+        process.signal(signal);
+        // Keep stdin open: termination must not depend on the producer reaching EOF.
+        let output = process.finish();
+        assert_eq!(output.status.signal(), Some(number), "{signal}: {output:?}");
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn cancellation_during_build_json_publication_keeps_one_complete_document() {
+    // The rendered payload exceeds the pipe capacity, keeping publication
+    // blocked until the signal has been handled and finish drains stdout.
+    let payload_len = 64 * 1024;
+    let recipe = format!("raw(text={})", "x".repeat(payload_len));
+    for signal in ["INT", "TERM"] {
+        let mut process = Running::start_with_stdout_pipe(
+            &["--output", "json", "build", "--packet", &recipe],
+            true,
+        );
+        process.wait_until(|p| {
+            std::fs::read_to_string(format!("/proc/{}/wchan", p.child.id()))
+                .unwrap()
+                .contains("pipe_write")
+        });
+        process.signal(signal);
+        std::thread::sleep(Duration::from_millis(100));
+        let output = process.finish();
+        assert_eq!(output.status.code(), Some(130), "{signal}");
+        let document: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .expect("stdout must contain exactly one complete JSON document");
+        assert_eq!(document["command"], "build");
+        assert_eq!(document["status"], "success");
+        assert_eq!(document["result"]["length"], payload_len);
+        assert_eq!(document["result"]["bytes_hex"], "78".repeat(payload_len));
+        assert!(document.get("error").is_none());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("io.cancelled"));
+    }
+}
+
+#[test]
 fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
     for format in [Format::Pcap, Format::PcapNg] {
         let mut prefix = Vec::new();

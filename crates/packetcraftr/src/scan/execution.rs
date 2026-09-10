@@ -6,12 +6,14 @@ use packetcraftr_core::packet::Packet;
 
 pub use crate::probe::ProbeEndpoint;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
     pub endpoint: ProbeEndpoint,
     pub attempt: u32,
+    /// Shared exact UDP payload from the validated request.
+    pub udp_payload: bytes::Bytes,
 }
 
 impl Probe {

@@ -16,21 +16,70 @@ use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::{
-    emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
-    write_stdout_line, write_summary_line,
+    StreamEncoder, emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line,
+    write_raw, write_stdout_line, write_summary_line,
 };
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let maximum = arguments.template.max_template_packets;
+    let axes = arguments.template.parse()?;
     let registry = registry()?;
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
     let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
-    let built = core::build::Builder::new(registry)
-        .build(
-            packet,
-            core::codec::Context::default(),
-            arguments.budget.build_options(arguments.mode.into()),
-        )
-        .map_err(build_error)?;
+    // Keep OS signal termination while recipe input can block waiting for EOF.
+    crate::cancellation::install()?;
+    let template = axes.into_template(packet);
+    let packets = template.expand(maximum).map_err(CliError::classified)?;
+    if packets.len() != 1 && matches!(format, Format::Json | Format::Raw) {
+        return Err(CliError::new(
+            Kind::Cli,
+            "JSON and raw build output require exactly one packet; use text, hex, or NDJSON for packet sets",
+        ));
+    }
+    let builder = core::build::Builder::new(registry);
+    let mut summary = output::build::Complete::default();
+    for packet in packets {
+        crate::cancellation::check()?;
+        let built = builder
+            .build(
+                packet.map_err(CliError::classified)?,
+                core::codec::Context::default(),
+                arguments.budget.build_options(arguments.mode.into()),
+            )
+            .map_err(build_error)?;
+        crate::cancellation::check()?;
+        let bytes = u64::try_from(built.bytes.len())
+            .map_err(|_| CliError::new(Kind::Internal, "built byte count overflowed"))?;
+        summary.bytes_built = summary
+            .bytes_built
+            .checked_add(bytes)
+            .ok_or_else(|| CliError::new(Kind::Internal, "built byte count overflowed"))?;
+        if format == Format::Ndjson {
+            let (packet, diagnostics) = output::build::Report::from_built(built);
+            stream.emit_data(
+                output::build::PacketEvent {
+                    packet_index: summary.packets_built,
+                    packet,
+                },
+                diagnostics,
+            )?;
+        } else {
+            render_packet(built, format)?;
+        }
+        summary.packets_built = super::increment_counter(summary.packets_built, "built packets")?;
+    }
+    // Startup handles cancellation after JSON publication without appending
+    // a second aggregate document to stdout.
+    if format != Format::Json {
+        crate::cancellation::check()?;
+    }
+    if format == Format::Ndjson {
+        stream.complete(summary, Vec::new())?;
+    }
+    Ok(())
+}
+
+fn render_packet(built: core::build::BuiltPacket, format: Format) -> Result<(), CliError> {
     match format {
         Format::Text => {
             write_summary_line(format_args!("built {} bytes", built.bytes.len()))?;

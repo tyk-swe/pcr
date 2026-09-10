@@ -42,3 +42,24 @@ impl Report {
         )
     }
 }
+
+/// One built packet in deterministic, zero-based Cartesian order.
+#[derive(Clone, Debug, Serialize)]
+pub struct PacketEvent {
+    pub packet_index: u64,
+    #[serde(flatten)]
+    pub packet: Report,
+}
+
+impl super::stream::StreamRecord for PacketEvent {
+    fn event_name(&self) -> &'static str {
+        "packet"
+    }
+}
+
+/// Totals published only after every packet has been built and emitted.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct Complete {
+    pub packets_built: u64,
+    pub bytes_built: u64,
+}

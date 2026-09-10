@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, SendArgs};
+use crate::command_options::{CaptureLimitsArgs, SendArgs, TemplateArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Live exchange is policy-gated and may require native features, dependencies, and privileges. NDJSON publishes provider-confirmed sends and definitively classified capture evidence during the single exchange; unanswered records follow capture completion and one complete record terminates success.
 
@@ -12,6 +12,8 @@ Example:
 pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) send: SendArgs,
+    #[command(flatten)]
+    pub(crate) template: TemplateArgs,
     /// Overall response window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
     pub(crate) timeout_ms: u64,

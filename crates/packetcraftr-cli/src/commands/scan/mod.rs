@@ -4,6 +4,7 @@
 //! Scan CLI command logic.
 
 pub(super) mod arguments;
+mod payload;
 mod rendering;
 
 use packetcraftr_cli::output::contract::Format;
@@ -22,6 +23,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let Args {
         target,
         transport,
+        udp_payload_hex,
+        udp_payload_file,
         family,
         ports,
         attempts,
@@ -35,6 +38,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         limits,
         policy,
     } = arguments;
+    let udp_payload = payload::read(
+        transport,
+        udp_payload_hex.as_deref(),
+        udp_payload_file.as_deref(),
+    )?;
     let target = parse_target(target)?;
     let queue_limits = limits.into_limits();
     let scan_limits = packetcraftr::scan::Limits {
@@ -51,6 +59,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let request = packetcraftr::scan::Request {
         target,
         transport: transport.into(),
+        udp_payload,
         address_family: family.into(),
         ports,
         attempts,

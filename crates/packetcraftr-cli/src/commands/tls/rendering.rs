@@ -76,12 +76,12 @@ pub(super) fn render_session(
 pub(super) fn render_text(
     state: &State,
     summary: &Summary,
-    extra_ports: &[u16],
+    registry: &core::registry::Registry,
 ) -> Result<(), CliError> {
     if state.selected == 0 {
         match unmatched_note(summary) {
             Some(note) => write_stdout_line(format_args!("{note}"))?,
-            None => render_empty(summary, extra_ports)?,
+            None => render_empty(summary, registry)?,
         }
     }
     write_stdout_line(format_args!(
@@ -123,13 +123,17 @@ fn unmatched_note(summary: &Summary) -> Option<String> {
 
 /// Says what was read and where to look next, so an empty report is never
 /// mistaken for "this capture has no TLS".
-fn render_empty(summary: &Summary, extra_ports: &[u16]) -> Result<(), CliError> {
+fn render_empty(summary: &Summary, registry: &core::registry::Registry) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "no TLS sessions assembled: {} frame(s) read, {} matched, {} TCP conversation(s)",
         summary.frames_read, summary.frames_matched, summary.tcp_streams,
     ))?;
-    let mut ports = core::protocol::builtin::TLS_TCP_PORTS.to_vec();
-    ports.extend_from_slice(extra_ports);
+    let mut ports: Vec<u16> = registry
+        .parent_bindings("tls")
+        .into_iter()
+        .filter(|(parent, _)| parent.as_str() == "tcp")
+        .filter_map(|(_, port)| u16::try_from(port.0).ok())
+        .collect();
     ports.sort_unstable();
     ports.dedup();
     write_stdout_line(format_args!(

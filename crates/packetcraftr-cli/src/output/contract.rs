@@ -10,7 +10,7 @@ use serde::Serialize;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
-pub const SCHEMA_V3: &str = "packetcraftr.output/v3";
+pub const SCHEMA_V4: &str = "packetcraftr.output/v4";
 
 /// Declares the command vocabulary once: the enum, [`Command::ALL`], and
 /// [`Command::as_str`] all come from the single list below, in canonical order.
@@ -71,7 +71,8 @@ impl Command {
     /// Formats deliberately supported by this command contract.
     pub const fn formats(self) -> &'static [Format] {
         match self {
-            Self::Build | Self::Dissect => BUILD_FORMATS,
+            Self::Build => BUILD_FORMATS,
+            Self::Dissect => DISSECT_FORMATS,
             Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
                 AGGREGATE_FORMATS
             }
@@ -147,7 +148,14 @@ pub enum Mode {
     Stream,
 }
 
-const BUILD_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
+const BUILD_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Hex,
+    Format::Raw,
+];
+const DISSECT_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
 const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
 const SEND_FORMATS: &[Format] = &[
     Format::Text,

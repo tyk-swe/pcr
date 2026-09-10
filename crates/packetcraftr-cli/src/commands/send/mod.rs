@@ -25,19 +25,14 @@ pub(super) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated an
 Example:
   packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
 
-/// One `SendArgs` resolved into everything a transmitting command needs: the
-/// registry it dissects with, the packet, the send options, and a client bound
-/// to the same policy.
-///
-/// `send` transmits it directly; `exchange` transmits the same packet and then
-/// captures against it, so both resolve the route the same way.
-pub(super) struct PreparedSend {
-    pub(super) packet: core::packet::Packet,
-    pub(super) options: packetcraftr::send::Options,
-    pub(super) client: Client,
+/// One packet with its send options and a client bound to the same policy.
+struct PreparedSend {
+    packet: core::packet::Packet,
+    options: packetcraftr::send::Options,
+    client: Client,
 }
 
-pub(super) fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
+fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
     let SendArgs {
         route,
         mode,

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v3.schema.json",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v4.schema.json",
   "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1.",
-  "title": "PacketcraftR command output v3",
+  "title": "PacketcraftR command output v4",
   "description": "Aggregate JSON and sequenced NDJSON. Every stream record declares event in its envelope; complete and error are terminal.",
   "oneOf": [
     {
@@ -30,7 +30,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v3"
+          "const": "packetcraftr.output/v4"
         },
         "command": {
           "type": [
@@ -237,6 +237,9 @@
         },
         {
           "oneOf": [
+            {
+              "$ref": "#/$defs/buildStreamSuccess"
+            },
             {
               "$ref": "#/$defs/readSuccess"
             },
@@ -3453,9 +3456,6 @@
                   },
                   "then": {
                     "properties": {
-                      "fallback_attempted": {
-                        "const": true
-                      },
                       "outcome": {
                         "const": "response"
                       }
@@ -4373,11 +4373,24 @@
           },
           "then": {
             "properties": {
-              "fallback_attempted": {
-                "const": true
-              },
               "outcome": {
                 "const": "response"
+              },
+              "attempts": {
+                "contains": {
+                  "required": [
+                    "transport",
+                    "status"
+                  ],
+                  "properties": {
+                    "transport": {
+                      "const": "tcp"
+                    },
+                    "status": {
+                      "const": "response"
+                    }
+                  }
+                }
               }
             }
           }
@@ -4393,34 +4406,62 @@
           "then": {
             "properties": {
               "attempts": {
-                "contains": {
-                  "required": [
-                    "transport"
-                  ],
-                  "properties": {
-                    "transport": {
-                      "const": "tcp"
+                "allOf": [
+                  {
+                    "contains": {
+                      "required": [
+                        "transport"
+                      ],
+                      "properties": {
+                        "transport": {
+                          "const": "tcp"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "contains": {
+                      "required": [
+                        "transport",
+                        "status"
+                      ],
+                      "properties": {
+                        "transport": {
+                          "const": "udp"
+                        },
+                        "status": {
+                          "const": "truncated"
+                        }
+                      }
                     }
                   }
-                }
+                ]
               }
             }
           },
           "else": {
             "properties": {
               "attempts": {
-                "not": {
-                  "contains": {
-                    "required": [
-                      "transport"
-                    ],
-                    "properties": {
-                      "transport": {
-                        "const": "tcp"
+                "anyOf": [
+                  {
+                    "items": {
+                      "properties": {
+                        "transport": {
+                          "const": "udp"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "items": {
+                      "properties": {
+                        "transport": {
+                          "const": "tcp"
+                        }
                       }
                     }
                   }
-                }
+                ]
               }
             }
           }
@@ -4934,6 +4975,20 @@
             "fixed_rate": {
               "type": "number",
               "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "bit_rate"
+          ],
+          "properties": {
+            "bit_rate": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
             }
           },
           "additionalProperties": true
@@ -6957,6 +7012,90 @@
         }
       },
       "additionalProperties": false
+    },
+    "buildStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "build"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "packet"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "packet_index",
+                "bytes_hex",
+                "length",
+                "packet",
+                "layout",
+                "requires_live_opt_in"
+              ],
+              "properties": {
+                "bytes_hex": {
+                  "$ref": "#/$defs/hexBytes"
+                },
+                "length": {
+                  "$ref": "#/$defs/uint64"
+                },
+                "packet": {
+                  "$ref": "#/$defs/packetDocument"
+                },
+                "layout": {
+                  "$ref": "#/$defs/packetLayout"
+                },
+                "requires_live_opt_in": {
+                  "type": "boolean"
+                },
+                "packet_index": {
+                  "$ref": "#/$defs/uint64"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "packets_built",
+                "bytes_built"
+              ],
+              "properties": {
+                "packets_built": {
+                  "$ref": "#/$defs/uint64"
+                },
+                "bytes_built": {
+                  "$ref": "#/$defs/uint64"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
     }
   }
 }

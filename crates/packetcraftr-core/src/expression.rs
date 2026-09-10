@@ -141,6 +141,25 @@ pub fn parse(input: &str, registry: &Registry, options: Options) -> Result<Packe
     Ok(packet)
 }
 
+/// Parses one reflective value using the packet expression grammar, including
+/// nested lists. Byte and nesting limits apply before parsing; `max_layers`
+/// has no effect because this input contains no layer stack.
+pub fn parse_value(input: &str, options: Options) -> Result<FieldValue, Error> {
+    if input.len() > options.max_bytes {
+        return Err(Error::SizeLimit {
+            actual: input.len(),
+            limit: options.max_bytes,
+        });
+    }
+    if options.max_nesting > MAX_EXPRESSION_NESTING {
+        return Err(Error::InvalidNestingLimit {
+            value: options.max_nesting,
+            maximum: MAX_EXPRESSION_NESTING,
+        });
+    }
+    parse_value_bounded(input.trim(), 0, options.max_nesting)
+}
+
 fn parse_layer(
     segment: &str,
     layer: usize,

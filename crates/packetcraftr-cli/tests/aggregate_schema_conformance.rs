@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Serializes a real Rust aggregate payload for every command that publishes
-//! one and validates the emitted envelope against the published v3 schema.
+//! one and validates the emitted envelope against the published v4 schema.
 //!
 //! The published-example tests validate hand-written JSON, so they cannot see
 //! a Rust type drifting away from the contract. These tests check declared
@@ -1190,7 +1190,7 @@ fn dns_response_case() -> Value {
                     },
                     ..attempt(packetcraftr::dns::Transport::Udp, 1)
                 },
-                attempt(packetcraftr::dns::Transport::Tcp, 2),
+                attempt(packetcraftr::dns::Transport::Tcp, 1),
             ],
             vec![packetcraftr::dns::UndecodedEvidence {
                 attempt: 1,
@@ -1652,7 +1652,7 @@ fn filter_discovery_metadata_is_required_and_validates_all_binding_kinds() {
         let fields = detail.remove("filter_fields").expect("metadata is present");
         assert!(
             !validator.is_valid(&document),
-            "output v3 requires filter discovery metadata"
+            "output v4 requires filter discovery metadata"
         );
         document["result"]["protocol"]["filter_fields"] = fields;
         document["result"]["protocol"]["filter_fields"][0]["kind"] = "unknown".into();

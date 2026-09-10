@@ -8,16 +8,16 @@ use std::time::Duration;
 use crate::policy::SocketBudget;
 
 use super::MAX_PROBE_OVERHEAD;
-use super::Request;
 use super::error::Error;
+use super::{Request, TransportMode};
 
 /// The complete finite cost one DNS operation may incur, approved before any
 /// resolver, route, capture, or socket side effect.
 pub(super) struct OperationBudget {
     pub(super) packet_count: u64,
     pub(super) maximum_wire_bytes: u64,
-    /// The socket cost of a possible TCP continuation, or
-    /// [`SocketBudget::none`] when no continuation is configured. DNS always
+    /// The socket cost of direct TCP or a possible continuation, or
+    /// [`SocketBudget::none`] for UDP-only queries. DNS always
     /// states the shape, so the same overrun is charged and classified the
     /// same way whether or not fallback is enabled.
     pub(super) tcp: SocketBudget,
@@ -29,7 +29,12 @@ pub(super) fn operation_budget(
     request: &Request,
     query_bytes: usize,
 ) -> Result<OperationBudget, Error> {
-    let packet_count = u64::from(request.attempts);
+    let attempts = u64::from(request.attempts);
+    let packet_count = if request.transport == TransportMode::Tcp {
+        0
+    } else {
+        attempts
+    };
     let query_bytes = u64::try_from(query_bytes).unwrap_or(u64::MAX);
     let udp_probe_bytes = query_bytes.saturating_add(MAX_PROBE_OVERHEAD);
     let maximum_wire_bytes =
@@ -40,8 +45,8 @@ pub(super) fn operation_budget(
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
             })?;
-    let tcp = if request.tcp_fallback {
-        socket_budget(packet_count, query_bytes)?
+    let tcp = if request.transport != TransportMode::Udp {
+        socket_budget(attempts, query_bytes)?
     } else {
         SocketBudget::none()
     };

@@ -68,13 +68,22 @@ impl TcpExecutor for CountingExecutor {}
 
 #[test]
 fn cancellation_during_authorization_or_resolution_prevents_dns_execution() {
-    for edns in [
+    for (edns, transport) in [
         None,
         Some(dns::EdnsRequest {
             udp_payload_size: 1232,
             dnssec_ok: true,
         }),
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|edns| {
+        [
+            dns::TransportMode::Udp,
+            dns::TransportMode::UdpThenTcp,
+            dns::TransportMode::Tcp,
+        ]
+        .map(|transport| (edns, transport))
+    }) {
         for progressive in [false, true] {
             for cancel_during_resolution in [true, false] {
                 let signal = Cancellation::default();
@@ -88,7 +97,7 @@ fn cancellation_during_authorization_or_resolution_prevents_dns_execution() {
                     transaction_id: 0x1234,
                     recursion_desired: true,
                     edns,
-                    tcp_fallback: false,
+                    transport,
                     attempts: 1,
                     timeout: Duration::from_secs(1),
                     queries_per_second: None,

@@ -12,11 +12,16 @@ ASSETS = (
     'LICENSE', 'README.md', 'CHANGELOG.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
     'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v1.schema.json',
-    'schemas/packetcraftr.output.v3.schema.json',
+    'schemas/packetcraftr.output.v4.schema.json',
     'examples/captures/tls-handshake.pcapng',
     'examples/documents/packet-ipv4-udp.json',
     'examples/documents/output-stats-resources.json',
     'examples/documents/output-read-resources.json',
+    'examples/documents/output-build-event.json',
+    'examples/documents/output-build-complete.json',
+    'examples/documents/output-dns-tcp-success.json',
+    'examples/documents/output-dns-tcp-complete.json',
+    'examples/documents/output-replay-bit-rate-success.json',
 )
 EXPECTED = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
 
@@ -65,7 +70,7 @@ def verify(root, version, commit, target, variant):
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v3'
+        if (record.get('schema') != 'packetcraftr.output/v4'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):

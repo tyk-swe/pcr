@@ -8,6 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Cartesian packet sets in core and `build`/`exchange`, with repeatable `--axis`,
+  checked expansion limits, and streamed build packet/completion events.
+- Offline `--decode-as` for compatible TCP/UDP codecs, shared with `--tls-port`
+  across dissection, filtering, and analysis commands.
+- Replay `--bps` and Rust `Timing::BitRate`, pacing exact submitted frame bytes
+  from cumulative totals under existing operation budgets.
+- Bounded UDP scan payloads from `--udp-payload-hex` or `--udp-payload-file`,
+  included in checksums, traffic budgets, and exact sent-evidence validation.
+- Direct DNS `--tcp`, available without native packet-I/O features, retaining
+  socket authorization, bounded framing, response validation, and retries.
 - `packetcraftr_core::budget::remaining_before` is the one helper every crate
   uses to turn a deadline into a remaining wait; the previous netio-private copy
   is gone. Core exposes `protocol::application::dns::{read_u16, read_u32}` and
@@ -37,6 +47,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- **Breaking:** `Template::axis` accumulates Cartesian axes; `expansion_len`
+  returns a checked result. DNS `Request::transport: TransportMode` replaces
+  `tcp_fallback`; unknown serialized request fields are rejected. Scan requests
+  and probes gain `udp_payload`, and `scan::Probe` is no longer `Copy`.
+- Output/v4 supersedes the earlier unreleased v3 schema, adding build streams,
+  bit-rate timing, and successful direct TCP DNS with `fallback_attempted=false`.
+  Schemas, examples, release assets, and migration notes follow the new contract.
 - `packetcraftr --help` lists exit code 130 for interrupted operations next to
   the classified codes.
 - `traceroute --port`, `--source-port`, and `--first-hop` reject zero during
@@ -52,7 +69,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   workflow; decoder and isolated native validation run outside PRs.
 - Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
   that option as its fifth argument. `None` preserves the original query bytes.
-- Structured command output advances to `packetcraftr.output/v3`. DNS
+- Structured command output advances to `packetcraftr.output/v4`. DNS
   `query_type` values are integers in `0..=65535` in summaries and events;
   packet documents remain `packetcraftr.packet/v1`.
 - Rust DNS `QueryType` is a numeric value with `new`/`code` methods and uppercase
@@ -96,6 +113,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `build` retains normal signal termination while waiting for recipe input,
+  then uses cooperative cancellation while building and publishing packets.
+- Exchange packet sets authorize expanded destinations before route preparation,
+  so an axis can replace a denied recipe destination with permitted addresses.
+- JSON `build` output remains one complete document when interrupted during
+  publication; cancellation is reported on stderr with exit code 130.
 - Capture-reader help now states that `--max-interfaces` bounds descriptions per
   input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
   Normalization's selected-output interface ceiling is documented separately;

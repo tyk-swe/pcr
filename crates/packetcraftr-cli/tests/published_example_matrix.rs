@@ -40,8 +40,7 @@ fn published_example_names() -> BTreeSet<String> {
 /// `error`.
 fn expected_kinds(command: Command) -> &'static [&'static str] {
     match command {
-        Command::Build
-        | Command::Dissect
+        Command::Dissect
         | Command::Protocols
         | Command::Plan
         | Command::Send
@@ -50,7 +49,8 @@ fn expected_kinds(command: Command) -> &'static [&'static str] {
         | Command::Stats => &["success", "error"],
         Command::Exchange => &["success", "complete", "error"],
         Command::Capture | Command::Read => &["event", "complete", "error"],
-        Command::Scan
+        Command::Build
+        | Command::Scan
         | Command::Replay
         | Command::Expert
         | Command::Follow

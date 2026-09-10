@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{OfflineCaptureLimitsArgs, TlsPortArgs};
+use crate::command_options::{DecodeArgs, OfflineCaptureLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
@@ -53,5 +53,5 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) dissect: bool,
     #[command(flatten)]
-    pub(crate) tls_ports: TlsPortArgs,
+    pub(crate) decode: DecodeArgs,
 }

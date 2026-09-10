@@ -18,6 +18,11 @@ use support::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
     (
+        output::contract::Command::Build,
+        false,
+        include_str!("../../../examples/documents/output-build-complete.json"),
+    ),
+    (
         output::contract::Command::Read,
         false,
         include_str!("../../../examples/documents/output-read-complete.json"),
@@ -635,6 +640,21 @@ fn dns_schema_enforces_fallback_transport_consistency() {
     no_fallback["result"]["accepted_transport"] = json!("udp");
     assert!(schema_validator().validate(&no_fallback).is_err());
 
+    let mut direct = document.clone();
+    direct["result"]["fallback_attempted"] = json!(false);
+    direct["result"]["attempts"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|attempt| attempt["transport"] == "tcp");
+    schema_validator()
+        .validate(&direct)
+        .expect("direct TCP does not require a fallback");
+    direct["result"]["fallback_attempted"] = json!(true);
+    assert!(
+        schema_validator().validate(&direct).is_err(),
+        "fallback needs a truncated UDP phase"
+    );
+
     let mut no_tcp_attempt = document.clone();
     no_tcp_attempt["result"]["attempts"]
         .as_array_mut()
@@ -717,7 +737,7 @@ fn complete(
 }
 
 #[test]
-fn v2_rejects_legacy_event_placement_and_unknown_root_discriminators() {
+fn schema_rejects_legacy_event_placement_and_unknown_root_discriminators() {
     let original: Value = serde_json::from_str(include_str!(
         "../../../examples/documents/output-tls-event.json"
     ))

@@ -28,6 +28,9 @@ fn direct_tcp_dns_uses_sockets_and_publishes_no_udp_or_fallback_evidence() {
                     Err(error) => panic!("bounded DNS fixture did not accept: {error}"),
                 }
             };
+            // Accepted sockets can inherit nonblocking mode from the listener.
+            // Use blocking I/O so the read and write timeouts apply.
+            stream.set_nonblocking(false).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();

@@ -17,7 +17,7 @@ use packetcraftr_core::analysis;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{parse_stream_selector, prepare_with_tls_ports};
+use super::offline_analysis::{parse_stream_selector, prepare};
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
@@ -140,11 +140,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     // The stream filter narrows reassembly to one conversation while indices
     // stay capture-global, so the index reported is the one asked for.
     let source = selected_stream.map(|index| format!("tcp.stream == {index}"));
-    let prepared = prepare_with_tls_ports(
-        arguments.limits,
-        source.as_deref(),
-        &arguments.tls_ports.ports,
-    )?;
+    let prepared = prepare(arguments.limits, source.as_deref(), &arguments.decode)?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Assembly consumes the reassembler's in-order deliveries.
@@ -192,7 +188,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &run_summary.ip_reassembly,
     );
     match format {
-        Format::Text => rendering::render_text(&state, &summary, &arguments.tls_ports.ports),
+        Format::Text => rendering::render_text(&state, &summary, &prepared.registry),
         Format::Json => rendering::render_aggregate(state, summary),
         Format::Ndjson => rendering::render_stream(summary, stream),
         _ => unreachable!("command dispatch validated the output format"),

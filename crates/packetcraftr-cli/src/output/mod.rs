@@ -4,7 +4,7 @@
 //! CLI machine output. Domain values stay with their owning crate; these
 //! representations handle hex encoding, timestamps, flattened reports, and
 //! the versioned envelope. The stream encoder owns ordering and termination.
-//! Every output-v3 NDJSON record declares its kind in the envelope's `event`.
+//! Every output-v4 NDJSON record declares its kind in the envelope's `event`.
 
 pub mod build;
 pub mod capture;

@@ -5,6 +5,7 @@
 
 pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;
+pub(crate) use decode::DecodeArgs;
 pub(crate) use offline_limits::{
     CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
 };
@@ -16,14 +17,15 @@ pub(crate) use policy::{
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
 pub(crate) use send::SendArgs;
-pub(crate) use tls_ports::TlsPortArgs;
+pub(crate) use template::TemplateArgs;
 
 mod address_family;
 mod capture_limits;
+mod decode;
 mod offline_limits;
 mod packet_budget;
 mod policy;
 mod recipe;
 mod route;
 mod send;
-mod tls_ports;
+mod template;

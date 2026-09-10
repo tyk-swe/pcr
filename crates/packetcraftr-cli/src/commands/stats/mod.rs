@@ -14,7 +14,7 @@ use packetcraftr_core::analysis;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{omitted_diagnostic, prepare_with_tls_ports};
+use super::offline_analysis::{omitted_diagnostic, prepare};
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::emit_aggregate;
@@ -23,10 +23,10 @@ use packetcraftr_cli::output::stats::Table;
 pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
-    let prepared = prepare_with_tls_ports(
+    let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
-        &arguments.tls_ports.ports,
+        &arguments.decode,
     )?;
     let mut collector = analysis::stats::Collector::for_table(
         Duration::from_millis(arguments.interval_ms),

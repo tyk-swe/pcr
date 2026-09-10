@@ -4,8 +4,8 @@
 //! Bounded DNS query construction, response validation, relevance filtering,
 //! and retry execution over the shared target-policy and exchange seams.
 //!
-//! Each attempt begins over UDP. When [`Request::tcp_fallback`] is true, one
-//! matching validated response with the truncation flag may continue over
+//! [`Request::transport`] selects UDP, direct TCP, or UDP with TCP fallback.
+//! In the default mode, one matching validated truncated response may continue over
 //! DNS-over-TCP to the same reauthorized numeric endpoint. Both phases share
 //! the attempt timeout. TCP framing and allocation are bounded, accepted
 //! responses receive the same transaction/question validation as UDP, and TCP
@@ -19,8 +19,6 @@ use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 pub const HEADER_BYTES: usize = 12;
 pub const DEFAULT_SERVER_PORT: u16 = 53;
 pub const DEFAULT_ATTEMPTS: u32 = 1;
-/// DNS queries retry one validated truncated UDP response over TCP by default.
-pub const DEFAULT_TCP_FALLBACK: bool = true;
 pub const DEFAULT_MAX_RECORDS: usize = 512;
 pub const DEFAULT_MAX_NAME_POINTERS: usize = 32;
 pub const DEFAULT_MAX_TXT_STRINGS: usize = 256;
@@ -89,7 +87,9 @@ pub use report::Summary;
 pub use report::Transport;
 pub use report::UndecodedEvidence;
 pub use report::ValidatedResponse;
-pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, QueryTypeParseError, Request};
+pub use request::{
+    EdnsRequest, Limits, MessageLimits, QueryType, QueryTypeParseError, Request, TransportMode,
+};
 
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};
 pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};

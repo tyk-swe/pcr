@@ -10,7 +10,15 @@ use crate::errors::CliError;
 use crate::system::InterfaceSelector;
 
 pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, CliError> {
-    let timing = if let Some(rate) = arguments.rate {
+    let timing = if let Some(rate) = arguments.bps {
+        if matches!(arguments.timing, Timing::Immediate) {
+            return Err(CliError::new(
+                Kind::Cli,
+                "--bps cannot be combined with --timing immediate",
+            ));
+        }
+        packetcraftr::replay::Timing::BitRate(rate)
+    } else if let Some(rate) = arguments.rate {
         if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
                 Kind::Cli,
@@ -64,6 +72,10 @@ mod tests {
     #[test]
     fn timing_options_map_to_validated_runtime_modes() {
         assert_eq!(
+            timing(&arguments(&["--bps", "8000000"])).unwrap(),
+            packetcraftr::replay::Timing::BitRate(8_000_000)
+        );
+        assert_eq!(
             timing(&arguments(&[])).expect("original timing"),
             packetcraftr::replay::Timing::Original
         );
@@ -84,12 +96,38 @@ mod tests {
     #[test]
     fn timing_rejects_immediate_overrides_and_invalid_numeric_values() {
         for extra in [
+            &["--timing", "immediate", "--bps", "8000000"][..],
             &["--timing", "immediate", "--rate", "20"][..],
             &["--timing", "immediate", "--speed", "2"][..],
             &["--rate", "0"][..],
             &["--speed", "0"][..],
         ] {
             assert!(timing(&arguments(extra)).is_err(), "{extra:?}");
+        }
+    }
+
+    #[test]
+    fn bit_rate_arguments_reject_zero_and_conflicting_modes() {
+        for extra in [
+            vec!["--bps", "0"],
+            vec!["--bps", "NaN"],
+            vec!["--bps", "8", "--rate", "1"],
+            vec!["--bps", "8", "--speed", "2"],
+        ] {
+            assert!(
+                Cli::try_parse_from(
+                    [
+                        "packetcraftr",
+                        "replay",
+                        "fixture.pcap",
+                        "--interface",
+                        "fixture0"
+                    ]
+                    .into_iter()
+                    .chain(extra)
+                )
+                .is_err()
+            );
         }
     }
 

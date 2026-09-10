@@ -24,7 +24,6 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::registry_with_tls_ports;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
@@ -57,7 +56,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         filter,
         normalize,
         dissect,
-        tls_ports,
+        decode,
     } = arguments;
     validate_capture_stream_limits(limits)?;
     validate_dissect_format(dissect, format)?;
@@ -77,7 +76,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         Format::PcapNg => Some(capture::Format::PcapNg),
         _ => None,
     };
-    let decoding = prepare_decoding(filter.as_deref(), dissect, &tls_ports.ports)?;
+    let decoding = prepare_decoding(filter.as_deref(), dissect, &decode)?;
     let mut reader = open_capture(&path, limits.reader)?;
     if normalize {
         return normalize_capture(&mut reader, limits, decoding.as_ref(), io::stdout().lock());
@@ -116,12 +115,12 @@ fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError
 fn prepare_decoding(
     filter: Option<&str>,
     dissect: bool,
-    tls_ports: &[u16],
+    decode: &crate::command_options::DecodeArgs,
 ) -> Result<Option<Decoding>, CliError> {
+    let registry = decode.registry()?;
     if filter.is_none() && !dissect {
         return Ok(None);
     }
-    let registry = registry_with_tls_ports(tls_ports)?;
     let filter = filter
         .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
         .transpose()?;

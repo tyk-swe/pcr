@@ -241,12 +241,8 @@ impl Completion {
                 "response truncation must agree with the outcome",
             ));
         }
-        if self.accepted_transport == Some(Transport::Tcp)
-            && (!self.fallback_attempted || self.outcome != Outcome::Response)
-        {
-            return Err(EvidenceError(
-                "accepted TCP requires an attempted fallback and a complete response",
-            ));
+        if self.accepted_transport == Some(Transport::Tcp) && self.outcome != Outcome::Response {
+            return Err(EvidenceError("accepted TCP requires a complete response"));
         }
         Ok(())
     }
@@ -299,13 +295,41 @@ impl Report {
                 "retained response must match the accepted response header",
             ));
         }
-        if summary.completion.fallback_attempted()
-            != attempts
-                .iter()
-                .any(|attempt| attempt.transport() == Transport::Tcp)
+        if summary.completion.accepted_transport() == Some(Transport::Tcp)
+            && !attempts.iter().any(|attempt| {
+                attempt.transport() == Transport::Tcp && attempt.status == Outcome::Response
+            })
         {
             return Err(EvidenceError(
-                "fallback must agree with retained TCP attempts",
+                "accepted TCP requires a retained successful TCP attempt",
+            ));
+        }
+        let has_udp = attempts
+            .iter()
+            .any(|attempt| attempt.transport() == Transport::Udp);
+        let mut fallback_attempted = false;
+        for (index, attempt) in attempts.iter().enumerate() {
+            if attempt.transport() != Transport::Tcp || !has_udp {
+                continue;
+            }
+            let preceded_by_truncation = index
+                .checked_sub(1)
+                .and_then(|index| attempts.get(index))
+                .is_some_and(|previous| {
+                    previous.attempt == attempt.attempt
+                        && previous.transport() == Transport::Udp
+                        && previous.status == Outcome::Truncated
+                });
+            if !preceded_by_truncation {
+                return Err(EvidenceError(
+                    "TCP fallback requires the same attempt's preceding truncated UDP response",
+                ));
+            }
+            fallback_attempted = true;
+        }
+        if summary.completion.fallback_attempted() != fallback_attempted {
+            return Err(EvidenceError(
+                "fallback must agree with retained UDP-to-TCP continuations",
             ));
         }
         Ok(Self {

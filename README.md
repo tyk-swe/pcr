@@ -70,6 +70,30 @@ count filtered-out frames too; the same block and interface ceilings bound outpu
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
 
+## Packet sets and decode-as
+
+`build` and `exchange` accept repeatable axes over zero-based layer fields:
+
+```console
+packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[9000,9001]'
+```
+
+This produces four packets in Cartesian order, with the last axis varying
+fastest. `--max-template-packets` defaults to 10,000 and is checked before
+preparation. Axes use expression values, reject empty lists and repeated fields
+(including aliases), and share a 1 MiB input ceiling. Build streams text, one
+hex line per packet, or NDJSON `packet` events followed by `complete`; JSON and
+raw require one packet. Exchange applies one budget and response window to the
+whole set, checking every packet's endpoints and final bytes.
+
+Offline `dissect`, `read`, `follow`, `stats`, `expert`, and `tls` accept
+`--decode-as 'udp.port=5353:dns'`. TCP ports support `tls` and `raw`; UDP ports
+support `dns`, `vxlan`, `geneve`, and `raw`. A mapping overrides the built-in
+binding for that port; transport source/destination precedence stays unchanged.
+Conflicting declarations are rejected. `--tls-port 4433` is shorthand for
+`--decode-as 'tcp.port=4433:tls'`. At most 256 declarations and 64 KiB of mapping
+text are accepted. Decoding and display filters use the same configured registry.
+
 ## Filtered capture export
 
 Save a focused capture in the source format:
@@ -120,7 +144,7 @@ need libpcap development files such as `libpcap-dev`.
 Choose the source profile before building:
 
 ```console
-# Offline construction, capture-file processing, and analysis
+# Offline construction/analysis and ordinary-socket DNS --tcp
 cargo build --locked --release -p packetcraftr-cli --no-default-features
 # Passive routes/interfaces and raw Layer 3 I/O, without libpcap
 cargo build --locked --release -p packetcraftr-cli --no-default-features --features native-layer3
@@ -131,7 +155,7 @@ cargo build --locked --release -p packetcraftr-cli --all-features
 
 Default features provide passive routes/interfaces. Capture, exchange and
 capture-backed probes require the corresponding full-native provider; pcap-free
-is intended for offline work, routing, raw Layer 3 send and replay. See
+supports offline work, routing, raw Layer 3 send/replay, and direct TCP DNS. See
 [Contributing](CONTRIBUTING.md) for the ordinary Cargo loop.
 
 Release artifacts use these runtime baselines: Ubuntu 24.04 (glibc 2.39), macOS 14
@@ -155,7 +179,7 @@ sink cannot promise a terminal NDJSON record.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
-- Structured command output: [`packetcraftr.output/v3`](schemas/packetcraftr.output.v3.schema.json)
+- Structured command output: [`packetcraftr.output/v4`](schemas/packetcraftr.output.v4.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
@@ -168,7 +192,7 @@ Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`; invalid
-combinations fail explicitly. Every output-v3 NDJSON envelope has an `event`
+combinations fail explicitly. Every output-v4 NDJSON envelope has an `event`
 discriminator; the schema enumerates the per-command event names, and
 `complete` and `error` are the terminal records. The payload is in `result` or
 `error`; consumers never need to
@@ -248,7 +272,7 @@ workers retain their permits and resources until cleanup finishes.
 For `capture`, `--capture-filter` is resolver-free native BPF applied before
 PacketcraftR queues and budgets; `--filter` runs after capture.
 
-`dns` starts each attempt over UDP. By default, a matching validated response
+By default, `dns` starts each attempt over UDP. A matching validated response
 with the DNS truncation flag triggers one length-prefixed TCP continuation to
 the same independently reauthorized numeric server. UDP and TCP share the
 single `--timeout-ms` attempt window; TCP failures follow the normal retry
@@ -259,10 +283,17 @@ terminal-truncation behavior, or when packet-oriented `--interface`, `--source`,
 or `--link-mode` overrides must be preserved. IPv6 link-local DNS servers also
 require `--udp-only` because the target syntax does not carry a TCP scope ID.
 
-Library callers opt into fallback by composing an exchange executor with
+`dns --tcp` starts each attempt directly over an ordinary TCP socket and works
+in the portable profile without raw capture privileges. It uses the same
+authorization, message limits, response checks, deadlines, and retry count.
+Direct TCP reports `fallback_attempted=false`, socket bytes, and zero captured
+packet counts. It uses an OS-selected local port; `--source-port`, `--udp-only`,
+and packet-oriented route overrides cannot be combined with `--tcp`.
+
+Library callers enable TCP by composing an exchange executor with
 `.with_dns_tcp(provider)`. The CLI explicitly selects
 `packetcraftr_netio::tcp::SystemProvider`; injected UDP executors default to
-unsupported TCP fallback. The standard-library TCP provider is available
+unsupported TCP execution. The standard-library TCP provider is available
 independently of the native packet-I/O feature flags.
 
 `--type` accepts `a`, `aaaa`, `caa`, `cname`, `mx`, `ns`, `ptr`, `soa`, `srv`,
@@ -280,7 +311,23 @@ default. The advertised UDP receive size is independent of the
 Kernel TCP control and retransmission packets are OS-managed, so DNS
 authorization does not mislabel them as an exact raw-packet count. It instead
 charges bounded connection and framed-message traffic units, application
-bytes, and duration alongside the exact UDP wire budget.
+bytes, and duration, adding an exact UDP wire budget when UDP is selected.
+
+`scan --transport udp` accepts `--udp-payload-hex HEX` or
+`--udp-payload-file PATH`. The same exact payload is sent to each selected port,
+up to 65,507 bytes, with derived lengths/checksums and the existing policy and
+MTU checks. Empty payloads retain the previous behavior. Valid DNS payloads on
+port 53 use an exact retained-wire DNS layer; payloads on registered protocol
+ports still need to satisfy strict construction. Responses retain transport
+and ICMP-error correlation; payload selection does not add application-level
+response assertions.
+
+`replay --bps 8000000` selects a bit rate instead of captured intervals or
+packets per second. It counts exact submitted frame bytes without synthetic
+media overhead, sends the first selected frame immediately, and schedules
+later frames from cumulative bytes already sent. Filtered frames consume no
+bit-rate timing. Cumulative rounding avoids per-frame drift; scheduled duration
+and byte totals describe the operation, without a throughput guarantee.
 
 This documentation-address example only prints help and performs no network
 operation:

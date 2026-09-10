@@ -246,6 +246,34 @@ fn cleanup_failure_after_an_output_error_reports_both_without_a_further_send() {
     assert_eq!(state.shutdowns, 1);
 }
 
+#[test]
+fn cartesian_exchange_denies_the_whole_set_before_transmission() {
+    let (client, state) = fixture(Fault::None);
+    let template = Template::new(query_packet())
+        .axis(
+            0,
+            "source",
+            vec![
+                FieldValue::Ipv4(support::SELECTED_SOURCE),
+                FieldValue::Ipv4("192.0.2.99".parse().unwrap()),
+            ],
+        )
+        .axis(0, "ttl", vec![1_u8.into(), 64_u8.into()]);
+    let mut options = layer3_options();
+    options.max_template_packets = 4;
+    let error = client.exchange(&template, options.clone()).unwrap_err();
+    assert_eq!(error.classification().code, "policy.source_ownership");
+    assert!(state.lock().unwrap().sent.is_empty());
+    assert!(!state.lock().unwrap().ready);
+
+    options.max_template_packets = 3;
+    assert!(matches!(
+        client.exchange(&template, options),
+        Err(packetcraftr::Error::Template { .. })
+    ));
+    assert!(state.lock().unwrap().sent.is_empty());
+}
+
 /// Each scan probe reaches the wire with its own destination port, sequence
 /// number, and IPv4 identification, so responses correlate to one probe.
 #[test]
@@ -278,6 +306,7 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
         attempts: 1,
         timeout: Duration::from_millis(100),
         probes_per_second: None,
+        udp_payload: bytes::Bytes::new(),
         limits: scan::Limits::default(),
     };
     scan::run_with_events(

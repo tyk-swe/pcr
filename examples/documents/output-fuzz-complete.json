@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v3",
+  "schema": "packetcraftr.output/v4",
   "command": "fuzz",
   "mode": "stream",
   "sequence": 1,

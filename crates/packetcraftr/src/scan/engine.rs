@@ -310,7 +310,16 @@ fn maximum_wire_bytes(
             IPV4_PROBE_BYTES
         } else {
             IPV6_PROBE_BYTES
-        };
+        }
+        .checked_add(u64::try_from(request.udp_payload.len()).unwrap_or(u64::MAX))
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "wire_bytes",
+                value: u64::MAX,
+                reason: "UDP payload accounting overflowed".to_owned(),
+            },
+        ))?;
         let address_probes = u64::try_from(endpoints_per_address)
             .unwrap_or(u64::MAX)
             .checked_mul(u64::from(request.attempts))

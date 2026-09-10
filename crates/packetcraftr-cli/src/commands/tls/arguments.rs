@@ -12,7 +12,7 @@ use packetcraftr_core::analysis::tls::Status as AnalysisStatus;
 // honest when the core constant moves.
 const _: () = assert!(MAX_DIRECTION_BUFFER == 135_168);
 
-use crate::command_options::{OfflineLimitsArgs, TlsPortArgs};
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Session assembly is computed offline over dissected frames; no live capture or transmission is involved.
 
@@ -93,7 +93,7 @@ pub(crate) struct Args {
     #[arg(long = "status", value_enum, value_name = "STATUS", action = ArgAction::Append)]
     pub(crate) statuses: Vec<Status>,
     #[command(flatten)]
-    pub(crate) tls_ports: TlsPortArgs,
+    pub(crate) decode: DecodeArgs,
     /// Maximum handshake bytes buffered across every tracked conversation.
     /// The smallest accepted value is 135168, which one direction of one
     /// conversation may buffer on its own.

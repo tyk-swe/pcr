@@ -29,7 +29,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
         return Err(CliError::new(
             core::error::Kind::Cli,
-            "DNS TCP fallback cannot preserve --interface, --source, or --link-mode; remove the route override or pass --udp-only",
+            "DNS TCP cannot preserve --interface, --source, or --link-mode; remove the route override or select --udp-only",
         ));
     }
     let queue_limits = arguments.limits.clone().into_limits();
@@ -92,6 +92,7 @@ fn prepare_request(
         address_family: arguments.family.into(),
         server_port: arguments.port,
         source_port: match arguments.source_port {
+            None if arguments.tcp => 0,
             Some(port) => port,
             None => packetcraftr::dns::unpredictable_source_port().map_err(CliError::classified)?,
         },
@@ -110,7 +111,13 @@ fn prepare_request(
                 dnssec_ok: arguments.dnssec_ok,
             }
         }),
-        tcp_fallback: packetcraftr::dns::DEFAULT_TCP_FALLBACK && !arguments.udp_only,
+        transport: if arguments.tcp {
+            packetcraftr::dns::TransportMode::Tcp
+        } else if arguments.udp_only {
+            packetcraftr::dns::TransportMode::Udp
+        } else {
+            packetcraftr::dns::TransportMode::UdpThenTcp
+        },
         attempts: arguments.attempts,
         timeout: Duration::from_millis(arguments.timeout_ms),
         queries_per_second: arguments.rate,

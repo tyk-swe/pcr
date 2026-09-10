@@ -11,6 +11,6 @@ mod route;
 
 pub(crate) use interface::{InterfaceSelector, resolve, select_interfaces};
 
-pub(crate) use route::prepare_route;
+pub(crate) use route::{prepare_packet_route, prepare_route};
 
 pub(crate) use client::{Client, Exchange, client};

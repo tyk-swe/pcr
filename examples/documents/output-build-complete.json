@@ -1,0 +1,13 @@
+{
+  "schema": "packetcraftr.output/v4",
+  "command": "build",
+  "mode": "stream",
+  "status": "success",
+  "result": {
+    "packets_built": 1,
+    "bytes_built": 4
+  },
+  "diagnostics": [],
+  "event": "complete",
+  "sequence": 1
+}

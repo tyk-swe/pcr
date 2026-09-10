@@ -601,7 +601,7 @@ fn dns_request(address: IpAddr) -> super::Request {
         transaction_id: 0x1234,
         recursion_desired: true,
         edns: None,
-        tcp_fallback: false,
+        transport: super::TransportMode::Udp,
         attempts: 1,
         timeout: Duration::from_millis(1),
         queries_per_second: None,
@@ -645,7 +645,7 @@ fn dns_executor_rejects_nonzero_response_index() {
 fn fallback_operation_deadline_precedes_authorization_failure() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     let baseline = std::time::Instant::now();
     let now = Arc::new(std::sync::Mutex::new(baseline));
     let deadline_now = Arc::clone(&now);
@@ -955,7 +955,7 @@ fn truncated_udp_falls_back_once_and_accepts_tcp_without_a_captured_frame() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
     request.server = "resolver.example.test".parse().expect("fixture hostname");
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let mut authorizer = RecordingAuthorizer::new(address);
     let mut executor =
@@ -1039,6 +1039,151 @@ fn udp_only_mode_keeps_truncation_terminal_and_reserves_no_tcp_phase() {
 }
 
 #[test]
+fn direct_tcp_retries_validate_responses_and_charge_only_socket_traffic() {
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let mut request = dns_request(address);
+    request.server = "resolver.example.test".parse().unwrap();
+    request.transport = super::TransportMode::Tcp;
+    request.source_port = 0;
+    request.attempts = 3;
+    request.timeout = Duration::from_secs(1);
+    request.queries_per_second = Some(2);
+    let mut mismatched = dns_response().to_vec();
+    mismatched[0] ^= 1;
+    let mut executor = ScriptedExecutor::new([]).with_tcp([
+        TcpScript::Response {
+            message: mismatched.into(),
+            elapsed: Duration::from_millis(10),
+        },
+        TcpScript::Error(super::tcp::Error::IncompletePrefix { actual: 1 }),
+        TcpScript::Response {
+            message: dns_response(),
+            elapsed: Duration::from_millis(10),
+        },
+    ]);
+    let mut authorizer = RecordingAuthorizer::new(address);
+    let mut clock = crate::test_fixtures::RecordingClock::default();
+    let report = super::run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+    )
+    .unwrap();
+    assert_eq!(executor.udp_calls, 0);
+    assert_eq!(executor.tcp_calls, 3);
+    assert_eq!(clock.delays, [Duration::from_millis(500); 2]);
+    assert_eq!(
+        report
+            .attempts()
+            .iter()
+            .map(|attempt| (attempt.attempt, attempt.status))
+            .collect::<Vec<_>>(),
+        [
+            (1, super::Outcome::Unrelated),
+            (2, super::Outcome::DecodeFailure),
+            (3, super::Outcome::Response)
+        ]
+    );
+    assert!(report.attempts().iter().all(
+        |attempt| attempt.transport() == super::Transport::Tcp && attempt.response().is_none()
+    ));
+    assert_eq!(
+        report.summary().completion.accepted_transport(),
+        Some(super::Transport::Tcp)
+    );
+    assert!(!report.summary().completion.fallback_attempted());
+    assert_eq!(report.summary().stats.packets_attempted, 0);
+    assert_eq!(report.summary().stats.packets_completed, 0);
+    let query_bytes = u64::try_from(executor.tcp_queries[0].len() + 2).unwrap();
+    assert_eq!(report.summary().stats.bytes, query_bytes * 3);
+    assert_eq!(authorizer.budgets[0].packets(), 6);
+    assert_eq!(authorizer.budgets[0].wire_bytes(), query_bytes * 3);
+    assert_eq!(authorizer.socket_budgets[0].connections(), 3);
+    assert_eq!(authorizer.socket_budgets[0].messages(), 3);
+    assert_eq!(authorizer.targets.len(), 6);
+    assert!(
+        executor
+            .tcp_timeouts
+            .iter()
+            .all(|timeout| *timeout > Duration::ZERO && *timeout <= request.timeout)
+    );
+}
+
+#[test]
+fn direct_tcp_denials_and_scoped_targets_never_execute_a_probe() {
+    use packetcraftr_core::error::Classified as _;
+    let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let mut request = dns_request(address);
+    request.timeout = Duration::from_secs(1);
+    request.transport = super::TransportMode::Tcp;
+    let mut executor = ScriptedExecutor::new([]);
+    let policy = crate::policy::Policy {
+        max_packets_per_operation: 1,
+        ..crate::policy::Policy::default()
+    };
+    let error = super::run(
+        &request,
+        &mut crate::policy::PolicyAuthorizer::for_packets(&policy),
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, "policy.traffic_unit_limit");
+
+    request.server = "resolver.example.test".parse().unwrap();
+    let mut authorizer = RecordingAuthorizer::new(address);
+    authorizer.deny_numeric = true;
+    let error = super::run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.classification().code,
+        "policy.fixture_tcp_destination"
+    );
+    assert_eq!(authorizer.targets.len(), 2);
+
+    let address = "fe80::53".parse().unwrap();
+    request.server = Target::Address(address);
+    assert!(matches!(
+        super::run(
+            &request,
+            &mut RecordingAuthorizer::new(address),
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock
+        ),
+        Err(super::Error::TcpLinkLocal { .. })
+    ));
+    assert_eq!(executor.udp_calls + executor.tcp_calls, 0);
+}
+
+#[test]
+fn dns_request_transport_defaults_and_legacy_flag_rejection_are_explicit() {
+    let request = dns_request(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)));
+    let mut document = serde_json::to_value(&request).unwrap();
+    document.as_object_mut().unwrap().remove("transport");
+    assert_eq!(
+        serde_json::from_value::<super::Request>(document.clone())
+            .unwrap()
+            .transport,
+        super::TransportMode::UdpThenTcp
+    );
+    document["tcp_fallback"] = serde_json::json!(false);
+    assert!(
+        serde_json::from_value::<super::Request>(document).is_err(),
+        "an obsolete UDP-only flag must never silently enable TCP"
+    );
+}
+
+#[test]
 fn only_a_validated_truncated_udp_response_triggers_tcp() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     for (payload, expected) in [
@@ -1051,7 +1196,7 @@ fn only_a_validated_truncated_udp_response_triggers_tcp() {
         (None, super::Outcome::Timeout),
     ] {
         let mut request = dns_request(address);
-        request.tcp_fallback = true;
+        request.transport = super::TransportMode::UdpThenTcp;
         request.timeout = Duration::from_secs(1);
         let mut executor = ScriptedExecutor::new([payload]);
         let result = super::engine::run(
@@ -1075,7 +1220,7 @@ fn only_a_validated_truncated_udp_response_triggers_tcp() {
 fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
     let address: std::net::Ipv6Addr = "fe80::53".parse().unwrap();
     let mut request = dns_request(IpAddr::V6(address));
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let mut executor = ScriptedExecutor::new([]);
 
@@ -1127,7 +1272,7 @@ fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
 fn tcp_fallback_receives_only_the_shared_attempt_remainder() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let mut executor =
         ScriptedExecutor::new([Some(truncated_dns_response())]).with_tcp([TcpScript::Response {
@@ -1197,7 +1342,7 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
         ),
     ] {
         let mut request = dns_request(address);
-        request.tcp_fallback = true;
+        request.transport = super::TransportMode::UdpThenTcp;
         request.timeout = Duration::from_secs(1);
         let mut executor =
             ScriptedExecutor::new([Some(truncated_dns_response())]).with_tcp([script]);
@@ -1220,7 +1365,7 @@ fn tcp_failures_map_to_stable_retry_outcomes() {
 fn executor_without_tcp_support_reports_a_capability_error() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let error = super::engine::run(
         &request,
@@ -1242,7 +1387,7 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let endpoint = SocketAddr::new(address, DEFAULT_SERVER_PORT);
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.attempts = 2;
     request.timeout = Duration::from_secs(1);
     let mut executor = ScriptedExecutor::new([
@@ -1285,7 +1430,7 @@ fn tcp_destination_policy_denial_happens_before_connection() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
     request.server = "resolver.example.test".parse().expect("fixture hostname");
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let mut authorizer = RecordingAuthorizer::new(address);
     authorizer.deny_numeric = true;
@@ -1330,7 +1475,7 @@ fn tcp_reauthorization_failure_after_attempt_deadline_becomes_timeout() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
     request.server = "resolver.example.test".parse().expect("fixture hostname");
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_millis(50);
     let mut authorizer = SlowTcpDenyingAuthorizer {
         address,
@@ -1359,7 +1504,7 @@ fn tcp_reauthorization_failure_after_attempt_deadline_becomes_timeout() {
 fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let policy = crate::policy::Policy {
         max_packets_per_operation: 2,
@@ -1400,7 +1545,11 @@ fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
     for tcp_fallback in [false, true] {
         let mut request = dns_request(address);
         request.attempts = 3;
-        request.tcp_fallback = tcp_fallback;
+        request.transport = if tcp_fallback {
+            super::TransportMode::UdpThenTcp
+        } else {
+            super::TransportMode::Udp
+        };
         request.timeout = Duration::from_secs(1);
         let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
         let mut executor = ScriptedExecutor::new([Some(dns_response())]);
@@ -1427,7 +1576,7 @@ fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
 fn udp_attempt_sink_failure_prevents_tcp_side_effects() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let mut request = dns_request(address);
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let mut executor =
         ScriptedExecutor::new([Some(truncated_dns_response())]).with_tcp([TcpScript::Response {
@@ -1542,7 +1691,7 @@ fn loopback_fallback(edns: Option<super::EdnsRequest>) {
     let mut request = dns_request(address);
     request.server_port = endpoint.port();
     request.edns = edns;
-    request.tcp_fallback = true;
+    request.transport = super::TransportMode::UdpThenTcp;
     request.timeout = Duration::from_secs(1);
     let result = super::engine::run(
         &request,
@@ -1656,7 +1805,7 @@ fn edns_bytes_are_shared_and_budgeted_across_fallback_and_retries() {
     ] {
         let mut request = dns_request(address);
         request.edns = edns;
-        request.tcp_fallback = true;
+        request.transport = super::TransportMode::UdpThenTcp;
         request.attempts = 2;
         request.timeout = Duration::from_secs(1);
         let query = super::encode_query(
@@ -1708,7 +1857,11 @@ fn added_edns_bytes_can_exceed_policy_before_any_io() {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     for tcp_fallback in [false, true] {
         let mut request = dns_request(address);
-        request.tcp_fallback = tcp_fallback;
+        request.transport = if tcp_fallback {
+            super::TransportMode::UdpThenTcp
+        } else {
+            super::TransportMode::Udp
+        };
         let plain = super::encode_query(
             &request.query_name,
             request.query_type,
@@ -1787,6 +1940,15 @@ fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
     )
     .unwrap()
     .metadata;
+    assert!(
+        super::Completion::new(
+            super::Outcome::Response,
+            false,
+            Some(super::Transport::Tcp),
+            Some(metadata.clone())
+        )
+        .is_ok()
+    );
     for (outcome, fallback, transport, header) in [
         (
             super::Outcome::Response,
@@ -1812,12 +1974,6 @@ fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
             Some(super::Transport::Tcp),
             Some(metadata.clone()),
         ),
-        (
-            super::Outcome::Response,
-            false,
-            Some(super::Transport::Tcp),
-            Some(metadata),
-        ),
     ] {
         let has_header = header.is_some();
         assert!(
@@ -1834,7 +1990,38 @@ fn report_construction_requires_fallback_and_attempts_to_agree() {
         source_port: None,
         sent_at: None,
     };
-    for (fallback, attempts) in [(false, vec![tcp]), (true, vec![udp_attempt_evidence()])] {
+    tcp.status = super::Outcome::Timeout;
+    assert!(
+        super::Report::new(
+            timeout_summary(false),
+            None,
+            vec![tcp.clone()],
+            Vec::new(),
+            Vec::new()
+        )
+        .is_ok()
+    );
+    let mut truncated = udp_attempt_evidence();
+    truncated.status = super::Outcome::Truncated;
+    assert!(
+        super::Report::new(
+            timeout_summary(true),
+            None,
+            vec![truncated.clone(), tcp.clone()],
+            Vec::new(),
+            Vec::new()
+        )
+        .is_ok()
+    );
+    let mut wrong_attempt = tcp.clone();
+    wrong_attempt.attempt = 2;
+    for (fallback, attempts) in [
+        (true, vec![tcp.clone()]),
+        (true, vec![udp_attempt_evidence()]),
+        (false, vec![truncated.clone(), tcp.clone()]),
+        (true, vec![udp_attempt_evidence(), tcp]),
+        (true, vec![truncated, wrong_attempt]),
+    ] {
         assert!(
             super::Report::new(
                 timeout_summary(fallback),

@@ -153,6 +153,10 @@ pub fn select_ports(
 pub struct Request {
     pub target: Target,
     pub transport: Transport,
+    /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
+    /// Non-empty payloads are rejected for TCP and ICMP.
+    #[serde(default)]
+    pub udp_payload: bytes::Bytes,
     pub address_family: Family,
     /// TCP or UDP destination ports. ICMP scans require this to be empty and
     /// produce one portless endpoint per selected address.
@@ -170,6 +174,21 @@ impl Request {
     /// with the declared ports.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
+        if self.udp_payload.len() > super::MAX_UDP_PAYLOAD_BYTES
+            || (!self.udp_payload.is_empty() && self.transport != Transport::Udp)
+        {
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "udp_payload_bytes",
+                    value: u64::try_from(self.udp_payload.len()).unwrap_or(u64::MAX),
+                    reason: format!(
+                        "UDP scans accept at most {} payload bytes; TCP and ICMP require an empty payload",
+                        super::MAX_UDP_PAYLOAD_BYTES
+                    ),
+                },
+            ));
+        }
         if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
             return Err(Error::new(
                 WORKFLOW,

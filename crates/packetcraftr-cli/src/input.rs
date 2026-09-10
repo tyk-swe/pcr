@@ -189,7 +189,19 @@ pub(crate) fn read_bounded_file(
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    read_bounded(open_file(path)?, max_bytes, kind)
+    let bytes = read_bounded_file_allow_empty(path, max_bytes, kind)?;
+    if bytes.is_empty() {
+        return Err(missing_input_error(kind));
+    }
+    Ok(bytes)
+}
+
+pub(crate) fn read_bounded_file_allow_empty(
+    path: &Path,
+    max_bytes: usize,
+    kind: InputKind,
+) -> Result<Vec<u8>, CliError> {
+    read_bounded_allow_empty(open_file(path)?, max_bytes, kind)
 }
 
 fn open_file(path: &Path) -> Result<File, CliError> {

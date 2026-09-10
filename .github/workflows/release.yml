@@ -243,6 +243,11 @@ jobs:
           cp examples/documents/packet-ipv4-udp.json "$staging/examples/documents/"
           cp examples/documents/output-stats-resources.json "$staging/examples/documents/"
           cp examples/documents/output-read-resources.json "$staging/examples/documents/"
+          cp examples/documents/output-build-event.json "$staging/examples/documents/"
+          cp examples/documents/output-build-complete.json "$staging/examples/documents/"
+          cp examples/documents/output-dns-tcp-success.json "$staging/examples/documents/"
+          cp examples/documents/output-dns-tcp-complete.json "$staging/examples/documents/"
+          cp examples/documents/output-replay-bit-rate-success.json "$staging/examples/documents/"
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
             "$ARCHIVE_BASENAME"
       - if: runner.os == 'Windows'
@@ -267,6 +272,11 @@ jobs:
           Copy-Item "examples/documents/packet-ipv4-udp.json" (Join-Path $staging "examples/documents")
           Copy-Item "examples/documents/output-stats-resources.json" (Join-Path $staging "examples/documents")
           Copy-Item "examples/documents/output-read-resources.json" (Join-Path $staging "examples/documents")
+          Copy-Item "examples/documents/output-build-event.json" (Join-Path $staging "examples/documents")
+          Copy-Item "examples/documents/output-build-complete.json" (Join-Path $staging "examples/documents")
+          Copy-Item "examples/documents/output-dns-tcp-success.json" (Join-Path $staging "examples/documents")
+          Copy-Item "examples/documents/output-dns-tcp-complete.json" (Join-Path $staging "examples/documents")
+          Copy-Item "examples/documents/output-replay-bit-rate-success.json" (Join-Path $staging "examples/documents")
           Compress-Archive -Path $staging -DestinationPath $archive
       - if: runner.os != 'Windows'
         name: Smoke-test Unix archive

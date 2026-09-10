@@ -74,8 +74,9 @@ impl packetcraftr::dns::TcpExecutor for Executor {
         &mut self,
         exchange: &packetcraftr::dns::TcpExchange,
     ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::dns::tcp::Error> {
-        // TCP only continues a truncated UDP answer, so the UDP execution has
-        // already bound the interface; the kernel socket cannot honour it.
+        // Direct TCP reaches this path without preparing any UDP exchange.
+        // CLI admission rejects packet-oriented overrides before execution;
+        // the socket adapter independently validates materialized options.
         Exchange::new(&self.client, self.exchange.clone())
             .with_dns_tcp(net::tcp::SystemProvider)
             .execute_tcp(exchange)

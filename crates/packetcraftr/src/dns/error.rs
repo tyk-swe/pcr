@@ -92,7 +92,7 @@ pub enum Error {
     Authorization(#[from] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
     Family { family: &'static str },
-    #[error("DNS-over-TCP fallback cannot address scoped IPv6 link-local server {address}")]
+    #[error("DNS-over-TCP cannot address scoped IPv6 link-local server {address}")]
     TcpLinkLocal { address: Ipv6Addr },
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },

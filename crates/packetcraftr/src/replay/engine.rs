@@ -318,7 +318,13 @@ fn scheduled_delay(
     if !progress.has_previous {
         return Ok(Duration::ZERO);
     }
-    match timing.delay_between(progress.previous_timestamp, frame.timestamp, source_index) {
+    match timing.delay_between(
+        progress.previous_timestamp,
+        frame.timestamp,
+        source_index,
+        progress.bytes_transmitted,
+        progress.scheduled_duration,
+    ) {
         Ok(delay) => Ok(delay),
         Err(Error::InvalidTiming { mode, value }) => Err(Error::Timing {
             source_index,

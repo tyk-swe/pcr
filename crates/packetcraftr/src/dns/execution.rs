@@ -44,16 +44,16 @@ pub struct Exchange {
     pub(crate) permit: crate::evidence::ExecutionPermit,
 }
 
-/// One DNS-over-TCP continuation after a validated truncated UDP response.
+/// One authorized DNS-over-TCP query, direct or following validated UDP truncation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TcpExchange {
-    /// Logical retry attempt shared with the triggering UDP phase.
+    /// Logical retry attempt, shared with UDP when this is a continuation.
     pub attempt: u32,
     /// Already-reauthorized numeric server and DNS port.
     pub endpoint: SocketAddr,
     /// Exact DNS query message without the TCP length prefix.
     pub query: Bytes,
-    /// Time remaining in the shared UDP/TCP attempt window.
+    /// Time remaining in the bounded DNS attempt window.
     pub timeout: Duration,
     /// Maximum response message bytes allowed before allocation.
     pub max_message_bytes: usize,
@@ -91,10 +91,10 @@ impl crate::probe::Request for Exchange {
     type Execution = Execution;
 }
 
-/// The optional DNS-over-TCP continuation an executor may provide next to its
+/// The optional DNS-over-TCP execution an executor may provide next to its
 /// UDP [`crate::probe::Executor`] implementation.
 pub trait TcpExecutor {
-    /// Executes one bounded DNS-over-TCP continuation. Expected socket and
+    /// Executes one bounded DNS-over-TCP query. Expected socket and
     /// framing failures are returned as typed data so the workflow can apply
     /// its normal retry precedence.
     fn execute_tcp(
@@ -102,7 +102,7 @@ pub trait TcpExecutor {
         _exchange: &TcpExchange,
     ) -> Result<TcpExecution, crate::dns::tcp::Error> {
         Err(crate::dns::tcp::Error::Unsupported {
-            message: "DNS executor does not provide TCP fallback".to_owned(),
+            message: "DNS executor does not provide TCP queries".to_owned(),
         })
     }
 }

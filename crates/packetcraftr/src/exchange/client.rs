@@ -185,7 +185,9 @@ where
         let deadline = started
             .checked_add(options.timeout)
             .expect("validated bounded exchange timeout must fit Instant");
-        let expansion_len = template.expansion_len();
+        let expansion_len = template.expansion_len().map_err(|source| Error::Template {
+            message: source.to_string(),
+        })?;
         self.policy.authorize(crate::policy::Operation::Budgeted(
             crate::policy::WireBudget::new(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0),
         ))?;

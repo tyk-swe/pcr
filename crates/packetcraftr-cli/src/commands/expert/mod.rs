@@ -9,7 +9,7 @@ use packetcraftr_cli::output::contract::Format;
 use packetcraftr_core::analysis;
 
 use self::arguments::{Args, Severity};
-use super::offline_analysis::prepare_with_tls_ports;
+use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
@@ -29,10 +29,10 @@ fn matches_selector(
 }
 
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    let prepared = prepare_with_tls_ports(
+    let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
-        &arguments.tls_ports.ports,
+        &arguments.decode,
     )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 

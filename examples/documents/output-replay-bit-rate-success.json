@@ -1,0 +1,73 @@
+{
+  "schema": "packetcraftr.output/v4",
+  "command": "replay",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "source_format": "pcap",
+    "timing": {
+      "bit_rate": 8000
+    },
+    "requested_interface": {
+      "name": "lab0",
+      "index": 2
+    },
+    "requested_link_mode": "layer2",
+    "frames_attempted": 2,
+    "frames_completed": 2,
+    "bytes_completed": 94,
+    "scheduled_duration": {
+      "secs": 0,
+      "nanos": 47000000
+    },
+    "frames": [
+      {
+        "source_sequence": 0,
+        "interface": {
+          "name": "lab0",
+          "index": 2
+        },
+        "link_mode": "layer2",
+        "scheduled_delay": {
+          "secs": 0,
+          "nanos": 0
+        },
+        "bytes_sent": 47,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 0,
+            "nanoseconds": 0
+          },
+          "captured_length": 47,
+          "original_length": 47,
+          "link_type": 1,
+          "bytes_hex": "020000000002020000000001080045000021123440004011a494c0000201c0000202c0000009000d77f468656c6c6f"
+        }
+      },
+      {
+        "source_sequence": 1,
+        "interface": {
+          "name": "lab0",
+          "index": 2
+        },
+        "link_mode": "layer2",
+        "scheduled_delay": {
+          "secs": 0,
+          "nanos": 47000000
+        },
+        "bytes_sent": 47,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 1,
+            "nanoseconds": 0
+          },
+          "captured_length": 47,
+          "original_length": 47,
+          "link_type": 1,
+          "bytes_hex": "020000000002020000000001080045000021123440004011a494c0000201c0000202c0000009000d77f468656c6c6f"
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

@@ -95,6 +95,12 @@ pub(crate) struct Args {
     /// TCP SYN, UDP, or ICMP echo probes.
     #[arg(long, value_enum, default_value_t = Transport::Tcp)]
     pub(crate) transport: Transport,
+    /// Exact UDP probe payload in hex, with optional whitespace, colon, or dash separators.
+    #[arg(long, value_name = "HEX", conflicts_with = "udp_payload_file")]
+    pub(crate) udp_payload_hex: Option<String>,
+    /// File containing exact UDP probe payload bytes (maximum 65507 bytes).
+    #[arg(long, value_name = "PATH", conflicts_with = "udp_payload_hex")]
+    pub(crate) udp_payload_file: Option<std::path::PathBuf>,
     /// Select all authorized addresses or only one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,

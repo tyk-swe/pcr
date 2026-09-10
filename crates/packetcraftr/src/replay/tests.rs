@@ -211,6 +211,7 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
         Timing::FixedRate(f64::NAN),
         Timing::FixedRate(f64::INFINITY),
         Timing::FixedRate(0.0),
+        Timing::BitRate(0),
     ] {
         assert!(matches!(
             timing.validate(),
@@ -223,25 +224,25 @@ fn replay_timing_validation_rejects_non_finite_and_non_positive_values() {
 fn replay_timing_requires_capture_time_only_for_source_interval_modes() {
     assert_eq!(
         Timing::Immediate
-            .delay_between(None, None, 2)
+            .delay_between(None, None, 2, 0, Duration::ZERO)
             .expect("immediate timing is independent of capture time"),
         Duration::ZERO
     );
     assert_eq!(
         Timing::FixedRate(2.0)
-            .delay_between(None, None, 2)
+            .delay_between(None, None, 2, 0, Duration::ZERO)
             .expect("fixed timing is independent of capture time"),
         Duration::from_millis(500)
     );
     assert!(matches!(
-        Timing::Original.delay_between(None, Some(UNIX_EPOCH), 2),
+        Timing::Original.delay_between(None, Some(UNIX_EPOCH), 2, 0, Duration::ZERO),
         Err(Error::TimestampUnavailable {
             source_index: 2,
             mode: "original"
         })
     ));
     assert!(matches!(
-        Timing::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3),
+        Timing::Scaled(2.0).delay_between(Some(UNIX_EPOCH), None, 3, 0, Duration::ZERO),
         Err(Error::TimestampUnavailable {
             source_index: 3,
             mode: "scaled"
@@ -504,6 +505,94 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
     ));
     assert_eq!(selector.numbers, [1, 2]);
     assert_eq!(authorizer.calls, 0);
+    assert_eq!(transmitter.transmission_calls, 0);
+}
+
+#[test]
+fn byte_rate_uses_selected_bytes_and_cumulative_rounding() {
+    let mut reader = capture_reader(
+        LinkType::ETHERNET,
+        &[
+            (Duration::ZERO, &[1, 2]),
+            (Duration::from_secs(100), &[3, 4, 5]),
+            (Duration::ZERO, &[6, 7, 8, 9]),
+            (Duration::ZERO, &[10]),
+        ],
+    );
+    let mut selector = RecordingSelector {
+        numbers: Vec::new(),
+        skip: Some(2),
+        keep: true,
+    };
+    let mut clock = RecordingClock::default();
+    let mut authorizer = RecordingAuthorizer::default();
+    let mut transmitter = RecordingTransmitter::default();
+    let summary = run_with_selector(
+        &mut reader,
+        &replay_options(Timing::BitRate(3_000_000_000)),
+        Some(&mut selector),
+        &mut authorizer,
+        &mut transmitter,
+        &mut clock,
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(
+        clock.delays,
+        [
+            Duration::ZERO,
+            Duration::from_nanos(6),
+            Duration::from_nanos(10)
+        ]
+    );
+    assert_eq!(summary.scheduled_duration, Duration::from_nanos(16));
+    assert_eq!(summary.bytes_transmitted, 7);
+    assert_eq!(authorizer.budgets, [(1, 2), (2, 6), (3, 7)]);
+    assert_eq!(authorizer.final_wire_calls, 3);
+}
+
+#[test]
+fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
+    let frames = [(Duration::ZERO, &[1_u8][..]), (Duration::ZERO, &[2_u8][..])];
+    let mut options = replay_options(Timing::BitRate(1));
+    options.limits.max_duration = Duration::from_secs(1);
+    let mut transmitter = RecordingTransmitter::default();
+    let error = run_with_selector(
+        &mut capture_reader(LinkType::ETHERNET, &frames),
+        &options,
+        None,
+        &mut RecordingAuthorizer::default(),
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_| Ok(()),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::DurationLimit {
+            source_index: 1,
+            ..
+        }
+    ));
+    assert_eq!(transmitter.transmission_calls, 1);
+
+    let mut transmitter = RecordingTransmitter::default();
+    let mut authorizer = RecordingAuthorizer {
+        deny_final_wire: true,
+        ..RecordingAuthorizer::default()
+    };
+    assert!(
+        run_with_selector(
+            &mut capture_reader(LinkType::ETHERNET, &frames),
+            &options,
+            None,
+            &mut authorizer,
+            &mut transmitter,
+            &mut RecordingClock::default(),
+            |_| Ok(()),
+        )
+        .is_err()
+    );
     assert_eq!(transmitter.transmission_calls, 0);
 }
 

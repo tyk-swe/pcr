@@ -56,7 +56,9 @@ pub(crate) struct CaptureReaderBoundsArgs {
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
     #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_SIZE_LIMIT)]
     pub(crate) max_frame_bytes: usize,
-    /// Maximum PCAPNG interfaces accepted from the input.
+    /// Maximum interface descriptions per input PCAPNG section, including unused
+    /// interfaces. A separate capture-wide input ceiling of 65,536 also applies.
+    /// With read --normalize, this also limits the selected output interfaces.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
 }

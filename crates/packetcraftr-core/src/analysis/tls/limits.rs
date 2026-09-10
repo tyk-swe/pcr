@@ -5,7 +5,7 @@
 
 use crate::analysis::Error;
 
-/// Bytes one direction of one session may hold while its handshake is still
+/// Logical bytes buffered in one direction while its handshake is still
 /// incomplete: one maximum handshake message plus the record framing around
 /// it. A direction that would grow past this stops buffering and the session
 /// is reported [`malformed`](super::Status::Malformed) rather than growing.
@@ -16,16 +16,18 @@ const DEFAULT_MAX_BUFFERED_BYTES: usize = 64 * 1024 * 1024;
 
 /// Finite resource ceilings for one TLS session assembly pass.
 ///
-/// A capture is untrusted input, so every buffer the collector keeps is
-/// bounded twice: per direction by [`MAX_DIRECTION_BUFFER`], and across the
-/// whole run by [`Limits::max_buffered_bytes`]. Sessions themselves are
-/// bounded by [`Limits::max_sessions`], and the alert records one session
-/// retains by [`MAX_ALERTS`](super::MAX_ALERTS). Reaching a ceiling degrades
-/// the affected sessions to a status that says so and never fails the run.
-/// Handshake bytes are charged against both byte ceilings before they are
-/// buffered, and the retained alerts are charged as they are kept, so what a
-/// run holds is bounded by `max_buffered_bytes` plus the alerts of the one
-/// session that last added any.
+/// Pending handshake bytes are bounded per direction by [`MAX_DIRECTION_BUFFER`]
+/// and across the run by [`Limits::max_buffered_bytes`]. Sessions themselves are
+/// bounded by [`Limits::max_sessions`], and the alert records one session retains
+/// by [`MAX_ALERTS`](super::MAX_ALERTS). Reaching a ceiling degrades the affected
+/// sessions to a status that says so and never fails the run. Handshake bytes
+/// are charged before buffering; alerts are charged as they are retained. The
+/// logical buffering charge can exceed `max_buffered_bytes` by the alerts of
+/// the one session that last added any, until the collector enforces the budget.
+///
+/// This charge excludes parsed hello summaries, buffer allocation capacity,
+/// tracking metadata, and emitted results. Parser and session-count limits bound
+/// retained summaries separately. These limits are not a total-memory or RSS cap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Conversations tracked at once. Reaching it retires the oldest tracked
@@ -33,8 +35,9 @@ pub struct Limits {
     /// [`gap`](super::Status::Gap) and counting it in
     /// [`Summary::evicted_sessions`](super::Summary::evicted_sessions).
     pub max_sessions: usize,
-    /// Handshake bytes buffered across every tracked conversation, including
-    /// the alert records each one retained. Reaching it retires the oldest
+    /// Logical handshake-buffer lengths across every tracked conversation,
+    /// including retained alert charges, but not parsed hello summaries or
+    /// allocation capacity. Reaching it retires the oldest
     /// tracked conversations until the new bytes fit. Any positive library
     /// budget is valid, including deliberate small-budget experiments. The CLI
     /// requires at least `MAX_DIRECTION_BUFFER` so a single direction can fit.

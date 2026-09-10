@@ -14,11 +14,9 @@ import sys
 import threading
 import uuid
 
-from validation_evidence import ROOT, digest, provenance
+from validation_evidence import NATIVE_SCENARIOS, ROOT, digest, provenance, validate_native
 
-SCENARIOS = ['readiness_and_repeated_cleanup', 'idle_deadline_and_cancellation',
-             'bounded_queue_reports_real_capture_loss', 'native_filter_error_preserves_diagnostic_and_releases_admission',
-             'interface_disappearance_reports_driver_failure_and_cleans_up']
+SCENARIOS = tuple(name for name in NATIVE_SCENARIOS if name != 'loopback_exchange')
 
 
 def checksum(data):
@@ -161,11 +159,14 @@ def main():
 
     if args.native_test_binary: args.native_test_binary = args.native_test_binary.resolve()
     report = dict(status='failed', run_id=args.run_id or str(uuid.uuid4()), scenarios=[dict(name=name, status='not_exercised')
-                  for name in ['loopback_exchange', *SCENARIOS]],
+                  for name in NATIVE_SCENARIOS],
                   other_platforms=[dict(platform=name, status='not_exercised', reason='no privileged lab lane configured')
                                    for name in ['Windows', 'macOS']])
     try:
         run(args, report)
+        # Only the parent can record the launcher exit after the child finishes.
+        if args.parent_namespace is None:
+            validate_native(report)
     except Exception as error:
         report['error'] = str(error)
         if report['status'] != 'unsupported': report['status'] = 'failed'

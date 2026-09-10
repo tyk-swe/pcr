@@ -151,6 +151,37 @@ fn policy_classifies_private_special_public_and_mapped_addresses() {
 }
 
 #[test]
+fn policy_keeps_ipv6_documentation_prefix_boundaries_exact() {
+    let policy = policy::Policy::default();
+    for allowed in [
+        "2001:db8::",
+        "2001:db8:ffff:ffff:ffff:ffff:ffff:ffff",
+        "3fff::",
+        "3fff:1::",
+        "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff",
+    ] {
+        let destination = allowed.parse().expect("IPv6 documentation address");
+        policy
+            .authorize_destination(destination)
+            .unwrap_or_else(|error| panic!("{allowed} must share documentation policy: {error}"));
+    }
+    for denied in [
+        "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff",
+        "2001:db9::",
+        "3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "3fff:1000::",
+        "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "4000::",
+    ] {
+        let address = denied.parse().expect("IPv6 address outside documentation");
+        assert!(matches!(
+            policy.authorize_destination(address),
+            Err(policy::Error::PublicDestination { destination }) if destination == address
+        ));
+    }
+}
+
+#[test]
 fn policy_validates_address_and_operation_bounds() {
     let defaults = policy::Policy::default();
     assert!(defaults.validate().is_ok());

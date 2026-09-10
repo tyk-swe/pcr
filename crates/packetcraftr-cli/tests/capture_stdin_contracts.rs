@@ -268,6 +268,68 @@ fn piped_pcapng_keeps_interface_limits() {
 }
 
 #[test]
+fn capture_help_describes_interface_limit_scopes() {
+    for (command, _) in COMMANDS {
+        let output = run(&[command, "--help"]);
+        assert!(output.status.success());
+        let help = String::from_utf8(output.stdout)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            help.contains("per input PCAPNG section"),
+            "{command}: {help}"
+        );
+        assert!(
+            help.contains("including unused interfaces"),
+            "{command}: {help}"
+        );
+        assert!(
+            help.contains("selected output interfaces"),
+            "{command}: {help}"
+        );
+        let total = packetcraftr_core::analysis::pcap::DEFAULT_TOTAL_INTERFACE_LIMIT.to_string();
+        assert!(
+            help.replace(',', "")
+                .contains(&format!("capture-wide input ceiling of {total}")),
+            "{command}: {help}"
+        );
+    }
+}
+
+#[test]
+fn input_interface_limit_is_per_section_for_files_and_stdin() {
+    let section = handshake_capture(Format::PcapNg);
+    let input = [section.as_slice(), section.as_slice()].concat();
+    for (command, flags) in COMMANDS {
+        let mut flags = flags.to_vec();
+        flags.extend_from_slice(&["--max-interfaces", "1"]);
+        let format = if command == "stats" { "json" } else { "ndjson" };
+        assert_file_stdin_parity(&input, command, &flags, format, 0);
+    }
+    let rewritten =
+        assert_file_stdin_parity(&input, "read", &["--max-interfaces", "1"], "pcapng", 0);
+    assert_eq!(rewritten.stdout, input);
+}
+
+#[test]
+fn selection_cannot_hide_unused_input_interfaces() {
+    let mut writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::IPV4).unwrap();
+    writer.add_interface(LinkType::IPV6).unwrap();
+    let input = writer.into_inner();
+    for (command, _) in COMMANDS {
+        let mut flags = vec!["--max-interfaces", "1"];
+        match command {
+            "follow" | "tls" => flags.extend_from_slice(&["--stream", "tcp:99"]),
+            _ => flags.extend_from_slice(&["--filter", "frame.number == 99"]),
+        }
+        let format = if command == "stats" { "json" } else { "ndjson" };
+        assert_file_stdin_parity(&input, command, &flags, format, 6);
+    }
+}
+
+#[test]
 fn piped_captures_keep_analysis_flow_limits() {
     for capture_format in [Format::Pcap, Format::PcapNg] {
         let mut bytes = Vec::new();

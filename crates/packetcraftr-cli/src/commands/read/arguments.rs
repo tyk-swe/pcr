@@ -27,8 +27,10 @@ directions and interface timestamp metadata. Comments, unknown blocks/options an
 original section structure are discarded. Timestamps must be exactly representable
 as nanosecond capture time and at their interface resolution; unrepresentable times
 and selected frames without timestamps fail. No matches produce a valid section
-with no interfaces or packets. Frame/payload limits count all input; block and
-interface limits also bound output.
+with no interfaces or packets. Frame/payload limits count all input. --max-frame-bytes
+also bounds output blocks. --max-interfaces limits descriptions per input section
+and selected interfaces in the normalized output. The separate capture-wide input
+ceiling is 65,536 descriptions, including interfaces with no selected frames.
 
 NDJSON emits frame events followed by one complete event. Text prefixes each frame,
 and NDJSON source_frame identifies it, with the one-based capture position used by

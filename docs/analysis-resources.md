@@ -30,6 +30,15 @@ are counted in `underflow_frames` and folded into bucket zero.
 
 ## What the ceilings cover
 
+`--max-interfaces` counts interface descriptions **per input PCAPNG section**,
+including unused interfaces and interfaces whose frames are filtered out. A
+separate, fixed CLI input ceiling limits the capture to 65,536 descriptions
+across all sections. The library exposes that ceiling as
+`ReaderOptions::max_total_interfaces`. With `read --normalize`,
+`--max-interfaces` also bounds the selected interfaces in the single output
+section; filtering can reduce that output count, not either input count.
+Non-normalizing reads and rewrites retain the per-section input semantics.
+
 | Retention | Bound and lifetime |
 | --- | --- |
 | Physical input | `max_frames` and `max_bytes` count all physical frames/payload bytes, including filtered frames. Reader block/frame and interface limits apply separately. |
@@ -37,7 +46,7 @@ are counted in `underflow_frames` and folded into bucket zero.
 | Scope paths | `max_scope_bytes` charges both retained path copies and conservative table/header capacity. Output shares immutable paths. Count is also bounded from the physical frame ceiling. This is a retained metadata charge, not allocator accounting. |
 | IP state | `max_ip_reassembly_bytes` covers retained fragments, reconstruction/cascade buffers and charged metadata; per-datagram, fragment and retained-outcome limits also apply. |
 | TCP state | `max_tcp_reassembly_bytes` covers retained payload/history and charged flow/segment metadata. Per-direction byte/segment ceilings and capture-time idle expiry are independent. |
-| TLS state | `max_tls_sessions` bounds live/closed tracking slots; `max_tls_buffer_bytes` bounds handshake/alert buffering. A direction has a 135,168-byte buffer ceiling. Terminal paths release recorded charges. |
+| TLS state | `max_tls_sessions` bounds live/closed tracking slots; `max_tls_buffer_bytes` bounds logical handshake-buffer lengths and alert charges, not parsed hello summaries or allocation capacity. A direction has a 135,168-byte logical buffer ceiling. Parser and session-count limits bound retained summaries separately. Terminal paths release recorded charges. |
 | Stats | Only the selected table allocates aggregation entries in the CLI. Library `Table::All` intentionally retains all tables. `--top` caps final rows, not keys needed to compute exact counts. |
 | Results | JSON retains selected rows/sessions/chunks according to command limits. TLS output retention is independent of active state. NDJSON holds one prepared line per encoder, at most 16 MiB including newline. |
 | Native/progress work | Offline analysis uses no native capture queue. Live capture can additionally retain its bounded native queue. A blocked output/callback worker retains its permit and captures until cleanup actually ends. `Runtime::snapshot()` exposes active, rejected, and timed-out retained capacity. |
@@ -51,6 +60,14 @@ layers, result ownership, thread stacks, allocator overhead and transient copies
 coexist. For a frame of B bytes, a hex output field alone needs about 2B string
 bytes before bounded NDJSON serialization begins. Raising JSON retention can
 increase memory even while active TLS state stays fixed.
+
+The payload-byte budget does not count container headers, options or metadata.
+PCAPNG metadata block/byte limits apply while seeking the next frame, not to the
+whole input. Hosts that need a cumulative source-byte or hard I/O-work ceiling
+must enforce it outside the current reader contract. TLS hello completion means
+assembly of the observed client/server hellos, not authentication or validation
+of every negotiation constraint; the first ClientHello remains the fingerprint
+source after a retry.
 
 No global allocator framework or process-RSS promise is introduced. The encoder
 prepares records atomically, but an OS writer can still fail halfway through

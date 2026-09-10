@@ -96,6 +96,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- IPv6 destination classification includes the RFC 9637 `3fff::/20`
+  documentation prefix under the same policy as `2001:db8::/32`, without
+  accepting adjacent addresses or relaxing other destination checks.
 - Release evidence requires versioned, complete named decoder/native results,
   pinned decoder identity, input/tool digests, exact corpus frame counts,
   matching TLS JA3 evidence, and successful native scenario/launcher exits.

@@ -96,14 +96,20 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
-- IPv6 destination classification includes the RFC 9637 `3fff::/20`
-  documentation prefix under the same policy as `2001:db8::/32`, without
-  accepting adjacent addresses or relaxing other destination checks.
+- Capture-reader help now states that `--max-interfaces` bounds descriptions per
+  input PCAPNG section, with a separate 65,536-description capture-wide ceiling.
+  Normalization's selected-output interface ceiling is documented separately;
+  input filtering and the existing limits keep their behavior.
 - Release evidence requires versioned, complete named decoder/native results,
   pinned decoder identity, input/tool digests, exact corpus frame counts,
   matching TLS JA3 evidence, and successful native scenario/launcher exits.
   Missing parent namespace IDs and contradictory or duplicate results are
   rejected. Producers and release validation share the evidence contract.
+- IPv6 destination classification includes the RFC 9637 `3fff::/20`
+  documentation prefix under the same policy as `2001:db8::/32`, without
+  accepting adjacent addresses or relaxing other destination checks.
+- TLS limit documentation distinguishes logical handshake/alert buffering from
+  retained hello summaries, allocation capacity, and total process memory.
 - `routes` failures keep the provider's classification, context, and cause
   chain instead of collapsing to a generic I/O message. DNS query construction
   errors and neighbor operation-and-cleanup errors expose their cause through

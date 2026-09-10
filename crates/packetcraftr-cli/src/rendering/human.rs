@@ -106,20 +106,6 @@ impl fmt::Display for SpacedHex<'_> {
     }
 }
 
-pub(crate) fn compact_hex(bytes: &[u8]) -> impl fmt::Display + '_ {
-    CompactHex(bytes)
-}
-
-struct CompactHex<'a>(&'a [u8]);
-
-impl fmt::Display for CompactHex<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0
-            .iter()
-            .try_for_each(|byte| write!(formatter, "{byte:02x}"))
-    }
-}
-
 pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
     CapturedFrameText(frame)
 }

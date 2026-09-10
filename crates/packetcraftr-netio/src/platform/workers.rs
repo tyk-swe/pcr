@@ -5,6 +5,7 @@
 //! to the resources being cleaned up, never to the caller's waiting deadline.
 
 use crate::resources::NativeSnapshot;
+use packetcraftr_core::budget::remaining_before;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
@@ -136,7 +137,7 @@ pub(super) fn join_with_deadline(
         return JoinAttempt::TimedOut(worker);
     };
     while !worker.is_finished() {
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        let Some(remaining) = remaining_before(deadline) else {
             return JoinAttempt::TimedOut(worker);
         };
         thread::park_timeout(remaining.min(poll_interval));

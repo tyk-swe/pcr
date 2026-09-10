@@ -7,11 +7,11 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use std::net::IpAddr;
 
 use packetcraftr_core::protocol::{
-    application::Dns,
+    application::dns::Dns,
     network::{Ipv4, Ipv6},
     transport::Udp,
 };
-use packetcraftr_core::{Packet, layer::Raw};
+use packetcraftr_core::{layer::Raw, packet::Packet};
 
 use crate::probe::nonzero_ipv4_identification;
 

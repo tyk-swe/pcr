@@ -516,7 +516,7 @@ mod tests {
     /// it: the codec writes back only the bytes the layer retained.
     fn encode(layer: &Tls) -> Result<EncodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
-        let packet = crate::Packet::new();
+        let packet = crate::packet::Packet::new();
         let build_context = crate::codec::Context::default();
         let context = LayerEncodeContext {
             packet: &packet,

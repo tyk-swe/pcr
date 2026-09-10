@@ -8,13 +8,14 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use packetcraftr_core::Packet;
-use packetcraftr_core::build::{Mode, Options};
+use packetcraftr_core::build::Options;
+use packetcraftr_core::codec::Mode;
 use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_core::fuzz::{
     CaseOutcome, Error, Limits, Request, Strategy, run as fuzz, run_observed,
 };
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::registry::Registry;

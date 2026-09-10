@@ -77,7 +77,7 @@ fn every_published_packet_example_loads_and_builds() {
         let document = Packet::parse(&input, format_for(&path), DEFAULT_MAX_DOCUMENT_BYTES)
             .unwrap_or_else(|error| panic!("{} must parse: {error}", path.display()));
         let packet = document
-            .to_packet(&registry, packetcraftr_core::build::DEFAULT_MAX_LAYERS)
+            .to_packet(&registry, packetcraftr_core::layout::DEFAULT_MAX_LAYERS)
             .unwrap_or_else(|error| panic!("{} must convert: {error}", path.display()));
         assert!(!packet.is_empty(), "{} must declare layers", path.display());
 

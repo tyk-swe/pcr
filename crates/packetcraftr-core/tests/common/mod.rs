@@ -18,11 +18,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
-use packetcraftr_core::build::{Builder, Context, Options};
+use packetcraftr_core::build::{Builder, Options};
+use packetcraftr_core::codec::Context;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};

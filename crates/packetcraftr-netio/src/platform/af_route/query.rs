@@ -15,7 +15,6 @@ use socket2::{Domain, Socket, Type};
 
 use super::enumeration::interfaces;
 use super::parser::{parse_route_addresses, roundup};
-use crate::deadline::remaining_before;
 use crate::platform::route_normalize::{
     NativeRouteSnapshot, constrain_by_preferred_source, find_interface, finish_route,
     interface_decision, validate_preferred_source_family,
@@ -25,6 +24,7 @@ use crate::{
     platform::os_error,
     route::{Decision, SelectionReason, SystemError},
 };
+use packetcraftr_core::budget::remaining_before;
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 

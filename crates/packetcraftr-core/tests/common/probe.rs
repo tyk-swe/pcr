@@ -13,7 +13,7 @@ use packetcraftr_core::field::{FieldValue, WireValue};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Layer;
 use packetcraftr_core::registry::Discriminator;
-use packetcraftr_core::{Packet, document, reflective_layer};
+use packetcraftr_core::{document, packet::Packet, reflective_layer};
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 

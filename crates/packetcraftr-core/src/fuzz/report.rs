@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Classification, Classified};
 use crate::{
-    Packet, build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field::FieldValue,
+    build::BuiltPacket, decode::DecodedPacket, diagnostic::Diagnostic, field::FieldValue,
+    packet::Packet,
 };
 
 use super::request::Strategy;

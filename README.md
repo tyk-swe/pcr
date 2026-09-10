@@ -169,8 +169,9 @@ option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`; invalid
 combinations fail explicitly. Every output-v3 NDJSON envelope has an `event`
-discriminator, including `frame`, `finding`, `chunk`, `session`, `complete`,
-and `error`. The payload is in `result` or `error`; consumers never need to
+discriminator; the schema enumerates the per-command event names, and
+`complete` and `error` are the terminal records. The payload is in `result` or
+`error`; consumers never need to
 infer a record kind from payload fields. `sequence` starts at zero and advances
 for each record. Successful operations end with exactly one `complete`; failed
 operations emit one terminal `error` when the output is still writable. A broken

@@ -6,7 +6,7 @@
 use bytes::Bytes;
 use packetcraftr_core::decode::Dissector;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::{Packet, layer::Raw};
+use packetcraftr_core::{layer::Raw, packet::Packet};
 use packetcraftr_netio::capture::Captured;
 use packetcraftr_netio::transmit::Submission;
 use std::{sync::Arc, time::Duration};

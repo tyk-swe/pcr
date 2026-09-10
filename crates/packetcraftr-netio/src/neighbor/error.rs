@@ -46,6 +46,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         operation: &'static str,
+        #[source]
         source: crate::Error,
     },
     #[error(
@@ -54,6 +55,7 @@ pub enum Error {
     Cleanup {
         interface: String,
         target: IpAddr,
+        #[source]
         source: crate::Error,
     },
     #[error(
@@ -62,6 +64,7 @@ pub enum Error {
     OperationAndCleanup {
         interface: String,
         target: IpAddr,
+        #[source]
         operation: Box<Error>,
         cleanup: crate::Error,
     },

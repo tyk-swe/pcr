@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
-use packetcraftr_core::{Packet, build::Builder, template};
+use packetcraftr_core::{build::Builder, packet::Packet, template};
 use packetcraftr_netio::{
     capture::{Provider as CaptureProvider, Request as CaptureRequest},
     transmit::Sender as PacketIo,

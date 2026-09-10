@@ -5,6 +5,7 @@
 
 use std::time::{Duration, Instant};
 
+use packetcraftr_core::budget::remaining_before;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use crate::planning::expired;
@@ -50,7 +51,7 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         if !self.correlation_stopped {
-            while let Some(remaining) = self.deadline.checked_duration_since(Instant::now()) {
+            while let Some(remaining) = remaining_before(self.deadline) {
                 let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
                     break;
                 };
@@ -215,7 +216,7 @@ mod tests {
     use packetcraftr_core::frame::{Frame, LinkType};
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
-    use packetcraftr_core::{Packet, decode::DecodedPacket};
+    use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
     use packetcraftr_netio::capture::{Captured, Metadata, Statistics};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::transmit::{Frame as TransmissionFrame, Report};

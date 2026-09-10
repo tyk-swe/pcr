@@ -32,7 +32,7 @@ Example:
 /// `send` transmits it directly; `exchange` transmits the same packet and then
 /// captures against it, so both resolve the route the same way.
 pub(super) struct PreparedSend {
-    pub(super) packet: core::Packet,
+    pub(super) packet: core::packet::Packet,
     pub(super) options: packetcraftr::send::Options,
     pub(super) client: Client,
 }

@@ -91,11 +91,12 @@ fuzz_target!(|data: &[u8]| {
 fn correlate_endpoints(control: u8, message: &[u8], limits: MessageLimits) {
     use packetcraftr::dns::{Probe, ResponseClassification, classify_response};
     use packetcraftr_core::{
-        Packet,
-        build::{Builder, Context, Options},
+        build::{Builder, Options},
+        codec::Context,
         decode::Dissector,
         frame::{Frame, LinkType},
         layer::Raw,
+        packet::Packet,
         protocol::{builtin, network::Ipv4, transport::Udp},
     };
     use std::{

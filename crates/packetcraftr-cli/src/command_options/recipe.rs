@@ -24,7 +24,7 @@ pub(crate) enum BuildMode {
     Permissive,
 }
 
-impl From<BuildMode> for core::build::Mode {
+impl From<BuildMode> for core::codec::Mode {
     fn from(value: BuildMode) -> Self {
         match value {
             BuildMode::Strict => Self::Strict,

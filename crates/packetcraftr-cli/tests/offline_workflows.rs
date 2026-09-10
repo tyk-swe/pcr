@@ -5,13 +5,13 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
 use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::ipv6::Fragment as Ipv6Fragment;
 use packetcraftr_core::protocol::network::Ipv6;
 #[path = "support/process.rs"]
@@ -129,7 +129,7 @@ fn ipv6_fragment_hex() -> String {
     packetcraftr_core::build::Builder::new(registry)
         .build(
             packet,
-            packetcraftr_core::build::Context::default(),
+            packetcraftr_core::codec::Context::default(),
             packetcraftr_core::build::Options::default(),
         )
         .expect("IPv6 fragment builds")

@@ -21,7 +21,7 @@ impl ProbeLifecycle<Batch<()>> for Lifecycle {
             vec![crate::exchange::Response {
                 request_index: 0,
                 response: crate::probe::test_fixtures::decoded_packet(
-                    packetcraftr_core::Packet::new(),
+                    packetcraftr_core::packet::Packet::new(),
                     UNIX_EPOCH,
                     &[0x45],
                     Vec::new(),

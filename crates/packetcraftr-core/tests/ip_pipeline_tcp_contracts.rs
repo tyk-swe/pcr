@@ -11,7 +11,6 @@ use common::ip_fragments::{
     ipv4_protocol_fragment_frame, reader_with_link_type,
 };
 use common::{CLIENT, SERVER, registry};
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::Options;
 use packetcraftr_core::analysis::follow::Collector as FollowCollector;
 use packetcraftr_core::analysis::{StreamRef, StreamTransport};
@@ -19,6 +18,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
 use std::net::Ipv4Addr;

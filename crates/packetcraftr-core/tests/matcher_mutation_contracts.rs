@@ -12,7 +12,7 @@ use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Padding, Raw};
 use packetcraftr_core::protocol::transport::Tcp;
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 #[test]
 fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
@@ -63,7 +63,7 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
         let built = builder
             .build(
                 request,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default(),
             )
             .expect("TCP request builds");
@@ -107,7 +107,7 @@ fn tcp_response_correlation_preserves_syn_fin_and_trailing_padding_rules() {
     let built = build::Builder::new(Arc::clone(&registry))
         .build(
             request,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("padded TCP request builds");

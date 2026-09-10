@@ -39,13 +39,9 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
         .into_iter()
         .filter(|interface| arguments.includes(interface))
     {
-        let route = provider.lookup_interface(&interface.id).map_err(|source| {
-            CliError::from_classification(
-                provider.classify_error(&source),
-                source.to_string(),
-                Vec::new(),
-            )
-        })?;
+        let route = provider
+            .lookup_interface(&interface.id)
+            .map_err(CliError::classified)?;
         if let Some(route) = route {
             routes.push(route);
         }

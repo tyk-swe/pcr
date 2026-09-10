@@ -137,14 +137,14 @@ fn diagnostic_stream(layer: Option<usize>, streams: DiagnosticStreams) -> Option
 
 pub(super) fn new(
     severity: Severity,
-    code: impl Into<String>,
+    code: &'static str,
     number: u64,
     stream: Option<StreamRef>,
     message: impl Into<String>,
 ) -> Finding {
     Finding {
         severity,
-        code: code.into(),
+        code,
         number,
         stream,
         message: message.into(),

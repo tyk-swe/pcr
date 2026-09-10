@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core as core;
-use packetcraftr_core::Packet;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_netio as net;
 
 use super::interface;
@@ -31,7 +31,7 @@ pub(crate) fn prepare_route(
         destination,
         route,
     } = arguments;
-    let packet = read_recipe(recipe, registry, core::build::DEFAULT_MAX_LAYERS)?;
+    let packet = read_recipe(recipe, registry, core::layout::DEFAULT_MAX_LAYERS)?;
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy

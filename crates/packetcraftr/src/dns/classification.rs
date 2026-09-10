@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::protocol::BuiltinProtocol;
-use packetcraftr_core::protocol::application::Dns;
+use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, registry::Registry,
+    decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, packet::Packet, registry::Registry,
 };
 
 use crate::evidence::{Budget, DiagnosticLog};

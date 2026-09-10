@@ -165,6 +165,7 @@ impl<F> Worker<F> {
 
 /// Publication failed before the callback acknowledged the event.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum EmitError {
     #[error(transparent)]
     Deadline(#[from] DeadlineExceeded),

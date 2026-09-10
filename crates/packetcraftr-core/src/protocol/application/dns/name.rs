@@ -40,6 +40,7 @@ pub struct Decompressed {
 
 /// Why a DNS name could not be decompressed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The label-length byte at `offset` is past the end of the message.
     #[error("DNS name label length at byte {offset} is truncated")]

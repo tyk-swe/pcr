@@ -18,7 +18,7 @@ use packetcraftr_core::diagnostic::{
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
-use packetcraftr_core::protocol::application::Dns;
+use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
@@ -32,7 +32,7 @@ use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
 use packetcraftr_core::registry::Registry;
-use packetcraftr_core::{Packet, build, decode, field::WireValue};
+use packetcraftr_core::{build, codec, decode, field::WireValue, packet::Packet};
 
 fn decode_from_root(
     registry: &Arc<Registry>,
@@ -47,14 +47,14 @@ fn round_trip(packet: Packet, root: &'static str) -> (build::BuiltPacket, decode
     let registry = rooted_registry(root);
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .unwrap_or_else(|error| panic!("{root} build: {error}"));
     let decoded = decode_from_root(&registry, built.bytes.clone(), decode::Options::default())
         .unwrap_or_else(|error| panic!("{root} decode: {error}"));
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .unwrap_or_else(|error| panic!("{root} rebuild: {error}"));
@@ -153,7 +153,7 @@ fn ipv4_source_route_encode_matches_known_transport_checksums() {
     let tcp = builder
         .build(
             tcp_packet,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("known TCP source-route packet builds");
@@ -175,9 +175,9 @@ fn ipv4_source_route_encode_matches_known_transport_checksums() {
     let udp = builder
         .build(
             udp_packet,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
-                mode: build::Mode::Permissive,
+                mode: codec::Mode::Permissive,
                 ..build::Options::default()
             },
         )
@@ -206,7 +206,7 @@ fn assert_remaining_source_route_checksums(
     let tcp_multiple_lsrr = builder
         .build(
             tcp_multiple_lsrr,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("TCP LSRR with multiple remaining addresses builds");
@@ -230,9 +230,9 @@ fn assert_remaining_source_route_checksums(
     let udp_multiple_ssrr = builder
         .build(
             udp_multiple_ssrr,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
-                mode: build::Mode::Permissive,
+                mode: codec::Mode::Permissive,
                 ..build::Options::default()
             },
         )
@@ -254,7 +254,7 @@ fn assert_completed_source_route_checksums(builder: &build::Builder, first_remai
     let tcp_completed_ssrr = builder
         .build(
             tcp_completed_ssrr,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("TCP completed SSRR builds");
@@ -274,9 +274,9 @@ fn assert_completed_source_route_checksums(builder: &build::Builder, first_remai
     let udp_completed_lsrr = builder
         .build(
             udp_completed_lsrr,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
-                mode: build::Mode::Permissive,
+                mode: codec::Mode::Permissive,
                 ..build::Options::default()
             },
         )
@@ -310,7 +310,7 @@ fn ipv4_source_route_transport_checksums_cover_route_states_and_nearest_envelope
     nested.push(source_routed_ipv4(137, 8, &[first_remaining]));
     nested.push(known_tcp());
     let nested = builder
-        .build(nested, build::Context::default(), build::Options::default())
+        .build(nested, codec::Context::default(), build::Options::default())
         .expect("nested IPv4 source-route packet builds");
     assert_eq!(
         nested
@@ -862,7 +862,7 @@ fn assert_ipv4_strict_and_permissive_modes(builder: &build::Builder) {
         builder
             .build(
                 invalid.clone(),
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default()
             )
             .is_err()
@@ -870,9 +870,9 @@ fn assert_ipv4_strict_and_permissive_modes(builder: &build::Builder) {
     let permissive = builder
         .build(
             invalid,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options {
-                mode: build::Mode::Permissive,
+                mode: codec::Mode::Permissive,
                 ..build::Options::default()
             },
         )
@@ -901,7 +901,7 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_vxlan.clone(),
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default()
             )
             .is_err()
@@ -910,9 +910,9 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_vxlan,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options {
-                    mode: build::Mode::Permissive,
+                    mode: codec::Mode::Permissive,
                     ..build::Options::default()
                 },
             )
@@ -929,7 +929,7 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_geneve,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default()
             )
             .is_err()
@@ -944,7 +944,7 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_arp.clone(),
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default()
             )
             .is_err()
@@ -953,9 +953,9 @@ fn strict_and_permissive_modes_distinguish_noncanonical_wire_requests() {
         builder
             .build(
                 bad_arp,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options {
-                    mode: build::Mode::Permissive,
+                    mode: codec::Mode::Permissive,
                     ..build::Options::default()
                 },
             )
@@ -1026,7 +1026,7 @@ fn corrupted_builtin_checksums_report_integrity_failures() {
 
     for (code, root, packet, corrupted_offset) in cases {
         let built = builder
-            .build(packet, build::Context::default(), build::Options::default())
+            .build(packet, codec::Context::default(), build::Options::default())
             .unwrap_or_else(|error| panic!("{code} build: {error}"));
         let mut bytes = built.bytes.to_vec();
         bytes[corrupted_offset] ^= 0xff;
@@ -1135,7 +1135,7 @@ fn pseudo_header_failures_name_the_calling_protocol() {
         packet.push_boxed(layer);
         let error = builder
             .clone()
-            .build(packet, build::Context::default(), build::Options::default())
+            .build(packet, codec::Context::default(), build::Options::default())
             .err()
             .unwrap_or_else(|| panic!("{protocol} without an IP envelope must not build"));
         let message = error.to_string();
@@ -1173,7 +1173,7 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
         build::Builder::new(rooted_registry("ipv6"))
             .build(
                 missing_destination,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options::default()
             )
             .is_err()

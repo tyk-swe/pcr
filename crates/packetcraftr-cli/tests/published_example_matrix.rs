@@ -50,8 +50,9 @@ fn expected_kinds(command: Command) -> &'static [&'static str] {
         | Command::Stats => &["success", "error"],
         Command::Exchange => &["success", "complete", "error"],
         Command::Capture | Command::Read => &["event", "complete", "error"],
-        Command::Replay | Command::Expert => &["success", "event", "error"],
         Command::Scan
+        | Command::Replay
+        | Command::Expert
         | Command::Follow
         | Command::Tls
         | Command::Traceroute

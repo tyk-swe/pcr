@@ -87,7 +87,7 @@ pub enum Error {
     #[error("DNS duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("DNS query construction failed: {0}")]
-    Query(WireError),
+    Query(#[source] WireError),
     #[error("DNS authorization failed: {0}")]
     Authorization(#[from] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]

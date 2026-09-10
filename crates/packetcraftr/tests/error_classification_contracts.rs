@@ -25,7 +25,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::{Packet, protocol};
+use packetcraftr_core::{packet::Packet, protocol};
 use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,

@@ -42,8 +42,9 @@ const fn udp_stream_ref(index: u64) -> StreamRef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     pub severity: Severity,
-    /// Stable machine-readable code, such as `tcp.retransmission`.
-    pub code: String,
+    /// Stable machine-readable code, such as `tcp.retransmission`; always a
+    /// literal from the published set.
+    pub code: &'static str,
     /// 1-based capture frame number that revealed the condition.
     pub number: u64,
     /// The conversation concerned, when there is one.
@@ -60,7 +61,7 @@ pub struct Summary {
     pub warnings: u64,
     pub notes: u64,
     /// Total findings per code, in code order.
-    pub codes: BTreeMap<String, u64>,
+    pub codes: BTreeMap<&'static str, u64>,
 }
 
 impl Summary {
@@ -72,7 +73,7 @@ impl Summary {
             Severity::Warning => self.warnings += 1,
             Severity::Info => self.notes += 1,
         }
-        *self.codes.entry(finding.code.clone()).or_default() += 1;
+        *self.codes.entry(finding.code).or_default() += 1;
     }
 }
 

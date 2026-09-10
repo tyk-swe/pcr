@@ -3,7 +3,7 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{Packet, packet::semantics, protocol::link::Ethernet};
+use packetcraftr_core::{packet::Packet, packet::semantics, protocol::link::Ethernet};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
 use super::model::{Error, MAX_RESOLVED_ADDRESSES, Policy};

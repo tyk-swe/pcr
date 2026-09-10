@@ -86,6 +86,7 @@ impl fmt::Display for QueryType {
 
 /// Invalid bounded DNS query-type text.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum QueryTypeParseError {
     #[error("expected a DNS type alias, 1–5 decimal digits, or TYPE followed by 1–5 digits")]
     Syntax,

@@ -15,12 +15,12 @@ use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::protocol::application::Tls;
+use packetcraftr_core::protocol::application::tls::codec::Tls;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
-use packetcraftr_core::{Packet, build, decode};
+use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 use common::tls_frames::{ClientHelloSpec, application_data, client_hello, handshake_record};
 use common::tls_vectors::{CLIENT_HELLO_VECTORS, SERVER_HELLO_VECTORS, decode_hex};
@@ -73,7 +73,7 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     packet.push(Raw::new(Bytes::copy_from_slice(payload)));
     let builder = build::Builder::new(Arc::clone(&registry));
     let built = builder
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .expect("segment builds");
     let frame = Frame::new(
         SystemTime::UNIX_EPOCH,
@@ -87,7 +87,7 @@ fn dissect(source_port: u16, destination_port: u16, payload: &[u8]) -> decode::D
     let rebuilt = builder
         .build(
             decoded.packet.clone(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("dissected segment rebuilds");

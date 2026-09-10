@@ -8,7 +8,7 @@ mod common;
 use bytes::Bytes;
 use common::probe::{Probe, probe_registry, structure};
 use packetcraftr_core::field::FieldValue;
-use packetcraftr_core::{Packet, document, expression, template};
+use packetcraftr_core::{document, expression, packet::Packet, template};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 

@@ -25,10 +25,10 @@ use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    Packet,
     budget::{Deadline, Interrupted},
     decode::DecodedPacket,
     diagnostic::Diagnostic,
+    packet::Packet,
     packet::semantics,
     protocol::BuiltinProtocol,
     registry::Registry,

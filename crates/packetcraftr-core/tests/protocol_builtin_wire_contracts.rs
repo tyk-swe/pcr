@@ -8,7 +8,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::{
     BuiltinProtocol, builtin, capture::BUILTIN_CAPTURE_ROOTS, network::Ipv4, transport::Udp,
 };
-use packetcraftr_core::{Packet, build, decode, layer::Raw};
+use packetcraftr_core::{build, codec, decode, layer::Raw, packet::Packet};
 
 fn representative_packet() -> Packet {
     let mut packet = Packet::new();
@@ -33,7 +33,7 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
     let built = builder
         .build(
             representative_packet(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("representative packet must build");
@@ -58,7 +58,7 @@ fn ipv4_udp_build_dissect_rebuild_is_exact() {
     let rebuilt = builder
         .build(
             decoded.packet,
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("decoded packet must rebuild");
@@ -101,8 +101,8 @@ fn advertised_protocols_and_capture_roots_are_registered() {
             &packetcraftr_core::codec::LayerEncodeContext {
                 packet: &Packet::new(),
                 index: 0,
-                build_context: &build::Context::default(),
-                mode: build::Mode::Strict,
+                build_context: &codec::Context::default(),
+                mode: codec::Mode::Strict,
                 registry: &registry,
                 child: None,
                 remaining_packet_bytes: usize::MAX,

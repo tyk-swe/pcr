@@ -6,11 +6,11 @@ mod support;
 
 use packetcraftr::{Client, exchange, policy::Policy};
 use packetcraftr_core::{
-    Packet,
     budget::Cancellation,
     error::{BoundaryError, Classification, Classified, Kind},
     field::FieldValue,
     layer::Raw,
+    packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Udp},
     template::Template,
 };

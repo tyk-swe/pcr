@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{Packet, decode::DecodedPacket, diagnostic::Diagnostic};
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use crate::Stats;
 

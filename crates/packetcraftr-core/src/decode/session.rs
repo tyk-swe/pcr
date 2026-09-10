@@ -7,10 +7,10 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-use crate::Packet;
 use crate::codec::{DecodedLayer, LayerCodec, LayerDecodeContext};
 use crate::diagnostic::Diagnostic;
 use crate::frame::Frame;
+use crate::packet::Packet;
 
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::registry::Discriminator;

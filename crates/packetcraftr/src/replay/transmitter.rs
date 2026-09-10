@@ -266,9 +266,10 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::Packet;
-    use packetcraftr_core::build::{Builder, Context, Options};
+    use packetcraftr_core::build::{Builder, Options};
+    use packetcraftr_core::codec::Context;
     use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::packet::Packet;
     use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
     use packetcraftr_netio::interface::{Address, Flags};
     use packetcraftr_netio::link::{Capability as LinkCapability, MacAddress};

@@ -44,13 +44,13 @@ pub(crate) struct Args {
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
     pub(crate) family: AddressFamily,
     /// Non-zero UDP base port (incremented per probe) or fixed TCP destination port.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) port: Option<u16>,
     /// Optional non-zero UDP/TCP source port; defaults to the ephemeral base.
-    #[arg(long)]
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     pub(crate) source_port: Option<u16>,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
-    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP)]
+    #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_FIRST_HOP, value_parser = clap::value_parser!(u8).range(1..))]
     pub(crate) first_hop: u8,
     /// Last IPv4 TTL or IPv6 hop limit attempted.
     #[arg(long, default_value_t = packetcraftr::traceroute::DEFAULT_MAX_HOPS)]

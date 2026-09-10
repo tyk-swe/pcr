@@ -7,7 +7,7 @@ use super::types::{Layer, PACKET_DOCUMENT_SCHEMA_V1, Packet};
 use crate::registry::Registry;
 
 impl Packet {
-    pub fn from_packet(packet: &crate::Packet) -> Self {
+    pub fn from_packet(packet: &crate::packet::Packet) -> Self {
         let layers = packet
             .iter()
             .map(|layer| {
@@ -37,12 +37,12 @@ impl Packet {
         &self,
         registry: &Registry,
         max_layers: usize,
-    ) -> Result<crate::Packet, Error> {
+    ) -> Result<crate::packet::Packet, Error> {
         self.validate_schema()?;
         if self.layers.len() > max_layers {
             return Err(Error::LayerLimit { limit: max_layers });
         }
-        let mut packet = crate::Packet::with_capacity(self.layers.len());
+        let mut packet = crate::packet::Packet::with_capacity(self.layers.len());
         for (index, layer) in self.layers.iter().enumerate() {
             let codec =
                 registry

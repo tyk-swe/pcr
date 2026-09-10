@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::probe::Workflow;
 
+pub const DEFAULT_ATTEMPTS: u32 = 1;
 pub const DEFAULT_MAX_PORTS: usize = 1_024;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_ATTEMPTS: u32 = 32;

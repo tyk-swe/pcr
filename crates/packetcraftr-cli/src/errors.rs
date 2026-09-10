@@ -115,6 +115,11 @@ pub(crate) const KINDS: [Kind; 6] = [
     Kind::Internal,
 ];
 
+/// The process exit code after a cooperative interrupt, following the shell
+/// convention for SIGINT. It is not a failure [`Kind`]; cancellation is not an
+/// error class of the operation itself.
+pub(crate) const CANCELLED_EXIT_CODE: u8 = 130;
+
 /// The process exit code for a failure of `kind`.
 pub(crate) const fn exit_code_for(kind: Kind) -> u8 {
     match kind {

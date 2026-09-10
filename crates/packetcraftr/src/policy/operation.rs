@@ -8,9 +8,9 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::Packet;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::link::Mode as LinkMode;
 
 use super::{Policy, authorize_permissive_live};
@@ -285,7 +285,7 @@ impl<'a> ReplayFrame<'a> {
 ///
 /// ```compile_fail,E0061
 /// use packetcraftr::policy::{DeclaredPackets, WireBudget};
-/// let packets: Vec<packetcraftr_core::Packet> = Vec::new();
+/// let packets: Vec<packetcraftr_core::packet::Packet> = Vec::new();
 /// let _ = DeclaredPackets::new(WireBudget::new(1, 1), &packets);
 /// ```
 ///

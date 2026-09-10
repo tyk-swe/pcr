@@ -7,7 +7,6 @@ mod common;
 
 use common::ip_fragments::{UDP_DATA, build, ipv4_fragments, reader_with_link_type};
 use common::{CLIENT, SERVER, registry};
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::follow::Collector as FollowCollector;
 use packetcraftr_core::analysis::reassembly::ip::{Family, OverlapPolicy};
 use packetcraftr_core::analysis::{
@@ -18,6 +17,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Padding, Raw};
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::ipv6::{DestinationOptions, Fragment as Ipv6Fragment};
 use packetcraftr_core::protocol::link::Ethernet;

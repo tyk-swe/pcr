@@ -9,8 +9,8 @@
 //! One exchange consumes the first declared response frame and then drops the
 //! connection; later messages on the stream are outside that frame.
 
+use packetcraftr_netio::SystemFault;
 use packetcraftr_netio::tcp::{Provider, Stream};
-use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -82,12 +82,6 @@ pub enum Category {
     Framing,
 }
 
-/// The system failure a socket phase carries.
-///
-/// Shared rather than boxed so [`Error`] stays `Clone` while retaining
-/// `io::Error`, which is not.
-pub type SocketFault = Arc<dyn StdError + Send + Sync>;
-
 /// Typed failures from one DNS-over-TCP exchange.
 #[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
@@ -123,7 +117,7 @@ pub enum Error {
         endpoint: SocketAddr,
         message: String,
         #[source]
-        source: Option<SocketFault>,
+        source: Option<SystemFault>,
     },
     /// A per-call socket timeout could not be installed.
     #[error(
@@ -133,7 +127,7 @@ pub enum Error {
         phase: Phase,
         transferred: usize,
         #[source]
-        source: SocketFault,
+        source: SystemFault,
     },
     /// The prefixed query could not be written completely.
     ///
@@ -145,7 +139,7 @@ pub enum Error {
         expected: usize,
         message: String,
         #[source]
-        source: Option<SocketFault>,
+        source: Option<SystemFault>,
     },
     /// A response read failed before an orderly end of stream.
     ///
@@ -156,7 +150,7 @@ pub enum Error {
         phase: Phase,
         message: String,
         #[source]
-        source: Option<SocketFault>,
+        source: Option<SystemFault>,
     },
     /// The peer closed before the complete two-byte prefix arrived.
     #[error("DNS-over-TCP response prefix ended after {actual} of 2 bytes")]

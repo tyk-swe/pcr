@@ -26,7 +26,7 @@ pub mod name;
 mod records;
 mod reflection;
 
-pub use decode::decode_name;
+pub use decode::{decode_name, read_u16, read_u32};
 pub use error::DecodeError;
 pub use records::{Edns, EdnsOption, Name, Record, RecordValue};
 

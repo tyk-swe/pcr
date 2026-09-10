@@ -4,8 +4,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-pub use crate::frame::DEFAULT_SIZE_LIMIT;
-use crate::frame::LinkType;
+use crate::frame::{DEFAULT_SIZE_LIMIT, LinkType};
 
 use super::error::Error;
 

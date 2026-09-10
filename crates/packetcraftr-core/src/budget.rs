@@ -199,6 +199,19 @@ impl Deadline {
     }
 }
 
+/// Wall-clock time left before `deadline`, or `None` once it has arrived.
+///
+/// The boundary instant itself counts as arrived. Blocking providers reject a
+/// timeout of exactly zero as invalid input, and a zero wait would otherwise
+/// be reported as an I/O failure, so callers feeding a socket or condvar
+/// timeout must treat `None` as the deadline expiring.
+#[must_use]
+pub fn remaining_before(deadline: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+}
+
 /// Reports the accounted time that passed a [`Deadline`] and the limit it broke.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("operation took {actual:?}, exceeding its {limit:?} budget")]
@@ -282,6 +295,15 @@ impl Cancelled {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+
+    #[test]
+    fn remaining_before_treats_the_boundary_as_arrived() {
+        let now = Instant::now();
+        assert!(remaining_before(now - Duration::from_secs(1)).is_none());
+        assert!(remaining_before(now).is_none());
+        let remaining = remaining_before(now + Duration::from_secs(3600)).expect("future deadline");
+        assert!(remaining > Duration::from_secs(3599));
+    }
     #[test]
     fn cancellation_is_shared_only_with_clones_and_never_fakes_elapsed_time() {
         let signal = Cancellation::default();

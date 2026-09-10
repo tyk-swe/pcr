@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::{Packet, build::Builder};
+use packetcraftr_core::{build::Builder, packet::Packet};
 use packetcraftr_netio::{
     capture::Statistics,
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},

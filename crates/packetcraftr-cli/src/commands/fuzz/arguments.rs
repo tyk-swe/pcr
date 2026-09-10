@@ -100,7 +100,7 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_CASES)]
     pub(crate) max_cases: usize,
     /// Maximum bytes in one generated packet.
-    #[arg(long, default_value_t = core::build::DEFAULT_MAX_PACKET_SIZE)]
+    #[arg(long, default_value_t = core::layout::DEFAULT_MAX_PACKET_SIZE)]
     pub(crate) max_packet_bytes: usize,
     /// Maximum aggregate retained generated case data.
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_TOTAL_BYTES)]

@@ -14,7 +14,7 @@ use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Ah;
 use packetcraftr_core::protocol::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
-use packetcraftr_core::{Packet, build};
+use packetcraftr_core::{build, codec, packet::Packet};
 
 const IPV4_CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
 const IPV4_SERVER: Ipv4Addr = Ipv4Addr::new(198, 51, 100, 2);
@@ -134,7 +134,7 @@ fn build_probe(network: NetworkVersion, transport: ProbeTransport) -> build::Bui
 
 fn build_packet(packet: Packet) -> build::BuiltPacket {
     build::Builder::new(registry())
-        .build(packet, build::Context::default(), build::Options::default())
+        .build(packet, codec::Context::default(), build::Options::default())
         .expect("packet fixture must build")
 }
 

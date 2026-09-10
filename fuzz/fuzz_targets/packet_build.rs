@@ -2,13 +2,13 @@
 
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::Packet;
-use packetcraftr_core::build::{Builder, Context, Options as BuildOptions};
-use packetcraftr_core::codec::Mode;
+use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::codec::{Context, Mode};
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
 use packetcraftr_core::expression::{self, Options as ExprOptions};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::registry::Registry;
 use std::sync::Arc;

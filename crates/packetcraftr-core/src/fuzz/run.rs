@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use crate::budget::Deadline;
-use crate::{Packet, registry::Registry};
+use crate::{packet::Packet, registry::Registry};
 
 use super::error::Error;
 use super::prepare::prepare_with_events;

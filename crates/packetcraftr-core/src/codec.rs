@@ -10,7 +10,7 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::Packet;
+use crate::packet::Packet;
 
 use crate::diagnostic::Diagnostic;
 use crate::field::FieldValue;

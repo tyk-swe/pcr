@@ -4,10 +4,10 @@
 //! Pre-encoding packet, binding, and padding-boundary validation.
 
 use crate::{
-    Packet,
     diagnostic::Diagnostic,
     field::FieldValue,
     layer::{Malformed, Padding, Raw},
+    packet::Packet,
     protocol::BuiltinProtocol,
     registry::Registry,
 };
@@ -18,7 +18,7 @@ pub(super) fn validate_bindings(
     registry: &Registry,
     packet: &Packet,
     protocols: &[crate::layer::Id],
-    mode: super::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     debug_assert_eq!(protocols.len(), packet.len());
@@ -35,7 +35,7 @@ fn validate_adjacent_bindings(
     registry: &Registry,
     packet: &Packet,
     protocols: &[crate::layer::Id],
-    mode: super::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let mut previous_binding = None;
@@ -63,7 +63,7 @@ fn validate_adjacent_bindings(
         {
             continue;
         }
-        if mode == super::Mode::Strict {
+        if mode == crate::codec::Mode::Strict {
             return Err(Error::UnboundLayers {
                 parent: *parent,
                 child: *child,
@@ -85,7 +85,7 @@ fn validate_padding(
     protocols: &[crate::layer::Id],
     index: usize,
     padding: &Padding,
-    mode: super::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let Some(outside_layer) = padding.outside_layer else {
@@ -155,7 +155,7 @@ fn validate_padding(
         _ => false,
     };
     if !has_declared_boundary {
-        if mode == super::Mode::Strict {
+        if mode == crate::codec::Mode::Strict {
             return Err(Error::InvalidPaddingBoundary {
                 index,
                 outside_layer,
@@ -184,7 +184,7 @@ fn validate_padding(
 fn validate_link_padding(
     protocols: &[crate::layer::Id],
     index: usize,
-    mode: super::Mode,
+    mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
@@ -202,7 +202,7 @@ fn validate_link_padding(
     if enclosed_by_link {
         return Ok(());
     }
-    if mode == super::Mode::Strict {
+    if mode == crate::codec::Mode::Strict {
         return Err(Error::PaddingWithoutLinkLayer { index });
     }
     diagnostics.push(

@@ -449,6 +449,24 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
     }
 }
 
+/// A combined operation-and-cleanup failure exposes the operation failure as
+/// its standard source, so generic error walkers see the same chain `causes`
+/// reports.
+#[test]
+fn neighbor_operation_and_cleanup_failures_expose_the_operation_as_a_source() {
+    let error = NeighborError::OperationAndCleanup {
+        interface: "fixture0".to_owned(),
+        target: ipv4("192.0.2.9"),
+        operation: Box::new(not_found()),
+        cleanup: Error::Capture {
+            message: "cleanup failed".to_owned(),
+            source: None,
+        },
+    };
+    let source = std::error::Error::source(&error).expect("the operation failure is the source");
+    assert_eq!(source.to_string(), not_found().to_string());
+}
+
 /// `packetcraftr_netio::Error` is `#[non_exhaustive]`; the table lists all 22
 /// variants exactly once, so a new variant must add a row here.
 #[test]
@@ -639,8 +657,8 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
 #[test]
 fn route_planning_retains_semantic_failures_before_provider_io() {
     use packetcraftr_core::{
-        Packet,
         field::WireValue,
+        packet::Packet,
         packet::semantics::Error as SemanticsError,
         protocol::{
             ipv6::SegmentRoutingHeader,

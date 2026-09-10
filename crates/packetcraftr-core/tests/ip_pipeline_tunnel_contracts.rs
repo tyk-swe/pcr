@@ -8,7 +8,6 @@ mod common;
 
 use common::ip_fragments::{UDP_DATA, build, cascading_vxlan_tcp_frames, reader_with_link_type};
 use common::{CLIENT, SERVER, registry};
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::follow::Collector as FollowCollector;
 use packetcraftr_core::analysis::{IpDatagramOutcome, IpEvent, Options, run_with_ip_events};
 use packetcraftr_core::analysis::{StreamRef, StreamTransport};
@@ -16,6 +15,7 @@ use packetcraftr_core::field::WireValue;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};

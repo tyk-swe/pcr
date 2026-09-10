@@ -6,7 +6,7 @@
 use std::fmt;
 use std::net::IpAddr;
 
-use crate::Packet;
+use crate::packet::Packet;
 
 /// One matcher's positive attribution of a response to a request.
 ///

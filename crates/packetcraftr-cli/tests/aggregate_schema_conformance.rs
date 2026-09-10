@@ -27,7 +27,6 @@ use packetcraftr_cli::output::{
     replay as replay_output, routes as routes_output, scan as scan_output, send as send_output,
     stats as stats_output, tls as tls_output, traceroute as traceroute_output,
 };
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamTransport;
 use packetcraftr_core::analysis::follow::Chunk as AnalysisChunk;
@@ -40,6 +39,7 @@ use packetcraftr_core::analysis::stats::IoBucketStat;
 use packetcraftr_core::analysis::stats::PortStat;
 use packetcraftr_core::analysis::stats::ProtocolStat;
 use packetcraftr_core::build;
+use packetcraftr_core::codec;
 use packetcraftr_core::decode;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Direction as CaptureDirection;
@@ -47,6 +47,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
@@ -195,7 +196,7 @@ fn built_packet() -> build::BuiltPacket {
     build::Builder::new(builtin::registry())
         .build(
             udp_packet(),
-            build::Context::default(),
+            codec::Context::default(),
             build::Options::default(),
         )
         .expect("representative packet builds")
@@ -729,7 +730,7 @@ fn expert_case() -> Value {
     let findings = vec![
         AnalysisFinding {
             severity: packetcraftr_core::diagnostic::Severity::Error,
-            code: "tcp.reset".to_owned(),
+            code: "tcp.reset",
             number: 8,
             stream: Some(StreamRef {
                 transport: StreamTransport::Tcp,
@@ -739,7 +740,7 @@ fn expert_case() -> Value {
         },
         AnalysisFinding {
             severity: packetcraftr_core::diagnostic::Severity::Info,
-            code: "capture.note".to_owned(),
+            code: "capture.note",
             number: 10,
             stream: None,
             message: "capture note".to_owned(),
@@ -755,7 +756,7 @@ fn expert_case() -> Value {
             errors: 1,
             warnings: 0,
             notes: 1,
-            codes: [("capture.note".to_owned(), 1), ("tcp.reset".to_owned(), 1)]
+            codes: [("capture.note", 1), ("tcp.reset", 1)]
                 .into_iter()
                 .collect(),
         },

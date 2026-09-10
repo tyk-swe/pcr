@@ -6,11 +6,11 @@ use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
 use packetcraftr_core as core;
-use packetcraftr_core::Packet;
 use packetcraftr_core::analysis::pcap::Reader;
 use packetcraftr_core::analysis::pcap::ReaderOptions;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
+use packetcraftr_core::packet::Packet;
 
 use super::command_options::{CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, RecipeArgs};
 use super::errors::CliError;

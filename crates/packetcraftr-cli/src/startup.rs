@@ -16,7 +16,7 @@ use packetcraftr_cli::output;
 
 use self::context::{MachineFormat, from_env};
 use super::cli::Cli;
-use super::errors::CliError;
+use super::errors::{CANCELLED_EXIT_CODE, CliError, exit_code_for};
 use super::rendering::{
     StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     stdout_stream, terminal_document, write_unattributed_error,
@@ -31,7 +31,7 @@ pub(crate) fn run() -> ExitCode {
     {
         Ok(parsed) => parsed,
         Err(error) => {
-            let code = u8::try_from(error.exit_code()).unwrap_or(70);
+            let code = u8::try_from(error.exit_code()).unwrap_or(exit_code_for(Kind::Internal));
             let raw_message = error.to_string();
             let message = terminal_document(&raw_message);
             if error.use_stderr()
@@ -65,7 +65,7 @@ pub(crate) fn run() -> ExitCode {
             };
             return match emitted {
                 Ok(()) => ExitCode::from(code),
-                Err(_) => ExitCode::from(5),
+                Err(_) => ExitCode::from(exit_code_for(Kind::Io)),
             };
         }
     };
@@ -154,7 +154,7 @@ pub(crate) fn run() -> ExitCode {
                     // late interrupt changes the exit status, but a second
                     // stdout document would invalidate the completed JSON.
                     let _ = emit_stderr_error(&error);
-                    return ExitCode::from(130);
+                    return ExitCode::from(CANCELLED_EXIT_CODE);
                 }
                 return command_failure(format, command, error, &stream);
             }
@@ -202,7 +202,7 @@ fn command_failure(
         error
     };
     let exit_code = if crate::cancellation::signal().is_cancelled() {
-        130
+        CANCELLED_EXIT_CODE
     } else {
         error.exit_code()
     };

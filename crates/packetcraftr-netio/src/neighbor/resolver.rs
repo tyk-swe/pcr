@@ -5,11 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{self, Session},
-    deadline::remaining_before,
     link::MacAddress,
     route::Materialized,
     transmit::{self, Layer2Frame},
@@ -211,7 +211,7 @@ where
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+            while let Some(remaining) = remaining_before(deadline) {
                 let Some(captured_frame) =
                     capture.next_captured_frame(remaining).map_err(|error| {
                         map_io_error(request, "receiving discovery response", error)

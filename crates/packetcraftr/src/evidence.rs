@@ -192,7 +192,7 @@ impl SentPacket {
 }
 
 #[cfg(test)]
-pub(crate) fn test_sent_packet(packet: packetcraftr_core::Packet) -> SentPacket {
+pub(crate) fn test_sent_packet(packet: packetcraftr_core::packet::Packet) -> SentPacket {
     use packetcraftr_netio::transmit::Submission;
 
     let built = test_built_packet(packet);
@@ -203,7 +203,7 @@ pub(crate) fn test_sent_packet(packet: packetcraftr_core::Packet) -> SentPacket 
 
 #[cfg(test)]
 pub(crate) fn test_sent_packet_with_report(
-    packet: packetcraftr_core::Packet,
+    packet: packetcraftr_core::packet::Packet,
     report: TransmissionReport,
 ) -> SentPacket {
     SentPacket::try_new(test_built_packet(packet), test_materialized_route(), report)
@@ -211,8 +211,9 @@ pub(crate) fn test_sent_packet_with_report(
 }
 
 #[cfg(test)]
-fn test_built_packet(packet: packetcraftr_core::Packet) -> BuiltPacket {
-    use packetcraftr_core::build::{Builder, Context, Options};
+fn test_built_packet(packet: packetcraftr_core::packet::Packet) -> BuiltPacket {
+    use packetcraftr_core::build::{Builder, Options};
+    use packetcraftr_core::codec::Context;
 
     Builder::new(packetcraftr_core::protocol::builtin::registry())
         .build(packet, Context::default(), Options::default())
@@ -264,7 +265,7 @@ fn test_materialized_route() -> packetcraftr_netio::route::Materialized {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use packetcraftr_core::{Packet, layer::Raw};
+    use packetcraftr_core::{layer::Raw, packet::Packet};
     use packetcraftr_netio::transmit::Submission;
 
     use super::*;

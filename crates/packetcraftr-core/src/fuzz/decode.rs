@@ -6,10 +6,10 @@
 use super::request::Limits;
 use crate::frame::{Frame, LinkType};
 use crate::{
-    Packet,
     build::BuiltPacket,
     decode::{DecodedPacket, Dissector},
     diagnostic::Diagnostic,
+    packet::Packet,
     protocol::BuiltinProtocol,
 };
 

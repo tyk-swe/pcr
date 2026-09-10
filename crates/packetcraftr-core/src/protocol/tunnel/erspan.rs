@@ -401,7 +401,7 @@ fn erspan_layout(layer: &Erspan) -> Vec<crate::layout::FieldLayout> {
 mod tests {
 
     use super::*;
-    use crate::Packet;
+    use crate::packet::Packet;
     use crate::protocol::link::Ethernet;
 
     fn encode(

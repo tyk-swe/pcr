@@ -62,7 +62,7 @@ where
 
         let mut matches_request =
             |request_index: usize,
-             sent: &packetcraftr_core::Packet,
+             sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
                 batch.probes.get(request_index).is_some_and(|probe| {
                     classify_response(

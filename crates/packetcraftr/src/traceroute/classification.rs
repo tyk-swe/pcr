@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::semantics;
 use packetcraftr_core::protocol::BuiltinProtocol;
-use packetcraftr_core::{Packet, decode::DecodedPacket, registry::Registry};
+use packetcraftr_core::{decode::DecodedPacket, packet::Packet, registry::Registry};
 
 use crate::probe::{self, Correlation};
 

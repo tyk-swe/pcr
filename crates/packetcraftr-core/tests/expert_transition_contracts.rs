@@ -68,13 +68,13 @@ fn analyze(
 
 fn finding(
     severity: packetcraftr_core::diagnostic::Severity,
-    code: &str,
+    code: &'static str,
     number: u64,
     message: &str,
 ) -> Finding {
     Finding {
         severity,
-        code: code.to_owned(),
+        code,
         number,
         stream: Some(StreamRef {
             transport: StreamTransport::Tcp,
@@ -96,7 +96,7 @@ fn assert_expert(
 
     let mut codes = BTreeMap::new();
     for item in &expected {
-        *codes.entry(item.code.clone()).or_default() += 1;
+        *codes.entry(item.code).or_default() += 1;
     }
     assert_eq!(
         summary,

@@ -50,17 +50,17 @@ mod tests {
     use super::*;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, transport::Udp};
     use packetcraftr_core::{
-        Packet,
         build::Builder,
         field::WireValue,
         layer::{Padding, Raw},
+        packet::Packet,
     };
 
     fn build(packet: Packet) -> BuiltPacket {
         Builder::new(packetcraftr_core::protocol::builtin::registry())
             .build(
                 packet,
-                packetcraftr_core::build::Context::default(),
+                packetcraftr_core::codec::Context::default(),
                 packetcraftr_core::build::Options::default(),
             )
             .expect("fixture packet builds")

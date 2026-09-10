@@ -5,9 +5,9 @@
 
 use thiserror::Error;
 
-use crate::Packet;
 use crate::field::FieldValue;
 use crate::layer::FieldError;
+use crate::packet::Packet;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 

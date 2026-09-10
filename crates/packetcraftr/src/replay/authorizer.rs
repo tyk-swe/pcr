@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{build, decode, registry::Registry};
+use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
@@ -92,9 +92,9 @@ impl SystemAuthorizer {
         build::Builder::new(Arc::clone(&self.registry))
             .build(
                 decoded.packet.clone(),
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options {
-                    mode: build::Mode::Permissive,
+                    mode: codec::Mode::Permissive,
                     ..build::Options::default()
                 },
             )
@@ -249,7 +249,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::Packet;
     use packetcraftr_core::build::{Builder, BuiltPacket};
     use packetcraftr_core::codec::{
         DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
@@ -258,6 +257,7 @@ mod tests {
     use packetcraftr_core::field::FieldValue;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::{Layer, Raw, raw_layout};
+    use packetcraftr_core::packet::Packet;
     use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::{Capability as LinkCapability, MacAddress};
@@ -342,12 +342,12 @@ mod tests {
         Builder::new(registry())
             .build(
                 packet,
-                build::Context::default(),
+                codec::Context::default(),
                 build::Options {
                     mode: if reserved_flag {
-                        build::Mode::Permissive
+                        codec::Mode::Permissive
                     } else {
-                        build::Mode::Strict
+                        codec::Mode::Strict
                     },
                     ..build::Options::default()
                 },
@@ -379,7 +379,7 @@ mod tests {
             })
             .push(Icmpv4::default());
         let built = Builder::new(registry())
-            .build(packet, build::Context::default(), build::Options::default())
+            .build(packet, codec::Context::default(), build::Options::default())
             .expect("Ethernet replay fixture builds");
         Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes)
             .expect("bounded Ethernet replay fixture")
@@ -544,7 +544,7 @@ mod tests {
             })
             .push(Icmpv4::default());
         let built = Builder::new(registry())
-            .build(packet, build::Context::default(), build::Options::default())
+            .build(packet, codec::Context::default(), build::Options::default())
             .expect("public-destination fixture builds");
         let frame = raw_frame(&built);
         let policy = crate::policy::Policy {

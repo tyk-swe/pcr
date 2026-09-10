@@ -18,7 +18,7 @@ pub(super) struct State {
     errors: u64,
     warnings: u64,
     notes: u64,
-    codes: BTreeMap<String, u64>,
+    codes: BTreeMap<&'static str, u64>,
     retained: Retained<output::expert::Finding>,
 }
 
@@ -45,7 +45,7 @@ impl State {
             packetcraftr_core::diagnostic::Severity::Warning => self.warnings += 1,
             packetcraftr_core::diagnostic::Severity::Info => self.notes += 1,
         }
-        *self.codes.entry(finding.code.clone()).or_default() += 1;
+        *self.codes.entry(finding.code).or_default() += 1;
     }
 }
 

@@ -364,7 +364,7 @@ fn validate_option_chain(
 mod tests {
 
     use super::*;
-    use crate::Packet;
+    use crate::packet::Packet;
 
     fn encode(
         layer: &Geneve,

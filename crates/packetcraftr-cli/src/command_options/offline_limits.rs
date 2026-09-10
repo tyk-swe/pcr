@@ -54,7 +54,7 @@ pub(crate) struct OfflineCaptureLimitsArgs {
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct CaptureReaderBoundsArgs {
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
-    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
+    #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_SIZE_LIMIT)]
     pub(crate) max_frame_bytes: usize,
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]

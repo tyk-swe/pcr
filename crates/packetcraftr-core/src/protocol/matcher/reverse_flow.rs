@@ -3,9 +3,9 @@
 
 use crate::protocol::transport::Tcp;
 use crate::{
-    Packet,
     field::FieldValue,
     matcher::{Match, ResponseMatcher},
+    packet::Packet,
     protocol::BuiltinProtocol,
 };
 

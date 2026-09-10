@@ -132,9 +132,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         max_sessions: arguments.max_tls_sessions,
         max_buffered_bytes: arguments.max_tls_buffer_bytes,
     };
-    if arguments.max_tls_buffer_bytes != 0
-        && arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER
-    {
+    if arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER {
         return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
     }
     let mut collector = Collector::new(tls_limits).map_err(CliError::classified)?;

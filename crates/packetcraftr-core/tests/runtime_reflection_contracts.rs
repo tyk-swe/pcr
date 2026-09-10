@@ -7,13 +7,13 @@ mod common;
 
 use bytes::Bytes;
 use common::probe::{Child, Probe, probe_layout, structure};
-use packetcraftr_core::Packet;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::layer::{
     FieldError, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout, raw_layout,
 };
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
+use packetcraftr_core::packet::Packet;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 fn assert_failed_packet_mutations(packet: &mut Packet) {
@@ -28,7 +28,7 @@ fn assert_failed_packet_mutations(packet: &mut Packet) {
     assert!(packet.get_mut::<Raw>().is_none());
     assert!(matches!(
         packet.replace(99, Child::default()),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 99, len: 4 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 4 })
     ));
     assert_eq!(structure(packet), structure(&before_failed_mutations));
     assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
@@ -77,7 +77,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     );
     assert!(matches!(
         packet.insert(9, Raw::default()),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 9, len: 4 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 9, len: 4 })
     ));
 
     let removed = packet
@@ -93,13 +93,13 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
 
     assert!(matches!(
         packet.remove(2),
-        Err(packetcraftr_core::PacketError::PaddingBoundaryRemoval { index: 2 })
+        Err(packetcraftr_core::packet::PacketError::PaddingBoundaryRemoval { index: 2 })
     ));
     packet.remove(3).expect("padding itself can be removed");
     assert_eq!(packet.len(), 3);
     assert!(matches!(
         packet.remove(8),
-        Err(packetcraftr_core::PacketError::IndexOutOfBounds { index: 8, len: 3 })
+        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 8, len: 3 })
     ));
 
     packet

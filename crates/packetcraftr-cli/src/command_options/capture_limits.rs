@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::{Args, ValueEnum};
-use packetcraftr_core::analysis::pcap as capture;
 use packetcraftr_netio as net;
 
 #[derive(Clone, Debug, Args)]
@@ -14,7 +13,7 @@ pub(crate) struct CaptureLimitsArgs {
     #[arg(long, default_value_t = net::capture::Limits::default().max_bytes)]
     max_captured_bytes: usize,
     /// Maximum bytes retained from any one captured frame.
-    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
+    #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_SIZE_LIMIT)]
     snap_length: usize,
     /// Backend queue behavior when a configured bound is reached.
     #[arg(long, value_enum, default_value_t = OverflowPolicy::Fail)]

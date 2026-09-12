@@ -244,7 +244,7 @@ pub(super) fn record_clean_closures(
     }
 }
 
-pub(super) fn finish(
+pub(in crate::analysis::expert) fn finish(
     streams: &HashMap<ScopedFlowKey, u64>,
     events: &[TcpEvent],
     end_number: u64,

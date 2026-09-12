@@ -126,7 +126,7 @@ pub(super) fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
     if state.emitted_history.len() > capacity {
         let remove = state.emitted_history.len().saturating_sub(capacity);
         state.history_start_offset = state.history_start_offset.saturating_add(remove as u64);
-        if !checked_drain_prefix(&mut state.emitted_history, remove) {
+        if !state.emitted_history.drain_prefix(remove) {
             state.emitted_history.clear();
         }
     }
@@ -176,7 +176,7 @@ pub(super) fn append_emitted_history(
     let history_start_offset = output_end.saturating_sub(keep as u64);
     if !state.emitted_history.is_empty() && history_start_offset < output_start {
         let old_start = history_start_offset.saturating_sub(state.history_start_offset) as usize;
-        if !checked_drain_prefix(&mut state.emitted_history, old_start) {
+        if !state.emitted_history.drain_prefix(old_start) {
             state.emitted_history.clear();
         }
     } else {
@@ -191,8 +191,4 @@ pub(super) fn append_emitted_history(
             .copied(),
     );
     state.history_start_offset = history_start_offset;
-}
-
-fn checked_drain_prefix(values: &mut History, end: usize) -> bool {
-    values.drain_prefix(end)
 }

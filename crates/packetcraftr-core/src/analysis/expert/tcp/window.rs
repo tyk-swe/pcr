@@ -152,7 +152,7 @@ pub(super) fn analyze_sender(
     }
 }
 
-pub(super) fn scale(options: &[u8]) -> Option<u8> {
+pub(in crate::analysis::expert) fn scale(options: &[u8]) -> Option<u8> {
     let mut rest = options;
     loop {
         match rest {

@@ -1,18 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashMap;
-
 use crate::diagnostic::Severity;
 
 use super::finding::new as new_finding;
 use super::generation;
 use super::observation::TcpObservation;
-use super::{Collector, Finding, FrameRecord, ScopedFlowKey, TcpEvent};
+use super::{Collector, Finding, FrameRecord, TcpEvent};
 
 mod acknowledgment;
 mod sequence;
 mod window;
+
+pub(super) use sequence::finish;
+pub(super) use window::scale as window_scale;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct DirectionState {
@@ -104,16 +105,4 @@ impl Collector {
         generation::retire_reset(&mut self.flows, &observation, &reverse);
         sequence::record_clean_closures(&mut self.flows, record.tcp_events);
     }
-}
-
-pub(super) fn finish(
-    streams: &HashMap<ScopedFlowKey, u64>,
-    events: &[TcpEvent],
-    end_number: u64,
-) -> Vec<Finding> {
-    sequence::finish(streams, events, end_number)
-}
-
-pub(super) fn window_scale(options: &[u8]) -> Option<u8> {
-    window::scale(options)
 }

@@ -16,7 +16,6 @@ use packetcraftr_netio as net;
 use packetcraftr_netio::capture::Provider as _;
 
 use self::arguments::Args;
-use super::registry;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::rendering::StreamEncoder;
@@ -43,7 +42,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     }
     let limits = limits.into_limits();
     limits.validate().map_err(CliError::classified)?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let selector =
         FrameSelector::compile_optional(filter.as_deref(), &registry, limits.snap_length)?;
     let interface = resolve(

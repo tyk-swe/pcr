@@ -10,14 +10,13 @@ use std::sync::Arc;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
 use crate::system::{client, prepare_route};
 
 pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let client = client(Arc::clone(&registry), request.policy);
     let route = client

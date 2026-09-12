@@ -3,11 +3,8 @@
 
 use packetcraftr_core::error::Kind;
 
-use packetcraftr_netio as net;
-
 use super::arguments::{Args, Timing};
 use crate::errors::CliError;
-use crate::system::InterfaceSelector;
 
 pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, CliError> {
     let timing = if let Some(rate) = arguments.bps {
@@ -39,10 +36,6 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     };
     timing.validate().map_err(CliError::classified)?;
     Ok(timing)
-}
-
-pub(super) fn interface(selector: &str) -> Result<net::interface::Id, CliError> {
-    InterfaceSelector::parse(selector).map(InterfaceSelector::into_id)
 }
 
 #[cfg(test)]
@@ -129,24 +122,5 @@ mod tests {
                 .is_err()
             );
         }
-    }
-
-    #[test]
-    fn interface_selectors_preserve_names_and_normalize_numeric_indexes() {
-        assert_eq!(
-            interface("fixture0").expect("interface name"),
-            net::interface::Id {
-                name: "fixture0".to_owned(),
-                index: 0,
-            }
-        );
-        assert_eq!(
-            interface("7").expect("interface index"),
-            net::interface::Id {
-                name: String::new(),
-                index: 7,
-            }
-        );
-        assert!(interface("0").is_err());
     }
 }

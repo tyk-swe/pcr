@@ -42,7 +42,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     // Validate before packet parsing can trigger hostname/interface work.
     options.validate().map_err(CliError::classified)?;
 
-    let registry = super::registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let packet = read_recipe(
         send.route.recipe,
         &registry,

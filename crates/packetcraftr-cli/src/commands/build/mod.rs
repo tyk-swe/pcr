@@ -12,7 +12,6 @@ use packetcraftr_core::error::Classified as _;
 use packetcraftr_core::error::Kind;
 
 use self::arguments::Args;
-use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::{
@@ -23,7 +22,7 @@ use crate::rendering::{
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     // Recipe byte limits bound parsing; the builder owns the requested layer budget.
     let packet = read_recipe(arguments.recipe, &registry, usize::MAX)?;
     // Keep OS signal termination while recipe input can block waiting for EOF.

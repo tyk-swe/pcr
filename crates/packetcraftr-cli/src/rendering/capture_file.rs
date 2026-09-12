@@ -74,14 +74,8 @@ fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), C
         if read == 0 {
             break;
         }
-        let bytes = buffer.get(..read).ok_or_else(|| {
-            CliError::new(
-                Kind::Internal,
-                "temporary capture read exceeded the copy buffer",
-            )
-        })?;
         destination
-            .write_all(bytes)
+            .write_all(&buffer[..read])
             .map_err(|source| stdout_error("write stdout failed", source))?;
     }
     destination

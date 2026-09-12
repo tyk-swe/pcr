@@ -4,7 +4,6 @@
 //! Live workflow executor shared by the probe-driven commands. It resolves
 //! the deferred interface once, then delegates to the library exchange.
 
-use super::registry;
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::system::{client, exchange};
 use packetcraftr_core as core;
@@ -108,7 +107,7 @@ pub(super) fn prepare(
     let policy = Arc::new(policy.into_policy());
     policy.validate().map_err(CliError::classified)?;
     let interface = InterfaceSelector::parse_optional(route.interface.as_deref())?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: None,

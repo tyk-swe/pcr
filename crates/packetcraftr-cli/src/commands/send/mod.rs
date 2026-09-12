@@ -12,7 +12,6 @@ use packetcraftr_core::analysis::pcap as capture;
 
 use packetcraftr_cli::output;
 
-use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{
     emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
@@ -39,7 +38,7 @@ fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
         allow_permissive_live,
         policy,
     } = arguments;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let client = client(Arc::clone(&registry), request.policy);
     Ok(PreparedSend {

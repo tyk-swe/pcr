@@ -15,11 +15,8 @@
 use packetcraftr_cli::output::contract::Format;
 use packetcraftr_core::error::Kind;
 
-use std::sync::Arc;
-
 use clap::Subcommand;
 use packetcraftr_cli::output;
-use packetcraftr_core as core;
 
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
@@ -213,10 +210,6 @@ impl Command {
             Self::Routes(arguments) => routes::run(arguments, format),
         }
     }
-}
-
-fn registry() -> Result<Arc<core::registry::Registry>, CliError> {
-    Ok(core::protocol::builtin::registry())
 }
 
 /// Renders one aggregate row per text line, or the whole result as one JSON

@@ -12,7 +12,6 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::registry;
 use crate::errors::CliError;
 use crate::rendering::{emit_aggregate, write_stdout_line};
 
@@ -66,7 +65,7 @@ fn describe_protocol(name: &str, format: Format) -> Result<(), CliError> {
                     .any(|alias| alias.eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| unknown_protocol(name))?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let fields = registry
         .schema(protocol.as_str())
         .map(|schema| {

@@ -19,7 +19,6 @@ use packetcraftr_netio as net;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::registry;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::{StreamEncoder, emit_aggregate_with_stats};
@@ -37,7 +36,7 @@ struct PreparedLive {
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let packet = read_recipe(arguments.recipe, &registry, request.build.max_layers)?;
     execute_and_render(request, packet, registry, live, format, stream)
 }

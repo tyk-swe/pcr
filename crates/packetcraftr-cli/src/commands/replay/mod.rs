@@ -18,14 +18,14 @@ use packetcraftr_core::analysis::pcap::Reader;
 use packetcraftr_netio as net;
 
 use self::arguments::Args;
-use super::registry;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::FrameSelector;
 use crate::input::{open_capture_file, validate_capture_stream_limits};
 use crate::rendering::StreamEncoder;
+use crate::system::InterfaceSelector;
 
-use conversion::{interface, timing};
+use conversion::timing;
 
 /// One validated replay: the source reader, the transmit providers, and the
 /// bounds the run is held to.
@@ -90,13 +90,13 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     };
     validate_capture_stream_limits(capture_limits)?;
     let timing = timing(arguments)?;
-    let registry = registry()?;
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let filter = FrameSelector::compile_optional(
         arguments.filter.as_deref(),
         &registry,
         arguments.reader.max_frame_bytes,
     )?;
-    let requested_interface = interface(&arguments.interface)?;
+    let requested_interface = InterfaceSelector::parse(&arguments.interface)?.into_id();
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,

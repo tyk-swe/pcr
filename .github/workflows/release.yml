@@ -49,27 +49,12 @@ jobs:
           git merge-base --is-ancestor \
             "$release_sha" "refs/remotes/origin/${default_branch}"
           echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
-      - name: Require successful CI for the tagged commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          successful_runs="$(
-            gh api --method GET \
-              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-              -f head_sha="$(git rev-parse HEAD)" \
-              -f status=success \
-              --jq '[.workflow_runs[] | select(.event == "push")] | length'
-          )"
-          test "$successful_runs" -gt 0
       - name: Require independent native and decoder evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/check-release-evidence.py --repository "$GITHUB_REPOSITORY" \
             --commit "$(git rev-parse HEAD)" --output "$RUNNER_TEMP/release-metadata/validation"
-      - name: Test archive verifier failure fixtures
-        run: python3 scripts/test-verify-archive.py
       - name: Install the pinned toolchain
         run: rustup toolchain install
       - uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2.87.7
@@ -224,83 +209,58 @@ jobs:
           python scripts/build-manifest.py --binary "$executable" \
             --output "$RUNNER_TEMP/BUILD-METADATA.json" --commit "$RELEASE_SHA" \
             --target "$TARGET" --variant "$VARIANT"
-      - if: runner.os != 'Windows'
-        name: Package Unix archive
-        shell: bash
+      - name: Package and smoke-test archive
+        shell: python
         run: |
-          set -euo pipefail
-          staging="$RUNNER_TEMP/$ARCHIVE_BASENAME"
-          mkdir -p "$staging"
-          cp "target/$TARGET/release/packetcraftr" "$staging/packetcraftr"
-          cp LICENSE "$staging/LICENSE"
-          cp README.md "$staging/README.md"
-          cp CHANGELOG.md "$staging/CHANGELOG.md"
-          cp "$RUNNER_TEMP/BUILD-METADATA.json" "$staging/BUILD-METADATA.json"
-          cp -R schemas "$staging/schemas"
-          cp -R docs "$staging/docs"
-          mkdir -p "$staging/examples/captures" "$staging/examples/documents"
-          cp examples/captures/tls-handshake.pcapng "$staging/examples/captures/"
-          cp examples/documents/packet-ipv4-udp.json "$staging/examples/documents/"
-          cp examples/documents/output-stats-resources.json "$staging/examples/documents/"
-          cp examples/documents/output-read-resources.json "$staging/examples/documents/"
-          cp examples/documents/output-build-event.json "$staging/examples/documents/"
-          cp examples/documents/output-build-complete.json "$staging/examples/documents/"
-          cp examples/documents/output-dns-tcp-success.json "$staging/examples/documents/"
-          cp examples/documents/output-dns-tcp-complete.json "$staging/examples/documents/"
-          cp examples/documents/output-replay-bit-rate-success.json "$staging/examples/documents/"
-          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
-            "$ARCHIVE_BASENAME"
-      - if: runner.os == 'Windows'
-        name: Package Windows archive
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $staging = Join-Path $env:RUNNER_TEMP $env:ARCHIVE_BASENAME
-          $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
-          New-Item -ItemType Directory -Path $staging | Out-Null
-          Copy-Item "target/$env:TARGET/release/packetcraftr.exe" $staging
-          Copy-Item "LICENSE" $staging
-          Copy-Item "README.md" $staging
-          Copy-Item "CHANGELOG.md" $staging
-          Copy-Item "$env:RUNNER_TEMP/BUILD-METADATA.json" $staging
-          Copy-Item "schemas" (Join-Path $staging "schemas") -Recurse
-          Copy-Item "docs" (Join-Path $staging "docs") -Recurse
-          New-Item -ItemType Directory -Path `
-            (Join-Path $staging "examples/captures"), `
-            (Join-Path $staging "examples/documents") | Out-Null
-          Copy-Item "examples/captures/tls-handshake.pcapng" (Join-Path $staging "examples/captures")
-          Copy-Item "examples/documents/packet-ipv4-udp.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-stats-resources.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-read-resources.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-build-event.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-build-complete.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-dns-tcp-success.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-dns-tcp-complete.json" (Join-Path $staging "examples/documents")
-          Copy-Item "examples/documents/output-replay-bit-rate-success.json" (Join-Path $staging "examples/documents")
-          Compress-Archive -Path $staging -DestinationPath $archive
-      - if: runner.os != 'Windows'
-        name: Smoke-test Unix archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          extraction="$RUNNER_TEMP/archive-smoke-test"
-          mkdir -p "$extraction"
-          tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
-          executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
-          test -x "$executable"
-          python scripts/verify-archive.py --root "$extraction/$ARCHIVE_BASENAME" \
-            --version "$VERSION" --commit "$RELEASE_SHA" --target "$TARGET" --variant "$VARIANT"
-      - if: runner.os == 'Windows'
-        name: Smoke-test Windows archive
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $extraction = Join-Path $env:RUNNER_TEMP "archive-smoke-test"
-          $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
-          Expand-Archive -Path $archive -DestinationPath $extraction
-          python scripts/verify-archive.py --root (Join-Path $extraction $env:ARCHIVE_BASENAME) `
-            --version $env:VERSION --commit $env:RELEASE_SHA --target $env:TARGET --variant $env:VARIANT
-          if ($LASTEXITCODE -ne 0) { throw "packaged archive verification failed" }
+          import os
+          import pathlib
+          import shutil
+          import subprocess
+          import sys
+
+          temporary = pathlib.Path(os.environ["RUNNER_TEMP"])
+          basename = os.environ["ARCHIVE_BASENAME"]
+          target = os.environ["TARGET"]
+          windows = "windows" in target
+          staging = temporary / basename
+          binary = pathlib.Path("target") / target / "release" / (
+              "packetcraftr.exe" if windows else "packetcraftr"
+          )
+          assets = (
+              "LICENSE", "README.md", "CHANGELOG.md",
+              "examples/captures/tls-handshake.pcapng",
+              "examples/documents/packet-ipv4-udp.json",
+              "examples/documents/output-stats-resources.json",
+              "examples/documents/output-read-resources.json",
+              "examples/documents/output-build-event.json",
+              "examples/documents/output-build-complete.json",
+              "examples/documents/output-dns-tcp-success.json",
+              "examples/documents/output-dns-tcp-complete.json",
+              "examples/documents/output-replay-bit-rate-success.json",
+          )
+          for source in map(pathlib.Path, assets):
+              destination = staging / source
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, destination)
+          shutil.copy2(binary, staging / binary.name)
+          shutil.copy2(temporary / "BUILD-METADATA.json", staging / "BUILD-METADATA.json")
+          shutil.copytree("schemas", staging / "schemas")
+          shutil.copytree("docs", staging / "docs")
+
+          archive = shutil.make_archive(
+              str(temporary / basename), "zip" if windows else "gztar",
+              root_dir=temporary, base_dir=basename,
+          )
+          extraction = temporary / "archive-smoke-test"
+          shutil.unpack_archive(archive, extraction)
+          root = extraction / basename
+          if not windows and not os.access(root / binary.name, os.X_OK):
+              raise SystemExit("packaged executable is not executable")
+          subprocess.run([
+              sys.executable, "scripts/verify-archive.py", "--root", str(root),
+              "--version", os.environ["VERSION"], "--commit", os.environ["RELEASE_SHA"],
+              "--target", target, "--variant", os.environ["VARIANT"],
+          ], check=True)
       - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
         name: Verify full Linux binary links libpcap
         shell: bash

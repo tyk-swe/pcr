@@ -55,13 +55,6 @@ impl std::error::Error for ReaperStartError {}
 
 pub(super) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TransferOutcome {
-    Queued,
-    RetainedQueueFull,
-    RetainedReaperStopped,
-}
-
 /// Blocks until `worker` finishes, calling `on_poll` before every wait so a
 /// cleanup task can keep nudging a blocked worker.
 pub(super) fn wait_until_finished(
@@ -85,18 +78,11 @@ impl ReaperClient {
     /// it, the complete closure and every resource it owns are deliberately
     /// retained. This catastrophic fallback leaks a bounded reservation rather
     /// than partially dropping native state that a worker may still access.
-    #[must_use]
-    pub(super) fn transfer(&self, task: ReapTask) -> TransferOutcome {
-        match self.tasks.try_send(task) {
-            Ok(()) => TransferOutcome::Queued,
-            Err(TrySendError::Full(task)) => {
-                self.retain(task);
-                TransferOutcome::RetainedQueueFull
-            }
-            Err(TrySendError::Disconnected(task)) => {
-                self.retain(task);
-                TransferOutcome::RetainedReaperStopped
-            }
+    pub(super) fn transfer(&self, task: ReapTask) {
+        if let Err(TrySendError::Full(task) | TrySendError::Disconnected(task)) =
+            self.tasks.try_send(task)
+        {
+            self.retain(task);
         }
     }
 
@@ -203,10 +189,6 @@ pub(super) mod test_support {
     pub(in crate::platform) fn retained_tasks(client: &ReaperClient) -> usize {
         client.retained_tasks.load(Ordering::Relaxed)
     }
-
-    pub(super) const fn production_capacity() -> usize {
-        crate::platform::workers::CAPACITY
-    }
 }
 
 #[cfg(test)]
@@ -229,11 +211,8 @@ mod tests {
     #[test]
     fn queue_saturation_retains_complete_task_without_panicking() {
         let (client, _receiver) = client_with_receiver(1, 1);
-        assert_eq!(client.transfer(Box::new(|| {})), TransferOutcome::Queued);
-        assert_eq!(
-            client.transfer(Box::new(|| {})),
-            TransferOutcome::RetainedQueueFull
-        );
+        client.transfer(Box::new(|| {}));
+        client.transfer(Box::new(|| {}));
         assert_eq!(retained_tasks(&client), 1);
     }
 
@@ -241,16 +220,12 @@ mod tests {
     fn dead_receiver_retains_complete_task_without_panicking() {
         let (client, receiver) = client_with_receiver(1, 1);
         drop(receiver);
-        assert_eq!(
-            client.transfer(Box::new(|| {})),
-            TransferOutcome::RetainedReaperStopped
-        );
+        client.transfer(Box::new(|| {}));
         assert_eq!(retained_tasks(&client), 1);
     }
 
     #[test]
     fn reservations_bound_all_cleanup_liabilities() {
-        assert_eq!(production_capacity(), crate::platform::workers::CAPACITY);
         let (client, _receiver) = client_with_receiver(1, 1);
         let permit = client.reserve().expect("one reservation");
         assert_eq!(client.reserve().map(|_| ()), Err(Exhausted { capacity: 1 }));
@@ -265,28 +240,22 @@ mod tests {
         let (first_started, first_started_receiver) = mpsc::channel();
         let (release_first, release_first_receiver) = mpsc::channel();
         let (first_finished, first_finished_receiver) = mpsc::channel();
-        assert_eq!(
-            client.transfer(Box::new(move || {
-                let _permit = first_permit;
-                first_started.send(()).expect("report first task start");
-                let _ = release_first_receiver.recv();
-                first_finished.send(()).expect("report first task finish");
-            })),
-            TransferOutcome::Queued
-        );
+        client.transfer(Box::new(move || {
+            let _permit = first_permit;
+            first_started.send(()).expect("report first task start");
+            let _ = release_first_receiver.recv();
+            first_finished.send(()).expect("report first task finish");
+        }));
         first_started_receiver
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("first cleanup task starts");
 
         let second_permit = client.reserve().expect("second cleanup reservation");
         let (second_finished, second_finished_receiver) = mpsc::channel();
-        assert_eq!(
-            client.transfer(Box::new(move || {
-                let _permit = second_permit;
-                second_finished.send(()).expect("report second task finish");
-            })),
-            TransferOutcome::Queued
-        );
+        client.transfer(Box::new(move || {
+            let _permit = second_permit;
+            second_finished.send(()).expect("report second task finish");
+        }));
         second_finished_receiver
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("later cleanup completes while first task is stalled");

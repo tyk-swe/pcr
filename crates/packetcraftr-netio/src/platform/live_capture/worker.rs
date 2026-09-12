@@ -19,7 +19,7 @@ use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::CaptureQueue};
-use crate::platform::worker_reaper::{ReaperClient, TransferOutcome, wait_until_finished};
+use crate::platform::worker_reaper::{ReaperClient, wait_until_finished};
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -30,7 +30,7 @@ pub(super) fn transfer_capture_worker(
     interrupt: Arc<dyn super::CaptureInterrupt>,
     permit: WorkerPermit,
     reaper: &ReaperClient,
-) -> TransferOutcome {
+) {
     permit.retention_marker().mark_retained();
     reaper.transfer(Box::new(move || {
         // The permit and interrupt are intentionally captured by this task so
@@ -42,7 +42,7 @@ pub(super) fn transfer_capture_worker(
             let _ = catch_unwind(AssertUnwindSafe(|| interrupt.interrupt()));
         });
         drop(interrupt);
-    }))
+    }));
 }
 
 pub(super) fn capture_worker(

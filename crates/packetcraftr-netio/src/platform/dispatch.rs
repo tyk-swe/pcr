@@ -321,12 +321,3 @@ mod interface_validation_tests {
         }
     }
 }
-
-/// Standard TCP uses the standard library's platform implementation on every
-/// target; it does not require packet route/capture/injection features.
-pub(crate) fn system_tcp_connect(
-    endpoint: std::net::SocketAddr,
-    timeout: std::time::Duration,
-) -> std::io::Result<crate::tcp::SystemStream> {
-    std::net::TcpStream::connect_timeout(&endpoint, timeout).map(crate::tcp::SystemStream)
-}

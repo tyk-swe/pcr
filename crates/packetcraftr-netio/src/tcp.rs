@@ -5,7 +5,7 @@
 //! the caller; providers own the connection and its native resources.
 
 use std::io::{self, Read, Write};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
 /// A connected byte stream with endpoint evidence and per-call time bounds.
@@ -32,12 +32,12 @@ impl Provider for SystemProvider {
     type Stream = SystemStream;
 
     fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream> {
-        crate::platform::system_tcp_connect(endpoint, timeout)
+        TcpStream::connect_timeout(&endpoint, timeout).map(SystemStream)
     }
 }
 
 /// An owned native connection. Construction is through [`SystemProvider`].
-pub struct SystemStream(pub(crate) std::net::TcpStream);
+pub struct SystemStream(pub(crate) TcpStream);
 
 impl Read for SystemStream {
     fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {

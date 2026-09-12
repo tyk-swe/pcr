@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt;
+use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{
     Arc,
@@ -28,27 +28,10 @@ use packetcraftr_netio::{
     },
 };
 
-#[derive(Clone, Copy, Debug)]
-struct RouteFailure;
-
-impl fmt::Display for RouteFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("route fixture failed")
-    }
-}
-
-impl std::error::Error for RouteFailure {}
-
-#[derive(Clone)]
-struct Routes {
-    decision: Result<Decision, RouteFailure>,
-    interface_decision: Result<Option<Decision>, RouteFailure>,
-    lookup_calls: Arc<AtomicUsize>,
-    interface_calls: Arc<AtomicUsize>,
-}
+struct Routes(Decision);
 
 impl Provider for Routes {
-    type Error = RouteFailure;
+    type Error = Infallible;
 
     fn lookup_with_preferences(
         &self,
@@ -56,13 +39,7 @@ impl Provider for Routes {
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
     ) -> Result<Decision, Self::Error> {
-        self.lookup_calls.fetch_add(1, Ordering::SeqCst);
-        self.decision.clone()
-    }
-
-    fn lookup_interface(&self, _interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
-        self.interface_calls.fetch_add(1, Ordering::SeqCst);
-        self.interface_decision.clone()
+        Ok(self.0.clone())
     }
 }
 
@@ -85,15 +62,6 @@ fn decision(capability: Capability) -> Decision {
         mtu: 1_500,
         capability,
         link_type: LinkType::ETHERNET,
-    }
-}
-
-fn routes(decision: Result<Decision, RouteFailure>) -> Routes {
-    Routes {
-        interface_decision: decision.clone().map(Some),
-        decision,
-        lookup_calls: Arc::new(AtomicUsize::new(0)),
-        interface_calls: Arc::new(AtomicUsize::new(0)),
     }
 }
 
@@ -494,7 +462,7 @@ fn planner_preserves_explicit_ethernet_destination_for_broadcast() {
             link_mode: Mode::Layer2,
             ..Options::default()
         },
-        &routes(Ok(explicit_route)),
+        &Routes(explicit_route),
     )
     .expect("explicit broadcast envelope plans");
     assert_eq!(explicit.destination_mac, Some(explicit_mac));

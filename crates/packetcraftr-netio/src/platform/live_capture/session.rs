@@ -335,7 +335,7 @@ impl Drop for NativeCaptureSession {
             // running worker is transferred, together with its interrupt and
             // its cleanup permit, to an owner that can wait without blocking
             // this Drop path.
-            let _ = transfer_capture_worker(
+            transfer_capture_worker(
                 worker,
                 Arc::clone(&self.stop),
                 interrupt,
@@ -367,10 +367,7 @@ mod tests {
     use crate::{
         capture::{Limits, Metadata},
         interface::Id as InterfaceId,
-        platform::worker_reaper::{
-            TransferOutcome,
-            test_support::{client_with_receiver, retained_tasks, start_with},
-        },
+        platform::worker_reaper::test_support::{client_with_receiver, retained_tasks, start_with},
     };
 
     fn metadata(name: &str, index: u32) -> Metadata {
@@ -850,7 +847,7 @@ mod tests {
     #[test]
     fn session_drop_is_no_panic_when_reaper_queue_is_saturated() {
         let (reaper, _receiver) = client_with_receiver(1, 1);
-        assert_eq!(reaper.transfer(Box::new(|| {})), TransferOutcome::Queued);
+        reaper.transfer(Box::new(|| {}));
         let (release_sender, release_receiver) = mpsc::channel();
         let (started_sender, started_receiver) = mpsc::channel();
         let session = NativeCaptureSession::spawn_with_reaper(

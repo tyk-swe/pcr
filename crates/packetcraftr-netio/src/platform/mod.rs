@@ -54,5 +54,5 @@ fn os_error(
 
 pub(crate) use dispatch::{
     native_resource_snapshot, system_capture, system_interface_route, system_interfaces,
-    system_route, system_send_layer2, system_send_layer3, system_tcp_connect,
+    system_route, system_send_layer2, system_send_layer3,
 };

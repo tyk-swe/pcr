@@ -202,7 +202,7 @@ fn classify_attempt(classification: ResponseClassification) -> AttemptClassifica
             } else {
                 format!(
                     "validated DNS response with code {}",
-                    response.response_code_name()
+                    response_code_name(response.metadata.response_code)
                 )
             };
             AttemptClassification::Accepted {
@@ -372,7 +372,7 @@ pub(super) fn classify_tcp_response(
             Some(validated.metadata.response_code),
             format!(
                 "validated DNS-over-TCP response with code {}",
-                validated.response_code_name()
+                response_code_name(validated.metadata.response_code)
             ),
             Some(validated),
         ),

@@ -113,6 +113,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - **Breaking:** the `packetcraftr::fuzz::PolicyAuthorizer` and
   `packetcraftr::replay::{ReplayFrame, WireBudget}` re-exports; import them
   from `packetcraftr::policy`.
+- **Breaking:** `packetcraftr::dns::ResponseMetadata::response_code_name` and
+  `ValidatedResponse::response_code_name`; use the canonical
+  `packetcraftr::dns::response_code_name` function.
 
 ### Fixed
 

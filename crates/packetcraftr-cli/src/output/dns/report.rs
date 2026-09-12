@@ -14,10 +14,7 @@ use super::record::Record;
 use crate::output::contract::Error;
 use crate::output::frame::{Captured, Timestamp};
 use packetcraftr::Stats;
-use packetcraftr::dns::RejectedRecord;
-use packetcraftr::dns::Section;
-
-use packetcraftr::dns::{Outcome, Transport};
+use packetcraftr::dns::{Outcome, RejectedRecord, Section, Transport, response_code_name};
 
 /// The response-header block the aggregate result and the terminal record both
 /// publish, present exactly when a response was accepted.
@@ -43,7 +40,7 @@ impl From<packetcraftr::dns::ResponseMetadata> for ResponseSummary {
     fn from(metadata: packetcraftr::dns::ResponseMetadata) -> Self {
         Self {
             response_code: metadata.response_code,
-            response_code_name: metadata.response_code_name().to_owned(),
+            response_code_name: response_code_name(metadata.response_code).to_owned(),
             edns: metadata.edns.map(Into::into),
             authoritative: metadata.authoritative,
             truncated: metadata.truncated,

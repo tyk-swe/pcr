@@ -14,7 +14,6 @@ use crate::Stats;
 
 use super::request::QueryType;
 use super::{Edns, Record};
-use crate::dns::classification::response_code_name;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,12 +55,6 @@ pub struct ResponseMetadata {
     pub rejected_record_count: usize,
 }
 
-impl ResponseMetadata {
-    pub fn response_code_name(&self) -> &'static str {
-        response_code_name(self.response_code)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedResponse {
     pub metadata: ResponseMetadata,
@@ -69,12 +62,6 @@ pub struct ValidatedResponse {
     pub authorities: Vec<Record>,
     pub additionals: Vec<Record>,
     pub rejected_records: Vec<RejectedRecord>,
-}
-
-impl ValidatedResponse {
-    pub fn response_code_name(&self) -> &'static str {
-        self.metadata.response_code_name()
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

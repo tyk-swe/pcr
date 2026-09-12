@@ -244,7 +244,10 @@ fn basic_response_retains_header_flags_and_a_record() {
             rejected_records: Vec::new(),
         }
     );
-    assert_eq!(decoded.response_code_name(), "no_error");
+    assert_eq!(
+        dns::response_code_name(decoded.metadata.response_code),
+        "no_error"
+    );
 }
 
 #[test]
@@ -609,7 +612,10 @@ fn edns_metadata_extends_response_code_and_retains_options() {
     );
     let decoded = decode(&message, "example.test", QueryType::A);
     assert_eq!(decoded.metadata.response_code, 18);
-    assert_eq!(decoded.response_code_name(), "bad_time");
+    assert_eq!(
+        dns::response_code_name(decoded.metadata.response_code),
+        "bad_time"
+    );
     let edns = decoded.metadata.edns.expect("EDNS metadata");
     assert_eq!(edns.udp_payload_size, 1_232);
     assert_eq!(edns.extended_response_code, 1);

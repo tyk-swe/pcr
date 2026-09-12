@@ -8,10 +8,10 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::{
-    CompletedDatagram, DatagramKey, DatagramState, Error, Family, Fragment, FragmentDisposition,
-    FragmentOutcome, IncompleteDatagram, IncompleteReason, Limits, MalformedError, OverlapPolicy,
-    PushOutcome, Reassembler, Reconstruction, ResourceError, Retained, RetainedRange,
-    RetiredDatagrams,
+    CompletedDatagram, DatagramKey, DatagramState, Ecn, Error, Family, Fragment,
+    FragmentDisposition, FragmentOutcome, IncompleteDatagram, IncompleteReason, Limits,
+    MalformedError, OverlapPolicy, PushOutcome, Reassembler, Reconstruction, ResourceError,
+    Retained, RetainedRange, RetiredDatagrams,
 };
 
 mod reconstruction;
@@ -39,6 +39,7 @@ struct Incoming {
     more_fragments: bool,
     payload: Bytes,
     reconstruction: IncomingReconstruction,
+    ecn: Ecn,
 }
 
 enum IncomingReconstruction {
@@ -273,6 +274,7 @@ impl Reassembler {
             })?;
 
         validate_reconstruction_consistency(existing, &incoming)?;
+        let ecn = accumulated_ecn(existing, &incoming)?;
         let final_length = plan_final_length(existing, &incoming)?;
         validate_family_wire_extent(existing, &incoming, final_length)?;
         let empty_ranges = Vec::new();
@@ -298,7 +300,7 @@ impl Reassembler {
             deadline,
         } = self.admit_charges(existing, &incoming, &merge, now, external_charge)?;
 
-        let reconstruction = materialize_reconstruction(existing, &incoming)?;
+        let reconstruction = materialize_reconstruction(existing, &incoming, ecn)?;
         let update = match merge.kind {
             UpdateKind::Unchanged => RangeUpdate::Unchanged,
             UpdateKind::Append => RangeUpdate::Append,
@@ -547,9 +549,9 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
         }
         .into());
     }
-    let (key, fragment_offset, more_fragments, payload, reconstruction) = match fragment {
+    let (key, fragment_offset, more_fragments, payload, reconstruction, ecn) = match fragment {
         Fragment::Ipv4(fragment) => {
-            validate_ipv4_header(&fragment)?;
+            let ecn = validate_ipv4_header(&fragment)?;
             (
                 DatagramKey::Ipv4(fragment.key),
                 fragment.fragment_offset,
@@ -558,10 +560,11 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
                 IncomingReconstruction::Ipv4 {
                     header: fragment.header,
                 },
+                ecn,
             )
         }
         Fragment::Ipv6(fragment) => {
-            validate_ipv6_prefix(&fragment)?;
+            let ecn = validate_ipv6_prefix(&fragment)?;
             (
                 DatagramKey::Ipv6(fragment.key),
                 fragment.fragment_offset,
@@ -572,6 +575,7 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
                     predecessor_next_header_offset: fragment.predecessor_next_header_offset,
                     next_header: fragment.next_header,
                 },
+                ecn,
             )
         }
     };
@@ -600,6 +604,7 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
         more_fragments,
         payload,
         reconstruction,
+        ecn,
     };
     validate_family_wire_extent(
         None,
@@ -615,7 +620,9 @@ fn validate_fragment(fragment: Fragment, limits: &Limits) -> Result<Incoming, Er
     Ok(incoming)
 }
 
-fn validate_ipv4_header(fragment: &super::Ipv4Fragment) -> Result<(), Error> {
+/// Validates one IPv4 fragment header and reports its congestion marking so
+/// reassembly can merge it independently of the retained header bytes.
+fn validate_ipv4_header(fragment: &super::Ipv4Fragment) -> Result<Ecn, Error> {
     let Some(fixed) = fragment.header.first_chunk::<IPV4_MIN_HEADER_LENGTH>() else {
         return Err(MalformedError::InvalidIpv4Header {
             reason: "header is shorter than twenty bytes",
@@ -663,10 +670,13 @@ fn validate_ipv4_header(fragment: &super::Ipv4Fragment) -> Result<(), Error> {
         }
         .into());
     }
-    Ok(())
+    Ok(Ecn::from_ipv4_tos(fixed[1]))
 }
 
-fn validate_ipv6_prefix(fragment: &super::Ipv6Fragment) -> Result<(), Error> {
+/// Validates one IPv6 fragment's unfragmentable prefix and reports its
+/// congestion marking so reassembly can merge it independently of the retained
+/// prefix bytes.
+fn validate_ipv6_prefix(fragment: &super::Ipv6Fragment) -> Result<Ecn, Error> {
     let Some(base) = fragment
         .unfragmentable_prefix
         .first_chunk::<IPV6_HEADER_LENGTH>()
@@ -722,7 +732,7 @@ fn validate_ipv6_prefix(fragment: &super::Ipv6Fragment) -> Result<(), Error> {
         }
         .into());
     }
-    Ok(())
+    Ok(Ecn::from_ipv6_traffic_class(base[1]))
 }
 
 fn ipv6_fragment_predecessor(prefix: &[u8]) -> Option<usize> {
@@ -755,7 +765,7 @@ fn validate_reconstruction_consistency(
         return Ok(());
     };
     match (&existing.reconstruction, &incoming.reconstruction) {
-        (Reconstruction::Ipv4 { first_header }, IncomingReconstruction::Ipv4 { header }) => {
+        (Reconstruction::Ipv4 { first_header, .. }, IncomingReconstruction::Ipv4 { header }) => {
             if incoming.offset == 0
                 && first_header
                     .as_ref()
@@ -765,29 +775,17 @@ fn validate_reconstruction_consistency(
             }
         }
         (
-            Reconstruction::Ipv6 {
-                prefix,
-                predecessor_next_header_offset,
-                next_header,
-            },
+            Reconstruction::Ipv6 { .. },
             IncomingReconstruction::Ipv6 {
-                prefix: incoming_prefix,
-                predecessor_next_header_offset: incoming_predecessor,
-                next_header: incoming_next_header,
+                prefix: _,
+                predecessor_next_header_offset: _,
+                next_header: _,
             },
         ) => {
-            if next_header != incoming_next_header {
-                return Err(MalformedError::InconsistentIpv6NextHeader {
-                    expected: *next_header,
-                    actual: *incoming_next_header,
-                }
-                .into());
-            }
-            if predecessor_next_header_offset != incoming_predecessor
-                || !ipv6_prefixes_match(prefix, incoming_prefix)
-            {
-                return Err(MalformedError::InconsistentIpv6Prefix.into());
-            }
+            // RFC 8200 §4.5 allows the number and content of the unfragmentable
+            // headers and the Fragment Next Header to differ between fragments.
+            // Only the offset-zero fragment's values are retained, which
+            // Reconstruction::from_offset_zero tracks for materialization.
         }
         // The datagram key carries the family, so a lookup can never return
         // state of the other one.
@@ -798,14 +796,21 @@ fn validate_reconstruction_consistency(
 
 fn ipv4_headers_match(first: &[u8], second: &[u8]) -> bool {
     first.len() == second.len()
-        && first.get(..2) == second.get(..2)
+        && first.first() == second.first()
+        // ECN is merged across fragments per RFC 3168, so it may differ even
+        // between offset-zero duplicates; DSCP is preserved and must agree.
         // Total length, fragment offset/MF, and checksum are normalized during
         // reconstruction and legitimately differ per fragment. Reserved/DF
         // are preserved and therefore must agree.
+        && ipv4_dscp(first) == ipv4_dscp(second)
         && first.get(4..6) == second.get(4..6)
         && ipv4_preserved_flags(first) == ipv4_preserved_flags(second)
         && first.get(8..10) == second.get(8..10)
         && first.get(12..) == second.get(12..)
+}
+
+fn ipv4_dscp(header: &[u8]) -> Option<u8> {
+    header.get(1).map(|tos| tos & 0xfc)
 }
 
 fn ipv4_preserved_flags(header: &[u8]) -> Option<u16> {
@@ -815,12 +820,6 @@ fn ipv4_preserved_flags(header: &[u8]) -> Option<u16> {
         .copied()
         .map(u16::from_be_bytes)
         .map(|flags_offset| flags_offset & 0xc000)
-}
-
-fn ipv6_prefixes_match(first: &[u8], second: &[u8]) -> bool {
-    first.len() == second.len()
-        && first.get(..4) == second.get(..4)
-        && first.get(6..) == second.get(6..)
 }
 
 fn plan_final_length(
@@ -882,17 +881,36 @@ fn validate_family_wire_extent(
         (
             IncomingReconstruction::Ipv4 { .. },
             Some(DatagramState {
-                reconstruction: Reconstruction::Ipv4 { first_header },
+                reconstruction: Reconstruction::Ipv4 { first_header, .. },
                 ..
             }),
         ) => first_header
             .as_ref()
             .map_or(IPV4_MIN_HEADER_LENGTH, Bytes::len),
         (IncomingReconstruction::Ipv4 { .. }, None) => IPV4_MIN_HEADER_LENGTH,
-        (IncomingReconstruction::Ipv6 { prefix, .. }, _) => prefix
-            .len()
-            .checked_sub(IPV6_HEADER_LENGTH)
-            .ok_or(MalformedError::OffsetOverflow)?,
+        (IncomingReconstruction::Ipv6 { prefix, .. }, existing) => {
+            // An offset-zero fragment replaces a provisional non-zero prefix,
+            // so the wire check must use the prefix the datagram will retain.
+            let retained = match existing {
+                Some(DatagramState {
+                    reconstruction:
+                        Reconstruction::Ipv6 {
+                            prefix: _,
+                            from_offset_zero,
+                            ..
+                        },
+                    ..
+                }) if !from_offset_zero && incoming.offset == 0 => prefix.len(),
+                Some(DatagramState {
+                    reconstruction: Reconstruction::Ipv6 { prefix, .. },
+                    ..
+                }) => prefix.len(),
+                _ => prefix.len(),
+            };
+            retained
+                .checked_sub(IPV6_HEADER_LENGTH)
+                .ok_or(MalformedError::OffsetOverflow)?
+        }
         _ => return Err(FAMILY_MISMATCH),
     };
     if reconstructed_prefix_length
@@ -916,17 +934,26 @@ fn reconstruction_retained_bytes(
         IncomingReconstruction::Ipv4 { header } => match established {
             Some(Reconstruction::Ipv4 {
                 first_header: Some(first_header),
+                ..
             }) => Ok(first_header.len()),
-            Some(Reconstruction::Ipv4 { first_header: None }) | None => {
-                Ok(if incoming.offset == 0 {
-                    header.len()
-                } else {
-                    0
-                })
-            }
+            Some(Reconstruction::Ipv4 {
+                first_header: None, ..
+            })
+            | None => Ok(if incoming.offset == 0 {
+                header.len()
+            } else {
+                0
+            }),
             Some(Reconstruction::Ipv6 { .. }) => Err(FAMILY_MISMATCH),
         },
         IncomingReconstruction::Ipv6 { prefix, .. } => match established {
+            // The offset-zero fragment's prefix replaces a provisional one, so
+            // admission must account for the prefix the datagram will retain.
+            Some(Reconstruction::Ipv6 {
+                prefix: _,
+                from_offset_zero,
+                ..
+            }) if !*from_offset_zero && incoming.offset == 0 => Ok(prefix.len()),
             Some(Reconstruction::Ipv6 {
                 prefix: established_prefix,
                 ..
@@ -937,15 +964,23 @@ fn reconstruction_retained_bytes(
     }
 }
 
+fn accumulated_ecn(existing: Option<&DatagramState>, incoming: &Incoming) -> Result<Ecn, Error> {
+    match existing {
+        Some(state) => Ok(state.reconstruction.ecn().merge(incoming.ecn)?),
+        None => Ok(incoming.ecn),
+    }
+}
+
 fn materialize_reconstruction(
     existing: Option<&DatagramState>,
     incoming: &Incoming,
+    ecn: Ecn,
 ) -> Result<Reconstruction, Error> {
     let established = existing.map(|state| &state.reconstruction);
     match &incoming.reconstruction {
         IncomingReconstruction::Ipv4 { header } => {
             let established_first = match established {
-                Some(Reconstruction::Ipv4 { first_header }) => first_header.clone(),
+                Some(Reconstruction::Ipv4 { first_header, .. }) => first_header.clone(),
                 None => None,
                 Some(Reconstruction::Ipv6 { .. }) => return Err(FAMILY_MISMATCH),
             };
@@ -955,6 +990,7 @@ fn materialize_reconstruction(
                     None if incoming.offset == 0 => Some(copy_bytes(header)?),
                     None => None,
                 },
+                ecn,
             })
         }
         IncomingReconstruction::Ipv6 {
@@ -962,11 +998,40 @@ fn materialize_reconstruction(
             predecessor_next_header_offset,
             next_header,
         } => match established {
-            Some(reconstruction @ Reconstruction::Ipv6 { .. }) => Ok(reconstruction.clone()),
+            Some(Reconstruction::Ipv6 {
+                prefix: established_prefix,
+                predecessor_next_header_offset: established_predecessor,
+                next_header: established_next,
+                from_offset_zero,
+                ..
+            }) => {
+                if !from_offset_zero && incoming.offset == 0 {
+                    // RFC 8200 §4.5: only the offset-zero fragment's
+                    // unfragmentable header and Fragment Next Header are
+                    // retained, even when later-offset fragments arrived first.
+                    Ok(Reconstruction::Ipv6 {
+                        prefix: copy_bytes(prefix)?,
+                        predecessor_next_header_offset: *predecessor_next_header_offset,
+                        next_header: *next_header,
+                        ecn,
+                        from_offset_zero: true,
+                    })
+                } else {
+                    Ok(Reconstruction::Ipv6 {
+                        prefix: established_prefix.clone(),
+                        predecessor_next_header_offset: *established_predecessor,
+                        next_header: *established_next,
+                        ecn,
+                        from_offset_zero: *from_offset_zero,
+                    })
+                }
+            }
             None => Ok(Reconstruction::Ipv6 {
                 prefix: copy_bytes(prefix)?,
                 predecessor_next_header_offset: *predecessor_next_header_offset,
                 next_header: *next_header,
+                ecn,
+                from_offset_zero: incoming.offset == 0,
             }),
             Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
         },

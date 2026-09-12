@@ -52,19 +52,92 @@ impl RetainedRange {
 enum Reconstruction {
     Ipv4 {
         first_header: Option<Bytes>,
+        ecn: Ecn,
     },
     Ipv6 {
         prefix: Bytes,
         predecessor_next_header_offset: usize,
         next_header: u8,
+        ecn: Ecn,
+        /// Whether `prefix` came from the offset-zero fragment, which RFC 8200
+        /// §4.5 makes the only retained unfragmentable header.
+        from_offset_zero: bool,
     },
 }
 
 impl Reconstruction {
     fn retained_bytes(&self) -> usize {
         match self {
-            Self::Ipv4 { first_header } => first_header.as_ref().map_or(0, Bytes::len),
+            Self::Ipv4 { first_header, .. } => first_header.as_ref().map_or(0, Bytes::len),
             Self::Ipv6 { prefix, .. } => prefix.len(),
+        }
+    }
+
+    fn ecn(&self) -> Ecn {
+        match self {
+            Self::Ipv4 { ecn, .. } | Self::Ipv6 { ecn, .. } => *ecn,
+        }
+    }
+}
+
+/// IPv4 TOS / IPv6 Traffic Class congestion marking accumulated across the
+/// admitted fragments of one datagram.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ecn {
+    NotEct,
+    Ect1,
+    Ect0,
+    Ce,
+}
+
+impl Ecn {
+    const fn from_ipv4_tos(tos: u8) -> Self {
+        Self::from_bits(tos & 0x03)
+    }
+
+    const fn from_ipv6_traffic_class(traffic_class: u8) -> Self {
+        // The low nibble of byte zero and the high nibble of byte one carry the
+        // Traffic Class; ECN is its two least significant bits.
+        Self::from_bits((traffic_class & 0x30) >> 4)
+    }
+
+    const fn from_bits(bits: u8) -> Self {
+        match bits & 0x03 {
+            0 => Self::NotEct,
+            1 => Self::Ect1,
+            2 => Self::Ect0,
+            _ => Self::Ce,
+        }
+    }
+
+    const fn ipv4_tos_bits(self) -> u8 {
+        match self {
+            Self::NotEct => 0,
+            Self::Ect1 => 1,
+            Self::Ect0 => 2,
+            Self::Ce => 3,
+        }
+    }
+
+    const fn ipv6_traffic_class_bits(self) -> u8 {
+        self.ipv4_tos_bits() << 4
+    }
+
+    /// RFC 3168 §5.3: identical codepoints are preserved, CE combines with any
+    /// ECN-capable marking into CE, and CE alongside Not-ECT cannot be
+    /// reassembled. The RFC leaves the remaining mixtures unspecified; they
+    /// resolve to the lower marking — Not-ECT when present, otherwise ECT(0).
+    fn merge(self, incoming: Self) -> Result<Self, MalformedError> {
+        if self == incoming {
+            return Ok(self);
+        }
+        match (self, incoming) {
+            (Self::Ce, Self::NotEct) | (Self::NotEct, Self::Ce) => {
+                Err(MalformedError::InconsistentEcn)
+            }
+            (Self::Ce, _) | (_, Self::Ce) => Ok(Self::Ce),
+            (Self::NotEct, _) | (_, Self::NotEct) => Ok(Self::NotEct),
+            _ => Ok(Self::Ect0),
         }
     }
 }

@@ -4,7 +4,7 @@
 //! Exact network-header reconstruction after a complete payload is admitted.
 
 use super::{
-    Bytes, Error, Family, IPV6_HEADER_LENGTH, MalformedError, Reconstruction, ResourceError,
+    Bytes, Ecn, Error, Family, IPV6_HEADER_LENGTH, MalformedError, Reconstruction, ResourceError,
 };
 
 /// A complete IPv4 datagram covers offset zero, so the fragment that filled
@@ -19,7 +19,7 @@ pub(super) fn reconstructed_length(
     payload_length: usize,
 ) -> Result<usize, Error> {
     let prefix = match reconstruction {
-        Reconstruction::Ipv4 { first_header } => first_header
+        Reconstruction::Ipv4 { first_header, .. } => first_header
             .as_ref()
             .map(Bytes::len)
             .ok_or(MISSING_OFFSET_ZERO_HEADER)?,
@@ -37,15 +37,20 @@ pub(super) fn reconstruct_bytes(
     payload: [&[u8]; 2],
 ) -> Result<Bytes, Error> {
     match reconstruction {
-        Reconstruction::Ipv4 { first_header } => reconstruct_ipv4(first_header.as_ref(), payload),
+        Reconstruction::Ipv4 { first_header, ecn } => {
+            reconstruct_ipv4(first_header.as_ref(), *ecn, payload)
+        }
         Reconstruction::Ipv6 {
             prefix,
             predecessor_next_header_offset,
             next_header,
+            ecn,
+            ..
         } => reconstruct_ipv6(
             prefix,
             *predecessor_next_header_offset,
             *next_header,
+            *ecn,
             payload,
         ),
     }
@@ -58,7 +63,11 @@ fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {
         .ok_or(MalformedError::OffsetOverflow.into())
 }
 
-fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: [&[u8]; 2]) -> Result<Bytes, Error> {
+fn reconstruct_ipv4(
+    first_header: Option<&Bytes>,
+    ecn: Ecn,
+    payload: [&[u8]; 2],
+) -> Result<Bytes, Error> {
     let header = first_header.ok_or(MISSING_OFFSET_ZERO_HEADER)?;
     let payload_length = payload_length(payload)?;
     let total_length = header
@@ -81,6 +90,8 @@ fn reconstruct_ipv4(first_header: Option<&Bytes>, payload: [&[u8]; 2]) -> Result
         .get_mut(2..4)
         .ok_or(MalformedError::OffsetOverflow)?
         .copy_from_slice(&total_length.to_be_bytes());
+    let tos = datagram.get_mut(1).ok_or(MalformedError::OffsetOverflow)?;
+    *tos = (*tos & 0xfc) | ecn.ipv4_tos_bits();
     let flags = datagram
         .get(6..8)
         .and_then(<[u8]>::first_chunk::<2>)
@@ -112,6 +123,7 @@ fn reconstruct_ipv6(
     prefix: &Bytes,
     predecessor_next_header_offset: usize,
     next_header: u8,
+    ecn: Ecn,
     payload: [&[u8]; 2],
 ) -> Result<Bytes, Error> {
     let extension_length = prefix
@@ -141,6 +153,8 @@ fn reconstruct_ipv6(
         .get_mut(4..6)
         .ok_or(MalformedError::OffsetOverflow)?
         .copy_from_slice(&payload_length.to_be_bytes());
+    let traffic_class = datagram.get_mut(1).ok_or(MalformedError::OffsetOverflow)?;
+    *traffic_class = (*traffic_class & !0x30) | ecn.ipv6_traffic_class_bits();
     *datagram
         .get_mut(predecessor_next_header_offset)
         .ok_or(MalformedError::OffsetOverflow)? = next_header;

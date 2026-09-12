@@ -317,9 +317,11 @@ bytes, and duration, adding an exact UDP wire budget when UDP is selected.
 `--udp-payload-file PATH`. The same exact payload is sent to each selected port,
 up to 65,507 bytes, with derived lengths/checksums and the existing policy and
 MTU checks. Empty payloads retain the previous behavior. Valid DNS payloads on
-port 53 use an exact retained-wire DNS layer; payloads on registered protocol
-ports still need to satisfy strict construction. Responses retain transport
-and ICMP-error correlation; payload selection does not add application-level
+port 53, VXLAN payloads on port 4789, and Geneve payloads on port 6081
+materialize as exact typed layers, including inner frames and their nested
+destination checks; payloads that do not decode as their registered protocol
+still need to satisfy strict construction. Responses retain transport and
+ICMP-error correlation; payload selection does not add application-level
 response assertions.
 
 `replay --bps 8000000` selects a bit rate instead of captured intervals or

@@ -16,6 +16,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   from cumulative totals under existing operation budgets.
 - Bounded UDP scan payloads from `--udp-payload-hex` or `--udp-payload-file`,
   included in checksums, traffic budgets, and exact sent-evidence validation.
+  Valid DNS, VXLAN, and Geneve payloads on their registered ports materialize
+  as exact typed layers, including inner frames, while payloads that do not
+  decode as their registered protocol still require strict construction.
 - Direct DNS `--tcp`, available without native packet-I/O features, retaining
   socket authorization, bounded framing, response validation, and retries.
 - `packetcraftr_core::budget::remaining_before` is the one helper every crate
@@ -113,6 +116,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- IPv6 fragment reassembly retains the offset-zero fragment's unfragmentable
+  prefix and Fragment Next Header and accepts the per-fragment variation
+  RFC 8200 §4.5 permits, including when the offset-zero fragment arrives last.
+- IPv4 and IPv6 reassembly merge fragment ECN codepoints per RFC 3168 §5.3,
+  preserve DSCP, recompute checksums, and fail closed when CE and Not-ECT
+  fragments mix.
 - `build` retains normal signal termination while waiting for recipe input,
   then uses cooperative cancellation while building and publishing packets.
 - Exchange packet sets authorize expanded destinations before route preparation,

@@ -244,10 +244,8 @@ pub enum MalformedError {
     InconsistentIpv4Header,
     #[error("invalid IPv6 unfragmentable prefix: {reason}")]
     InvalidIpv6Prefix { reason: &'static str },
-    #[error("IPv6 fragments have inconsistent unfragmentable prefixes")]
-    InconsistentIpv6Prefix,
-    #[error("IPv6 fragment Next Header changed from {expected} to {actual}")]
-    InconsistentIpv6NextHeader { expected: u8, actual: u8 },
+    #[error("IP fragments mix CE with Not-ECT congestion markings")]
+    InconsistentEcn,
     #[error("IP final payload length changed from {existing} to {new}")]
     ConflictingFinalLength { existing: usize, new: usize },
     #[error("IP fragment data extends beyond known final payload length {final_length}")]

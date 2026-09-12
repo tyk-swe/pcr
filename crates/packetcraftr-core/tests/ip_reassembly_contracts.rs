@@ -152,6 +152,33 @@ fn ipv6_fragment(
     })
 }
 
+/// Rewrites an IPv4 fragment's TOS byte and repairs its header checksum.
+fn ipv4_with_tos(fragment: Fragment, tos: u8) -> Fragment {
+    let Fragment::Ipv4(mut fragment) = fragment else {
+        unreachable!("fixture is IPv4");
+    };
+    let mut header = fragment.header.to_vec();
+    header[1] = tos;
+    header[10..12].fill(0);
+    let checksum = packetcraftr_core::protocol::checksum(&header);
+    header[10..12].copy_from_slice(&checksum.to_be_bytes());
+    fragment.header = Bytes::from(header);
+    Fragment::Ipv4(fragment)
+}
+
+/// Rewrites an IPv6 fragment's Traffic Class without touching its declared
+/// payload length.
+fn ipv6_with_traffic_class(fragment: Fragment, traffic_class: u8) -> Fragment {
+    let Fragment::Ipv6(mut fragment) = fragment else {
+        unreachable!("fixture is IPv6");
+    };
+    let mut prefix = fragment.unfragmentable_prefix.to_vec();
+    prefix[0] = (prefix[0] & 0xf0) | (traffic_class >> 4);
+    prefix[1] = (prefix[1] & 0x0f) | ((traffic_class & 0x0f) << 4);
+    fragment.unfragmentable_prefix = Bytes::from(prefix);
+    Fragment::Ipv6(fragment)
+}
+
 fn completed(
     outcome: PushOutcome,
 ) -> packetcraftr_core::analysis::reassembly::ip::CompletedDatagram {
@@ -915,41 +942,240 @@ fn unrepresentable_idle_expiry_fails_before_state_mutation() {
 }
 
 #[test]
-fn inconsistent_ipv6_prefix_and_next_header_are_typed_errors() {
+fn ipv6_fragment_next_header_uses_the_offset_zero_value_in_either_order() {
     let key = ipv6_key();
     let now = Instant::now();
     let first = ipv6_fragment(&key, 0, true, &b"abcdefgh"[..]);
+    let mut tail = match ipv6_fragment(&key, 1, false, &b"tail"[..]) {
+        Fragment::Ipv6(fragment) => fragment,
+        Fragment::Ipv4(_) => unreachable!(),
+    };
+    tail.next_header = 6;
+    let tail = Fragment::Ipv6(tail);
+
+    for fragments in [[first.clone(), tail.clone()], [tail.clone(), first.clone()]] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut completion = None;
+        for fragment in fragments {
+            if let PushOutcome::Completed { datagram, .. } = reassembler
+                .push(fragment, now)
+                .expect("RFC 8200 permits per-fragment Fragment Next Headers")
+            {
+                completion = Some(datagram);
+            }
+        }
+        let datagram = completion.expect("both fragments complete the datagram");
+        let prefix = ipv6_prefix(&key, 8);
+        assert_eq!(datagram.bytes.len(), 40 + 12);
+        assert_eq!(&datagram.bytes[..4], &prefix[..4]);
+        assert_eq!(&datagram.bytes[7..40], &prefix[7..40]);
+        assert_eq!(datagram.bytes[6], 17);
+        assert_eq!(&datagram.bytes[4..6], &12_u16.to_be_bytes());
+        assert_eq!(&datagram.bytes[40..], b"abcdefghtail");
+    }
+}
+
+#[test]
+fn ipv6_fragments_may_carry_different_unfragmentable_prefixes() {
+    let key = ipv6_key();
+    let now = Instant::now();
+    let first = ipv6_fragment(&key, 0, true, &b"abcdefgh"[..]);
+    let mut tail = match ipv6_fragment(&key, 1, false, &b"ijklmnop"[..]) {
+        Fragment::Ipv6(fragment) => fragment,
+        Fragment::Ipv4(_) => unreachable!(),
+    };
+    let mut prefix = ipv6_prefix_with_destination_options(&key, 8).to_vec();
+    // RFC 8200 §4.5 also permits other base-header fields to vary.
+    prefix[1] = 0x01;
+    prefix[7] = 32;
+    tail.unfragmentable_prefix = Bytes::from(prefix);
+    tail.predecessor_next_header_offset = 40;
+    let tail = Fragment::Ipv6(tail);
+
+    for fragments in [[first.clone(), tail.clone()], [tail.clone(), first.clone()]] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut completion = None;
+        for fragment in fragments {
+            if let PushOutcome::Completed { datagram, .. } = reassembler
+                .push(fragment, now)
+                .expect("RFC 8200 permits per-fragment unfragmentable headers")
+            {
+                completion = Some(datagram);
+            }
+        }
+        let datagram = completion.expect("both fragments complete the datagram");
+        let expected_prefix = ipv6_prefix(&key, 8);
+        assert_eq!(datagram.bytes.len(), 40 + 16);
+        assert_eq!(&datagram.bytes[..4], &expected_prefix[..4]);
+        assert_eq!(&datagram.bytes[7..40], &expected_prefix[7..40]);
+        assert_eq!(datagram.bytes[6], 17);
+        assert_eq!(&datagram.bytes[4..6], &16_u16.to_be_bytes());
+        assert_eq!(&datagram.bytes[40..], b"abcdefghijklmnop");
+    }
+}
+
+#[test]
+fn repeated_offset_zero_fragments_may_differ_only_in_ecn() {
+    let key = ipv4_key();
+    let now = Instant::now();
+    let dscp = 46 << 2;
+    let first = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), dscp | 0x02);
+    let duplicate = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), dscp | 0x03);
+    let tail = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), dscp | 0x02);
+
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     reassembler
+        .push(first.clone(), now)
+        .expect("the first offset-zero fragment is retained");
+    assert!(matches!(
+        reassembler.push(duplicate, now),
+        Ok(PushOutcome::Accepted(outcome))
+            if matches!(outcome.disposition, FragmentDisposition::Duplicate { .. })
+    ));
+    let datagram = completed(
+        reassembler
+            .push(tail, now)
+            .expect("tail completes the datagram"),
+    );
+    assert_eq!(datagram.bytes[1], dscp | 0x03);
+
+    let mut mismatched = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    mismatched
         .push(first, now)
-        .expect("first prefix is retained");
-
-    let mut different_next = match ipv6_fragment(&key, 1, false, &b"tail"[..]) {
-        Fragment::Ipv6(fragment) => fragment,
-        Fragment::Ipv4(_) => unreachable!(),
-    };
-    different_next.next_header = 6;
-    assert_eq!(
-        reassembler.push(Fragment::Ipv6(different_next), now),
-        Err(Error::Malformed(
-            MalformedError::InconsistentIpv6NextHeader {
-                expected: 17,
-                actual: 6
-            }
-        ))
+        .expect("the first offset-zero fragment is retained");
+    let changed_dscp = ipv4_with_tos(
+        ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]),
+        (47 << 2) | 0x02,
     );
-
-    let mut different_prefix = match ipv6_fragment(&key, 1, false, &b"tail"[..]) {
-        Fragment::Ipv6(fragment) => fragment,
-        Fragment::Ipv4(_) => unreachable!(),
-    };
-    let mut prefix = different_prefix.unfragmentable_prefix.to_vec();
-    prefix[3] = 1;
-    different_prefix.unfragmentable_prefix = Bytes::from(prefix);
     assert_eq!(
-        reassembler.push(Fragment::Ipv6(different_prefix), now),
-        Err(Error::Malformed(MalformedError::InconsistentIpv6Prefix))
+        mismatched.push(changed_dscp, now),
+        Err(Error::Malformed(MalformedError::InconsistentIpv4Header))
     );
+}
+
+#[test]
+fn ipv4_reassembly_merges_ecn_dscp_and_checksum_in_either_order() {
+    let key = ipv4_key();
+    let now = Instant::now();
+    let dscp = 46 << 2;
+    let ect0 = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), dscp | 0x02);
+    let ce = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), dscp | 0x03);
+
+    for (first, second) in [(ect0.clone(), ce.clone()), (ce, ect0)] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        reassembler
+            .push(first, now)
+            .expect("the first fragment is admitted");
+        let datagram = completed(
+            reassembler
+                .push(second, now)
+                .expect("CE alongside ECT(0) is permitted"),
+        );
+        assert_eq!(datagram.bytes[1], dscp | 0x03);
+        assert_eq!(
+            packetcraftr_core::protocol::checksum(&datagram.bytes[..20]),
+            0
+        );
+        assert_eq!(&datagram.bytes[20..], b"abcdefghijkl");
+    }
+}
+
+#[test]
+fn ipv4_identical_ecn_codepoints_are_preserved() {
+    let key = ipv4_key();
+    let now = Instant::now();
+    for marking in [0x00_u8, 0x01, 0x02, 0x03] {
+        let first = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), marking);
+        let tail = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), marking);
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        reassembler
+            .push(first, now)
+            .expect("the first fragment is admitted");
+        let datagram = completed(
+            reassembler
+                .push(tail, now)
+                .expect("tail completes the datagram"),
+        );
+        assert_eq!(datagram.bytes[1], marking);
+    }
+}
+
+#[test]
+fn ipv4_not_ect_with_ce_fails_typed_in_either_order() {
+    let key = ipv4_key();
+    let now = Instant::now();
+    let not_ect = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x00);
+    let ce = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x03);
+
+    for (first, second) in [(not_ect.clone(), ce.clone()), (ce, not_ect)] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        reassembler
+            .push(first, now)
+            .expect("the first fragment is admitted");
+        assert_eq!(
+            reassembler.push(second, now),
+            Err(Error::Malformed(MalformedError::InconsistentEcn))
+        );
+        assert_eq!(reassembler.datagram_count(), 1);
+    }
+}
+
+#[test]
+fn ipv4_unspecified_ecn_mixtures_resolve_conservatively() {
+    let key = ipv4_key();
+    let now = Instant::now();
+
+    // Not-ECT with ECT(x) and no CE is unspecified by RFC 3168; reassembly
+    // keeps Not-ECT.
+    let not_ect = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x00);
+    let ect0 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x02);
+    let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+    reassembler
+        .push(not_ect, now)
+        .expect("the first fragment is admitted");
+    let datagram = completed(
+        reassembler
+            .push(ect0, now)
+            .expect("tail completes the datagram"),
+    );
+    assert_eq!(datagram.bytes[1] & 0x03, 0x00);
+
+    // ECT(0) with ECT(1): the lower marking wins in either arrival order.
+    let ect0 = ipv4_with_tos(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x02);
+    let ect1 = ipv4_with_tos(ipv4_fragment(&key, 1, false, &b"ijkl"[..]), 0x01);
+    for (first, second) in [(ect0.clone(), ect1.clone()), (ect1, ect0)] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        reassembler
+            .push(first, now)
+            .expect("the first fragment is admitted");
+        let datagram = completed(
+            reassembler
+                .push(second, now)
+                .expect("tail completes the datagram"),
+        );
+        assert_eq!(datagram.bytes[1] & 0x03, 0x02);
+    }
+}
+
+#[test]
+fn ipv6_reassembly_merges_ecn_in_either_order() {
+    let key = ipv6_key();
+    let now = Instant::now();
+    let ect0 = ipv6_with_traffic_class(ipv6_fragment(&key, 0, true, &b"abcdefgh"[..]), 0x02);
+    let ce = ipv6_with_traffic_class(ipv6_fragment(&key, 1, false, &b"ijkl"[..]), 0x03);
+
+    for (first, second) in [(ect0.clone(), ce.clone()), (ce, ect0)] {
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        reassembler
+            .push(first, now)
+            .expect("the first fragment is admitted");
+        let datagram = completed(
+            reassembler
+                .push(second, now)
+                .expect("CE alongside ECT(0) is permitted"),
+        );
+        assert_eq!(datagram.bytes[1] & 0x30, 0x30);
+    }
 }
 
 proptest! {

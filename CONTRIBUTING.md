@@ -78,6 +78,10 @@ and deletes a namespace-local dummy interface. No external destinations are used
 For restricted hosts, prebuild the test executable and use `sudo` with
 `--native-test-binary PATH`; the launcher maps namespace root to the invoking
 checkout owner's UID. It does not relax host namespace policy or file permissions.
+On util-linux before 2.40, that `sudo` run asks `newuidmap`/`newgidmap` to apply
+the mapping, so authorize the owner's UID and GID for root in `/etc/subuid` and
+`/etc/subgid` (for example `root:1001:1`); newer util-linux writes the mapping
+directly and needs no subid entry.
 
 When these validation jobs run, missing prerequisites, failed namespace
 creation and skipped scenarios are failures, never passing native evidence.

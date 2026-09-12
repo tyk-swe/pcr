@@ -140,7 +140,11 @@ jobs:
         run: |
           rustup toolchain install
           sudo apt-get update
-          sudo apt-get install --yes libpcap-dev iproute2 util-linux
+          sudo apt-get install --yes libpcap-dev iproute2 util-linux uidmap
+      - name: Authorize mapping the checkout owner into the namespace
+        run: |
+          echo "root:$(id -u):1" | sudo tee -a /etc/subuid
+          echo "root:$(id -g):1" | sudo tee -a /etc/subgid
       - name: Build native CLI and native contract executable
         run: |
           cargo build --locked --release -p packetcraftr-cli --all-features

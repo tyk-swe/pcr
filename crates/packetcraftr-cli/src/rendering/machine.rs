@@ -12,20 +12,39 @@ use serde::Serialize;
 
 use crate::errors::CliError;
 
+#[derive(Debug)]
+pub(crate) enum BoundedJsonError {
+    Limit,
+    Serialize(serde_json::Error),
+}
+
+impl BoundedJsonError {
+    pub(crate) fn into_cli_error(self, limit: impl FnOnce() -> CliError) -> CliError {
+        match self {
+            Self::Limit => limit(),
+            Self::Serialize(source) => {
+                CliError::new(Kind::Internal, format!("serialize output failed: {source}"))
+            }
+        }
+    }
+}
+
 pub(crate) fn bounded_json_len(
     value: &impl Serialize,
     limit: usize,
-) -> Result<usize, serde_json::Error> {
+) -> Result<usize, BoundedJsonError> {
     struct Counter {
         remaining: usize,
+        exceeded: bool,
     }
 
     impl Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.remaining = self
-                .remaining
-                .checked_sub(bytes.len())
-                .ok_or_else(|| io::Error::other("JSON output limit"))?;
+            if bytes.len() > self.remaining {
+                self.exceeded = true;
+                return Err(io::Error::other("JSON output limit"));
+            }
+            self.remaining -= bytes.len();
             Ok(bytes.len())
         }
 
@@ -34,9 +53,15 @@ pub(crate) fn bounded_json_len(
         }
     }
 
-    let mut counter = Counter { remaining: limit };
-    serde_json::to_writer(&mut counter, value)?;
-    Ok(limit - counter.remaining)
+    let mut counter = Counter {
+        remaining: limit,
+        exceeded: false,
+    };
+    match serde_json::to_writer(&mut counter, value) {
+        Ok(()) => Ok(limit - counter.remaining),
+        Err(_) if counter.exceeded => Err(BoundedJsonError::Limit),
+        Err(source) => Err(BoundedJsonError::Serialize(source)),
+    }
 }
 
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
@@ -87,7 +112,7 @@ mod tests {
     use serde::Serialize;
     use serde::ser::{Error as _, SerializeSeq};
 
-    use super::bounded_json_len;
+    use super::{BoundedJsonError, bounded_json_len};
 
     struct Instrumented<'a> {
         second: &'a Cell<bool>,
@@ -130,8 +155,17 @@ mod tests {
         for value in cases {
             let n = serde_json::to_vec(&value).unwrap().len();
             assert_eq!(bounded_json_len(&value, n).unwrap(), n, "{value}");
-            assert!(bounded_json_len(&value, n - 1).is_err(), "{value}");
-            assert!(bounded_json_len(&value, 0).is_err(), "{value}");
+            assert!(
+                matches!(
+                    bounded_json_len(&value, n - 1),
+                    Err(BoundedJsonError::Limit)
+                ),
+                "{value}"
+            );
+            assert!(
+                matches!(bounded_json_len(&value, 0), Err(BoundedJsonError::Limit)),
+                "{value}"
+            );
             assert_eq!(bounded_json_len(&value, usize::MAX).unwrap(), n, "{value}");
         }
     }
@@ -140,13 +174,19 @@ mod tests {
     fn bounded_json_len_stops_serializing_at_the_limit() {
         let second = Cell::new(false);
         let value = Instrumented { second: &second };
-        assert!(bounded_json_len(&value, 1).is_err());
+        assert!(matches!(
+            bounded_json_len(&value, 1),
+            Err(BoundedJsonError::Limit)
+        ));
         assert!(!second.get());
     }
 
     #[test]
     fn bounded_json_len_preserves_serialization_failures() {
         let error = bounded_json_len(&FailingSerialization, usize::MAX).unwrap_err();
-        assert_eq!(error.to_string(), "fixture serialization failure");
+        let BoundedJsonError::Serialize(source) = error else {
+            panic!("expected serialization failure, got {error:?}");
+        };
+        assert_eq!(source.to_string(), "fixture serialization failure");
     }
 }

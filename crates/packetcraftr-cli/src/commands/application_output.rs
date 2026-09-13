@@ -29,11 +29,13 @@ impl<'a> EventOutput<'a> {
         retained: &mut Vec<T>,
         render_text: impl FnOnce(&T) -> Result<(), CliError>,
     ) -> Result<(), CliError> {
-        let bytes = bounded_json_len(&value, self.remaining).map_err(|_| {
-            CliError::new(
-                Kind::Policy,
-                "application output exceeds --max-application-output-bytes",
-            )
+        let bytes = bounded_json_len(&value, self.remaining).map_err(|error| {
+            error.into_cli_error(|| {
+                CliError::new(
+                    Kind::Policy,
+                    "application output exceeds --max-application-output-bytes",
+                )
+            })
         })?;
         self.remaining -= bytes;
         match self.format {
@@ -173,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_sizing_preserves_the_remaining_budget() {
+    fn failed_sizing_and_serialization_preserve_the_remaining_budget() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer.clone());
         let mut output = EventOutput::new(Format::Ndjson, &stream, 4);
@@ -197,10 +199,11 @@ mod tests {
                 Ok(())
             })
             .unwrap_err();
-        assert_eq!(error.classification.kind, Kind::Policy);
+        assert_eq!(error.classification.kind, Kind::Internal);
+        assert_eq!(error.exit_code(), 70);
         assert_eq!(
             error.message,
-            "application output exceeds --max-application-output-bytes"
+            "serialize output failed: fixture serialization failure"
         );
         assert!(failures.is_empty());
         assert!(buffer.records().is_empty());

@@ -145,7 +145,8 @@ impl Projector {
                 columns: self.projection.columns(),
                 row: &row,
             };
-            let bytes = bounded_json_len(&event, self.remaining).map_err(|_| self.limit())?;
+            let bytes = bounded_json_len(&event, self.remaining)
+                .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
             stream.emit_data(
                 output::projection::RowEvent {
@@ -155,7 +156,8 @@ impl Projector {
                 Vec::new(),
             )?;
         } else {
-            let bytes = bounded_json_len(&row, self.remaining).map_err(|_| self.limit())?;
+            let bytes = bounded_json_len(&row, self.remaining)
+                .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
             self.rows.push(row);
         }

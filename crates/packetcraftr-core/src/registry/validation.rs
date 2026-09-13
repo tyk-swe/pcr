@@ -17,7 +17,7 @@ impl super::builder::Builder {
     /// # Panics
     ///
     /// Panics only if the builder corrupts a binding table; registration errors return
-    /// [`Error`](crate::registry::Error).
+    /// [`Error`].
     pub fn build(mut self) -> Result<super::lookup::Registry, Error> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {

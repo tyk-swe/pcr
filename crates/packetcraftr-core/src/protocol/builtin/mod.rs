@@ -4,8 +4,8 @@
 //! Deterministic registration of every codec and capture root declared by the
 //! built-in capability tables.
 //!
-//! Call [`registry`] for the immutable default registry. For codec and capture
-//! discovery, use [`super::BuiltinProtocol::ALL`] and
+//! Call [`registry`](fn@registry) for the immutable default registry. For codec
+//! and capture discovery, use [`super::BuiltinProtocol::ALL`] and
 //! [`super::capture::BUILTIN_CAPTURE_ROOTS`].
 //!
 //! [`registry_with`] is the seam for callers that need one more binding than

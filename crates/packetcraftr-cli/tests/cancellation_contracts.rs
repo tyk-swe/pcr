@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![cfg(target_os = "linux")]
+// These contracts observe child processes through procfs and deliver INT/TERM
+// through a `kill` utility; the package build script enables the gate on
+// targets that provide both facilities.
+#![cfg(packetcraftr_test_procfs)]
 
 use std::io::{Cursor, Write};
 use std::net::Ipv4Addr;
@@ -108,6 +111,7 @@ impl Drop for Running {
 
 #[test]
 fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() {
+    support::require_procfs();
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
     {
@@ -175,6 +179,7 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
 fn build_retains_signal_termination_while_recipe_stdin_is_open() {
     use std::os::unix::process::ExitStatusExt;
 
+    support::require_procfs();
     for (signal, number) in [("INT", 2), ("TERM", 15)] {
         let mut process = Running::start(&["--output", "ndjson", "build"]);
         process.wait_until(|p| {
@@ -192,6 +197,7 @@ fn build_retains_signal_termination_while_recipe_stdin_is_open() {
 
 #[test]
 fn cancellation_during_build_json_publication_keeps_one_complete_document() {
+    support::require_procfs();
     // The rendered payload exceeds the pipe capacity, keeping publication
     // blocked until the signal has been handled and finish drains stdout.
     let payload_len = 64 * 1024;
@@ -223,6 +229,7 @@ fn cancellation_during_build_json_publication_keeps_one_complete_document() {
 
 #[test]
 fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
+    support::require_procfs();
     for format in [Format::Pcap, Format::PcapNg] {
         let mut prefix = Vec::new();
         let mut writer = Writer::new(&mut prefix, format, LinkType::IPV4).unwrap();
@@ -286,6 +293,7 @@ fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
 
 #[test]
 fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
+    support::require_procfs();
     for format in ["text", "json", "ndjson"] {
         for signal in ["INT", "TERM"] {
             let mut process = Running::start(&[

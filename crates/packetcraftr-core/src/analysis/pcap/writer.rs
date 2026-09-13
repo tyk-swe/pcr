@@ -59,7 +59,8 @@ impl OutputFailure {
 /// A streaming writer that creates a new capture from frames.
 ///
 /// It emits generated classic packet records or PCAPNG Enhanced Packet Blocks;
-/// use [`super::rewrite`] when source block structure must be retained.
+/// use [`rewrite`](fn@super::rewrite) when source block structure must be
+/// retained.
 pub struct Writer<W> {
     inner: W,
     pub(super) state: WriterState,

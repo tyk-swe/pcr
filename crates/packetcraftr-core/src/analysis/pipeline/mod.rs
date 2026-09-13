@@ -692,8 +692,8 @@ fn decode_derived(
 }
 
 /// Reads one physical frame and charges it against the aggregate frame and
-/// captured-byte ceilings, which the capture reader's own [`pcap::Limits`]
-/// enforces.
+/// captured-byte ceilings, which the capture reader's own
+/// [`pcap::Limits`](crate::analysis::pcap::Limits) enforces.
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
     frames_read: &mut u64,

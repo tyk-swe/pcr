@@ -354,9 +354,12 @@ fn normalization_rejects_timestamps_not_representable_in_capture_time() {
     }
 }
 
-#[cfg(target_os = "linux")]
+// The write-failure case sinks stdout into /dev/full; the package build script
+// enables the gate on targets that provide it.
+#[cfg(packetcraftr_test_dev_full)]
 #[test]
 fn normalized_stdout_failure_exits_with_an_io_error() {
+    support::require_dev_full();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(&capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]))
         .unwrap();
@@ -372,7 +375,7 @@ fn normalized_stdout_failure_exits_with_an_io_error() {
             std::fs::OpenOptions::new()
                 .write(true)
                 .open("/dev/full")
-                .unwrap(),
+                .expect("/dev/full must be writable for the write-failure contract"),
         )
         .output()
         .unwrap();

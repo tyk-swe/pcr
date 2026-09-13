@@ -78,13 +78,12 @@ fn run_command_with_open_stdin(mut command: Command) -> Output {
     }
 }
 
-#[cfg(target_os = "linux")]
+// Allocating a pty for the terminal-stdin cases uses the util-linux `script`
+// flags; the package build script enables the gate on targets that ship them.
+#[cfg(packetcraftr_test_util_linux)]
 #[test]
 fn capture_commands_reject_terminal_stdin_before_reading() {
-    if Command::new("script").arg("--version").output().is_err() {
-        eprintln!("terminal-stdin process test requires util-linux script");
-        return;
-    }
+    support::require_util_linux_script();
     for arguments in [
         "read -",
         "expert -",
@@ -940,12 +939,10 @@ fn published_quick_start_capture_reads_as_a_complete_stream() {
     assert_eq!(records.last().unwrap()["event"], "complete");
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(packetcraftr_test_util_linux)]
 #[test]
 fn binary_stdout_requires_deliberate_override_on_a_terminal() {
-    if Command::new("script").arg("--version").output().is_err() {
-        return;
-    }
+    support::require_util_linux_script();
     let fixture = tempfile::NamedTempFile::new().unwrap();
     let mut writer = Writer::pcap(fixture.reopen().unwrap(), LinkType::ETHERNET).unwrap();
     writer

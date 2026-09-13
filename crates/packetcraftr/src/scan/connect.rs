@@ -189,24 +189,25 @@ fn execution(
     )
 }
 
-fn run_observed<P, A, C, F>(
+/// The authorized connect plan: every endpoint to probe, the total attempt
+/// count, the pacing delay, the approved socket budget, and the metadata the
+/// summary reports.
+struct Planned {
+    endpoints: Vec<SocketAddr>,
+    count: usize,
+    delay: Duration,
+    budget: SocketBudget,
+    addresses: Vec<IpAddr>,
+    planned_duration: Duration,
+}
+
+/// Validates the connect-specific request, resolves the declared targets, and
+/// approves the complete socket budget before any connection is scheduled.
+fn planned<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
-    provider: Arc<P>,
-    clock: &mut C,
-    mut emit: F,
-) -> Result<Summary, Error>
-where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
-    A: Authorizer,
-    C: Clock,
-    F: FnMut(Probe, &Deadline) -> Result<(), Error>,
-{
-    let started = Instant::now();
-    let mut deadline =
-        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(WORKFLOW, &deadline)?;
+    deadline: &Deadline,
+) -> Result<Planned, Error> {
     request.validate()?;
     if request.transport != Transport::Tcp {
         return Err(invalid(
@@ -226,7 +227,7 @@ where
     if ports.contains(&0) {
         return Err(invalid("port", 0, "TCP connect requires nonzero ports"));
     }
-    let addresses = super::targets::resolve(request, authorizer, &deadline)?;
+    let addresses = super::targets::resolve(request, authorizer, deadline)?;
     if addresses.is_empty() {
         return Err(Error::new(
             WORKFLOW,
@@ -273,121 +274,183 @@ where
     approve_operation(
         authorizer,
         Operation::Socket(operation),
-        &deadline,
+        deadline,
         &WORKFLOW,
     )?;
+    Ok(Planned {
+        endpoints,
+        count,
+        delay,
+        budget,
+        addresses,
+        planned_duration,
+    })
+}
+
+/// Approves and starts one connection attempt, returning the pending socket.
+fn admit_next<P, A, C>(
+    request: &Request,
+    planned: &Planned,
+    next: usize,
+    authorizer: &mut A,
+    deadline: &Deadline,
+    provider: &Arc<P>,
+    clock: &mut C,
+) -> Result<Active<P::Stream>, Error>
+where
+    P: Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+    A: Authorizer,
+    C: Clock,
+{
+    let endpoint = planned.endpoints[next % planned.endpoints.len()];
+    let attempt = (next / planned.endpoints.len()) as u32 + 1;
+    let final_endpoints = [endpoint];
+    let operation = SocketOperation::new(&final_endpoints, planned.budget)
+        .map_err(|source| execution(next as u64, source))?;
+    approve_operation(
+        authorizer,
+        Operation::Socket(operation),
+        deadline,
+        &WORKFLOW,
+    )?;
+    let timeout = deadline
+        .bounded_timeout(request.timeout)
+        .map_err(|source| {
+            Error::new(
+                WORKFLOW,
+                ErrorKind::DurationLimit {
+                    actual: source.actual,
+                    limit: source.limit,
+                },
+            )
+        })?;
+    let admitted = Instant::now();
+    let scheduled_at = SystemTime::now();
+    let pending = tcp::start_connect(
+        Arc::clone(provider),
+        endpoint,
+        timeout,
+        clock.cancellation(),
+    )
+    .map_err(|source| execution(next as u64, source))?;
+    Ok(Active {
+        pending,
+        sequence: next as u64,
+        endpoint,
+        attempt,
+        started: admitted,
+        scheduled_at,
+        timeout,
+    })
+}
+
+/// Polls one pending connection, removing and settling it when it finished or
+/// exceeded its deadline. `None` means it is still pending.
+fn settle_active<S: tcp::Stream>(
+    active: &mut Vec<Active<S>>,
+    index: usize,
+) -> Result<Option<Probe>, Error> {
+    let result = active[index]
+        .pending
+        .poll()
+        .map_err(|source| execution(active[index].sequence, source))?;
+    if let Some(result) = result {
+        let entry = active.remove(index);
+        return Ok(Some(finish_probe(entry, result)?));
+    }
+    if active[index].started.elapsed() < active[index].timeout {
+        return Ok(None);
+    }
+    let mut entry = active.remove(index);
+    let attempted = entry.pending.cancel();
+    Ok(Some(Probe {
+        sequence: entry.sequence,
+        endpoint: entry.endpoint,
+        attempt: entry.attempt,
+        attempted,
+        connect_succeeded: None,
+        outcome: Outcome::DeadlineExpired,
+        scheduled_at: entry.scheduled_at,
+        finished_at: None,
+        elapsed: entry.started.elapsed(),
+        local: None,
+        error: None,
+    }))
+}
+
+fn run_observed<P, A, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    provider: Arc<P>,
+    clock: &mut C,
+    mut emit: F,
+) -> Result<Summary, Error>
+where
+    P: Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+    A: Authorizer,
+    C: Clock,
+    F: FnMut(Probe, &Deadline) -> Result<(), Error>,
+{
+    let started = Instant::now();
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+    enforce_deadline(WORKFLOW, &deadline)?;
+    let planned = planned(request, authorizer, &deadline)?;
     let mut stats = Statistics::default();
     let mut active: Vec<Active<P::Stream>> = Vec::new();
     let mut next = 0usize;
     let mut next_start = clock.now();
     let mut evidence_bytes = 0usize;
-    while next < count || !active.is_empty() {
+    while next < planned.count || !active.is_empty() {
         enforce_deadline(WORKFLOW, &deadline)?;
-        while next < count && active.len() < request.max_in_flight && clock.now() >= next_start {
-            let endpoint = endpoints[next % endpoints.len()];
-            let attempt = (next / endpoints.len()) as u32 + 1;
-            let final_endpoints = [endpoint];
-            let operation = SocketOperation::new(&final_endpoints, budget)
-                .map_err(|source| execution(next as u64, source))?;
-            approve_operation(
-                authorizer,
-                Operation::Socket(operation),
-                &deadline,
-                &WORKFLOW,
-            )?;
-            let timeout = deadline
-                .bounded_timeout(request.timeout)
-                .map_err(|source| {
-                    Error::new(
-                        WORKFLOW,
-                        ErrorKind::DurationLimit {
-                            actual: source.actual,
-                            limit: source.limit,
-                        },
-                    )
-                })?;
-            let admitted = Instant::now();
-            let scheduled_at = SystemTime::now();
-            let pending = tcp::start_connect(
-                Arc::clone(&provider),
-                endpoint,
-                timeout,
-                clock.cancellation(),
-            )
-            .map_err(|source| execution(next as u64, source))?;
-            active.push(Active {
-                pending,
-                sequence: next as u64,
-                endpoint,
-                attempt,
-                started: admitted,
-                scheduled_at,
-                timeout,
-            });
+        while next < planned.count
+            && active.len() < request.max_in_flight
+            && clock.now() >= next_start
+        {
+            active.push(admit_next(
+                request, &planned, next, authorizer, &deadline, &provider, clock,
+            )?);
             stats.connections_scheduled += 1;
             next += 1;
             next_start = clock
                 .now()
-                .checked_add(delay)
+                .checked_add(planned.delay)
                 .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
         }
         let mut index = 0;
         while index < active.len() {
             enforce_deadline(WORKFLOW, &deadline)?;
-            let result = active[index]
-                .pending
-                .poll()
-                .map_err(|source| execution(active[index].sequence, source))?;
-            let probe = if let Some(result) = result {
-                let entry = active.remove(index);
-                Some(finish_probe(entry, result)?)
-            } else if active[index].started.elapsed() >= active[index].timeout {
-                let mut entry = active.remove(index);
-                let attempted = entry.pending.cancel();
-                Some(Probe {
-                    sequence: entry.sequence,
-                    endpoint: entry.endpoint,
-                    attempt: entry.attempt,
-                    attempted,
-                    connect_succeeded: None,
-                    outcome: Outcome::DeadlineExpired,
-                    scheduled_at: entry.scheduled_at,
-                    finished_at: None,
-                    elapsed: entry.started.elapsed(),
-                    local: None,
-                    error: None,
-                })
-            } else {
+            let Some(probe) = settle_active(&mut active, index)? else {
                 index += 1;
-                None
+                continue;
             };
-            if let Some(probe) = probe {
-                evidence_bytes = evidence_bytes
-                    .checked_add(std::mem::size_of::<Probe>())
-                    .and_then(|bytes| {
-                        bytes.checked_add(
-                            probe
-                                .error
-                                .as_ref()
-                                .map_or(0, |error| error.to_string().len()),
-                        )
-                    })
-                    .filter(|bytes| *bytes <= request.limits.max_evidence_bytes)
-                    .ok_or_else(|| {
-                        invalid(
-                            "max_evidence_bytes",
-                            request.limits.max_evidence_bytes,
-                            "socket evidence budget exceeded",
-                        )
-                    })?;
-                stats.connections_attempted += u64::from(probe.attempted);
-                stats.connections_succeeded += u64::from(probe.connect_succeeded == Some(true));
-                emit(probe, &deadline)?;
-            }
+            evidence_bytes = evidence_bytes
+                .checked_add(std::mem::size_of::<Probe>())
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        probe
+                            .error
+                            .as_ref()
+                            .map_or(0, |error| error.to_string().len()),
+                    )
+                })
+                .filter(|bytes| *bytes <= request.limits.max_evidence_bytes)
+                .ok_or_else(|| {
+                    invalid(
+                        "max_evidence_bytes",
+                        request.limits.max_evidence_bytes,
+                        "socket evidence budget exceeded",
+                    )
+                })?;
+            stats.connections_attempted += u64::from(probe.attempted);
+            stats.connections_succeeded += u64::from(probe.connect_succeeded == Some(true));
+            emit(probe, &deadline)?;
         }
-        if next < count || !active.is_empty() {
+        if next < planned.count || !active.is_empty() {
             let mut wait = Duration::from_millis(1);
-            if next < count && active.len() < request.max_in_flight {
+            if next < planned.count && active.len() < request.max_in_flight {
                 wait = wait.min(next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
@@ -418,8 +481,8 @@ where
     stats.elapsed = started.elapsed();
     Ok(Summary {
         target: request.targets.to_string(),
-        resolved_addresses: addresses,
-        planned_duration,
+        resolved_addresses: planned.addresses,
+        planned_duration: planned.planned_duration,
         stats,
     })
 }

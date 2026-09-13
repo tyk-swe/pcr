@@ -146,60 +146,13 @@ where
 {
     let started = Instant::now();
     let initial = options.budget;
-    let validated = request.validate();
-    let mut report = Report {
-        requested_interfaces: if validated.is_ok() {
-            request.interfaces.clone()
-        } else {
-            Vec::new()
-        },
-        sources: Vec::new(),
-        frames_delivered: 0,
-        stats: Stats::default(),
-        budget: options.budget,
-        stop: StopReason::Failure,
-        capture_statistics_complete: false,
-        diagnostics: Vec::new(),
-    };
-    if let Err(error) = validated {
-        return Err(failure(Cause::Native(Box::new(error)), report, None));
-    }
-    if options.window > native::MAX_TIMEOUT || started.checked_add(options.window).is_none() {
-        return Err(failure(
-            Cause::Invalid("capture window exceeds the supported range"),
-            report,
-            None,
-        ));
-    }
-    if let Some(signal) = &options.cancellation
-        && let Err(error) = signal.check()
-    {
-        return Err(failure(Cause::Cancelled(error), report, None));
-    }
-    let mut group = match group::Group::arm(provider, request, options.cancellation.clone()) {
-        Ok(group) => group,
-        Err(error) => {
-            replace_sources(&mut report, &error.sources);
-            finish_stats(&mut report, initial, started);
-            return Err(failure(Cause::Native(Box::new(error)), report, None));
-        }
-    };
-    let deadline = started + options.window;
-    let mut primary = None;
+    let Armed {
+        mut group,
+        mut report,
+        deadline,
+        mut primary,
+    } = armed(provider, request, &options, started)?;
     let mut source_frame = None;
-    if !options.window.is_zero() {
-        match deadline
-            .checked_duration_since(Instant::now())
-            .filter(|remaining| !remaining.is_zero())
-        {
-            Some(remaining) => {
-                if let Err(error) = group.wait_ready(remaining) {
-                    primary = Some(Cause::Native(Box::new(error)));
-                }
-            }
-            None => primary = Some(Cause::Invalid("capture window expired during activation")),
-        }
-    }
     replace_sources(&mut report, &group.snapshot());
     if primary.is_none() {
         match emit(Event::Started {
@@ -345,6 +298,86 @@ where
         Ok(report)
     }
 }
+/// The capture after activation: the armed group, the report skeleton, the
+/// capture deadline, and the first activation failure if `wait_ready` or the
+/// window produced one.
+struct Armed<C: native::Session> {
+    group: group::Group<C>,
+    report: Report,
+    deadline: Instant,
+    primary: Option<Cause>,
+}
+
+/// Validates the request, builds the report skeleton, arms the capture
+/// group, and waits for it to become ready. Every failure path already
+/// carries the partially built report inside its error.
+fn armed<P: native::Provider>(
+    provider: &P,
+    request: &group::Request,
+    options: &Options,
+    started: Instant,
+) -> Result<Armed<P::Capture>, Error> {
+    let validated = request.validate();
+    let mut report = Report {
+        requested_interfaces: if validated.is_ok() {
+            request.interfaces.clone()
+        } else {
+            Vec::new()
+        },
+        sources: Vec::new(),
+        frames_delivered: 0,
+        stats: Stats::default(),
+        budget: options.budget,
+        stop: StopReason::Failure,
+        capture_statistics_complete: false,
+        diagnostics: Vec::new(),
+    };
+    if let Err(error) = validated {
+        return Err(failure(Cause::Native(Box::new(error)), report, None));
+    }
+    if options.window > native::MAX_TIMEOUT || started.checked_add(options.window).is_none() {
+        return Err(failure(
+            Cause::Invalid("capture window exceeds the supported range"),
+            report,
+            None,
+        ));
+    }
+    if let Some(signal) = &options.cancellation
+        && let Err(error) = signal.check()
+    {
+        return Err(failure(Cause::Cancelled(error), report, None));
+    }
+    let mut group = match group::Group::arm(provider, request, options.cancellation.clone()) {
+        Ok(group) => group,
+        Err(error) => {
+            replace_sources(&mut report, &error.sources);
+            finish_stats(&mut report, options.budget, started);
+            return Err(failure(Cause::Native(Box::new(error)), report, None));
+        }
+    };
+    let deadline = started + options.window;
+    let mut primary = None;
+    if !options.window.is_zero() {
+        match deadline
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+        {
+            Some(remaining) => {
+                if let Err(error) = group.wait_ready(remaining) {
+                    primary = Some(Cause::Native(Box::new(error)));
+                }
+            }
+            None => primary = Some(Cause::Invalid("capture window expired during activation")),
+        }
+    }
+    Ok(Armed {
+        group,
+        report,
+        deadline,
+        primary,
+    })
+}
+
 fn failure(cause: Cause, report: Report, source_frame: Option<u64>) -> Error {
     Error {
         cause: Box::new(cause),

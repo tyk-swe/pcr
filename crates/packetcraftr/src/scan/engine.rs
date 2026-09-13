@@ -159,113 +159,14 @@ where
             &mut lifecycle,
         )
     } else {
-        let count = approved
-            .addresses
-            .len()
-            .saturating_mul(approved.endpoints.len())
-            .saturating_mul(request.attempts as usize);
-        if count.saturating_mul(std::mem::size_of::<Batch>()) > request.limits.max_prepared_bytes {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::PipelineExecution {
-                    source: super::pipeline::limit(
-                        "prepared descriptions",
-                        request.limits.max_prepared_bytes,
-                    ),
-                },
-            ));
-        }
-        let batches: Vec<_> = batches.collect();
-        let mut completed = vec![false; batches.len()];
-        let mut confirmed = vec![false; batches.len()];
-        let mut sent_bytes = 0u64;
-        let remaining = deadline
-            .remaining()
-            .map_err(|error| duration_limit(WORKFLOW, error.actual, error.limit))?;
-        let settings = PipelineOptions {
-            max_in_flight: request.max_in_flight,
-            probes_per_second: request.probes_per_second,
-            max_duration: remaining,
-            max_prepared_bytes: request.limits.max_prepared_bytes,
-            max_evidence_frames: request.limits.max_evidence_frames,
-            max_evidence_bytes: request.limits.max_evidence_bytes,
-            max_undecoded: request.limits.max_undecoded,
-        };
-        let result = executor.execute_pipeline(&batches, settings, &mut |event| {
-            let invalid = |index| {
-                crate::BoundaryError::from_error(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidEvidence {
-                        sequence: index as u64,
-                        message: "pipeline returned an invalid or repeated request index"
-                            .to_owned(),
-                    },
-                ))
-            };
-            match event {
-                PipelineEvent::Sent { index, sent } => {
-                    let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                    if confirmed[index] || !sent_probe_matches(&batch.probe, &sent.built().packet) {
-                        return Err(invalid(index));
-                    }
-                    confirmed[index] = true;
-                    sent_bytes = sent_bytes
-                        .checked_add(sent.bytes_sent() as u64)
-                        .ok_or_else(|| invalid(index))?;
-                    (processor.emit)(
-                        Event::Sent(super::SentProbe {
-                            probe: batch.probe.clone(),
-                            sent,
-                        }),
-                        &deadline,
-                    )
-                    .map_err(crate::BoundaryError::from_error)?;
-                }
-                PipelineEvent::Completed { index, execution } => {
-                    let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                    if completed[index] || !confirmed[index] {
-                        return Err(invalid(index));
-                    }
-                    validate_batch_evidence(
-                        WORKFLOW,
-                        std::slice::from_ref(&batch.probe),
-                        batch.timeout,
-                        &execution,
-                        request.limits.evidence(),
-                        sent_probe_matches,
-                    )
-                    .map_err(crate::BoundaryError::from_error)?;
-                    processor
-                        .process_batch(batch, execution, &deadline)
-                        .map_err(crate::BoundaryError::from_error)?;
-                    completed[index] = true;
-                }
-                PipelineEvent::Undecoded { frame } => processor
-                    .retain_undecoded(vec![frame], &deadline)
-                    .map_err(crate::BoundaryError::from_error)?,
-                PipelineEvent::Diagnostic(diagnostic) => processor
-                    .record_diagnostics(vec![diagnostic], &deadline)
-                    .map_err(crate::BoundaryError::from_error)?,
-            }
-            Ok(())
-        });
-        match result {
-            Ok(stats) => {
-                if completed.iter().any(|done| !*done)
-                    || stats.packets_attempted != batches.len() as u64
-                    || stats.packets_completed != batches.len() as u64
-                    || stats.bytes != sent_bytes
-                {
-                    return Err(Error::new(WORKFLOW,ErrorKind::InvalidEvidence {sequence:0,message:"pipeline completion statistics disagree with validated sends/outcomes".to_owned()}));
-                }
-                enforce_deadline(WORKFLOW, &deadline)?;
-                Ok(stats)
-            }
-            Err(source) => Err(Error::new(
-                WORKFLOW,
-                ErrorKind::PipelineExecution { source },
-            )),
-        }
+        run_pipelined(
+            request,
+            executor,
+            &mut processor,
+            &deadline,
+            batches,
+            &approved,
+        )
     };
     let stats = stats?;
     let mut counts = ClassificationCounts::default();
@@ -280,6 +181,138 @@ where
         counts,
         stats,
     })
+}
+
+/// Executes the scan through the executor's rolling packet window, publishing
+/// the same events the serial path emits. The completion check rejects a
+/// pipeline whose reported statistics disagree with the validated sends.
+fn run_pipelined<E, F, B>(
+    request: &Request,
+    executor: &mut E,
+    processor: &mut Processor<'_, F>,
+    deadline: &Deadline,
+    batches: B,
+    approved: &ApprovedScan,
+) -> Result<crate::Stats, Error>
+where
+    E: Executor<Batch>,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+    B: Iterator<Item = Batch>,
+{
+    let count = approved
+        .addresses
+        .len()
+        .saturating_mul(approved.endpoints.len())
+        .saturating_mul(request.attempts as usize);
+    if count.saturating_mul(std::mem::size_of::<Batch>()) > request.limits.max_prepared_bytes {
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::PipelineExecution {
+                source: super::pipeline::limit(
+                    "prepared descriptions",
+                    request.limits.max_prepared_bytes,
+                ),
+            },
+        ));
+    }
+    let batches: Vec<_> = batches.collect();
+    let mut completed = vec![false; batches.len()];
+    let mut confirmed = vec![false; batches.len()];
+    let mut sent_bytes = 0u64;
+    let remaining = deadline
+        .remaining()
+        .map_err(|error| duration_limit(WORKFLOW, error.actual, error.limit))?;
+    let settings = PipelineOptions {
+        max_in_flight: request.max_in_flight,
+        probes_per_second: request.probes_per_second,
+        max_duration: remaining,
+        max_prepared_bytes: request.limits.max_prepared_bytes,
+        max_evidence_frames: request.limits.max_evidence_frames,
+        max_evidence_bytes: request.limits.max_evidence_bytes,
+        max_undecoded: request.limits.max_undecoded,
+    };
+    let result = executor.execute_pipeline(&batches, settings, &mut |event| {
+        let invalid = |index| {
+            crate::BoundaryError::from_error(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidEvidence {
+                    sequence: index as u64,
+                    message: "pipeline returned an invalid or repeated request index".to_owned(),
+                },
+            ))
+        };
+        match event {
+            PipelineEvent::Sent { index, sent } => {
+                let batch = batches.get(index).ok_or_else(|| invalid(index))?;
+                if confirmed[index] || !sent_probe_matches(&batch.probe, &sent.built().packet) {
+                    return Err(invalid(index));
+                }
+                confirmed[index] = true;
+                sent_bytes = sent_bytes
+                    .checked_add(sent.bytes_sent() as u64)
+                    .ok_or_else(|| invalid(index))?;
+                (processor.emit)(
+                    Event::Sent(super::SentProbe {
+                        probe: batch.probe.clone(),
+                        sent,
+                    }),
+                    deadline,
+                )
+                .map_err(crate::BoundaryError::from_error)?;
+            }
+            PipelineEvent::Completed { index, execution } => {
+                let batch = batches.get(index).ok_or_else(|| invalid(index))?;
+                if completed[index] || !confirmed[index] {
+                    return Err(invalid(index));
+                }
+                validate_batch_evidence(
+                    WORKFLOW,
+                    std::slice::from_ref(&batch.probe),
+                    batch.timeout,
+                    &execution,
+                    request.limits.evidence(),
+                    sent_probe_matches,
+                )
+                .map_err(crate::BoundaryError::from_error)?;
+                processor
+                    .process_batch(batch, execution, deadline)
+                    .map_err(crate::BoundaryError::from_error)?;
+                completed[index] = true;
+            }
+            PipelineEvent::Undecoded { frame } => processor
+                .retain_undecoded(vec![frame], deadline)
+                .map_err(crate::BoundaryError::from_error)?,
+            PipelineEvent::Diagnostic(diagnostic) => processor
+                .record_diagnostics(vec![diagnostic], deadline)
+                .map_err(crate::BoundaryError::from_error)?,
+        }
+        Ok(())
+    });
+    match result {
+        Ok(stats) => {
+            if completed.iter().any(|done| !*done)
+                || stats.packets_attempted != batches.len() as u64
+                || stats.packets_completed != batches.len() as u64
+                || stats.bytes != sent_bytes
+            {
+                return Err(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidEvidence {
+                        sequence: 0,
+                        message:
+                            "pipeline completion statistics disagree with validated sends/outcomes"
+                                .to_owned(),
+                    },
+                ));
+            }
+            enforce_deadline(WORKFLOW, deadline)?;
+            Ok(stats)
+        }
+        Err(source) => Err(Error::new(
+            WORKFLOW,
+            ErrorKind::PipelineExecution { source },
+        )),
+    }
 }
 
 #[derive(Default)]

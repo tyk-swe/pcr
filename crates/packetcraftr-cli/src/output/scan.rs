@@ -53,6 +53,7 @@ pub struct Probe {
     pub application: Option<packetcraftr::scan::profile::Evidence>,
 }
 
+/// Final per-endpoint rollup: the winning classification and every probe.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Endpoint {
     pub address: IpAddr,
@@ -117,6 +118,7 @@ impl Report {
     }
 }
 
+/// A transmitted probe packet with its destination and timing evidence.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Sent {
     pub sequence: u64,
@@ -266,11 +268,14 @@ impl crate::output::stream::StreamRecord for Event {
     }
 }
 
+/// A probe still in flight when the pipeline failed, with its best response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Pending {
     pub sent: Sent,
     pub response: Option<Captured>,
 }
+
+/// The probe being prepared when the pipeline failed, before it was sent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FailedProbe {
     pub sequence: u64,
@@ -279,6 +284,8 @@ pub struct FailedProbe {
     pub transport: Transport,
     pub attempt: u32,
 }
+
+/// Per-interface capture lifecycle and statistics for a pipeline scan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureSource {
     pub interface: packetcraftr_netio::interface::Id,
@@ -287,6 +294,8 @@ pub struct CaptureSource {
     pub statistics_valid: bool,
     pub statistics: packetcraftr_netio::capture::Statistics,
 }
+
+/// Pipeline failure report: partial statistics and every incomplete probe.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Failure {
     pub stats: Stats,

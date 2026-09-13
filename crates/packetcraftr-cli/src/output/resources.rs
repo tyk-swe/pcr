@@ -6,6 +6,7 @@
 
 use serde::Serialize;
 
+/// A reported resource value: a measured count or a policy-bound text form.
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Value {

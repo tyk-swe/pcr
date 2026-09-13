@@ -19,6 +19,7 @@ use packetcraftr_core::analysis::pcap::Format as SourceFormat;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode as LinkMode;
 
+/// Aggregate result of `replay`; per-frame evidence is emitted separately.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub source_format: SourceFormat,

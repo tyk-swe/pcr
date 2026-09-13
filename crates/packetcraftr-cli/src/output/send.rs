@@ -22,6 +22,7 @@ pub struct MaterializedRoute {
     pub neighbor: Option<NeighborEvidence>,
 }
 
+/// Per-target neighbor-resolution evidence for a transmitted packet.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NeighborEvidence {
     pub mac_address: String,

@@ -6,9 +6,10 @@
 //! Format I/O uses [`std::io`], with optional gzip/Zstd adapters. Native
 //! libpcap/Npcap is not required for capture-file access.
 //!
-//! [`rewrite`] is the fidelity-preserving path: it validates and copies every
-//! bounded source record without changing formats. [`Writer`] creates a new
-//! capture from frames and therefore is not a source-structure rewrite API.
+//! [`rewrite`](fn@rewrite) is the fidelity-preserving path: it validates and
+//! copies every bounded source record without changing formats. [`Writer`]
+//! creates a new capture from frames and therefore is not a source-structure
+//! rewrite API.
 
 mod classic;
 pub mod compression;

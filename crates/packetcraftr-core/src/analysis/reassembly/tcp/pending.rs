@@ -216,10 +216,12 @@ fn validate_sequence_bounds(
                 limit: limits.max_bytes_per_flow,
             })?;
     if let Some(final_offset) = state.fin_offset {
-        if fin_offset.is_some_and(|incoming| incoming != final_offset) {
+        if let Some(new_offset) = fin_offset
+            && new_offset != final_offset
+        {
             return Err(MalformedError::ConflictingFinalSequence {
                 existing_offset: final_offset,
-                new_offset: fin_offset.expect("checked as present"),
+                new_offset,
             }
             .into());
         }

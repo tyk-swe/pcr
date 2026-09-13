@@ -79,3 +79,48 @@ pub(crate) fn stream(
         buffer,
     )
 }
+
+// Facility prerequisites for the compile-time capability gates the package
+// build script declares. Each assertion fails the scenario explicitly; a
+// missing prerequisite is a failed test, never a silent pass.
+
+/// Process cancellation contracts inspect `/proc` and deliver signals through
+/// a `kill` utility.
+#[cfg(packetcraftr_test_procfs)]
+pub(crate) fn require_procfs() {
+    assert!(
+        std::fs::metadata("/proc/self/status").is_ok(),
+        "process cancellation contracts require a readable procfs at /proc"
+    );
+    assert!(
+        Command::new("kill")
+            .arg("-l")
+            .output()
+            .is_ok_and(|output| output.status.success()),
+        "process cancellation contracts require a `kill` signal utility"
+    );
+}
+
+/// Terminal-stdin contracts allocate a pty with the util-linux `script` flags
+/// `--quiet --return --command`; other `script` implementations do not accept
+/// them.
+#[cfg(packetcraftr_test_util_linux)]
+pub(crate) fn require_util_linux_script() {
+    let output = Command::new("script")
+        .arg("--version")
+        .output()
+        .expect("terminal process contracts require the util-linux `script` allocator");
+    assert!(
+        output.status.success() && String::from_utf8_lossy(&output.stdout).contains("util-linux"),
+        "terminal process contracts require util-linux `script`, got: {output:?}"
+    );
+}
+
+/// Write-failure contracts sink stdout into `/dev/full`.
+#[cfg(packetcraftr_test_dev_full)]
+pub(crate) fn require_dev_full() {
+    assert!(
+        std::fs::metadata("/dev/full").is_ok(),
+        "write-failure contracts require the /dev/full sink"
+    );
+}

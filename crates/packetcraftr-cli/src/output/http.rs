@@ -12,6 +12,8 @@ use packetcraftr_core::{
     protocol::application::http,
 };
 use serde::Serialize;
+
+/// The HTTP request line or status line of a message.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StartLine {
@@ -54,6 +56,8 @@ impl From<http::StartLine> for StartLine {
         }
     }
 }
+
+/// One HTTP header field with its text form and raw wire bytes.
 #[derive(Debug, Serialize)]
 pub struct Header {
     pub name: String,
@@ -69,6 +73,8 @@ impl From<http::Header> for Header {
         }
     }
 }
+
+/// One HTTP message on a stream, with head, body progress, and outcome.
 #[derive(Debug, Serialize)]
 pub struct Message {
     pub index: u64,

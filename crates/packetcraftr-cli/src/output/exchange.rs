@@ -11,6 +11,7 @@ use crate::output::contract::Error;
 use crate::output::frame::{Captured, Decoded, Wire};
 use packetcraftr::Stats;
 
+/// One response correlated with a sent request, with its measured latency.
 #[derive(Clone, Debug, Serialize)]
 pub struct Response {
     pub request_index: u64,

@@ -71,6 +71,78 @@ struct Pending {
     rank: u8,
     charge: usize,
 }
+/// Rejects an empty or out-of-budget pipeline configuration before any
+/// resource is armed, so a scan that cannot proceed arms no capture.
+fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), BoundaryError> {
+    if batches.is_empty()
+        || batches.len() > super::MAX_PROBES
+        || options.max_in_flight == 0
+        || options.max_in_flight > 1024
+        || options.max_prepared_bytes == 0
+        || options.max_prepared_bytes > 256 * 1024 * 1024
+        || options.max_evidence_frames == 0
+        || options.max_evidence_bytes == 0
+        || options.max_evidence_bytes > capture::MAX_CAPTURE_QUEUE_BYTES
+        || options.max_evidence_frames > capture::MAX_CAPTURE_QUEUE_FRAMES
+        || options
+            .probes_per_second
+            .is_some_and(|rate| rate == 0 || rate > super::MAX_RATE)
+        || options.max_undecoded > options.max_evidence_frames
+        || options.max_duration.is_zero()
+        || options.max_duration > super::MAX_DURATION
+    {
+        return Err(limit("pipeline configuration", 1024));
+    }
+    Ok(())
+}
+
+/// Scores every pending probe a captured record could complete: interface,
+/// freshness window, transport classification, and application evidence. An
+/// empty or ambiguous result leaves the frame unattributed.
+fn ranked_candidates(
+    pending: &BTreeMap<usize, Pending>,
+    batches: &[Batch],
+    registry: &packetcraftr_core::registry::Registry,
+    decoded: &packetcraftr_core::decode::DecodedPacket,
+    native_interface: &packetcraftr_netio::interface::Id,
+    received: Instant,
+) -> Vec<(usize, u8, bool)> {
+    let mut candidates = Vec::new();
+    for (index, entry) in pending {
+        if entry.sent.route().plan.decision.interface != *native_interface
+            || received < entry.sent.timing().freshness_marker().monotonic()
+            || received > entry.deadline
+        {
+            continue;
+        }
+        if let Some(classified) = classify_response(
+            registry,
+            batches[*index].probe.endpoint.transport(),
+            &entry.sent.built().packet,
+            decoded,
+        ) {
+            let application = super::profile::evidence(
+                &batches[*index].probe,
+                &entry.sent.built().packet,
+                decoded,
+            );
+            let rank = classified.classification.rank() * 4
+                + application
+                    .as_ref()
+                    .map_or(2, super::profile::Evidence::rank);
+            let definitive = classified.classification == Classification::Open
+                && application.as_ref().is_none_or(|evidence| {
+                    matches!(
+                        evidence.status,
+                        super::profile::Status::Confirmed | super::profile::Status::Unchecked
+                    )
+                });
+            candidates.push((*index, rank, definitive));
+        }
+    }
+    candidates
+}
+
 pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
     BoundaryError::new(
         format!("scan pipeline exceeds {field}={maximum}"),
@@ -107,25 +179,7 @@ where
     N: neighbor::Resolver,
     I: transmit::Sender + capture::Provider,
 {
-    if batches.is_empty()
-        || batches.len() > super::MAX_PROBES
-        || options.max_in_flight == 0
-        || options.max_in_flight > 1024
-        || options.max_prepared_bytes == 0
-        || options.max_prepared_bytes > 256 * 1024 * 1024
-        || options.max_evidence_frames == 0
-        || options.max_evidence_bytes == 0
-        || options.max_evidence_bytes > capture::MAX_CAPTURE_QUEUE_BYTES
-        || options.max_evidence_frames > capture::MAX_CAPTURE_QUEUE_FRAMES
-        || options
-            .probes_per_second
-            .is_some_and(|rate| rate == 0 || rate > super::MAX_RATE)
-        || options.max_undecoded > options.max_evidence_frames
-        || options.max_duration.is_zero()
-        || options.max_duration > super::MAX_DURATION
-    {
-        return Err(limit("pipeline configuration", 1024));
-    }
+    validate_options(batches, &options)?;
     let started = Instant::now();
     let deadline = started
         .checked_add(options.max_duration)
@@ -333,41 +387,14 @@ where
                 }
                 continue;
             };
-            let native_interface = &plan.interfaces[record.source];
-            let mut candidates = Vec::new();
-            for (index, entry) in &pending {
-                if entry.sent.route().plan.decision.interface != *native_interface
-                    || received < entry.sent.timing().freshness_marker().monotonic()
-                    || received > entry.deadline
-                {
-                    continue;
-                }
-                if let Some(classified) = classify_response(
-                    &executor.client.registry,
-                    batches[*index].probe.endpoint.transport(),
-                    &entry.sent.built().packet,
-                    &decoded,
-                ) {
-                    let application = super::profile::evidence(
-                        &batches[*index].probe,
-                        &entry.sent.built().packet,
-                        &decoded,
-                    );
-                    let rank = classified.classification.rank() * 4
-                        + application
-                            .as_ref()
-                            .map_or(2, super::profile::Evidence::rank);
-                    let definitive = classified.classification == Classification::Open
-                        && application.as_ref().is_none_or(|evidence| {
-                            matches!(
-                                evidence.status,
-                                super::profile::Status::Confirmed
-                                    | super::profile::Status::Unchecked
-                            )
-                        });
-                    candidates.push((*index, rank, definitive));
-                }
-            }
+            let candidates = ranked_candidates(
+                &pending,
+                batches,
+                &executor.client.registry,
+                &decoded,
+                &plan.interfaces[record.source],
+                received,
+            );
             if candidates.len() != 1 {
                 if candidates.len() > 1 && diagnostics.insert("ambiguous") {
                     emit(PipelineEvent::Diagnostic(Diagnostic::warning(

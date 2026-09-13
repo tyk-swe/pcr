@@ -3,7 +3,7 @@
 
 //! Operation declarations and the policy/resolver boundary used by live workflows.
 //! Client preparation and injected workflow authorization apply the same
-//! [`Policy`](super::Policy). Discovery is authorized before it runs; final
+//! [`Policy`]. Discovery is authorized before it runs; final
 //! materialized bytes are authorized again at the transmission boundary.
 
 use std::net::IpAddr;

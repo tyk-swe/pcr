@@ -382,14 +382,12 @@ impl Files {
             slot,
             opened_at: elapsed,
         });
-        if self
-            .options
-            .rotate_bytes
-            .is_some_and(|limit| self.header_bytes > limit)
+        if let Some(limit) = self.options.rotate_bytes
+            && self.header_bytes > limit
         {
             return Err(Error::FrameTooLarge {
                 required: self.header_bytes,
-                limit: self.options.rotate_bytes.unwrap(),
+                limit,
             });
         }
         Ok(())

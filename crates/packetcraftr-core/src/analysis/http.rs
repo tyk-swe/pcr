@@ -212,8 +212,13 @@ impl Collector {
         }
         Ok(())
     }
-    fn data(&mut self, data: application::Delivery, output: &mut Vec<Event>) -> Result<(), Error> {
-        let connection = (data.stream, data.generation);
+    /// Returns the direction state for this delivery, flushing and resetting
+    /// retained state when a reused stream carries a new generation.
+    fn direction_for(
+        &mut self,
+        data: &application::Delivery,
+        output: &mut Vec<Event>,
+    ) -> Result<Direction, Error> {
         if self
             .generations
             .insert(data.stream, data.generation)
@@ -245,6 +250,12 @@ impl Collector {
                 live: None,
             };
         }
+        Ok(direction)
+    }
+
+    fn data(&mut self, data: application::Delivery, output: &mut Vec<Event>) -> Result<(), Error> {
+        let connection = (data.stream, data.generation);
+        let mut direction = self.direction_for(&data, output)?;
         let mut input = data.bytes.as_ref();
         while !input.is_empty() && !direction.disabled && !self.upgraded.contains(&connection) {
             if direction.live.is_none() {

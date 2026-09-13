@@ -128,6 +128,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   remain unchanged. See [the migration notes](docs/migration-unreleased.md).
 - DNS record and name types move to `packetcraftr_core`; malformed declared
   records now produce offline diagnostics instead of a header-only DNS layer.
+- Private-item rustdoc checks join the public documentation gate for the
+  portable, pcap-free, and full-native CI profiles. Linux process tests gate
+  on capability cfgs emitted by the CLI build script
+  (`packetcraftr_test_procfs`, `packetcraftr_test_util_linux`,
+  `packetcraftr_test_dev_full`) instead of raw `target_os` checks and fail
+  explicitly when a facility is missing. TLS handshake parsing, IP reassembly merge
+  planning, and workflow admission/activation paths split along documented
+  responsibility boundaries without changing public paths or behavior.
 
 ### Removed
 

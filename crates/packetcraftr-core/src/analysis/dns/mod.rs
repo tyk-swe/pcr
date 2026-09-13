@@ -26,23 +26,33 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 pub use transactions::{Latency, Transaction, TransactionStatus};
 
+/// The transport carrying a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
     Udp,
     Tcp,
 }
+/// The terminal state of a framed message on a stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    /// The declared wire body was fully captured.
     Complete,
+    /// The message violated wire rules or length limits.
     Malformed,
+    /// The stream ended before the declared wire body arrived.
     Incomplete,
+    /// A sequence gap in the stream made the message unrecoverable.
     Gap,
+    /// The same stream position carried conflicting bytes.
     Conflict,
+    /// The stream was reset mid-message.
     Reset,
+    /// Resource limits evicted the stream's retained state.
     Evicted,
 }
+/// One framed DNS message on a UDP flow or TCP stream.
 #[derive(Clone, Debug)]
 pub struct Message {
     pub index: u64,
@@ -59,12 +69,17 @@ pub struct Message {
     pub error: Option<DecodeError>,
     pub sources: SourceSet,
 }
+/// What the collector reports for each processed record.
 #[derive(Clone, Debug)]
 pub enum Event {
+    /// A stream-level condition that invalidated pending messages.
     Issue(StreamIssue),
+    /// A framed message reached a terminal state.
     Message(Box<Message>),
+    /// A query/response pair settled into a final status.
     Transaction(Transaction),
 }
+/// A stream-level condition attributed to one direction of a flow.
 #[derive(Clone, Debug, Serialize)]
 pub struct StreamIssue {
     pub number: u64,
@@ -72,6 +87,7 @@ pub struct StreamIssue {
     pub stream: u64,
     pub status: Status,
 }
+/// Cumulative counts over every record the collector has processed.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Summary {
     pub messages: u64,
@@ -82,6 +98,7 @@ pub struct Summary {
     pub orphan_responses: u64,
     pub duplicate_responses: u64,
 }
+
 struct Direction {
     stream: u64,
     generation: u64,
@@ -108,6 +125,11 @@ impl Direction {
         self.prefix.len() + self.body.len()
     }
 }
+/// Collects DNS messages and transactions from reassembled flow deliveries.
+///
+/// Feed it unfiltered records with TCP events and physical-source tracking
+/// enabled; it owns the wire framing, decode attempts, and query/response
+/// correlation for every configured port.
 pub struct Collector {
     limits: Limits,
     ports: Vec<u16>,

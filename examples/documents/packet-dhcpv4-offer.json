@@ -1,0 +1,765 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 62901
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.10"
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": false
+        },
+        "dscp_ecn": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "fragment_offset": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "more_fragments": {
+          "type": "bool",
+          "value": false
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        },
+        "protocol": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "reserved_flag": {
+          "type": "bool",
+          "value": false
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "total_length": {
+          "type": "unsigned",
+          "value": 300
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 25410
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 68
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 280
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 67
+        }
+      }
+    },
+    {
+      "protocol": "dhcpv4",
+      "fields": {
+        "boot_file": {
+          "type": "bytes",
+          "value": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "client_address": {
+          "type": "ipv4",
+          "value": "0.0.0.0"
+        },
+        "client_hardware_address": {
+          "type": "bytes",
+          "value": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "file_options": {
+          "type": "list",
+          "value": []
+        },
+        "flags": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "gateway_address": {
+          "type": "ipv4",
+          "value": "0.0.0.0"
+        },
+        "hardware_length": {
+          "type": "unsigned",
+          "value": 6
+        },
+        "hardware_type": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "hops": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "message_type": {
+          "type": "unsigned",
+          "value": 2
+        },
+        "operation": {
+          "type": "unsigned",
+          "value": 2
+        },
+        "options": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 53
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "message_type": {
+                      "type": "unsigned",
+                      "value": 2
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 51
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "seconds": {
+                      "type": "unsigned",
+                      "value": 3600
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 54
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "address": {
+                      "type": "ipv4",
+                      "value": "192.0.2.1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "address": {
+                      "type": "ipv4",
+                      "value": "255.255.255.0"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 6
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "addresses": {
+                      "type": "list",
+                      "value": [
+                        {
+                          "type": "ipv4",
+                          "value": "192.0.2.53"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 222
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "data": {
+                      "type": "bytes",
+                      "value": [
+                        0,
+                        255
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "seconds": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "server_address": {
+          "type": "ipv4",
+          "value": "0.0.0.0"
+        },
+        "server_name": {
+          "type": "bytes",
+          "value": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "server_name_options": {
+          "type": "list",
+          "value": []
+        },
+        "transaction_id": {
+          "type": "unsigned",
+          "value": 7
+        },
+        "wire": {
+          "type": "bytes",
+          "value": [
+            2,
+            1,
+            6,
+            0,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            192,
+            0,
+            2,
+            10,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            99,
+            130,
+            83,
+            99,
+            53,
+            1,
+            2,
+            51,
+            4,
+            0,
+            0,
+            14,
+            16,
+            54,
+            4,
+            192,
+            0,
+            2,
+            1,
+            1,
+            4,
+            255,
+            255,
+            255,
+            0,
+            6,
+            4,
+            192,
+            0,
+            2,
+            53,
+            222,
+            2,
+            0,
+            255,
+            255
+          ]
+        },
+        "your_address": {
+          "type": "ipv4",
+          "value": "192.0.2.10"
+        }
+      }
+    }
+  ]
+}

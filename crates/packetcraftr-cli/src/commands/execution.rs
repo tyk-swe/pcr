@@ -58,6 +58,24 @@ where
     Req: packetcraftr::probe::Request,
     for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
 {
+    fn pipeline_capacity(&self) -> usize {
+        <Exchange<'_> as packetcraftr::probe::Executor<Req>>::pipeline_capacity(&Exchange::new(
+            &self.client,
+            self.exchange.clone(),
+        ))
+    }
+    fn execute_pipeline(
+        &mut self,
+        requests: &[Req],
+        options: packetcraftr::probe::PipelineOptions,
+        emit: &mut dyn FnMut(
+            packetcraftr::probe::PipelineEvent<Req::Execution>,
+        ) -> Result<(), core::error::BoundaryError>,
+    ) -> Result<packetcraftr::Stats, core::error::BoundaryError> {
+        self.prepared()
+            .map_err(CliError::into_boundary_error)?
+            .execute_pipeline(requests, options, emit)
+    }
     fn execute(
         &mut self,
         request: &Req,

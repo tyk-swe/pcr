@@ -169,7 +169,7 @@ fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::codec::Error> {
     };
     hello.selected_version = hello.legacy_version;
     hello.is_hello_retry_request = hello.random == HELLO_RETRY_REQUEST_RANDOM;
-    let _session_id = session_id(&mut reader)?;
+    hello.session_id = Bytes::copy_from_slice(session_id(&mut reader)?);
     hello.cipher_suite = reader.u16()?;
     hello.compression = reader.u8()?;
     if reader.is_empty() {
@@ -261,8 +261,8 @@ fn parse_client_extensions(input: &[u8], hello: &mut ClientHello) -> Result<(), 
         if !seen.insert(extension.kind) {
             return Err(invalid(NAME, "duplicate hello extension"));
         }
-        hello.extensions.push(extension);
         apply_client_extension(extension.kind, body, hello)?;
+        hello.extensions.push(extension);
     }
     Ok(())
 }
@@ -275,8 +275,8 @@ fn parse_server_extensions(input: &[u8], hello: &mut ServerHello) -> Result<(), 
         if !seen.insert(extension.kind) {
             return Err(invalid(NAME, "duplicate hello extension"));
         }
-        hello.extensions.push(extension);
         apply_server_extension(extension.kind, body, hello)?;
+        hello.extensions.push(extension);
     }
     Ok(())
 }
@@ -302,7 +302,14 @@ fn next_extension<'a>(
         ));
     }
     let body = reader.take(len)?;
-    Ok((Extension { kind, len }, body))
+    Ok((
+        Extension {
+            kind,
+            len,
+            data: Bytes::copy_from_slice(body),
+        },
+        body,
+    ))
 }
 
 fn apply_client_extension(kind: u16, body: &[u8], hello: &mut ClientHello) -> Result<(), Error> {

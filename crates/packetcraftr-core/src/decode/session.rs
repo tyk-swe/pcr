@@ -135,6 +135,7 @@ impl<'registry> DecodeSession<'registry> {
         codec.decode(
             input,
             &LayerDecodeContext {
+                parent: self.packet.iter().last().map(|layer| *layer.protocol_id()),
                 registry: self.registry,
                 allow_trailing_padding: allow_link_padding,
                 network: self.traversal.network(),

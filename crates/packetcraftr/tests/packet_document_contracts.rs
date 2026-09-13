@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Keeps `schemas/packetcraftr.packet.v1.schema.json` and the published
+//! Keeps `schemas/packetcraftr.packet.v2.schema.json` and the published
 //! `examples/documents/packet-*` files in step with the document loader.
 
 use std::fs;

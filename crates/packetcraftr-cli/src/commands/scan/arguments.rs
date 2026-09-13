@@ -13,6 +13,9 @@ use crate::command_options::{
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
+  packetcraftr scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
+  packetcraftr scan 192.0.2.10 --transport udp --ports 53,9000 \
+    --udp-profiles examples/documents/udp-profiles.json --max-in-flight 8
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
 
 Port syntax:
@@ -22,9 +25,33 @@ Port syntax:
   Expansion is bounded by --max-ports and stops as soon as another distinct
   port would exceed that limit.
 
-Pacing is serial. The planned duration is the sum of every probe timeout and
-inter-probe delay. A high --rate does not bypass capture setup or response waits;
-completed reports include the planned duration and measured exchange/pacing rate."#;
+The default window is one probe. --rate bounds probe starts across the operation;
+larger windows overlap response waits. Planned duration conservatively includes
+timeout waves and pacing delays; it is not an achieved-throughput guarantee.
+
+Multiple targets accept IP addresses, hostnames, and bounded CIDRs. --exclude
+removes numeric addresses/CIDRs; --max-targets bounds the distinct selection.
+--connect uses ordinary TCP sockets, requires no raw-packet privileges, and caps
+overlapping connections at 16. It reports socket outcomes and rejects packet
+route overrides. Hostname lookup requires the existing policy opt-in.
+
+--max-in-flight bounds overlapping raw-packet response windows (1..=1024).
+The complete plan is authorized before active discovery; capture is shared per
+interface and ready before sends. One pacing schedule, operation deadline and
+evidence budget apply across every window. --max-prepared-bytes bounds charged
+plans and active packet descriptions. Executors lacking window support reject it.
+NDJSON publishes probe_sent receipts before final probe events. Failures retain
+confirmed pending transmissions in error.scan.
+
+--udp-profiles reads a bounded packetcraftr.udp-profiles/v1 document. Profiles
+select a typed DNS query or explicit hexadecimal bytes per port, with DNS identity
+checks or bounded offset/mask checks. Unmapped ports use --udp-payload-* or the
+empty default payload. A profile's application status is separate from endpoint
+reachability: open does not imply confirmed. DNS responses must match ID, opcode,
+and questions. Configured byte checks only confirm those checks, not identity.
+A nonmatching UDP reply remains evidence while a rolling window waits for a valid
+application reply or its deadline. Profiles do not perform hidden resolution.
+"#;
 
 /// One CLI `--ports` token, parsed into the library's own port selection.
 ///
@@ -89,9 +116,22 @@ impl From<Transport> for packetcraftr::scan::Transport {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Explicit IP address or hostname to scan.
-    #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
-    pub(crate) target: String,
+    /// Use ordinary TCP connections without raw packet privileges.
+    #[arg(long = "connect")]
+    pub(crate) connect: bool,
+    /// Maximum overlapping probe windows; ordinary TCP is capped at 16.
+    #[arg(long, default_value_t = 1)]
+    pub(crate) max_in_flight: usize,
+
+    /// Explicit IP addresses, hostnames, or bounded CIDRs, in selection order.
+    #[arg(value_name = "TARGET", required=true, num_args=1..)]
+    pub(crate) targets: Vec<String>,
+    /// Numeric IP or CIDR to exclude; repeat as needed.
+    #[arg(long = "exclude", value_name = "IP_OR_CIDR")]
+    pub(crate) exclusions: Vec<packetcraftr::target::Network>,
+    /// Maximum distinct selected addresses across all targets.
+    #[arg(long, default_value_t = 1024)]
+    pub(crate) max_targets: usize,
     /// TCP SYN, UDP, or ICMP echo probes.
     #[arg(long, value_enum, default_value_t = Transport::Tcp)]
     pub(crate) transport: Transport,
@@ -114,8 +154,7 @@ pub(crate) struct Args {
     /// Response window for each capture-ready probe.
     #[arg(long, default_value_t = 1_000)]
     pub(crate) timeout_ms: u64,
-    /// Pacing ceiling for serial single-probe exchanges, not achieved throughput.
-    /// Each probe waits for its response window before the next exchange starts.
+    /// Operation-wide probe-start rate ceiling, not achieved throughput.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
     /// Maximum distinct destination ports accepted by the request.
@@ -130,6 +169,12 @@ pub(crate) struct Args {
     /// Maximum undecodable exact frames retained across the scan.
     #[arg(long, default_value_t = packetcraftr::scan::DEFAULT_MAX_UNDECODED_FRAMES)]
     pub(crate) max_undecoded: usize,
+    /// Bounded per-port payload and response-check assignments (UDP profiles v1).
+    #[arg(long)]
+    pub(crate) udp_profiles: Option<std::path::PathBuf>,
+    /// Maximum charged plans and in-flight packet descriptions.
+    #[arg(long,default_value_t=64*1024*1024)]
+    pub(crate) max_prepared_bytes: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]

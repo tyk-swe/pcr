@@ -111,6 +111,7 @@ struct Codes {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ErrorKind {
+    TargetSelection(crate::target::SelectionError),
     Cancelled(packetcraftr_core::budget::Cancelled),
     InvalidLimit {
         field: &'static str,
@@ -138,6 +139,9 @@ pub enum ErrorKind {
     DurationLimit {
         actual: Duration,
         limit: Duration,
+    },
+    PipelineExecution {
+        source: BoundaryError,
     },
     Execution {
         sequence: u64,
@@ -177,6 +181,7 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let workflow = self.workflow;
         match &self.kind {
+            ErrorKind::TargetSelection(source) => write!(formatter, "{workflow}: {source}"),
             ErrorKind::Cancelled(source) => write!(formatter, "{workflow}: {source}"),
             ErrorKind::InvalidLimit {
                 field,
@@ -218,6 +223,9 @@ impl fmt::Display for Error {
                 formatter,
                 "{workflow} worst-case duration {actual:?} exceeds the configured limit of {limit:?}"
             ),
+            ErrorKind::PipelineExecution { source } => {
+                write!(formatter, "{workflow} pipeline execution failed: {source}")
+            }
             ErrorKind::Execution { sequence, source } => write!(
                 formatter,
                 "{workflow} execution failed at probe {sequence}: {source}"
@@ -247,7 +255,9 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
             ErrorKind::Cancelled(source) => Some(source),
+            ErrorKind::TargetSelection(source) => Some(source),
             ErrorKind::Authorization(source)
+            | ErrorKind::PipelineExecution { source }
             | ErrorKind::Execution { source, .. }
             | ErrorKind::Output { source } => Some(source),
             ErrorKind::Clock { source, .. } => Some(source.as_ref()),
@@ -261,6 +271,7 @@ impl Classified for Error {
         let codes = self.workflow.codes();
         match &self.kind {
             ErrorKind::Cancelled(source) => source.classification(),
+            ErrorKind::TargetSelection(source) => source.classification(),
             ErrorKind::InvalidLimit { .. }
             | ErrorKind::InvalidPort { .. }
             | ErrorKind::InvalidSourcePort
@@ -269,6 +280,7 @@ impl Classified for Error {
                 Classification::new(codes.limit, Kind::Cli, Some(codes.limit_remediation))
             }
             ErrorKind::Authorization(source)
+            | ErrorKind::PipelineExecution { source }
             | ErrorKind::Execution { source, .. }
             | ErrorKind::Output { source } => source.classification(),
             ErrorKind::Family { .. } => Classification::new(
@@ -296,7 +308,9 @@ impl Classified for Error {
 
     fn context(&self) -> Option<Coordinate> {
         match &self.kind {
-            ErrorKind::Authorization(source) | ErrorKind::Output { source } => source.context(),
+            ErrorKind::Authorization(source)
+            | ErrorKind::Output { source }
+            | ErrorKind::PipelineExecution { source } => source.context(),
             ErrorKind::Execution { sequence, .. }
             | ErrorKind::Clock { sequence, .. }
             | ErrorKind::InvalidEvidence { sequence, .. }
@@ -312,6 +326,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match &self.kind {
             ErrorKind::Authorization(source)
+            | ErrorKind::PipelineExecution { source }
             | ErrorKind::Execution { source, .. }
             | ErrorKind::Output { source } => source.causes(),
             _ => packetcraftr_core::error::source_chain(self),

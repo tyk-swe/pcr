@@ -1,0 +1,24 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "dissect",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "fields",
+  "status": "success",
+  "result": {
+    "columns": [
+      "frame.number",
+      "ip.src",
+      "dns.qname"
+    ],
+    "source_frame": 1,
+    "values": [
+      1,
+      "192.0.2.53",
+      [
+        "example.test."
+      ]
+    ]
+  },
+  "diagnostics": []
+}

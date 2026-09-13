@@ -10,7 +10,7 @@ use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRA
 
 use crate::probe::evidence::{EvidenceLimits, check_limits, duration_violation};
 use crate::target::Family;
-use crate::target::Target;
+use crate::target::Selection;
 
 use crate::probe::{Error, ErrorKind};
 use crate::scan::WORKFLOW;
@@ -23,6 +23,8 @@ pub use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
+    pub max_prepared_bytes: usize,
+    pub max_targets: usize,
     pub max_ports: usize,
     pub max_probes: usize,
     pub max_duration: Duration,
@@ -34,6 +36,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            max_prepared_bytes: 64 * 1024 * 1024,
+            max_targets: 1024,
             max_ports: DEFAULT_MAX_PORTS,
             max_probes: DEFAULT_MAX_TEMPLATE_PACKETS,
             max_duration: MAX_DURATION,
@@ -58,6 +62,12 @@ impl Limits {
     pub fn validate(&self) -> Result<(), Error> {
         check_limits(
             &[
+                (
+                    "max_prepared_bytes",
+                    self.max_prepared_bytes,
+                    256 * 1024 * 1024,
+                ),
+                ("max_targets", self.max_targets, super::MAX_PROBES),
                 ("max_ports", self.max_ports, usize::from(u16::MAX) + 1),
                 ("max_probes", self.max_probes, MAX_PROBES),
                 (
@@ -151,19 +161,23 @@ pub fn select_ports(
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
-    pub target: Target,
+    /// Maximum overlapping probe response windows.
+    pub max_in_flight: usize,
+    pub targets: Selection,
     pub transport: Transport,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     /// Non-empty payloads are rejected for TCP and ICMP.
     #[serde(default)]
     pub udp_payload: bytes::Bytes,
+    #[serde(default)]
+    pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
     pub address_family: Family,
     /// TCP or UDP destination ports. ICMP scans require this to be empty and
     /// produce one portless endpoint per selected address.
     pub ports: Vec<u16>,
     pub attempts: u32,
     pub timeout: Duration,
-    /// Maximum average probe rate, enforced by delays between single-probe exchanges.
+    /// Maximum probe start rate; rolling windows share one pacing schedule.
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
 }
@@ -174,6 +188,48 @@ impl Request {
     /// with the declared ports.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
+        if self.max_in_flight == 0 || self.max_in_flight > 1024 {
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "max_in_flight",
+                    value: self.max_in_flight as u64,
+                    reason: "must be within 1..=1024".to_owned(),
+                },
+            ));
+        }
+        self.targets
+            .validate()
+            .map_err(|source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)))?;
+        if self.udp_profiles.len() > super::profile::MAX_PROFILE_PORTS
+            || (!self.udp_profiles.is_empty() && self.transport != Transport::Udp)
+        {
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "udp_profiles",
+                    value: self.udp_profiles.len() as u64,
+                    reason: "profiles require UDP and at most 4096 port mappings".to_owned(),
+                },
+            ));
+        }
+        let mut seen_profiles = std::collections::HashSet::new();
+        let mut profile_bytes = 0usize;
+        for profile in self.udp_profiles.values() {
+            if seen_profiles.insert(std::sync::Arc::as_ptr(profile)) {
+                profile_bytes = profile_bytes.saturating_add(profile.storage_bytes());
+            }
+        }
+        if profile_bytes > super::profile::MAX_PROFILE_BYTES {
+            return Err(Error::new(
+                WORKFLOW,
+                ErrorKind::InvalidLimit {
+                    field: "udp_profile_bytes",
+                    value: profile_bytes as u64,
+                    reason: "compiled profiles exceed 1 MiB".to_owned(),
+                },
+            ));
+        }
         if self.udp_payload.len() > super::MAX_UDP_PAYLOAD_BYTES
             || (!self.udp_payload.is_empty() && self.transport != Transport::Udp)
         {

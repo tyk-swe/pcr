@@ -1,0 +1,68 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "http",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "http_message",
+  "status": "success",
+  "result": {
+    "index": 2,
+    "stream": 0,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "198.51.100.2",
+        "source_port": 80,
+        "destination": "192.0.2.1",
+        "destination_port": 40000
+      }
+    },
+    "request": 1,
+    "status": "complete",
+    "start": {
+      "type": "response",
+      "version": "HTTP/1.1",
+      "status": 200,
+      "reason": "OK",
+      "reason_hex": "4f4b"
+    },
+    "headers": [
+      {
+        "name": "Transfer-Encoding",
+        "value": "chunked",
+        "value_hex": "6368756e6b6564"
+      }
+    ],
+    "header_wire_hex": "485454502f312e3120323030204f4b0d0a5472616e736665722d456e636f64696e673a206368756e6b65640d0a0d0a",
+    "framing": {
+      "type": "chunked"
+    },
+    "body_bytes": 5,
+    "trailers": [
+      {
+        "name": "X-End",
+        "value": "yes",
+        "value_hex": "796573"
+      }
+    ],
+    "error": null,
+    "sources": [
+      {
+        "number": 6,
+        "timestamp": {
+          "unix_seconds": 6,
+          "nanoseconds": 0
+        }
+      },
+      {
+        "number": 7,
+        "timestamp": {
+          "unix_seconds": 7,
+          "nanoseconds": 0
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

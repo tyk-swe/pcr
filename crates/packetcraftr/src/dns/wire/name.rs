@@ -48,16 +48,3 @@ pub fn canonical_query_name(value: &str) -> Result<String, crate::dns::WireError
     }
     Ok(format!("{}.", value.to_ascii_lowercase()))
 }
-
-pub(super) fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), crate::dns::WireError> {
-    if name == "." {
-        output.push(0);
-        return Ok(());
-    }
-    for label in name.trim_end_matches('.').split('.') {
-        output.push(u8::try_from(label.len()).map_err(|_| crate::dns::WireError::NameTooLong)?);
-        output.extend_from_slice(label.as_bytes());
-    }
-    output.push(0);
-    Ok(())
-}

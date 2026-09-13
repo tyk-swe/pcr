@@ -17,6 +17,7 @@ use super::pcapng::{
 };
 use super::wire::{align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_size};
 
+#[derive(Clone)]
 pub(super) enum WriterState {
     Pcap {
         endianness: Endianness,
@@ -255,7 +256,38 @@ impl<W: Write> Writer<W> {
 
     /// Adds one PCAPNG interface while retaining its timestamp metadata.
     pub fn add_interface_description(&mut self, description: Interface) -> Result<u32, Error> {
+        self.add_interface_description_with_options(description, &[])
+    }
+
+    /// Adds bounded interface options, excluding the timestamp fields owned by `description`.
+    pub fn add_interface_description_with_options(
+        &mut self,
+        description: Interface,
+        options: &[super::PcapNgOption],
+    ) -> Result<u32, Error> {
         self.ensure_output_available()?;
+        let base = if description.timestamp_offset == 0 {
+            32usize
+        } else {
+            44
+        };
+        let mut length = base;
+        for option in options {
+            if matches!(option.code, 0 | 9 | 14) || option.value.len() > u16::MAX as usize {
+                return Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    reason: "custom interface options conflict with generated metadata or exceed wire length",
+                });
+            }
+            length = length
+                .checked_add(4 + option.value.len().div_ceil(4) * 4)
+                .filter(|length| *length <= self.max_size)
+                .ok_or(Error::SizeLimitExceeded {
+                    kind: "interface description",
+                    declared: u64::MAX,
+                    limit: self.max_size,
+                })?;
+        }
         let (endianness, interface_id) = match &self.state {
             WriterState::Pcap { .. } => {
                 return Err(Error::WrongWriterFormat {
@@ -285,6 +317,7 @@ impl<W: Write> Writer<W> {
                 description.snap_len,
                 description.timestamp_resolution,
                 description.timestamp_offset,
+                options,
             )
         })?;
         match &mut self.state {
@@ -294,6 +327,39 @@ impl<W: Write> Writer<W> {
             WriterState::Pcap { .. } => unreachable!("format checked above"),
         }
         Ok(interface_id)
+    }
+
+    /// Counts the uncompressed capture bytes a frame would add under the current
+    /// interface and resource state, including any automatic interface block.
+    /// This performs the same validation as `write_frame` without changing this
+    /// writer, its counters, or its destination.
+    pub fn encoded_frame_size(&self, frame: &Frame) -> Result<usize, Error> {
+        self.ensure_output_available()?;
+        struct Counter(usize);
+        impl Write for Counter {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0 = self
+                    .0
+                    .checked_add(bytes.len())
+                    .ok_or_else(|| io::Error::other("capture size preview overflow"))?;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut preview = Writer {
+            inner: Counter(0),
+            state: self.state.clone(),
+            max_size: self.max_size,
+            max_interfaces: self.max_interfaces,
+            stream_limits: self.stream_limits,
+            frames_written: self.frames_written,
+            captured_bytes_written: self.captured_bytes_written,
+            output_failure: None,
+        };
+        preview.write_frame(frame)?;
+        Ok(preview.inner.0)
     }
 
     /// Writes one frame, validating all representability and length invariants

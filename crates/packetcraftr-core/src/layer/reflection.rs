@@ -28,6 +28,7 @@ macro_rules! reflective_layer {
                     derived: $derived:literal,
                     required: $required:literal,
                     description: $description:literal,
+                    $(children: $children:expr_2021,)?
                     $(reflect: $member:ident)?
                     $(reflect_bounded: $bounded_member:ident, $maximum:tt)?
                     $(
@@ -52,6 +53,7 @@ macro_rules! reflective_layer {
                         derived: $derived,
                         required: $required,
                         description: $description,
+                        children: $crate::reflective_layer!(@children $($children)?),
                     }
                 ),*
             ];
@@ -119,7 +121,7 @@ macro_rules! reflective_layer {
         $vis fn $layout($($layout_arg: $layout_ty),*)
             -> Vec<$crate::layout::FieldLayout>
         {
-            let mut fields: Vec<_> = vec![
+            let mut fields: Vec<$crate::layout::FieldLayout> = vec![
                 $(
                     $crate::reflective_layer!(@layout $field $(, $start, $end)?)
                 ),*
@@ -131,6 +133,8 @@ macro_rules! reflective_layer {
             fields
         }
     };
+    (@children) => { &[] };
+    (@children $children:expr) => { $children };
     (@layout $field:literal) => {
         None
     };

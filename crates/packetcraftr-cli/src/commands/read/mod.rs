@@ -50,7 +50,20 @@ struct StreamState {
 }
 
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    arguments.compression.validate(format)?;
+    if !arguments.fields.is_empty() {
+        return super::projection::read(arguments, format, stream);
+    }
+    if matches!(format, Format::Json | Format::Csv | Format::Tsv) {
+        return Err(CliError::new(
+            Kind::Cli,
+            "this read output format requires --field selections",
+        ));
+    }
     let Args {
+        fields: _,
+        max_projection_bytes: _,
+        compression,
         path,
         limits,
         filter,
@@ -79,20 +92,29 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let decoding = prepare_decoding(filter.as_deref(), dissect, &decode)?;
     let mut reader = open_capture(&path, limits.reader)?;
     if normalize {
-        return normalize_capture(&mut reader, limits, decoding.as_ref(), io::stdout().lock());
+        let stdout = io::stdout();
+        let mut destination = compression.writer(stdout.lock())?;
+        normalize_capture(&mut reader, limits, decoding.as_ref(), &mut destination)?;
+        drop(destination.finish().map_err(CliError::classified)?);
+        return Ok(());
     }
     if let Some(rewrite_format) = rewrite_format {
         let stream_limits = Limits {
             max_frames: limits.max_frames,
             max_bytes: limits.max_bytes,
         };
-        return rewrite_capture(
+        let stdout = io::stdout();
+        let mut destination = compression.writer(stdout.lock())?;
+        rewrite_capture(
             &mut reader,
             rewrite_format,
             stream_limits,
             decoding.as_ref(),
             limits.reader.max_frame_bytes,
-        );
+            &mut destination,
+        )?;
+        drop(destination.finish().map_err(CliError::classified)?);
+        return Ok(());
     }
     read_records(&mut reader, limits, decoding.as_ref(), format, stream)
 }
@@ -137,6 +159,7 @@ fn rewrite_capture(
     limits: Limits,
     decoding: Option<&Decoding>,
     max_packet_size: usize,
+    destination: &mut impl Write,
 ) -> Result<(), CliError> {
     if format != reader.format() {
         return Err(CliError::from_classification(
@@ -152,9 +175,8 @@ fn rewrite_capture(
             Vec::new(),
         ));
     }
-    let stdout = io::stdout();
     if let Some(decoding) = decoding {
-        return capture::select(reader, stdout.lock(), limits, |number, frame| {
+        return capture::select(reader, destination, limits, |number, frame| {
             decode_selected(frame, number, decoding, max_packet_size)
                 .map(|decoded| decoded.is_some())
                 .map_err(CliError::into_boundary_error)
@@ -162,7 +184,7 @@ fn rewrite_capture(
         .map(|_| ())
         .map_err(CliError::classified);
     }
-    rewrite(reader, stdout.lock(), limits)
+    rewrite(reader, destination, limits)
         .map(|_| ())
         .map_err(CliError::classified)
 }

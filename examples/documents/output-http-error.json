@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "http",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "policy.application_limit",
+    "kind": "policy",
+    "message": "application analysis exceeds max_http_body_bytes=268435456",
+    "causes": [],
+    "remediation": "raise a finite application-analysis limit or narrow the capture"
+  },
+  "diagnostics": []
+}

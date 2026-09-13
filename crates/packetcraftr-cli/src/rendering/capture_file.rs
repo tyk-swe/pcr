@@ -22,14 +22,18 @@ impl<T: Read + Write + Seek> Spool for T {}
 pub(crate) fn write_capture_file(
     format: Format,
     frames: impl IntoIterator<Item = Frame>,
+    compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
-    let mut stdout = io::stdout().lock();
+    let stdout = io::stdout();
+    let mut stdout = compression.writer(stdout.lock())?;
     write_capture_file_with(
         format,
         frames,
         || tempfile::tempfile().map(|file| Box::new(file) as Box<dyn Spool>),
         &mut stdout,
-    )
+    )?;
+    drop(stdout.finish().map_err(CliError::classified)?);
+    Ok(())
 }
 
 fn write_capture_file_with(

@@ -14,6 +14,7 @@ pub struct Probe {
     pub attempt: u32,
     /// Shared exact UDP payload from the validated request.
     pub udp_payload: bytes::Bytes,
+    pub udp_profile: Option<std::sync::Arc<super::profile::UdpProfile>>,
 }
 
 impl Probe {

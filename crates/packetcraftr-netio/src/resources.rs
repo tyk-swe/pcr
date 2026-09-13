@@ -26,3 +26,9 @@ pub struct NativeSnapshot {
 pub fn native_snapshot() -> NativeSnapshot {
     crate::platform::native_resource_snapshot()
 }
+
+/// Inspect the separate process-wide ordinary-TCP worker/socket admission pool.
+#[must_use]
+pub fn tcp_connect_snapshot() -> NativeSnapshot {
+    crate::platform::tcp_connect_snapshot()
+}

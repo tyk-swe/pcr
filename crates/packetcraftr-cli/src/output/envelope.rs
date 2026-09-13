@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use super::contract::{Command, Mode, SCHEMA_V4};
+use super::contract::{Command, Mode, SCHEMA_V5};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
@@ -23,6 +23,10 @@ pub struct Error {
     pub context: Option<Coordinate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture: Option<Box<super::capture::Snapshot>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scan: Option<Box<super::scan::Failure>>,
 }
 
 impl Error {
@@ -37,6 +41,8 @@ impl Error {
             message: message.into(),
             causes,
             context: None,
+            capture: None,
+            scan: None,
             remediation: classification.remediation.map(str::to_owned),
         }
     }
@@ -44,6 +50,18 @@ impl Error {
     pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
         Self::new(error.classification(), error.to_string(), error.causes())
             .with_context(error.context())
+    }
+
+    #[must_use]
+    pub fn with_capture(mut self, capture: Option<Box<super::capture::Snapshot>>) -> Self {
+        self.capture = capture;
+        self
+    }
+
+    #[must_use]
+    pub fn with_scan(mut self, scan: Option<Box<super::scan::Failure>>) -> Self {
+        self.scan = scan;
+        self
     }
 
     #[must_use]
@@ -92,7 +110,7 @@ impl<T> Envelope<T> {
     /// One aggregate JSON success.
     pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
-            schema: SCHEMA_V4,
+            schema: SCHEMA_V5,
             command: Some(command),
             mode: Mode::Aggregate,
             sequence: None,
@@ -113,7 +131,7 @@ impl<T> Envelope<T> {
         diagnostics: Vec<Diagnostic>,
     ) -> Self {
         Self {
-            schema: SCHEMA_V4,
+            schema: SCHEMA_V5,
             command: Some(command),
             mode: Mode::Stream,
             sequence: Some(sequence),
@@ -144,7 +162,7 @@ impl Envelope<()> {
     /// before command selection.
     pub fn error(command: Option<Command>, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V4,
+            schema: SCHEMA_V5,
             command,
             mode: Mode::Aggregate,
             sequence: None,
@@ -159,7 +177,7 @@ impl Envelope<()> {
     /// One terminal NDJSON error record at `sequence`.
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
-            schema: SCHEMA_V4,
+            schema: SCHEMA_V5,
             command,
             mode: Mode::Stream,
             sequence: Some(sequence),

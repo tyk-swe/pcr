@@ -114,7 +114,9 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Vlan
         | BuiltinProtocol::Vlan8021ad
         | BuiltinProtocol::Vxlan => true,
-        BuiltinProtocol::Dns
+        BuiltinProtocol::Dhcpv4
+        | BuiltinProtocol::Dhcpv6
+        | BuiltinProtocol::Dns
         | BuiltinProtocol::Esp
         | BuiltinProtocol::Icmpv4
         | BuiltinProtocol::Icmpv6
@@ -124,6 +126,7 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Raw
         | BuiltinProtocol::Sctp
         | BuiltinProtocol::Tcp
+        | BuiltinProtocol::Http
         | BuiltinProtocol::Tls => false,
     }
 }

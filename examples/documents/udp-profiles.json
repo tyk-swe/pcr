@@ -1,0 +1,48 @@
+{
+  "schema": "packetcraftr.udp-profiles/v1",
+  "profiles": [
+    {
+      "ports": [
+        53
+      ],
+      "profile": {
+        "name": "dns-example",
+        "request": {
+          "type": "dns",
+          "name": "example.test.",
+          "query_type": 1,
+          "class": 1,
+          "recursion_desired": true,
+          "id_base": 4096
+        },
+        "response": {
+          "type": "dns"
+        }
+      }
+    },
+    {
+      "ports": [
+        9000,
+        9001
+      ],
+      "profile": {
+        "name": "lab-byte-service",
+        "request": {
+          "type": "bytes",
+          "data": "50435201"
+        },
+        "response": {
+          "type": "bytes",
+          "checks": [
+            {
+              "offset": 0,
+              "data": "50435202"
+            }
+          ],
+          "min_length": 4,
+          "max_length": 64
+        }
+      }
+    }
+  ]
+}

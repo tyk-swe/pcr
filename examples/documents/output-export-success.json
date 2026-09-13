@@ -1,0 +1,83 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "export",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "path": "selected-http.pcap",
+    "format": "pcap",
+    "frames_read": 7,
+    "frames_selected": 7,
+    "captured_bytes_read": 425,
+    "captured_bytes_selected": 425,
+    "interfaces": 1,
+    "metadata_records": 0,
+    "source_frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "matched_streams": [
+      {
+        "transport": "tcp",
+        "index": 0
+      }
+    ],
+    "unmatched_streams": [],
+    "unmatched_datagram_frames": [],
+    "selected_complete_datagrams": 0,
+    "selected_incomplete_datagrams": [],
+    "unselected_incomplete_datagrams": 0,
+    "source_outcomes_omitted": 0,
+    "scopes": [
+      {
+        "id": 0,
+        "interface": null,
+        "encapsulation": []
+      }
+    ],
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
+  },
+  "diagnostics": []
+}

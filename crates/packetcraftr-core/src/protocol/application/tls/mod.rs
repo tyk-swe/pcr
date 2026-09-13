@@ -18,8 +18,10 @@
 //! keeps the per-frame codec stateless and lets the stream collector reuse the
 //! same parser over reassembled payloads.
 //!
-//! TLS is decode-only. Nothing here constructs a handshake.
+//! [`Hello`] constructs bounded ClientHello and ServerHello fixtures.
 
+mod construct;
+pub use construct::{Hello, HelloExtension, HelloKind};
 pub mod codec;
 pub mod fingerprint;
 pub mod model;

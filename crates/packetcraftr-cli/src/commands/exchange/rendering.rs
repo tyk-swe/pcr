@@ -31,6 +31,7 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(),
 pub(super) fn render_capture(
     result: &packetcraftr::exchange::Report,
     format: Format,
+    compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
     let frames = stable_timestamp_order(
         result
@@ -46,7 +47,7 @@ pub(super) fn render_capture(
             .chain(result.unsolicited.iter().map(|packet| &packet.frame))
             .chain(result.undecoded.iter()),
     );
-    write_capture_file(format, frames.into_iter().cloned())
+    write_capture_file(format, frames.into_iter().cloned(), compression)
 }
 
 fn stable_timestamp_order<'a>(

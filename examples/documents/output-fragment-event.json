@@ -1,0 +1,22 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "fragment",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "fragment",
+  "status": "success",
+  "result": {
+    "fragment_index": 0,
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 0,
+        "nanoseconds": 0
+      },
+      "captured_length": 124,
+      "original_length": 124,
+      "link_type": 228,
+      "bytes_hex": "4500007c000020004011d66dc0000201c00002029c409c4100d032b9787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878"
+    }
+  },
+  "diagnostics": []
+}

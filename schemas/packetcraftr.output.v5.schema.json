@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v4.schema.json",
-  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v1.",
-  "title": "PacketcraftR command output v4",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v5.schema.json",
+  "$comment": "Packet documents remain independently versioned at packetcraftr.packet/v2.",
+  "title": "PacketcraftR command output v5",
   "description": "Aggregate JSON and sequenced NDJSON. Every stream record declares event in its envelope; complete and error are terminal.",
   "oneOf": [
     {
@@ -30,7 +30,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v4"
+          "const": "packetcraftr.output/v5"
         },
         "command": {
           "type": [
@@ -57,7 +57,13 @@
             "dns",
             "fuzz",
             "interfaces",
-            "routes"
+            "routes",
+            "fragment",
+            "merge",
+            "dns-read",
+            "http",
+            "export",
+            "rewrite"
           ]
         },
         "mode": {
@@ -200,6 +206,33 @@
             },
             {
               "$ref": "#/$defs/routesSuccess"
+            },
+            {
+              "$ref": "#/$defs/fragmentSuccess"
+            },
+            {
+              "$ref": "#/$defs/mergeSuccess"
+            },
+            {
+              "$ref": "#/$defs/projectionAggregateSuccess"
+            },
+            {
+              "$ref": "#/$defs/scanConnectSuccess"
+            },
+            {
+              "$ref": "#/$defs/dnsAnalysisSuccess"
+            },
+            {
+              "$ref": "#/$defs/httpSuccess"
+            },
+            {
+              "$ref": "#/$defs/exportSuccess"
+            },
+            {
+              "$ref": "#/$defs/rewriteSuccess"
+            },
+            {
+              "$ref": "#/$defs/captureAggregateSuccess"
             }
           ]
         }
@@ -272,6 +305,30 @@
             },
             {
               "$ref": "#/$defs/tlsStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/fragmentStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/mergeStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/projectionStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/scanConnectStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/dnsAnalysisStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/httpStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/exportStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/rewriteStreamSuccess"
             }
           ]
         }
@@ -525,10 +582,7 @@
               "const": "complete"
             },
             "result": {
-              "type": "object",
-              "required": [],
-              "properties": {},
-              "additionalProperties": false
+              "$ref": "#/$defs/captureSummary"
             }
           },
           "required": [
@@ -2947,7 +3001,8 @@
               "required": [
                 "target",
                 "resolved_addresses",
-                "counts"
+                "counts",
+                "planned_duration"
               ],
               "properties": {
                 "target": {
@@ -2961,6 +3016,9 @@
                 },
                 "counts": {
                   "$ref": "#/$defs/scanClassificationCounts"
+                },
+                "planned_duration": {
+                  "$ref": "#/$defs/duration"
                 }
               },
               "additionalProperties": false
@@ -2970,6 +3028,29 @@
             "event",
             "result"
           ]
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "probe_sent"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "sent"
+              ],
+              "properties": {
+                "sent": {
+                  "$ref": "#/$defs/scanSent"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
         }
       ]
     },
@@ -3897,7 +3978,8 @@
             "ipv4",
             "ipv6",
             "mac",
-            "list"
+            "list",
+            "object"
           ]
         },
         "required": {
@@ -3908,6 +3990,17 @@
         },
         "description": {
           "type": "string"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/protocolField"
+          }
+        },
+        "children_reference": {
+          "type": "string",
+          "pattern": "^(/children/[0-9]+)*/children$",
+          "description": "JSON Pointer to an earlier child array within this top-level field description."
         }
       },
       "additionalProperties": true
@@ -4043,7 +4136,9 @@
         "frames_completed",
         "bytes_completed",
         "scheduled_duration",
-        "frames"
+        "frames",
+        "passes_completed",
+        "interfaces_used"
       ],
       "properties": {
         "source_format": {
@@ -4057,7 +4152,14 @@
           "$ref": "#/$defs/replayTiming"
         },
         "requested_interface": {
-          "$ref": "#/$defs/interfaceId"
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/interfaceId"
+            }
+          ]
         },
         "requested_link_mode": {
           "$ref": "#/$defs/linkMode"
@@ -4078,6 +4180,17 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/replayFrameResult"
+          }
+        },
+        "passes_completed": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "interfaces_used": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interfaceId"
           }
         }
       },
@@ -4516,7 +4629,8 @@
         "link_mode",
         "scheduled_delay",
         "bytes_sent",
-        "frame"
+        "frame",
+        "pass"
       ],
       "properties": {
         "source_sequence": {
@@ -4536,6 +4650,11 @@
         },
         "frame": {
           "$ref": "#/$defs/frame"
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
         }
       },
       "additionalProperties": true
@@ -4548,7 +4667,7 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.packet/v1"
+          "const": "packetcraftr.packet/v2"
         },
         "layers": {
           "type": "array",
@@ -5349,6 +5468,9 @@
         "reason": {
           "type": "string",
           "minLength": 1
+        },
+        "application": {
+          "$ref": "#/$defs/udpApplicationEvidence"
         }
       },
       "additionalProperties": true
@@ -6397,6 +6519,25 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "object"
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/fieldValue"
+              }
+            }
+          }
         }
       ]
     },
@@ -6468,6 +6609,12 @@
         "remediation": {
           "type": "string",
           "minLength": 1
+        },
+        "capture": {
+          "$ref": "#/$defs/captureSnapshot"
+        },
+        "scan": {
+          "$ref": "#/$defs/scanFailure"
         }
       },
       "additionalProperties": true
@@ -6506,7 +6653,7 @@
       "additionalProperties": true
     },
     "operationStats": {
-      "description": "Command-processed counters. For capture, packets_attempted is the one-based source-frame count, packets_completed is the matched/emitted frame count, and bytes is captured source bytes; capture contains distinct provider-reported backend statistics.",
+      "description": "Command-processed counters. Capture counts admitted frames as packets_attempted, confirmed consumer deliveries as packets_completed, and admitted captured bytes as bytes; sources separately report delivery and loss. Backend counters remain distinct.",
       "type": "object",
       "required": [
         "packets_attempted",
@@ -7096,6 +7243,2687 @@
           ]
         }
       ]
+    },
+    "fragmentRecord": {
+      "type": "object",
+      "properties": {
+        "fragment_index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        }
+      },
+      "required": [
+        "fragment_index",
+        "frame"
+      ],
+      "additionalProperties": true
+    },
+    "fragmentComplete": {
+      "type": "object",
+      "properties": {
+        "mtu": {
+          "$ref": "#/$defs/uint64"
+        },
+        "fragments": {
+          "$ref": "#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "required": [
+        "mtu",
+        "fragments",
+        "bytes"
+      ],
+      "additionalProperties": true
+    },
+    "fragmentSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "fragment"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "$ref": "#/$defs/fragmentComplete"
+            },
+            "fragments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/fragmentRecord"
+              }
+            }
+          },
+          "required": [
+            "summary",
+            "fragments"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "fragmentStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "fragment"
+        }
+      },
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "fragment"
+            },
+            "result": {
+              "$ref": "#/$defs/fragmentRecord"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/fragmentComplete"
+            }
+          }
+        }
+      ]
+    },
+    "mergeInterface": {
+      "type": "object",
+      "required": [
+        "source",
+        "source_name",
+        "section",
+        "local_interface",
+        "global_interface",
+        "output_interface"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_name": {
+          "type": "string"
+        },
+        "section": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "local_interface": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "global_interface": {
+          "$ref": "#/$defs/uint64"
+        },
+        "output_interface": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "mergeResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "frames",
+        "captured_bytes",
+        "source_frames",
+        "interfaces",
+        "source_metadata_records"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mergeInterface"
+          }
+        },
+        "source_metadata_records": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "mergeSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "merge"
+        },
+        "result": {
+          "$ref": "#/$defs/mergeResult"
+        }
+      }
+    },
+    "mergeStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "merge"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/mergeResult"
+        }
+      }
+    },
+    "projectionCell": {
+      "oneOf": [
+        {
+          "type": [
+            "null",
+            "boolean",
+            "integer",
+            "string"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectionCell"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/projectionCell"
+          }
+        }
+      ]
+    },
+    "projectionRow": {
+      "type": "object",
+      "required": [
+        "source_frame",
+        "values"
+      ],
+      "properties": {
+        "source_frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectionCell"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "projectionComplete": {
+      "type": "object",
+      "required": [
+        "columns",
+        "rows_written",
+        "frames_read",
+        "captured_bytes_read"
+      ],
+      "properties": {
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rows_written": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "projectionResult": {
+      "type": "object",
+      "required": [
+        "columns",
+        "rows_written",
+        "frames_read",
+        "captured_bytes_read",
+        "rows"
+      ],
+      "properties": {
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rows_written": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/projectionRow"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "projectionAggregateSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "read",
+            "dissect"
+          ]
+        },
+        "result": {
+          "$ref": "#/$defs/projectionResult"
+        }
+      }
+    },
+    "projectionStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "read",
+            "dissect"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "fields"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "columns",
+                "source_frame",
+                "values"
+              ],
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 256,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "source_frame": {
+                  "$ref": "#/$defs/sourceFrame"
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/projectionCell"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/projectionComplete"
+            }
+          }
+        }
+      ]
+    },
+    "scanConnectProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "address",
+        "port",
+        "attempt",
+        "attempted",
+        "connect_succeeded",
+        "outcome",
+        "classification",
+        "scheduled_at",
+        "finished_at",
+        "elapsed",
+        "local",
+        "error"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "address": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "attempted": {
+          "type": "boolean"
+        },
+        "connect_succeeded": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "connected",
+            "refused",
+            "timed_out",
+            "unreachable",
+            "local_error",
+            "deadline_expired"
+          ]
+        },
+        "classification": {
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unreachable",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "scheduled_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "finished_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/timestamp"
+            }
+          ]
+        },
+        "elapsed": {
+          "$ref": "#/$defs/duration"
+        },
+        "local": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "os_code",
+                "message"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "os_code": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectStatistics": {
+      "type": "object",
+      "required": [
+        "connections_scheduled",
+        "connections_attempted",
+        "connections_succeeded",
+        "elapsed"
+      ],
+      "properties": {
+        "connections_scheduled": {
+          "$ref": "#/$defs/uint64"
+        },
+        "connections_attempted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "connections_succeeded": {
+          "$ref": "#/$defs/uint64"
+        },
+        "elapsed": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectSummary": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolved_addresses",
+        "planned_duration",
+        "socket_stats"
+      ],
+      "properties": {
+        "method": {
+          "const": "tcp_connect"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "planned_duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "socket_stats": {
+          "$ref": "#/$defs/scanConnectStatistics"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectReport": {
+      "type": "object",
+      "required": [
+        "method",
+        "target",
+        "resolved_addresses",
+        "planned_duration",
+        "socket_stats",
+        "endpoints"
+      ],
+      "properties": {
+        "method": {
+          "const": "tcp_connect"
+        },
+        "target": {
+          "type": "string"
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "planned_duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "socket_stats": {
+          "$ref": "#/$defs/scanConnectStatistics"
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "port",
+              "classification",
+              "probes"
+            ],
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "classification": {
+                "enum": [
+                  "open",
+                  "closed",
+                  "filtered",
+                  "unreachable",
+                  "unknown",
+                  "timeout"
+                ]
+              },
+              "probes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/scanConnectProbe"
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanConnectSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        },
+        "result": {
+          "$ref": "#/$defs/scanConnectReport"
+        }
+      }
+    },
+    "scanConnectStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "scan"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "event": {
+              "const": "connect_probe"
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "method",
+                "sequence",
+                "address",
+                "port",
+                "attempt",
+                "attempted",
+                "connect_succeeded",
+                "outcome",
+                "classification",
+                "scheduled_at",
+                "finished_at",
+                "elapsed",
+                "local",
+                "error"
+              ],
+              "properties": {
+                "method": {
+                  "const": "tcp_connect"
+                },
+                "sequence": {
+                  "$ref": "#/$defs/uint64"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "attempted": {
+                  "type": "boolean"
+                },
+                "connect_succeeded": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "outcome": {
+                  "enum": [
+                    "connected",
+                    "refused",
+                    "timed_out",
+                    "unreachable",
+                    "local_error",
+                    "deadline_expired"
+                  ]
+                },
+                "classification": {
+                  "enum": [
+                    "open",
+                    "closed",
+                    "filtered",
+                    "unreachable",
+                    "unknown",
+                    "timeout"
+                  ]
+                },
+                "scheduled_at": {
+                  "$ref": "#/$defs/timestamp"
+                },
+                "finished_at": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/timestamp"
+                    }
+                  ]
+                },
+                "elapsed": {
+                  "$ref": "#/$defs/duration"
+                },
+                "local": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "error": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "os_code",
+                        "message"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string"
+                        },
+                        "os_code": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/scanConnectSummary"
+            }
+          }
+        }
+      ]
+    },
+    "uint16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "applicationFlow": {
+      "type": "object",
+      "required": [
+        "scope",
+        "flow"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/uint32"
+        },
+        "flow": {
+          "type": "object",
+          "required": [
+            "source",
+            "destination",
+            "source_port",
+            "destination_port"
+          ],
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "source_port": {
+              "$ref": "#/$defs/uint16"
+            },
+            "destination_port": {
+              "$ref": "#/$defs/uint16"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "applicationSource": {
+      "type": "object",
+      "required": [
+        "number",
+        "timestamp"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/uint64"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisMessage": {
+      "type": "object",
+      "required": [
+        "index",
+        "transport",
+        "stream",
+        "generation",
+        "flow",
+        "status",
+        "wire_hex",
+        "framing_hex",
+        "declared_length",
+        "fields",
+        "error",
+        "sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "transport": {
+          "enum": [
+            "udp",
+            "tcp"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "malformed",
+            "incomplete",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        },
+        "wire_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "framing_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "declared_length": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint16"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/fieldValue"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsLatency": {
+      "type": "object",
+      "required": [
+        "nanoseconds",
+        "negative"
+      ],
+      "properties": {
+        "nanoseconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "negative": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisTransaction": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "generation",
+        "flow",
+        "status",
+        "dns_id",
+        "queries",
+        "response",
+        "original_response",
+        "first_query_latency",
+        "latest_query_latency",
+        "sources"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "udp",
+            "tcp"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "status": {
+          "enum": [
+            "matched",
+            "unanswered",
+            "orphan_response",
+            "duplicate_response"
+          ]
+        },
+        "dns_id": {
+          "$ref": "#/$defs/uint16"
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "original_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "first_query_latency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dnsLatency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latest_query_latency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/dnsLatency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisIssue": {
+      "type": "object",
+      "required": [
+        "number",
+        "flow",
+        "stream",
+        "status"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "malformed",
+            "incomplete",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisSummary": {
+      "type": "object",
+      "required": [
+        "messages",
+        "complete_messages",
+        "transactions",
+        "matched_transactions",
+        "unanswered_transactions",
+        "orphan_responses",
+        "duplicate_responses"
+      ],
+      "properties": {
+        "messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "transactions": {
+          "$ref": "#/$defs/uint64"
+        },
+        "matched_transactions": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unanswered_transactions": {
+          "$ref": "#/$defs/uint64"
+        },
+        "orphan_responses": {
+          "$ref": "#/$defs/uint64"
+        },
+        "duplicate_responses": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisComplete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/dnsAnalysisSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "messages",
+        "transactions",
+        "issues"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/dnsAnalysisSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisMessage"
+          }
+        },
+        "transactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisTransaction"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAnalysisIssue"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "dnsAnalysisSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "dns-read"
+        },
+        "result": {
+          "$ref": "#/$defs/dnsAnalysisResult"
+        }
+      }
+    },
+    "dnsAnalysisStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "dns-read"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_message"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisMessage"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_transaction"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisTransaction"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "dns_stream_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisIssue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/dnsAnalysisComplete"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "httpStartLine": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "method",
+            "target",
+            "target_hex",
+            "version"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "method": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "target_hex": {
+              "$ref": "#/$defs/hexBytes"
+            },
+            "version": {
+              "enum": [
+                "HTTP/1.0",
+                "HTTP/1.1"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "status",
+            "reason",
+            "reason_hex",
+            "version"
+          ],
+          "properties": {
+            "type": {
+              "const": "response"
+            },
+            "status": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "reason": {
+              "type": "string"
+            },
+            "reason_hex": {
+              "$ref": "#/$defs/hexBytes"
+            },
+            "version": {
+              "enum": [
+                "HTTP/1.0",
+                "HTTP/1.1"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "httpHeader": {
+      "type": "object",
+      "required": [
+        "name",
+        "value",
+        "value_hex"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "value_hex": {
+          "$ref": "#/$defs/hexBytes"
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpBodyFraming": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "none",
+                "chunked",
+                "close",
+                "tunnel"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "length"
+          ],
+          "properties": {
+            "type": {
+              "const": "length"
+            },
+            "length": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "httpMessage": {
+      "type": "object",
+      "required": [
+        "index",
+        "stream",
+        "generation",
+        "flow",
+        "request",
+        "status",
+        "start",
+        "headers",
+        "header_wire_hex",
+        "framing",
+        "body_bytes",
+        "trailers",
+        "error",
+        "sources"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "upgrade"
+          ]
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/httpStartLine"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpHeader"
+          }
+        },
+        "header_wire_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "framing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/httpBodyFraming"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "trailers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpHeader"
+          }
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpIssue": {
+      "type": "object",
+      "required": [
+        "number",
+        "flow",
+        "stream",
+        "status"
+      ],
+      "properties": {
+        "number": {
+          "$ref": "#/$defs/uint64"
+        },
+        "flow": {
+          "$ref": "#/$defs/applicationFlow"
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "malformed",
+            "limit",
+            "gap",
+            "conflict",
+            "reset",
+            "evicted",
+            "upgrade"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpSummary": {
+      "type": "object",
+      "required": [
+        "messages",
+        "complete_messages",
+        "incomplete_messages",
+        "malformed_messages",
+        "upgraded_connections",
+        "responses_without_request",
+        "requests_without_final_response"
+      ],
+      "properties": {
+        "messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "complete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "malformed_messages": {
+          "$ref": "#/$defs/uint64"
+        },
+        "upgraded_connections": {
+          "$ref": "#/$defs/uint64"
+        },
+        "responses_without_request": {
+          "$ref": "#/$defs/uint64"
+        },
+        "requests_without_final_response": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpComplete": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/httpSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "summary",
+        "scopes",
+        "incomplete_datagrams",
+        "source_outcomes_omitted",
+        "ip_reassembly",
+        "messages",
+        "issues"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "summary": {
+          "$ref": "#/$defs/httpSummary"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpMessage"
+          }
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpIssue"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "httpSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http"
+        },
+        "result": {
+          "$ref": "#/$defs/httpResult"
+        }
+      }
+    },
+    "httpStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "http"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http_message"
+            },
+            "result": {
+              "$ref": "#/$defs/httpMessage"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "http_stream_issue"
+            },
+            "result": {
+              "$ref": "#/$defs/httpIssue"
+            }
+          }
+        },
+        {
+          "required": [
+            "event",
+            "result"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "result": {
+              "$ref": "#/$defs/httpComplete"
+            }
+          }
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_overlap_resolved"
+            },
+            "result": {
+              "$ref": "#/$defs/ipOverlapResolvedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_completed"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramCompletedEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "ip_datagram_incomplete"
+            },
+            "result": {
+              "$ref": "#/$defs/ipDatagramIncompleteEvent"
+            }
+          },
+          "required": [
+            "event",
+            "result"
+          ]
+        }
+      ]
+    },
+    "streamReference": {
+      "type": "object",
+      "required": [
+        "transport",
+        "index"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "index": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "exportIncomplete": {
+      "type": "object",
+      "required": [
+        "key",
+        "sources"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ipDatagramKey"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applicationSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "exportResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "format",
+        "frames_read",
+        "frames_selected",
+        "captured_bytes_read",
+        "captured_bytes_selected",
+        "interfaces",
+        "metadata_records",
+        "source_frames",
+        "matched_streams",
+        "unmatched_streams",
+        "unmatched_datagram_frames",
+        "selected_complete_datagrams",
+        "selected_incomplete_datagrams",
+        "unselected_incomplete_datagrams",
+        "source_outcomes_omitted",
+        "scopes",
+        "ip_reassembly"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "pcap",
+            "pcapng"
+          ]
+        },
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_selected": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_selected": {
+          "$ref": "#/$defs/uint64"
+        },
+        "interfaces": {
+          "$ref": "#/$defs/uint64"
+        },
+        "metadata_records": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "matched_streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/streamReference"
+          }
+        },
+        "unmatched_streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/streamReference"
+          }
+        },
+        "unmatched_datagram_frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "selected_complete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "selected_incomplete_datagrams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/exportIncomplete"
+          }
+        },
+        "unselected_incomplete_datagrams": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_outcomes_omitted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureScope"
+          }
+        },
+        "ip_reassembly": {
+          "$ref": "#/$defs/ipReassemblyReport"
+        }
+      },
+      "additionalProperties": true
+    },
+    "exportSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "result": {
+          "$ref": "#/$defs/exportResult"
+        }
+      }
+    },
+    "exportStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "export"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/exportResult"
+        }
+      }
+    },
+    "rewriteResult": {
+      "type": "object",
+      "required": [
+        "path",
+        "rule_matches",
+        "frames_read",
+        "frames_changed",
+        "captured_bytes_read",
+        "captured_bytes_written",
+        "interfaces",
+        "source_metadata_records"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "rule_matches": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/uint64"
+          }
+        },
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_changed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_written": {
+          "$ref": "#/$defs/uint64"
+        },
+        "interfaces": {
+          "$ref": "#/$defs/uint64"
+        },
+        "source_metadata_records": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "rewriteSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "rewrite"
+        },
+        "result": {
+          "$ref": "#/$defs/rewriteResult"
+        }
+      }
+    },
+    "rewriteStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "event",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "rewrite"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/rewriteResult"
+        }
+      }
+    },
+    "captureFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "slot",
+        "generation",
+        "frames",
+        "capture_bytes",
+        "encoded_bytes",
+        "first_source_frame",
+        "last_source_frame",
+        "finalized"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "generation": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "capture_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "encoded_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "first_source_frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sourceFrame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_source_frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sourceFrame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finalized": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "captureFiles": {
+      "type": "object",
+      "required": [
+        "retention",
+        "compression",
+        "rotate_bytes",
+        "rotate_interval_ms",
+        "maximum_files",
+        "files",
+        "frames_written",
+        "captured_bytes_written",
+        "discarded_files",
+        "discarded_frames",
+        "discarded_capture_bytes",
+        "stopped_at_retention_limit"
+      ],
+      "properties": {
+        "retention": {
+          "enum": [
+            "stop",
+            "ring"
+          ]
+        },
+        "compression": {
+          "enum": [
+            "none",
+            "gzip",
+            "zstd"
+          ]
+        },
+        "rotate_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rotate_interval_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maximum_files": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureFile"
+          }
+        },
+        "frames_written": {
+          "$ref": "#/$defs/uint64"
+        },
+        "captured_bytes_written": {
+          "$ref": "#/$defs/uint64"
+        },
+        "discarded_files": {
+          "$ref": "#/$defs/uint64"
+        },
+        "discarded_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "discarded_capture_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stopped_at_retention_limit": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "captureSource": {
+      "type": "object",
+      "required": [
+        "capture_id",
+        "native_interface",
+        "link_type",
+        "snap_length",
+        "queue_frames",
+        "queue_bytes",
+        "overflow_policy",
+        "metadata_valid",
+        "ready",
+        "shutdown_confirmed",
+        "statistics_valid",
+        "statistics",
+        "delivered_frames",
+        "delivered_bytes",
+        "admitted_frames",
+        "matched_frames",
+        "emitted_frames",
+        "late_frames"
+      ],
+      "properties": {
+        "capture_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "native_interface": {
+          "$ref": "#/$defs/interfaceId"
+        },
+        "link_type": {
+          "$ref": "#/$defs/uint32"
+        },
+        "snap_length": {
+          "$ref": "#/$defs/uint64"
+        },
+        "queue_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "queue_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overflow_policy": {
+          "enum": [
+            "fail",
+            "drop_newest",
+            "drop_oldest"
+          ]
+        },
+        "metadata_valid": {
+          "type": "boolean"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "shutdown_confirmed": {
+          "type": "boolean"
+        },
+        "statistics_valid": {
+          "type": "boolean"
+        },
+        "statistics": {
+          "$ref": "#/$defs/captureStatistics"
+        },
+        "delivered_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "delivered_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "admitted_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "matched_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "emitted_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "late_frames": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "captureSummary": {
+      "type": "object",
+      "required": [
+        "requested_interfaces",
+        "sources",
+        "frames_delivered",
+        "stop_reason",
+        "capture_statistics_complete",
+        "files"
+      ],
+      "properties": {
+        "requested_interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interfaceId"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/captureSource"
+          }
+        },
+        "frames_delivered": {
+          "$ref": "#/$defs/uint64"
+        },
+        "stop_reason": {
+          "enum": [
+            "window",
+            "frame_budget",
+            "sink",
+            "failure"
+          ]
+        },
+        "capture_statistics_complete": {
+          "type": "boolean"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/captureFiles"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "captureSnapshot": {
+      "type": "object",
+      "required": [
+        "summary",
+        "stats"
+      ],
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/captureSummary"
+        },
+        "stats": {
+          "$ref": "#/$defs/operationStats"
+        }
+      },
+      "additionalProperties": true
+    },
+    "captureAggregateSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "stats"
+      ],
+      "properties": {
+        "command": {
+          "const": "capture"
+        },
+        "result": {
+          "$ref": "#/$defs/captureSummary"
+        }
+      }
+    },
+    "scanSent": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "protocol",
+        "destination",
+        "destination_port",
+        "attempt",
+        "sent_at",
+        "frame",
+        "route",
+        "udp_profile"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "protocol": {
+          "enum": [
+            "tcp",
+            "udp",
+            "icmpv4",
+            "icmpv6"
+          ]
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "destination_port": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint16"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "sent_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "frame": {
+          "$ref": "#/$defs/wireFrame"
+        },
+        "route": {
+          "$ref": "#/$defs/materializedRoute"
+        },
+        "udp_profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanPending": {
+      "type": "object",
+      "required": [
+        "sent",
+        "response"
+      ],
+      "properties": {
+        "sent": {
+          "$ref": "#/$defs/scanSent"
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/frame"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanFailedProbe": {
+      "type": "object",
+      "required": [
+        "sequence",
+        "destination",
+        "destination_port",
+        "transport",
+        "attempt"
+      ],
+      "properties": {
+        "sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "destination": {
+          "$ref": "#/$defs/ipAddress"
+        },
+        "destination_port": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint16"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp",
+            "icmp"
+          ]
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanCaptureSource": {
+      "type": "object",
+      "required": [
+        "interface",
+        "ready",
+        "shutdown_confirmed",
+        "statistics_valid",
+        "statistics"
+      ],
+      "properties": {
+        "interface": {
+          "$ref": "#/$defs/interfaceId"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "shutdown_confirmed": {
+          "type": "boolean"
+        },
+        "statistics_valid": {
+          "type": "boolean"
+        },
+        "statistics": {
+          "$ref": "#/$defs/captureStatistics"
+        }
+      },
+      "additionalProperties": true
+    },
+    "scanFailure": {
+      "type": "object",
+      "required": [
+        "stats",
+        "pending",
+        "failed_probe",
+        "capture_sources"
+      ],
+      "properties": {
+        "stats": {
+          "$ref": "#/$defs/operationStats"
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanPending"
+          }
+        },
+        "failed_probe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/scanFailedProbe"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "capture_sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scanCaptureSource"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "udpApplicationEvidence": {
+      "type": "object",
+      "required": [
+        "profile",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "not_observed",
+            "unchecked",
+            "confirmed",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     }
   }
 }

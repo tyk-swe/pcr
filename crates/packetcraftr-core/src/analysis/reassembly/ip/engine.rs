@@ -101,6 +101,9 @@ struct Charges {
 }
 
 impl Reassembler {
+    pub(crate) fn contains_datagram(&self, key: &DatagramKey) -> bool {
+        self.datagrams.contains_key(key)
+    }
     fn aggregate_limit(&self) -> Error {
         ResourceError::AggregateMemoryLimit {
             limit: self.limits.max_aggregate_bytes,

@@ -1,0 +1,37 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "merge",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "path": "merged.pcapng",
+    "frames": 2,
+    "captured_bytes": 250,
+    "source_frames": [
+      1,
+      1
+    ],
+    "interfaces": [
+      {
+        "source": 0,
+        "source_name": "left.pcap",
+        "section": null,
+        "local_interface": null,
+        "global_interface": 0,
+        "output_interface": 0
+      },
+      {
+        "source": 1,
+        "source_name": "right.pcap",
+        "section": null,
+        "local_interface": null,
+        "global_interface": 0,
+        "output_interface": 1
+      }
+    ],
+    "source_metadata_records": 0
+  },
+  "diagnostics": []
+}

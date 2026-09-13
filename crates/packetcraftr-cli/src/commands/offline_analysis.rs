@@ -34,6 +34,7 @@ impl AnalysisSetup {
     /// choose only whether the run drives TCP reassembly.
     pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
         analysis::Options {
+            track_sources: false,
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
             tcp_events,
@@ -58,6 +59,7 @@ pub(super) fn prepare(
         .map(|source| filtering::compile(source, &registry, Capabilities::stream_capable()))
         .transpose()?;
     let limits = analysis::Limits {
+        max_provenance_bytes: limits.max_provenance_bytes,
         max_frames: capture.max_frames,
         max_bytes: capture.max_bytes,
         max_frame_bytes: capture.reader.max_frame_bytes,

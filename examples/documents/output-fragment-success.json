@@ -1,0 +1,42 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "fragment",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "summary": {
+      "mtu": 128,
+      "fragments": 2,
+      "bytes": 248
+    },
+    "fragments": [
+      {
+        "fragment_index": 0,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 0,
+            "nanoseconds": 0
+          },
+          "captured_length": 124,
+          "original_length": 124,
+          "link_type": 228,
+          "bytes_hex": "4500007c000020004011d66dc0000201c00002029c409c4100d032b9787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878"
+        }
+      },
+      {
+        "fragment_index": 1,
+        "frame": {
+          "timestamp": {
+            "unix_seconds": 0,
+            "nanoseconds": 0
+          },
+          "captured_length": 124,
+          "original_length": 124,
+          "link_type": 228,
+          "bytes_hex": "4500007c0000000d4011f660c0000201c00002027878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878"
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

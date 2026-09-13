@@ -45,7 +45,17 @@ pub(super) fn build_batches<'a>(
                 address,
                 endpoint,
                 attempt,
-                udp_payload: request.udp_payload.clone(),
+                udp_profile: endpoint
+                    .port()
+                    .and_then(|port| request.udp_profiles.get(&port))
+                    .cloned(),
+                udp_payload: endpoint
+                    .port()
+                    .and_then(|port| request.udp_profiles.get(&port))
+                    .map_or_else(
+                        || request.udp_payload.clone(),
+                        |profile| profile.payload(sequence),
+                    ),
             },
             timeout: request.timeout,
             permit: crate::evidence::ExecutionPermit::new(),
@@ -71,10 +81,12 @@ pub(super) fn worst_case_duration(
         .and_then(|count| count.checked_mul(endpoints_per_address))
         .ok_or_else(&overflow)?;
     let batch_count_u32 = u32::try_from(batch_count).map_err(|_| overflow())?;
-    let exchange_time = request
-        .timeout
-        .checked_mul(batch_count_u32)
-        .ok_or_else(&overflow)?;
+    let windows = if request.max_in_flight == 1 {
+        batch_count_u32
+    } else {
+        batch_count_u32.div_ceil(request.max_in_flight as u32)
+    };
+    let exchange_time = request.timeout.checked_mul(windows).ok_or_else(&overflow)?;
     let delay_count = batch_count_u32.saturating_sub(1);
     let delay = if delay_count == 0 {
         Duration::ZERO
@@ -106,7 +118,8 @@ mod tests {
     #[test]
     fn duration_planning_preserves_per_gap_rounding_empty_plans_and_overflow() {
         let mut request = Request {
-            target: Target::Address("192.0.2.1".parse().expect("documentation address")),
+            max_in_flight: 1,
+            targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
             transport: crate::scan::Transport::Tcp,
             address_family: Family::Any,
             ports: vec![80],
@@ -114,6 +127,7 @@ mod tests {
             timeout: Duration::from_millis(1),
             probes_per_second: Some(3),
             udp_payload: bytes::Bytes::new(),
+            udp_profiles: Default::default(),
             limits: crate::scan::Limits::default(),
         };
         for (addresses, endpoints, expected) in [

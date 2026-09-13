@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::io::Read;
+use std::io::{Read, Seek};
 
 use crate::budget::Cancellation;
 use crate::frame::{Frame, LinkType};
@@ -269,6 +269,28 @@ impl<R: Read> Iterator for Reader<R> {
             Ok(None) => None,
             Err(error) => Some(Err(error)),
         }
+    }
+}
+
+impl<R: Read + Seek> Reader<R> {
+    /// Reopens a seekable capture from its first header, resetting all section
+    /// and interface state while retaining limits and cancellation.
+    pub fn rewind(&mut self) -> Result<(), Error> {
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
+        }
+        self.finished = true;
+        self.inner.rewind()?;
+        let fresh = Reader::with_options(&mut self.inner, self.options)?;
+        self.state = fresh.state;
+        self.header = fresh.header;
+        self.interfaces = fresh.interfaces;
+        self.scratch = fresh.scratch;
+        self.finished = false;
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
+        }
+        Ok(())
     }
 }
 

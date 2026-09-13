@@ -13,21 +13,63 @@ Use core BPF keywords and numeric address, network, port, and protocol operands.
 
 The two filters use different languages and may be combined.
 
+Repeat --interface for an explicit set. Queue frame/byte limits are shared across
+sources, and each source must have room for one full snapshot. All sources pass
+readiness before delivery; shutdown and loss are reported per interface. Output
+frame.interface values are zero-based capture IDs in selected-interface order;
+the completion report maps them to native names/indexes. Frames retain capture
+timestamps and fair delivery order; cross-interface timestamp ordering is not promised.
+
+--write saves PCAPNG while text/JSON/NDJSON report progress and completion. JSON
+requires --write. --rotate-bytes counts uncompressed capture bytes including all
+headers; frames never split across files. --rotate-interval-ms rotates between
+frames using elapsed monotonic time. --rotate-files bounds retained files (1..=64).
+The default --retention stop ends at that bound. Explicit --retention ring reuses
+only handles for files created by this operation. Existing paths are preserved.
+All files receive complete metadata and compression finalization. Failure output
+includes partial capture/file evidence. A boundary can consume one matched frame
+without writing it when no next file is permitted; source counters expose this.
+Operation frame/byte/time limits remain shared across every source and file.
+
 Text and NDJSON frame records use the one-based post-BPF source frame position.
 Display-filter rejection does not renumber later source_frame values; NDJSON envelope
 sequence remains the zero-based emitted-record position.
 
 Examples:
   packetcraftr capture --interface 1 --timeout-ms 1000
+  packetcraftr --output ndjson capture --interface 1 --interface 2
+  packetcraftr --output json capture --interface 1 --write trace.pcapng.gz \
+    --compression gzip --rotate-bytes 1048576 --rotate-files 4
+  packetcraftr capture --interface 1 --write ring.pcapng \
+    --rotate-interval-ms 1000 --rotate-files 3 --retention ring
   packetcraftr capture --interface 1 --promiscuous \
     --capture-filter 'udp port 53' \
     --filter 'udp.source_port == 53'"#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Interface name or numeric index to capture from.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: String,
+    /// Compress binary stdout or saved PCAPNG files.
+    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
+    pub(crate) compression: crate::command_options::Compression,
+
+    /// Interface names or numeric indexes; repeat to capture an explicit set.
+    #[arg(long, value_name = "NAME_OR_INDEX", required = true)]
+    pub(crate) interface: Vec<String>,
+    /// Save PCAPNG files; existing paths are never overwritten.
+    #[arg(long)]
+    pub(crate) write: Option<std::path::PathBuf>,
+    /// Maximum uncompressed capture bytes per file, including headers and metadata.
+    #[arg(long)]
+    pub(crate) rotate_bytes: Option<u64>,
+    /// Rotate between frames after this monotonic interval.
+    #[arg(long)]
+    pub(crate) rotate_interval_ms: Option<u64>,
+    /// Maximum retained files (1..=64); numbering is inserted before the last extension.
+    #[arg(long, default_value_t = 1)]
+    pub(crate) rotate_files: usize,
+    /// Stop at the file limit, or reuse only files created by this operation.
+    #[arg(long,value_enum,default_value_t=packetcraftr_cli::output::capture::Retention::Stop)]
+    pub(crate) retention: packetcraftr_cli::output::capture::Retention,
     /// Enable promiscuous capture mode.
     #[arg(long)]
     pub(crate) promiscuous: bool,

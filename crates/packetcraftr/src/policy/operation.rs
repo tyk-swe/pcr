@@ -112,6 +112,15 @@ impl SocketBudget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("operation traffic budget overflowed")]
 pub struct BudgetOverflow;
+impl packetcraftr_core::error::Classified for BudgetOverflow {
+    fn classification(&self) -> packetcraftr_core::error::Classification {
+        packetcraftr_core::error::Classification::new(
+            "policy.budget_overflow",
+            packetcraftr_core::error::Kind::Policy,
+            Some("reduce the finite operation budget"),
+        )
+    }
+}
 
 /// Complete authorization shape for DNS that may use raw UDP and kernel TCP.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +128,39 @@ pub struct DnsOperation {
     udp: WireBudget,
     tcp: SocketBudget,
     budget: WireBudget,
+}
+
+/// Authorized numeric endpoints and a finite budget of kernel socket operations.
+#[derive(Clone, Copy, Debug)]
+pub struct SocketOperation<'a> {
+    endpoints: &'a [std::net::SocketAddr],
+    sockets: SocketBudget,
+    budget: WireBudget,
+}
+impl<'a> SocketOperation<'a> {
+    pub fn new(
+        endpoints: &'a [std::net::SocketAddr],
+        sockets: SocketBudget,
+    ) -> Result<Self, BudgetOverflow> {
+        let units = sockets
+            .connections
+            .checked_add(sockets.messages)
+            .ok_or(BudgetOverflow)?;
+        Ok(Self {
+            endpoints,
+            sockets,
+            budget: WireBudget::new(units, sockets.application_bytes),
+        })
+    }
+    pub fn endpoints(&self) -> &'a [std::net::SocketAddr] {
+        self.endpoints
+    }
+    pub const fn sockets(&self) -> SocketBudget {
+        self.sockets
+    }
+    pub const fn budget(&self) -> WireBudget {
+        self.budget
+    }
 }
 
 impl DnsOperation {
@@ -296,6 +338,8 @@ impl<'a> ReplayFrame<'a> {
 /// authorizer until each says what it does with it.
 #[derive(Clone, Copy, Debug)]
 pub enum Operation<'a> {
+    /// Ordinary socket operations; the endpoint list is authorized before connection.
+    Socket(SocketOperation<'a>),
     /// A packet-oriented target workflow — scan or traceroute — whose
     /// destinations were already authorized through
     /// [`Authorizer::resolve_and_authorize`]; only the budget remains to be
@@ -319,6 +363,7 @@ impl Operation<'_> {
     #[must_use]
     pub const fn budget(&self) -> WireBudget {
         match self {
+            Self::Socket(socket) => socket.budget(),
             Self::Budgeted(budget) => *budget,
             Self::Dns(dns) => dns.budget(),
             Self::Declared(declared) => declared.budget,
@@ -330,6 +375,7 @@ impl Operation<'_> {
     #[must_use]
     pub const fn shape(&self) -> &'static str {
         match self {
+            Self::Socket(_) => "socket",
             Self::Budgeted(_) => "budgeted",
             Self::Dns(_) => "dns",
             Self::Declared(_) => "declared-packet",
@@ -472,12 +518,18 @@ impl Policy {
     pub fn authorize(&self, request: Operation<'_>) -> Result<(), Error> {
         self.validate()?;
         let budget = request.budget();
-        if matches!(request, Operation::Dns(_)) {
-            self.authorize_dns_budget(budget.packets(), budget.wire_bytes())?;
+        if matches!(request, Operation::Dns(_) | Operation::Socket(_)) {
+            self.authorize_traffic_budget(budget.packets(), budget.wire_bytes())?;
         } else {
             self.authorize_wire_budget(budget.packets(), budget.wire_bytes())?;
         }
         match request {
+            Operation::Socket(socket) => {
+                for endpoint in socket.endpoints() {
+                    self.authorize_destination(endpoint.ip())?;
+                }
+                Ok(())
+            }
             Operation::Budgeted(_) | Operation::Dns(_) => Ok(()),
             Operation::Declared(declared) => {
                 if let PermissiveLive::Required { allowed } = declared.permissive_live() {

@@ -24,6 +24,7 @@ use crate::rendering::{
 type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
 
 pub(super) struct CaptureSettings {
+    pub(super) compression: crate::command_options::Compression,
     pub(super) format: Format,
     pub(super) max_interfaces: usize,
 }
@@ -41,7 +42,7 @@ pub(super) struct Run<'a, R, A, T, C> {
 
 impl<R, A, T, C> Run<'_, R, A, T, C>
 where
-    R: Read,
+    R: Read + std::io::Seek,
     A: packetcraftr::replay::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
@@ -53,7 +54,7 @@ where
             packetcraftr::replay::FrameEvidence,
         ) -> Result<(), packetcraftr::replay::Error>,
     ) -> Result<packetcraftr::replay::Summary, CliError> {
-        packetcraftr::replay::run_with_selector(
+        packetcraftr::replay::run_repeated_with_selector(
             self.reader,
             self.options,
             self.selector,
@@ -71,7 +72,7 @@ pub(super) fn render_text<R, A, T, C>(
     filtered: bool,
 ) -> Result<(), CliError>
 where
-    R: Read,
+    R: Read + std::io::Seek,
     A: packetcraftr::replay::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
@@ -95,10 +96,10 @@ where
 
 pub(super) fn render_aggregate<R, A, T, C>(
     run: Run<'_, R, A, T, C>,
-    requested_interface: net::interface::Id,
+    requested_interface: Option<net::interface::Id>,
 ) -> Result<(), CliError>
 where
-    R: Read,
+    R: Read + std::io::Seek,
     A: packetcraftr::replay::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
@@ -121,7 +122,7 @@ pub(super) fn render_stream<R, A, T, C>(
     stream: &StreamEncoder,
 ) -> Result<(), CliError>
 where
-    R: Read,
+    R: Read + std::io::Seek,
     A: packetcraftr::replay::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
@@ -140,7 +141,7 @@ pub(super) fn render_capture<R, A, T, C>(
     settings: CaptureSettings,
 ) -> Result<(), CliError>
 where
-    R: Read,
+    R: Read + std::io::Seek,
     A: packetcraftr::replay::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
@@ -148,7 +149,7 @@ where
     let stdout = io::stdout();
     let mut writer = capture_writer(
         run.reader,
-        stdout.lock(),
+        settings.compression.writer(stdout.lock())?,
         settings.format,
         run.options.limits,
         settings.max_interfaces,
@@ -156,7 +157,9 @@ where
     run.drive(|evidence| render_capture_record(&mut writer, evidence))?;
     writer
         .flush()
-        .map_err(|source| stream_capture_error("flush capture output failed", source))
+        .map_err(|source| stream_capture_error("flush capture output failed", source))?;
+    drop(writer.into_inner().finish().map_err(CliError::classified)?);
+    Ok(())
 }
 
 fn output_error(source_index: u64, message: impl Into<String>) -> packetcraftr::replay::Error {
@@ -199,7 +202,7 @@ fn render_stream_record(
         .map_err(|error| output_error(source_index, error.to_string()))
 }
 
-fn capture_writer<R: Read, W: Write>(
+fn capture_writer<R: Read + std::io::Seek, W: Write>(
     reader: &Reader<R>,
     destination: W,
     format: Format,
@@ -222,7 +225,7 @@ fn capture_writer<R: Read, W: Write>(
     Ok(SourceCaptureWriter::new(writer))
 }
 
-fn classic_writer<R: Read, W: Write>(
+fn classic_writer<R: Read + std::io::Seek, W: Write>(
     reader: &Reader<R>,
     destination: W,
     format: Format,
@@ -438,7 +441,9 @@ mod tests {
 
     fn options() -> packetcraftr::replay::Options {
         packetcraftr::replay::Options {
-            interface: interface(),
+            interface: Some(interface()),
+            repeat: 1,
+            inter_pass_delay: Duration::ZERO,
             link_mode: net::link::Mode::Auto,
             timing: packetcraftr::replay::Timing::Immediate,
             limits: packetcraftr::replay::Limits::default(),

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_cli::output::{
-    contract::{Command, SCHEMA_V4},
+    contract::{Command, SCHEMA_V5},
     envelope::Envelope,
     stream::StreamEncoder,
 };
@@ -23,7 +23,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
         Vec::new(),
     ))
     .expect("aggregate must serialize");
-    assert_eq!(aggregate["schema"], SCHEMA_V4);
+    assert_eq!(aggregate["schema"], SCHEMA_V5);
     assert_eq!(aggregate["command"], "protocols");
     assert_eq!(aggregate["mode"], "aggregate");
     assert_eq!(aggregate["status"], "success");
@@ -37,7 +37,7 @@ fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {
             .expect("stream must serialize");
     }
     let stream = output.records().pop().expect("eighth record");
-    assert_eq!(stream["schema"], SCHEMA_V4);
+    assert_eq!(stream["schema"], SCHEMA_V5);
     assert_eq!(stream["mode"], "stream");
     assert_eq!(stream["sequence"], 7);
 }

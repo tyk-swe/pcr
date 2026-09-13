@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "fuzz",
   "mode": "aggregate",
   "status": "success",
@@ -32,7 +32,7 @@
           { "type": "bytes", "value": [0] }
         ],
         "recipe": {
-          "schema": "packetcraftr.packet/v1",
+          "schema": "packetcraftr.packet/v2",
           "layers": [
             {
               "protocol": "raw",

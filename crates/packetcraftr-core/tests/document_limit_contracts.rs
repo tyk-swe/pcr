@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 
 use packetcraftr_core::document::{
     DEFAULT_MAX_DOCUMENT_BYTES, DocumentLimits, Error, Format, Layer, Limit, MAX_DOCUMENT_NESTING,
-    PACKET_DOCUMENT_SCHEMA_V1, Packet,
+    PACKET_DOCUMENT_SCHEMA_V2, Packet,
 };
 use packetcraftr_core::field::FieldValue;
 use serde::Deserialize;
 
-const SCHEMA: &str = PACKET_DOCUMENT_SCHEMA_V1;
+const SCHEMA: &str = PACKET_DOCUMENT_SCHEMA_V2;
 
 /// Wraps layer JSON in a complete document.
 fn document(layers: &str) -> String {
@@ -602,12 +602,12 @@ fn value_before_type_has_the_same_semantic_budget() {
         max_list_items: 3,
         ..DocumentLimits::DEFAULT
     };
-    let value_first = r#"{"schema":"packetcraftr.packet/v1","layers":[{"protocol":"raw","fields":{"b":{"value":[1,2,3,4],"type":"bytes"}}}]}"#;
+    let value_first = r#"{"schema":"packetcraftr.packet/v2","layers":[{"protocol":"raw","fields":{"b":{"value":[1,2,3,4],"type":"bytes"}}}]}"#;
     parse_both(value_first, &narrow).expect("byte elements are not list items");
     parse_both(&document(&layer("raw", &[bytes("b", 4)])), &narrow)
         .expect("type-first bytes are not list items");
     // Type mismatches after buffering are format errors.
-    let mismatch = "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,300],\"type\":\"bytes\"}}}]}";
+    let mismatch = "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,300],\"type\":\"bytes\"}}}]}";
     assert!(matches!(
         Packet::parse_with_limits(mismatch, Format::Json, &DocumentLimits::DEFAULT),
         Err(Error::Parse { .. })
@@ -662,7 +662,7 @@ fn value_first_bytes_respect_the_per_value_byte_limit() {
         max_byte_value_bytes: 2,
         ..DocumentLimits::DEFAULT
     };
-    let json = "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,2,3],\"type\":\"bytes\"}}}]}";
+    let json = "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"b\":{\"value\":[1,2,3],\"type\":\"bytes\"}}}]}";
     assert_eq!(
         limit_of(Packet::parse_with_limits(json, Format::Json, &limits)),
         Limit::ByteValueBytes
@@ -771,30 +771,30 @@ fn fuzz_regressions_stay_fixed() {
     let cases: [(&str, Format); 6] = [
         // Layer probe past the layer limit must not recurse without bound.
         (
-            "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{},{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"list\",\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[",
+            "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{},{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"list\",\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[",
             Format::Json,
         ),
         // Unknown tags and keys stay format errors.
         (
-            "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"float\",\"value\":1.5}}}]}",
+            "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"float\",\"value\":1.5}}}]}",
             Format::Json,
         ),
         (
-            "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"unsigned\",\"value\":1,\"extra\":0}}}]}",
+            "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"type\":\"unsigned\",\"value\":1,\"extra\":0}}}]}",
             Format::Json,
         ),
         // Value-first with an unusable shape.
         (
-            "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":[[1]],\"type\":\"list\"}}}]}",
+            "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":[[1]],\"type\":\"list\"}}}]}",
             Format::Json,
         ),
         (
-            "{\"schema\":\"packetcraftr.packet/v1\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":{\"type\":\"bool\",\"value\":true},\"type\":\"bool\"}}}]}",
+            "{\"schema\":\"packetcraftr.packet/v2\",\"layers\":[{\"protocol\":\"raw\",\"fields\":{\"f\":{\"value\":{\"type\":\"bool\",\"value\":true},\"type\":\"bool\"}}}]}",
             Format::Json,
         ),
         // YAML anchors and multiple documents remain refused.
         (
-            "schema: &a packetcraftr.packet/v1\nlayers: *a\n",
+            "schema: &a packetcraftr.packet/v2\nlayers: *a\n",
             Format::Yaml,
         ),
     ];

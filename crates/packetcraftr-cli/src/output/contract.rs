@@ -10,7 +10,7 @@ use serde::Serialize;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 /// Version identifier emitted by every structured CLI record.
-pub const SCHEMA_V4: &str = "packetcraftr.output/v4";
+pub const SCHEMA_V5: &str = "packetcraftr.output/v5";
 
 /// Declares the command vocabulary once: the enum, [`Command::ALL`], and
 /// [`Command::as_str`] all come from the single list below, in canonical order.
@@ -24,7 +24,7 @@ macro_rules! commands {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
         $(#[$enum_attribute])*
         $visibility enum $name {
-            $( $variant, )*
+            $( #[serde(rename = $text)] $variant, )*
         }
 
         impl $name {
@@ -46,6 +46,8 @@ commands! {
     #[serde(rename_all = "snake_case")]
     pub enum Command {
         Build = "build",
+        Fragment = "fragment",
+        Merge = "merge",
         Dissect = "dissect",
         Protocols = "protocols",
         Plan = "plan",
@@ -61,6 +63,10 @@ commands! {
         Tls = "tls",
         Traceroute = "traceroute",
         Dns = "dns",
+        DnsRead = "dns-read",
+        Http = "http",
+        Export = "export",
+        Rewrite = "rewrite",
         Fuzz = "fuzz",
         Interfaces = "interfaces",
         Routes = "routes",
@@ -71,14 +77,24 @@ impl Command {
     /// Formats deliberately supported by this command contract.
     pub const fn formats(self) -> &'static [Format] {
         match self {
+            Self::Rewrite | Self::Export | Self::Merge | Self::Http | Self::DnsRead => TOOL_FORMATS,
             Self::Build => BUILD_FORMATS,
+            Self::Fragment => &[
+                Format::Text,
+                Format::Json,
+                Format::Ndjson,
+                Format::Hex,
+                Format::Pcap,
+                Format::PcapNg,
+            ],
             Self::Dissect => DISSECT_FORMATS,
             Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
                 AGGREGATE_FORMATS
             }
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
-            Self::Capture | Self::Read => CAPTURE_FORMATS,
+            Self::Capture => CAPTURE_FORMATS,
+            Self::Read => READ_FORMATS,
             Self::Replay => REPLAY_FORMATS,
             Self::Follow => FOLLOW_FORMATS,
             Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert | Self::Tls => {
@@ -113,6 +129,8 @@ pub enum Format {
     Text,
     Json,
     Ndjson,
+    Csv,
+    Tsv,
     Hex,
     Raw,
     Pcap,
@@ -124,6 +142,8 @@ impl Format {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
+            Self::Csv => "csv",
+            Self::Tsv => "tsv",
             Self::Json => "json",
             Self::Ndjson => "ndjson",
             Self::Hex => "hex",
@@ -155,7 +175,25 @@ const BUILD_FORMATS: &[Format] = &[
     Format::Hex,
     Format::Raw,
 ];
-const DISSECT_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Hex, Format::Raw];
+const DISSECT_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Csv,
+    Format::Tsv,
+    Format::Hex,
+    Format::Raw,
+];
+const READ_FORMATS: &[Format] = &[
+    Format::Text,
+    Format::Json,
+    Format::Ndjson,
+    Format::Csv,
+    Format::Tsv,
+    Format::Hex,
+    Format::Pcap,
+    Format::PcapNg,
+];
 const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
 const SEND_FORMATS: &[Format] = &[
     Format::Text,
@@ -174,6 +212,7 @@ const EXCHANGE_FORMATS: &[Format] = &[
 ];
 const CAPTURE_FORMATS: &[Format] = &[
     Format::Text,
+    Format::Json,
     Format::Ndjson,
     Format::Hex,
     Format::Pcap,

@@ -1,0 +1,229 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "dns",
+      "fields": {
+        "additional_count": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "additionals": {
+          "type": "list",
+          "value": []
+        },
+        "answer_count": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "answers": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "class": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "owner": {
+                  "type": "text",
+                  "value": "example.test."
+                },
+                "ttl": {
+                  "type": "unsigned",
+                  "value": 60
+                },
+                "type": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "address": {
+                      "type": "ipv4",
+                      "value": "192.0.2.8"
+                    },
+                    "kind": {
+                      "type": "text",
+                      "value": "a"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "authenticated_data": {
+          "type": "bool",
+          "value": false
+        },
+        "authoritative_answer": {
+          "type": "bool",
+          "value": false
+        },
+        "authorities": {
+          "type": "list",
+          "value": []
+        },
+        "authority_count": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "checking_disabled": {
+          "type": "bool",
+          "value": false
+        },
+        "id": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "opcode": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "qclass": {
+          "type": "list",
+          "value": [
+            {
+              "type": "unsigned",
+              "value": 1
+            }
+          ]
+        },
+        "qname": {
+          "type": "list",
+          "value": [
+            {
+              "type": "text",
+              "value": "example.test."
+            }
+          ]
+        },
+        "qtype": {
+          "type": "list",
+          "value": [
+            {
+              "type": "unsigned",
+              "value": 1
+            }
+          ]
+        },
+        "question_count": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "questions": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "class": {
+                  "type": "unsigned",
+                  "value": 1
+                },
+                "name": {
+                  "type": "text",
+                  "value": "example.test."
+                },
+                "type": {
+                  "type": "unsigned",
+                  "value": 1
+                }
+              }
+            }
+          ]
+        },
+        "rcode": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "recursion_available": {
+          "type": "bool",
+          "value": false
+        },
+        "recursion_desired": {
+          "type": "bool",
+          "value": false
+        },
+        "reserved": {
+          "type": "bool",
+          "value": false
+        },
+        "response": {
+          "type": "bool",
+          "value": true
+        },
+        "truncated": {
+          "type": "bool",
+          "value": false
+        },
+        "wire": {
+          "type": "bytes",
+          "value": [
+            0,
+            0,
+            128,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            7,
+            101,
+            120,
+            97,
+            109,
+            112,
+            108,
+            101,
+            4,
+            116,
+            101,
+            115,
+            116,
+            0,
+            0,
+            1,
+            0,
+            1,
+            7,
+            101,
+            120,
+            97,
+            109,
+            112,
+            108,
+            101,
+            4,
+            116,
+            101,
+            115,
+            116,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+            0,
+            0,
+            60,
+            0,
+            4,
+            192,
+            0,
+            2,
+            8
+          ]
+        }
+      }
+    }
+  ]
+}

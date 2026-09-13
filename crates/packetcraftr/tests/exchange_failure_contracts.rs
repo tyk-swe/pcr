@@ -299,7 +299,8 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
         },
     );
     let request = scan::Request {
-        target: Target::Address("10.0.0.2".parse().unwrap()),
+        max_in_flight: 1,
+        targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
         transport: Transport::Tcp,
         address_family: Family::Any,
         ports: vec![80, 81, 82],
@@ -307,6 +308,7 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
         timeout: Duration::from_millis(100),
         probes_per_second: None,
         udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
         limits: scan::Limits::default(),
     };
     scan::run_with_events(

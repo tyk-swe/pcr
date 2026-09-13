@@ -227,8 +227,15 @@ jobs:
               "packetcraftr.exe" if windows else "packetcraftr"
           )
           assets = (
-              "LICENSE", "README.md", "CHANGELOG.md",
+              "LICENSE", "README.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md",
               "examples/captures/tls-handshake.pcapng",
+              "examples/captures/http-stream.pcap",
+              "examples/documents/packet-dns-response.json",
+              "examples/documents/packet-tls-client-hello.json",
+              "examples/documents/packet-dhcpv4-offer.json",
+              "examples/documents/packet-dhcpv6-reply.json",
+              "examples/documents/rewrite-lab-host.json",
+              "examples/documents/udp-profiles.json",
               "examples/documents/packet-ipv4-udp.json",
               "examples/documents/output-stats-resources.json",
               "examples/documents/output-read-resources.json",

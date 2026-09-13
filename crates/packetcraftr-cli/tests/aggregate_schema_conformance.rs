@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Serializes a real Rust aggregate payload for every command that publishes
-//! one and validates the emitted envelope against the published v4 schema.
+//! one and validates the emitted envelope against the published v5 schema.
 //!
 //! The published-example tests validate hand-written JSON, so they cannot see
 //! a Rust type drifting away from the contract. These tests check declared
@@ -80,6 +80,14 @@ type Case = fn() -> Value;
 /// name for the branch it exercises.
 const CASES: &[(Command, &str, Case)] = &[
     (Command::Build, "built packet", build_case),
+    (Command::Fragment, "fragment set", fragment_case),
+    (Command::Merge, "empty merged captures", merge_case),
+    (Command::DnsRead, "offline DNS", dns_read_case),
+    (Command::Http, "offline HTTP", http_case),
+    (Command::Export, "physical dependencies", export_case),
+    (Command::Rewrite, "rewritten headers", rewrite_case),
+    (Command::Capture, "capture completion", capture_case),
+    (Command::Read, "projected rows", projection_case),
     (Command::Dissect, "matched dissection", dissect_case),
     (Command::Dissect, "filtered out", dissect_unmatched_case),
     (Command::Protocols, "list", protocols_list_case),
@@ -421,6 +429,57 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
 
 // ------------------------------------------------------------------- cases
 
+fn fragment_case() -> Value {
+    let frame =
+        packetcraftr_cli::output::frame::Captured::try_from_frame(evidence_frame()).unwrap();
+    envelope(
+        Command::Fragment,
+        packetcraftr_cli::output::fragment::Report {
+            summary: packetcraftr_cli::output::fragment::Complete {
+                mtu: 1500,
+                fragments: 1,
+                bytes: u64::from(frame.captured_length),
+            },
+            fragments: vec![packetcraftr_cli::output::fragment::Fragment {
+                fragment_index: 0,
+                frame,
+            }],
+        },
+        Vec::new(),
+    )
+}
+fn merge_case() -> Value {
+    envelope(
+        Command::Merge,
+        packetcraftr_cli::output::merge::Report::new(
+            "merged.pcapng".to_owned(),
+            packetcraftr_core::analysis::pcap::MergeReport {
+                source_frames: vec![0, 0],
+                ..Default::default()
+            },
+        ),
+        Vec::new(),
+    )
+}
+fn projection_case() -> Value {
+    envelope(
+        Command::Read,
+        packetcraftr_cli::output::projection::Report {
+            summary: packetcraftr_cli::output::projection::Complete {
+                columns: vec!["frame.number".to_owned()],
+                rows_written: 1,
+                frames_read: 1,
+                captured_bytes_read: 1,
+            },
+            rows: vec![packetcraftr_cli::output::projection::Row {
+                source_frame: 1.try_into().unwrap(),
+                values: vec![Some(1u64.into())],
+            }],
+        },
+        Vec::new(),
+    )
+}
+
 fn build_case() -> Value {
     let mut built = built_packet();
     built.diagnostics.push(diagnostic());
@@ -575,6 +634,7 @@ fn exchange_empty_case() -> Value {
 
 fn replay_case() -> Value {
     let frames = vec![replay_output::Frame {
+        pass: 1,
         source_index: 1,
         interface: packetcraftr_netio::interface::Id {
             name: "lab0".to_owned(),
@@ -588,6 +648,11 @@ fn replay_case() -> Value {
     }];
     let report = replay_output::Report::from_summary(
         packetcraftr::replay::Summary {
+            passes_completed: 1,
+            interfaces_used: vec![InterfaceId {
+                name: "lab0".to_owned(),
+                index: 2,
+            }],
             source_format: packetcraftr_core::analysis::pcap::Format::Pcap,
             timing: packetcraftr::replay::Timing::Immediate,
             frames_read: 1,
@@ -608,6 +673,7 @@ fn replay_case() -> Value {
 fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        application: None,
         sequence: 0,
         address,
         transport: packetcraftr::scan::Transport::Tcp,
@@ -657,6 +723,7 @@ fn scan_case() -> Value {
 fn scan_icmp_case() -> Value {
     let ipv6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
     let probe = |address: IpAddr| packetcraftr::scan::ProbeEvidence {
+        application: None,
         sequence: 1,
         address,
         transport: packetcraftr::scan::Transport::Icmp,
@@ -1355,7 +1422,7 @@ fn aggregate_payloads_accept_unknown_fields_in_nested_output_records() {
         match value {
             Value::Object(object) => {
                 // Embedded packet inputs and reflective values keep their own contract.
-                if object.get("schema").and_then(Value::as_str) == Some("packetcraftr.packet/v1")
+                if object.get("schema").and_then(Value::as_str) == Some("packetcraftr.packet/v2")
                     || (object.contains_key("type") && object.contains_key("value"))
                 {
                     return;
@@ -1680,4 +1747,106 @@ fn fixture_scope() -> packetcraftr_core::analysis::scope::Definition {
     let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
     let id = scopes.intern(None, Vec::new()).unwrap();
     scopes.definition(id).unwrap().clone()
+}
+
+fn dns_read_case() -> Value {
+    use packetcraftr_cli::output::dns_analysis::{Complete, Report};
+    envelope(
+        Command::DnsRead,
+        Report {
+            messages: Vec::new(),
+            transactions: Vec::new(),
+            issues: Vec::new(),
+            complete: Complete {
+                frames_read: 0,
+                frames_matched: 0,
+                summary: Default::default(),
+                scopes: Vec::new(),
+                incomplete_datagrams: 0,
+                source_outcomes_omitted: 0,
+                ip_reassembly: reassembly_output::Report::from_analysis(&Default::default()),
+            },
+        },
+        Vec::new(),
+    )
+}
+
+fn http_case() -> Value {
+    use packetcraftr_cli::output::http::{Complete, Report};
+    envelope(
+        Command::Http,
+        Report {
+            messages: Vec::new(),
+            issues: Vec::new(),
+            complete: Complete {
+                frames_read: 0,
+                frames_matched: 0,
+                summary: Default::default(),
+                scopes: Vec::new(),
+                incomplete_datagrams: 0,
+                source_outcomes_omitted: 0,
+                ip_reassembly: reassembly_output::Report::from_analysis(&Default::default()),
+            },
+        },
+        Vec::new(),
+    )
+}
+
+fn export_case() -> Value {
+    use packetcraftr_core::analysis::{
+        export::Plan,
+        pcap::{Format, SelectionReport},
+    };
+    let plan = Plan {
+        source_frames: Default::default(),
+        matched_streams: Vec::new(),
+        unmatched_streams: Vec::new(),
+        unmatched_datagram_frames: Vec::new(),
+        selected_complete_datagrams: 0,
+        selected_incomplete_datagrams: Vec::new(),
+        unselected_incomplete_datagrams: 0,
+        source_outcomes_omitted: 0,
+        frames_read: 0,
+        scopes: Vec::new(),
+        ip_reassembly: Default::default(),
+    };
+    let capture = SelectionReport {
+        format: Format::Pcap,
+        frames_read: 0,
+        frames_selected: 0,
+        captured_bytes_read: 0,
+        captured_bytes_selected: 0,
+        interfaces: 1,
+        metadata_records: 0,
+    };
+    envelope(
+        Command::Export,
+        packetcraftr_cli::output::export::Report::new("selected.pcap".to_owned(), capture, plan)
+            .unwrap(),
+        Vec::new(),
+    )
+}
+
+fn rewrite_case() -> Value {
+    envelope(
+        Command::Rewrite,
+        packetcraftr_cli::output::rewrite::Report {
+            path: "rewritten.pcapng".to_owned(),
+            rule_matches: vec![0],
+            capture: Default::default(),
+        },
+        Vec::new(),
+    )
+}
+
+fn capture_case() -> Value {
+    let summary = packetcraftr_cli::output::capture::Summary {
+        requested_interfaces: Vec::new(),
+        sources: Vec::new(),
+        frames_delivered: 0,
+        stop_reason: packetcraftr::capture::StopReason::Window,
+        capture_statistics_complete: true,
+        files: None,
+    };
+    envelope_with_stats(Command::Capture, summary, Vec::new(), Default::default())
 }

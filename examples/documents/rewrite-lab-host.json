@@ -1,0 +1,19 @@
+{
+  "schema": "packetcraftr.rewrite/v1",
+  "rules": [
+    {
+      "filter": "ipv4.source == 192.0.2.1",
+      "patch": {
+        "source_ip": "192.0.2.9",
+        "source_port": 49000
+      }
+    },
+    {
+      "filter": "ipv4.destination == 192.0.2.1",
+      "patch": {
+        "destination_ip": "192.0.2.9",
+        "destination_port": 49000
+      }
+    }
+  ]
+}

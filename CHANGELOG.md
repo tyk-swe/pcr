@@ -6,7 +6,47 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ## [Unreleased]
 
+### Breaking
+
+- Packet documents use `packetcraftr.packet/v2`; structured command output uses
+  `packetcraftr.output/v5`. Schemas and published examples migrate together.
+  DNS questions use one typed list and section counts use `WireValue<u16>`.
+  See `docs/migration-unreleased.md`.
+
 ### Added
+
+- Portable TCP connect scans expose bounded socket outcomes and cleanup, with
+  explicit multi-target/CIDR selections, exclusions, and stable deduplication.
+- Replay maps source interfaces or filters to output interfaces and supports
+  finite repeated passes under shared budgets over a validated capture snapshot.
+- Rolling raw-packet scan windows share ready capture sources, pacing, deadlines,
+  and evidence bounds; per-port UDP profiles add DNS and masked-byte validation.
+- Multi-interface capture shares queue/operation budgets, readiness, and cleanup,
+  with per-source evidence and bounded PCAPNG size/time rotation and stop/ring retention.
+- DHCPv4/DHCPv6 fixture construction and typed options, including overloaded
+  fields, relay messages, DUIDs, address associations, and retained unknown wire.
+- Bounded capture header rewriting and ordered JSON rules with checksum repair,
+  VLAN replacement, preserved interface identity, and atomic compressed output.
+- Dependency-preserving `export` selects complete streams and reconstructed or
+  incomplete IP groups, then atomically copies their original capture records.
+- Cleartext HTTP/1 headers and sourced TCP message inspection through `http`,
+  including bounded body framing, request links, trailers, and incomplete evidence.
+- Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
+  UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
+  responses, partial messages, and capture-clock regressions.
+
+- Explicit bounded IPv4/IPv6 fragmentation and the offline `fragment` command.
+- Ordered multi-capture merging with source/interface provenance and atomic file publication.
+- Gzip/Zstd capture input/output with encoded/decoded-byte and window ceilings.
+- Registered field projection from `read`/`dissect`, including CSV/TSV, missing
+  values, repeated layers, nested fields, stream indexes, and bounded row output.
+
+- Bounded TLS ClientHello/ServerHello fixtures with SNI/ALPN helpers, ordered
+  opaque extensions, nested template/fuzz targets, and derived fingerprints.
+- Bounded named object fields and nested reflection/template/filter/fuzz paths.
+- Structured DNS question, record, EDNS and response construction through Rust
+  and recipes, sharing the encoder with live DNS queries. Untouched decoded DNS
+  retains exact original bytes; explicit edits derive lengths and counts.
 
 - Cartesian packet sets in core and `build`/`exchange`, with repeatable `--axis`,
   checked expansion limits, and streamed build packet/completion events.
@@ -54,7 +94,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   returns a checked result. DNS `Request::transport: TransportMode` replaces
   `tcp_fallback`; unknown serialized request fields are rejected. Scan requests
   and probes gain `udp_payload`, and `scan::Probe` is no longer `Copy`.
-- Output/v4 supersedes the earlier unreleased v3 schema, adding build streams,
+- Output/v5 supersedes the earlier unreleased v3/v4 schemas, adding build streams,
   bit-rate timing, and successful direct TCP DNS with `fallback_attempted=false`.
   Schemas, examples, release assets, and migration notes follow the new contract.
 - `packetcraftr --help` lists exit code 130 for interrupted operations next to
@@ -72,9 +112,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   workflow; decoder and isolated native validation run outside PRs.
 - Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
   that option as its fifth argument. `None` preserves the original query bytes.
-- Structured command output advances to `packetcraftr.output/v4`. DNS
-  `query_type` values are integers in `0..=65535` in summaries and events;
-  packet documents remain `packetcraftr.packet/v1`.
+- DNS `query_type` values are integers in `0..=65535` in summaries and events.
 - Rust DNS `QueryType` is a numeric value with `new`/`code` methods and uppercase
   named constants. Its serde representation is an integer; `Display` retains
   human-readable aliases. See [the migration notes](docs/migration-unreleased.md).

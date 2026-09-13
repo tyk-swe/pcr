@@ -11,7 +11,7 @@ mod machine;
 mod ndjson;
 mod style;
 
-pub(crate) use capture_file::{stdout_error, stream_capture_error, write_capture_file, write_raw};
+pub(crate) use capture_file::{stream_capture_error, write_capture_file, write_raw};
 pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter};
 
 pub(crate) use dns::render_dns_records;

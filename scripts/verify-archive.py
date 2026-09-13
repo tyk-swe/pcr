@@ -9,11 +9,20 @@ import subprocess
 import sys
 
 ASSETS = (
-    'LICENSE', 'README.md', 'CHANGELOG.md',
+    'LICENSE', 'README.md', 'CHANGELOG.md', 'THIRD_PARTY_NOTICES.md',
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
-    'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v1.schema.json',
-    'schemas/packetcraftr.output.v4.schema.json',
+    'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v2.schema.json',
+    'schemas/packetcraftr.output.v5.schema.json',
+    'schemas/packetcraftr.rewrite.v1.schema.json',
+    'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'examples/captures/tls-handshake.pcapng',
+    'examples/captures/http-stream.pcap',
+    'examples/documents/packet-dns-response.json',
+    'examples/documents/packet-tls-client-hello.json',
+    'examples/documents/packet-dhcpv4-offer.json',
+    'examples/documents/packet-dhcpv6-reply.json',
+    'examples/documents/rewrite-lab-host.json',
+    'examples/documents/udp-profiles.json',
     'examples/documents/packet-ipv4-udp.json',
     'examples/documents/output-stats-resources.json',
     'examples/documents/output-read-resources.json',
@@ -70,7 +79,7 @@ def verify(root, version, commit, target, variant):
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v4'
+        if (record.get('schema') != 'packetcraftr.output/v5'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):

@@ -142,11 +142,35 @@ fn layers<'a>(
 /// A path can yield several values: a protocol may appear more than once in a
 /// tunnelled stack, and an `Either` binding names more than one field. Any
 /// single match is enough, which is also how the grammar documents `!=`.
-fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
+pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
     F: FnMut(&FieldValue) -> bool,
 {
     match &field.source {
+        FieldSource::NestedLayer {
+            protocol,
+            path,
+            occurrence,
+        } => {
+            for layer in layers(context, protocol.as_str(), *occurrence) {
+                let Some(root) = layer.field(path.root()) else {
+                    continue;
+                };
+                let Some(value) = path.get(&root) else {
+                    continue;
+                };
+                let binding = FilterFieldBinding::Direct {
+                    protocol: *protocol,
+                    field: "",
+                };
+                if let Some(value) = project(value.clone(), &binding, field.slice)
+                    && predicate(&value)
+                {
+                    return true;
+                }
+            }
+            false
+        }
         FieldSource::Frame(which) => match frame_value(context, *which) {
             Some(value) => predicate(&value),
             None => false,

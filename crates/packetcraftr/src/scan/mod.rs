@@ -19,20 +19,27 @@ pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 pub const MAX_UDP_PAYLOAD_BYTES: usize = 65_507;
 
 // Header allowance for every generated scan probe: Ethernet plus IP and TCP
-// without options. UDP payload bytes are added separately to authorize the complete
+// without options, with the IPv4 allowance including minimum Ethernet padding.
+// UDP payload bytes are added separately to authorize the complete
 // multi-batch byte budget before the first route or send side effect.
-const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
+const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
 mod classification;
+pub mod connect;
 mod engine;
 mod execution;
 mod executor;
+mod pipeline;
 mod plan;
+pub use pipeline::{Error as PipelineError, PendingEvidence};
 mod probe;
+pub mod profile;
+mod registry;
 mod report;
 mod request;
+mod targets;
 #[cfg(test)]
 mod tests;
 
@@ -42,6 +49,6 @@ pub use engine::{run, run_with_events};
 pub use execution::{Batch, Execution, Executor, Probe, ProbeEndpoint};
 pub use report::{
     Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, ProbeStatus, Report,
-    Summary,
+    SentProbe, Summary,
 };
 pub use request::{Limits, PortSpec, Request, Transport, select_ports};

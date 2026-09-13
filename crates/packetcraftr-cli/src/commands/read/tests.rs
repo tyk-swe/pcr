@@ -39,6 +39,8 @@ fn normalized_output_propagates_header_interface_packet_and_flush_failures() {
                 max_frames: 1,
                 max_bytes: 1000,
                 reader: CaptureReaderBoundsArgs {
+                    max_decoded_bytes: 256 * 1024 * 1024,
+                    max_encoded_bytes: 256 * 1024 * 1024,
                     max_frame_bytes: 1000,
                     max_interfaces: 1,
                 },

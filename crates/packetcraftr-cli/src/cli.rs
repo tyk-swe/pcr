@@ -14,6 +14,8 @@ const ROOT_HELP_FORMATS: &str = r#"Output formats:
   text    Human-readable summaries and diagnostics.
   json    One aggregate JSON document.
   ndjson  One JSON record per streamed event.
+  csv     Selected fields as comma-delimited JSON cells.
+  tsv     Selected fields as tab-delimited JSON cells.
   hex     Exact frame bytes as hexadecimal text.
   raw     Exact frame bytes without text framing.
   pcap    Classic PCAP capture bytes.

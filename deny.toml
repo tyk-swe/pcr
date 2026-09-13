@@ -25,6 +25,23 @@ allow = [
     "Unicode-3.0",
     "Zlib",
 ]
+# Zstd capture compression uses these exact BSD-3-Clause packages. Their
+# redistribution notices are included in THIRD_PARTY_NOTICES.md and archives.
+[[licenses.exceptions]]
+name = "zstd"
+version = "=0.14.0"
+allow = ["BSD-3-Clause"]
+
+[[licenses.exceptions]]
+name = "zstd-safe"
+version = "=8.0.0"
+allow = ["BSD-3-Clause"]
+
+[[licenses.exceptions]]
+name = "zstd-sys"
+version = "=2.1.0"
+allow = ["BSD-3-Clause"]
+
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"

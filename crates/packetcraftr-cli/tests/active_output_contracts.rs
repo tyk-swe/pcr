@@ -27,6 +27,7 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
         port: None,
         classification,
         probes: vec![scan::ProbeEvidence {
+            application: None,
             sequence: 0,
             address,
             transport: packetcraftr::scan::Transport::Icmp,

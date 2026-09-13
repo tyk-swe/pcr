@@ -365,8 +365,37 @@ fn parse_subject(tokens: &[Spanned], start: usize, registry: &Registry) -> Resul
             message: "expected a field path".to_owned(),
         });
     };
-    let resolved = path::resolve(word, registry, offset)?;
-    let index = start.saturating_add(1);
+    let mut index = start.saturating_add(1);
+    let mut combined = word.clone();
+    while let Some(Spanned {
+        token: Token::Slice(contents),
+        ..
+    }) = tokens.get(index)
+    {
+        if contents.is_empty() || !contents.bytes().all(|byte| byte.is_ascii_digit()) {
+            break;
+        }
+        let mut candidate = format!("{combined}[{contents}]");
+        let mut next = index + 1;
+        if let Some(Spanned {
+            token: Token::Word(tail),
+            ..
+        }) = tokens.get(next)
+            && tail.starts_with('.')
+        {
+            candidate.push_str(tail);
+            next += 1;
+        }
+        if !matches!(
+            path::resolve(&candidate, registry, offset),
+            Ok(Resolved::Field(_))
+        ) {
+            break;
+        }
+        combined = candidate;
+        index = next;
+    }
+    let resolved = path::resolve(&combined, registry, offset)?;
 
     let field = match resolved {
         Resolved::Layer {

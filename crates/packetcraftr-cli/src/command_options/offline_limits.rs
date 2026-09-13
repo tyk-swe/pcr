@@ -53,6 +53,14 @@ pub(crate) struct OfflineCaptureLimitsArgs {
 /// that reads a capture file so the defaults cannot diverge.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct CaptureReaderBoundsArgs {
+    /// Maximum source bytes, bounding compressed headers, members, and skipped frames.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    pub(crate) max_encoded_bytes: u64,
+
+    /// Maximum decoded capture bytes, including metadata and compression expansion.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    pub(crate) max_decoded_bytes: u64,
+
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
     #[arg(long, default_value_t = packetcraftr_core::frame::DEFAULT_SIZE_LIMIT)]
     pub(crate) max_frame_bytes: usize,
@@ -74,6 +82,9 @@ impl OfflineCaptureLimitsArgs {
 /// Capture and analysis bounds shared by stats, expert, follow, and TLS.
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineLimitsArgs {
+    /// Maximum physical-frame provenance allocations retained by analysis consumers.
+    #[arg(long, default_value_t=16*1024*1024)]
+    pub(crate) max_provenance_bytes: usize,
     #[command(flatten)]
     pub(crate) capture: OfflineCaptureLimitsArgs,
     /// Maximum capture-global distinct conversations per transport.

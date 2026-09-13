@@ -117,6 +117,13 @@ fn compatible_tunnels_tls_and_raw_overrides_preserve_bytes() {
         (false, 8472, vxlan, "vxlan"),
         (false, 6082, geneve, "geneve"),
         (true, 4433, tls, "tls"),
+        (
+            true,
+            5353,
+            vec![0, 12, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "dns",
+        ),
+        (true, 8000, b"GET / HTTP/1.1\r\n\r\n".to_vec(), "http"),
         (false, 53, dns, "raw"),
     ] {
         let frame = frame(tcp, 50000, port, &payload);
@@ -143,7 +150,7 @@ fn compatible_tunnels_tls_and_raw_overrides_preserve_bytes() {
 #[test]
 fn incompatible_or_conflicting_bindings_fail_before_input() {
     for options in [
-        vec!["--decode-as", "tcp.port=53:dns"],
+        vec!["--decode-as", "tcp.port=53:vxlan"],
         vec!["--decode-as", "udp.port=0:dns"],
         vec!["--decode-as", "udp.port=65536:dns"],
         vec!["--decode-as", "udp.port=53:unknown"],

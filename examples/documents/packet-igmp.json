@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.packet/v1",
+  "schema": "packetcraftr.packet/v2",
   "layers": [
     {
       "protocol": "ipv4",

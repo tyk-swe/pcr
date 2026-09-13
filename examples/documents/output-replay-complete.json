@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "replay",
   "mode": "stream",
   "status": "success",
@@ -19,7 +19,14 @@
       "secs": 0,
       "nanos": 0
     },
-    "frames": []
+    "frames": [],
+    "passes_completed": 1,
+    "interfaces_used": [
+      {
+        "name": "lab0",
+        "index": 2
+      }
+    ]
   },
   "diagnostics": [],
   "stats": {

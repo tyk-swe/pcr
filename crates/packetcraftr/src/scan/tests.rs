@@ -34,7 +34,8 @@ use crate::{BoundaryError, Stats, target::Family};
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
-        target,
+        max_in_flight: 1,
+        targets: target.into(),
         transport: Transport::Tcp,
         address_family: Family::Any,
         ports: vec![80],
@@ -42,6 +43,7 @@ fn tcp_scan_request(target: Target) -> Request {
         timeout: Duration::from_millis(1),
         probes_per_second: None,
         udp_payload: bytes::Bytes::new(),
+        udp_profiles: Default::default(),
         limits: Limits::default(),
     }
 }
@@ -764,4 +766,112 @@ fn a_validated_request_selects_its_declared_ports_once_each() {
         error.kind,
         ErrorKind::InvalidLimit { field: "ports", .. }
     ));
+}
+
+#[derive(Default)]
+struct TargetSetAuthorizer {
+    calls: Vec<Target>,
+}
+impl crate::policy::Authorizer for TargetSetAuthorizer {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+    ) -> Result<crate::target::Authorized, BoundaryError> {
+        self.calls.push(target.clone());
+        Ok(crate::target::Authorized {
+            declared: target.clone(),
+            addresses: match target {
+                Target::Address(address) => vec![*address],
+                Target::Hostname(_) => {
+                    vec!["192.0.2.3".parse().unwrap(), "192.0.2.3".parse().unwrap()]
+                }
+            },
+        })
+    }
+    fn authorize_operation(
+        &mut self,
+        _operation: crate::policy::Operation<'_>,
+    ) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn explicit_target_sets_deduplicate_exclude_and_share_the_probe_budget() {
+    let mut request = tcp_scan_request(Target::Address("192.0.2.1".parse().unwrap()));
+    request.targets = crate::target::Selection {
+        include: [
+            "192.0.2.0/30",
+            "192.0.2.1",
+            "named.example",
+            "2001:db8::/127",
+        ]
+        .iter()
+        .map(|target| target.parse().unwrap())
+        .collect(),
+        exclude: vec!["192.0.2.0".parse().unwrap()],
+    };
+    let mut authorizer = TargetSetAuthorizer::default();
+    let mut executor = TimeoutExecutor::default();
+    let report = run(
+        &request,
+        &mut authorizer,
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap();
+    assert_eq!(
+        report
+            .resolved_addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        [
+            "192.0.2.1",
+            "192.0.2.2",
+            "192.0.2.3",
+            "2001:db8::",
+            "2001:db8::1"
+        ]
+    );
+    assert_eq!(executor.batches.len(), 5);
+    assert!(
+        !authorizer
+            .calls
+            .contains(&Target::Address("192.0.2.0".parse().unwrap()))
+    );
+    request.limits.max_probes = 4;
+    let mut executor = TimeoutExecutor::default();
+    assert!(
+        run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock
+        )
+        .is_err()
+    );
+    assert!(executor.batches.is_empty());
+}
+
+#[test]
+fn oversized_cidrs_are_refused_before_hostname_resolution_or_probe_execution() {
+    let mut request = tcp_scan_request(Target::Address("192.0.2.1".parse().unwrap()));
+    request.targets.include = vec!["named.example".parse().unwrap(), "::/0".parse().unwrap()];
+    let mut authorizer = TargetSetAuthorizer::default();
+    let mut executor = TimeoutExecutor::default();
+    assert!(
+        run(
+            &request,
+            &mut authorizer,
+            &packetcraftr_core::protocol::builtin::registry(),
+            &mut executor,
+            &mut NoopClock
+        )
+        .is_err()
+    );
+    assert!(authorizer.calls.is_empty());
+    assert!(executor.batches.is_empty());
 }

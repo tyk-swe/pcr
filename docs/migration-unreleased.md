@@ -2,18 +2,37 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-## Numeric DNS types and output/v4
+## Named packet fields and output/v5
 
-All structured command envelopes now identify `packetcraftr.output/v4` and
-validate against `schemas/packetcraftr.output.v4.schema.json`. Packet documents
-remain `packetcraftr.packet/v1`.
+Field values now include `{ "type": "object", "value": { "name": TAGGED_VALUE } }`.
+Object members share the list-item, nesting, node, and payload budgets; key bytes
+also consume payload budget. Expressions use `{name=value}` objects. Nested paths
+such as `questions[0].name` use zero-based list indices in reflection, templates,
+filters, and fuzz targets. Protocol field descriptions publish nested members.
 
-Output/v4 also adds streamed `build` packet/completion events and replay
+DNS is constructible. `Dns::questions` contains lossless `Question` values;
+`qnames`, `qtypes`, and `qclasses` are replaced by this single question model.
+The read-only reflected `qname`, `qtype`, and `qclass` views remain available.
+Section counts now use `WireValue<u16>`. Fresh messages derive counts; `Dns::edit`
+resets them to `Auto` for explicit structured edits. Exact/raw overrides follow
+the existing strict/permissive rules. DNS records reflect as named objects.
+Untouched decoded messages retain compression and unknown bytes exactly; edited
+messages encode names uncompressed, leaving unknown RDATA opaque. Opaque RDATA
+is not interpreted or relocated if it contains application-specific pointers.
+The reflected `wire` field preserves the original message through document
+round trips; explicit structured edits invalidate that retained image.
+
+
+All structured command envelopes now identify `packetcraftr.output/v5` and
+validate against `schemas/packetcraftr.output.v5.schema.json`. Packet documents now use `packetcraftr.packet/v2` and the corresponding v2 schema.
+Earlier packet-document versions are rejected with a schema error.
+
+Output/v5 includes streamed `build` packet/completion events and replay
 `{"bit_rate": BITS_PER_SECOND}` timing. Successful TCP DNS can have
 `fallback_attempted=false`: this represents a direct TCP query. Consumers
 must inspect the actual attempt transport rather than infer it from fallback.
 Fallback attempts retain a preceding truncated UDP phase with the same attempt
-number. These changes supersede the earlier unreleased output/v3 contract.
+number. These changes supersede the earlier unreleased output/v3 and output/v4 contracts.
 
 DNS `query_type` is an integer in `0..=65535` wherever it appears in aggregate
 summaries and NDJSON DNS events. For example, `"query_type": "aaaa"` becomes
@@ -31,7 +50,7 @@ with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CN
 `MX`, `NS`, `PTR`, `SOA`, `SRV`, `TXT`, and `ANY`; update names such as `Aaaa` to
 `AAAA`. Match constants or numeric codes with a fallback for other values.
 Use `Display` for presentation and integer serde values for data. The CLI
-contract constant is now `SCHEMA_V4`.
+contract constant is now `SCHEMA_V5`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
 Text parsing returns `QueryTypeParseError`, preserving the original integer
 parse error for out-of-range values.
@@ -94,7 +113,7 @@ The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
 that flag. DO requests DNSSEC data and performs no signature validation. The
 advertised receive size is independent of `--max-message-bytes`, which bounds
 response decoding. Existing output `edns` fields still describe the response;
-the output/v4 and packet/v1 contracts are unchanged by these request settings.
+these request settings add no fields to the output/v5 or packet/v2 contracts.
 
 ## Offline DNS records
 
@@ -120,21 +139,21 @@ per name, and 256 strings / 16,384 bytes per TXT record. Absolute ceilings are
 and 64 questions. Supplied limits above these ceilings are tightened; zero
 permits none of that resource.
 
-DNS reflection adds `answers`, `authorities`, and `additionals` fields. Each is
-a list of `[owner, type_code, class, ttl, rdata]` records using the existing typed
-`FieldValue` lists. The `rdata` list starts with a tag:
+DNS reflection exposes `answers`, `authorities`, and `additionals` as lists of
+named `{owner, type, class, ttl, value}` objects. Replace positional record lists
+with these objects. The nested `value` object selects its shape with `kind`:
 
-| Tag | Following values |
+| `kind` | Named value members |
 | --- | --- |
-| `a`, `aaaa` | IPv4 or IPv6 address |
-| `cname`, `ns`, `ptr` | Name |
-| `mx` | Preference, exchange name |
-| `soa` | Primary name server, responsible mailbox, serial, refresh, retry, expire, minimum |
-| `srv` | Priority, weight, port, target name |
-| `caa` | Flags, tag bytes, value bytes |
-| `txt` | List of character-string bytes |
-| `unknown` | Exact RDATA bytes |
-| `opt` | UDP payload size, extended response code, version, DO bit, flags, list of `[option_code, option_bytes]` |
+| `a`, `aaaa` | `address` (IPv4) or `address6` (IPv6) |
+| `cname`, `ns`, `ptr` | `name` |
+| `mx` | `preference`, `exchange` |
+| `soa` | `primary_name_server`, `responsible_mailbox`, `serial`, `refresh`, `retry`, `expire`, `minimum` |
+| `srv` | `priority`, `weight`, `port`, `target` |
+| `caa` | `flags`, `tag` bytes, `data` bytes |
+| `txt` | `strings`, a list of byte values |
+| `unknown` | `type`, exact `rdata` bytes |
+| `opt` | `udp_payload_size`, `extended_response_code`, `version`, `dnssec_ok`, `flags`, `options` as `{code, data}` objects |
 
 Ordinary typed records are decoded for the Internet (`IN`) class. Other
 classes retain exact RDATA as `unknown`; their class-specific formats are not
@@ -143,7 +162,7 @@ interpreted as Internet addresses or records.
 OPT records remain in their original section. Offline inspection retains
 unknown EDNS versions; live queries still enforce their existing OPT version,
 owner, section, and uniqueness rules. These fields fit the existing recursive
-packet/v1 field contract.
+packet/v2 field contract.
 
 ## Typed netio validation errors
 
@@ -177,14 +196,14 @@ and final query-byte checks.
 
 ## Resource and output hardening
 
-Existing client constructors, public limit structs and default output/v4 records
-remain compatible. Share callback admission explicitly with
+Existing client constructors remain available; the feature additions in this
+release add fields to public limits and migrate output to v5. Share callback admission with
 `client.with_progress_runtime(runtime.clone())`; inspect it with
 `client.progress_runtime().snapshot()`. Native admission remains process-wide.
 
 `--resource-diagnostics` opts into an optional `resources` envelope member.
-Older strict output schemas may reject this member, so upgrade those consumers
-before enabling it. No additional NDJSON events or sequence positions are added.
+Output/v5 schemas include this member. Resource diagnostics add no NDJSON events
+or sequence positions.
 `--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
 cleanup allowance remain one second, and operation deadlines take precedence.
 
@@ -194,3 +213,102 @@ raise an explicit budget only after considering the hosting process limit.
 Packet-document key reordering no longer changes semantic acceptance. Existing
 input/depth and duplicate-field checks still apply. See
 [resource contracts](analysis-resources.md).
+
+## TLS hello construction
+
+`Tls::from_hello(Hello)` builds complete ClientHello/ServerHello fixture records.
+The `hello` object in recipes exposes record/legacy versions, random, session ID,
+cipher suites, compression methods, and ordered `{type, data}` extensions.
+`HelloExtension::server_name` and `HelloExtension::alpn` construct common bodies;
+recipes also accept `{server_name="example.test"}` and `{alpn=["h2"]}`.
+Extension bodies remain authoritative, including unrecognized extensions.
+Nested template and fuzz paths can address `hello.cipher_suites[0]` or
+`hello.extensions[0].data`. Edits rederive lengths and fingerprints.
+
+Expressions accept `hex("00ff")` and `bytes("text")` for exact byte values,
+including inside objects and lists. Decoded TLS extension models now retain
+`data`; ServerHello models retain their echoed `session_id`.
+
+Offline DNS analysis is available through `analysis::dns::Collector` and the
+`dns-read` CLI command. Collector callers enable both `Options::tcp_events` and
+`Options::track_sources`, feed complete conversations, then call `finish` with
+the run summary. `FrameRecord` exposes source sets for physical and reassembled
+transport views; source sets share a bounded provenance allocator and reject
+unions from different capture runs. `Limits::max_provenance_bytes` bounds these
+allocations. `LayerDecodeContext::parent` identifies the enclosing protocol so
+DNS can distinguish UDP messages from TCP length-prefixed messages.
+
+Capture header rewrites use `transform::HeaderRewrite` and the `rewrite` CLI.
+Conditional rule documents have independent version `packetcraftr.rewrite/v1` and
+schema `schemas/packetcraftr.rewrite.v1.schema.json`. Rules evaluate original frames
+and apply matching edits in order. `pcap::map_frames` normalizes mapped frames into
+one PCAPNG section and checks capture identity, metadata, and declared growth.
+`export` instead uses a stable snapshot and preserves selected source records.
+
+DHCP codecs live at `protocol::application::dhcp` and bind standard UDP ports.
+`Dhcpv4`, `Dhcpv6`, `Option4`, and `Option6` construct fixtures with named option
+values. `Limits` bounds complete message bytes, aggregate option nodes, and nesting.
+Per-message wire retention preserves exact unedited captures. Protocol discovery
+may replace repeated `children` arrays with `children_reference`: resolve that JSON
+Pointer against the containing top-level field description before traversing its
+children. This only compacts discovery output; reflective paths keep their bounds.
+
+Live capture orchestration now lives in `packetcraftr::capture`, over
+`packetcraftr_netio::capture::group`. `capture::run` owns activation through cleanup,
+charges the shared `CaptureBudget` before selection, and reports per-source evidence.
+The CLI accepts repeated `--interface` flags. Live `frame.interface_id` and emitted
+frame interface values are capture IDs (0-based selected-interface order); completion
+sources map these to native interface names/indexes. Update filters that used native
+OS indexes in this field. Cross-interface delivery keeps exact timestamps without
+promising timestamp ordering.
+
+Capture completion is an enriched `output::capture::Summary`, replacing the empty
+completion payload. JSON capture requires `--write`. Capture failures may include
+`error.capture`, containing source/file evidence and processed statistics. Rotated
+files are PCAPNG, use uncompressed byte thresholds, and finalize compression per
+file. Explicit ring retention reuses operation-owned handles and reports retired
+files; neither source count nor rotation increases the configured operation budget.
+
+Scan requests use bounded `target::Selection` sets (hosts/CIDRs/exclusions), with
+`Limits::max_targets`, `max_in_flight`, and `Limits::max_prepared_bytes`. Raw scan
+executors expose `pipeline_capacity` and may implement `execute_pipeline`; the
+base executor refuses unsupported windows instead of serializing them silently.
+`probe::PipelineEvent` carries confirmed sends, completions and bounded evidence.
+CLI executor delegation preserves this capability. Raw scan NDJSON adds
+`probe_sent`; failures may carry `error.scan` with confirmed pending wire.
+
+`Request::udp_profiles` maps ports to validated `Arc<profile::UdpProfile>` values.
+`Probe` retains its selected profile, and `ProbeEvidence::application` reports
+application validation independently of reachability. Configuration serializes
+through `profile::Config`; private compiled state is revalidated on deserialization.
+`Registry::to_builder` derives isolated bindings for explicit byte/DNS profiles,
+without changing the caller's registry. UDP profile documents use independent
+`packetcraftr.udp-profiles/v1` and ship with a schema and example.
+
+## Replay mapping and repetition
+
+Wrap the old `replay::Options::interface` value in `Some` for a fixed fallback,
+and add `repeat: 1` and `inter_pass_delay: Duration::ZERO` for one pass.
+`Selector::interface` may return an output interface for each selected frame;
+its default uses the fallback. Replay readers now require `Read + Seek` so the
+engine can rewind between passes. The CLI snapshots and validates the complete
+capture before live work, including compressed inputs.
+
+Repetition shares source-frame, transmitted-byte, time, and policy budgets.
+`FrameEvidence::pass` is one-based; `source_index` remains relative to the input.
+`Summary` adds `passes_completed` and `interfaces_used`. The aggregate requested
+interface is optional, and each sent frame retains its actual output route.
+
+## TCP connect scanning
+
+Use `scan::connect::{run, run_with_events}` with an explicit TCP provider for
+kernel connections. Reports use socket outcomes and endpoint evidence, with no
+raw packet receipt or capture statistics. `policy::Operation::Socket` carries
+`SocketOperation` with the authorized numeric endpoints and a finite `SocketBudget`.
+Custom authorizers must handle this operation before a connection is admitted.
+
+Netio's `tcp::start_connect` returns a pollable `PendingConnect`. Cancellation or
+drop cancels unstarted calls; admitted calls retain their process-wide resource
+lease until worker and socket cleanup finish. Successful `Connection` values
+retain that lease until dropped. At most 16 calls/connections can retain admission.
+The workflow caps `Request::max_in_flight` accordingly and rejects UDP/ICMP use.

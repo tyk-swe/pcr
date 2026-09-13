@@ -22,10 +22,16 @@ pub(crate) fn render_dns_records(packet: &Packet) -> Result<(), CliError> {
                 continue;
             };
             for record in records {
-                let FieldValue::List(parts) = record else {
+                let FieldValue::Object(parts) = record else {
                     continue;
                 };
-                let [owner, type_code, class, ttl, data] = parts.as_slice() else {
+                let (Some(owner), Some(type_code), Some(class), Some(ttl), Some(data)) = (
+                    parts.get("owner"),
+                    parts.get("type"),
+                    parts.get("class"),
+                    parts.get("ttl"),
+                    parts.get("value"),
+                ) else {
                     continue;
                 };
                 write_plain_line(format_args!(

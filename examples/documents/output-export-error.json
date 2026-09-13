@@ -1,0 +1,13 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "export",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.export_selection",
+    "kind": "cli",
+    "message": "capture dependency selection needs a filter, stream, or nonzero datagram frame",
+    "causes": []
+  },
+  "diagnostics": []
+}

@@ -39,6 +39,19 @@ impl fmt::Debug for Registry {
 }
 
 impl Registry {
+    /// Derives a mutable registry configuration, retaining existing codecs,
+    /// aliases, roots, matchers and filter fields. `build` revalidates bindings.
+    pub fn to_builder(&self) -> Builder {
+        Builder {
+            codecs: self.codecs.clone(),
+            aliases: self.aliases.clone(),
+            roots: self.roots.clone(),
+            bindings: self.bindings.clone(),
+            matchers: self.matchers.clone(),
+            filter_fields: self.filter_fields.clone(),
+        }
+    }
+
     pub fn builder() -> Builder {
         Builder::new()
     }

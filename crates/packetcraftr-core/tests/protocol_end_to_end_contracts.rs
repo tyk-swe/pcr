@@ -735,8 +735,8 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     ];
     let dns = Dns::from_wire(query.clone()).expect("valid DNS query");
     assert_eq!(dns.id, 0x1234);
-    assert_eq!(dns.qnames, ["www.example.com."]);
-    assert_eq!(dns.qtypes, [1]);
+    assert_eq!(dns.questions[0].name.to_string(), "www.example.com.");
+    assert_eq!(dns.questions[0].query_type, 1);
     assert_eq!(dns.wire().as_ref(), query);
     let mut packet = Packet::new();
     packet.push(ipv4([192, 0, 2, 1], [8, 8, 8, 8]));

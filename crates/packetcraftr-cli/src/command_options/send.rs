@@ -7,6 +7,10 @@ use super::{BuildMode, RouteArgs, SendPolicyArgs};
 
 #[derive(Debug, Args)]
 pub(crate) struct SendArgs {
+    /// Compress binary capture output; independent of the input's detected format.
+    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
+    pub(crate) compression: crate::command_options::Compression,
+
     #[command(flatten)]
     pub(crate) route: RouteArgs,
     /// Strict or permissive packet construction.

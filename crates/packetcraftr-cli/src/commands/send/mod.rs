@@ -33,6 +33,7 @@ struct PreparedSend {
 
 fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
     let SendArgs {
+        compression: _,
         route,
         mode,
         allow_permissive_live,
@@ -57,6 +58,8 @@ fn prepare(arguments: SendArgs) -> Result<PreparedSend, CliError> {
 }
 
 pub(super) fn run(arguments: SendArgs, format: Format) -> Result<(), CliError> {
+    let compression = arguments.compression;
+    compression.validate(format)?;
     let prepared = prepare(arguments)?;
     let report = prepared
         .client
@@ -81,8 +84,8 @@ pub(super) fn run(arguments: SendArgs, format: Format) -> Result<(), CliError> {
         }
         Format::Hex => write_plain_line(format_args!("{}", result.frame.bytes_hex())),
         Format::Raw => write_raw(result.frame.bytes()),
-        Format::Pcap => write_capture_file(capture::Format::Pcap, [capture_frame]),
-        Format::PcapNg => write_capture_file(capture::Format::PcapNg, [capture_frame]),
+        Format::Pcap => write_capture_file(capture::Format::Pcap, [capture_frame], compression),
+        Format::PcapNg => write_capture_file(capture::Format::PcapNg, [capture_frame], compression),
         _ => unreachable!("command dispatch validated the output format"),
     }
 }

@@ -36,11 +36,27 @@ impl From<Timing> for packetcraftr::replay::Timing {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
+    /// Compress binary capture output; independent of the input's detected format.
+    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
+    pub(crate) compression: crate::command_options::Compression,
+
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
-    /// Exact interface name or numeric index used for every transmission.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: String,
+    /// Fallback output interface; mapping-only runs may omit it.
+    #[arg(long, value_name="NAME_OR_INDEX", required_unless_present_any=["interface_maps","filter_maps"])]
+    pub(crate) interface: Option<String>,
+    /// Map a capture-global input interface ID (classic PCAP uses 0).
+    #[arg(long = "map-interface", value_name = "SOURCE_ID=OUTPUT_INTERFACE")]
+    pub(crate) interface_maps: Vec<String>,
+    /// Map matching frames; conflicting matches are rejected before transmission.
+    #[arg(long = "map-filter", value_name = "EXPR=>OUTPUT_INTERFACE")]
+    pub(crate) filter_maps: Vec<String>,
+    /// Finite capture passes under one read/transmit/time budget.
+    #[arg(long, default_value_t = 1)]
+    pub(crate) repeat: u32,
+    /// Additional minimum pause between passes, in milliseconds.
+    #[arg(long, default_value_t = 0)]
+    pub(crate) inter_pass_delay_ms: u64,
     /// Automatic, Layer 2, or raw Layer 3 replay intent.
     #[arg(long, value_enum, default_value_t = LinkMode::Auto)]
     pub(crate) link_mode: LinkMode,

@@ -73,7 +73,11 @@ impl DecodeArgs {
                 .ok_or_else(|| error(format!("unknown decode-as protocol {child:?}")))?;
             if !matches!(
                 (parent, child.as_str()),
-                ("tcp", "tls" | "raw") | ("udp", "dns" | "vxlan" | "geneve" | "raw")
+                ("tcp", "dns" | "http" | "tls" | "raw")
+                    | (
+                        "udp",
+                        "dhcpv4" | "dhcpv6" | "dns" | "vxlan" | "geneve" | "raw"
+                    )
             ) {
                 return Err(error(format!(
                     "{child} cannot be decoded directly under {parent}"

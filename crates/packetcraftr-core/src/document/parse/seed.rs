@@ -49,6 +49,7 @@ pub(super) enum Tag {
     Ipv6,
     Mac,
     List,
+    Object,
 }
 
 impl Tag {
@@ -63,6 +64,7 @@ impl Tag {
             Self::Ipv6 => "an IPv6 address string",
             Self::Mac => "an array of 6 bytes",
             Self::List => "a list of tagged field values",
+            Self::Object => "a map of named tagged field values",
         }
     }
 }

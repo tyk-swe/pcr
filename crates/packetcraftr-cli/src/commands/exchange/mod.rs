@@ -19,6 +19,8 @@ use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
 
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    let compression = arguments.send.compression;
+    compression.validate(format)?;
     let Args {
         send,
         template,
@@ -112,8 +114,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     match format {
         Format::Text => rendering::render_text(&result),
         Format::Json => rendering::render_aggregate(result),
-        Format::Pcap => rendering::render_capture(&result, capture::Format::Pcap),
-        Format::PcapNg => rendering::render_capture(&result, capture::Format::PcapNg),
+        Format::Pcap => rendering::render_capture(&result, capture::Format::Pcap, compression),
+        Format::PcapNg => rendering::render_capture(&result, capture::Format::PcapNg, compression),
         _ => unreachable!("streaming returned before aggregate rendering"),
     }
 }

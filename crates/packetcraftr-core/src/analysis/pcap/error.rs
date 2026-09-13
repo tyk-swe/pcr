@@ -106,6 +106,18 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
+            Self::Io(source)
+                if source
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<super::compression::Error>())
+                    .is_some() =>
+            {
+                source
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<super::compression::Error>())
+                    .expect("guarded compression error")
+                    .classification()
+            }
             Self::Io(_) => Classification::new(
                 "io.capture_file",
                 Kind::Io,

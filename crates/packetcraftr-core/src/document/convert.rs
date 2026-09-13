@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::error::Error;
-use super::types::{Layer, PACKET_DOCUMENT_SCHEMA_V1, Packet};
+use super::types::{Layer, PACKET_DOCUMENT_SCHEMA_V2, Packet};
 
 use crate::registry::Registry;
 
@@ -28,7 +28,7 @@ impl Packet {
             })
             .collect();
         Self {
-            schema: PACKET_DOCUMENT_SCHEMA_V1.to_owned(),
+            schema: PACKET_DOCUMENT_SCHEMA_V2.to_owned(),
             layers,
         }
     }

@@ -15,7 +15,8 @@ pub use model::{Error, Policy};
 
 pub use operation::{
     Authorizer, BudgetOverflow, DeclaredPackets, DnsOperation, Operation, PermissiveLive,
-    PolicyAuthorizer, ReplayFrame, SocketBudget, WireBudget, unsupported_operation,
+    PolicyAuthorizer, ReplayFrame, SocketBudget, SocketOperation, WireBudget,
+    unsupported_operation,
 };
 pub(crate) use wire::{
     PermissiveLiveDenial, WireAuthorizationError, authorize_permissive_live, authorize_wire,

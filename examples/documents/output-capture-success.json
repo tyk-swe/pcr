@@ -1,0 +1,91 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "capture",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "requested_interfaces": [
+      {
+        "name": "fixture0",
+        "index": 1
+      }
+    ],
+    "sources": [
+      {
+        "capture_id": 0,
+        "native_interface": {
+          "name": "fixture0",
+          "index": 1
+        },
+        "link_type": 147,
+        "snap_length": 65535,
+        "queue_frames": 4096,
+        "queue_bytes": 268435456,
+        "overflow_policy": "fail",
+        "metadata_valid": true,
+        "ready": true,
+        "shutdown_confirmed": true,
+        "statistics_valid": true,
+        "statistics": {
+          "received_frames": 100,
+          "received_bytes": 8042,
+          "dropped_frames": 0,
+          "dropped_bytes": 0,
+          "overflow_events": 0
+        },
+        "delivered_frames": 100,
+        "delivered_bytes": 8042,
+        "admitted_frames": 100,
+        "matched_frames": 1,
+        "emitted_frames": 1,
+        "late_frames": 0
+      }
+    ],
+    "frames_delivered": 100,
+    "stop_reason": "frame_budget",
+    "capture_statistics_complete": true,
+    "files": {
+      "retention": "stop",
+      "compression": "none",
+      "rotate_bytes": null,
+      "rotate_interval_ms": null,
+      "maximum_files": 1,
+      "files": [
+        {
+          "path": "capture.pcapng",
+          "slot": 0,
+          "generation": 1,
+          "frames": 1,
+          "capture_bytes": 120,
+          "encoded_bytes": 120,
+          "first_source_frame": 100,
+          "last_source_frame": 100,
+          "finalized": true
+        }
+      ],
+      "frames_written": 1,
+      "captured_bytes_written": 4,
+      "discarded_files": 0,
+      "discarded_frames": 0,
+      "discarded_capture_bytes": 0,
+      "stopped_at_retention_limit": false
+    }
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 100,
+    "packets_completed": 1,
+    "bytes": 8042,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 250000
+    },
+    "capture": {
+      "received_frames": 100,
+      "received_bytes": 8042,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

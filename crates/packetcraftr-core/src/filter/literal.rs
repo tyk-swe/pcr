@@ -154,6 +154,7 @@ pub(super) fn kind_name(kind: FieldKind) -> &'static str {
         FieldKind::Ipv6 => "an IPv6 address",
         FieldKind::Mac => "a MAC address",
         FieldKind::List => "a list",
+        FieldKind::Object => "an object",
     }
 }
 
@@ -184,6 +185,7 @@ pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
         FieldKind::Mac => matches!(literal, Literal::Mac(_) | Literal::Bytes(_)),
         // Lists compare element-wise.
         FieldKind::List => true,
+        FieldKind::Object => false,
     }
 }
 

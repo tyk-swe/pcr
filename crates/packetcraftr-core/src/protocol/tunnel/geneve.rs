@@ -389,6 +389,7 @@ mod tests {
     fn decode(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
         let registry = crate::protocol::builtin::registry();
         let context = LayerDecodeContext {
+            parent: None,
             registry: &registry,
             allow_trailing_padding: false,
             network: None,

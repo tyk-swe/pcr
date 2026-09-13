@@ -61,6 +61,12 @@ pub(super) fn render_text(
                 optional_debug(evidence.latency),
                 evidence.reason,
             ))?;
+            if let Some(application) = &evidence.application {
+                write_stdout_line(format_args!(
+                    "    profile={} validation={:?}: {}",
+                    application.profile, application.status, application.reason
+                ))?;
+            }
             if let Some(frame) = &evidence.frame {
                 write_stdout_line(format_args!("    frame {}", captured_frame_text(frame)))?;
             }
@@ -92,4 +98,25 @@ pub(super) fn emit_complete(
 ) -> Result<(), CliError> {
     let (record, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
     Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+}
+
+pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
+    use packetcraftr_core::error::Classified;
+    let mut cli =
+        CliError::from_classification(error.classification(), error.to_string(), error.causes())
+            .with_context(error.context());
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    while let Some(error) = source {
+        if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineError>() {
+            match output::scan::Failure::try_from_pipeline(pipeline) {
+                Ok(partial) => cli = cli.with_scan(partial),
+                Err(error) => cli
+                    .causes
+                    .push(format!("could not render pending scan evidence: {error}")),
+            }
+            break;
+        }
+        source = error.source();
+    }
+    cli
 }

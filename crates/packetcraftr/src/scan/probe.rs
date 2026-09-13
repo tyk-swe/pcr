@@ -69,7 +69,21 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
                 destination_port: port,
                 ..Udp::default()
             });
-            push_udp_payload(&mut packet, port, &probe.udp_payload);
+            if let Some(profile) = &probe.udp_profile {
+                if profile.raw_payload() {
+                    if !probe.udp_payload.is_empty() {
+                        packet.push(Raw::new(probe.udp_payload.clone()));
+                    }
+                } else {
+                    if let Ok(dns) = Dns::from_wire(probe.udp_payload.clone()) {
+                        packet.push(dns);
+                    } else {
+                        packet.push(Raw::new(probe.udp_payload.clone()));
+                    }
+                }
+            } else {
+                push_udp_payload(&mut packet, port, &probe.udp_payload);
+            }
             &mut packet
         }
         ProbeEndpoint::Icmp => match probe.address {
@@ -100,10 +114,8 @@ const GENEVE_ETHERNET: u16 = 0x6558;
 const GENEVE_IPV4: u16 = 0x0800;
 const GENEVE_IPV6: u16 = 0x86dd;
 
-// Strict UDP construction checks that the child agrees with its registered port. DNS, VXLAN, and
-// Geneve are the only payload protocols the builtin registry binds, so materialize those as typed
-// layers and keep every other payload as exact Raw bytes; a payload that does not decode as its
-// registered protocol also stays Raw and fails strict building as before.
+// Materialize recognized payloads under their registered UDP ports so strict
+// construction retains the same application bytes and protocol identity.
 fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     if payload.is_empty() {
         return;
@@ -113,6 +125,20 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
         && let Ok(dns) = Dns::from_wire(payload.clone())
     {
         packet.push(dns);
+        return;
+    }
+    if matches!(port, 67 | 68)
+        && let Ok(dhcp) =
+            packetcraftr_core::protocol::application::dhcp::Dhcpv4::from_wire(payload.clone())
+    {
+        packet.push(dhcp);
+        return;
+    }
+    if matches!(port, 546 | 547)
+        && let Ok(dhcp) =
+            packetcraftr_core::protocol::application::dhcp::Dhcpv6::from_wire(payload.clone())
+    {
+        packet.push(dhcp);
         return;
     }
     if port == VXLAN_PORT
@@ -143,6 +169,7 @@ fn decode_tunnel_header(
         .decode(
             payload,
             &LayerDecodeContext {
+                parent: None,
                 registry,
                 allow_trailing_padding: false,
                 network: None,
@@ -276,6 +303,12 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
 // the observed packet is compared against the same reduction probe_packet applied, so the narrowing
 // is symmetric on both sides of the comparison
 pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+    if probe.udp_profile.as_ref().is_some_and(|profile| {
+        probe.endpoint.transport() != super::Transport::Udp
+            || profile.payload(probe.sequence) != probe.udp_payload
+    }) {
+        return false;
+    }
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {
@@ -346,6 +379,7 @@ mod tests {
             attempt: 1,
             address: "192.0.2.53".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 53 },
+            udp_profile: None,
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -376,6 +410,7 @@ mod tests {
                 attempt: 1,
                 address: address.parse().unwrap(),
                 endpoint: ProbeEndpoint::Udp { port: 50001 },
+                udp_profile: None,
                 udp_payload: Bytes::from_static(b"\x00query\xff"),
             };
             let mut packet = probe.packet();
@@ -493,6 +528,7 @@ mod tests {
             attempt: 1,
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 4789 },
+            udp_profile: None,
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -525,6 +561,7 @@ mod tests {
             attempt: 1,
             address: "2001:db8::10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 6081 },
+            udp_profile: None,
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -546,6 +583,7 @@ mod tests {
             attempt: 1,
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 6081 },
+            udp_profile: None,
             udp_payload: payload.clone(),
         };
         let mut packet = probe.packet();
@@ -566,6 +604,7 @@ mod tests {
             attempt: 1,
             address: "192.0.2.10".parse().unwrap(),
             endpoint: ProbeEndpoint::Udp { port: 4789 },
+            udp_profile: None,
             udp_payload: Bytes::from_static(b"not a vxlan frame"),
         };
         let mut packet = probe.packet();

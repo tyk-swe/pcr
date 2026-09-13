@@ -55,7 +55,7 @@ impl Policy {
 
     /// Applies the shared policy ceilings to DNS's explicit aggregate of raw
     /// packets and bounded socket connection/message traffic units.
-    pub(super) fn authorize_dns_budget(
+    pub(super) fn authorize_traffic_budget(
         &self,
         traffic_units: u64,
         wire_and_application_bytes: u64,

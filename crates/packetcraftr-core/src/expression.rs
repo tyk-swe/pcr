@@ -222,8 +222,80 @@ fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<
             message: "missing field value".to_owned(),
         });
     }
+    for (prefix, hexadecimal) in [("hex(", true), ("bytes(", false)] {
+        if let Some(body) = input.strip_prefix(prefix) {
+            let body = body.strip_suffix(')').ok_or_else(|| Error::Syntax {
+                offset: 0,
+                message: "unterminated byte literal".to_owned(),
+            })?;
+            let text = parse_quoted(body.trim())?;
+            if !hexadecimal {
+                return Ok(FieldValue::Bytes(text.into()));
+            }
+            if text.len() % 2 != 0 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(Error::Syntax {
+                    offset: 0,
+                    message: "hex literal requires pairs of hexadecimal digits".to_owned(),
+                });
+            }
+            let mut bytes = Vec::with_capacity(text.len() / 2);
+            for offset in (0..text.len()).step_by(2) {
+                bytes.push(
+                    u8::from_str_radix(&text[offset..offset + 2], 16).map_err(|_| {
+                        Error::Syntax {
+                            offset,
+                            message: "invalid hex byte".to_owned(),
+                        }
+                    })?,
+                );
+            }
+            return Ok(FieldValue::Bytes(bytes.into()));
+        }
+    }
     if input.starts_with('"') {
         return parse_quoted(input).map(FieldValue::Text);
+    }
+    if input.starts_with('{') {
+        if depth >= max_nesting {
+            return Err(Error::NestingLimit { limit: max_nesting });
+        }
+        if !input.ends_with('}') {
+            return Err(Error::Syntax {
+                offset: 0,
+                message: "unterminated object".to_owned(),
+            });
+        }
+        let body = &input[1..input.len() - 1];
+        let mut values = BTreeMap::new();
+        if !body.trim().is_empty() {
+            for entry in split_top_level_bounded(body, ',', None)? {
+                let Some((name, value)) = split_assignment(entry)? else {
+                    return Err(Error::Syntax {
+                        offset: 0,
+                        message: "expected object field=value".to_owned(),
+                    });
+                };
+                let name = name.trim();
+                if name.is_empty()
+                    || !name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    return Err(Error::Syntax {
+                        offset: 0,
+                        message: "invalid object field name".to_owned(),
+                    });
+                }
+                let value = parse_value_bounded(value.trim(), depth + 1, max_nesting)?;
+                if values.insert(name.to_owned(), value).is_some() {
+                    return Err(Error::Syntax {
+                        offset: 0,
+                        message: format!("duplicate object field {name}"),
+                    });
+                }
+            }
+        }
+        return Ok(FieldValue::Object(values));
     }
     if input.starts_with('[') {
         if depth >= max_nesting {
@@ -392,6 +464,7 @@ struct TopLevelScanner<'a> {
     escaped: bool,
     paren_depth: usize,
     list_depth: usize,
+    object_depth: usize,
     merge_brackets: bool,
 }
 
@@ -403,6 +476,7 @@ impl<'a> TopLevelScanner<'a> {
             escaped: false,
             paren_depth: 0,
             list_depth: 0,
+            object_depth: 0,
             merge_brackets: false,
         }
     }
@@ -433,6 +507,13 @@ impl<'a> TopLevelScanner<'a> {
             }
             let unbalanced = |character| ScanFailure::Unbalanced { offset, character };
             match character {
+                '{' => self.object_depth = self.object_depth.saturating_add(1),
+                '}' => {
+                    self.object_depth = self
+                        .object_depth
+                        .checked_sub(1)
+                        .ok_or_else(|| unbalanced(character))?
+                }
                 '(' => self.paren_depth = self.paren_depth.saturating_add(1),
                 ')' => {
                     let Some(depth) = self.paren_depth.checked_sub(1) else {
@@ -458,13 +539,13 @@ impl<'a> TopLevelScanner<'a> {
                     };
                     *depth = remaining;
                 }
-                _ if self.paren_depth == 0 && self.list_depth == 0 => {
+                _ if self.paren_depth == 0 && self.list_depth == 0 && self.object_depth == 0 => {
                     return Ok(Some((offset, character)));
                 }
                 _ => {}
             }
         }
-        if self.quoted || self.paren_depth != 0 || self.list_depth != 0 {
+        if self.quoted || self.paren_depth != 0 || self.list_depth != 0 || self.object_depth != 0 {
             Err(ScanFailure::Unterminated)
         } else {
             Ok(None)

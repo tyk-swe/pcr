@@ -1,0 +1,287 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "tls",
+      "fields": {
+        "alpn": {
+          "type": "list",
+          "value": [
+            {
+              "type": "text",
+              "value": "h2"
+            }
+          ]
+        },
+        "cipher_suites": {
+          "type": "list",
+          "value": [
+            {
+              "type": "unsigned",
+              "value": 49199
+            }
+          ]
+        },
+        "content_type": {
+          "type": "unsigned",
+          "value": 22
+        },
+        "ech": {
+          "type": "bool",
+          "value": false
+        },
+        "handshake_type": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "hello": {
+          "type": "object",
+          "value": {
+            "cipher_suites": {
+              "type": "list",
+              "value": [
+                {
+                  "type": "unsigned",
+                  "value": 49199
+                }
+              ]
+            },
+            "compression": {
+              "type": "bytes",
+              "value": [
+                0
+              ]
+            },
+            "extensions": {
+              "type": "list",
+              "value": [
+                {
+                  "type": "object",
+                  "value": {
+                    "data": {
+                      "type": "bytes",
+                      "value": [
+                        0,
+                        15,
+                        0,
+                        0,
+                        12,
+                        101,
+                        120,
+                        97,
+                        109,
+                        112,
+                        108,
+                        101,
+                        46,
+                        116,
+                        101,
+                        115,
+                        116
+                      ]
+                    },
+                    "type": {
+                      "type": "unsigned",
+                      "value": 0
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "value": {
+                    "data": {
+                      "type": "bytes",
+                      "value": [
+                        0,
+                        3,
+                        2,
+                        104,
+                        50
+                      ]
+                    },
+                    "type": {
+                      "type": "unsigned",
+                      "value": 16
+                    }
+                  }
+                }
+              ]
+            },
+            "kind": {
+              "type": "text",
+              "value": "client"
+            },
+            "legacy_version": {
+              "type": "unsigned",
+              "value": 771
+            },
+            "random": {
+              "type": "bytes",
+              "value": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            "record_version": {
+              "type": "unsigned",
+              "value": 771
+            },
+            "session_id": {
+              "type": "bytes",
+              "value": []
+            }
+          }
+        },
+        "incomplete": {
+          "type": "bool",
+          "value": false
+        },
+        "ja3": {
+          "type": "text",
+          "value": "c0d5fef2fe90cff012acce3a48f7eb6e"
+        },
+        "ja3_raw": {
+          "type": "text",
+          "value": "771,49199,0-16,,"
+        },
+        "ja4": {
+          "type": "text",
+          "value": "t12d0102h2_f06271c2b022_000000000000"
+        },
+        "record_count": {
+          "type": "unsigned",
+          "value": 1
+        },
+        "sni": {
+          "type": "text",
+          "value": "example.test"
+        },
+        "sni_raw": {
+          "type": "text",
+          "value": "6578616d706c652e74657374"
+        },
+        "version": {
+          "type": "unsigned",
+          "value": 771
+        },
+        "wire": {
+          "type": "bytes",
+          "value": [
+            22,
+            3,
+            3,
+            0,
+            77,
+            1,
+            0,
+            0,
+            73,
+            3,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            192,
+            47,
+            1,
+            0,
+            0,
+            30,
+            0,
+            0,
+            0,
+            17,
+            0,
+            15,
+            0,
+            0,
+            12,
+            101,
+            120,
+            97,
+            109,
+            112,
+            108,
+            101,
+            46,
+            116,
+            101,
+            115,
+            116,
+            0,
+            16,
+            0,
+            5,
+            0,
+            3,
+            2,
+            104,
+            50
+          ]
+        }
+      }
+    }
+  ]
+}

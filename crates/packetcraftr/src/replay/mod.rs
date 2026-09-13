@@ -15,7 +15,7 @@ mod wire;
 
 pub use crate::policy::{Authorizer, Operation};
 pub use authorizer::SystemAuthorizer;
-pub use engine::run_with_selector;
+pub use engine::{run_repeated_with_selector, run_with_selector};
 pub use error::Error;
 pub use model::{
     FrameEvidence, Limits, MAX_REPLAY_DURATION, Options, Selector, Summary, Timing, Transmission,

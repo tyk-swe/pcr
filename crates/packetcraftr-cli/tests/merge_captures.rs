@@ -1,0 +1,57 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+mod support;
+use packetcraftr_core::analysis::pcap::{Reader, compression::Input};
+use support::{parse_json, run, run_success};
+
+#[test]
+fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures");
+    let source = root.join("dns-response.pcap");
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("merged.pcapng.zst");
+    let arguments = [
+        "--output",
+        "json",
+        "merge",
+        source.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--write",
+        target.to_str().unwrap(),
+        "--compression",
+        "zstd",
+    ];
+    let report = parse_json(&run_success(&arguments));
+    assert_eq!(report["result"]["frames"], 2);
+    assert_eq!(report["result"]["interfaces"].as_array().unwrap().len(), 2);
+    let bytes = std::fs::read(&target).unwrap();
+    let input = Input::new(std::io::Cursor::new(&bytes), Default::default()).unwrap();
+    let mut reader = Reader::new(input).unwrap();
+    let first = reader.next_frame().unwrap().unwrap();
+    let second = reader.next_frame().unwrap().unwrap();
+    assert_eq!(first.bytes(), second.bytes());
+    assert_ne!(first.interface, second.interface);
+    assert!(!run(&arguments).status.success());
+    assert_eq!(std::fs::read(&target).unwrap(), bytes);
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/packetcraftr.output.v5.schema.json"
+    ))
+    .unwrap();
+    assert!(
+        jsonschema::validator_for(&schema)
+            .unwrap()
+            .is_valid(&report)
+    );
+    let broken = root.join("clock-regression.pcap");
+    let absent = directory.path().join("failed.pcapng");
+    let output = run(&[
+        "merge",
+        broken.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--write",
+        absent.to_str().unwrap(),
+    ]);
+    assert!(!output.status.success());
+    assert!(!absent.exists());
+}

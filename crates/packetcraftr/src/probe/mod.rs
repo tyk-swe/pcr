@@ -12,7 +12,7 @@ pub(crate) mod runner;
 pub(crate) mod test_fixtures;
 
 pub use error::{Error, ErrorKind, Workflow};
-pub use executor::{ExchangeExecutor, Executor, Request};
+pub use executor::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions, Request};
 pub use model::{ProbeEndpoint, ProbeStatus, Transport};
 pub use runner::{Batch, Execution};
 

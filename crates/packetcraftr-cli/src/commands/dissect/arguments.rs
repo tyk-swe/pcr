@@ -17,6 +17,13 @@ Examples:
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
+    /// Select a registered field; repeat to preserve the requested column order.
+    #[arg(long = "field", value_name = "PATH")]
+    pub(crate) fields: Vec<String>,
+    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
+    #[arg(long, default_value_t=16*1024*1024)]
+    pub(crate) max_projection_bytes: usize,
+
     /// Whole-frame hexadecimal bytes.
     #[arg(long, conflicts_with = "file")]
     pub(crate) hex: Option<String>,

@@ -1,0 +1,58 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "event": "probe_sent",
+  "result": {
+    "sent": {
+      "sequence": 0,
+      "protocol": "tcp",
+      "destination": "192.0.2.2",
+      "destination_port": 80,
+      "attempt": 1,
+      "sent_at": {
+        "unix_seconds": 1783555200,
+        "nanoseconds": 0
+      },
+      "udp_profile": null,
+      "frame": {
+        "bytes_hex": "45000028000100004006f6cbc0000201c00002029c40005000000000000000005002ffff8f4e0000",
+        "length": 40
+      },
+      "route": {
+        "plan": {
+          "route": {
+            "interface": {
+              "name": "fixture0",
+              "index": 1
+            },
+            "selected_address": "192.0.2.1",
+            "preferred_source": null,
+            "next_hop": null,
+            "selection_reason": "on_link",
+            "destination_scope": "link",
+            "mtu": 1500,
+            "capability": "layer3",
+            "link_type": 101
+          },
+          "mode": "layer3",
+          "lookup_destination": "192.0.2.2",
+          "final_destination": "192.0.2.2",
+          "visited_destinations": [
+            "192.0.2.2"
+          ],
+          "packet_source": "192.0.2.1",
+          "neighbor_source": null,
+          "neighbor_target": null,
+          "neighbor_vlan_tags": [],
+          "synthesized_ethernet": false,
+          "source_mac": null,
+          "destination_mac": null
+        }
+      }
+    }
+  },
+  "diagnostics": []
+}

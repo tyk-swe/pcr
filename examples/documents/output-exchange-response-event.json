@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "exchange",
   "mode": "stream",
   "sequence": 1,
@@ -18,7 +18,7 @@
         "bytes_hex": "deadbeef"
       },
       "packet": {
-        "schema": "packetcraftr.packet/v1",
+        "schema": "packetcraftr.packet/v2",
         "layers": [
           {
             "protocol": "raw",

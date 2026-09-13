@@ -1,0 +1,192 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "http",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "messages": [
+      {
+        "index": 1,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "192.0.2.1",
+            "source_port": 40000,
+            "destination": "198.51.100.2",
+            "destination_port": 80
+          }
+        },
+        "request": null,
+        "status": "complete",
+        "start": {
+          "type": "request",
+          "method": "GET",
+          "target": "/example",
+          "target_hex": "2f6578616d706c65",
+          "version": "HTTP/1.1"
+        },
+        "headers": [
+          {
+            "name": "Host",
+            "value": "example.test",
+            "value_hex": "6578616d706c652e74657374"
+          },
+          {
+            "name": "X-Test",
+            "value": "one",
+            "value_hex": "6f6e65"
+          },
+          {
+            "name": "X-Test",
+            "value": "two",
+            "value_hex": "74776f"
+          }
+        ],
+        "header_wire_hex": "474554202f6578616d706c6520485454502f312e310d0a486f73743a206578616d706c652e746573740d0a582d546573743a206f6e650d0a582d546573743a2074776f0d0a0d0a",
+        "framing": {
+          "type": "none"
+        },
+        "body_bytes": 0,
+        "trailers": [],
+        "error": null,
+        "sources": [
+          {
+            "number": 4,
+            "timestamp": {
+              "unix_seconds": 4,
+              "nanoseconds": 0
+            }
+          },
+          {
+            "number": 5,
+            "timestamp": {
+              "unix_seconds": 5,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "stream": 0,
+        "generation": 0,
+        "flow": {
+          "scope": 0,
+          "flow": {
+            "source": "198.51.100.2",
+            "source_port": 80,
+            "destination": "192.0.2.1",
+            "destination_port": 40000
+          }
+        },
+        "request": 1,
+        "status": "complete",
+        "start": {
+          "type": "response",
+          "version": "HTTP/1.1",
+          "status": 200,
+          "reason": "OK",
+          "reason_hex": "4f4b"
+        },
+        "headers": [
+          {
+            "name": "Transfer-Encoding",
+            "value": "chunked",
+            "value_hex": "6368756e6b6564"
+          }
+        ],
+        "header_wire_hex": "485454502f312e3120323030204f4b0d0a5472616e736665722d456e636f64696e673a206368756e6b65640d0a0d0a",
+        "framing": {
+          "type": "chunked"
+        },
+        "body_bytes": 5,
+        "trailers": [
+          {
+            "name": "X-End",
+            "value": "yes",
+            "value_hex": "796573"
+          }
+        ],
+        "error": null,
+        "sources": [
+          {
+            "number": 6,
+            "timestamp": {
+              "unix_seconds": 6,
+              "nanoseconds": 0
+            }
+          },
+          {
+            "number": 7,
+            "timestamp": {
+              "unix_seconds": 7,
+              "nanoseconds": 0
+            }
+          }
+        ]
+      }
+    ],
+    "issues": [],
+    "frames_read": 7,
+    "frames_matched": 7,
+    "summary": {
+      "messages": 2,
+      "complete_messages": 2,
+      "incomplete_messages": 0,
+      "malformed_messages": 0,
+      "upgraded_connections": 0,
+      "responses_without_request": 0,
+      "requests_without_final_response": 0
+    },
+    "scopes": [
+      {
+        "id": 0,
+        "interface": null,
+        "encapsulation": []
+      }
+    ],
+    "incomplete_datagrams": 0,
+    "source_outcomes_omitted": 0,
+    "ip_reassembly": {
+      "families": [
+        {
+          "family": "ipv4",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        },
+        {
+          "family": "ipv6",
+          "physical_fragments": 0,
+          "atomic_fragments": 0,
+          "admitted_fragments": 0,
+          "duplicate_fragments": 0,
+          "overlap_resolved_fragments": 0,
+          "completing_fragments": 0,
+          "completed_datagrams": 0,
+          "incomplete_datagrams": 0,
+          "idle_expired_datagrams": 0,
+          "end_of_capture_datagrams": 0,
+          "overlap_bytes": 0,
+          "derived_datagram_bytes": 0,
+          "derived_payload_bytes": 0
+        }
+      ],
+      "outcomes": [],
+      "outcomes_omitted": 0
+    }
+  },
+  "diagnostics": []
+}

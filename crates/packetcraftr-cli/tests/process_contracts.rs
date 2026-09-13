@@ -216,7 +216,7 @@ fn offline_build_supports_json_hex_and_raw_without_terminal_style() {
     ]);
     assert_no_terminal_style(&json_output.stdout);
     let value = parse_json(&json_output);
-    assert_eq!(value["schema"], "packetcraftr.output/v4");
+    assert_eq!(value["schema"], "packetcraftr.output/v5");
     assert_eq!(value["result"]["bytes_hex"], "68656c6c6f");
 
     let text = run_success(&["--output", "text", "build", "--packet", "raw(text=hello)"]);
@@ -694,7 +694,7 @@ fn build_enforces_configurable_layer_and_packet_budgets() {
     serde_json::to_writer(
         &mut document,
         &serde_json::json!({
-            "schema": "packetcraftr.packet/v1",
+            "schema": "packetcraftr.packet/v2",
             "layers": layers,
         }),
     )

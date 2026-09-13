@@ -12,6 +12,8 @@ mod af_route;
 #[cfg(native_layer2)]
 mod capture_filter;
 mod dispatch;
+mod tcp_connect;
+pub(crate) use tcp_connect::{Lease as TcpConnectLease, Pending as TcpConnectPending};
 #[cfg(native_send)]
 mod interface_identity;
 #[cfg(native_route)]
@@ -53,6 +55,6 @@ fn os_error(
 }
 
 pub(crate) use dispatch::{
-    native_resource_snapshot, system_capture, system_interface_route, system_interfaces,
-    system_route, system_send_layer2, system_send_layer3,
+    native_resource_snapshot, start_tcp_connect, system_capture, system_interface_route,
+    system_interfaces, system_route, system_send_layer2, system_send_layer3, tcp_connect_snapshot,
 };

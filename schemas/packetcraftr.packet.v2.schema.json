@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v2.schema.json",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
-  "title": "PacketcraftR packet document v1",
+  "title": "PacketcraftR packet document v2",
   "description": "A runtime-neutral ordered packet stack. Protocol-specific field names and semantic constraints are supplied by packetcraftr_core::registry::Registry; this schema validates the stable packetcraftr_core::document::Packet and tagged packetcraftr_core::field::FieldValue representation. Parsers additionally enforce packetcraftr_core::document::DocumentLimits (layer count, list nesting, fields per layer, node and list-item counts, name, text, byte-value and total payload widths) identically for JSON and YAML.",
   "type": "object",
   "required": [
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "schema": {
-      "const": "packetcraftr.packet/v1",
+      "const": "packetcraftr.packet/v2",
       "description": "Packet document schema identifier."
     },
     "layers": {
@@ -77,6 +77,9 @@
         },
         {
           "$ref": "#/$defs/listValue"
+        },
+        {
+          "$ref": "#/$defs/objectValue"
         }
       ]
     },
@@ -256,6 +259,25 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/byte"
+      }
+    },
+    "objectValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "object"
+        },
+        "value": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        }
       }
     }
   }

@@ -153,7 +153,7 @@ where
     /// exact final bytes against the final route.
     ///
     /// The re-authorization is unconditional: it is the last gate before
-    /// capture arming and transmission can observe these bytes.
+    /// transmission can observe these bytes.
     pub(crate) fn materialize_and_authorize(
         &self,
         planned: PlannedPacket,

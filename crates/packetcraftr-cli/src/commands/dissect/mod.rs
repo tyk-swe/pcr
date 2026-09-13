@@ -24,8 +24,28 @@ use crate::rendering::{
     write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: Format,
+    stream: &crate::rendering::StreamEncoder,
+) -> Result<(), CliError> {
     let registry = arguments.decode.registry()?;
+    let projector = super::projection::Projector::prepare(
+        &arguments.fields,
+        arguments.max_projection_bytes,
+        &registry,
+        output::contract::Command::Dissect,
+        format,
+    )?;
+    if projector
+        .as_ref()
+        .is_some_and(|projector| projector.projection.requirements().stream_index)
+    {
+        return Err(CliError::new(
+            Kind::Cli,
+            "dissect cannot assign stream indexes; use read with --field",
+        ));
+    }
     let max_packet_size = arguments.budget.max_packet_size;
     // A bad filter fails before any input is read, so it cannot leave the
     // command waiting on standard input for frame bytes it would never use.
@@ -64,6 +84,25 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
         None => true,
     };
+    if let Some(mut projector) = projector {
+        if kept {
+            let values = projector
+                .projection
+                .values(
+                    &core::filter::Context {
+                        decoded: &decoded,
+                        derived: &[],
+                        number: 1,
+                        tcp_stream: None,
+                        udp_stream: None,
+                    },
+                    projector.remaining(),
+                )
+                .map_err(CliError::classified)?;
+            projector.emit(1, values, stream)?;
+        }
+        return projector.finish(1, u64::from(decoded.frame.captured_length()), stream);
+    }
     // An unmatched frame keeps byte-oriented stdout empty on success; the
     // notice goes to stderr through the shared human renderer.
     if !kept && !matches!(format, Format::Json) {

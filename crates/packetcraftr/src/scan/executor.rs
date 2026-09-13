@@ -22,7 +22,29 @@ where
     N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
+    fn pipeline_capacity(&self) -> usize {
+        1024
+    }
+    fn execute_pipeline(
+        &mut self,
+        requests: &[Batch],
+        options: crate::probe::PipelineOptions,
+        emit: &mut dyn FnMut(crate::probe::PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<crate::Stats, BoundaryError> {
+        let registry = super::registry::configured(self.client.registry(), requests)?;
+        let client = super::registry::client(self.client, registry);
+        super::pipeline::run(
+            &mut ExchangeExecutor::new(&client, self.options.clone()),
+            requests,
+            options,
+            emit,
+        )
+    }
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let registry =
+            super::registry::configured(self.client.registry(), std::slice::from_ref(batch))?;
+        let client = super::registry::client(self.client, registry);
+        let executor = ExchangeExecutor::new(&client, self.options.clone());
         let first = &batch.probe;
         let packet = first.packet();
         if !super::probe::sent_probe_matches(first, &packet) {
@@ -35,14 +57,14 @@ where
              response: &packetcraftr_core::decode::DecodedPacket| {
                 request_index == 0
                     && classify_response(
-                        self.client.registry(),
+                        executor.client.registry(),
                         first.endpoint.transport(),
                         sent,
                         response,
                     )
                     .is_some()
             };
-        let exchange = self.exchange_for_workflow(
+        let exchange = executor.exchange_for_workflow(
             &template,
             WorkflowOverrides {
                 timeout: batch.timeout,

@@ -548,7 +548,7 @@ impl Authorizer for RecordingAuthorizer {
                 self.budgets.push(dns.budget());
                 self.socket_budgets.push(dns.tcp());
             }
-            Operation::Declared(_) | Operation::Replay(_) => {
+            Operation::Socket(_) | Operation::Declared(_) | Operation::Replay(_) => {
                 panic!("DNS must submit a DNS or budgeted operation")
             }
         }

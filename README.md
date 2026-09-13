@@ -178,8 +178,8 @@ sink cannot promise a terminal NDJSON record.
 
 ## Contracts
 
-- Packet JSON/YAML: [`packetcraftr.packet/v1`](schemas/packetcraftr.packet.v1.schema.json)
-- Structured command output: [`packetcraftr.output/v4`](schemas/packetcraftr.output.v4.schema.json)
+- Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
+- Structured command output: [`packetcraftr.output/v5`](schemas/packetcraftr.output.v5.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
@@ -191,8 +191,8 @@ output are versioned independently.
 Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
-`json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`; invalid
-combinations fail explicitly. Every output-v4 NDJSON envelope has an `event`
+`json`, `ndjson`, `hex`, `raw`, `pcap`, `pcapng`, `csv`, and `tsv`; invalid
+combinations fail explicitly. Every output-v5 NDJSON envelope has an `event`
 discriminator; the schema enumerates the per-command event names, and
 `complete` and `error` are the terminal records. The payload is in `result` or
 `error`; consumers never need to
@@ -200,7 +200,7 @@ infer a record kind from payload fields. `sequence` starts at zero and advances
 for each record. Successful operations end with exactly one `complete`; failed
 operations emit one terminal `error` when the output is still writable. A broken
 output is reported as incomplete on stderr and cannot guarantee a terminal line.
-The packet-document contract remains v1; the old output-v1 contract is retired.
+Packet documents use v2; consumers of earlier contracts must migrate.
 
 Exit codes are part of the contract: 0 on success, 2 for an invalid invocation
 or input (`cli`), 3 for a packet that cannot be built or dissected (`packet`),
@@ -331,6 +331,28 @@ later frames from cumulative bytes already sent. Filtered frames consume no
 bit-rate timing. Cumulative rounding avoids per-frame drift; scheduled duration
 and byte totals describe the operation, without a throughput guarantee.
 
+Replay maps input interfaces with `--map-interface SOURCE_ID=OUTPUT_INTERFACE`
+or display filters with `--map-filter 'EXPR=>OUTPUT_INTERFACE'`. Source IDs are
+capture-global; classic PCAP uses 0. `--interface` supplies an optional fallback.
+Conflicting mappings and selected frames without a destination fail before that
+frame can transmit. Every selected frame retains endpoint and final-byte checks.
+`--repeat 1..1024` and `--inter-pass-delay-ms` repeat a validated capture snapshot.
+Timing restarts each pass, while source-frame, transmitted-byte, policy, and time
+budgets span the whole operation. Events identify the pass and actual interface.
+
+`scan` accepts multiple IP addresses, hostnames, and CIDRs, with repeatable numeric
+`--exclude IP_OR_CIDR` and a shared `--max-targets` ceiling. Selection deduplicates
+in input order and rejects oversized networks before expansion. Hostname lookup
+requires the existing policy opt-in; selected endpoints are authorized before
+probe execution. CIDRs include every numeric address in their range.
+
+`scan --connect --ports 80,443` uses ordinary TCP sockets and works in the portable
+build. `--max-in-flight` permits up to 16 overlapping connections; one pacing
+schedule and deadline bound the run. Results distinguish connected, refused,
+timeout, unreachable, and local failures, and report socket-call evidence.
+The kernel controls TCP wire packets. Packet route overrides are rejected for
+this mode, and cancellation retains resource admission until cleanup finishes.
+
 This documentation-address example only prints help and performs no network
 operation:
 
@@ -344,4 +366,180 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Report
 suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 PacketcraftR is licensed under the
-[GNU Affero General Public License v3.0 only](LICENSE).
+[GNU Affero General Public License v3.0 only](LICENSE). Bundled dependency
+attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+### Structured fixtures, fragmentation, and capture processing
+
+Packet recipes use `packetcraftr.packet/v2`; command JSON/NDJSON uses
+`packetcraftr.output/v5`. Named objects, `hex("00ff")`, and `bytes("text")`
+can appear inside expressions and nested template axes.
+
+```sh
+packetcraftr build --packet-file examples/documents/packet-dns-response.json
+packetcraftr build --packet-file examples/documents/packet-tls-client-hello.json
+packetcraftr --output pcapng fragment --packet 'ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=40001)/raw(text=fixture)' --mtu 32 > fragments.pcapng
+packetcraftr merge left.pcap right.pcapng --write merged.pcapng --compression zstd
+packetcraftr --output pcap read capture.pcap.gz --compression zstd > capture.pcap.zst
+packetcraftr --output csv read capture.pcapng --field frame.number --field ip.src --field udp.source_port
+```
+
+Fragmentation is explicit and never sends traffic. MTU excludes the link header.
+IPv4 DF and existing fragments are rejected; IPv6 splitting requires
+`--identification` and enough room for its complete first-fragment header chain.
+The transform supports raw IP and Ethernet/VLAN, preserves transport bytes and
+capture time, regenerates Ethernet padding, and omits link trailers/FCS.
+AH/ESP and unsupported IPv6 upper-layer headers are explicit errors.
+
+Merge requires time-ordered inputs and rejects missing/regressing timestamps.
+Equal times use input argument order and source frame order. Output interfaces
+remain distinct by source/section/interface; generated interface comments retain
+that mapping. Source-only sections, statistics, comments, and unknown metadata
+are normalized away. Extended FCS/packet-flag metadata is currently rejected.
+The destination must be new and is published only after successful finalization.
+
+Capture readers detect gzip/Zstd by magic, including redirected stdin and replay
+files. Binary capture output supports `--compression none|gzip|zstd`.
+`--max-encoded-bytes` and `--max-decoded-bytes` each default to 256 MiB per
+input; decoded accounting includes metadata. Empty compressed members and
+skippable frames consume the encoded budget. Zstd windows are capped at 64 MiB.
+Concatenated members are decoded and truncation/corruption fails the operation.
+
+`read` and `dissect` accept repeatable `--field` selections. Columns preserve
+request order, absent values are `null`, and repeated layers produce ordered
+arrays. `protocol#N.field` selects a one-based layer occurrence; list indices
+such as `dns.questions[0].name` are zero based. Bytes render as lowercase hex.
+CSV/TSV cells contain compact JSON values with CSV-style quoting; headers are
+field names. JSON and NDJSON include source frame identity and completion counts.
+Projection data is bounded by `--max-projection-bytes` (16 MiB by default),
+excluding structured envelopes. Stream-index fields in `read` use bounded capture
+analysis and require timestamped input; `dissect` cannot assign stream indexes.
+
+Offline DNS inspection uses `dns-read CAPTURE` with text, JSON, or NDJSON output.
+It accepts gzip and Zstd captures and additional `--dns-port` values. TCP prefixes
+and bodies may cross segments, and one delivery may contain several messages.
+`--stream tcp:INDEX` or `--stream udp:INDEX` selects a complete conversation.
+Every message and transaction lists its physical source frames and timestamps,
+including fragments needed to reconstruct an IP datagram. Per-frame `dns` fields
+also decode a complete first TCP message; use `dns-read` for stream boundaries.
+
+Transactions match capture scope, transport, connection generation, reversed
+endpoints, ID, opcode, and the complete question set (ASCII case-insensitive DNS
+names). Query retries share one outstanding transaction; a new query after a
+response starts a new transaction even if its ID is reused. Empty or mismatched
+response questions remain orphan evidence. A missing response means it was not
+captured. Latencies run from the last physical query frame to the first physical
+response frame; first-query and latest-retry values include a negative-interval
+flag. A response can precede query completion when reassembly fills a late gap;
+that interval is kept as captured. TCP gaps, conflicting retransmissions, resets, malformed messages, and
+partial capture endings remain explicit. Application message, stream, source,
+buffer, retained-byte, and output-byte ceilings are finite and configurable.
+
+Use `http CAPTURE` to inspect cleartext HTTP/1.0 and HTTP/1.1 messages over TCP.
+The collector handles split headers, request pipelining, interim responses, HEAD,
+content lengths, chunked bodies and trailers, and clean-close-delimited bodies.
+CONNECT success and protocol upgrades end HTTP inspection for that connection.
+Bodies are counted without being retained or decompressed. Duplicate headers,
+exact header wire, binary values, source frames, and request links remain in
+JSON/NDJSON. Gaps, resets, capture endings, invalid framing, and body limits are
+explicit outcomes. HTTP/2, HTTP/3, TLS decryption, and object extraction remain
+outside this command. `--http-port` adds a cleartext service to ports 80 and 8080;
+`--stream tcp:INDEX` selects a whole conversation. The per-frame `http` layer and
+`--decode-as tcp.port=PORT:http` expose headers that fit in one captured segment.
+
+`export CAPTURE --stream tcp:INDEX --write selected.pcap` copies a whole scoped
+conversation, including the physical fragments used to reconstruct its transport
+packets. Stream selectors repeat; `--datagram-frame NUMBER` selects complete or
+incomplete IP groups containing that physical frame. `--filter EXPR` selects
+physical/derived fields and includes datagrams reconstructed on matching records.
+The saved file retains the source format, packet records, interface identity,
+timestamps, and metadata; PCAPNG section lengths become unknown and interface
+statistics continue to describe the source capture. `--compression gzip|zstd`
+compresses the result. Input is validated into a bounded anonymous snapshot, then
+analyzed and copied from that same snapshot. A new output path is published only
+after every pass succeeds. Reports list source positions, unmatched selectors,
+known incomplete dependencies, unattributable groups, and omitted source outcomes.
+Missing fragment headers are never used to guess a conversation. Ordinary `read`
+keeps its existing physical-frame selection behavior.
+
+`rewrite CAPTURE --write rewritten.pcapng` edits matched capture headers. Direct
+options include `--source-ip`, `--destination-ip`, TCP/UDP source/destination
+ports, MAC addresses, repeated `--vlan VID` (or `TPID:VID:PRIORITY:DEI`), and
+`--strip-vlans`. `--filter` matches original frame fields. For conditional edits
+in both directions, use `--rules-file examples/documents/rewrite-lab-host.json`.
+The bounded `packetcraftr.rewrite/v1` document applies matching patches in order;
+every condition sees the original frame. The rule schema is shipped alongside
+packet and output schemas.
+
+Rewriting keeps application bytes, capture time, direction, and interface identity.
+VLAN replacement changes frame lengths by the tag-size difference; IP lengths
+stay faithful and affected checksums are recalculated. IPv4 UDP checksum zero
+remains disabled. Network/port edits reject truncated or non-atomic fragmented
+packets, unsupported checksum semantics, source-routing/Home Address headers, and
+authenticated headers. MAC/VLAN-only edits can operate on fragments. The saved
+PCAPNG uses one section, retains interface options, and discards source section
+structure, packet options, statistics, and other non-interface metadata. Missing
+timestamps, declared FCS metadata, and extended packet flags fail explicitly.
+Interface snapshot ceilings account for possible VLAN growth. Existing output
+paths are preserved; compression is finalized before publishing the new file.
+
+DHCP fixture construction and inspection use `dhcpv4` (`dhcp`) and `dhcpv6`
+(`dhcp6`) below UDP. Standard ports are 67/68 and 546/547; `--decode-as` also
+supports both protocols. Named options expose transaction IDs, assigned addresses,
+lease timers, server/client identifiers, DNS servers, DUIDs, nested IA_NA/IA_PD
+options, prefixes, and relay messages. DHCPv4 overloaded `file`/`sname` areas are
+parsed and constructible; their use is derived when option lists are supplied.
+See `examples/documents/packet-dhcpv4-offer.json` and
+`examples/documents/packet-dhcpv6-reply.json` for bounded recipes. The wire formats
+are described in [RFC 2131](https://datatracker.ietf.org/doc/html/rfc2131),
+[RFC 2132](https://datatracker.ietf.org/doc/html/rfc2132), and
+[RFC 9915](https://datatracker.ietf.org/doc/html/rfc9915).
+
+Unedited decoded messages retain their exact wire image. Unknown and noncanonical
+option bodies remain raw; DHCPv4 concatenation pieces are preserved separately.
+Malformed TLV lengths remain available through the dissection's malformed bytes.
+DHCPv6 legacy IA_TA and Server Unicast options remain readable for older captures.
+Decoders and constructors share finite message, option-count, and nesting limits.
+These codecs provide no DHCP server, address configuration, or active discovery.
+Repeated child descriptions in `protocols --output json` use `children_reference`,
+a JSON Pointer anchored at their top-level field description, keeping recursive
+DHCP metadata compact without limiting nested field paths.
+
+Live capture accepts repeated `--interface` selections. It partitions the native
+queue limits across the selected interfaces, waits for every source to become
+ready, and applies one frame/byte/window budget across the operation. Records keep
+capture timestamps and fair delivery order. Capture IDs start at zero in selected
+interface order; completion metadata maps them to native names/indexes and reports
+per-interface delivery, filtering, loss, and cleanup. Use PCAPNG for multiple
+interfaces; classic PCAP remains available for one interface on stdout.
+
+`capture --write trace.pcapng --rotate-bytes 1048576 --rotate-files 4` saves bounded
+PCAPNG files. `--rotate-interval-ms` adds monotonic time boundaries between frames.
+Byte thresholds include uncompressed headers and interface metadata; a frame that
+cannot fit in an empty file fails before its bytes are written. JSON summaries
+require `--write`; text and NDJSON can also report saved captures. `--retention stop`
+is the default. Explicit `--retention ring` reuses only file handles created by
+this operation, and reports retired generations/frames. Existing paths remain
+untouched. Numbering is inserted before the last filename extension. Compression
+finishes independently for every file. Rotation and interfaces never reset the
+operation budget. A final boundary can consume a matched frame without publishing
+it; admitted/matched/emitted counts make that distinction visible. Failure output
+retains partial source and file evidence, including finalization state.
+
+Raw scans accept `--max-in-flight` for bounded rolling response windows. The client
+validates the complete plan before active discovery, shares ready capture sessions
+by interface, checks final bytes/endpoints, and uses one rate/deadline/evidence
+budget. Preparation is bounded by `--max-prepared-bytes`; large packet descriptions
+can reduce the active window below its requested ceiling. NDJSON `probe_sent`
+records preserve accepted wire before final probe outcomes. Pipeline failures carry
+confirmed pending receipts and source cleanup evidence in `error.scan`.
+
+`scan ... --transport udp --udp-profiles examples/documents/udp-profiles.json`
+selects named per-port requests and response checks. Profiles generate typed DNS
+queries with per-probe IDs, or transmit explicit bytes under operation-local raw
+bindings. Responses can be checked against DNS IDs/questions or bounded masked byte
+patterns. `application.status` distinguishes confirmed, rejected, unchecked, and
+unobserved application evidence from transport reachability. A matching profile is
+not authenticated service identity. Unmapped ports preserve the ordinary payload
+fallback. Profile files use `packetcraftr.udp-profiles/v1`, are capped at 1 MiB,
+and never resolve the DNS question name merely to construct its wire bytes.

@@ -286,6 +286,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
     }
 
     let schema = FieldSchema {
+        children: &[],
         name: "field_name",
         aliases: &["fixture_alias"],
         kind: PacketFieldKind::Unsigned,

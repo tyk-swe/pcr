@@ -195,7 +195,9 @@ fn capture_reader(link_type: LinkType, frames: &[(Duration, &[u8])]) -> Reader<C
 
 fn replay_options(timing: Timing) -> Options {
     Options {
-        interface: test_interface(),
+        interface: Some(test_interface()),
+        repeat: 1,
+        inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Auto,
         timing,
         limits: Limits::default(),
@@ -715,4 +717,83 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
             Duration::ZERO
         ]
     );
+}
+
+struct MappedInterfaces;
+impl Selector for MappedInterfaces {
+    fn select(&mut self, _: u64, _: &Frame) -> Result<bool, BoundaryError> {
+        Ok(true)
+    }
+    fn interface(&mut self, number: u64, _: &Frame) -> Result<Option<InterfaceId>, BoundaryError> {
+        Ok(Some(InterfaceId {
+            name: format!("test{number}"),
+            index: 6 + number as u32,
+        }))
+    }
+}
+
+#[test]
+fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_schedule() {
+    let mut reader = capture_reader(
+        LinkType::ETHERNET,
+        &[(Duration::ZERO, b"ab"), (Duration::from_millis(10), b"cd")],
+    );
+    let mut options = replay_options(Timing::Original);
+    options.interface = None;
+    options.repeat = 2;
+    options.inter_pass_delay = Duration::from_millis(3);
+    let mut authorizer = RecordingAuthorizer::default();
+    let mut transmitter = RecordingTransmitter::default();
+    let mut clock = RecordingClock::default();
+    let mut evidence = Vec::new();
+    let summary = super::run_repeated_with_selector(
+        &mut reader,
+        &options,
+        Some(&mut MappedInterfaces),
+        &mut authorizer,
+        &mut transmitter,
+        &mut clock,
+        |frame| {
+            evidence.push(frame);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(summary.passes_completed, 2);
+    assert_eq!(summary.frames_read, 4);
+    assert_eq!(summary.frames_transmitted, 4);
+    assert_eq!(summary.interfaces_used.len(), 2);
+    assert_eq!(summary.scheduled_duration, Duration::from_millis(23));
+    assert_eq!(
+        evidence
+            .iter()
+            .map(|frame| (
+                frame.pass,
+                frame.source_index,
+                frame.transmission().interface.index
+            ))
+            .collect::<Vec<_>>(),
+        [(1, 0, 7), (1, 1, 8), (2, 0, 7), (2, 1, 8)]
+    );
+    assert_eq!(authorizer.final_wire_calls, 4);
+    assert_eq!(authorizer.budgets, [(1, 2), (2, 4), (3, 6), (4, 8)]);
+    options.limits.max_source_frames = 3;
+    let mut transmitter = RecordingTransmitter::default();
+    assert!(matches!(
+        super::run_repeated_with_selector(
+            &mut reader,
+            &options,
+            Some(&mut MappedInterfaces),
+            &mut authorizer,
+            &mut transmitter,
+            &mut RecordingClock::default(),
+            |_| Ok(())
+        ),
+        Err(Error::SourceFrameLimit {
+            actual: 4,
+            limit: 3,
+            ..
+        })
+    ));
+    assert_eq!(transmitter.transmission_calls, 3);
 }

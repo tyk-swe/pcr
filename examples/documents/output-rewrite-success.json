@@ -1,0 +1,19 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "rewrite",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "path": "rewritten-http.pcapng",
+    "rule_matches": [
+      4
+    ],
+    "frames_read": 7,
+    "frames_changed": 4,
+    "captured_bytes_read": 425,
+    "captured_bytes_written": 425,
+    "interfaces": 1,
+    "source_metadata_records": 0
+  },
+  "diagnostics": []
+}

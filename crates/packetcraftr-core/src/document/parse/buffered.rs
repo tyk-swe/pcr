@@ -4,6 +4,7 @@
 //! Tag-independent, bounded staging. Numbers in arrays occupy one byte;
 //! only tagged objects consume semantic list items and nodes.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use bytes::Bytes;
@@ -16,7 +17,7 @@ use super::budget::{
     BOOL_PAYLOAD_BYTES, Budget, INTEGER_PAYLOAD_BYTES, IPV4_PAYLOAD_BYTES, IPV6_PAYLOAD_BYTES,
     MAC_PAYLOAD_BYTES,
 };
-use super::seed::{FieldValueSeed, Tag};
+use super::seed::{BoundedString, FieldValueSeed, Tag};
 
 pub(super) enum Buffered {
     Bool(bool),
@@ -26,6 +27,7 @@ pub(super) enum Buffered {
     Empty,
     Bytes(Vec<u8>),
     List(Vec<FieldValue>),
+    Object(BTreeMap<String, FieldValue>),
 }
 
 impl Buffered {
@@ -76,6 +78,7 @@ impl Buffered {
                 budget.enter_list(depth)?;
                 FieldValue::List(Vec::new())
             }
+            (Tag::Object, Self::Object(value)) => FieldValue::Object(value),
             (tag, other) => return Err(E::invalid_type(other.unexpected(), &tag.expected())),
         };
         let width = match &value {
@@ -87,7 +90,7 @@ impl Buffered {
             FieldValue::Ipv6(_) => IPV6_PAYLOAD_BYTES,
             FieldValue::Mac(_) => MAC_PAYLOAD_BYTES,
             // Children were charged when their tags were resolved.
-            FieldValue::List(_) => 0,
+            FieldValue::List(_) | FieldValue::Object(_) => 0,
         };
         budget.charge_payload(width)?;
         Ok(value)
@@ -100,6 +103,7 @@ impl Buffered {
             Self::Signed(value) => Unexpected::Signed(*value),
             Self::Text(value) => Unexpected::Str(value),
             Self::Empty | Self::Bytes(_) | Self::List(_) => Unexpected::Seq,
+            Self::Object(_) => Unexpected::Map,
         }
     }
 }
@@ -123,7 +127,41 @@ impl<'de> DeserializeSeed<'de> for BufferedSeed<'_, '_> {
 impl<'de> Visitor<'de> for BufferedSeed<'_, '_> {
     type Value = Buffered;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a boolean, integer, string, or array field value")
+        f.write_str("a boolean, integer, string, array, or object field value")
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Buffered, A::Error> {
+        self.budget.enter_list(self.depth)?;
+        let mut values = BTreeMap::new();
+        loop {
+            if let Some(limit) = self.budget.list_budget_full(values.len()) {
+                if map.next_key::<de::IgnoredAny>()?.is_some() {
+                    return Err(self.budget.exceeded(limit));
+                }
+                break;
+            }
+            let Some(name) = map.next_key_seed(BoundedString {
+                budget: self.budget,
+                limit: Limit::FieldNameBytes,
+            })?
+            else {
+                break;
+            };
+            if values.contains_key(&name) {
+                return Err(de::Error::custom(format_args!(
+                    "duplicate object field {name:?}"
+                )));
+            }
+            self.budget.charge_list_item()?;
+            self.budget.charge_payload(name.len())?;
+            self.budget
+                .charge_temporary(name.len() + std::mem::size_of::<(String, FieldValue)>())?;
+            let value = map.next_value_seed(FieldValueSeed {
+                budget: self.budget,
+                depth: self.depth + 1,
+            })?;
+            values.insert(name, value);
+        }
+        Ok(Buffered::Object(values))
     }
     fn visit_bool<E: de::Error>(self, value: bool) -> Result<Buffered, E> {
         Ok(Buffered::Bool(value))

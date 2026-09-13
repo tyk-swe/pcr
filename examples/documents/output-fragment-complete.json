@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "fragment",
+  "mode": "stream",
+  "sequence": 2,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "mtu": 128,
+    "fragments": 2,
+    "bytes": 248
+  },
+  "diagnostics": []
+}

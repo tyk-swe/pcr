@@ -22,13 +22,18 @@
 //! scoped to the filter.
 
 mod adapter;
+pub mod application;
 mod conversation_index;
 pub(crate) mod dedup;
+pub mod dns;
 mod error;
 pub mod expert;
+pub mod export;
 pub mod follow;
+pub mod http;
 pub mod pcap;
 mod pipeline;
+pub mod provenance;
 pub mod reassembly;
 pub mod scope;
 pub mod stats;

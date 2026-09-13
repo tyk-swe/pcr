@@ -1,0 +1,315 @@
+{
+  "schema": "packetcraftr.packet/v2",
+  "layers": [
+    {
+      "protocol": "ipv6",
+      "fields": {
+        "destination": {
+          "type": "ipv6",
+          "value": "2001:db8::10"
+        },
+        "flow_label": {
+          "type": "unsigned",
+          "value": 0
+        },
+        "hop_limit": {
+          "type": "unsigned",
+          "value": 64
+        },
+        "next_header": {
+          "type": "unsigned",
+          "value": 17
+        },
+        "payload_length": {
+          "type": "unsigned",
+          "value": 97
+        },
+        "source": {
+          "type": "ipv6",
+          "value": "2001:db8::1"
+        },
+        "traffic_class": {
+          "type": "unsigned",
+          "value": 0
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "checksum": {
+          "type": "unsigned",
+          "value": 289
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 546
+        },
+        "length": {
+          "type": "unsigned",
+          "value": 97
+        },
+        "source_port": {
+          "type": "unsigned",
+          "value": 547
+        }
+      }
+    },
+    {
+      "protocol": "dhcpv6",
+      "fields": {
+        "message_type": {
+          "type": "unsigned",
+          "value": 7
+        },
+        "options": {
+          "type": "list",
+          "value": [
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 2
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "duid": {
+                      "type": "object",
+                      "value": {
+                        "hardware_type": {
+                          "type": "unsigned",
+                          "value": 1
+                        },
+                        "link_address": {
+                          "type": "bytes",
+                          "value": [
+                            2,
+                            0,
+                            0,
+                            0,
+                            0,
+                            1
+                          ]
+                        },
+                        "type": {
+                          "type": "unsigned",
+                          "value": 3
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 3
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "iaid": {
+                      "type": "unsigned",
+                      "value": 7
+                    },
+                    "options": {
+                      "type": "list",
+                      "value": [
+                        {
+                          "type": "object",
+                          "value": {
+                            "code": {
+                              "type": "unsigned",
+                              "value": 5
+                            },
+                            "value": {
+                              "type": "object",
+                              "value": {
+                                "address": {
+                                  "type": "ipv6",
+                                  "value": "2001:db8::10"
+                                },
+                                "options": {
+                                  "type": "list",
+                                  "value": []
+                                },
+                                "preferred_lifetime": {
+                                  "type": "unsigned",
+                                  "value": 180
+                                },
+                                "valid_lifetime": {
+                                  "type": "unsigned",
+                                  "value": 300
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "t1": {
+                      "type": "unsigned",
+                      "value": 60
+                    },
+                    "t2": {
+                      "type": "unsigned",
+                      "value": 120
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 23
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "addresses": {
+                      "type": "list",
+                      "value": [
+                        {
+                          "type": "ipv6",
+                          "value": "2001:db8::53"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "value": {
+                "code": {
+                  "type": "unsigned",
+                  "value": 65000
+                },
+                "value": {
+                  "type": "object",
+                  "value": {
+                    "data": {
+                      "type": "bytes",
+                      "value": [
+                        0,
+                        255,
+                        3
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "transaction_id": {
+          "type": "unsigned",
+          "value": 1193046
+        },
+        "wire": {
+          "type": "bytes",
+          "value": [
+            7,
+            18,
+            52,
+            86,
+            0,
+            2,
+            0,
+            10,
+            0,
+            3,
+            0,
+            1,
+            2,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            3,
+            0,
+            40,
+            0,
+            0,
+            0,
+            7,
+            0,
+            0,
+            0,
+            60,
+            0,
+            0,
+            0,
+            120,
+            0,
+            5,
+            0,
+            24,
+            32,
+            1,
+            13,
+            184,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            16,
+            0,
+            0,
+            0,
+            180,
+            0,
+            0,
+            1,
+            44,
+            0,
+            23,
+            0,
+            16,
+            32,
+            1,
+            13,
+            184,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            83,
+            253,
+            232,
+            0,
+            3,
+            0,
+            255,
+            3
+          ]
+        }
+      }
+    }
+  ]
+}

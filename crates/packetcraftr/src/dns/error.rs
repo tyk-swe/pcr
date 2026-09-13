@@ -14,6 +14,9 @@ use packetcraftr_core::protocol::application::dns::name;
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WireError {
+    #[error("DNS construction failed: {0}")]
+    Encode(#[from] packetcraftr_core::codec::Error),
+
     #[error("{0}")]
     Decode(#[from] packetcraftr_core::protocol::application::dns::DecodeError),
 

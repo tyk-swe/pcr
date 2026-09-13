@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.udp-profiles.v1.schema.json",
+  "title": "PacketcraftR UDP scan profiles v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "profiles"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.udp-profiles/v1"
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "ports",
+          "profile"
+        ],
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "minItems": 1,
+            "maxItems": 4096
+          },
+          "profile": {
+            "type": "object",
+            "required": [
+              "name",
+              "request",
+              "response"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "request": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "data"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "bytes"
+                      },
+                      "data": {
+                        "type": "string",
+                        "pattern": "^([0-9a-fA-F]{2})*$",
+                        "maxLength": 131014
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "name"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "dns"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      },
+                      "query_type": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "class": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "recursion_desired": {
+                        "type": "boolean"
+                      },
+                      "id_base": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "response": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "any",
+                          "dns"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "checks"
+                    ],
+                    "properties": {
+                      "type": {
+                        "const": "bytes"
+                      },
+                      "checks": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "offset",
+                            "data"
+                          ],
+                          "properties": {
+                            "offset": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 65535
+                            },
+                            "data": {
+                              "type": "string",
+                              "pattern": "^([0-9a-fA-F]{2})*$",
+                              "maxLength": 2048,
+                              "minLength": 2
+                            },
+                            "mask": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "pattern": "^([0-9a-fA-F]{2})*$",
+                                  "maxLength": 2048
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 64
+                      },
+                      "min_length": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      "max_length": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 256
+    }
+  },
+  "additionalProperties": false
+}

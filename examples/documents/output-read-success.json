@@ -1,0 +1,29 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "read",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "columns": [
+      "frame.number",
+      "ip.src",
+      "dns.qname"
+    ],
+    "rows_written": 1,
+    "frames_read": 1,
+    "captured_bytes_read": 125,
+    "rows": [
+      {
+        "source_frame": 1,
+        "values": [
+          1,
+          "192.0.2.53",
+          [
+            "example.test."
+          ]
+        ]
+      }
+    ]
+  },
+  "diagnostics": []
+}

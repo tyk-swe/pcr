@@ -1,0 +1,614 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Explicit kernel TCP scanning with socket evidence and bounded rolling admission.
+
+use super::{Classification, Request, Transport, WORKFLOW};
+use crate::{
+    BoundaryError,
+    clock::Clock,
+    policy::{Authorizer, Operation, SocketBudget, SocketOperation},
+    probe::{Error, ErrorKind, enforce_deadline},
+    target::approve_operation,
+};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::tcp::{self, Provider, Stream as _};
+use serde::Serialize;
+use std::{
+    collections::HashMap,
+    io,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::{Duration, Instant, SystemTime},
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    Connected,
+    Refused,
+    TimedOut,
+    Unreachable,
+    LocalError,
+    DeadlineExpired,
+}
+impl Outcome {
+    pub const fn classification(self) -> Classification {
+        match self {
+            Self::Connected => Classification::Open,
+            Self::Refused => Classification::Closed,
+            Self::TimedOut | Self::DeadlineExpired => Classification::Timeout,
+            Self::Unreachable => Classification::Unreachable,
+            Self::LocalError => Classification::Unknown,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct Probe {
+    pub sequence: u64,
+    pub endpoint: SocketAddr,
+    pub attempt: u32,
+    pub attempted: bool,
+    /// None means no socket-call result was available by the deadline.
+    pub connect_succeeded: Option<bool>,
+    pub outcome: Outcome,
+    pub scheduled_at: SystemTime,
+    pub finished_at: Option<SystemTime>,
+    pub elapsed: Duration,
+    pub local: Option<SocketAddr>,
+    pub error: Option<Arc<io::Error>>,
+}
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Statistics {
+    pub connections_scheduled: u64,
+    pub connections_attempted: u64,
+    pub connections_succeeded: u64,
+    pub elapsed: Duration,
+}
+#[derive(Clone, Debug)]
+pub struct Summary {
+    pub target: String,
+    pub resolved_addresses: Vec<IpAddr>,
+    pub planned_duration: Duration,
+    pub stats: Statistics,
+}
+#[derive(Clone, Debug)]
+pub struct Endpoint {
+    pub address: IpAddr,
+    pub port: u16,
+    pub classification: Classification,
+    pub probes: Vec<Probe>,
+}
+#[derive(Clone, Debug)]
+pub struct Report {
+    pub summary: Summary,
+    pub endpoints: Vec<Endpoint>,
+}
+
+pub fn run<P, A, C>(
+    request: &Request,
+    authorizer: &mut A,
+    provider: Arc<P>,
+    clock: &mut C,
+) -> Result<Report, Error>
+where
+    P: Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+    A: Authorizer,
+    C: Clock,
+{
+    let mut probes = Vec::new();
+    let summary = run_observed(request, authorizer, provider, clock, |probe, _| {
+        probes.push(probe);
+        Ok(())
+    })?;
+    probes.sort_by_key(|probe| probe.sequence);
+    let mut endpoints: Vec<Endpoint> = Vec::new();
+    let mut indices = HashMap::new();
+    for probe in probes {
+        let key = probe.endpoint;
+        let index = *indices.entry(key).or_insert_with(|| {
+            let index = endpoints.len();
+            endpoints.push(Endpoint {
+                address: key.ip(),
+                port: key.port(),
+                classification: Classification::Timeout,
+                probes: Vec::new(),
+            });
+            index
+        });
+        endpoints[index]
+            .classification
+            .promote(probe.outcome.classification());
+        endpoints[index].probes.push(probe);
+    }
+    Ok(Report { summary, endpoints })
+}
+
+pub fn run_with_events<P, A, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    provider: Arc<P>,
+    clock: &mut C,
+    runtime: &crate::progress::Runtime,
+    emit: F,
+) -> Result<Summary, Error>
+where
+    P: Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+    A: Authorizer,
+    C: Clock,
+    F: FnMut(Probe) -> Result<(), BoundaryError> + Send + 'static,
+{
+    let observe = crate::probe::runner::sink_observer(
+        runtime,
+        emit,
+        |error| {
+            Error::new(
+                WORKFLOW,
+                ErrorKind::DurationLimit {
+                    actual: error.actual,
+                    limit: error.limit,
+                },
+            )
+        },
+        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
+    )?;
+    run_observed(request, authorizer, provider, clock, observe)
+}
+
+struct Active<S> {
+    pending: tcp::PendingConnect<S>,
+    sequence: u64,
+    endpoint: SocketAddr,
+    attempt: u32,
+    started: Instant,
+    scheduled_at: SystemTime,
+    timeout: Duration,
+}
+fn invalid(field: &'static str, value: usize, reason: &str) -> Error {
+    Error::new(
+        WORKFLOW,
+        ErrorKind::InvalidLimit {
+            field,
+            value: value as u64,
+            reason: reason.to_owned(),
+        },
+    )
+}
+fn execution(
+    sequence: u64,
+    source: impl packetcraftr_core::error::Classified + Send + Sync + 'static,
+) -> Error {
+    Error::new(
+        WORKFLOW,
+        ErrorKind::Execution {
+            sequence,
+            source: BoundaryError::from_error(source),
+        },
+    )
+}
+
+fn run_observed<P, A, C, F>(
+    request: &Request,
+    authorizer: &mut A,
+    provider: Arc<P>,
+    clock: &mut C,
+    mut emit: F,
+) -> Result<Summary, Error>
+where
+    P: Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+    A: Authorizer,
+    C: Clock,
+    F: FnMut(Probe, &Deadline) -> Result<(), Error>,
+{
+    let started = Instant::now();
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+    enforce_deadline(WORKFLOW, &deadline)?;
+    request.validate()?;
+    if request.transport != Transport::Tcp {
+        return Err(invalid(
+            "transport",
+            0,
+            "TCP connect requires TCP transport",
+        ));
+    }
+    if request.max_in_flight > tcp::MAX_PENDING_CONNECTIONS {
+        return Err(invalid(
+            "max_in_flight",
+            request.max_in_flight,
+            "TCP connect is capped at 16 concurrent native operations",
+        ));
+    }
+    let ports = request.selected_ports()?;
+    if ports.contains(&0) {
+        return Err(invalid("port", 0, "TCP connect requires nonzero ports"));
+    }
+    let addresses = super::targets::resolve(request, authorizer, &deadline)?;
+    if addresses.is_empty() {
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::Family {
+                family: request.address_family.label(),
+            },
+        ));
+    }
+    let count = addresses
+        .len()
+        .checked_mul(ports.len())
+        .and_then(|count| count.checked_mul(request.attempts as usize))
+        .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
+    crate::probe::evidence::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
+    let delay = crate::clock::rate_delay(1, request.probes_per_second)
+        .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
+    let windows = u32::try_from(count.div_ceil(request.max_in_flight))
+        .map_err(|_| invalid("probes", count, "duration overflow"))?;
+    let planned_duration = request
+        .timeout
+        .checked_mul(windows)
+        .and_then(|duration| {
+            delay
+                .checked_mul(count.saturating_sub(1) as u32)
+                .and_then(|pacing| duration.checked_add(pacing))
+        })
+        .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
+    crate::probe::evidence::check_probe_duration(
+        WORKFLOW,
+        planned_duration,
+        request.limits.max_duration,
+    )?;
+    let endpoints: Vec<_> = addresses
+        .iter()
+        .flat_map(|address| {
+            ports
+                .iter()
+                .map(move |port| SocketAddr::new(*address, *port))
+        })
+        .collect();
+    let budget = SocketBudget::new(count as u64, 0, 0);
+    let operation =
+        SocketOperation::new(&endpoints, budget).map_err(|source| execution(0, source))?;
+    approve_operation(
+        authorizer,
+        Operation::Socket(operation),
+        &deadline,
+        &WORKFLOW,
+    )?;
+    let mut stats = Statistics::default();
+    let mut active: Vec<Active<P::Stream>> = Vec::new();
+    let mut next = 0usize;
+    let mut next_start = clock.now();
+    let mut evidence_bytes = 0usize;
+    while next < count || !active.is_empty() {
+        enforce_deadline(WORKFLOW, &deadline)?;
+        while next < count && active.len() < request.max_in_flight && clock.now() >= next_start {
+            let endpoint = endpoints[next % endpoints.len()];
+            let attempt = (next / endpoints.len()) as u32 + 1;
+            let final_endpoints = [endpoint];
+            let operation = SocketOperation::new(&final_endpoints, budget)
+                .map_err(|source| execution(next as u64, source))?;
+            approve_operation(
+                authorizer,
+                Operation::Socket(operation),
+                &deadline,
+                &WORKFLOW,
+            )?;
+            let timeout = deadline
+                .bounded_timeout(request.timeout)
+                .map_err(|source| {
+                    Error::new(
+                        WORKFLOW,
+                        ErrorKind::DurationLimit {
+                            actual: source.actual,
+                            limit: source.limit,
+                        },
+                    )
+                })?;
+            let admitted = Instant::now();
+            let scheduled_at = SystemTime::now();
+            let pending = tcp::start_connect(
+                Arc::clone(&provider),
+                endpoint,
+                timeout,
+                clock.cancellation(),
+            )
+            .map_err(|source| execution(next as u64, source))?;
+            active.push(Active {
+                pending,
+                sequence: next as u64,
+                endpoint,
+                attempt,
+                started: admitted,
+                scheduled_at,
+                timeout,
+            });
+            stats.connections_scheduled += 1;
+            next += 1;
+            next_start = clock
+                .now()
+                .checked_add(delay)
+                .ok_or_else(|| invalid("rate", 0, "pacing deadline overflow"))?;
+        }
+        let mut index = 0;
+        while index < active.len() {
+            enforce_deadline(WORKFLOW, &deadline)?;
+            let result = active[index]
+                .pending
+                .poll()
+                .map_err(|source| execution(active[index].sequence, source))?;
+            let probe = if let Some(result) = result {
+                let entry = active.remove(index);
+                Some(finish_probe(entry, result)?)
+            } else if active[index].started.elapsed() >= active[index].timeout {
+                let mut entry = active.remove(index);
+                let attempted = entry.pending.cancel();
+                Some(Probe {
+                    sequence: entry.sequence,
+                    endpoint: entry.endpoint,
+                    attempt: entry.attempt,
+                    attempted,
+                    connect_succeeded: None,
+                    outcome: Outcome::DeadlineExpired,
+                    scheduled_at: entry.scheduled_at,
+                    finished_at: None,
+                    elapsed: entry.started.elapsed(),
+                    local: None,
+                    error: None,
+                })
+            } else {
+                index += 1;
+                None
+            };
+            if let Some(probe) = probe {
+                evidence_bytes = evidence_bytes
+                    .checked_add(std::mem::size_of::<Probe>())
+                    .and_then(|bytes| {
+                        bytes.checked_add(
+                            probe
+                                .error
+                                .as_ref()
+                                .map_or(0, |error| error.to_string().len()),
+                        )
+                    })
+                    .filter(|bytes| *bytes <= request.limits.max_evidence_bytes)
+                    .ok_or_else(|| {
+                        invalid(
+                            "max_evidence_bytes",
+                            request.limits.max_evidence_bytes,
+                            "socket evidence budget exceeded",
+                        )
+                    })?;
+                stats.connections_attempted += u64::from(probe.attempted);
+                stats.connections_succeeded += u64::from(probe.connect_succeeded == Some(true));
+                emit(probe, &deadline)?;
+            }
+        }
+        if next < count || !active.is_empty() {
+            let mut wait = Duration::from_millis(1);
+            if next < count && active.len() < request.max_in_flight {
+                wait = wait.min(next_start.saturating_duration_since(clock.now()));
+            }
+            if !wait.is_zero() {
+                deadline
+                    .start_accounting(Duration::ZERO)
+                    .map_err(|source| {
+                        Error::new(
+                            WORKFLOW,
+                            ErrorKind::DurationLimit {
+                                actual: source.actual,
+                                limit: source.limit,
+                            },
+                        )
+                    })?;
+                clock.sleep(wait).map_err(|source| {
+                    Error::new(
+                        WORKFLOW,
+                        ErrorKind::Clock {
+                            sequence: next as u64,
+                            source: Box::new(source),
+                        },
+                    )
+                })?;
+            }
+        }
+    }
+    enforce_deadline(WORKFLOW, &deadline)?;
+    stats.elapsed = started.elapsed();
+    Ok(Summary {
+        target: request.targets.to_string(),
+        resolved_addresses: addresses,
+        planned_duration,
+        stats,
+    })
+}
+
+fn finish_probe<S: tcp::Stream>(
+    entry: Active<S>,
+    result: tcp::ConnectOutcome<S>,
+) -> Result<Probe, Error> {
+    let mut probe = Probe {
+        sequence: entry.sequence,
+        endpoint: entry.endpoint,
+        attempt: entry.attempt,
+        attempted: result.attempted,
+        connect_succeeded: Some(result.result.is_ok()),
+        outcome: Outcome::LocalError,
+        scheduled_at: result.started_at,
+        finished_at: Some(result.completed_at),
+        elapsed: result.elapsed,
+        local: None,
+        error: None,
+    };
+    match result.result {
+        Ok(stream) => {
+            let peer = stream.peer_addr().map_err(|source| {
+                execution(
+                    entry.sequence,
+                    tcp::ConnectError::Evidence {
+                        operation: "peer",
+                        source,
+                    },
+                )
+            })?;
+            if peer != entry.endpoint {
+                return Err(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidEvidence {
+                        sequence: entry.sequence,
+                        message: "TCP provider returned a different peer endpoint".to_owned(),
+                    },
+                ));
+            }
+            probe.local = Some(stream.local_addr().map_err(|source| {
+                execution(
+                    entry.sequence,
+                    tcp::ConnectError::Evidence {
+                        operation: "local",
+                        source,
+                    },
+                )
+            })?);
+            probe.outcome = if result.elapsed > entry.timeout {
+                Outcome::DeadlineExpired
+            } else {
+                Outcome::Connected
+            };
+            drop(stream);
+        }
+        Err(source) => {
+            probe.outcome = match source.kind() {
+                io::ErrorKind::ConnectionRefused => Outcome::Refused,
+                io::ErrorKind::TimedOut => Outcome::TimedOut,
+                io::ErrorKind::NetworkUnreachable | io::ErrorKind::HostUnreachable => {
+                    Outcome::Unreachable
+                }
+                _ => Outcome::LocalError,
+            };
+            probe.error = Some(Arc::new(source));
+        }
+    }
+    if result.elapsed > entry.timeout {
+        probe.outcome = Outcome::DeadlineExpired;
+    }
+    Ok(probe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Socket {
+        peer: SocketAddr,
+        closed: Arc<AtomicUsize>,
+    }
+    impl Drop for Socket {
+        fn drop(&mut self) {
+            self.closed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    impl Read for Socket {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            panic!("connect scan must not read application bytes")
+        }
+    }
+    impl Write for Socket {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            panic!("connect scan must not write application bytes")
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    impl tcp::Stream for Socket {
+        fn peer_addr(&self) -> io::Result<SocketAddr> {
+            Ok(self.peer)
+        }
+        fn local_addr(&self) -> io::Result<SocketAddr> {
+            Ok("127.0.0.1:40000".parse().unwrap())
+        }
+        fn set_read_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+        fn set_write_timeout(&self, _: Option<Duration>) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    struct Concurrent {
+        active: AtomicUsize,
+        peak: AtomicUsize,
+        calls: AtomicUsize,
+        closed: Arc<AtomicUsize>,
+    }
+    impl Provider for Concurrent {
+        type Stream = Socket;
+        fn connect(&self, endpoint: SocketAddr, _: Duration) -> io::Result<Socket> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(20));
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            Ok(Socket {
+                peer: endpoint,
+                closed: Arc::clone(&self.closed),
+            })
+        }
+    }
+    #[test]
+    fn connect_windows_overlap_with_stable_identity_and_closed_socket_evidence() {
+        let request = Request {
+            targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
+            transport: Transport::Tcp,
+            udp_payload: bytes::Bytes::new(),
+            udp_profiles: Default::default(),
+            address_family: crate::target::Family::Any,
+            ports: vec![80, 81, 82, 83],
+            attempts: 1,
+            timeout: Duration::from_secs(1),
+            probes_per_second: None,
+            max_in_flight: 2,
+            limits: super::super::Limits::default(),
+        };
+        let closed = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(Concurrent {
+            active: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            calls: AtomicUsize::new(0),
+            closed: Arc::clone(&closed),
+        });
+        let policy = crate::policy::Policy::default();
+        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let report = run(
+            &request,
+            &mut authorizer,
+            Arc::clone(&provider),
+            &mut crate::clock::SystemClock,
+        )
+        .unwrap();
+        assert_eq!(provider.peak.load(Ordering::SeqCst), 2);
+        assert_eq!(closed.load(Ordering::SeqCst), 4);
+        assert_eq!(report.summary.stats.connections_attempted, 4);
+        assert_eq!(
+            report
+                .endpoints
+                .iter()
+                .flat_map(|endpoint| endpoint.probes.iter().map(|probe| probe.sequence))
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
+        let mut bounded = request;
+        bounded.limits.max_probes = 1;
+        assert!(
+            run(
+                &bounded,
+                &mut authorizer,
+                Arc::clone(&provider),
+                &mut crate::clock::SystemClock
+            )
+            .is_err()
+        );
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
+    }
+}

@@ -132,10 +132,11 @@ impl Handshake {
 
 /// One extension as it appeared on the wire, in offer order.
 ///
-/// The body is not retained: everything this crate reads from an extension is
-/// already lifted into the surrounding hello.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The body is retained exactly, including unrecognized extension data.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Extension {
+    /// Exact extension body.
+    pub data: Bytes,
     /// The extension identifier.
     pub kind: u16,
     /// The declared extension body length in bytes.
@@ -192,6 +193,8 @@ impl ClientHello {
 /// A parsed ServerHello, including a HelloRetryRequest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ServerHello {
+    /// Exact echoed legacy session identifier.
+    pub session_id: Bytes,
     /// `legacy_version`; TLS 1.3 servers freeze this at 0x0303.
     pub legacy_version: u16,
     /// The negotiated version: `supported_versions` when present, otherwise

@@ -48,16 +48,52 @@ pub struct Field {
     pub required: bool,
     pub derived: bool,
     pub description: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Field>,
+    /// JSON Pointer to a previously described child array within this top-level field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children_reference: Option<String>,
 }
 
 impl From<&FieldSchema> for Field {
     fn from(value: &FieldSchema) -> Self {
+        Self::describe(value, "", &mut std::collections::HashMap::new())
+    }
+}
+impl Field {
+    fn describe(
+        value: &FieldSchema,
+        path: &str,
+        seen: &mut std::collections::HashMap<(*const FieldSchema, usize), String>,
+    ) -> Self {
+        let mut children_reference = None;
+        let children = if value.children.is_empty() {
+            Vec::new()
+        } else {
+            let key = (value.children.as_ptr(), value.children.len());
+            if let Some(previous) = seen.get(&key) {
+                children_reference = Some(previous.clone());
+                Vec::new()
+            } else {
+                seen.insert(key, format!("{path}/children"));
+                value
+                    .children
+                    .iter()
+                    .enumerate()
+                    .map(|(index, child)| {
+                        Self::describe(child, &format!("{path}/children/{index}"), seen)
+                    })
+                    .collect()
+            }
+        };
         Self {
             name: value.name.to_owned(),
             kind: value.kind,
             required: value.required,
             derived: value.derived,
             description: value.description.to_owned(),
+            children,
+            children_reference,
         }
     }
 }

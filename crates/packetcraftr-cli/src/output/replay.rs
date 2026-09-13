@@ -23,7 +23,9 @@ use packetcraftr_netio::link::Mode as LinkMode;
 pub struct Report {
     pub source_format: SourceFormat,
     pub timing: Timing,
-    pub requested_interface: InterfaceId,
+    pub requested_interface: Option<InterfaceId>,
+    pub interfaces_used: Vec<InterfaceId>,
+    pub passes_completed: u32,
     pub requested_link_mode: LinkMode,
     #[serde(rename = "frames_attempted")]
     pub frames_read: u64,
@@ -38,14 +40,16 @@ pub struct Report {
 impl Report {
     pub fn from_summary(
         summary: packetcraftr::replay::Summary,
-        requested_interface: NetworkInterfaceId,
+        requested_interface: impl Into<Option<NetworkInterfaceId>>,
         requested_link_mode: NetworkLinkMode,
         frames: Vec<Frame>,
     ) -> Self {
         Self {
             source_format: summary.source_format,
             timing: summary.timing,
-            requested_interface,
+            requested_interface: requested_interface.into(),
+            interfaces_used: summary.interfaces_used,
+            passes_completed: summary.passes_completed,
             requested_link_mode,
             frames_read: summary.frames_read,
             frames_transmitted: summary.frames_transmitted,
@@ -59,6 +63,7 @@ impl Report {
 /// One frame record produced by streaming `replay` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
+    pub pass: u32,
     #[serde(rename = "source_sequence")]
     pub source_index: u64,
     pub interface: InterfaceId,
@@ -72,6 +77,7 @@ impl Frame {
     pub fn try_from_evidence(evidence: packetcraftr::replay::FrameEvidence) -> Result<Self, Error> {
         Ok(Self {
             source_index: evidence.source_index,
+            pass: evidence.pass,
             interface: evidence.transmission().interface.clone(),
             link_mode: evidence.link_mode,
             scheduled_delay: evidence.scheduled_delay,

@@ -218,15 +218,45 @@ impl Limits {
 /// Complete replay request after the caller has selected an interface.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
-    pub interface: InterfaceId,
+    /// Fallback when the selector supplies no per-frame interface.
+    pub interface: Option<InterfaceId>,
+    pub repeat: u32,
+    pub inter_pass_delay: Duration,
     pub link_mode: LinkMode,
     pub timing: Timing,
     pub limits: Limits,
 }
 
+impl Options {
+    pub fn validate(&self) -> Result<(), Error> {
+        self.limits.validate()?;
+        self.timing.validate()?;
+        if self.repeat == 0 || self.repeat > 1024 {
+            return Err(Error::InvalidLimit {
+                field: "repeat",
+                value: u64::from(self.repeat),
+                reason: "must be within 1..=1024",
+            });
+        }
+        if self
+            .inter_pass_delay
+            .checked_mul(self.repeat - 1)
+            .is_none_or(|delay| delay > self.limits.max_duration)
+        {
+            return Err(Error::InvalidDuration {
+                value: self.inter_pass_delay,
+                maximum: self.limits.max_duration,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// Per-frame evidence emitted only after exact transmission is confirmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameEvidence {
+    /// One-based pass identity; source_index remains relative to the input capture.
+    pub pass: u32,
     pub source_index: u64,
     pub source_interface_id: Option<u32>,
     pub capture_interface: Interface,
@@ -245,6 +275,8 @@ impl FrameEvidence {
 /// Terminal counters for a completed replay stream.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Summary {
+    pub passes_completed: u32,
+    pub interfaces_used: Vec<InterfaceId>,
     pub source_format: Format,
     pub timing: Timing,
     #[serde(rename = "frames_attempted")]
@@ -264,6 +296,14 @@ pub struct Summary {
 pub trait Selector {
     /// Decides whether this frame proceeds to authorization and transmission.
     fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;
+    /// Selects an output interface after filtering. None uses the explicit fallback.
+    fn interface(
+        &mut self,
+        _number: u64,
+        _frame: &Frame,
+    ) -> Result<Option<InterfaceId>, crate::BoundaryError> {
+        Ok(None)
+    }
 }
 
 /// Exact-frame transmitter seam used by native and injected adapters.

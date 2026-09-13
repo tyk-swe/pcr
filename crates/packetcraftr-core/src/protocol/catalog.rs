@@ -22,12 +22,15 @@ macro_rules! builtin_protocol_catalog {
             Arp { canonical: "arp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: ArpCodec }
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
-            Dns { canonical: "dns", aliases: [], constructible: false, exact_round_trip: true, matcher: none, codec: DnsCodec }
+            Dhcpv4 { canonical: "dhcpv4", aliases: ["dhcp"], constructible: true, exact_round_trip: true, matcher: none, codec: Dhcpv4Codec }
+            Dhcpv6 { canonical: "dhcpv6", aliases: ["dhcp6"], constructible: true, exact_round_trip: true, matcher: none, codec: Dhcpv6Codec }
+            Dns { canonical: "dns", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: DnsCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: GreCodec }
+            Http { canonical: "http", aliases: ["http1"], constructible: false, exact_round_trip: true, matcher: none, codec: HttpCodec }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, exact_round_trip: true, matcher: echo_v4, codec: Icmpv4Codec }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, exact_round_trip: true, matcher: echo_v6, codec: Icmpv6Codec }
             Igmp { canonical: "igmp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: IgmpCodec }
@@ -51,7 +54,7 @@ macro_rules! builtin_protocol_catalog {
             Sctp { canonical: "sctp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: SctpCodec }
             Snap { canonical: "snap", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: SnapCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: TcpCodec }
-            Tls { canonical: "tls", aliases: ["ssl"], constructible: false, exact_round_trip: true, matcher: none, codec: TlsCodec }
+            Tls { canonical: "tls", aliases: ["ssl"], constructible: true, exact_round_trip: true, matcher: none, codec: TlsCodec }
             Udp { canonical: "udp", aliases: [], constructible: true, exact_round_trip: true, matcher: reverse_flow, codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, exact_round_trip: true, matcher: none, codec: VlanCodec }
             Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, exact_round_trip: true, matcher: none, codec: Vlan8021adCodec }

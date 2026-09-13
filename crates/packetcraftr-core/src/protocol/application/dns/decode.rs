@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{DecodeError, DecodeLimits, Dns, Name};
+use super::{DecodeError, DecodeLimits, Dns, Name, Question};
 use bytes::Bytes;
 pub use primitives::{read_u16, read_u32};
 mod primitives;
@@ -71,20 +71,19 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
             limit,
         });
     }
-    let mut qnames = Vec::with_capacity(usize::from(question_count));
-    let mut qtypes = Vec::with_capacity(usize::from(question_count));
-    let mut qclasses = Vec::with_capacity(usize::from(question_count));
+    let mut questions = Vec::with_capacity(usize::from(question_count));
     let mut offset = 12;
     for _ in 0..question_count {
         let (name, next) = decode_name(message, offset, limits)?;
-        // Preserve the existing offline question presentation of ASCII spaces.
-        qnames.push(name.to_string().replace("\\032", " "));
-        qtypes.push(read_u16(message, next, "question type")?);
-        qclasses.push(read_u16(
-            message,
-            advance(next, 2, "question class")?,
-            "question class",
-        )?);
+        questions.push(Question {
+            name,
+            query_type: read_u16(message, next, "question type")?,
+            class: read_u16(
+                message,
+                advance(next, 2, "question class")?,
+                "question class",
+            )?,
+        });
         offset = advance(next, 4, "question")?;
     }
     let limits = DecodeLimits {
@@ -116,13 +115,12 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
         authenticated_data: flags & 0x0020 != 0,
         checking_disabled: flags & 0x0010 != 0,
         rcode: (flags & 15) as u8,
-        question_count,
-        answer_count,
-        authority_count,
-        additional_count,
-        qnames,
-        qtypes,
-        qclasses,
+        question_count: crate::field::WireValue::Exact(question_count),
+        answer_count: crate::field::WireValue::Exact(answer_count),
+        authority_count: crate::field::WireValue::Exact(authority_count),
+        additional_count: crate::field::WireValue::Exact(additional_count),
+        questions,
+        reserved: flags & 0x0040 != 0,
         answers,
         authorities,
         additionals,

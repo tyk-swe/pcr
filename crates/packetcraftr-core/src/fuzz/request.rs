@@ -66,11 +66,7 @@ impl FromStr for Target {
             .map_err(|_| TargetParseError::InvalidLayer {
                 target: value.to_owned(),
             })?;
-        if field.is_empty()
-            || !field
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-        {
+        if crate::field::Path::parse(field).is_err() {
             return Err(TargetParseError::InvalidField {
                 target: value.to_owned(),
             });
@@ -90,7 +86,7 @@ pub enum TargetParseError {
     MissingSeparator { target: String },
     #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
     InvalidLayer { target: String },
-    #[error("invalid fuzz target {target:?}; the field must be a non-empty [A-Za-z0-9_] name")]
+    #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
     InvalidField { target: String },
 }
 

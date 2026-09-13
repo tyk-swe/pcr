@@ -36,6 +36,11 @@ pub(super) enum StreamTransport {
 
 #[derive(Clone, Debug)]
 pub(super) enum FieldSource {
+    NestedLayer {
+        protocol: crate::layer::Id,
+        path: crate::field::Path,
+        occurrence: Option<usize>,
+    },
     /// Reflective fields of one protocol's layers, addressed exactly as the
     /// registry binds them. Canonical `<protocol>.<field>` paths resolve to a
     /// `Direct` binding, so every layer path reads through one description.
@@ -233,11 +238,23 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     path: path.to_owned(),
                     protocol,
                 })?;
-        let declared = schema
-            .fields
-            .iter()
-            .find(|entry| entry.name == tail)
-            .ok_or_else(unknown)?;
+        let nested = crate::field::Path::parse(tail).map_err(|_| unknown())?;
+        let declared = nested.schema(schema).ok_or_else(unknown)?;
+        if nested.is_nested() {
+            return Ok(Resolved::Field(FieldRef {
+                source: FieldSource::NestedLayer {
+                    protocol,
+                    path: nested,
+                    occurrence,
+                },
+                slice: None,
+                specs: vec![FieldSpec {
+                    kind: declared.kind,
+                    derived: declared.derived,
+                }],
+                path: path.to_owned(),
+            }));
+        }
         return Ok(Resolved::Field(FieldRef {
             source: FieldSource::Layer {
                 binding: FilterFieldBinding::Direct {

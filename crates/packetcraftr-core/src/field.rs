@@ -3,11 +3,15 @@
 
 //! Reflective field kinds and values.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+
+mod path;
+pub use path::{Path, PathError};
 
 /// A value whose wire representation may be derived, exact, or deliberately raw.
 ///
@@ -50,6 +54,7 @@ pub enum FieldKind {
     Ipv6,
     Mac,
     List,
+    Object,
 }
 
 impl FieldKind {
@@ -64,6 +69,7 @@ impl FieldKind {
             Self::Ipv6 => "ipv6",
             Self::Mac => "mac",
             Self::List => "list",
+            Self::Object => "object",
         }
     }
 }
@@ -87,6 +93,8 @@ pub enum FieldValue {
     Ipv6(Ipv6Addr),
     Mac([u8; 6]),
     List(Vec<FieldValue>),
+    /// Named, recursively typed fields, ordered by name for stable serialization.
+    Object(BTreeMap<String, FieldValue>),
 }
 
 pub(crate) fn parse_mac(input: &str) -> Option<[u8; 6]> {
@@ -122,6 +130,22 @@ mod bytes_as_array {
 }
 
 impl FieldValue {
+    /// The concrete reflective kind, independent of a layer's declared kind.
+    pub const fn kind(&self) -> FieldKind {
+        match self {
+            Self::Bool(_) => FieldKind::Bool,
+            Self::Unsigned(_) => FieldKind::Unsigned,
+            Self::Signed(_) => FieldKind::Signed,
+            Self::Text(_) => FieldKind::Text,
+            Self::Bytes(_) => FieldKind::Bytes,
+            Self::Ipv4(_) => FieldKind::Ipv4,
+            Self::Ipv6(_) => FieldKind::Ipv6,
+            Self::Mac(_) => FieldKind::Mac,
+            Self::List(_) => FieldKind::List,
+            Self::Object(_) => FieldKind::Object,
+        }
+    }
+
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             Self::Unsigned(value) => Some(*value),
@@ -211,6 +235,16 @@ impl fmt::Display for FieldValue {
                 "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
                 value[0], value[1], value[2], value[3], value[4], value[5]
             ),
+            Self::Object(values) => {
+                formatter.write_str("{")?;
+                for (index, (name, value)) in values.iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(",")?;
+                    }
+                    write!(formatter, "{name}={value}")?;
+                }
+                formatter.write_str("}")
+            }
             Self::List(values) => {
                 for (index, value) in values.iter().enumerate() {
                     if index != 0 {

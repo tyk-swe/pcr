@@ -150,6 +150,10 @@ impl Interner {
         self.definitions.get(id.get() as usize)
     }
 
+    pub fn definitions(&self) -> &[Definition] {
+        &self.definitions
+    }
+
     pub fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }

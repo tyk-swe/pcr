@@ -244,15 +244,53 @@ pub(crate) fn open_capture(
 pub(crate) fn open_capture_file(
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
-) -> Result<Reader<File>, CliError> {
+) -> Result<Reader<Box<dyn Read>>, CliError> {
     capture_reader(open_file(path)?, bounds)
 }
 
-fn capture_reader<R: Read>(
+/// Validate and preserve a bounded source in an anonymous seekable snapshot.
+/// Callers can analyze and copy identical records, including redirected stdin.
+pub(crate) fn snapshot_capture<R: Read>(
+    input: &mut Reader<R>,
+    bounds: CaptureReaderBoundsArgs,
+    limits: core::analysis::pcap::Limits,
+) -> Result<Reader<File>, CliError> {
+    use core::analysis::pcap;
+    let snapshot = tempfile::tempfile()
+        .map_err(pcap::Error::from)
+        .map_err(CliError::classified)?;
+    let (mut snapshot, _) = pcap::rewrite(input, snapshot, limits).map_err(CliError::classified)?;
+    std::io::Seek::rewind(&mut snapshot)
+        .map_err(pcap::Error::from)
+        .map_err(CliError::classified)?;
+    Reader::with_options(
+        snapshot,
+        ReaderOptions {
+            max_size: bounds.max_frame_bytes,
+            max_interfaces_per_section: bounds.max_interfaces,
+            ..Default::default()
+        },
+    )
+    .map(|reader| reader.with_cancellation(crate::cancellation::signal().clone()))
+    .map_err(CliError::classified)
+}
+
+fn capture_reader<R: Read + 'static>(
     source: R,
     bounds: CaptureReaderBoundsArgs,
-) -> Result<Reader<R>, CliError> {
+) -> Result<Reader<Box<dyn Read>>, CliError> {
     crate::cancellation::check()?;
+    let source: Box<dyn Read> = Box::new(
+        core::analysis::pcap::compression::Input::new(
+            source,
+            core::analysis::pcap::compression::Limits {
+                max_decoded_bytes: bounds.max_decoded_bytes,
+                max_encoded_bytes: bounds.max_encoded_bytes,
+                ..Default::default()
+            },
+        )
+        .map_err(CliError::classified)?,
+    );
     let reader = Reader::with_options(
         source,
         ReaderOptions {
@@ -306,6 +344,8 @@ pub(crate) fn validate_capture_stream_limits(
         max_bytes,
         reader:
             CaptureReaderBoundsArgs {
+                max_decoded_bytes: _,
+                max_encoded_bytes: _,
                 max_frame_bytes,
                 max_interfaces,
             },
@@ -471,6 +511,8 @@ mod tests {
                 max_frames,
                 max_bytes,
                 reader: CaptureReaderBoundsArgs {
+                    max_encoded_bytes: 256 * 1024 * 1024,
+                    max_decoded_bytes: 256 * 1024 * 1024,
                     max_frame_bytes,
                     max_interfaces,
                 },

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "replay",
   "mode": "aggregate",
   "status": "success",
@@ -42,7 +42,8 @@
           "original_length": 47,
           "link_type": 1,
           "bytes_hex": "020000000002020000000001080045000021123440004011a494c0000201c0000202c0000009000d77f468656c6c6f"
-        }
+        },
+        "pass": 1
       },
       {
         "source_sequence": 1,
@@ -65,7 +66,15 @@
           "original_length": 47,
           "link_type": 1,
           "bytes_hex": "020000000002020000000001080045000021123440004011a494c0000201c0000202c0000009000d77f468656c6c6f"
-        }
+        },
+        "pass": 1
+      }
+    ],
+    "passes_completed": 1,
+    "interfaces_used": [
+      {
+        "name": "lab0",
+        "index": 2
       }
     ]
   },

@@ -27,6 +27,8 @@ const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
 /// processing time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// Physical source-set allocations, including references retained by collectors.
+    pub max_provenance_bytes: usize,
     /// Physical input frames. This also bounds persistent capture-scope
     /// metadata: one frame can introduce at most three exact scope identities.
     pub max_frames: u64,
@@ -70,6 +72,7 @@ impl Default for Limits {
         let ip = IpReassemblyLimits::default();
         let tcp = TcpReassemblyLimits::default();
         Self {
+            max_provenance_bytes: 16 * 1024 * 1024,
             max_frames: DEFAULT_STREAM_FRAMES,
             max_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
@@ -98,6 +101,7 @@ impl Limits {
             ("max_frame_bytes", self.max_frame_bytes as u64),
             ("max_flows", self.max_flows as u64),
             ("max_scope_bytes", self.max_scope_bytes as u64),
+            ("max_provenance_bytes", self.max_provenance_bytes as u64),
             ("max_tcp_bytes_per_flow", self.max_tcp_bytes_per_flow as u64),
             (
                 "max_tcp_reassembly_bytes",
@@ -213,6 +217,8 @@ impl Limits {
 /// What one analysis run computes beyond dispatching matched frames.
 #[derive(Clone, Debug, Default)]
 pub struct Options<'a> {
+    /// Track contributing physical records through nested IP reconstruction.
+    pub track_sources: bool,
     pub cancellation: Option<crate::budget::Cancellation>,
     /// Keeps only matching frames; compiled by the caller so filter mistakes
     /// surface before any input is read. Conversation indices are assigned

@@ -5,6 +5,7 @@ use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
+#[cfg(test)]
 use packetcraftr_netio as net;
 
 use packetcraftr_cli::output;
@@ -15,6 +16,8 @@ pub(crate) struct CliError {
     pub(crate) classification: Classification,
     context: Option<Coordinate>,
     pub(crate) causes: Vec<String>,
+    capture: Option<Box<output::capture::Snapshot>>,
+    scan: Option<Box<output::scan::Failure>>,
 }
 
 impl CliError {
@@ -26,6 +29,8 @@ impl CliError {
             classification: Classification::new(fallback_code(kind), kind, None),
             context: None,
             causes: Vec::new(),
+            capture: None,
+            scan: None,
         }
     }
 
@@ -46,6 +51,8 @@ impl CliError {
             classification,
             context: None,
             causes,
+            capture: None,
+            scan: None,
         }
     }
 
@@ -65,13 +72,24 @@ impl CliError {
             .with_context(self.context)
     }
 
-    pub(crate) fn with_cleanup(mut self, cleanup: net::Error) -> Self {
-        let operation = self.message.clone();
-        self.message = format!("{operation}; capture shutdown also failed: {cleanup}");
+    pub(crate) fn with_capture(mut self, snapshot: output::capture::Snapshot) -> Self {
+        self.capture = Some(Box::new(snapshot));
+        self
+    }
+
+    pub(crate) fn with_scan(mut self, scan: output::scan::Failure) -> Self {
+        self.scan = Some(Box::new(scan));
+        self
+    }
+
+    pub(crate) fn with_secondary(mut self, phase: &'static str, secondary: Self) -> Self {
+        let primary = self.message.clone();
+        self.message = format!("{primary}; {phase} also failed: {}", secondary.message);
         if self.causes.is_empty() {
-            self.causes.push(operation);
+            self.causes.push(primary);
         }
-        self.causes.push(cleanup.to_string());
+        self.causes.push(secondary.message);
+        self.causes.extend(secondary.causes);
         self
     }
 
@@ -82,6 +100,8 @@ impl CliError {
             self.causes.clone(),
         )
         .with_context(self.context)
+        .with_capture(self.capture.clone())
+        .with_scan(self.scan.clone())
     }
 }
 
@@ -216,7 +236,8 @@ mod tests {
             message: "receiver stopped".to_owned(),
             source: None,
         };
-        let error = CliError::new(Kind::Io, "capture failed").with_cleanup(cleanup.clone());
+        let error = CliError::new(Kind::Io, "capture failed")
+            .with_secondary("capture shutdown", CliError::classified(cleanup.clone()));
         assert_eq!(
             error.message,
             format!("capture failed; capture shutdown also failed: {cleanup}")
@@ -231,7 +252,7 @@ mod tests {
             "capture failed",
             vec!["original source".to_owned()],
         )
-        .with_cleanup(cleanup.clone());
+        .with_secondary("capture shutdown", CliError::classified(cleanup.clone()));
         assert_eq!(
             error.causes,
             vec!["original source".to_owned(), cleanup.to_string()]

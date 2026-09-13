@@ -77,6 +77,9 @@ pub struct FieldSchema {
     pub required: bool,
     /// Human-readable field purpose.
     pub description: &'static str,
+    /// Named members of an object or of each object in a list.
+    #[serde(skip_serializing_if = "<[FieldSchema]>::is_empty")]
+    pub children: &'static [FieldSchema],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -116,6 +119,34 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn field(&self, name: &str) -> Option<FieldValue>;
     fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+
+    /// Reads a registered nested object member or zero-based list element.
+    fn field_path(&self, name: &str) -> Option<FieldValue> {
+        if let Some(value) = self.field(name) {
+            return Some(value);
+        }
+        let path = crate::field::Path::parse(name).ok()?;
+        path.schema(self.schema())?;
+        path.get(&self.field(path.root())?).cloned()
+    }
+
+    /// Edits a nested value through its owning field's validated setter.
+    fn set_field_path(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+        let unknown = || FieldError::UnknownField {
+            protocol: *self.protocol_id(),
+            field: name.to_owned(),
+        };
+        let path = crate::field::Path::parse(name).map_err(|_| unknown())?;
+        path.schema(self.schema()).ok_or_else(unknown)?;
+        if !path.is_nested() {
+            return self.set_field(path.root(), value);
+        }
+        let mut root = self.field(path.root()).ok_or_else(unknown)?;
+        if !path.replace(&mut root, value) {
+            return Err(unknown());
+        }
+        self.set_field(path.root(), root)
+    }
 
     /// Validates the stable required-field contract after codec defaults,
     /// materialization, or decoding.

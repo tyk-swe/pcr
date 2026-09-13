@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "fragment",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "packet.transform_input",
+    "kind": "packet",
+    "message": "invalid packet transform input: MTU leaves no aligned fragment payload",
+    "causes": [],
+    "remediation": "supply a complete supported datagram"
+  },
+  "diagnostics": []
+}

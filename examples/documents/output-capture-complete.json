@@ -1,10 +1,52 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "capture",
   "mode": "stream",
   "status": "success",
   "sequence": 1,
-  "result": {},
+  "result": {
+    "requested_interfaces": [
+      {
+        "name": "fixture0",
+        "index": 1
+      }
+    ],
+    "sources": [
+      {
+        "capture_id": 0,
+        "native_interface": {
+          "name": "fixture0",
+          "index": 1
+        },
+        "link_type": 147,
+        "snap_length": 65535,
+        "queue_frames": 4096,
+        "queue_bytes": 268435456,
+        "overflow_policy": "fail",
+        "metadata_valid": true,
+        "ready": true,
+        "shutdown_confirmed": true,
+        "statistics_valid": true,
+        "statistics": {
+          "received_frames": 100,
+          "received_bytes": 8042,
+          "dropped_frames": 0,
+          "dropped_bytes": 0,
+          "overflow_events": 0
+        },
+        "delivered_frames": 100,
+        "delivered_bytes": 8042,
+        "admitted_frames": 100,
+        "matched_frames": 1,
+        "emitted_frames": 1,
+        "late_frames": 0
+      }
+    ],
+    "frames_delivered": 100,
+    "stop_reason": "frame_budget",
+    "capture_statistics_complete": true,
+    "files": null
+  },
   "diagnostics": [],
   "stats": {
     "packets_attempted": 100,

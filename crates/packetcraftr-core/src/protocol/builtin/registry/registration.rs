@@ -35,6 +35,15 @@ pub(super) fn register(
         builder,
         &[
             (BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100),
+            (BuiltinProtocol::Udp, 67, BuiltinProtocol::Dhcpv4, 100),
+            (BuiltinProtocol::Udp, 68, BuiltinProtocol::Dhcpv4, 100),
+            (BuiltinProtocol::Udp, 546, BuiltinProtocol::Dhcpv6, 100),
+            (BuiltinProtocol::Udp, 547, BuiltinProtocol::Dhcpv6, 100),
+            (BuiltinProtocol::Tcp, 53, BuiltinProtocol::Dns, 100),
+            (BuiltinProtocol::Tcp, 80, BuiltinProtocol::Http, 100),
+            (BuiltinProtocol::Tcp, 8080, BuiltinProtocol::Http, 100),
+            (BuiltinProtocol::Http, 0, BuiltinProtocol::Raw, 0),
+            (BuiltinProtocol::Dns, 0, BuiltinProtocol::Raw, 0),
             (BuiltinProtocol::Arp, 0, BuiltinProtocol::Padding, 0),
         ],
     )?;

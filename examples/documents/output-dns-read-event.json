@@ -1,0 +1,347 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "dns-read",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "dns_message",
+  "status": "success",
+  "result": {
+    "index": 1,
+    "transport": "udp",
+    "stream": 0,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "192.0.2.53",
+        "source_port": 53,
+        "destination": "198.51.100.8",
+        "destination_port": 49152
+      }
+    },
+    "status": "complete",
+    "wire_hex": "123481800001000100010002076578616d706c6504746573740000010001c00c000100010000003c0004c0000208c00c000200010000012c0005026e73c00cc00cfde80001000000070004ff00c0ff00002904d0010080400007000c000300ff01",
+    "framing_hex": "",
+    "declared_length": 97,
+    "fields": {
+      "additional_count": {
+        "type": "unsigned",
+        "value": 2
+      },
+      "additionals": {
+        "type": "list",
+        "value": [
+          {
+            "type": "object",
+            "value": {
+              "class": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "owner": {
+                "type": "text",
+                "value": "example.test."
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 7
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 65000
+              },
+              "value": {
+                "type": "object",
+                "value": {
+                  "kind": {
+                    "type": "text",
+                    "value": "unknown"
+                  },
+                  "rdata": {
+                    "type": "bytes",
+                    "value": [
+                      255,
+                      0,
+                      192,
+                      255
+                    ]
+                  },
+                  "type": {
+                    "type": "unsigned",
+                    "value": 65000
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "value": {
+              "class": {
+                "type": "unsigned",
+                "value": 1232
+              },
+              "owner": {
+                "type": "text",
+                "value": "."
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 16810048
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 41
+              },
+              "value": {
+                "type": "object",
+                "value": {
+                  "dnssec_ok": {
+                    "type": "bool",
+                    "value": true
+                  },
+                  "extended_response_code": {
+                    "type": "unsigned",
+                    "value": 1
+                  },
+                  "flags": {
+                    "type": "unsigned",
+                    "value": 32832
+                  },
+                  "kind": {
+                    "type": "text",
+                    "value": "opt"
+                  },
+                  "options": {
+                    "type": "list",
+                    "value": [
+                      {
+                        "type": "object",
+                        "value": {
+                          "code": {
+                            "type": "unsigned",
+                            "value": 12
+                          },
+                          "data": {
+                            "type": "bytes",
+                            "value": [
+                              0,
+                              255,
+                              1
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "udp_payload_size": {
+                    "type": "unsigned",
+                    "value": 1232
+                  },
+                  "version": {
+                    "type": "unsigned",
+                    "value": 0
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "answer_count": {
+        "type": "unsigned",
+        "value": 1
+      },
+      "answers": {
+        "type": "list",
+        "value": [
+          {
+            "type": "object",
+            "value": {
+              "class": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "owner": {
+                "type": "text",
+                "value": "example.test."
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 60
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "value": {
+                "type": "object",
+                "value": {
+                  "address": {
+                    "type": "ipv4",
+                    "value": "192.0.2.8"
+                  },
+                  "kind": {
+                    "type": "text",
+                    "value": "a"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "authenticated_data": {
+        "type": "bool",
+        "value": false
+      },
+      "authoritative_answer": {
+        "type": "bool",
+        "value": false
+      },
+      "authorities": {
+        "type": "list",
+        "value": [
+          {
+            "type": "object",
+            "value": {
+              "class": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "owner": {
+                "type": "text",
+                "value": "example.test."
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 300
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 2
+              },
+              "value": {
+                "type": "object",
+                "value": {
+                  "kind": {
+                    "type": "text",
+                    "value": "ns"
+                  },
+                  "name": {
+                    "type": "text",
+                    "value": "ns.example.test."
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "authority_count": {
+        "type": "unsigned",
+        "value": 1
+      },
+      "checking_disabled": {
+        "type": "bool",
+        "value": false
+      },
+      "id": {
+        "type": "unsigned",
+        "value": 4660
+      },
+      "opcode": {
+        "type": "unsigned",
+        "value": 0
+      },
+      "qclass": {
+        "type": "list",
+        "value": [
+          {
+            "type": "unsigned",
+            "value": 1
+          }
+        ]
+      },
+      "qname": {
+        "type": "list",
+        "value": [
+          {
+            "type": "text",
+            "value": "example.test."
+          }
+        ]
+      },
+      "qtype": {
+        "type": "list",
+        "value": [
+          {
+            "type": "unsigned",
+            "value": 1
+          }
+        ]
+      },
+      "question_count": {
+        "type": "unsigned",
+        "value": 1
+      },
+      "questions": {
+        "type": "list",
+        "value": [
+          {
+            "type": "object",
+            "value": {
+              "class": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "name": {
+                "type": "text",
+                "value": "example.test."
+              },
+              "type": {
+                "type": "unsigned",
+                "value": 1
+              }
+            }
+          }
+        ]
+      },
+      "rcode": {
+        "type": "unsigned",
+        "value": 0
+      },
+      "recursion_available": {
+        "type": "bool",
+        "value": true
+      },
+      "recursion_desired": {
+        "type": "bool",
+        "value": true
+      },
+      "reserved": {
+        "type": "bool",
+        "value": false
+      },
+      "response": {
+        "type": "bool",
+        "value": true
+      },
+      "truncated": {
+        "type": "bool",
+        "value": false
+      }
+    },
+    "error": null,
+    "sources": [
+      {
+        "number": 1,
+        "timestamp": {
+          "unix_seconds": 123,
+          "nanoseconds": 456789000
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

@@ -18,6 +18,41 @@ use support::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
     (
+        output::contract::Command::Rewrite,
+        false,
+        include_str!("../../../examples/documents/output-rewrite-complete.json"),
+    ),
+    (
+        output::contract::Command::Export,
+        false,
+        include_str!("../../../examples/documents/output-export-complete.json"),
+    ),
+    (
+        output::contract::Command::Http,
+        false,
+        include_str!("../../../examples/documents/output-http-complete.json"),
+    ),
+    (
+        output::contract::Command::DnsRead,
+        false,
+        include_str!("../../../examples/documents/output-dns-read-complete.json"),
+    ),
+    (
+        output::contract::Command::Fragment,
+        false,
+        include_str!("../../../examples/documents/output-fragment-complete.json"),
+    ),
+    (
+        output::contract::Command::Merge,
+        false,
+        include_str!("../../../examples/documents/output-merge-complete.json"),
+    ),
+    (
+        output::contract::Command::Dissect,
+        false,
+        include_str!("../../../examples/documents/output-dissect-complete.json"),
+    ),
+    (
         output::contract::Command::Build,
         false,
         include_str!("../../../examples/documents/output-build-complete.json"),
@@ -160,6 +195,7 @@ fn decoded(bytes: &[u8]) -> core::decode::DecodedPacket {
 fn scan_probe(sequence: u64) -> packetcraftr::scan::ProbeEvidence {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
     packetcraftr::scan::ProbeEvidence {
+        application: None,
         sequence,
         address,
         transport: packetcraftr::scan::Transport::Tcp,
@@ -300,6 +336,7 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_typed_event(
         output::contract::Command::Replay,
         output::replay::Frame {
+            pass: 1,
             source_index: 1,
             interface: packetcraftr_netio::interface::Id {
                 name: "fixture0".to_owned(),
@@ -507,6 +544,17 @@ fn tls_session_event() -> output::tls::Event {
 
 fn validate_active_event_variants() {
     for event in [
+        packetcraftr::scan::Event::Sent(packetcraftr::scan::SentProbe {
+            probe: packetcraftr::scan::Probe {
+                udp_profile: None,
+                sequence: 0,
+                address: "192.0.2.2".parse().unwrap(),
+                endpoint: packetcraftr::scan::ProbeEndpoint::Tcp { port: 80 },
+                attempt: 1,
+                udp_payload: bytes::Bytes::new(),
+            },
+            sent: Arc::new(sent_packet()),
+        }),
         packetcraftr::scan::Event::Probe {
             target: Arc::from("scan.test"),
             probe: scan_probe(9),

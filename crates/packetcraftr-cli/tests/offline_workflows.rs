@@ -1061,15 +1061,15 @@ fn recipe_stdin_matches_files_for_yaml_json_and_expressions() {
 #[test]
 fn malformed_recipe_stdin_retains_document_and_expression_diagnostics() {
     for (suffix, input) in [
-        (".yaml", "schema: packetcraftr.packet/v1\nlayers: ["),
+        (".yaml", "schema: packetcraftr.packet/v2\nlayers: ["),
         (
             ".yaml",
-            "# A broken packet\nschema: packetcraftr.packet/v1\nlayers: [",
+            "# A broken packet\nschema: packetcraftr.packet/v2\nlayers: [",
         ),
-        (".yaml", "layers: [\nschema: packetcraftr.packet/v1"),
+        (".yaml", "layers: [\nschema: packetcraftr.packet/v2"),
         (
             ".json",
-            "{\"schema\": \"packetcraftr.packet/v1\", \"layers\": [",
+            "{\"schema\": \"packetcraftr.packet/v2\", \"layers\": [",
         ),
     ] {
         let mut file = tempfile::Builder::new().suffix(suffix).tempfile().unwrap();
@@ -1113,7 +1113,7 @@ fn malformed_recipe_stdin_retains_document_and_expression_diagnostics() {
 fn recipe_stdin_keeps_file_byte_and_build_layer_limits() {
     let limit = packetcraftr_core::document::DEFAULT_MAX_DOCUMENT_BYTES;
     let oversized = vec![b' '; limit + 1];
-    let layers = b"# Two layers\nlayers:\n  - protocol: raw\n  - protocol: raw\nschema: packetcraftr.packet/v1\n";
+    let layers = b"# Two layers\nlayers:\n  - protocol: raw\n  - protocol: raw\nschema: packetcraftr.packet/v2\n";
     for (input, code, message) in [
         (
             oversized.as_slice(),
@@ -1708,19 +1708,20 @@ fn offline_dns_records_match_aggregate_stream_and_published_example_contracts() 
         .unwrap();
     let fields = &dns["fields"];
     assert_eq!(
-        fields["answers"]["value"][0]["value"][4]["value"][1]["value"],
+        fields["answers"]["value"][0]["value"]["value"]["value"]["address"]["value"],
         "192.0.2.8"
     );
     assert_eq!(
-        fields["authorities"]["value"][0]["value"][4]["value"][1]["value"],
+        fields["authorities"]["value"][0]["value"]["value"]["value"]["name"]["value"],
         "ns.example.test."
     );
     assert_eq!(
-        fields["additionals"]["value"][0]["value"][4]["value"][1],
+        fields["additionals"]["value"][0]["value"]["value"]["value"]["rdata"],
         serde_json::json!({"type":"bytes","value":[255,0,192,255]})
     );
     assert_eq!(
-        fields["additionals"]["value"][1]["value"][4]["value"][6]["value"][0]["value"][1],
+        fields["additionals"]["value"][1]["value"]["value"]["value"]["options"]["value"][0]["value"]
+            ["data"],
         serde_json::json!({"type":"bytes","value":[0,255,1]})
     );
     let text = run_success(&["read", path_text(&capture), "--dissect"]);

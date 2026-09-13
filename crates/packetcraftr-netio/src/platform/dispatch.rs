@@ -321,3 +321,20 @@ mod interface_validation_tests {
         }
     }
 }
+
+pub(crate) fn start_tcp_connect<P>(
+    provider: std::sync::Arc<P>,
+    endpoint: std::net::SocketAddr,
+    timeout: std::time::Duration,
+    cancellation: Option<packetcraftr_core::budget::Cancellation>,
+) -> Result<super::TcpConnectPending<P::Stream>, crate::tcp::ConnectError>
+where
+    P: crate::tcp::Provider + Send + Sync + 'static,
+    P::Stream: Send + 'static,
+{
+    super::tcp_connect::start(provider, endpoint, timeout, cancellation)
+}
+
+pub(crate) fn tcp_connect_snapshot() -> crate::resources::NativeSnapshot {
+    super::tcp_connect::snapshot()
+}

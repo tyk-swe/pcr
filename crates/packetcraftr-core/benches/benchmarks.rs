@@ -94,7 +94,7 @@ fn bench_packet_decode_and_rebuild(c: &mut Criterion) {
 
 fn bench_document_parsing(c: &mut Criterion) {
     let json_doc = r#"{
-      "schema": "packetcraftr.packet/v1",
+      "schema": "packetcraftr.packet/v2",
       "layers": [
         {
           "protocol": "ipv4",
@@ -119,7 +119,7 @@ fn bench_document_parsing(c: &mut Criterion) {
       ]
     }"#;
 
-    let yaml_doc = r#"schema: "packetcraftr.packet/v1"
+    let yaml_doc = r#"schema: "packetcraftr.packet/v2"
 layers:
   - protocol: ipv4
     fields:

@@ -222,9 +222,13 @@ impl Authorizer for SystemAuthorizer {
             .map_err(BoundaryError::from_error)?;
         match operation {
             Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
-            Operation::Budgeted(_) | Operation::Dns(_) | Operation::Declared(_) => Err(
-                unsupported_operation("the replay system authorizer", &operation),
-            ),
+            Operation::Socket(_)
+            | Operation::Budgeted(_)
+            | Operation::Dns(_)
+            | Operation::Declared(_) => Err(unsupported_operation(
+                "the replay system authorizer",
+                &operation,
+            )),
         }
     }
 

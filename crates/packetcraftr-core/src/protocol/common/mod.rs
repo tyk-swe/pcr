@@ -10,6 +10,7 @@ mod checksum;
 mod errors;
 mod fields;
 mod payload;
+pub(crate) mod structured;
 mod validation;
 
 pub use checksum::{ChecksumAccumulator, checksum, checksum_parts};

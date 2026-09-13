@@ -4,7 +4,9 @@
 //! Scan CLI command logic.
 
 pub(super) mod arguments;
+mod connect;
 mod payload;
+mod profiles;
 mod rendering;
 
 use packetcraftr_cli::output::contract::Format;
@@ -16,15 +18,37 @@ use packetcraftr_cli::output;
 use self::arguments::Args;
 use super::execution;
 use crate::errors::CliError;
-use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
 
 pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    if arguments.connect && !matches!(arguments.transport, arguments::Transport::Tcp) {
+        return Err(CliError::new(
+            packetcraftr_core::error::Kind::Cli,
+            "--connect requires TCP transport",
+        ));
+    }
+    if arguments.connect && !arguments.route.supports_kernel_tcp() {
+        return Err(CliError::from_classification(
+            packetcraftr_core::error::Classification::new(
+                "capability.scan_tcp_route",
+                packetcraftr_core::error::Kind::Capability,
+                Some("omit packet interface/source/link overrides for ordinary TCP"),
+            ),
+            "TCP connect uses kernel route and source selection",
+            Vec::new(),
+        ));
+    }
     let Args {
-        target,
+        connect,
+        max_in_flight,
+        max_prepared_bytes,
+        targets,
+        exclusions,
+        max_targets,
         transport,
         udp_payload_hex,
         udp_payload_file,
+        udp_profiles,
         family,
         ports,
         attempts,
@@ -43,9 +67,20 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         udp_payload_hex.as_deref(),
         udp_payload_file.as_deref(),
     )?;
-    let target = parse_target(target)?;
+    let udp_profiles = profiles::load(udp_profiles.as_deref(), transport)?;
+    let targets = packetcraftr::target::Selection {
+        include: targets
+            .iter()
+            .map(|target| target.parse())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(CliError::classified)?,
+        exclude: exclusions,
+    };
+    targets.validate().map_err(CliError::classified)?;
     let queue_limits = limits.into_limits();
     let scan_limits = packetcraftr::scan::Limits {
+        max_prepared_bytes,
+        max_targets,
         max_ports,
         max_probes,
         max_duration: Duration::from_millis(max_duration_ms),
@@ -57,9 +92,11 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let ports = packetcraftr::scan::select_ports(ports.into_iter().map(|spec| spec.0), max_ports)
         .map_err(CliError::classified)?;
     let request = packetcraftr::scan::Request {
-        target,
+        max_in_flight,
+        targets,
         transport: transport.into(),
         udp_payload,
+        udp_profiles,
         address_family: family.into(),
         ports,
         attempts,
@@ -67,6 +104,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         probes_per_second: rate,
         limits: scan_limits,
     };
+    if connect {
+        return connect::run(&request, policy, format, stream);
+    }
     let mut providers = execution::prepare(
         route,
         policy,
@@ -90,7 +130,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
             },
         )
-        .map_err(CliError::classified)?;
+        .map_err(rendering::scan_error)?;
         rendering::emit_complete(summary, stream)
     } else {
         let report = packetcraftr::scan::run(
@@ -100,7 +140,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             &mut providers.executor,
             &mut clock,
         )
-        .map_err(CliError::classified)?;
+        .map_err(rendering::scan_error)?;
         let (result, diagnostics, stats) =
             output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
         if format == Format::Text {

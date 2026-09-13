@@ -193,21 +193,15 @@ fn offline_records_edns_and_binary_data_are_typed_and_round_trip_exactly() {
     );
     assert!(edns.dnssec_ok);
     assert_eq!(edns.options[0].data.as_ref(), [0, 0xff, 1]);
-    let FieldValue::List(additionals) = dns.field("additionals").unwrap() else {
-        panic!("record list")
-    };
     assert_eq!(
-        additionals[0],
-        FieldValue::List(vec![
-            "example.test.".into(),
-            65000u16.into(),
-            3u16.into(),
-            987u32.into(),
-            FieldValue::List(vec![
-                "unknown".into(),
-                Bytes::from_static(&[0xff, 0, 0xc0, 0xff]).into()
-            ])
-        ])
+        dns.field_path("additionals[0].value.rdata"),
+        Some(FieldValue::Bytes(Bytes::from_static(&[
+            0xff, 0, 0xc0, 0xff
+        ])))
+    );
+    assert_eq!(
+        dns.field_path("additionals[0].value.type"),
+        Some(65000u16.into())
     );
     let rebuilt = build::Builder::new(builtin::registry())
         .build(decoded.packet, Default::default(), Default::default())
@@ -358,7 +352,7 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
 }
 
 #[test]
-fn offline_opt_version_and_section_are_wire_facts_and_changed_names_cannot_reencode() {
+fn offline_opt_version_and_section_are_wire_facts_and_names_can_be_edited() {
     let mut wire = question();
     wire[7] = 1;
     record(&mut wire, &[0xc0, 12], 41, 512, 0x0001_8000, &[]);
@@ -371,11 +365,11 @@ fn offline_opt_version_and_section_are_wire_facts_and_changed_names_cannot_reenc
     dns.answers[0].owner = Name::from_labels(["EXAMPLE", "test"]).unwrap();
     let mut packet = Packet::new();
     packet.push(dns);
-    assert!(
-        build::Builder::new(builtin::registry())
-            .build(packet, Default::default(), Default::default())
-            .is_err()
-    );
+    let built = build::Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    let edited = Dns::from_wire(built.bytes).unwrap();
+    assert_eq!(edited.answers[0].owner.to_string(), "EXAMPLE.test.");
 }
 
 #[test]

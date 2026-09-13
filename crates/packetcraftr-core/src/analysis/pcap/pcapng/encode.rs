@@ -47,8 +47,20 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
     snap_len: u32,
     timestamp_resolution: TimestampResolution,
     timestamp_offset: i64,
+    options: &[crate::analysis::pcap::PcapNgOption],
 ) -> Result<(), Error> {
-    let block_length = if timestamp_offset == 0 { 32 } else { 44 };
+    let base = if timestamp_offset == 0 { 32usize } else { 44 };
+    let block_length = usize_to_u32_limit(
+        options
+            .iter()
+            .try_fold(base, |length, option| {
+                length.checked_add(4 + option.value.len().div_ceil(4) * 4)
+            })
+            .ok_or(Error::InvalidData {
+                format: crate::analysis::pcap::Format::PcapNg,
+                reason: "interface option length overflow",
+            })?,
+    )?;
     write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
     // validate_new_interface rejects a link type above u16::MAX with Error::LinkTypeOutOfRange
@@ -74,6 +86,12 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
         write_u16(writer, endianness, PCAPNG_OPTION_IF_TSOFFSET)?;
         write_u16(writer, endianness, 8)?;
         write_i64(writer, endianness, timestamp_offset)?;
+    }
+    for option in options {
+        write_u16(writer, endianness, option.code)?;
+        write_u16(writer, endianness, option.value.len() as u16)?;
+        writer.write_all(&option.value)?;
+        write_padding(writer, option.value.len() as u32)?;
     }
     write_u16(writer, endianness, PCAPNG_OPTION_END)?;
     write_u16(writer, endianness, 0)?;

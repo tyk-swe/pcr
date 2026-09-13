@@ -21,21 +21,29 @@ use packetcraftr_cli::output;
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 
+mod application_output;
 mod build;
 mod capture;
 mod dissect;
 mod dns;
+mod dns_read;
 mod exchange;
 mod execution;
 mod expert;
+mod export;
 mod follow;
+mod fragment;
 mod fuzz;
+mod http;
 mod interfaces;
+mod merge;
 mod offline_analysis;
 mod plan;
+mod projection;
 mod protocols;
 mod read;
 mod replay;
+mod rewrite;
 mod routes;
 mod scan;
 mod send;
@@ -45,6 +53,10 @@ mod traceroute;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Merge time-ordered captures into scoped PCAPNG.
+    Merge(merge::Args),
+    /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
+    Fragment(fragment::Args),
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
     Build(build::arguments::Args),
@@ -102,6 +114,14 @@ pub(crate) enum Command {
         after_long_help = dns::arguments::AFTER_LONG_HELP
     )]
     Dns(dns::arguments::Args),
+    /// Inspect captured UDP/TCP DNS messages and transaction evidence.
+    DnsRead(dns_read::Args),
+    /// Inspect cleartext HTTP/1 messages over captured TCP streams.
+    Http(http::Args),
+    /// Export streams and reassembled IP datagrams with their physical dependencies.
+    Export(export::Args),
+    /// Rewrite capture headers with checked lengths and transport checksums.
+    Rewrite(rewrite::Args),
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
     Fuzz(fuzz::arguments::Args),
@@ -113,6 +133,8 @@ pub(crate) enum Command {
 impl Command {
     pub(crate) const fn kind(&self) -> output::contract::Command {
         match self {
+            Self::Merge(_) => output::contract::Command::Merge,
+            Self::Fragment(_) => output::contract::Command::Fragment,
             Self::Build(_) => output::contract::Command::Build,
             Self::Dissect(_) => output::contract::Command::Dissect,
             Self::Protocols(_) => output::contract::Command::Protocols,
@@ -130,6 +152,10 @@ impl Command {
             Self::Tls(_) => output::contract::Command::Tls,
             Self::Traceroute(_) => output::contract::Command::Traceroute,
             Self::Dns(_) => output::contract::Command::Dns,
+            Self::DnsRead(_) => output::contract::Command::DnsRead,
+            Self::Http(_) => output::contract::Command::Http,
+            Self::Export(_) => output::contract::Command::Export,
+            Self::Rewrite(_) => output::contract::Command::Rewrite,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
             Self::Routes(_) => output::contract::Command::Routes,
         }
@@ -140,6 +166,10 @@ impl Command {
             Self::Expert(args) => args.limits.max_duration_ms,
             Self::Follow(args) => args.limits.max_duration_ms,
             Self::Tls(args) => args.limits.max_duration_ms,
+            Self::DnsRead(args) => args.limits.max_duration_ms,
+            Self::Http(args) => args.limits.max_duration_ms,
+            Self::Export(args) => args.limits.max_duration_ms,
+            Self::Rewrite(args) => args.max_duration_ms,
             Self::Replay(args) => args.max_duration_ms,
             Self::Scan(args) => args.max_duration_ms,
             Self::Traceroute(args) => args.max_duration_ms,
@@ -155,7 +185,9 @@ impl Command {
     pub(crate) fn supports_cancellation(&self) -> bool {
         matches!(
             self,
-            Self::Read(_)
+            Self::Merge(_)
+                | Self::Fragment(_)
+                | Self::Read(_)
                 | Self::Send(_)
                 | Self::Capture(_)
                 | Self::Exchange(_)
@@ -166,6 +198,10 @@ impl Command {
                 | Self::Stats(_)
                 | Self::Tls(_)
                 | Self::Traceroute(_)
+                | Self::Rewrite(_)
+                | Self::Export(_)
+                | Self::Http(_)
+                | Self::DnsRead(_)
                 | Self::Dns(_)
                 | Self::Fuzz(_)
         )
@@ -189,8 +225,10 @@ impl Command {
             });
         let stream = publisher.as_ref().unwrap_or(stream);
         match self {
+            Self::Merge(arguments) => merge::run(arguments, format, stream),
+            Self::Fragment(arguments) => fragment::run(arguments, format, stream),
             Self::Build(arguments) => build::run(arguments, format, stream),
-            Self::Dissect(arguments) => dissect::run(arguments, format),
+            Self::Dissect(arguments) => dissect::run(arguments, format, stream),
             Self::Protocols(arguments) => protocols::run(arguments, format),
             Self::Read(arguments) => read::run(arguments, format, stream),
             Self::Interfaces(arguments) => interfaces::run(arguments, format),
@@ -204,6 +242,10 @@ impl Command {
             Self::Scan(arguments) => scan::run(arguments, format, stream),
             Self::Stats(arguments) => stats::run(arguments, format),
             Self::Tls(arguments) => tls::run(arguments, format, stream),
+            Self::DnsRead(arguments) => dns_read::run(arguments, format, stream),
+            Self::Http(arguments) => http::run(arguments, format, stream),
+            Self::Export(arguments) => export::run(arguments, format, stream),
+            Self::Rewrite(arguments) => rewrite::run(arguments, format, stream),
             Self::Traceroute(arguments) => traceroute::run(arguments, format, stream),
             Self::Dns(arguments) => dns::run(arguments, format, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),

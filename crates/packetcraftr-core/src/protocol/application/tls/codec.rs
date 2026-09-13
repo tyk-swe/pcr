@@ -112,6 +112,8 @@ pub struct Tls {
     pub supported_versions: Vec<u16>,
     /// Named groups offered by a ClientHello.
     pub supported_groups: Vec<u16>,
+    /// A single complete editable hello, when it accounts for this layer.
+    pub hello: Option<super::Hello>,
     wire: Bytes,
 }
 
@@ -124,6 +126,35 @@ struct Dissection {
 }
 
 impl Tls {
+    /// Constructs bounded hello records and derives their inspection fields.
+    pub fn from_hello(hello: super::Hello) -> Result<Self, crate::codec::Error> {
+        let wire = hello.to_wire()?;
+        let parsed = Self::from_records(&wire)
+            .ok_or_else(|| invalid(NAME, "hello did not encode complete TLS records"))?;
+        if parsed.remainder != 0 || parsed.layer.hello.is_none() {
+            return Err(invalid(NAME, "hello fields contain an invalid handshake"));
+        }
+        Ok(parsed.layer)
+    }
+
+    /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
+    pub fn from_wire(wire: &[u8]) -> Result<Self, crate::codec::Error> {
+        let parsed =
+            Self::from_records(wire).ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
+        if parsed.remainder != 0 {
+            return Err(invalid(NAME, "TLS records have an incomplete tail"));
+        }
+        Ok(parsed.layer)
+    }
+
+    fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::layer::FieldError> {
+        let hello = super::Hello::from_value(value)?;
+        let replacement = Self::from_hello(hello)
+            .map_err(|_| crate::protocol::common::out_of_range(tls_schema(), "hello"))?;
+        *self = replacement;
+        Ok(())
+    }
+
     /// Reads every complete record from the front of `wire`.
     ///
     /// Returns `None` when no complete record is present, which is how a
@@ -195,6 +226,7 @@ impl Tls {
             cipher_suites: Vec::new(),
             supported_versions: Vec::new(),
             supported_groups: Vec::new(),
+            hello: None,
             wire: Bytes::copy_from_slice(wire.get(..consumed)?),
         };
         layer.apply_handshake(&records, &mut diagnostics);
@@ -215,17 +247,24 @@ impl Tls {
         for record in records.iter().take_while(|record| record.is_handshake()) {
             stream.extend_from_slice(&record.body);
         }
-        let Outcome::Complete { value, .. } = parse_handshake(&stream) else {
+        let Outcome::Complete { value, consumed } = parse_handshake(&stream) else {
             return;
         };
+        let editable = consumed == stream.len() && records.iter().all(Record::is_handshake);
         match value {
             Handshake::ClientHello(hello) => {
                 self.handshake_type = Some(HANDSHAKE_CLIENT_HELLO);
                 self.apply_client_hello(&hello, diagnostics);
+                if editable {
+                    self.hello = Some(super::Hello::from_client(&hello, self.version));
+                }
             }
             Handshake::ServerHello(hello) => {
                 self.handshake_type = Some(HANDSHAKE_SERVER_HELLO);
                 self.apply_server_hello(&hello);
+                if editable {
+                    self.hello = Some(super::Hello::from_server(&hello, self.version));
+                }
             }
             Handshake::Other { kind, .. } => self.handshake_type = Some(kind),
         }
@@ -322,8 +361,10 @@ fn optional_codes(values: &[u16]) -> Option<FieldValue> {
 }
 
 reflective_layer! {
-    fn tls_schema() => { protocol: protocol(NAME), name: "TLS" }
+    pub(super) fn tls_schema() => { protocol: protocol(NAME), name: "TLS" }
     impl Tls {
+        "hello" => { kind: Object, derived: false, required: false, description: "Complete hello fixture; extension type/data retain exact unknown bodies", children: super::construct::FIELDS, get |layer| layer.hello.as_ref().map(super::Hello::value), set |layer, value, _name| layer.set_hello(value) },
+        "wire" => { kind: Bytes, derived: false, required: false, description: "Retained TLS record bytes", get |layer| Some(layer.wire.clone().into()), set |_layer, _value, name| read_only(tls_schema(), name) },
         "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (0, 1) },
         "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (1, 3) },
         "record_count" => { kind: Unsigned, derived: false, required: false, description: "Complete records in this segment", get |layer| Some(FieldValue::from(layer.record_count)), set |_layer, _value, name| read_only(tls_schema(), name) },
@@ -413,12 +454,20 @@ impl LayerCodec for TlsCodec {
 
     fn make_layer(
         &self,
-        _fields: &BTreeMap<String, FieldValue>,
+        fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        Err(crate::codec::Error::Unsupported {
-            protocol: protocol(NAME),
-            message: "TLS is dissection-only; build the segment payload as raw bytes".to_owned(),
-        })
+        let mut layer = match fields.get("wire") {
+            Some(FieldValue::Bytes(wire)) => Tls::from_wire(wire)?,
+            Some(_) => return Err(invalid(NAME, "wire must be bytes")),
+            None => Tls::from_hello(super::Hello::default())?,
+        };
+        for (name, value) in fields {
+            if name == "wire" || layer.field(name).as_ref() == Some(value) {
+                continue;
+            }
+            layer.set_field_path(name, value.clone())?;
+        }
+        Ok(Box::new(layer))
     }
 }
 
@@ -560,14 +609,9 @@ mod tests {
     }
 
     #[test]
-    fn tls_layers_cannot_be_built_from_fields() {
-        let error = TlsCodec
-            .make_layer(&BTreeMap::new())
-            .expect_err("TLS is dissection-only");
-        assert!(
-            matches!(error, crate::codec::Error::Unsupported { .. }),
-            "{error}"
-        );
-        assert!(error.to_string().contains("dissection-only"), "{error}");
+    fn tls_default_fixture_exposes_a_complete_client_hello() {
+        let layer = TlsCodec.make_layer(&BTreeMap::new()).unwrap();
+        assert_eq!(layer.field("handshake_type"), Some(1u8.into()));
+        assert!(layer.field("hello").is_some());
     }
 }

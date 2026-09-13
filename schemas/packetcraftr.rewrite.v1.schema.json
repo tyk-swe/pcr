@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.rewrite.v1.schema.json",
+  "title": "PacketcraftR capture header rewrite rules v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "rules"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.rewrite/v1"
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "patch"
+        ],
+        "properties": {
+          "filter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 8192
+          },
+          "patch": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "source_mac": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "destination_mac": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source_ip": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "ipv4"
+                      },
+                      {
+                        "type": "string",
+                        "format": "ipv6"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "destination_ip": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "ipv4"
+                      },
+                      {
+                        "type": "string",
+                        "format": "ipv6"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source_port": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "destination_port": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vlans": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "ether_type",
+                        "identifier"
+                      ],
+                      "properties": {
+                        "ether_type": {
+                          "enum": [
+                            33024,
+                            34984
+                          ]
+                        },
+                        "identifier": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4095
+                        },
+                        "priority": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 7
+                        },
+                        "drop_eligible": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "source_mac"
+                ],
+                "properties": {
+                  "source_mac": {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  }
+                }
+              },
+              {
+                "required": [
+                  "destination_mac"
+                ],
+                "properties": {
+                  "destination_mac": {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    }
+                  }
+                }
+              },
+              {
+                "required": [
+                  "source_ip"
+                ],
+                "properties": {
+                  "source_ip": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "ipv4"
+                      },
+                      {
+                        "type": "string",
+                        "format": "ipv6"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "required": [
+                  "destination_ip"
+                ],
+                "properties": {
+                  "destination_ip": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "ipv4"
+                      },
+                      {
+                        "type": "string",
+                        "format": "ipv6"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "required": [
+                  "source_port"
+                ],
+                "properties": {
+                  "source_port": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  }
+                }
+              },
+              {
+                "required": [
+                  "destination_port"
+                ],
+                "properties": {
+                  "destination_port": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  }
+                }
+              },
+              {
+                "required": [
+                  "vlans"
+                ],
+                "properties": {
+                  "vlans": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "ether_type",
+                        "identifier"
+                      ],
+                      "properties": {
+                        "ether_type": {
+                          "enum": [
+                            33024,
+                            34984
+                          ]
+                        },
+                        "identifier": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 4095
+                        },
+                        "priority": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 7
+                        },
+                        "drop_eligible": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

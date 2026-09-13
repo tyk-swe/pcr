@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "expert",
   "mode": "aggregate",
   "status": "error",

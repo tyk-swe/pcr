@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v4",
+  "schema": "packetcraftr.output/v5",
   "command": "read",
   "mode": "stream",
   "sequence": 0,
@@ -19,7 +19,7 @@
     },
     "decoded": {
       "packet": {
-        "schema": "packetcraftr.packet/v1",
+        "schema": "packetcraftr.packet/v2",
         "layers": [
           {
             "protocol": "ipv4",

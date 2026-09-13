@@ -95,6 +95,7 @@ fn boundary_value(
             let values = [[0; 6], [0xff; 6], [0x02, 0, 0, 0, 0, 1]];
             FieldValue::Mac(values[index_from(selector, values.len())])
         }
+        FieldKind::Object => FieldValue::Object(Default::default()),
         FieldKind::List => match original {
             FieldValue::List(values) if selector & 1 == 1 => {
                 let candidate = FieldValue::List(values.first().cloned().into_iter().collect());
@@ -151,6 +152,7 @@ pub(super) fn random_value(
             value.copy_from_slice(&random.bytes(6));
             FieldValue::Mac(value)
         }
+        FieldKind::Object => FieldValue::Object(Default::default()),
         FieldKind::List => match original {
             FieldValue::List(values) if !values.is_empty() => {
                 let count = bounded_length(random, limits.max_list_items.min(values.len()));
@@ -216,6 +218,25 @@ fn bounded_size_at(
         FieldValue::Ipv4(_) => 4,
         FieldValue::Ipv6(_) => 16,
         FieldValue::Mac(_) => 6,
+        FieldValue::Object(values) => {
+            if values.len() > max_list_items {
+                return None;
+            }
+            let mut total = values.len();
+            for (name, value) in values {
+                total = total.checked_add(name.len())?;
+                if total > remaining {
+                    return None;
+                }
+                total = total.checked_add(bounded_size_at(
+                    value,
+                    remaining - total,
+                    max_list_items,
+                    depth.checked_add(1)?,
+                )?)?;
+            }
+            total
+        }
         FieldValue::List(values) => {
             if values.len() > max_list_items {
                 return None;
@@ -376,6 +397,7 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
         FieldValue::Ipv4(_) => push(FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED)),
         FieldValue::Ipv6(_) => push(FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED)),
         FieldValue::Mac(_) => push(FieldValue::Mac([0; 6])),
+        FieldValue::Object(_) => push(FieldValue::Object(Default::default())),
         FieldValue::List(value) => {
             push(FieldValue::List(Vec::new()));
             if value.len() > 1 {

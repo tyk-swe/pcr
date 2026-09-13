@@ -3,6 +3,8 @@
 
 //! Owned live-capture sessions and bounded queue configuration.
 
+pub mod group;
+
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};

@@ -154,7 +154,7 @@ fn prepare_case(
     let Some(layer) = recipe.layer_mut(field.target.layer) else {
         return Err(unresolved_target(field, "layer is outside the packet"));
     };
-    let Some(original) = layer.field(&field.target.field) else {
+    let Some(original) = layer.field_path(&field.target.field) else {
         return Err(unresolved_target(
             field,
             "field is not reflectively readable",
@@ -177,7 +177,7 @@ fn prepare_case(
         value: mutated_value.clone(),
     };
     let shrink_values = shrink_values(&mutated_value, request.limits.max_shrink_steps);
-    let mutation_result = layer.set_field(&field.target.field, mutated_value);
+    let mutation_result = layer.set_field_path(&field.target.field, mutated_value);
     let retained_value_bytes =
         retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
     charge_retained_bytes(
@@ -460,25 +460,31 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                 target: target.clone(),
                 message: format!("layer index is outside packet length {}", packet.len()),
             })?;
-        let schema = layer
-            .schema()
-            .fields
-            .iter()
-            .find(|field| field.name == target.field)
+        let path =
+            crate::field::Path::parse(&target.field).map_err(|source| Error::InvalidTarget {
+                target: target.clone(),
+                message: source.to_string(),
+            })?;
+        let schema = path
+            .schema(layer.schema())
             .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
-                message: format!("layer {} has no such reflected field", layer.protocol_id()),
+                message: "unregistered reflective path".to_owned(),
             })?;
-        if layer.field(schema.name).is_none() {
-            return Err(Error::InvalidTarget {
+        let value = layer
+            .field_path(&target.field)
+            .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
                 message: "field is not reflectively readable".to_owned(),
-            });
-        }
+            })?;
         fields.push(ResolvedField {
             target: target.clone(),
             protocol: layer.protocol_id().to_string(),
-            kind: schema.kind,
+            kind: if path.is_nested() {
+                value.kind()
+            } else {
+                schema.kind
+            },
             is_derived: schema.derived,
         });
     }

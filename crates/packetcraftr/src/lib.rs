@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 
 mod address;
+pub mod capture;
 mod client;
 pub mod clock;
 pub mod dns;

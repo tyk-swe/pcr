@@ -1,0 +1,13 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "merge",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "io.runtime",
+    "kind": "io",
+    "message": "merge destination already exists",
+    "causes": []
+  },
+  "diagnostics": []
+}

@@ -17,6 +17,8 @@ use crate::error::{Classification, Classified, Kind};
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
+    Provenance(#[from] crate::analysis::provenance::Error),
+    #[error(transparent)]
     Cancelled(#[from] crate::budget::Cancelled),
     #[error("invalid analysis limit {field}={value}: {reason}")]
     InvalidLimit {
@@ -94,6 +96,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
+            Self::Provenance(source) => source.classification(),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.analysis_limit",
                 Kind::Cli,

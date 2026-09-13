@@ -123,6 +123,9 @@ pub(super) struct IpDispatch {
 }
 
 impl IpDispatch {
+    pub(super) fn contains_datagram(&self, key: &DatagramKey) -> bool {
+        self.reassembler.contains_datagram(key)
+    }
     pub(super) fn new(limits: IpReassemblyLimits, overlap_policy: OverlapPolicy) -> Self {
         Self {
             max_aggregate_bytes: limits.max_aggregate_bytes,

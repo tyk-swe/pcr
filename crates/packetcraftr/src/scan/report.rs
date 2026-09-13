@@ -74,6 +74,7 @@ pub struct ProbeEvidence {
     pub latency: Option<Duration>,
     pub response: Option<Frame>,
     pub reason: String,
+    pub application: Option<super::profile::Evidence>,
 }
 
 #[derive(Clone, Debug)]
@@ -97,7 +98,14 @@ pub struct Report {
 }
 
 #[derive(Clone, Debug)]
+pub struct SentProbe {
+    pub probe: super::Probe,
+    pub sent: Arc<crate::SentPacket>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Event {
+    Sent(SentProbe),
     Probe {
         target: Arc<str>,
         probe: ProbeEvidence,
@@ -113,7 +121,7 @@ pub enum Event {
 /// [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
 pub struct Summary {
-    /// Sum of every serial exchange timeout and pacing gap, validated before sending.
+    /// Conservative receive-window and pacing bound, validated before sending.
     pub planned_duration: Duration,
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,

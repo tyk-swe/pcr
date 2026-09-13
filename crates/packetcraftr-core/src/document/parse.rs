@@ -185,7 +185,7 @@ mod tests {
     use super::*;
 
     const ONE_DOCUMENT: &str = concat!(
-        "schema: packetcraftr.packet/v1\n",
+        "schema: packetcraftr.packet/v2\n",
         "layers:\n",
         "  - protocol: raw\n",
         "    fields:\n",

@@ -1,0 +1,19 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "dissect",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "columns": [
+      "frame.number",
+      "ip.src",
+      "dns.qname"
+    ],
+    "rows_written": 1,
+    "frames_read": 1,
+    "captured_bytes_read": 125
+  },
+  "diagnostics": []
+}

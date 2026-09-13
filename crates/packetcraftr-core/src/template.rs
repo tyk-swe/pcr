@@ -87,7 +87,7 @@ impl Template {
                     len: packet_len,
                 })?;
                 layer
-                    .set_field(&axis.field, value.clone())
+                    .set_field_path(&axis.field, value.clone())
                     .map_err(|source| axis.error(source))?;
             }
             Ok(packet)
@@ -101,23 +101,25 @@ impl Template {
                 index: axis.layer,
                 len: self.base.len(),
             })?;
-            let field = layer
+            let unknown = || {
+                axis.error(FieldError::UnknownField {
+                    protocol: *layer.protocol_id(),
+                    field: axis.field.clone(),
+                })
+            };
+            let path = crate::field::Path::parse(&axis.field).map_err(|_| unknown())?;
+            path.schema(layer.schema()).ok_or_else(unknown)?;
+            let root = layer
                 .schema()
                 .fields
                 .iter()
-                .find(|field| {
-                    field.name == axis.field || field.aliases.contains(&axis.field.as_str())
-                })
-                .ok_or_else(|| {
-                    axis.error(FieldError::UnknownField {
-                        protocol: *layer.protocol_id(),
-                        field: axis.field.clone(),
-                    })
-                })?;
-            if !fields.insert((axis.layer, field.name)) {
+                .find(|field| field.name == path.root() || field.aliases.contains(&path.root()))
+                .ok_or_else(unknown)?;
+            let canonical = path.canonical(root.name);
+            if !fields.insert((axis.layer, canonical.clone())) {
                 return Err(Error::DuplicateAxis {
                     layer: axis.layer,
-                    field: field.name.to_owned(),
+                    field: canonical,
                 });
             }
             // Check each supplied value once before yielding any packets. Each
@@ -125,7 +127,7 @@ impl Template {
             let mut editable = layer.clone_box();
             for value in &axis.values {
                 editable
-                    .set_field(&axis.field, value.clone())
+                    .set_field_path(&axis.field, value.clone())
                     .map_err(|source| axis.error(source))?;
             }
         }

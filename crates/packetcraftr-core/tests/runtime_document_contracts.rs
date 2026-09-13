@@ -253,7 +253,7 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         Err(document::Error::LayerLimit { limit: 0 })
     ));
     let unknown = document::Packet {
-        schema: document::PACKET_DOCUMENT_SCHEMA_V1.to_owned(),
+        schema: document::PACKET_DOCUMENT_SCHEMA_V2.to_owned(),
         layers: vec![document::Layer {
             protocol: "absent".to_owned(),
             fields: BTreeMap::new(),
@@ -276,16 +276,16 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
     ));
     // Each of these must surface as a parse failure of the named format, never
     // as an accepted document or a limit breach.
-    let duplicate = "schema: packetcraftr.packet/v1\nschema: duplicate\nlayers: []\n";
+    let duplicate = "schema: packetcraftr.packet/v2\nschema: duplicate\nlayers: []\n";
     for (input, format, expected_format, expected_fragment) in [
         (
-            r#"{"schema":"packetcraftr.packet/v1","layers":[]} trailing"#,
+            r#"{"schema":"packetcraftr.packet/v2","layers":[]} trailing"#,
             document::Format::Json,
             "JSON",
             "trailing",
         ),
         (
-            "---\nschema: packetcraftr.packet/v1\nlayers: []\n---\n{}",
+            "---\nschema: packetcraftr.packet/v2\nlayers: []\n---\n{}",
             document::Format::Yaml,
             "YAML",
             "multiple yaml documents",

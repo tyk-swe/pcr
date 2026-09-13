@@ -36,12 +36,14 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
     definition.build();
     let mut settings = BTreeMap::new();
     let selected = matches.subcommand().map(|(_, values)| values);
-    let tcp_enabled = matches!(command, Command::Expert | Command::Tls)
-        || (command == Command::Follow
-            && selected
-                .and_then(|values| values.get_raw("stream"))
-                .and_then(|mut values| values.next())
-                .is_some_and(|value| !value.to_string_lossy().starts_with("udp:")));
+    let tcp_enabled = matches!(
+        command,
+        Command::Expert | Command::DnsRead | Command::Http | Command::Tls
+    ) || (command == Command::Follow
+        && selected
+            .and_then(|values| values.get_raw("stream"))
+            .and_then(|mut values| values.next())
+            .is_some_and(|value| !value.to_string_lossy().starts_with("udp:")));
     let selected_definition = definition.find_subcommand(command.as_str());
     for (values, definition) in
         std::iter::once((matches, &definition)).chain(selected.zip(selected_definition))
@@ -154,26 +156,48 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
 fn stage(id: &str, command: Command) -> Option<&'static str> {
     let offline = matches!(
         command,
-        Command::Read | Command::Stats | Command::Expert | Command::Follow | Command::Tls
+        Command::Rewrite
+            | Command::Export
+            | Command::Merge
+            | Command::Read
+            | Command::Stats
+            | Command::Expert
+            | Command::Follow
+            | Command::Http
+            | Command::DnsRead
+            | Command::Tls
     );
     Some(match id {
         "output_timeout_ms" => "output",
-        "top"
+        "rotate_bytes" | "rotate_interval_ms" | "rotate_files" | "retention" => "capture_storage",
+        "max_prepared_bytes" => "preparation",
+        "max_application_output_bytes"
+        | "max_projection_bytes"
+        | "max_output_bytes"
+        | "top"
         | "max_output_sessions"
         | "max_unmatched_frames"
         | "max_responses"
         | "max_undecoded"
         | "max_ip_outcomes"
         | "max_rejected_records" => "result_retention",
-        "max_flows" | "max_scope_bytes" | "max_interfaces" => "indexed_metadata",
+        "max_provenance_bytes" | "max_flows" | "max_scope_bytes" | "max_interfaces" => {
+            "indexed_metadata"
+        }
         "max_queue_frames" | "max_captured_bytes" | "snap_length" | "overflow_policy" => {
             "native_capture"
         }
-        "max_frames" | "max_bytes" | "max_frame_bytes" if offline => "physical_input",
-        "max_duration_ms" | "timeout_ms" => "operation",
+        "max_frames" | "max_bytes" | "max_frame_bytes" | "max_encoded_bytes"
+        | "max_decoded_bytes"
+            if offline =>
+        {
+            "physical_input"
+        }
+        "max_duration_ms" | "timeout_ms" | "max_targets" | "max_in_flight" => "operation",
         "tcp_idle_expiry_ms" | "ip_idle_expiry_ms" | "ip_overlap" => "active_state",
         id if id.starts_with("max_tcp_")
             || id.starts_with("max_ip_")
+            || id.starts_with("max_application_")
             || id.starts_with("max_tls_") =>
         {
             "active_state"
@@ -206,6 +230,9 @@ pub(crate) fn snapshot() -> Option<Report> {
     let mut workers = vec![Worker::native(
         packetcraftr_netio::resources::native_snapshot(),
     )];
+    let mut tcp = Worker::native(packetcraftr_netio::resources::tcp_connect_snapshot());
+    tcp.name = "tcp_connect_process".to_owned();
+    workers.push(tcp);
     workers.extend(
         context
             .runtimes

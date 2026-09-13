@@ -9,7 +9,7 @@ use serde::Serialize;
 use super::error::Error;
 use crate::field::FieldValue;
 
-pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
+pub const PACKET_DOCUMENT_SCHEMA_V2: &str = "packetcraftr.packet/v2";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 /// Absolute recursive `FieldValue::List` nesting accepted by the stable
 /// packet-document parser.
@@ -195,10 +195,10 @@ pub struct Layer {
 
 impl Packet {
     pub fn validate_schema(&self) -> Result<(), Error> {
-        if self.schema != PACKET_DOCUMENT_SCHEMA_V1 {
+        if self.schema != PACKET_DOCUMENT_SCHEMA_V2 {
             return Err(Error::Schema {
                 actual: self.schema.clone(),
-                expected: PACKET_DOCUMENT_SCHEMA_V1,
+                expected: PACKET_DOCUMENT_SCHEMA_V2,
             });
         }
         Ok(())

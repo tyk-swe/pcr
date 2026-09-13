@@ -37,7 +37,7 @@ pub struct Context {
     pub destination: Option<IpAddr>,
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     #[error("codec expected layer {expected}, got {actual}")]
@@ -109,6 +109,8 @@ impl EncodedLayer {
 }
 
 pub struct LayerDecodeContext<'a> {
+    /// The decoded parent layer, absent at the capture root.
+    pub parent: Option<Id>,
     pub registry: &'a Registry,
     /// Whether bytes outside an IP-declared length may be link-layer padding.
     pub allow_trailing_padding: bool,

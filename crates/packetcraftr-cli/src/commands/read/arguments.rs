@@ -39,6 +39,17 @@ sequence remains the zero-based emitted-record position."#;
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
+    /// Select a registered field; repeat to preserve the requested column order.
+    #[arg(long="field", value_name="PATH", conflicts_with_all=["normalize","dissect"])]
+    pub(crate) fields: Vec<String>,
+    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
+    #[arg(long, default_value_t=16*1024*1024)]
+    pub(crate) max_projection_bytes: usize,
+
+    /// Compress binary capture output; independent of the input's detected format.
+    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
+    pub(crate) compression: crate::command_options::Compression,
+
     /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,
     #[command(flatten)]

@@ -270,7 +270,9 @@ fn ethernet_capture(frames: &[&[u8]]) -> Reader<Cursor<Vec<u8>>> {
 fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() {
     let mut reader = ethernet_capture(&[&[1, 2, 3], &[4, 5, 6], &[7, 8, 9]]);
     let options = ReplayOptions {
-        interface: replay_interface(),
+        interface: Some(replay_interface()),
+        repeat: 1,
+        inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Layer2,
         timing: Timing::Immediate,
         limits: Limits {

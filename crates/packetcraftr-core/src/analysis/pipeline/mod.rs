@@ -46,6 +46,7 @@ use ip::IpDispatch;
 /// physical fragment whose arrival filled its final gap.
 #[derive(Debug)]
 pub struct DerivedDatagram {
+    pub sources: Option<crate::analysis::provenance::SourceSet>,
     pub decoded: DecodedPacket,
     pub scope: ScopeId,
     pub fragment_count: usize,
@@ -72,6 +73,7 @@ pub struct FrameRecord<'a> {
     pub decoded: &'a DecodedPacket,
     derived_datagrams: &'a [DerivedDatagram],
     scopes: &'a Interner,
+    physical_sources: Option<&'a crate::analysis::provenance::SourceSet>,
     /// Innermost TCP and UDP observations, each tied to the decoded view
     /// that supplied it. A tunnel can carry one of each.
     pub tcp: Option<TcpView<'a>>,
@@ -109,9 +111,72 @@ pub struct UdpView<'a> {
 }
 
 impl FrameRecord<'_> {
+    pub fn physical_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
+        self.physical_sources
+    }
+    pub fn tcp_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
+        self.tcp.and_then(|view| self.sources_of(view.decoded))
+    }
+    pub fn udp_sources(&self) -> Option<&crate::analysis::provenance::SourceSet> {
+        self.udp.and_then(|view| self.sources_of(view.decoded))
+    }
+    fn sources_of(
+        &self,
+        decoded: &DecodedPacket,
+    ) -> Option<&crate::analysis::provenance::SourceSet> {
+        if std::ptr::eq(decoded, self.decoded) {
+            return self.physical_sources;
+        }
+        self.derived_datagrams
+            .iter()
+            .find(|datagram| std::ptr::eq(&datagram.decoded, decoded))
+            .and_then(|datagram| datagram.sources.as_ref())
+    }
+
+    /// Projects physical and newly reconstructed fields using scoped stream indexes.
+    pub fn project(
+        &self,
+        projection: &crate::filter::Projection,
+        max_bytes: usize,
+    ) -> Result<Vec<Option<crate::field::FieldValue>>, crate::filter::ProjectionError> {
+        self.with_filter_context(|context| projection.values(context, max_bytes))
+    }
+
+    /// Evaluates a filter against this physical record and its reconstructed children.
+    pub fn matches(&self, filter: &crate::filter::Filter) -> Result<bool, crate::filter::Error> {
+        self.with_filter_context(|context| filter.matches(context))
+    }
+
+    fn with_filter_context<T>(&self, visit: impl FnOnce(&crate::filter::Context<'_>) -> T) -> T {
+        let derived: Vec<_> = self
+            .derived_datagrams
+            .iter()
+            .map(|datagram| crate::filter::DerivedPacket {
+                decoded: &datagram.decoded,
+                replayed_prefix_layers: datagram.replayed_prefix_layers,
+            })
+            .collect();
+        visit(&crate::filter::Context {
+            decoded: self.decoded,
+            derived: &derived,
+            number: self.number,
+            tcp_stream: self
+                .tcp
+                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
+            udp_stream: self
+                .udp
+                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
+        })
+    }
+
     /// Resolves a run-local scope into its capture interface and tunnel path.
     pub fn scope_definition(&self, id: ScopeId) -> Option<&crate::analysis::scope::Definition> {
         self.scopes.definition(id)
+    }
+
+    /// Capture-global scope definitions observed through this frame.
+    pub fn scope_definitions(&self) -> &[crate::analysis::scope::Definition] {
+        self.scopes.definitions()
     }
 
     /// Innermost completed network-layer view attached to this physical
@@ -137,6 +202,8 @@ impl FrameRecord<'_> {
 /// separately and cannot disagree.
 #[derive(Clone, Debug, Default)]
 pub struct Summary {
+    pub incomplete_sources: Vec<crate::analysis::provenance::IncompleteSources>,
+    pub source_outcomes_omitted: u64,
     pub clock: ClockReport,
     pub frames_read: u64,
     pub frames_matched: u64,
@@ -211,6 +278,15 @@ where
     let mut scopes = Interner::with_limits(scope_limit, limits.max_scope_bytes);
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
     let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
+    let mut provenance = options
+        .track_sources
+        .then(|| {
+            crate::analysis::provenance::Tracker::new(
+                limits.max_provenance_bytes,
+                limits.max_ip_outcomes,
+            )
+        })
+        .transpose()?;
     let stage = FrameStage {
         decoder: &decoder,
         deadline: &deadline,
@@ -240,6 +316,12 @@ where
         // Every physical frame advances capture-global IP state before any
         // transport indexing or display filter. A completion is decoded as a
         // derived network-layer view attributed to this same physical frame.
+        let physical_sources = provenance
+            .as_ref()
+            .map(|tracker| {
+                tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
+            })
+            .transpose()?;
         let derived = advance_ip_reassembly(
             &mut ip_dispatch,
             &stage,
@@ -250,6 +332,8 @@ where
                 timestamp,
             },
             &mut ip_sink,
+            &mut provenance,
+            physical_sources.as_ref(),
         )?;
         let TransportViews { tcp, udp } = elect_transport_views(&decoded, &derived);
         let mut tcp_view = tcp.as_ref().map(|elected| TcpView {
@@ -350,6 +434,7 @@ where
             decoded: &decoded,
             derived_datagrams: &derived,
             scopes: &scopes,
+            physical_sources: physical_sources.as_ref(),
             tcp: tcp_view,
             udp: udp_view,
             tcp_events: &tcp_events,
@@ -370,7 +455,12 @@ where
         })?;
     }
     enforce_deadline(&deadline)?;
+    let (incomplete_sources, source_outcomes_omitted) = provenance
+        .map(crate::analysis::provenance::Tracker::finish)
+        .unwrap_or_default();
     Ok(Summary {
+        incomplete_sources,
+        source_outcomes_omitted,
         frames_read,
         frames_matched,
         clock: ip_dispatch.clock_report().clone(),
@@ -405,6 +495,8 @@ fn advance_ip_reassembly<I>(
     scopes: &mut Interner,
     frame: PhysicalFrame<'_>,
     ip_sink: &mut I,
+    provenance: &mut Option<crate::analysis::provenance::Tracker>,
+    physical_sources: Option<&crate::analysis::provenance::SourceSet>,
 ) -> Result<Vec<DerivedDatagram>, Error>
 where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
@@ -425,8 +517,14 @@ where
 
     let now = ip_dispatch.at(timestamp, number)?;
     emit(ip_dispatch.expire(now), ip_sink)?;
+    if let Some(tracker) = provenance {
+        tracker.retire(|key| ip_dispatch.contains_datagram(key));
+    }
     let fragments =
         ip_fragments(decoded, scopes).map_err(|source| Error::Scope { number, source })?;
+    if let (Some(tracker), Some(sources)) = (provenance.as_mut(), physical_sources) {
+        tracker.remember(&fragments, sources)?;
+    }
     let (mut completed, events) = ip_dispatch
         .dispatch(fragments, now, 0)
         .map_err(|source| Error::IpReassembly { number, source })?;
@@ -440,7 +538,10 @@ where
         let budget = ip_dispatch
             .plan_derived_decode(derived_memory_charge, datagram.bytes.len())
             .map_err(|source| Error::IpReassembly { number, source })?;
-        let next_derived = decode_derived(
+        let sources = provenance
+            .as_mut()
+            .and_then(|tracker| tracker.completed(&datagram.key));
+        let mut next_derived = decode_derived(
             stage.decoder,
             source,
             datagram,
@@ -449,12 +550,17 @@ where
             budget.budget_reduced,
             stage.max_ip_reassembly_bytes,
         )?;
+        next_derived.sources = sources;
         let next_derived_memory_charge = ip_dispatch
             .charge_derived_memory(derived_memory_charge, budget.charge)
             .map_err(|source| Error::IpReassembly { number, source })?;
         let fragments =
             ip_fragments_in_scope(&next_derived.decoded, source, next_derived.scope, scopes)
                 .map_err(|source| Error::Scope { number, source })?;
+        if let (Some(tracker), Some(sources)) = (provenance.as_mut(), next_derived.sources.as_ref())
+        {
+            tracker.remember(&fragments, sources)?;
+        }
         let (next_completed, events) = ip_dispatch
             .dispatch(fragments, now, next_derived_memory_charge)
             .map_err(|source| Error::IpReassembly { number, source })?;
@@ -575,6 +681,7 @@ fn decode_derived(
             }
         })?;
     Ok(DerivedDatagram {
+        sources: None,
         decoded,
         scope,
         fragment_count: datagram.fragment_count,

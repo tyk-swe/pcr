@@ -49,6 +49,8 @@ pub struct Probe {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<Captured>,
     pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub application: Option<packetcraftr::scan::profile::Evidence>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -115,10 +117,52 @@ impl Report {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Sent {
+    pub sequence: u64,
+    pub protocol: Protocol,
+    pub destination: IpAddr,
+    pub destination_port: Option<u16>,
+    pub attempt: u32,
+    pub sent_at: Timestamp,
+    pub udp_profile: Option<String>,
+    pub frame: super::frame::Wire,
+    pub route: super::send::MaterializedRoute,
+}
+impl Sent {
+    pub fn try_from_sent(value: packetcraftr::scan::SentProbe) -> Result<Self, Error> {
+        let probe = value.probe;
+        let sent = value.sent;
+        let protocol = match (probe.endpoint.transport(), probe.address) {
+            (Transport::Tcp, _) => Protocol::Tcp,
+            (Transport::Udp, _) => Protocol::Udp,
+            (Transport::Icmp, IpAddr::V4(_)) => Protocol::Icmpv4,
+            (Transport::Icmp, IpAddr::V6(_)) => Protocol::Icmpv6,
+        };
+        Ok(Self {
+            sequence: probe.sequence,
+            udp_profile: probe
+                .udp_profile
+                .as_ref()
+                .map(|profile| profile.name().to_owned()),
+            protocol,
+            destination: probe.address,
+            destination_port: probe.endpoint.port(),
+            attempt: probe.attempt,
+            sent_at: Timestamp::try_from(sent.timing().freshness_marker().wall_clock())?,
+            frame: super::frame::Wire::new(sent.wire_bytes().clone()),
+            route: super::send::MaterializedRoute::try_from_route(sent.route().clone())?,
+        })
+    }
+}
+
 /// One independently useful event in structured scan streaming output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {
+    Sent {
+        sent: Sent,
+    },
     Probe {
         target: String,
         probe: Probe,
@@ -140,6 +184,12 @@ impl Event {
         event: packetcraftr::scan::Event,
     ) -> Result<(Self, Vec<PacketDiagnostic>), Error> {
         let (event, diagnostics) = match event {
+            packetcraftr::scan::Event::Sent(sent) => (
+                Self::Sent {
+                    sent: Sent::try_from_sent(sent)?,
+                },
+                Vec::new(),
+            ),
             packetcraftr::scan::Event::Probe { target, probe } => (
                 Self::Probe {
                     target: target.to_string(),
@@ -200,16 +250,86 @@ fn try_from_probe(evidence: packetcraftr::scan::ProbeEvidence) -> Result<Probe, 
             .map(Captured::try_from_frame)
             .transpose()?,
         reason: evidence.reason,
+        application: evidence.application,
     })
 }
 
 impl crate::output::stream::StreamRecord for Event {
     fn event_name(&self) -> &'static str {
         match self {
+            Self::Sent { .. } => "probe_sent",
             Self::Probe { .. } => "probe",
             Self::Undecoded { .. } => "undecoded",
             Self::Diagnostic {} => "diagnostic",
             Self::Complete { .. } => "complete",
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Pending {
+    pub sent: Sent,
+    pub response: Option<Captured>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct FailedProbe {
+    pub sequence: u64,
+    pub destination: IpAddr,
+    pub destination_port: Option<u16>,
+    pub transport: Transport,
+    pub attempt: u32,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureSource {
+    pub interface: packetcraftr_netio::interface::Id,
+    pub ready: bool,
+    pub shutdown_confirmed: bool,
+    pub statistics_valid: bool,
+    pub statistics: packetcraftr_netio::capture::Statistics,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Failure {
+    pub stats: Stats,
+    pub pending: Vec<Pending>,
+    pub failed_probe: Option<FailedProbe>,
+    pub capture_sources: Vec<CaptureSource>,
+}
+impl Failure {
+    pub fn try_from_pipeline(error: &packetcraftr::scan::PipelineError) -> Result<Self, Error> {
+        Ok(Self {
+            stats: error.stats.clone(),
+            pending: error
+                .pending
+                .iter()
+                .map(|entry| {
+                    Ok(Pending {
+                        sent: Sent::try_from_sent(entry.sent.clone())?,
+                        response: entry
+                            .response
+                            .clone()
+                            .map(Captured::try_from_frame)
+                            .transpose()?,
+                    })
+                })
+                .collect::<Result<_, Error>>()?,
+            failed_probe: error.failed_probe.as_ref().map(|probe| FailedProbe {
+                sequence: probe.sequence,
+                destination: probe.address,
+                destination_port: probe.endpoint.port(),
+                transport: probe.endpoint.transport(),
+                attempt: probe.attempt,
+            }),
+            capture_sources: error
+                .capture_sources
+                .iter()
+                .map(|source| CaptureSource {
+                    interface: source.metadata.interface.clone(),
+                    ready: source.ready,
+                    shutdown_confirmed: source.shutdown_confirmed,
+                    statistics_valid: source.statistics_valid,
+                    statistics: source.statistics,
+                })
+                .collect(),
+        })
     }
 }

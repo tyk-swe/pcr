@@ -1,0 +1,39 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "dns-read",
+  "mode": "stream",
+  "sequence": 1,
+  "event": "dns_transaction",
+  "status": "success",
+  "result": {
+    "status": "orphan_response",
+    "transport": "udp",
+    "stream": 0,
+    "generation": 0,
+    "flow": {
+      "scope": 0,
+      "flow": {
+        "source": "198.51.100.8",
+        "source_port": 49152,
+        "destination": "192.0.2.53",
+        "destination_port": 53
+      }
+    },
+    "dns_id": 4660,
+    "queries": [],
+    "response": 1,
+    "original_response": null,
+    "first_query_latency": null,
+    "latest_query_latency": null,
+    "sources": [
+      {
+        "number": 1,
+        "timestamp": {
+          "unix_seconds": 123,
+          "nanoseconds": 456789000
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

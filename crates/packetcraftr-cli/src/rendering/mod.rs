@@ -23,7 +23,7 @@ pub(crate) use human::{
     write_plain_line, write_stdout_line, write_summary_line,
 };
 
-pub(crate) use machine::{emit_aggregate, emit_aggregate_with_stats, emit_json};
+pub(crate) use machine::{bounded_json_len, emit_aggregate, emit_aggregate_with_stats, emit_json};
 
 pub(crate) use ndjson::{StreamEncoder, stdout_stream, write_unattributed_error};
 

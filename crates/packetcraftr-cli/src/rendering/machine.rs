@@ -12,6 +12,33 @@ use serde::Serialize;
 
 use crate::errors::CliError;
 
+pub(crate) fn bounded_json_len(
+    value: &impl Serialize,
+    limit: usize,
+) -> Result<usize, serde_json::Error> {
+    struct Counter {
+        remaining: usize,
+    }
+
+    impl Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.remaining = self
+                .remaining
+                .checked_sub(bytes.len())
+                .ok_or_else(|| io::Error::other("JSON output limit"))?;
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = Counter { remaining: limit };
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(limit - counter.remaining)
+}
+
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
@@ -51,4 +78,75 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     emit_json(&crate::resources::decorate(
         output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use serde::Serialize;
+    use serde::ser::{Error as _, SerializeSeq};
+
+    use super::bounded_json_len;
+
+    struct Instrumented<'a> {
+        second: &'a Cell<bool>,
+    }
+
+    impl Serialize for Instrumented<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let mut sequence = serializer.serialize_seq(Some(2))?;
+            sequence.serialize_element(&0u8)?;
+            self.second.set(true);
+            sequence.serialize_element(&1u8)?;
+            sequence.end()
+        }
+    }
+
+    struct FailingSerialization;
+
+    impl Serialize for FailingSerialization {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let mut sequence = serializer.serialize_seq(Some(2))?;
+            sequence.serialize_element(&0u8)?;
+            Err(S::Error::custom("fixture serialization failure"))
+        }
+    }
+
+    #[test]
+    fn bounded_json_len_counts_exact_compact_bytes() {
+        let cases = [
+            serde_json::json!(null),
+            serde_json::json!(""),
+            serde_json::json!("multibyte é\n\"quoted\"\\\u{0007}"),
+            serde_json::json!({"nested": [1, "two", {"three": [null, true]}], "empty": []}),
+        ];
+        for value in cases {
+            let n = serde_json::to_vec(&value).unwrap().len();
+            assert_eq!(bounded_json_len(&value, n).unwrap(), n, "{value}");
+            assert!(bounded_json_len(&value, n - 1).is_err(), "{value}");
+            assert!(bounded_json_len(&value, 0).is_err(), "{value}");
+            assert_eq!(bounded_json_len(&value, usize::MAX).unwrap(), n, "{value}");
+        }
+    }
+
+    #[test]
+    fn bounded_json_len_stops_serializing_at_the_limit() {
+        let second = Cell::new(false);
+        let value = Instrumented { second: &second };
+        assert!(bounded_json_len(&value, 1).is_err());
+        assert!(!second.get());
+    }
+
+    #[test]
+    fn bounded_json_len_preserves_serialization_failures() {
+        let error = bounded_json_len(&FailingSerialization, usize::MAX).unwrap_err();
+        assert_eq!(error.to_string(), "fixture serialization failure");
+    }
 }

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::application_output::charge;
+use super::application_output::EventOutput;
 use crate::{
     command_options::{DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
@@ -62,90 +62,25 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     let mut options = setup.options(true);
     options.track_sources = true;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
-    let mut output_bytes = 0usize;
+    let mut output = EventOutput::new(
+        format,
+        stream,
+        args.application.max_application_output_bytes,
+    );
     let mut emit = |event: Event| -> Result<(), CliError> {
         match event {
-            Event::Message(value) => {
-                let value = wire::Message::try_from(*value).map_err(CliError::classified)?;
-                charge(
-                    &value,
-                    &mut output_bytes,
-                    args.application.max_application_output_bytes,
-                )?;
-                match format {
-                    Format::Json => messages.push(value),
-                    Format::Ndjson => stream
-                        .emit_data(value, Vec::new())
-                        .map_err(CliError::from)?,
-                    Format::Text => write_plain_line(format_args!(
-                        "DNS {:?}:{} message={} {:?} {}:{} -> {}:{} frames={:?} {}",
-                        value.transport,
-                        value.stream,
-                        value.index,
-                        value.status,
-                        value.flow.flow.source,
-                        value.flow.flow.source_port,
-                        value.flow.flow.destination,
-                        value.flow.flow.destination_port,
-                        value
-                            .sources
-                            .iter()
-                            .map(|source| source.number)
-                            .collect::<Vec<_>>(),
-                        value
-                            .fields
-                            .as_ref()
-                            .and_then(|fields| fields.get("questions"))
-                            .map(ToString::to_string)
-                            .unwrap_or_default()
-                    ))?,
-                    _ => unreachable!("format validated"),
-                }
-            }
-            Event::Transaction(value) => {
-                let value = wire::Transaction::try_from(value).map_err(CliError::classified)?;
-                charge(
-                    &value,
-                    &mut output_bytes,
-                    args.application.max_application_output_bytes,
-                )?;
-                match format {
-                    Format::Json => transactions.push(value),
-                    Format::Ndjson => stream
-                        .emit_data(value, Vec::new())
-                        .map_err(CliError::from)?,
-                    Format::Text => write_plain_line(format_args!(
-                        "  transaction id={} {:?} queries={:?} response={:?} latest_latency={:?}",
-                        value.dns_id,
-                        value.status,
-                        value.queries,
-                        value.response,
-                        value.latest_query_latency
-                    ))?,
-                    _ => unreachable!("format validated"),
-                }
-            }
-            Event::Issue(value) => {
-                let value = wire::Issue(value);
-                charge(
-                    &value,
-                    &mut output_bytes,
-                    args.application.max_application_output_bytes,
-                )?;
-                match format {
-                    Format::Json => issues.push(value),
-                    Format::Ndjson => stream
-                        .emit_data(value, Vec::new())
-                        .map_err(CliError::from)?,
-                    Format::Text => write_plain_line(format_args!(
-                        "  TCP stream={} frame={} {:?}",
-                        value.0.stream, value.0.number, value.0.status
-                    ))?,
-                    _ => unreachable!("format validated"),
-                }
-            }
+            Event::Message(value) => output.emit(
+                wire::Message::try_from(*value).map_err(CliError::classified)?,
+                &mut messages,
+                render_message,
+            ),
+            Event::Transaction(value) => output.emit(
+                wire::Transaction::try_from(value).map_err(CliError::classified)?,
+                &mut transactions,
+                render_transaction,
+            ),
+            Event::Issue(value) => output.emit(wire::Issue(value), &mut issues, render_issue),
         }
-        Ok(())
     };
     let run = analysis::run_with_ip_events(
         &mut reader,
@@ -201,4 +136,40 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         )),
         _ => unreachable!("format validated"),
     }
+}
+fn render_message(value: &wire::Message) -> Result<(), CliError> {
+    write_plain_line(format_args!(
+        "DNS {:?}:{} message={} {:?} {}:{} -> {}:{} frames={:?} {}",
+        value.transport,
+        value.stream,
+        value.index,
+        value.status,
+        value.flow.flow.source,
+        value.flow.flow.source_port,
+        value.flow.flow.destination,
+        value.flow.flow.destination_port,
+        value
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>(),
+        value
+            .fields
+            .as_ref()
+            .and_then(|fields| fields.get("questions"))
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    ))
+}
+fn render_transaction(value: &wire::Transaction) -> Result<(), CliError> {
+    write_plain_line(format_args!(
+        "  transaction id={} {:?} queries={:?} response={:?} latest_latency={:?}",
+        value.dns_id, value.status, value.queries, value.response, value.latest_query_latency
+    ))
+}
+fn render_issue(value: &wire::Issue) -> Result<(), CliError> {
+    write_plain_line(format_args!(
+        "  TCP stream={} frame={} {:?}",
+        value.0.stream, value.0.number, value.0.status
+    ))
 }

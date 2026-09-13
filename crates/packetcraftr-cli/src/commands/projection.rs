@@ -5,7 +5,7 @@
 
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_raw},
+    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
 };
 use packetcraftr_cli::output::{
     self,
@@ -140,30 +140,24 @@ impl Projector {
             buffer.write_all(b"\n").map_err(|_| self.limit())?;
             self.charge(buffer.bytes.len())?;
             write_raw(&buffer.bytes)?;
-        } else {
-            let mut counter = Counter {
-                remaining: self.remaining,
-                used: 0,
+        } else if self.format == Format::Ndjson {
+            let event = output::projection::RowEvent {
+                columns: self.projection.columns(),
+                row: &row,
             };
-            if self.format == Format::Ndjson {
-                let event = output::projection::RowEvent {
+            let bytes = bounded_json_len(&event, self.remaining).map_err(|_| self.limit())?;
+            self.charge(bytes)?;
+            stream.emit_data(
+                output::projection::RowEvent {
                     columns: self.projection.columns(),
                     row: &row,
-                };
-                serde_json::to_writer(&mut counter, &event).map_err(|_| self.limit())?;
-                self.charge(counter.used)?;
-                stream.emit_data(
-                    output::projection::RowEvent {
-                        columns: self.projection.columns(),
-                        row: &row,
-                    },
-                    Vec::new(),
-                )?;
-            } else {
-                serde_json::to_writer(&mut counter, &row).map_err(|_| self.limit())?;
-                self.charge(counter.used)?;
-                self.rows.push(row);
-            }
+                },
+                Vec::new(),
+            )?;
+        } else {
+            let bytes = bounded_json_len(&row, self.remaining).map_err(|_| self.limit())?;
+            self.charge(bytes)?;
+            self.rows.push(row);
         }
         self.count = self.count.checked_add(1).ok_or_else(|| self.limit())?;
         Ok(())
@@ -196,23 +190,6 @@ impl Projector {
     }
 }
 
-struct Counter {
-    remaining: usize,
-    used: usize,
-}
-impl Write for Counter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.remaining = self
-            .remaining
-            .checked_sub(bytes.len())
-            .ok_or_else(|| io::Error::other("projection output limit"))?;
-        self.used += bytes.len();
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
 struct BoundedBuffer {
     bytes: Vec<u8>,
     remaining: usize,

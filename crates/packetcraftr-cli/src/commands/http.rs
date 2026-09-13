@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::application_output::charge;
+use super::application_output::EventOutput;
 use crate::{
     command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
@@ -63,80 +63,20 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     options.track_sources = true;
     let mut reader = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
-    let mut used = 0;
+    let mut output = EventOutput::new(
+        format,
+        stream,
+        args.application.max_application_output_bytes,
+    );
     let mut emit = |event: Event| -> Result<(), CliError> {
         match event {
-            Event::Message(message) => {
-                let value = wire::Message::try_from(*message).map_err(CliError::classified)?;
-                charge(
-                    &value,
-                    &mut used,
-                    args.application.max_application_output_bytes,
-                )?;
-                match format {
-                    Format::Json => messages.push(value),
-                    Format::Ndjson => stream
-                        .emit_data(value, Vec::new())
-                        .map_err(CliError::from)?,
-                    Format::Text => {
-                        let start = match &value.start {
-                            Some(wire::StartLine::Request { method, target, .. }) => {
-                                format!("{method} {}", escaped(target))
-                            }
-                            Some(wire::StartLine::Response { status, reason, .. }) => {
-                                format!("{status} {}", escaped(reason))
-                            }
-                            None => "partial headers".to_owned(),
-                        };
-                        write_plain_line(format_args!(
-                            "HTTP tcp:{} message={} {:?} {} body_bytes={} request={:?} frames={:?}",
-                            value.stream,
-                            value.index,
-                            value.status,
-                            start,
-                            value.body_bytes,
-                            value.request,
-                            value
-                                .sources
-                                .iter()
-                                .map(|source| source.number)
-                                .collect::<Vec<_>>()
-                        ))?;
-                        for header in &value.headers {
-                            write_plain_line(format_args!(
-                                "  {}: {}",
-                                header.name,
-                                escaped(&header.value)
-                            ))?;
-                        }
-                        if let Some(error) = &value.error {
-                            write_plain_line(format_args!("  {error}"))?;
-                        }
-                    }
-                    _ => unreachable!("format validated"),
-                }
-            }
-            Event::Issue(issue) => {
-                let value = wire::Issue(issue);
-                charge(
-                    &value,
-                    &mut used,
-                    args.application.max_application_output_bytes,
-                )?;
-                match format {
-                    Format::Json => issues.push(value),
-                    Format::Ndjson => stream
-                        .emit_data(value, Vec::new())
-                        .map_err(CliError::from)?,
-                    Format::Text => write_plain_line(format_args!(
-                        "  TCP stream={} frame={} {:?}",
-                        value.0.stream, value.0.number, value.0.status
-                    ))?,
-                    _ => unreachable!("format validated"),
-                }
-            }
+            Event::Message(message) => output.emit(
+                wire::Message::try_from(*message).map_err(CliError::classified)?,
+                &mut messages,
+                render_message,
+            ),
+            Event::Issue(issue) => output.emit(wire::Issue(issue), &mut issues, render_issue),
         }
-        Ok(())
     };
     let run = analysis::run_with_ip_events(
         &mut reader,
@@ -192,6 +132,48 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         )),
         _ => unreachable!("format validated"),
     }
+}
+fn render_message(value: &wire::Message) -> Result<(), CliError> {
+    let start = match &value.start {
+        Some(wire::StartLine::Request { method, target, .. }) => {
+            format!("{method} {}", escaped(target))
+        }
+        Some(wire::StartLine::Response { status, reason, .. }) => {
+            format!("{status} {}", escaped(reason))
+        }
+        None => "partial headers".to_owned(),
+    };
+    write_plain_line(format_args!(
+        "HTTP tcp:{} message={} {:?} {} body_bytes={} request={:?} frames={:?}",
+        value.stream,
+        value.index,
+        value.status,
+        start,
+        value.body_bytes,
+        value.request,
+        value
+            .sources
+            .iter()
+            .map(|source| source.number)
+            .collect::<Vec<_>>()
+    ))?;
+    for header in &value.headers {
+        write_plain_line(format_args!(
+            "  {}: {}",
+            header.name,
+            escaped(&header.value)
+        ))?;
+    }
+    if let Some(error) = &value.error {
+        write_plain_line(format_args!("  {error}"))?;
+    }
+    Ok(())
+}
+fn render_issue(value: &wire::Issue) -> Result<(), CliError> {
+    write_plain_line(format_args!(
+        "  TCP stream={} frame={} {:?}",
+        value.0.stream, value.0.number, value.0.status
+    ))
 }
 fn escaped(value: &str) -> String {
     value.chars().flat_map(char::escape_default).collect()

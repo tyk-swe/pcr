@@ -200,6 +200,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   `VecDeque::try_reserve_exact` returns an exact capacity.
 - Live DNS truncation errors include their required byte widths, fixing
   workspace compilation after the shared DNS decoder error gained that field.
+- Bounded JSON output sizing distinguishes budget exhaustion from serializer
+  failures: a value that fails to serialize now reports an internal error with
+  the original source instead of the `--max-application-output-bytes` policy
+  error, which remains reserved for actual limit exceedances.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

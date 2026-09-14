@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use crate::policy::SocketBudget;
+use crate::policy::{BudgetOverflow, DnsOperation, SocketBudget, WireBudget};
 
 use super::MAX_PROBE_OVERHEAD;
 use super::error::Error;
@@ -23,6 +23,40 @@ pub(super) struct OperationBudget {
     pub(super) tcp: SocketBudget,
     /// Intentional delay between attempts at the requested rate.
     pub(super) delay: Duration,
+}
+
+/// Sum every question's worst-case UDP and TCP cost before any batch traffic.
+pub(super) fn batch_budget(
+    mut budgets: impl Iterator<Item = DnsOperation>,
+) -> Result<DnsOperation, Error> {
+    budgets.try_fold(
+        DnsOperation::new(WireBudget::new(0, 0), SocketBudget::none())?,
+        |total, budget| {
+            let udp = total.udp();
+            let tcp = total.tcp();
+            Ok(DnsOperation::new(
+                WireBudget::new(
+                    udp.packets()
+                        .checked_add(budget.udp().packets())
+                        .ok_or(BudgetOverflow)?,
+                    udp.wire_bytes()
+                        .checked_add(budget.udp().wire_bytes())
+                        .ok_or(BudgetOverflow)?,
+                ),
+                SocketBudget::new(
+                    tcp.connections()
+                        .checked_add(budget.tcp().connections())
+                        .ok_or(BudgetOverflow)?,
+                    tcp.messages()
+                        .checked_add(budget.tcp().messages())
+                        .ok_or(BudgetOverflow)?,
+                    tcp.application_bytes()
+                        .checked_add(budget.tcp().application_bytes())
+                        .ok_or(BudgetOverflow)?,
+                ),
+            )?)
+        },
+    )
 }
 
 pub(super) fn operation_budget(

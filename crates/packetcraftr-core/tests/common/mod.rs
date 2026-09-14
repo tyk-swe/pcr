@@ -17,7 +17,6 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::build::{Builder, Options};
 use packetcraftr_core::codec::Context;
@@ -26,7 +25,7 @@ use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
-use packetcraftr_core::protocol::transport::{Tcp, Udp};
+use packetcraftr_core::protocol::transport::{Tcp, TcpOption, Udp};
 use packetcraftr_core::registry::Registry;
 
 pub(crate) const CLIENT: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
@@ -42,7 +41,7 @@ pub(crate) struct TcpSpec {
     pub(crate) acknowledgment: u32,
     pub(crate) flags: u16,
     pub(crate) window: u16,
-    pub(crate) options: Bytes,
+    pub(crate) options: Vec<TcpOption>,
 }
 
 pub(crate) fn registry() -> Arc<Registry> {
@@ -59,7 +58,7 @@ pub(crate) fn client_tcp(sequence: u32, acknowledgment: u32, flags: u16, window:
         acknowledgment,
         flags,
         window,
-        options: Bytes::new(),
+        options: Vec::new(),
     }
 }
 
@@ -73,7 +72,7 @@ pub(crate) fn server_tcp(sequence: u32, acknowledgment: u32, flags: u16, window:
         acknowledgment,
         flags,
         window,
-        options: Bytes::new(),
+        options: Vec::new(),
     }
 }
 

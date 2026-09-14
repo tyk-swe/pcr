@@ -74,8 +74,17 @@ pub struct Io {
     pub buckets: Vec<IoBucket>,
 }
 
-/// Aggregate result of `stats`, carrying exactly the requested table.
+/// One capture-source interface description, identified by the global
+/// interface ID that frame records reference.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Interface {
+    pub id: u32,
+    pub link_type: u32,
+    pub snap_length: u32,
+}
+
+/// Aggregate result of `stats`, carrying exactly the requested table.
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub clock: packetcraftr_core::analysis::ClockReport,
     #[serde(flatten)]
@@ -90,6 +99,26 @@ pub struct Report {
     pub first_timestamp: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_timestamp: Option<Timestamp>,
+    /// Earliest-to-latest matched-timestamp span; absent when nothing
+    /// matched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<Duration>,
+    /// Mean captured length over matched frames; absent when the match set
+    /// is empty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub average_packet_size: Option<f64>,
+    /// Matched frames per second over `duration`; absent when the duration
+    /// is missing or zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packets_per_second: Option<f64>,
+    /// Matched captured bytes per second over `duration`; absent under the
+    /// same rules as `packets_per_second`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes_per_second: Option<f64>,
+    /// Interface descriptions the capture source declared, in the global
+    /// interface-ID order `interface` fields reference; empty when the
+    /// source describes none.
+    pub interfaces: Vec<Interface>,
 }
 
 /// Exactly one selected table. A report cannot publish several tables or omit
@@ -123,6 +152,21 @@ impl Report {
         report: packetcraftr_core::analysis::stats::Report,
         frames_read: u64,
     ) -> Result<Self, Error> {
+        // Derive before the table match consumes report fields.
+        let duration = report.duration();
+        let average_packet_size = report.average_packet_size();
+        let packets_per_second = report.packet_rate();
+        let bytes_per_second = report.byte_rate();
+        let interfaces = report
+            .interfaces
+            .iter()
+            .enumerate()
+            .map(|(id, interface)| Interface {
+                id: u32::try_from(id).unwrap_or(u32::MAX),
+                link_type: interface.link_type.0,
+                snap_length: interface.snap_len,
+            })
+            .collect();
         let table = match table {
             Table::Conversations => TableData::Conversations {
                 conversations: report
@@ -160,6 +204,11 @@ impl Report {
             bytes_matched: report.bytes,
             first_timestamp: convert_timestamp(report.first_timestamp)?,
             last_timestamp: convert_timestamp(report.last_timestamp)?,
+            duration,
+            average_packet_size,
+            packets_per_second,
+            bytes_per_second,
+            interfaces,
         })
     }
 }

@@ -174,6 +174,8 @@ const BUILD_FORMATS: &[Format] = &[
     Format::Ndjson,
     Format::Hex,
     Format::Raw,
+    Format::Pcap,
+    Format::PcapNg,
 ];
 const DISSECT_FORMATS: &[Format] = &[
     Format::Text,

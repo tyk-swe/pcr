@@ -5,17 +5,6 @@
   "status": "success",
   "result": {
     "table": "endpoints",
-    "frames_read": 8,
-    "frames_matched": 8,
-    "bytes_matched": 659,
-    "first_timestamp": {
-      "unix_seconds": 1787616000,
-      "nanoseconds": 0
-    },
-    "last_timestamp": {
-      "unix_seconds": 1787616000,
-      "nanoseconds": 68000000
-    },
     "endpoints": [
       {
         "address": "192.0.2.1",
@@ -30,6 +19,31 @@
         "tx_bytes": 293,
         "rx_frames": 4,
         "rx_bytes": 366
+      }
+    ],
+    "frames_read": 8,
+    "frames_matched": 8,
+    "bytes_matched": 659,
+    "first_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 1787616000,
+      "nanoseconds": 68000000
+    },
+    "duration": {
+      "secs": 0,
+      "nanos": 68000078
+    },
+    "average_packet_size": 82.375,
+    "packets_per_second": 117.6469235273287,
+    "bytes_per_second": 9691.165325563701,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 1,
+        "snap_length": 65535
       }
     ]
   },

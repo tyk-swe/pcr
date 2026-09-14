@@ -120,25 +120,28 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let mut deadline =
+        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     run_observed_with_deadline(
         request,
         authorizer,
         registry,
         executor,
         clock,
-        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation()),
+        &mut deadline,
         emit,
     )
 }
 
+/// [`run_observed`] under a caller-owned deadline.
 pub(super) fn run_observed_with_deadline<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
-    deadline: Deadline,
-    mut emit: F,
+    deadline: &mut Deadline,
+    emit: F,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
@@ -147,33 +150,15 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     deadline.check_cancelled()?;
-    let PreparedOperation {
-        deadline,
-        query,
-        delay,
-        summary,
-    } = prepare_operation(request, authorizer, deadline)?;
-    let context = Arc::new(EventContext {
-        server: Arc::from(summary.server.as_str()),
-        server_port: summary.server_port,
-        query_name: Arc::from(summary.query_name.as_str()),
-        query_type: summary.query_type,
-    });
-    Operation {
-        request,
+    let mut prepared = PreparedOperation::new(request)?;
+    approve_operation(
         authorizer,
-        registry,
-        executor,
-        clock,
+        AuthorizedOperation::Dns(prepared.budget),
         deadline,
-        query,
-        delay,
-        context,
-        summary,
-        state: DnsState::default(),
-        emit: &mut emit,
-    }
-    .execute()
+        &Gates,
+    )?;
+    prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
+    Ok(prepared.summary)
 }
 
 #[derive(Default)]
@@ -227,63 +212,92 @@ impl Collector {
     }
 }
 
-struct PreparedOperation {
-    deadline: Deadline,
+/// Validated query and finite cost, prepared without discovery or traffic.
+/// The summary retains confirmed accounting even if execution returns an error.
+pub(super) struct PreparedOperation<'a> {
+    request: &'a Request,
     query: Bytes,
-    delay: Duration,
-    summary: Summary,
+    pub(super) delay: Duration,
+    pub(super) budget: DnsOperation,
+    pub(super) summary: Summary,
 }
 
-fn prepare_operation<A: Authorizer>(
-    request: &Request,
-    authorizer: &mut A,
-    deadline: Deadline,
-) -> Result<PreparedOperation, Error> {
-    let query_name = request.canonical_name()?;
-    let query = super::wire::encode_query(
-        &query_name,
-        request.query_type,
-        request.transaction_id,
-        request.recursion_desired,
-        request.edns,
-    )
-    .map_err(Error::Query)?;
-    let budget = operation_budget(request, query.len())?;
-    // This complete-operation gate deliberately precedes resolution and probe
-    // construction. The authorizer's resolver path independently enforces the
-    // declared hostname before every resolver side effect.
-    let OperationBudget {
-        packet_count,
-        maximum_wire_bytes,
-        tcp,
-        delay,
-    } = budget;
-    approve_operation(
-        authorizer,
-        AuthorizedOperation::Dns(DnsOperation::new(
-            WireBudget::new(packet_count, maximum_wire_bytes),
+impl<'a> PreparedOperation<'a> {
+    pub(super) fn new(request: &'a Request) -> Result<Self, Error> {
+        let query_name = request.canonical_name()?;
+        let query = super::wire::encode_query(
+            &query_name,
+            request.query_type,
+            request.transaction_id,
+            request.recursion_desired,
+            request.edns,
+        )
+        .map_err(Error::Query)?;
+        let budget = operation_budget(request, query.len())?;
+        let OperationBudget {
+            packet_count,
+            maximum_wire_bytes,
             tcp,
-        )?),
-        &deadline,
-        &Gates,
-    )?;
-    deadline.enforce()?;
+            delay,
+        } = budget;
+        Ok(Self {
+            request,
+            query,
+            delay,
+            budget: DnsOperation::new(WireBudget::new(packet_count, maximum_wire_bytes), tcp)?,
+            summary: Summary {
+                server: request.server.to_string(),
+                server_port: request.server_port,
+                resolved_addresses: Vec::new(),
+                query_name,
+                query_type: request.query_type,
+                transaction_id: request.transaction_id,
+                completion: super::Completion::new(Outcome::Timeout, false, None, None)?,
+                stats: Stats::default(),
+            },
+        })
+    }
 
-    Ok(PreparedOperation {
-        deadline,
-        query,
-        delay,
-        summary: Summary {
-            server: request.server.to_string(),
-            server_port: request.server_port,
-            resolved_addresses: Vec::new(),
-            query_name,
-            query_type: request.query_type,
-            transaction_id: request.transaction_id,
-            completion: super::Completion::new(Outcome::Timeout, false, None, None)?,
-            stats: Stats::default(),
-        },
-    })
+    /// Executes after the caller authorizes this query's cost, either on its own
+    /// or within the combined batch. Endpoint authorization still runs per attempt.
+    pub(super) fn execute<A, E, C, F>(
+        &mut self,
+        authorizer: &mut A,
+        registry: &Registry,
+        executor: &mut E,
+        clock: &mut C,
+        deadline: &mut Deadline,
+        mut emit: F,
+    ) -> Result<(), Error>
+    where
+        A: Authorizer,
+        E: Executor<Exchange> + TcpExecutor,
+        C: Clock,
+        F: FnMut(Event, &Deadline) -> Result<(), Error>,
+    {
+        deadline.enforce()?;
+        let context = Arc::new(EventContext {
+            server: Arc::from(self.summary.server.as_str()),
+            server_port: self.summary.server_port,
+            query_name: Arc::from(self.summary.query_name.as_str()),
+            query_type: self.summary.query_type,
+        });
+        Operation {
+            request: self.request,
+            authorizer,
+            registry,
+            executor,
+            clock,
+            deadline,
+            query: self.query.clone(),
+            delay: self.delay,
+            context,
+            summary: &mut self.summary,
+            state: DnsState::default(),
+            emit: &mut emit,
+        }
+        .execute()
+    }
 }
 
 /// Everything one running DNS operation accumulates, kept apart from the
@@ -292,8 +306,6 @@ fn prepare_operation<A: Authorizer>(
 struct DnsState {
     evidence_budget: Budget,
     diagnostics: DiagnosticLog,
-    scheduled_delay: Duration,
-    attempts_completed: u32,
     retained_undecoded: usize,
 }
 
@@ -303,11 +315,11 @@ struct Operation<'a, A, E, C, F> {
     registry: &'a Registry,
     executor: &'a mut E,
     clock: &'a mut C,
-    deadline: Deadline,
+    deadline: &'a mut Deadline,
     query: Bytes,
     delay: Duration,
     context: Arc<EventContext>,
-    summary: Summary,
+    summary: &'a mut Summary,
     state: DnsState,
     emit: &'a mut F,
 }
@@ -325,30 +337,21 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    fn execute(mut self) -> Result<Summary, Error> {
+    fn execute(mut self) -> Result<(), Error> {
         for attempt in 1..=self.request.attempts {
             if self.execute_attempt(attempt)? {
                 break;
             }
         }
         self.deadline.enforce()?;
-        self.summary.stats.elapsed = self
-            .summary
-            .stats
-            .elapsed
-            .checked_add(self.state.scheduled_delay)
-            .ok_or(Error::StatisticsOverflow {
-                attempt: self.state.attempts_completed,
-            })?;
         self.summary.completion.validate()?;
-        Ok(self.summary)
+        Ok(())
     }
 
     fn execute_attempt(&mut self, attempt: u32) -> Result<bool, Error> {
         self.wait_before_attempt(attempt)?;
         let probe = self.prepare_probe(attempt)?;
         if self.request.transport == TransportMode::Tcp {
-            self.state.attempts_completed = attempt;
             let mut attempt_deadline = self.deadline.for_wait(self.request.timeout)?;
             return self.query_over_tcp(&probe, &mut attempt_deadline);
         }
@@ -360,7 +363,7 @@ where
         self.publish_new_diagnostics()?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
-            &self.deadline,
+            &*self.deadline,
             self.registry,
             &probe,
             &execution,
@@ -379,7 +382,6 @@ where
             None => timeout_evidence(&probe, sent_at),
         };
         self.publish_new_diagnostics()?;
-        self.state.attempts_completed = attempt;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
@@ -448,15 +450,16 @@ where
                 attempt,
                 source: Box::new(source),
             })?;
-            self.deadline.account(self.delay)?;
-            self.state.scheduled_delay =
-                self.state
-                    .scheduled_delay
+            self.summary.stats.elapsed =
+                self.summary
+                    .stats
+                    .elapsed
                     .checked_add(self.delay)
                     .ok_or(Error::DurationLimit {
                         actual: Duration::MAX,
                         limit: self.request.limits.max_duration,
                     })?;
+            self.deadline.account(self.delay)?;
         }
         Ok(())
     }
@@ -467,7 +470,7 @@ where
             self.authorizer,
             &self.request.server,
             self.request.address_family,
-            &self.deadline,
+            &*self.deadline,
             &Gates,
         );
         self.deadline.enforce()?;
@@ -521,27 +524,36 @@ where
         };
         self.deadline.enforce()?;
         let execution = self.executor.execute(&execution_request);
-        self.deadline.enforce()?;
-        let mut execution = execution.map_err(|source| Error::Execution {
-            attempt: probe.attempt,
-            source,
-        })?;
+        let interrupted = self.deadline.enforce();
+        let mut execution = match execution {
+            Ok(execution) => execution,
+            Err(source) => {
+                interrupted?;
+                return Err(Error::Execution {
+                    attempt: probe.attempt,
+                    source,
+                });
+            }
+        };
         if execution.permit != execution_request.permit {
             return Err(Error::InvalidEvidence {
                 attempt: probe.attempt,
                 message: "executor returned evidence for a different execution permit".to_owned(),
             });
         }
-        self.deadline.account(execution.stats.elapsed)?;
-        let _ = attempt_deadline.account(execution.stats.elapsed);
         validate_dns_execution(probe, &execution, self.request.limits, timeout)?;
-        self.deadline.enforce()?;
+        // Confirm the receipt before charging it, but retain that traffic even
+        // when cancellation or elapsed time stops this question at the boundary.
         self.summary
             .stats
             .checked_add_assign(&execution.stats)
             .map_err(|_| Error::StatisticsOverflow {
                 attempt: probe.attempt,
             })?;
+        interrupted?;
+        self.deadline.account(execution.stats.elapsed)?;
+        let _ = attempt_deadline.account(execution.stats.elapsed);
+        self.deadline.enforce()?;
         for diagnostic in execution.diagnostics.drain(..) {
             self.state.diagnostics.push_once(diagnostic);
         }
@@ -607,9 +619,6 @@ where
         let reported_elapsed = result
             .as_ref()
             .map_or(boundary_elapsed, |execution| execution.response.elapsed);
-        self.deadline.account(reported_elapsed)?;
-        let attempt_expired = attempt_deadline.account(reported_elapsed).is_err();
-
         let mut tcp_stats = Stats {
             elapsed: reported_elapsed,
             ..Stats::default()
@@ -640,6 +649,10 @@ where
             .map_err(|_| Error::StatisticsOverflow {
                 attempt: probe.attempt,
             })?;
+
+        self.deadline.check_cancelled()?;
+        self.deadline.account(reported_elapsed)?;
+        let attempt_expired = attempt_deadline.account(reported_elapsed).is_err();
 
         if attempt_expired || reported_elapsed > timeout {
             return Ok(tcp_timeout_evidence(
@@ -701,7 +714,7 @@ where
             self.authorizer,
             &target,
             Family::Any,
-            &self.deadline,
+            &*self.deadline,
             &Gates,
         );
         self.deadline.enforce()?;
@@ -785,7 +798,7 @@ where
     }
 
     fn publish(&mut self, event: Event) -> Result<(), Error> {
-        (self.emit)(event, &self.deadline)?;
+        (self.emit)(event, &*self.deadline)?;
         self.deadline.enforce()?;
         Ok(())
     }
@@ -804,7 +817,7 @@ where
             frames,
             |frame| Event::Undecoded(UndecodedEvidence { attempt, frame }),
             Event::Diagnostic,
-            |event| (self.emit)(event, &self.deadline),
+            |event| (self.emit)(event, &*self.deadline),
             || self.deadline.enforce().map_err(Into::into),
         )
     }
@@ -863,7 +876,7 @@ fn select_response<'a>(
 }
 
 /// The DNS workflow's names for the shared policy-gate failures.
-struct Gates;
+pub(super) struct Gates;
 
 impl crate::target::GateErrors for Gates {
     type Error = Error;
@@ -877,6 +890,6 @@ impl crate::target::GateErrors for Gates {
     }
 }
 
-fn duration_error(actual: Duration, limit: Duration) -> Error {
+pub(super) fn duration_error(actual: Duration, limit: Duration) -> Error {
     Error::DurationLimit { actual, limit }
 }

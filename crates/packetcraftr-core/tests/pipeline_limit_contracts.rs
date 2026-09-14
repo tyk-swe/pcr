@@ -6,7 +6,9 @@
 
 mod common;
 
-use common::{TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
+use common::{
+    CLIENT, SERVER, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame,
+};
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::{Error, Limits, Options, run};
 use packetcraftr_core::error::BoundaryError;
@@ -456,4 +458,201 @@ fn cancellation_stops_before_reading_input_and_is_not_a_timeout() {
         |_| panic!("cancelled collector was called"),
     );
     assert!(matches!(result, Err(Error::Cancelled(_))));
+}
+
+#[test]
+fn time_bounds_select_inclusive_endpoints_without_assuming_order() {
+    // The third frame regresses below the second: selection follows the
+    // timestamp value, never capture order.
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        udp_frame(
+            &registry,
+            epoch + Duration::new(1, 100_000_000),
+            CLIENT,
+            SERVER,
+            1,
+            9,
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::new(1, 500_000_000),
+            CLIENT,
+            SERVER,
+            2,
+            9,
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::new(1, 900_000_000),
+            CLIENT,
+            SERVER,
+            3,
+            9,
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::new(1, 250_000_000),
+            CLIENT,
+            SERVER,
+            4,
+            9,
+            b"",
+        ),
+    ];
+    let bounds = packetcraftr_core::frame::TimeBounds::new(
+        Some(epoch + Duration::new(1, 500_000_000)),
+        Some(epoch + Duration::new(1, 900_000_000)),
+    )
+    .expect("ordered bounds");
+    let mut capture = reader(&frames);
+    let mut matched = Vec::new();
+    let summary = run(
+        &mut capture,
+        registry,
+        &Options {
+            time_bounds: Some(bounds),
+            ..Options::default()
+        },
+        |record| {
+            matched.push(record.number);
+            Ok(())
+        },
+    )
+    .expect("bounded run succeeds");
+    assert_eq!(summary.frames_read, 4);
+    assert_eq!(summary.frames_matched, 2);
+    assert_eq!(matched, [2, 3]);
+}
+
+#[test]
+fn time_bounds_skipped_frames_still_count_against_read_limits() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(10),
+            CLIENT,
+            SERVER,
+            1,
+            9,
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(20),
+            CLIENT,
+            SERVER,
+            2,
+            9,
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(30),
+            CLIENT,
+            SERVER,
+            3,
+            9,
+            b"",
+        ),
+    ];
+    let bounds =
+        packetcraftr_core::frame::TimeBounds::new(Some(epoch + Duration::from_secs(100)), None)
+            .expect("open-ended bounds");
+    let mut capture = reader(&frames);
+    let summary = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options {
+            time_bounds: Some(bounds),
+            ..Options::default()
+        },
+        |_| panic!("out-of-bounds frames must not reach the sink"),
+    )
+    .expect("bounded run succeeds");
+    assert_eq!(summary.frames_read, 3);
+    assert_eq!(summary.frames_matched, 0);
+
+    // Read budgets charge skipped frames, so the window cannot dodge the
+    // aggregate input ceilings.
+    let mut capture = reader(&frames);
+    let result = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options {
+            time_bounds: Some(bounds),
+            limits: Limits {
+                max_frames: 2,
+                ..Limits::default()
+            },
+            ..Options::default()
+        },
+        |_| Ok(()),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn time_bounds_compose_with_the_display_filter() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            CLIENT,
+            SERVER,
+            1,
+            9,
+            b"",
+        ),
+        tcp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            client_tcp(100, 0, Tcp::SYN, 4_000),
+            b"",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(2),
+            CLIENT,
+            SERVER,
+            2,
+            9,
+            b"",
+        ),
+    ];
+    let filter = packetcraftr_core::filter::Filter::compile(
+        "udp",
+        &registry,
+        packetcraftr_core::filter::Options::default(),
+    )
+    .expect("display filter compiles");
+    let bounds =
+        packetcraftr_core::frame::TimeBounds::new(Some(epoch + Duration::from_secs(2)), None)
+            .expect("open-ended bounds");
+    let mut capture = reader(&frames);
+    let mut matched = Vec::new();
+    let summary = run(
+        &mut capture,
+        registry,
+        &Options {
+            filter: Some(&filter),
+            time_bounds: Some(bounds),
+            ..Options::default()
+        },
+        |record| {
+            matched.push(record.number);
+            Ok(())
+        },
+    )
+    .expect("bounded run succeeds");
+    assert_eq!(summary.frames_matched, 1);
+    assert_eq!(matched, [3]);
 }

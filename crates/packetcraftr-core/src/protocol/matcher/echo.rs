@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
-    field::FieldValue,
     matcher::{Match, ResponseMatcher},
     packet::Packet,
     protocol::BuiltinProtocol,
@@ -63,15 +62,13 @@ impl ResponseMatcher for EchoMatcher {
             {
                 return None;
             }
-            let Some(FieldValue::Bytes(request_body)) = request_layer.field("body") else {
-                return None;
-            };
-            let Some(FieldValue::Bytes(response_body)) = response_layer.field("body") else {
-                return None;
-            };
-            let request_identity = request_body.first_chunk::<4>()?;
-            if Some(request_identity) != response_body.first_chunk::<4>() {
-                return None;
+            // The typed echo identifier and sequence are the correlation
+            // identity; the variable rest of the echo body is not compared.
+            for field in ["identifier", "sequence"] {
+                let identity = request_layer.field(field).and_then(|v| v.as_u64())?;
+                if Some(identity) != response_layer.field(field).and_then(|v| v.as_u64()) {
+                    return None;
+                }
             }
         }
         Some(Match::new(100))

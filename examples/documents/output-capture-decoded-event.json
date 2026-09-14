@@ -1,0 +1,344 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "capture",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 0,
+  "result": {
+    "source_frame": 100,
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 1783555200,
+        "nanoseconds": 125000000
+      },
+      "captured_length": 46,
+      "original_length": 46,
+      "link_type": 1,
+      "bytes_hex": "aabbccddeeff112233445566080045000020000100004011f6c8c0000201c0000202d4313039000c0000deadbeef"
+    },
+    "decoded": {
+      "packet": {
+        "schema": "packetcraftr.packet/v2",
+        "layers": [
+          {
+            "protocol": "ethernet",
+            "fields": {
+              "destination": {
+                "type": "mac",
+                "value": [
+                  170,
+                  187,
+                  204,
+                  221,
+                  238,
+                  255
+                ]
+              },
+              "ether_type": {
+                "type": "unsigned",
+                "value": 2048
+              },
+              "source": {
+                "type": "mac",
+                "value": [
+                  17,
+                  34,
+                  51,
+                  68,
+                  85,
+                  102
+                ]
+              }
+            }
+          },
+          {
+            "protocol": "ipv4",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 63176
+              },
+              "destination": {
+                "type": "ipv4",
+                "value": "192.0.2.2"
+              },
+              "dont_fragment": {
+                "type": "bool",
+                "value": false
+              },
+              "dscp_ecn": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "fragment_offset": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "identification": {
+                "type": "unsigned",
+                "value": 1
+              },
+              "more_fragments": {
+                "type": "bool",
+                "value": false
+              },
+              "options": {
+                "type": "bytes",
+                "value": []
+              },
+              "protocol": {
+                "type": "unsigned",
+                "value": 17
+              },
+              "reserved_flag": {
+                "type": "bool",
+                "value": false
+              },
+              "source": {
+                "type": "ipv4",
+                "value": "192.0.2.1"
+              },
+              "total_length": {
+                "type": "unsigned",
+                "value": 32
+              },
+              "ttl": {
+                "type": "unsigned",
+                "value": 64
+              }
+            }
+          },
+          {
+            "protocol": "udp",
+            "fields": {
+              "checksum": {
+                "type": "unsigned",
+                "value": 0
+              },
+              "destination_port": {
+                "type": "unsigned",
+                "value": 12345
+              },
+              "length": {
+                "type": "unsigned",
+                "value": 12
+              },
+              "source_port": {
+                "type": "unsigned",
+                "value": 54321
+              }
+            }
+          },
+          {
+            "protocol": "raw",
+            "fields": {
+              "bytes": {
+                "type": "bytes",
+                "value": [
+                  222,
+                  173,
+                  190,
+                  239
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "layout": {
+        "layers": [
+          {
+            "index": 0,
+            "protocol": "ethernet",
+            "range": {
+              "start": 0,
+              "end": 14
+            },
+            "fields": [
+              {
+                "name": "destination",
+                "range": {
+                  "start": 0,
+                  "end": 6
+                }
+              },
+              {
+                "name": "source",
+                "range": {
+                  "start": 6,
+                  "end": 12
+                }
+              },
+              {
+                "name": "ether_type",
+                "range": {
+                  "start": 12,
+                  "end": 14
+                }
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "protocol": "ipv4",
+            "range": {
+              "start": 14,
+              "end": 34
+            },
+            "fields": [
+              {
+                "name": "dscp_ecn",
+                "range": {
+                  "start": 15,
+                  "end": 16
+                }
+              },
+              {
+                "name": "total_length",
+                "range": {
+                  "start": 16,
+                  "end": 18
+                }
+              },
+              {
+                "name": "identification",
+                "range": {
+                  "start": 18,
+                  "end": 20
+                }
+              },
+              {
+                "name": "reserved_flag",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "dont_fragment",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "more_fragments",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "fragment_offset",
+                "range": {
+                  "start": 20,
+                  "end": 22
+                }
+              },
+              {
+                "name": "ttl",
+                "range": {
+                  "start": 22,
+                  "end": 23
+                }
+              },
+              {
+                "name": "protocol",
+                "range": {
+                  "start": 23,
+                  "end": 24
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 24,
+                  "end": 26
+                }
+              },
+              {
+                "name": "source",
+                "range": {
+                  "start": 26,
+                  "end": 30
+                }
+              },
+              {
+                "name": "destination",
+                "range": {
+                  "start": 30,
+                  "end": 34
+                }
+              },
+              {
+                "name": "options",
+                "range": {
+                  "start": 34,
+                  "end": 34
+                }
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "protocol": "udp",
+            "range": {
+              "start": 34,
+              "end": 42
+            },
+            "fields": [
+              {
+                "name": "source_port",
+                "range": {
+                  "start": 34,
+                  "end": 36
+                }
+              },
+              {
+                "name": "destination_port",
+                "range": {
+                  "start": 36,
+                  "end": 38
+                }
+              },
+              {
+                "name": "length",
+                "range": {
+                  "start": 38,
+                  "end": 40
+                }
+              },
+              {
+                "name": "checksum",
+                "range": {
+                  "start": 40,
+                  "end": 42
+                }
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "protocol": "raw",
+            "range": {
+              "start": 42,
+              "end": 46
+            },
+            "fields": [
+              {
+                "name": "bytes",
+                "range": {
+                  "start": 42,
+                  "end": 46
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "diagnostics": []
+    }
+  },
+  "diagnostics": [],
+  "event": "frame"
+}

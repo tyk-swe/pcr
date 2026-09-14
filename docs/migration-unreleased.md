@@ -73,12 +73,31 @@ build records carry `packet_index` and the existing built-packet fields;
 completion carries `packets_built` and `bytes_built`. `expression::parse_value`
 exposes the existing bounded value grammar for callers authoring axes.
 
+`--axis` additionally accepts inclusive unsigned ranges `START..END[:STEP]`
+with decimal or `0x` endpoints, such as `0.ttl=1..64` or `0.ttl=1..64:8`.
+Ranges are checked against the packet ceiling before any packet materializes;
+reversed ranges, zero steps, and malformed spans are typed errors.
+
 Rust `scan::Request` and `scan::Probe` gain `udp_payload: bytes::Bytes`; add
 `udp_payload: bytes::Bytes::new()` to request/probe literals to retain empty
 datagrams. Request deserialization defaults missing payloads to empty.
 `scan::Probe` is now `Clone` rather than `Copy`, with shared payload storage.
 Payloads are bounded to `scan::MAX_UDP_PAYLOAD_BYTES` (65,507), included in the
 operation budget, and rejected when non-empty for TCP or ICMP.
+
+## Typed TCP options
+
+The `Tcp` layer's `options` field is now an ordered list of typed option
+objects (`packetcraftr_core::protocol::transport::TcpOption`) instead of
+`bytes::Bytes`. Standard options — EOL, NOP, MSS, window scale,
+SACK-permitted, SACK blocks, and timestamps — reflect as
+`{kind: N, member: …}` objects; unknown kinds, nonstandard lengths, and
+unparseable tails stay byte-exact as `Raw`/`Trailing` entries. Construction
+accepts typed objects (`options=[{kind=2,mss=1460}]`) or verbatim bytes
+(`options=hex("0204 05b4")`), which parse into the same typed form. Nested
+paths such as `tcp.options[0].mss` work in filters, projection, templates,
+and fuzz targets. Code that read `options.as_ref()` now iterates `options`
+variants instead.
 
 ## DNS transport selection
 
@@ -269,6 +288,15 @@ files are PCAPNG, use uncompressed byte thresholds, and finalize compression per
 file. Explicit ring retention reuses operation-owned handles and reports retired
 files; neither source count nor rotation increases the configured operation budget.
 
+`capture --dissect` adds an optional `decoded` object to NDJSON `frame` records —
+the same `decodedStack` (`packet`, `layout`, `diagnostics`) `read --dissect`
+publishes — beside the preserved `frame` bytes and metadata. `capture --field`
+streams `fields` rows on the capture stream under `--max-projection-bytes`, so
+the `capture` command joins `read`/`dissect` in the shared projection contract.
+Both are additive: consumers that ignore optional members and the `fields`
+event need no change. Decoded output requires text or NDJSON (`--write` to
+PCAPNG stays raw-only) and `--field` conflicts with `--dissect`.
+
 Scan requests use bounded `target::Selection` sets (hosts/CIDRs/exclusions), with
 `Limits::max_targets`, `max_in_flight`, and `Limits::max_prepared_bytes`. Raw scan
 executors expose `pipeline_capacity` and may implement `execute_pipeline`; the
@@ -276,6 +304,22 @@ base executor refuses unsupported windows instead of serializing them silently.
 `probe::PipelineEvent` carries confirmed sends, completions and bounded evidence.
 CLI executor delegation preserves this capability. Raw scan NDJSON adds
 `probe_sent`; failures may carry `error.scan` with confirmed pending wire.
+
+`scan::Summary`, `scan::Report`, and `connect::Statistics` gain `rtt`:
+confirmed sends, verdicts received inside their round, `lost = sent - received`,
+and min/avg/max over one sample per received probe. Rust literal constructors
+must supply `scan::Rtt::default()` or an accumulated value. The output/v5
+schema adds the corresponding `rtt` objects on scan summaries and
+`socket_stats`; absent duration fields mean no response produced a sample.
+
+`analysis::Summary` and `stats::Report` gain `interfaces`: the capture
+source's interface descriptions in global-ID order (empty for a PCAPNG
+source with none). `stats::Report` also gains `duration()`,
+`average_packet_size()`, `packet_rate()`, and `byte_rate()` derived
+accessors — `None` on empty match sets or zero spans — and the stats
+aggregate publishes them as `duration`, `average_packet_size`,
+`packets_per_second`, `bytes_per_second`, plus a required `interfaces`
+array on `statsResult`.
 
 `Request::udp_profiles` maps ports to validated `Arc<profile::UdpProfile>` values.
 `Probe` retains its selected profile, and `ProbeEvidence::application` reports
@@ -312,3 +356,86 @@ drop cancels unstarted calls; admitted calls retain their process-wide resource
 lease until worker and socket cleanup finish. Successful `Connection` values
 retain that lease until dropped. At most 16 calls/connections can retain admission.
 The workflow caps `Request::max_in_flight` accordingly and rejects UDP/ICMP use.
+
+## Offline epoch bounds
+
+`read`, `stats`, `expert`, `follow`, `tls`, `dns-read`, `http`, and `export`
+accept `--start-epoch EPOCH`/`--stop-epoch EPOCH` keeping only frames inside
+the inclusive window. Values are non-negative Unix seconds with an optional
+fraction of at most nine digits, compared at full `SystemTime` precision —
+`1.5000005` still selects correctly against a microsecond-resolution capture.
+Reversed bounds fail with `cli.reversed_time_bounds`; unsupported precision,
+including fractions finer than the host's `SystemTime` representation, is
+rejected rather than rounded. Frames whose records carry no timestamp are never
+kept while bounds are set, and frames skipped by bounds count toward
+`--max-frames`/`--max-bytes`. Bounds compose with `--filter` and do not assume
+capture timestamps are ordered.
+
+The Rust `analysis::Options` gains `time_bounds: Option<frame::TimeBounds>`;
+construct bounds with `TimeBounds::new(start, end)`, which rejects a start
+after the stop. Bounds apply at the same pipeline stage as the display filter:
+timestamped physical frames still advance IP reconstruction and stream indexing
+whether or not they are kept. Timestamp-less frames are skipped before that
+stateful processing when bounds are set. All frames consume read budgets;
+`analysis::Summary::bytes_read` reports the complete captured-byte input count.
+
+## Followed-direction files
+
+`follow --write DIR` writes each selected direction's payload to
+`DIR/TRANSPORT-INDEX-client.bin` and `DIR/TRANSPORT-INDEX-server.bin`,
+filtered by `--direction` and empty-filed when a direction carried no payload.
+Both files share `--max-application-output-bytes`. Destinations are never
+overwritten; publish failures attempt to roll back files the invocation already
+created, and report any cleanup failures and their paths.
+JSON and NDJSON reports carry `written: [{direction, path, bytes}]`.
+
+## Destination allowlists
+
+`policy::Policy` gains `allowed_destinations: Vec<DestinationConstraint>`,
+bounded by `MAX_DESTINATION_CONSTRAINTS`. Each entry is an exact IP address or
+a canonical CIDR network parsed by `DestinationConstraint::from_str`; network
+input must spell the masked network address. A non-empty list must contain
+every authorized destination at the target, packet-declared, route-visited,
+and final-wire stages; an empty list adds no constraint, and matching entries
+never substitute for the public-destination or other opt-ins. Denials surface
+as `policy::Error::DestinationNotAllowed` (`policy.destination_not_allowed`)
+carrying the refused destination and the rendered constraint set; malformed
+entries and an oversized list classify as `cli.live_target`. The CLI exposes
+the list as repeatable `--allow-destination ADDRESS[/PREFIX]` on every
+destination-bearing live command.
+
+## Send packet sets
+
+`send` expands `--axis` templates and repeats the set with `--repeat`/`--rate`
+instead of sending exactly one packet. `Client::send` is unchanged; new
+`send_set`, `send_set_with_events`, and `send_set_driven` entry points take
+`send::SetOptions` (`repeat`, `rate`, `max_template_packets`) and return
+`send::SetReport` — `sent: Vec<SentFrame>` records each carry one-based `pass`
+and expansion `index`, and `passes_completed` counts finished passes. The
+output/v5 `sendResult` replaces `frame`/`route` with a `frames` list plus
+`passes_completed`. Invalid repeat/rate values classify as `cli.send_limit`;
+the pacing ceiling is `send::MAX_SEND_DURATION`.
+
+## DNS question batches and reverse names
+
+`dns` accepts several `NAME` positionals plus repeatable `--reverse ADDRESS`
+(PTR questions derived by `dns::reverse_name` under `in-addr.arpa`/`ip6.arpa`)
+as one batch bounded by `dns::MAX_QUESTIONS`. `dns::run_batch` and
+`run_batch_with_events` take `&[Request]`, share the minimum
+`limits.max_duration` as a single `Deadline` across questions, and return
+`dns::BatchReport` whose `questions` carry `QuestionStatus` —
+`completed`/`failed`/`unattempted` — in input order. Single-question
+invocations keep the previous envelope and error semantics; batch aggregates
+add a `questions` array to `dnsResult`, and streamed batches end with a
+`complete` record carrying per-question statuses. `--transaction-id` is
+rejected for multi-question batches because identifiers are per question.
+
+## Generated documentation
+
+`packetcraftr documentation --directory DIR` writes `DIR/completions/` (Bash,
+Elvish, Fish, PowerShell, Zsh) and `DIR/man/` (one page per command), both
+generated from the finalized command definitions of the binary that runs it.
+The command produces files rather than a contract document: it ignores
+`--output` and reports failures on stderr with the `io.documentation`
+classification. Release archives now carry both trees, and the archive
+verifier requires a man page for every shipped subcommand.

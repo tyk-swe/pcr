@@ -134,6 +134,12 @@ impl packetcraftr::replay::Selector for FrameSelector {
     }
 }
 
+/// Evaluates a compiled filter against a dissection the caller already owns,
+/// so commands that decode a frame for output do not decode it again to filter.
+pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
+    filter.matches(context).map_err(cli_error)
+}
+
 /// Converts a filter compilation failure into the CLI error taxonomy.
 fn cli_error(error: packetcraftr_core::filter::Error) -> CliError {
     let remediation = match &error {

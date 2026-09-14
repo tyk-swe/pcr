@@ -73,11 +73,21 @@ pub(super) fn render_text(
         }
     }
     render_undecoded(result.undecoded.iter().map(|frame| (None, frame)))?;
+    let rtt = result.rtt;
     write_summary_line(format_args!(
         "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
         result.endpoints.len(),
         stats.packets_completed,
         stats.bytes
+    ))?;
+    write_summary_line(format_args!(
+        "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+        rtt.sent,
+        rtt.received,
+        rtt.lost,
+        optional_debug(rtt.min),
+        optional_debug(rtt.avg),
+        optional_debug(rtt.max),
     ))?;
     render_diagnostics_text(&diagnostics)
 }

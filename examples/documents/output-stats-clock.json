@@ -56,7 +56,21 @@
     "last_timestamp": {
       "unix_seconds": 101,
       "nanoseconds": 0
-    }
+    },
+    "duration": {
+      "secs": 11,
+      "nanos": 0
+    },
+    "average_packet_size": 40.0,
+    "packets_per_second": 0.2727272727272727,
+    "bytes_per_second": 10.909090909090908,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 228,
+        "snap_length": 65535
+      }
+    ]
   },
   "diagnostics": []
 }

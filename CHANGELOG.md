@@ -87,9 +87,118 @@ All notable changes to PacketcraftR are documented here. The format follows
   including EDNS and exact unknown RDATA. Core exposes bounded DNS record
   decoding shared by live queries, with typed failures for malformed or
   truncated messages and explicit message, record, name, and TXT limits.
+- `build --output pcap|pcapng` writes single packets and expanded template
+  sets to capture files through an explicit `--link-type`, validated against
+  the emitted bytes, with deterministic or supplied `--timestamp` values.
+  Generated captures read back through `read` and replay through providers.
+- `--axis` accepts inclusive unsigned ranges `START..END[:STEP]` with decimal
+  or `0x` endpoints alongside `[VALUES]` lists, checked against the packet
+  ceiling before any range materializes; reversed ranges, zero steps, and
+  malformed spans fail with typed errors.
+- `--payload-file LAYER.FIELD=PATH` fills an empty bytes-typed recipe field
+  from a file inside the packet input limit, keeping saved packet documents
+  self-contained.
+- NTPv3/v4 client, server, and broadcast messages decode and construct on
+  UDP/123, with typed signed poll/precision exponents, exact 64-bit
+  timestamps, four-byte reference identifiers, and preserved extension bytes.
+  Unsupported versions, control modes, and truncated inputs stay raw;
+  `--decode-as udp.port=PORT:ntp` overrides other ports.
+- ICMP/ICMPv6 expose typed body views — echo identifier/sequence/rest plus
+  family-specific pointer, MTU, and gateway fields — that read and write
+  through the preserved opaque body bytes, keeping malformed and unknown
+  wire content faithful.
+- TCP options type EOL, NOP, MSS, window scale, SACK-permitted/SACK blocks,
+  and timestamps in wire order. Unknown kinds, nonstandard lengths, and
+  unparseable tails stay byte-exact as raw or trailing entries, and typed
+  options are editable through expressions, filters, projection, templates,
+  and packet documents.
+- Scan reports round-trip statistics: `scan::Summary`/`Report` and the
+  TCP-connect `socket_stats` carry `rtt` — sent, received, and lost counts
+  plus min/avg/max over one sample per received probe — across aggregate
+  JSON, NDJSON `complete` records, and text output. ICMP echo correlation
+  now uses the typed identifier/sequence fields.
+- `stats` reports a compact capture summary: matched-span `duration`,
+  `average_packet_size`, `packets_per_second`, and `bytes_per_second`
+  derived from observed timestamp extremes (regressions cannot produce a
+  negative span; rates stay absent on zero spans), plus the capture's
+  declared `interfaces` with link type and snap length in frame-reference
+  ID order.
+- `expert` now surfaces capture-level evidence as findings:
+  `capture.frame_truncated` when a record's captured length is below its
+  wire length, and `capture.clock_regression` when a matched frame's
+  timestamp falls below the capture's high-water mark — both warnings
+  attributed to the frame that carried the evidence, with interface
+  context when the source declares it.
+- `read` and the analysis commands (`stats`, `expert`, `follow`, `tls`,
+  `dns-read`, `http`, `export`) accept `--start-epoch`/`--stop-epoch`
+  selecting an inclusive epoch-second window at exact sub-second precision;
+  reversed bounds and fractions past nanoseconds are rejected, frames without
+  timestamps are never kept, and skipped frames still count toward read limits.
+- `follow --write DIR` saves each selected direction's payload as
+  `TRANSPORT-INDEX-{client,server}.bin`, staged in DIR and published
+  atomically without overwriting existing files; both files share one
+  `--max-application-output-bytes` budget, and reports list published paths
+  under `written`.
+- Live commands accept repeatable `--allow-destination ADDRESS[/PREFIX]`
+  constraints restricting destinations to exact addresses or canonical CIDR
+  networks, enforced at target authorization, on packet-declared
+  route-bearing addresses, and on the destination the final wire bytes
+  actually carry; constraints only narrow permission, and denials report the
+  effective constraint set under `policy.destination_not_allowed`.
+- `send` accepts the same `--axis` template expansion as `build`/`exchange`
+  plus `--repeat N` (replays the whole expansion in order) and `--rate N`
+  (paces transmission starts to `N` packets per second); the checked
+  expansion-times-repetition total shares one packet/byte budget, pacing
+  schedules past the operation ceiling fail before transmission, and text,
+  hex, and raw formats emit each confirmed frame progressively so partial
+  progress survives later failures.
+- `dns` accepts multiple NAME positionals and repeatable `--reverse ADDRESS`,
+  deriving PTR questions under `in-addr.arpa`/`ip6.arpa` via the new
+  `dns::reverse_name`; `dns::run_batch`/`run_batch_with_events` execute a
+  bounded batch (up to `dns::MAX_QUESTIONS`) under one shared deadline and
+  report each question `completed`, `failed`, or `unattempted` in input order.
+- `capture` accepts `--dissect` and repeatable `--field PATH` on text and
+  NDJSON output. `--dissect` decodes each emitted frame once and publishes its
+  layer stack and decode diagnostics — NDJSON `frame` records gain a `decoded`
+  object beside the preserved captured bytes and interface metadata, while
+  text prints the layer list. `--field` streams bounded `fields` rows per
+  matched frame under `--max-projection-bytes`. Decoding shares the
+  `--filter`/`--decode-as` registry, a frame is decoded at most once across
+  selection and emission, and decoded state never accumulates across frames.
+- `packetcraftr documentation --directory DIR` generates shell completions
+  (`completions/`: Bash, Elvish, Fish, PowerShell, Zsh) and man pages (`man/`:
+  one per command) from the finalized command definitions; release archives
+  package both trees and the archive verifier requires them.
+- Linux Arm64 (`aarch64-unknown-linux-gnu`) release archives join the matrix
+  for both `all-features` and `pcap-free` variants, built and smoke-tested on
+  an arm64 runner with the same linkage, archive-verification, checksum, and
+  attestation checks as the existing targets.
+- Runnable library examples in their owning crates:
+  `packetcraftr-core`'s `build_decode_filter` and `capture_analysis` (offline
+  build/dissect/filter plus the analysis pipeline over an in-memory capture),
+  and `packetcraftr`'s `client_composition` (explicit destination allowlist,
+  finite operation budgets, and local providers — no live traffic). CI runs
+  them under the portable profile.
 
 ### Changed
 
+- **Breaking:** `policy::Policy` gains an `allowed_destinations` constraint
+  list bounded by `MAX_DESTINATION_CONSTRAINTS`; the new
+  `policy::DestinationConstraint` type parses exact addresses and canonical
+  CIDR networks.
+
+- **Breaking:** `send` aggregates results into a `frames` list with per-frame
+  `pass`/`index` metadata plus `passes_completed`, replacing the single-frame
+  `frame`/`route` result; `send::Client::send` gains set-sending entry points
+  (`send_set`, `send_set_with_events`, `send_set_driven`) over
+  `send::SetOptions`/`send::SetReport`.
+- **Breaking:** `analysis::Options` gains a `time_bounds` field; the new
+  `frame::TimeBounds` type holds inclusive `SystemTime` bounds compared at
+  full precision during frame selection.
+- **Breaking:** the TCP `options` layer field is now an ordered list of typed
+  option objects instead of a byte string; `options=hex("…")` byte input still
+  parses into the typed form. `packetcraftr.packet/v2` documents and machine
+  output reflect the new shape.
 - **Breaking:** `Template::axis` accumulates Cartesian axes; `expansion_len`
   returns a checked result. DNS `Request::transport: TransportMode` replaces
   `tcp_fallback`; unknown serialized request fields are rejected. Scan requests
@@ -165,6 +274,29 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Capture-time bounds skip timestamp-less records without losing input-budget
+  accounting; stream projections use the complete frame and byte totals.
+  Timestamp parsing rejects fractions the host cannot represent exactly.
+- TCP option parsing stops at EOL and preserves the remaining bytes as opaque
+  padding; construction checks the 40-byte wire ceiling before copying data.
+- DNS batches retain pacing between questions and reject mixed server identities
+  before authorization. Send sets validate packet counts and pacing before CLI
+  discovery and honor cancellation supplied by an injected clock.
+- Capture projections reject unavailable stream indices; generated captures
+  validate emitted root headers, and output cleanup preserves secondary errors.
+- Empty ICMP `rest` fields accept payload files, list axes retain whitespace
+  compatibility, passive planning validates allowlist limits, and clock-regression
+  findings retain interface context.
+
+- DNS batches authorize the combined UDP and TCP traffic budget before discovery,
+  stop on output failure, and include confirmed traffic from failed questions in
+  their totals, including deadline and cancellation failures.
+- `read --field` validates and applies epoch bounds with and without stream
+  fields, preserving source frame numbers and input-budget accounting.
+- `follow --write` synchronizes every staged file before publishing any
+  destination, so synchronization failures leave retries unobstructed.
+- `build` finalizes initialized capture compression on failure, preserving frames
+  already written even when a later packet cannot be encoded.
 - IPv6 fragment reassembly retains the offset-zero fragment's unfragmentable
   prefix and Fragment Next Header and accepts the per-fragment variation
   RFC 8200 §4.5 permits, including when the offset-zero fragment arrives last.

@@ -13,6 +13,7 @@ use crate::probe::test_fixtures::{
 use crate::progress::Runtime;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
+    icmp::Icmpv4,
     network::{Ipv4, Ipv6},
     transport::Tcp,
 };
@@ -874,4 +875,269 @@ fn oversized_cidrs_are_refused_before_hostname_resolution_or_probe_execution() {
     );
     assert!(authorizer.calls.is_empty());
     assert!(executor.batches.is_empty());
+}
+
+fn icmp_scan_request(target: Target, attempts: u32, timeout: Duration) -> Request {
+    Request {
+        transport: Transport::Icmp,
+        ports: Vec::new(),
+        attempts,
+        timeout,
+        ..tcp_scan_request(target)
+    }
+}
+
+/// Returns `copies` correlated ICMP echo replies per probe, each carrying the
+/// probe's identity and the scripted latency.
+struct EchoReplyExecutor {
+    inner: TimeoutExecutor,
+    latency: Duration,
+    copies: usize,
+}
+
+impl Executor<Batch> for EchoReplyExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let mut execution = self.inner.execute(batch)?;
+        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+            (batch.probe.address, batch.probe.endpoint)
+        else {
+            return Ok(execution);
+        };
+        let Some(reply) = execution
+            .sent
+            .first()
+            .and_then(|sent| echo_reply(sent.built().packet.get::<Icmpv4>()?.body.clone(), remote))
+        else {
+            return Ok(execution);
+        };
+        for _ in 0..self.copies {
+            execution.responses.push(crate::exchange::Response {
+                request_index: 0,
+                response: decoded(reply.clone(), Vec::new()),
+                latency: self.latency,
+            });
+        }
+        Ok(execution)
+    }
+}
+
+#[test]
+fn scan_repeated_icmp_rounds_report_sent_received_lost_and_rtt() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let request = icmp_scan_request(Target::Address(address), 4, Duration::from_millis(10));
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut EchoReplyExecutor {
+            inner: TimeoutExecutor::default(),
+            latency: Duration::from_micros(500),
+            copies: 1,
+        },
+        &mut NoopClock,
+    )
+    .expect("responding ICMP scan completes");
+
+    assert_eq!(report.rtt.sent, 4);
+    assert_eq!(report.rtt.received, 4);
+    assert_eq!(report.rtt.lost, 0);
+    assert_eq!(report.rtt.min, Some(Duration::from_micros(500)));
+    assert_eq!(report.rtt.avg, Some(Duration::from_micros(500)));
+    assert_eq!(report.rtt.max, Some(Duration::from_micros(500)));
+    let endpoint = report.endpoints.first().expect("one probed endpoint");
+    assert_eq!(endpoint.classification, Classification::Open);
+    assert!(endpoint.probes.iter().all(|evidence| {
+        evidence.status == ProbeStatus::Response
+            && evidence.latency == Some(Duration::from_micros(500))
+    }));
+}
+
+#[test]
+fn scan_mixed_icmp_rounds_count_loss_and_sample_only_received() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let request = icmp_scan_request(Target::Address(address), 4, Duration::from_millis(10));
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut EveryOtherEchoExecutor {
+            inner: TimeoutExecutor::default(),
+        },
+        &mut NoopClock,
+    )
+    .expect("partially answered ICMP scan completes");
+
+    assert_eq!(report.rtt.sent, 4);
+    assert_eq!(report.rtt.received, 2);
+    assert_eq!(report.rtt.lost, 2);
+    assert_eq!(report.rtt.min, Some(Duration::from_micros(250)));
+    assert_eq!(report.rtt.avg, Some(Duration::from_micros(375)));
+    assert_eq!(report.rtt.max, Some(Duration::from_micros(500)));
+}
+
+/// Answers only even-sequence probes, with a latency that grows per answer.
+struct EveryOtherEchoExecutor {
+    inner: TimeoutExecutor,
+}
+
+impl Executor<Batch> for EveryOtherEchoExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let mut execution = self.inner.execute(batch)?;
+        if batch.probe.sequence % 2 == 1 {
+            return Ok(execution);
+        }
+        let latency = Duration::from_micros(250 + 250 * (batch.probe.sequence / 2));
+        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+            (batch.probe.address, batch.probe.endpoint)
+        else {
+            return Ok(execution);
+        };
+        let Some(reply) = execution
+            .sent
+            .first()
+            .and_then(|sent| echo_reply(sent.built().packet.get::<Icmpv4>()?.body.clone(), remote))
+        else {
+            return Ok(execution);
+        };
+        execution.responses.push(crate::exchange::Response {
+            request_index: 0,
+            response: decoded(reply, Vec::new()),
+            latency,
+        });
+        Ok(execution)
+    }
+}
+
+/// Builds the echo reply matching one sent probe: same identity body, type 0,
+/// and the probed address answered to the fixture source.
+fn echo_reply(body: bytes::Bytes, remote: Ipv4Addr) -> Option<Packet> {
+    let mut reply = Packet::new();
+    reply
+        .push(Ipv4 {
+            source: remote,
+            destination: Ipv4Addr::new(10, 0, 0, 1),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4 {
+            icmp_type: 0,
+            body,
+            ..Icmpv4::default()
+        });
+    Some(reply)
+}
+
+#[test]
+fn scan_all_timeout_rounds_report_total_loss_without_rtt_samples() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let request = icmp_scan_request(Target::Address(address), 3, Duration::from_millis(10));
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TimeoutExecutor::default(),
+        &mut NoopClock,
+    )
+    .expect("silent ICMP scan completes");
+
+    assert_eq!(report.rtt.sent, 3);
+    assert_eq!(report.rtt.received, 0);
+    assert_eq!(report.rtt.lost, 3);
+    assert_eq!(report.rtt.min, None);
+    assert_eq!(report.rtt.avg, None);
+    assert_eq!(report.rtt.max, None);
+}
+
+#[test]
+fn scan_duplicate_replies_contribute_a_single_rtt_sample() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let request = icmp_scan_request(Target::Address(address), 1, Duration::from_millis(10));
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut EchoReplyExecutor {
+            inner: TimeoutExecutor::default(),
+            latency: Duration::from_micros(500),
+            copies: 3,
+        },
+        &mut NoopClock,
+    )
+    .expect("duplicated replies still complete");
+
+    assert_eq!(report.rtt.sent, 1);
+    assert_eq!(report.rtt.received, 1);
+    assert_eq!(report.rtt.lost, 0);
+    assert_eq!(report.rtt.avg, Some(Duration::from_micros(500)));
+}
+
+/// Replies inside the round window with a stale identity, the way a reply to
+/// an earlier probe or another operation's probe would arrive.
+struct StaleEchoExecutor {
+    inner: TimeoutExecutor,
+}
+
+impl Executor<Batch> for StaleEchoExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+        let mut execution = self.inner.execute(batch)?;
+        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+            (batch.probe.address, batch.probe.endpoint)
+        else {
+            return Ok(execution);
+        };
+        let Some(mut body) = execution
+            .sent
+            .first()
+            .and_then(|sent| sent.built().packet.get::<Icmpv4>())
+            .map(|icmp| icmp.body.to_vec())
+        else {
+            return Ok(execution);
+        };
+        body[3] ^= 0xff;
+        if let Some(reply) = echo_reply(bytes::Bytes::from(body), remote) {
+            execution.responses.push(crate::exchange::Response {
+                request_index: 0,
+                response: decoded(reply, Vec::new()),
+                latency: Duration::from_micros(500),
+            });
+        }
+        Ok(execution)
+    }
+}
+
+#[test]
+fn scan_replies_with_a_stale_identity_count_as_lost_not_received() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let request = icmp_scan_request(Target::Address(address), 2, Duration::from_millis(10));
+    let report = run(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut StaleEchoExecutor {
+            inner: TimeoutExecutor::default(),
+        },
+        &mut NoopClock,
+    )
+    .expect("stale replies still let the scan complete");
+
+    let endpoint = report.endpoints.first().expect("one probed endpoint");
+    assert!(
+        endpoint
+            .probes
+            .iter()
+            .all(|probe| probe.status == ProbeStatus::Timeout)
+    );
+    assert_eq!(report.rtt.sent, 2);
+    assert_eq!(report.rtt.received, 0);
+    assert_eq!(report.rtt.lost, 2);
+    assert_eq!(report.rtt.min, None);
 }

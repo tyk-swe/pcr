@@ -5,7 +5,7 @@ use super::files::Files;
 use crate::{
     command_options::Compression,
     errors::CliError,
-    filtering::FrameSelector,
+    filtering::{FrameSelector, matches_decoded},
     rendering::{
         StreamEncoder, captured_frame_text, emit_aggregate_with_stats, render_diagnostics_stderr,
         render_diagnostics_text, write_plain_line, write_stdout_line, write_summary_line,
@@ -20,16 +20,115 @@ use packetcraftr_cli::output::{
     contract::{Command, Format},
 };
 use packetcraftr_core::{
+    self as core,
     analysis::pcap::{self, compression},
+    decode::DecodedPacket,
     error::{BoundaryError, Classified},
+    frame::Frame,
+    registry::Registry,
 };
 use packetcraftr_netio::capture::{Provider, group};
+use std::cell::RefCell;
 use std::io;
+use std::sync::Arc;
+
+/// Shared per-frame decoding for `--filter`, `--dissect`, and `--field`.
+/// Selection decodes a kept frame once and parks it so emission republishes
+/// the same dissection; decoded state never outlives one frame.
+pub(super) struct Decoding {
+    decoder: core::decode::Dissector,
+    filter: Option<core::filter::Filter>,
+    max_packet_size: usize,
+    parked: RefCell<Option<(u64, DecodedPacket)>>,
+}
+
+impl Decoding {
+    /// Builds the shared decoding state, or `None` when neither `--dissect`
+    /// nor `--field` asked for decoded output. `parked` starts empty.
+    pub(super) fn prepare(
+        dissect: bool,
+        projector: bool,
+        filter: Option<&str>,
+        registry: &Arc<Registry>,
+        snap_length: usize,
+    ) -> Result<Option<Self>, CliError> {
+        if !dissect && !projector {
+            return Ok(None);
+        }
+        let filter = filter
+            .map(|source| {
+                crate::filtering::compile(
+                    source,
+                    registry,
+                    crate::filtering::Capabilities::frames_only(),
+                )
+            })
+            .transpose()?;
+        Ok(Some(Self {
+            decoder: core::decode::Dissector::new(Arc::clone(registry)),
+            filter,
+            max_packet_size: snap_length,
+            parked: RefCell::new(None),
+        }))
+    }
+
+    fn decode(&self, frame: &Frame) -> Result<DecodedPacket, CliError> {
+        self.decoder
+            .decode(
+                frame.clone(),
+                core::decode::Options {
+                    max_packet_size: self.max_packet_size,
+                    ..core::decode::Options::default()
+                },
+            )
+            .map_err(CliError::classified)
+    }
+
+    /// The filter half of frame selection, run by the capture admission
+    /// callback; a kept frame's dissection is parked for the emit callback.
+    pub(super) fn select(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
+        let decoded = self.decode(frame)?;
+        let keep = match &self.filter {
+            Some(filter) => matches_decoded(
+                filter,
+                &core::filter::Context {
+                    decoded: &decoded,
+                    derived: &[],
+                    number: source_frame,
+                    tcp_stream: None,
+                    udp_stream: None,
+                },
+            )?,
+            None => true,
+        };
+        if keep {
+            self.parked.replace(Some((source_frame, decoded)));
+        }
+        Ok(keep)
+    }
+
+    /// Reuses the dissection `select` parked for this frame, decoding only
+    /// when no selection ran for it (the no-filter case).
+    pub(super) fn take_or_decode(
+        &self,
+        source_frame: u64,
+        frame: &Frame,
+    ) -> Result<DecodedPacket, CliError> {
+        if let Some((number, decoded)) = self.parked.take()
+            && number == source_frame
+        {
+            return Ok(decoded);
+        }
+        self.decode(frame)
+    }
+}
 
 pub(super) struct Rendering<'a> {
     pub(super) format: Format,
     pub(super) compression: Compression,
     pub(super) selector: Option<FrameSelector>,
+    pub(super) decoding: Option<Decoding>,
+    pub(super) projector: Option<super::super::projection::Projector>,
     pub(super) files: Option<Files>,
     pub(super) stream: &'a StreamEncoder,
 }
@@ -52,6 +151,11 @@ pub(super) fn run<P: Provider>(
         request,
         options,
         |number, frame| {
+            if let Some(decoding) = &rendering.decoding {
+                return decoding
+                    .select(number, frame)
+                    .map_err(CliError::into_boundary_error);
+            }
             rendering
                 .selector
                 .as_ref()
@@ -102,34 +206,15 @@ pub(super) fn run<P: Provider>(
                 if control == Control::StopBefore {
                     return Ok(control);
                 }
-                let emitted = match format {
-                    Format::Text => output::frame::Captured::try_from_frame(frame)
-                        .map_err(CliError::classified)
-                        .and_then(|frame| {
-                            write_stdout_line(format_args!(
-                                "{source_frame}: {}",
-                                captured_frame_text(&frame)
-                            ))
-                        }),
-                    Format::Hex => output::frame::Captured::try_from_frame(frame)
-                        .map_err(CliError::classified)
-                        .and_then(|frame| write_plain_line(format_args!("{}", frame.bytes_hex()))),
-                    Format::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
-                        .map_err(CliError::classified)
-                        .and_then(|event| {
-                            rendering
-                                .stream
-                                .emit_data(event, Vec::new())
-                                .map_err(Into::into)
-                        }),
-                    Format::Json => Ok(()),
-                    Format::Pcap | Format::PcapNg => writer
-                        .as_mut()
-                        .expect("writer initialized before frames")
-                        .write_frame(&frame)
-                        .map_err(CliError::classified),
-                    _ => unreachable!("format checked before activation"),
-                };
+                let emitted = emit_frame(
+                    rendering.decoding.as_ref(),
+                    rendering.projector.as_mut(),
+                    rendering.stream,
+                    format,
+                    &mut writer,
+                    source_frame,
+                    frame,
+                );
                 emitted.map_err(CliError::into_boundary_error)?;
                 Ok(control)
             }
@@ -177,6 +262,24 @@ pub(super) fn run<P: Provider>(
             stats: report.stats,
         }));
     }
+    // A projection that never matched a frame still owes its text header; the
+    // NDJSON terminal is the capture summary, never a second complete record.
+    if format == Format::Text
+        && let Some(projector) = rendering.projector.take()
+    {
+        projector
+            .finish(
+                report.frames_delivered,
+                report.stats.bytes,
+                rendering.stream,
+            )
+            .map_err(|error| {
+                error.with_capture(output::capture::Snapshot {
+                    summary: summary.clone(),
+                    stats: report.stats.clone(),
+                })
+            })?;
+    }
     render_complete(
         format,
         &summary,
@@ -190,6 +293,79 @@ pub(super) fn run<P: Provider>(
             stats: report.stats,
         })
     })
+}
+
+/// Publishes one matched frame. Decoded output reuses the dissection the
+/// admission callback parked, projections stream as bounded `fields` records,
+/// and every sink error propagates so capture cleanup still runs.
+fn emit_frame(
+    decoding: Option<&Decoding>,
+    projector: Option<&mut super::super::projection::Projector>,
+    stream: &StreamEncoder,
+    format: Format,
+    writer: &mut Option<pcap::Writer<compression::Output<io::Stdout>>>,
+    source_frame: u64,
+    frame: Frame,
+) -> Result<(), CliError> {
+    if let Some(decoding) = decoding {
+        let decoded = decoding.take_or_decode(source_frame, &frame)?;
+        if let Some(projector) = projector {
+            let values = projector
+                .projection
+                .values(
+                    &core::filter::Context {
+                        decoded: &decoded,
+                        derived: &[],
+                        number: source_frame,
+                        tcp_stream: None,
+                        udp_stream: None,
+                    },
+                    projector.remaining(),
+                )
+                .map_err(CliError::classified)?;
+            return projector.emit(source_frame, values, stream);
+        }
+        return match format {
+            Format::Text => {
+                // Only the text rendering needs a stack here; the NDJSON event
+                // builds its own inside `try_from_decoded`.
+                let stack = output::frame::Stack::from_decoded(&decoded);
+                let frame =
+                    output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
+                let source_frame = source_frame.try_into().map_err(CliError::classified)?;
+                super::super::read::rendering::render_frame_text(source_frame, &frame, Some(&stack))
+            }
+            Format::Ndjson => {
+                output::capture::Event::try_from_decoded(source_frame, frame, &decoded)
+                    .map_err(CliError::classified)
+                    .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into))
+            }
+            _ => unreachable!("decoded output requires text or NDJSON"),
+        };
+    }
+    match format {
+        Format::Text => output::frame::Captured::try_from_frame(frame)
+            .map_err(CliError::classified)
+            .and_then(|frame| {
+                write_stdout_line(format_args!(
+                    "{source_frame}: {}",
+                    captured_frame_text(&frame)
+                ))
+            }),
+        Format::Hex => output::frame::Captured::try_from_frame(frame)
+            .map_err(CliError::classified)
+            .and_then(|frame| write_plain_line(format_args!("{}", frame.bytes_hex()))),
+        Format::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
+            .map_err(CliError::classified)
+            .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),
+        Format::Json => Ok(()),
+        Format::Pcap | Format::PcapNg => writer
+            .as_mut()
+            .expect("writer initialized before frames")
+            .write_frame(&frame)
+            .map_err(CliError::classified),
+        _ => unreachable!("format checked before activation"),
+    }
 }
 fn render_complete(
     format: Format,
@@ -365,6 +541,8 @@ mod tests {
                 format: Format::Ndjson,
                 compression: Compression::None,
                 selector: None,
+                decoding: None,
+                projector: None,
                 files: None,
                 stream: &publisher,
             },
@@ -415,6 +593,8 @@ mod tests {
                 format: Format::Ndjson,
                 compression: Compression::None,
                 selector: None,
+                decoding: None,
+                projector: None,
                 files: Some(files),
                 stream: &publisher,
             },
@@ -439,5 +619,320 @@ mod tests {
         assert_eq!(reader.next_frame().unwrap().unwrap().interface, Some(0));
         assert_eq!(reader.next_frame().unwrap().unwrap().interface, Some(1));
         assert!(reader.next_frame().unwrap().is_none());
+    }
+
+    /// A single-source session delivering caller-chosen frame bytes.
+    fn single_session(
+        link_type: LinkType,
+        frames: Vec<Vec<u8>>,
+    ) -> (Provider, group::Request, Vec<Arc<AtomicUsize>>) {
+        let interface = Id {
+            index: 7,
+            name: "fixture0".to_owned(),
+        };
+        let counter = Arc::new(AtomicUsize::new(0));
+        let session = Session {
+            metadata: native::Metadata {
+                interface: interface.clone(),
+                link_type,
+                snap_length: 256,
+            },
+            frames: frames
+                .into_iter()
+                .map(|bytes| {
+                    native::Captured::without_ingress_time(
+                        Frame::new(UNIX_EPOCH, link_type, bytes).unwrap(),
+                    )
+                })
+                .collect(),
+            stopped: counter.clone(),
+            failed: false,
+        };
+        (
+            Provider {
+                captures: Mutex::new(VecDeque::from([session])),
+            },
+            group::Request {
+                interfaces: vec![interface],
+                limits: native::Limits {
+                    max_frames: 8,
+                    max_bytes: 4096,
+                    snap_length: 256,
+                    ..Default::default()
+                },
+                filter: None,
+                promiscuous: false,
+            },
+            vec![counter],
+        )
+    }
+
+    /// Ethernet/IPv4/UDP with a verified header checksum and four payload bytes.
+    fn ipv4_udp_frame() -> Vec<u8> {
+        vec![
+            0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x08, 0x00,
+            0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00, 0x40, 0x11, 0xf6, 0xc8, 0xc0, 0x00,
+            0x02, 0x01, 0xc0, 0x00, 0x02, 0x02, 0xd4, 0x31, 0x30, 0x39, 0x00, 0x0c, 0x00, 0x00,
+            0xde, 0xad, 0xbe, 0xef,
+        ]
+    }
+
+    fn registry() -> Arc<packetcraftr_core::registry::Registry> {
+        packetcraftr_core::protocol::builtin::registry()
+    }
+
+    fn dissecting() -> Option<Decoding> {
+        Decoding::prepare(true, false, None, &registry(), 256).unwrap()
+    }
+
+    #[test]
+    fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
+        let mut bytes = ipv4_udp_frame();
+        let truncated: Vec<u8> = bytes[..26].to_vec();
+        // An unknown ethertype keeps a valid Ethernet header over raw payload.
+        bytes[12] = 0x88;
+        bytes[13] = 0xb5;
+        let (provider, request, stopped) =
+            single_session(LinkType::ETHERNET, vec![ipv4_udp_frame(), truncated, bytes]);
+        let (publisher, buffer) = stream(Command::Capture);
+        run(
+            &provider,
+            &request,
+            options(3),
+            Rendering {
+                format: Format::Ndjson,
+                compression: Compression::None,
+                selector: None,
+                decoding: dissecting(),
+                projector: None,
+                files: None,
+                stream: &publisher,
+            },
+        )
+        .unwrap();
+        let records = buffer.records();
+        assert_eq!(records.len(), 4);
+        let validator = crate::test_support::schema_validator();
+        for record in &records {
+            assert!(validator.is_valid(record), "{record}");
+        }
+        let valid = &records[0]["result"];
+        let layers: Vec<_> = valid["decoded"]["packet"]["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|layer| layer["protocol"].as_str().unwrap())
+            .collect();
+        assert_eq!(layers, ["ethernet", "ipv4", "udp", "raw"]);
+        // Captured bytes and interface metadata survive beside the dissection.
+        assert_eq!(
+            valid["frame"]["bytes_hex"].as_str().unwrap(),
+            "aabbccddeeff112233445566080045000020000100004011f6c8c0000201c0000202d4313039000c0000deadbeef"
+        );
+        assert_eq!(valid["frame"]["interface"], 0);
+        assert!(
+            valid["decoded"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        // Truncation surfaces as decode diagnostics, not a dropped frame.
+        let truncated = &records[1]["result"];
+        assert!(
+            !truncated["decoded"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(truncated["frame"]["captured_length"], 26);
+        // Unknown protocol payloads still dissect to their known layers.
+        let unknown = &records[2]["result"];
+        let layers: Vec<_> = unknown["decoded"]["packet"]["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|layer| layer["protocol"].as_str().unwrap())
+            .collect();
+        assert_eq!(layers.first(), Some(&"ethernet"));
+        assert!(
+            stopped
+                .iter()
+                .all(|count| count.load(Ordering::SeqCst) == 1)
+        );
+    }
+
+    #[test]
+    fn projection_streams_bounded_fields_records() {
+        let (provider, request, stopped) =
+            single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
+        let (publisher, buffer) = stream(Command::Capture);
+        let projector = super::super::super::projection::Projector::prepare(
+            &["frame.len".to_owned(), "ipv4.destination".to_owned()],
+            4096,
+            &registry(),
+            Command::Capture,
+            Format::Ndjson,
+        )
+        .unwrap();
+        run(
+            &provider,
+            &request,
+            options(1),
+            Rendering {
+                format: Format::Ndjson,
+                compression: Compression::None,
+                selector: None,
+                decoding: Decoding::prepare(false, true, None, &registry(), 256).unwrap(),
+                projector,
+                files: None,
+                stream: &publisher,
+            },
+        )
+        .unwrap();
+        let records = buffer.records();
+        assert_eq!(records.len(), 2);
+        let row = &records[0];
+        assert_eq!(row["event"], "fields");
+        assert_eq!(row["result"]["source_frame"], 1);
+        assert_eq!(
+            row["result"]["columns"],
+            serde_json::json!(["frame.len", "ipv4.destination"])
+        );
+        assert_eq!(
+            row["result"]["values"],
+            serde_json::json!([46, "192.0.2.2"])
+        );
+        assert_eq!(records[1]["event"], "complete");
+        assert_eq!(records[1]["result"]["frames_delivered"], 1);
+        let validator = crate::test_support::schema_validator();
+        for record in &records {
+            assert!(validator.is_valid(record), "{record}");
+        }
+        assert!(
+            stopped
+                .iter()
+                .all(|count| count.load(Ordering::SeqCst) == 1)
+        );
+    }
+
+    #[test]
+    fn projection_exhaustion_stops_capture_and_retains_evidence() {
+        let (provider, request, stopped) =
+            single_session(LinkType::ETHERNET, vec![ipv4_udp_frame(), ipv4_udp_frame()]);
+        let (publisher, buffer) = stream(Command::Capture);
+        let projector = super::super::super::projection::Projector::prepare(
+            &["frame.len".to_owned(), "ipv4.destination".to_owned()],
+            16,
+            &registry(),
+            Command::Capture,
+            Format::Ndjson,
+        )
+        .unwrap();
+        let error = run(
+            &provider,
+            &request,
+            options(2),
+            Rendering {
+                format: Format::Ndjson,
+                compression: Compression::None,
+                selector: None,
+                decoding: Decoding::prepare(false, true, None, &registry(), 256).unwrap(),
+                projector,
+                files: None,
+                stream: &publisher,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.classification.code, "policy.projection_limit");
+        let value = serde_json::to_value(error.output_error()).unwrap();
+        assert_eq!(value["capture"]["summary"]["frames_delivered"], 1);
+        assert!(
+            stopped
+                .iter()
+                .all(|count| count.load(Ordering::SeqCst) == 1)
+        );
+        drop(buffer);
+    }
+
+    #[test]
+    fn sink_failure_stops_capture_and_shuts_sources_down() {
+        struct Broken;
+        impl io::Write for Broken {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("fixture sink failure"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let (provider, request, stopped) =
+            single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
+        let publisher = StreamEncoder::new(Command::Capture, Broken);
+        let error = run(
+            &provider,
+            &request,
+            options(1),
+            Rendering {
+                format: Format::Ndjson,
+                compression: Compression::None,
+                selector: None,
+                decoding: dissecting(),
+                projector: None,
+                files: None,
+                stream: &publisher,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.classification.code, "io.stdout");
+        let value = serde_json::to_value(error.output_error()).unwrap();
+        assert_eq!(value["capture"]["summary"]["frames_delivered"], 1);
+        assert!(
+            stopped
+                .iter()
+                .all(|count| count.load(Ordering::SeqCst) == 1)
+        );
+    }
+
+    #[test]
+    fn filtered_decoding_parks_one_dissection_per_emission() {
+        let (provider, request, stopped) =
+            single_session(LinkType::ETHERNET, vec![ipv4_udp_frame(), vec![0u8; 8]]);
+        let (publisher, buffer) = stream(Command::Capture);
+        let decoding = Decoding::prepare(
+            true,
+            false,
+            Some("ipv4.destination == 192.0.2.2"),
+            &registry(),
+            256,
+        )
+        .unwrap();
+        run(
+            &provider,
+            &request,
+            options(2),
+            Rendering {
+                format: Format::Ndjson,
+                compression: Compression::None,
+                selector: None,
+                decoding,
+                projector: None,
+                files: None,
+                stream: &publisher,
+            },
+        )
+        .unwrap();
+        let records = buffer.records();
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0]["result"]["source_frame"], 1);
+        assert_eq!(
+            records[0]["result"]["decoded"]["packet"]["layers"][1]["protocol"],
+            "ipv4"
+        );
+        assert_eq!(records[1]["result"]["sources"][0]["matched_frames"], 1);
+        assert!(
+            stopped
+                .iter()
+                .all(|count| count.load(Ordering::SeqCst) == 1)
+        );
     }
 }

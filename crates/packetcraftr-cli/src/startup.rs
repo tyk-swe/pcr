@@ -21,6 +21,7 @@ use super::rendering::{
     StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     stdout_stream, terminal_document, write_unattributed_error,
 };
+use crate::commands;
 
 pub(crate) fn run() -> ExitCode {
     let context = from_env();
@@ -33,13 +34,27 @@ pub(crate) fn run() -> ExitCode {
         Err(error) => return parse_error_exit(&context, &error),
     };
     cli.color.write_global();
+    // Documentation generates files rather than contract output, so it has no
+    // command kind; dispatch it before the stream setup that requires one.
+    if let commands::Command::Documentation(arguments) = &cli.command {
+        return match commands::documentation::run(arguments) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                let _ = emit_stderr_error(&error);
+                ExitCode::from(error.exit_code())
+            }
+        };
+    }
     let format = cli.format;
     if matches!(
         format,
         output::contract::Format::Raw
             | output::contract::Format::Pcap
             | output::contract::Format::PcapNg
-    ) && cli.command.kind().formats().contains(&format)
+    ) && cli
+        .command
+        .kind()
+        .is_some_and(|kind| kind.formats().contains(&format))
         && std::io::stdout().is_terminal()
         && !cli.force_binary_stdout
     {
@@ -50,7 +65,10 @@ pub(crate) fn run() -> ExitCode {
         let _ = emit_stderr_error(&error);
         return ExitCode::from(error.exit_code());
     }
-    let command = cli.command.kind();
+    let command = cli
+        .command
+        .kind()
+        .expect("documentation returned before stream setup");
     if cli.resource_diagnostics
         && matches!(
             format,

@@ -4,7 +4,7 @@
 //! Read CLI command logic.
 
 pub(super) mod arguments;
-mod rendering;
+pub(crate) mod rendering;
 #[cfg(test)]
 mod tests;
 
@@ -66,12 +66,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         compression,
         path,
         limits,
+        epoch,
         filter,
         normalize,
         dissect,
         decode,
     } = arguments;
     validate_capture_stream_limits(limits)?;
+    let bounds = epoch.resolve()?;
     validate_dissect_format(dissect, format)?;
     if normalize && format != Format::PcapNg {
         return Err(CliError::from_classification(
@@ -94,7 +96,13 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     if normalize {
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
-        normalize_capture(&mut reader, limits, decoding.as_ref(), &mut destination)?;
+        normalize_capture(
+            &mut reader,
+            limits,
+            bounds,
+            decoding.as_ref(),
+            &mut destination,
+        )?;
         drop(destination.finish().map_err(CliError::classified)?);
         return Ok(());
     }
@@ -109,6 +117,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             &mut reader,
             rewrite_format,
             stream_limits,
+            bounds,
             decoding.as_ref(),
             limits.reader.max_frame_bytes,
             &mut destination,
@@ -116,7 +125,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         drop(destination.finish().map_err(CliError::classified)?);
         return Ok(());
     }
-    read_records(&mut reader, limits, decoding.as_ref(), format, stream)
+    read_records(
+        &mut reader,
+        limits,
+        bounds,
+        decoding.as_ref(),
+        format,
+        stream,
+    )
 }
 
 fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {
@@ -153,10 +169,17 @@ fn prepare_decoding(
     }))
 }
 
+/// Whether epoch bounds keep `frame`; absent bounds keep everything, and a
+/// frame without a timestamp is never kept while bounds are set.
+fn kept_by_time(bounds: Option<core::frame::TimeBounds>, frame: &core::frame::Frame) -> bool {
+    bounds.is_none_or(|bounds| bounds.contains(frame.timestamp))
+}
+
 fn rewrite_capture(
     reader: &mut Reader<impl Read>,
     format: capture::Format,
     limits: Limits,
+    bounds: Option<core::frame::TimeBounds>,
     decoding: Option<&Decoding>,
     max_packet_size: usize,
     destination: &mut impl Write,
@@ -175,23 +198,30 @@ fn rewrite_capture(
             Vec::new(),
         ));
     }
-    if let Some(decoding) = decoding {
-        return capture::select(reader, destination, limits, |number, frame| {
-            decode_selected(frame, number, decoding, max_packet_size)
-                .map(|decoded| decoded.is_some())
-                .map_err(CliError::into_boundary_error)
-        })
-        .map(|_| ())
-        .map_err(CliError::classified);
+    if decoding.is_none() && bounds.is_none() {
+        return rewrite(reader, destination, limits)
+            .map(|_| ())
+            .map_err(CliError::classified);
     }
-    rewrite(reader, destination, limits)
-        .map(|_| ())
-        .map_err(CliError::classified)
+    capture::select(reader, destination, limits, |number, frame| {
+        if !kept_by_time(bounds, frame) {
+            return Ok(false);
+        }
+        let Some(decoding) = decoding else {
+            return Ok(true);
+        };
+        decode_selected(frame, number, decoding, max_packet_size)
+            .map(|decoded| decoded.is_some())
+            .map_err(CliError::into_boundary_error)
+    })
+    .map(|_| ())
+    .map_err(CliError::classified)
 }
 
 fn read_records(
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
+    bounds: Option<core::frame::TimeBounds>,
     decoding: Option<&Decoding>,
     format: Format,
     stream: &StreamEncoder,
@@ -199,6 +229,9 @@ fn read_records(
     let mut state = StreamState::default();
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
+        if !kept_by_time(bounds, &frame) {
+            continue;
+        }
         let Some(record) = convert_frame(frame, source_frame, decoding, limits)? else {
             continue;
         };
@@ -221,6 +254,7 @@ fn read_records(
 fn normalize_capture(
     reader: &mut Reader<impl Read>,
     limits: OfflineCaptureLimitsArgs,
+    bounds: Option<core::frame::TimeBounds>,
     decoding: Option<&Decoding>,
     destination: impl Write,
 ) -> Result<(), CliError> {
@@ -241,6 +275,9 @@ fn normalize_capture(
     let mut state = StreamState::default();
     while let Some(mut frame) = reader.next_frame().map_err(CliError::classified)? {
         let source_frame = account_frame(&mut state, &frame, limits)?;
+        if !kept_by_time(bounds, &frame) {
+            continue;
+        }
         if let Some(decoding) = decoding
             && decode_selected(
                 &frame,

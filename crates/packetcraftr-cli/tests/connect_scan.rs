@@ -56,6 +56,11 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     assert_eq!(report["result"]["method"], "tcp_connect");
     assert_eq!(report["result"]["socket_stats"]["connections_attempted"], 2);
     assert_eq!(report["result"]["socket_stats"]["connections_succeeded"], 1);
+    let rtt = &report["result"]["socket_stats"]["rtt"];
+    assert_eq!(rtt["sent"], 2);
+    assert_eq!(rtt["received"], 2);
+    assert_eq!(rtt["lost"], 0);
+    assert!(rtt["min"]["secs"].is_number() && rtt["max"].is_object());
     assert_eq!(report["result"]["endpoints"][0]["classification"], "open");
     assert_eq!(report["result"]["endpoints"][1]["classification"], "closed");
     assert!(report.get("stats").is_none());

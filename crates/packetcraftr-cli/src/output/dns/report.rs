@@ -210,6 +210,114 @@ fn try_from_undecoded(evidence: packetcraftr::dns::UndecodedEvidence) -> Result<
     })
 }
 
+/// Aggregate result of a `dns` batch: the shared server plus each question's
+/// deterministic outcome in input order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BatchResult {
+    pub server: String,
+    pub server_port: u16,
+    pub questions: Vec<QuestionResult>,
+}
+
+/// One batch question: uniform identity and status, the classified failure for
+/// `failed`, and the complete per-question result for `completed`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct QuestionResult {
+    pub query_name: String,
+    pub query_type: u16,
+    pub transaction_id: u16,
+    pub status: packetcraftr::dns::QuestionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Box<Report>>,
+}
+
+/// The per-question status summary a streamed batch-complete record carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct QuestionComplete {
+    pub query_name: String,
+    pub query_type: u16,
+    pub transaction_id: u16,
+    pub status: packetcraftr::dns::QuestionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl BatchResult {
+    pub fn try_from_batch(
+        batch: packetcraftr::dns::BatchReport,
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+        let packetcraftr::dns::BatchReport {
+            server,
+            server_port,
+            questions,
+            stats,
+        } = batch;
+        let mut diagnostics = Vec::new();
+        let mut results = Vec::with_capacity(questions.len());
+        for question in questions {
+            let packetcraftr::dns::QuestionOutcome {
+                query_name,
+                query_type,
+                transaction_id,
+                status,
+                report,
+                error,
+            } = question;
+            let result = report
+                .map(|report| {
+                    let (converted, found, _) = Report::try_from_dns(report)?;
+                    // Questions in a batch trip the same codes; the aggregate
+                    // envelope carries one entry per code, not per question.
+                    for diagnostic in found {
+                        packetcraftr_core::diagnostic::push_once(&mut diagnostics, diagnostic);
+                    }
+                    Ok(Box::new(converted))
+                })
+                .transpose()?;
+            results.push(QuestionResult {
+                query_name,
+                query_type: query_type.code(),
+                transaction_id,
+                status,
+                error: error.map(|error| error.to_string()),
+                result,
+            });
+        }
+        Ok((
+            Self {
+                server,
+                server_port,
+                questions: results,
+            },
+            diagnostics,
+            stats,
+        ))
+    }
+
+    /// The streamed terminal record's per-question summaries.
+    pub fn question_completions(batch: &packetcraftr::dns::BatchReport) -> Vec<QuestionComplete> {
+        batch
+            .questions
+            .iter()
+            .map(|question| QuestionComplete {
+                query_name: question.query_name.clone(),
+                query_type: question.query_type.code(),
+                transaction_id: question.transaction_id,
+                status: question.status,
+                outcome: question
+                    .report
+                    .as_ref()
+                    .map(|report| report.summary().completion.outcome()),
+                error: question.error.as_ref().map(ToString::to_string),
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Attempt {
     pub attempt: u32,
@@ -271,6 +379,13 @@ pub enum Event {
         evidence: Undecoded,
     },
     Diagnostic {},
+    /// The terminal record for a multi-question batch: one status entry per
+    /// declared question, in input order.
+    BatchComplete {
+        server: String,
+        server_port: u16,
+        questions: Vec<QuestionComplete>,
+    },
     Complete {
         server: String,
         server_port: u16,
@@ -391,7 +506,7 @@ impl crate::output::stream::StreamRecord for Event {
             Self::Rejected { .. } => "rejected",
             Self::Undecoded { .. } => "undecoded",
             Self::Diagnostic {} => "diagnostic",
-            Self::Complete { .. } => "complete",
+            Self::BatchComplete { .. } | Self::Complete { .. } => "complete",
         }
     }
 }

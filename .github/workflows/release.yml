@@ -158,6 +158,9 @@ jobs:
           - triple: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
             archive_extension: tar.gz
+          - triple: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            archive_extension: tar.gz
           - triple: x86_64-apple-darwin
             os: macos-15-intel
             archive_extension: tar.gz
@@ -253,6 +256,11 @@ jobs:
           shutil.copy2(temporary / "BUILD-METADATA.json", staging / "BUILD-METADATA.json")
           shutil.copytree("schemas", staging / "schemas")
           shutil.copytree("docs", staging / "docs")
+          # Completions and man pages come from the packaged binary itself, so
+          # they always describe the shipped command definitions.
+          subprocess.run([
+              str(binary.resolve()), "documentation", "--directory", str(staging),
+          ], check=True, timeout=60)
 
           archive = shutil.make_archive(
               str(temporary / basename), "zip" if windows else "gztar",
@@ -337,14 +345,15 @@ jobs:
               \( -name '*.tar.gz' -o -name '*.zip' \) -printf '%f\n' |
               LC_ALL=C sort
           )
-          if [[ "${#archives[@]}" -ne 8 ]]; then
-            echo "expected exactly eight release archives, found ${#archives[@]}" >&2
+          if [[ "${#archives[@]}" -ne 10 ]]; then
+            echo "expected exactly ten release archives, found ${#archives[@]}" >&2
             printf 'found: %s\n' "${archives[@]}" >&2
             exit 1
           fi
 
           targets=(
             x86_64-unknown-linux-gnu
+            aarch64-unknown-linux-gnu
             x86_64-apple-darwin
             aarch64-apple-darwin
             x86_64-pc-windows-msvc

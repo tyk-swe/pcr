@@ -5,17 +5,6 @@
   "status": "success",
   "result": {
     "table": "conversations",
-    "frames_read": 3,
-    "frames_matched": 3,
-    "bytes_matched": 162,
-    "first_timestamp": {
-      "unix_seconds": 0,
-      "nanoseconds": 0
-    },
-    "last_timestamp": {
-      "unix_seconds": 2,
-      "nanoseconds": 0
-    },
     "conversations": [
       {
         "transport": "tcp",
@@ -64,6 +53,31 @@
           "secs": 0,
           "nanos": 0
         }
+      }
+    ],
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 162,
+    "first_timestamp": {
+      "unix_seconds": 0,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 2,
+      "nanoseconds": 0
+    },
+    "duration": {
+      "secs": 2,
+      "nanos": 0
+    },
+    "average_packet_size": 54.0,
+    "packets_per_second": 1.5,
+    "bytes_per_second": 81.0,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 1,
+        "snap_length": 65535
       }
     ]
   },

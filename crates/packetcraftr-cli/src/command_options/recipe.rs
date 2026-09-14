@@ -15,6 +15,11 @@ pub(crate) struct RecipeArgs {
     /// Versioned JSON or YAML packet document; conflicts with --packet.
     #[arg(long, value_name = "PATH", conflicts_with = "packet")]
     pub(crate) packet_file: Option<PathBuf>,
+    /// Literal bytes for a recipe field loaded from a file, e.g.
+    /// 1.payload=data.bin. The zero-based layer field must be bytes-typed and
+    /// empty in the recipe; the file stays inside the packet input limit.
+    #[arg(long, value_name = "LAYER.FIELD=PATH")]
+    pub(crate) payload_file: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

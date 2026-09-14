@@ -25,6 +25,7 @@ use crate::rendering::StreamEncoder;
 pub(super) struct AnalysisSetup {
     pub(super) registry: Arc<Registry>,
     pub(super) filter: Option<Filter>,
+    pub(super) time_bounds: Option<packetcraftr_core::frame::TimeBounds>,
     pub(super) ip_overlap: analysis::reassembly::ip::OverlapPolicy,
     pub(super) limits: analysis::Limits,
 }
@@ -37,6 +38,7 @@ impl AnalysisSetup {
             track_sources: false,
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
+            time_bounds: self.time_bounds,
             tcp_events,
             ip_overlap: self.ip_overlap,
             limits: self.limits.clone(),
@@ -53,6 +55,7 @@ pub(super) fn prepare(
 ) -> Result<AnalysisSetup, CliError> {
     let capture = limits.capture;
     let ip_overlap = limits.ip_overlap.into();
+    let time_bounds = limits.epoch.resolve()?;
     validate_capture_stream_limits(capture)?;
     let registry = decode.registry()?;
     let filter = filter_source
@@ -82,6 +85,7 @@ pub(super) fn prepare(
     Ok(AnalysisSetup {
         registry,
         filter,
+        time_bounds,
         ip_overlap,
         limits,
     })

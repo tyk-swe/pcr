@@ -333,6 +333,26 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_typed_event(output::contract::Command::Read, read, Vec::new());
     let capture = output::capture::Event::try_from_frame(1, frame(&[1])).unwrap();
     validate_typed_event(output::contract::Command::Capture, capture, Vec::new());
+    let capture_decoded =
+        output::capture::Event::try_from_decoded(1, frame(&[1]), &decoded(&[1])).unwrap();
+    validate_typed_event(
+        output::contract::Command::Capture,
+        capture_decoded,
+        Vec::new(),
+    );
+    // A --field capture row streams through the shared projection contract.
+    let capture_row = output::projection::Row {
+        source_frame: output::frame::SourceFrame::try_from(1).unwrap(),
+        values: vec![Some(core::field::FieldValue::Unsigned(46))],
+    };
+    validate_typed_event(
+        output::contract::Command::Capture,
+        output::projection::RowEvent {
+            columns: &["frame.len".to_owned()],
+            row: &capture_row,
+        },
+        Vec::new(),
+    );
     validate_typed_event(
         output::contract::Command::Replay,
         output::replay::Frame {
@@ -487,6 +507,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
             server_bytes: 0,
             undelivered_bytes: 0,
             chunks: Vec::new(),
+            written: Vec::new(),
             ip_reassembly: output::reassembly::Report::default(),
         },
     );
@@ -649,6 +670,46 @@ fn validate_dns_event_variants() {
         let (event, diagnostics) = output::dns::Event::try_from_dns(event).unwrap();
         validate_typed_event(output::contract::Command::Dns, event, diagnostics);
     }
+    // The batch terminal record lists each question's deterministic status.
+    // `complete` is reserved for the terminal record, so it emits through the
+    // terminal path rather than `emit_data`.
+    let (sink, bytes) = stream(output::contract::Command::Dns);
+    sink.complete_with_stats(
+        output::dns::Event::BatchComplete {
+            server: "192.0.2.53".to_owned(),
+            server_port: 53,
+            questions: vec![
+                output::dns::QuestionComplete {
+                    query_name: "1.2.0.192.in-addr.arpa".to_owned(),
+                    query_type: packetcraftr::dns::QueryType::PTR.code(),
+                    transaction_id: 0x1234,
+                    status: packetcraftr::dns::QuestionStatus::Completed,
+                    outcome: Some(packetcraftr::dns::Outcome::Response),
+                    error: None,
+                },
+                output::dns::QuestionComplete {
+                    query_name: "unreachable.test".to_owned(),
+                    query_type: packetcraftr::dns::QueryType::A.code(),
+                    transaction_id: 0x1235,
+                    status: packetcraftr::dns::QuestionStatus::Failed,
+                    outcome: None,
+                    error: Some("induced failure".to_owned()),
+                },
+                output::dns::QuestionComplete {
+                    query_name: "never.test".to_owned(),
+                    query_type: packetcraftr::dns::QueryType::A.code(),
+                    transaction_id: 0x1236,
+                    status: packetcraftr::dns::QuestionStatus::Unattempted,
+                    outcome: None,
+                    error: None,
+                },
+            ],
+        },
+        Vec::new(),
+        packetcraftr::Stats::default(),
+    )
+    .expect("batch terminal record renders");
+    validate_records(schema_validator(), &bytes.records());
 }
 
 #[test]

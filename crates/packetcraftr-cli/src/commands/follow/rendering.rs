@@ -66,7 +66,20 @@ pub(super) fn render_record(
     }
 }
 
-pub(super) fn render_text(selector: StreamRef, summary: &Summary) -> Result<(), CliError> {
+/// Reports each file `--write` published on formats whose stdout carries the
+/// payload itself.
+pub(super) fn render_written(written: &[super::write::Written]) -> Result<(), CliError> {
+    for file in written {
+        emit_stderr_message(&format!("wrote {} byte(s) to {}", file.bytes, file.path))?;
+    }
+    Ok(())
+}
+
+pub(super) fn render_text(
+    selector: StreamRef,
+    summary: &Summary,
+    written: &[super::write::Written],
+) -> Result<(), CliError> {
     crate::commands::offline_analysis::render_clock(&summary.clock)?;
     if let Some(scope) = &summary.scope {
         crate::commands::offline_analysis::render_scope(scope)?;
@@ -88,7 +101,14 @@ pub(super) fn render_text(selector: StreamRef, summary: &Summary) -> Result<(), 
             "followed {transport} stream {}: no frames",
             selector.index
         )),
+    }?;
+    for file in written {
+        write_stdout_line(format_args!(
+            "wrote {} byte(s) to {}",
+            file.bytes, file.path
+        ))?;
     }
+    Ok(())
 }
 
 pub(super) fn render_aggregate(
@@ -96,6 +116,7 @@ pub(super) fn render_aggregate(
     summary: Summary,
     state: State,
     ip_reassembly: &analysis::IpReassemblyReport,
+    written: Vec<super::write::Written>,
 ) -> Result<(), CliError> {
     let diagnostics = omitted_diagnostic(
         "follow.chunks_omitted",
@@ -111,6 +132,7 @@ pub(super) fn render_aggregate(
             summary,
             state.retained.into_items(),
             ip_reassembly,
+            written.into_iter().map(Into::into).collect(),
         ),
         diagnostics,
     )
@@ -121,6 +143,7 @@ pub(super) fn render_stream(
     summary: Summary,
     ip_reassembly: &analysis::IpReassemblyReport,
     stream: &StreamEncoder,
+    written: Vec<super::write::Written>,
 ) -> Result<(), CliError> {
     Ok(stream.complete(
         output::follow::Report::from_summary(
@@ -129,6 +152,7 @@ pub(super) fn render_stream(
             summary,
             Vec::new(),
             ip_reassembly,
+            written.into_iter().map(Into::into).collect(),
         ),
         Vec::new(),
     )?)

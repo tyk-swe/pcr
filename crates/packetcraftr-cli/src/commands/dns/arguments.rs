@@ -11,18 +11,24 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr dns 192.0.2.53 example.test --type a
   packetcraftr dns 127.0.0.1 example.test --tcp
   packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv
+  packetcraftr dns 192.0.2.53 example.test other.test --reverse 192.0.2.1 --reverse 2001:db8::1
   packetcraftr dns 192.0.2.53 example.test --udp-only --help"#;
 
-pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. By default, each attempt starts over UDP and one validated matching truncated response may continue over TCP to the same reauthorized numeric server. --tcp queries directly over ordinary TCP sockets without raw capture. Both modes retain the --timeout-ms attempt window and bounded retries. --udp-only disables fallback and supports packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport; direct TCP reports fallback_attempted=false.";
+pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated DNS queries. By default, each attempt starts over UDP and one validated matching truncated response may continue over TCP to the same reauthorized numeric server. --tcp queries directly over ordinary TCP sockets without raw capture. Both modes retain the --timeout-ms attempt window and bounded retries. --udp-only disables fallback and supports packet-oriented route overrides that kernel TCP cannot preserve. Text, JSON, and NDJSON identify each attempted phase and the accepted response transport; direct TCP reports fallback_attempted=false.
+
+Several NAMEs plus repeatable --reverse ADDRESS (PTR under in-addr.arpa/ip6.arpa) form one bounded batch of at most 256 questions sharing the explicit server, transport selection, and --max-duration-ms deadline. Each question reports completed/failed/unattempted in input order; a question's own attempts keep --timeout-ms and --attempts.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Explicit DNS server IP address or hostname.
     #[arg(value_name = "SERVER")]
     pub(crate) server: String,
-    /// Bounded ASCII DNS owner name to query.
-    #[arg(value_name = "NAME")]
-    pub(crate) name: String,
+    /// Bounded ASCII DNS owner names to query as one batch.
+    #[arg(value_name = "NAME", required_unless_present = "reverse")]
+    pub(crate) names: Vec<String>,
+    /// Append a PTR question for this address (in-addr.arpa/ip6.arpa); repeatable.
+    #[arg(long = "reverse", value_name = "ADDRESS")]
+    pub(crate) reverse: Vec<std::net::IpAddr>,
     /// DNS type alias, decimal code, or TYPE<n> (0..=65535; at most five digits).
     #[arg(long = "type", default_value_t = QueryType::A)]
     pub(crate) query_type: QueryType,
@@ -32,7 +38,7 @@ pub(crate) struct Args {
     /// DNS server port for the selected UDP/TCP transport.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_SERVER_PORT)]
     pub(crate) port: u16,
-    /// Explicit 16-bit transaction ID; a process-local value is generated when omitted.
+    /// Explicit 16-bit transaction ID; only valid for a single-question batch.
     #[arg(long)]
     pub(crate) transaction_id: Option<u16>,
     /// First UDP source port; kernel TCP uses an OS-selected local port.
@@ -112,6 +118,19 @@ mod tests {
             panic!("fixture must select DNS")
         };
         arguments
+    }
+
+    #[test]
+    fn multiple_names_and_reverse_addresses_form_one_batch() {
+        let args = dns_args(&[
+            "second.test",
+            "--reverse",
+            "192.0.2.1",
+            "--reverse",
+            "2001:db8::1",
+        ]);
+        assert_eq!(args.names, ["example.test", "second.test"]);
+        assert_eq!(args.reverse.len(), 2);
     }
 
     #[test]

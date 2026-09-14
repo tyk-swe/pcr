@@ -6,6 +6,7 @@
 pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use decode::DecodeArgs;
+pub(crate) use epoch_bounds::EpochBoundsArgs;
 pub(crate) use offline_limits::{
     CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
 };
@@ -22,6 +23,7 @@ pub(crate) use template::TemplateArgs;
 mod address_family;
 mod capture_limits;
 mod decode;
+mod epoch_bounds;
 mod offline_limits;
 mod packet_budget;
 mod policy;
@@ -33,5 +35,8 @@ mod template;
 mod compression;
 pub(crate) use compression::Compression;
 
+mod capture_output;
+pub(crate) use capture_output::CaptureOutputArgs;
+
 mod application;
-pub(crate) use application::ApplicationLimitsArgs;
+pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};

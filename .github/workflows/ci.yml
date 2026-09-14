@@ -61,6 +61,11 @@ jobs:
         run: rustup toolchain install
       - name: Test without native capabilities
         run: cargo test --locked --workspace --no-default-features
+      - name: Run offline library examples
+        run: |
+          cargo run --locked -p packetcraftr-core --example build_decode_filter
+          cargo run --locked -p packetcraftr-core --example capture_analysis
+          cargo run --locked -p packetcraftr --example client_composition --no-default-features
       - name: Test the shipped pcap-free feature profile
         run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the isolated pcap-free CLI

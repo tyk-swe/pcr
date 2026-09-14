@@ -56,6 +56,12 @@ impl Projector {
         }
         let projection = Projection::compile(columns.iter().map(String::as_str), registry)
             .map_err(CliError::classified)?;
+        if command == Command::Capture && projection.requirements().stream_index {
+            return Err(CliError::new(
+                core::error::Kind::Cli,
+                "capture --field cannot select stream indices; save the capture and use read --field",
+            ));
+        }
         Ok(Some(Self {
             projection,
             command,
@@ -234,6 +240,7 @@ pub(super) fn read(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
+    let bounds = args.epoch.resolve()?;
     let registry = args.decode.registry()?;
     let mut projector = Projector::prepare(
         &args.fields,
@@ -262,10 +269,11 @@ pub(super) fn read(
             .as_ref()
             .is_some_and(|filter| filter.requirements().stream_index)
     {
-        core::analysis::run(
+        let summary = core::analysis::run(
             &mut reader,
             registry,
             &core::analysis::Options {
+                time_bounds: bounds,
                 cancellation: Some(crate::cancellation::signal().clone()),
                 limits: core::analysis::Limits {
                     max_frames: args.limits.max_frames,
@@ -276,8 +284,6 @@ pub(super) fn read(
                 ..Default::default()
             },
             |record| {
-                frames = record.number;
-                bytes += u64::from(record.decoded.frame.captured_length());
                 let kept = filter
                     .as_ref()
                     .map(|filter| record.matches(filter))
@@ -299,6 +305,8 @@ pub(super) fn read(
             },
         )
         .map_err(CliError::classified)?;
+        frames = summary.frames_read;
+        bytes = summary.bytes_read;
     } else {
         let decoder = core::decode::Dissector::new(registry);
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
@@ -308,6 +316,9 @@ pub(super) fn read(
             }
             .advance(frames, bytes, frame.captured_length())
             .map_err(CliError::classified)?;
+            if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
+                continue;
+            }
             let decoded = decoder
                 .decode(
                     frame,

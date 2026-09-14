@@ -37,6 +37,14 @@ impl From<AnalysisChunk> for Chunk {
     }
 }
 
+/// One direction payload file `follow --write` published.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WrittenFile {
+    pub direction: Direction,
+    pub path: String,
+    pub bytes: u64,
+}
+
 /// Aggregate result of `follow`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
@@ -55,6 +63,9 @@ pub struct Report {
     /// TCP bytes captured but stranded behind missing segments.
     pub undelivered_bytes: u64,
     pub chunks: Vec<Chunk>,
+    /// Files `--write` published, in deterministic publish order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub written: Vec<WrittenFile>,
     pub ip_reassembly: super::reassembly::Report,
 }
 
@@ -66,6 +77,7 @@ impl Report {
         summary: packetcraftr_core::analysis::follow::Summary,
         chunks: Vec<Chunk>,
         ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
+        written: Vec<WrittenFile>,
     ) -> Self {
         let endpoint = |address: IpAddr, port: u16| Endpoint { address, port };
         let (client, server) = match &summary.client_flow {
@@ -87,6 +99,7 @@ impl Report {
             server_bytes: summary.server_bytes,
             undelivered_bytes: summary.undelivered_bytes,
             chunks,
+            written,
             ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
         }
     }

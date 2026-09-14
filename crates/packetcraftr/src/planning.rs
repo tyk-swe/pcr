@@ -58,6 +58,7 @@ where
         provider: &P,
         deadline: Option<Instant>,
     ) -> Result<packetcraftr_netio::route::Plan, Error> {
+        self.policy.validate()?;
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;
         }

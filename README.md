@@ -72,7 +72,8 @@ count filtered-out frames too; the same block and interface ceilings bound outpu
 
 ## Packet sets and decode-as
 
-`build` and `exchange` accept repeatable axes over zero-based layer fields:
+`build`, `exchange`, and `send` accept repeatable axes over zero-based layer
+fields:
 
 ```console
 packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[9000,9001]'
@@ -81,14 +82,31 @@ packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '
 This produces four packets in Cartesian order, with the last axis varying
 fastest. `--max-template-packets` defaults to 10,000 and is checked before
 preparation. Axes use expression values, reject empty lists and repeated fields
-(including aliases), and share a 1 MiB input ceiling. Build streams text, one
-hex line per packet, or NDJSON `packet` events followed by `complete`; JSON and
+(including aliases), and share a 1 MiB input ceiling. An unsigned range operand
+such as `0.ttl=1..64` or `0.ttl=1..64:8` expands its inclusive `START..END`
+span with an optional step; endpoints may be decimal or `0x` hexadecimal.
+Reversed ranges, zero steps, and ranges that exceed the packet ceiling fail
+before any packet is built. Build streams text, one hex line per packet, or
+NDJSON `packet` events followed by `complete`; JSON and
 raw require one packet. Exchange applies one budget and response window to the
 whole set, checking every packet's endpoints and final bytes.
 
+`send --repeat N` replays the complete expansion `N` times in expansion order
+and `--rate N` bounds transmission starts to `N` packets per second. The
+first frame leaves immediately; a fixed interval paces later sends. The
+expansion times repetition is checked arithmetic against one packet/byte
+budget — there is no unbounded repeat — and a scheduled delay past the
+operation ceiling fails before anything transmits. Every frame is planned,
+endpoint-checked, and final-wire authorized in turn; text, hex, and raw emit
+each confirmed frame as it lands, and a later failure, cancellation, or
+exhausted budget stops the run without discarding earlier evidence. Aggregate JSON reports `frames` (each
+with its one-based `pass` and expansion `index`) and `passes_completed`; PCAP
+and PCAPNG capture every transmitted frame.
+
 Offline `dissect`, `read`, `follow`, `stats`, `expert`, and `tls` accept
 `--decode-as 'udp.port=5353:dns'`. TCP ports support `tls` and `raw`; UDP ports
-support `dns`, `vxlan`, `geneve`, and `raw`. A mapping overrides the built-in
+support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, and `raw`. A
+mapping overrides the built-in
 binding for that port; transport source/destination precedence stays unchanged.
 Conflicting declarations are rejected. `--tls-port 4433` is shorthand for
 `--decode-as 'tcp.port=4433:tls'`. At most 256 declarations and 64 KiB of mapping
@@ -112,6 +130,16 @@ input packets count toward the finite frame/byte limits, and an empty selection
 is valid. Errors can leave partial output. Without `--filter` or `--normalize`,
 capture output remains a byte-for-byte rewrite.
 
+`read` and the analysis commands (`stats`, `expert`, `follow`, `tls`,
+`dns-read`, `http`, `export`) also accept `--start-epoch`/`--stop-epoch` to
+keep only frames inside an inclusive epoch-second window, written
+`SECONDS[.FRACTION]` with up to nanosecond precision and compared exactly —
+never rounded to the capture's own resolution. Either side may be open,
+reversed bounds and fractions the host cannot represent exactly are rejected,
+frames without timestamps are never kept, and skipped frames still count toward
+the read limits. Selection follows the timestamp value, so out-of-order clocks
+cannot escape the window.
+
 `read --dissect` and `dissect` decode DNS answer, authority, and additional
 records, including EDNS and exact unknown RDATA. Malformed or truncated DNS
 messages produce diagnostics while retaining their captured bytes. The
@@ -121,8 +149,8 @@ the structured record fields and bounded core decoder.
 ## Install
 
 [GitHub releases](https://github.com/tyk-swe/pcr/releases) provide Linux
-x86-64, macOS x86-64 and Arm64, and Windows x86-64 MSVC archives. Verify the
-matching archive with `SHA256SUMS`, then put `packetcraftr` or
+x86-64 and Arm64, macOS x86-64 and Arm64, and Windows x86-64 MSVC archives.
+Verify the matching archive with `SHA256SUMS`, then put `packetcraftr` or
 `packetcraftr.exe` on `PATH`.
 
 - `all-features` archives include routing, raw Layer 3, and Layer 2
@@ -158,8 +186,9 @@ capture-backed probes require the corresponding full-native provider; pcap-free
 supports offline work, routing, raw Layer 3 send/replay, and direct TCP DNS. See
 [Contributing](CONTRIBUTING.md) for the ordinary Cargo loop.
 
-Release artifacts use these runtime baselines: Ubuntu 24.04 (glibc 2.39), macOS 14
-on arm64, macOS 15 on x86_64, and Windows Server 2022 on x86_64. Older systems are
+Release artifacts use these runtime baselines: Ubuntu 24.04 (glibc 2.39) on
+x86-64 and Arm64, macOS 14 on arm64, macOS 15 on x86_64, and Windows Server 2022
+on x86_64. Older systems are
 not a tested binary baseline; build from source for another environment.
 Full-native Linux needs the shared libpcap runtime (Ubuntu `libpcap0.8t64`);
 Windows capture/Layer 2 needs a working Npcap installation exporting the symbols
@@ -175,6 +204,20 @@ unless `--force-binary-stdout` is supplied. For commands with cooperative
 cancellation, the first interrupt requests cleanup;
 the second forces exit. Cancellation exits 130; a killed process or unwritable
 sink cannot promise a terminal NDJSON record.
+
+## Shell completions and man pages
+
+Release archives ship generated shell completions under `completions/` (Bash,
+Elvish, Fish, PowerShell, and Zsh) and man pages under `man/` (one per command).
+The binary itself regenerates both trees from the finalized command
+definitions:
+
+```console
+packetcraftr documentation --directory DIR
+```
+
+This writes `DIR/completions/` and `DIR/man/`, which can be copied into the
+shell completion and `man1` directories of the platform.
 
 ## Contracts
 
@@ -224,6 +267,31 @@ and every retained-state ceiling explicit.
 2 when the selected conversation is absent, including in an empty capture.
 Existing conversations with no payload still succeed with zero extracted bytes.
 
+`follow --write DIR` saves each selected direction's payload as
+`TRANSPORT-INDEX-client.bin` and `TRANSPORT-INDEX-server.bin` inside DIR —
+`--direction` narrows which files are written, and an empty direction produces
+an empty file. Files are staged in DIR and published atomically without
+overwriting existing destinations; both share one
+`--max-application-output-bytes` budget, and the aggregate report lists each
+published path under `written`. Publishing is not a multi-file transaction: on
+failure, staged bytes are discarded and rollback of already-published files is
+attempted. Cleanup failures report the paths that could not be removed.
+
+Every `stats` report carries a compact capture summary alongside the selected
+table: the matched-timestamp `duration`, `average_packet_size`, and
+`packets_per_second`/`bytes_per_second` rates (absent on empty match sets and
+zero spans; timestamp regressions cannot produce a negative duration), plus
+the `interfaces` the capture source declared, in the ID order frame records
+reference. A PCAPNG file with no interface descriptions reports an empty
+list rather than inventing one.
+
+`expert` findings also cover capture-level evidence beyond TCP state:
+`capture.frame_truncated` marks a record whose captured length falls short
+of its wire length, and `capture.clock_regression` marks a matched frame
+timestamped below the capture's high-water mark. Both carry the frame number
+and, when the source declares one, the interface ID; both are warnings and
+respect `--min-severity`, `--code`, and the retained-finding limit.
+
 ## Library
 
 Depend on the crate that owns the capability you need:
@@ -245,6 +313,21 @@ Offline analysis exposes a physical `FrameRecord` with optional `TcpView` and
 `UdpView` observations. Each observation carries its decoded source and scoped
 conversation together. Derived datagrams do not add physical frames or bytes.
 
+Runnable examples live in their owning crates and use only documentation
+addresses and in-memory fixtures — no native features or network access are
+required:
+
+```console
+cargo run -p packetcraftr-core --example build_decode_filter
+cargo run -p packetcraftr-core --example capture_analysis
+cargo run -p packetcraftr --example client_composition --no-default-features
+```
+
+`client_composition` wires a `Client` over local route/neighbor/sender
+providers under an explicit `Policy` (destination allowlist plus finite
+per-operation packet/byte budgets) and shows both an admitted send and an
+allowlist denial without emitting traffic.
+
 ```console
 cargo doc --locked --workspace --all-features --no-deps --open
 ```
@@ -256,6 +339,15 @@ permissive-packet and source-spoofing controls, route/interface and MTU checks,
 finite packet/byte/time budgets, and native OS permission requirements. Only
 applicable commands expose each control; read that command's `--help` instead
 of copying flags between workflows.
+
+`--allow-destination ADDRESS[/PREFIX]` restricts live destinations to exact
+addresses or canonical CIDR networks and may repeat. The list is checked at
+target authorization, on every route-bearing address a packet declares, and
+again on the destination the final wire bytes actually carry. Constraints only
+narrow permission — a public destination inside the allowlist still needs
+`--allow-public-destinations`. Network entries must spell the canonical
+network address (`192.0.2.0/24`, not `192.0.2.1/24`); an absent list adds no
+constraint.
 
 Time budgets are checked at workflow boundaries and passed to native I/O where
 its interface accepts a deadline. Event publication bounds the caller's wait.
@@ -289,6 +381,14 @@ authorization, message limits, response checks, deadlines, and retry count.
 Direct TCP reports `fallback_attempted=false`, socket bytes, and zero captured
 packet counts. It uses an OS-selected local port; `--source-port`, `--udp-only`,
 and packet-oriented route overrides cannot be combined with `--tcp`.
+
+`dns` accepts several NAME positionals and repeatable `--reverse ADDRESS`,
+which derives the PTR question under `in-addr.arpa` or `ip6.arpa` — a bounded
+batch of at most 256 questions sharing the explicit server, transport
+selection, and one `--max-duration-ms` deadline. Each question reports
+`completed`, `failed`, or `unattempted` in input order; a question's own
+attempts keep `--timeout-ms` and `--attempts`. `--transaction-id` stays
+single-question only; batches generate a fresh identifier per question.
 
 Library callers enable TCP by composing an exchange executor with
 `.with_dns_tcp(provider)`. The CLI explicitly selects
@@ -352,6 +452,16 @@ schedule and deadline bound the run. Results distinguish connected, refused,
 timeout, unreachable, and local failures, and report socket-call evidence.
 The kernel controls TCP wire packets. Packet route overrides are rejected for
 this mode, and cancellation retains resource admission until cleanup finishes.
+
+Both scan paths report bounded repeated-probe statistics in `rtt`: `sent` counts
+confirmed probe transmissions (admitted connect calls for `--connect`),
+`received` counts probes that produced a definitive verdict inside their round —
+a checksum-valid correlated response, or a connected, refused, or unreachable
+socket verdict — and `lost` is `sent - received`. `min`/`avg`/`max` summarize
+one round-trip sample per received probe and are absent when nothing answered.
+Duplicate replies inside one round contribute a single sample; replies carrying
+a stale identity never correlate. A capture backend reporting dropped frames
+marks the caveat with the `capture.evidence_incomplete` diagnostic.
 
 This documentation-address example only prints help and performs no network
 operation:
@@ -525,6 +635,15 @@ finishes independently for every file. Rotation and interfaces never reset the
 operation budget. A final boundary can consume a matched frame without publishing
 it; admitted/matched/emitted counts make that distinction visible. Failure output
 retains partial source and file evidence, including finalization state.
+
+`capture --dissect` decodes each emitted frame once and prints its layer list in
+text or adds a `decoded` object — packet document, layout, and diagnostics — to
+NDJSON `frame` records beside the preserved captured bytes. `capture --field`
+streams bounded `fields` rows per matched frame under `--max-projection-bytes`,
+sharing the `read`/`dissect` projection contract. Decoded output requires text
+or NDJSON, decodes a frame at most once across `--filter` selection and
+emission, honors `--decode-as`/`--tls-port` bindings, and never accumulates
+decoded state across frames.
 
 Raw scans accept `--max-in-flight` for bounded rolling response windows. The client
 validates the complete plan before active discovery, shares ready capture sessions

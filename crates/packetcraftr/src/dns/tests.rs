@@ -649,7 +649,7 @@ fn fallback_operation_deadline_precedes_authorization_failure() {
     let baseline = std::time::Instant::now();
     let now = Arc::new(std::sync::Mutex::new(baseline));
     let deadline_now = Arc::clone(&now);
-    let deadline = packetcraftr_core::budget::Deadline::with_time_source(
+    let mut deadline = packetcraftr_core::budget::Deadline::with_time_source(
         request.limits.max_duration,
         move || *deadline_now.lock().unwrap(),
     );
@@ -665,7 +665,7 @@ fn fallback_operation_deadline_precedes_authorization_failure() {
         &packetcraftr_core::protocol::builtin::registry(),
         &mut TrustedReceiptExecutor,
         &mut NoopClock,
-        deadline,
+        &mut deadline,
         |_, _| Ok(()),
     )
     .expect_err("the expired operation deadline must outrank authorization denial");
@@ -878,7 +878,7 @@ fn executor_diagnostic_precedes_response_selection_deadline_failure() {
     let post_execution_calls = Arc::new(AtomicUsize::new(0));
     let time_source_calls = Arc::clone(&post_execution_calls);
     let baseline = std::time::Instant::now();
-    let deadline = packetcraftr_core::budget::Deadline::with_time_source(
+    let mut deadline = packetcraftr_core::budget::Deadline::with_time_source(
         request.limits.max_duration,
         move || {
             if time_source_completed.load(Ordering::SeqCst)
@@ -899,7 +899,7 @@ fn executor_diagnostic_precedes_response_selection_deadline_failure() {
         &packetcraftr_core::protocol::builtin::registry(),
         &mut SelectionDeadlineExecutor { completed },
         &mut NoopClock,
-        deadline,
+        &mut deadline,
         move |event, _| {
             observed_events.lock().unwrap().push(event);
             Ok(())
@@ -924,7 +924,7 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
     let now = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
     let deadline_now = Arc::clone(&now);
     let callback_now = Arc::clone(&now);
-    let deadline = packetcraftr_core::budget::Deadline::with_time_source(
+    let mut deadline = packetcraftr_core::budget::Deadline::with_time_source(
         Duration::from_millis(50),
         move || *deadline_now.lock().unwrap(),
     );
@@ -935,7 +935,7 @@ fn dns_stops_publishing_when_an_event_sink_exhausts_the_deadline() {
         &packetcraftr_core::protocol::builtin::registry(),
         &mut ClassifiedResponseExecutor,
         &mut NoopClock,
-        deadline,
+        &mut deadline,
         move |event, _| {
             observed_events.lock().unwrap().push(event);
             *callback_now.lock().unwrap() += Duration::from_millis(100);
@@ -2034,4 +2034,290 @@ fn report_construction_requires_fallback_and_attempts_to_agree() {
             "fallback={fallback}"
         );
     }
+}
+
+struct CancellingExecutor {
+    calls: usize,
+    cancel_at: usize,
+    signal: packetcraftr_core::budget::Cancellation,
+}
+
+impl Executor<Exchange> for CancellingExecutor {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
+        self.calls += 1;
+        if self.calls == self.cancel_at {
+            self.signal.cancel();
+        }
+        TrustedReceiptExecutor.execute(exchange)
+    }
+}
+
+impl TcpExecutor for CancellingExecutor {}
+
+/// Reports an executor elapsed time that overflows any operation deadline, so
+/// the shared batch budget is spent deterministically after the first question.
+struct OvertimeExecutor;
+
+impl Executor<Exchange> for OvertimeExecutor {
+    fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
+        let mut execution = TrustedReceiptExecutor.execute(exchange)?;
+        execution.stats.elapsed = Duration::from_secs(3600);
+        Ok(execution)
+    }
+}
+
+impl TcpExecutor for OvertimeExecutor {}
+
+fn batch_request(address: IpAddr, name: &str, transaction_id: u16) -> super::Request {
+    super::Request {
+        query_name: name.to_owned(),
+        transaction_id,
+        ..dns_request(address)
+    }
+}
+
+#[test]
+fn batch_completes_every_question_in_input_order() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let requests = [
+        batch_request(address, "first.test", 1),
+        batch_request(
+            address,
+            &super::reverse_name(Ipv4Addr::new(192, 0, 2, 1).into()),
+            2,
+        ),
+        batch_request(address, "third.test", 3),
+    ];
+    let batch = super::run_batch(
+        &requests,
+        &mut SingleAddressAuthorizer { address },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut TrustedReceiptExecutor,
+        &mut NoopClock,
+    )
+    .expect("the batch runs to completion");
+
+    assert_eq!(batch.server, "10.0.0.53");
+    assert_eq!(batch.status_counts(), (3, 0, 0));
+    assert_eq!(
+        batch
+            .questions
+            .iter()
+            .map(|question| question.query_name.as_str())
+            .collect::<Vec<_>>(),
+        ["first.test", "1.2.0.192.in-addr.arpa", "third.test"]
+    );
+    // Every question ran with its own transaction id and timed-out evidence.
+    assert_eq!(batch.stats.packets_attempted, 3);
+    for (question, id) in batch.questions.iter().zip([1_u16, 2, 3]) {
+        assert_eq!(question.transaction_id, id);
+        let report = question.report.as_ref().expect("completed report");
+        // The outcome names the declared question; the report holds the
+        // canonical wire name with its root label.
+        assert_eq!(
+            report.summary().query_name,
+            format!("{}.", question.query_name)
+        );
+    }
+}
+
+#[test]
+fn batch_reports_a_failed_question_and_continues_in_order() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let requests = [
+        batch_request(address, "fails.test", 1),
+        batch_request(address, "works.test", 2),
+    ];
+    let mut executor = ProgressiveExecutor {
+        calls: Arc::new(AtomicUsize::new(0)),
+        shutdowns: Arc::new(AtomicUsize::new(0)),
+        fail_at: Some(1),
+    };
+    let batch = super::run_batch(
+        &requests,
+        &mut SingleAddressAuthorizer { address },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("a per-question failure does not abort the batch");
+
+    assert_eq!(batch.status_counts(), (1, 1, 0));
+    assert_eq!(batch.questions[0].status, super::QuestionStatus::Failed);
+    assert!(batch.questions[0].error.is_some());
+    assert_eq!(batch.questions[1].status, super::QuestionStatus::Completed);
+}
+
+#[test]
+fn batch_marks_remaining_questions_unattempted_after_cancellation() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let signal = packetcraftr_core::budget::Cancellation::default();
+    let requests = [
+        batch_request(address, "first.test", 1),
+        batch_request(address, "stopped.test", 2),
+        batch_request(address, "never.test", 3),
+    ];
+    let mut executor = CancellingExecutor {
+        calls: 0,
+        cancel_at: 2,
+        signal: signal.clone(),
+    };
+    let mut clock = crate::clock::CancellableClock(signal);
+    let batch = super::run_batch(
+        &requests,
+        &mut SingleAddressAuthorizer { address },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut clock,
+    )
+    .expect("cancellation still returns the deterministic batch outcome");
+
+    assert_eq!(batch.status_counts(), (1, 1, 1));
+    assert_eq!(
+        batch
+            .questions
+            .iter()
+            .map(|question| question.status)
+            .collect::<Vec<_>>(),
+        [
+            super::QuestionStatus::Completed,
+            super::QuestionStatus::Failed,
+            super::QuestionStatus::Unattempted
+        ]
+    );
+    assert!(matches!(
+        batch.questions[1].error,
+        Some(super::Error::Cancelled(_))
+    ));
+    assert_eq!(executor.calls, 2, "the cancelled batch sends no more");
+    assert_eq!(batch.stats.packets_attempted, 2);
+    assert_eq!(batch.stats.packets_completed, 2);
+    assert!(
+        batch.stats.bytes
+            > batch.questions[0]
+                .report
+                .as_ref()
+                .unwrap()
+                .summary()
+                .stats
+                .bytes
+    );
+}
+
+#[test]
+fn an_exhausted_shared_deadline_marks_later_questions_unattempted() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let requests = [
+        batch_request(address, "overtime.test", 1),
+        batch_request(address, "never.test", 2),
+    ];
+    let batch = super::run_batch(
+        &requests,
+        &mut SingleAddressAuthorizer { address },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut OvertimeExecutor,
+        &mut NoopClock,
+    )
+    .expect("deadline exhaustion returns the deterministic batch outcome");
+
+    assert_eq!(batch.status_counts(), (0, 1, 1));
+    assert!(matches!(
+        batch.questions[0].error,
+        Some(super::Error::DurationLimit { .. })
+    ));
+    assert_eq!(
+        batch.questions[1].status,
+        super::QuestionStatus::Unattempted
+    );
+    assert_eq!(batch.stats.packets_attempted, 1);
+    assert_eq!(batch.stats.packets_completed, 1);
+    assert!(batch.stats.bytes > 0);
+    assert_eq!(batch.stats.elapsed, Duration::from_secs(3600));
+}
+
+#[test]
+fn batch_counts_tcp_bytes_from_the_question_that_exhausts_the_deadline() {
+    let address = Ipv4Addr::LOCALHOST.into();
+    let mut request = dns_request(address);
+    request.transport = super::TransportMode::Tcp;
+    request.timeout = Duration::from_secs(2);
+    request.limits.max_duration = Duration::from_secs(3);
+    let requests = [request.clone(), request.clone(), request.clone(), request];
+    let mut executor = ScriptedExecutor::new([]).with_tcp((0..3).map(|_| TcpScript::Response {
+        message: dns_response(),
+        elapsed: Duration::from_millis(1100),
+    }));
+    let report = super::run_batch(
+        &requests,
+        &mut SingleAddressAuthorizer { address },
+        &packetcraftr_core::protocol::builtin::registry(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap();
+    assert_eq!(report.status_counts(), (2, 1, 1));
+    assert!(matches!(
+        report.questions[2].error,
+        Some(super::Error::DurationLimit { .. })
+    ));
+    assert_eq!(executor.tcp_calls, 3);
+    assert_eq!(
+        report.stats.bytes,
+        executor
+            .tcp_queries
+            .iter()
+            .map(|query| query.len() as u64 + 2)
+            .sum::<u64>()
+    );
+    assert_eq!(report.stats.elapsed, Duration::from_millis(3300));
+}
+
+#[test]
+fn batch_rejects_empty_and_invalid_requests_before_any_side_effects() {
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53));
+    let mut authorizer = RecordingAuthorizer::new(address);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut executor = ProgressiveExecutor {
+        calls: Arc::clone(&calls),
+        shutdowns: Arc::new(AtomicUsize::new(0)),
+        fail_at: None,
+    };
+    let registry = packetcraftr_core::protocol::builtin::registry();
+
+    for (requests, code) in [
+        (Vec::new(), "cli.dns_limit"),
+        (
+            vec![batch_request(address, "example.test", 1); super::MAX_QUESTIONS + 1],
+            "cli.dns_limit",
+        ),
+        (
+            vec![
+                batch_request(address, "fine.test", 1),
+                batch_request(address, "not a dns name", 2),
+            ],
+            "packet.dns_query",
+        ),
+    ] {
+        let error = super::run_batch(
+            &requests,
+            &mut authorizer,
+            &registry,
+            &mut executor,
+            &mut NoopClock,
+        )
+        .expect_err("the invalid batch is refused");
+        assert_eq!(
+            packetcraftr_core::error::Classified::classification(&error).code,
+            code
+        );
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "no request reached the wire"
+    );
+    assert!(
+        authorizer.targets.is_empty(),
+        "no resolution side effect ran"
+    );
 }

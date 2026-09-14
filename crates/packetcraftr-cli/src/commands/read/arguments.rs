@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{DecodeArgs, OfflineCaptureLimitsArgs};
+use crate::command_options::{DecodeArgs, EpochBoundsArgs, OfflineCaptureLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
@@ -14,6 +14,13 @@ pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr --output pcapng read capture.pcapng > validated-copy.pcapng
   packetcraftr --output pcapng read capture.pcapng --filter 'udp.port == 53' > dns.pcapng
   packetcraftr --output pcapng read - --normalize --filter 'udp' < capture.pcap > selected.pcapng
+  packetcraftr read capture.pcapng --start-epoch 1700000000.5 --stop-epoch 1700000060
+
+--start-epoch/--stop-epoch keep only frames whose capture timestamp falls
+inside the inclusive bounds, compared at full precision without rounding.
+Either side may be omitted. Reversed bounds are rejected. Frames without
+timestamps are never kept while bounds are set. Bounds compose with --filter
+and skipped frames still count toward --max-frames/--max-bytes.
 
 Capture output requires the input format unless --normalize is used. Without --filter, every record is copied
 verbatim. With --filter, selected packet records and all metadata are retained;
@@ -54,6 +61,8 @@ pub(crate) struct Args {
     pub(crate) path: PathBuf,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
+    #[command(flatten)]
+    pub(crate) epoch: EpochBoundsArgs,
     /// Keep only frames matching a display filter.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,

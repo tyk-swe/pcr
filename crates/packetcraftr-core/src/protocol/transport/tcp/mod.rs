@@ -3,9 +3,11 @@
 
 //! TCP segment model and codec.
 
-use std::collections::BTreeMap;
+mod options;
 
-use bytes::Bytes;
+pub use options::{SackBlock, TcpOption};
+
+use std::collections::BTreeMap;
 
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
@@ -38,7 +40,9 @@ pub struct Tcp {
     pub window: u16,
     pub checksum: WireValue<u16>,
     pub urgent_pointer: u16,
-    pub options: Bytes,
+    /// Parsed options in wire order. Unknown kinds, nonstandard lengths, and
+    /// unparseable tails stay byte-exact as `Raw`/`Trailing` entries.
+    pub options: Vec<TcpOption>,
 }
 
 impl Tcp {
@@ -60,7 +64,7 @@ impl Default for Tcp {
             window: 65_535,
             checksum: WireValue::Auto,
             urgent_pointer: 0,
-            options: Bytes::new(),
+            options: Vec::new(),
         }
     }
 }
@@ -86,8 +90,11 @@ reflective_layer! {
             reflect: checksum, layout: (16, 18) },
         "urgent_pointer" => { kind: Unsigned, derived: false, required: false, description: "Urgent pointer",
             reflect: urgent_pointer, layout: (18, 20) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
-            reflect: options, layout: (20, header_len) },
+        "options" => { kind: List, derived: false, required: false, description: "Ordered standard or unknown TCP options",
+            children: options::OPTION_FIELDS,
+            get |layer| Some(options::options_value(&layer.options)),
+            set |layer, value, name| { layer.options = options::parse_field(value, tcp_schema(), name)?; Ok(()) },
+            layout: (20, header_len) },
     }
     layout pub(crate) fn tcp_layout(header_len: usize);
 }
@@ -113,9 +120,7 @@ impl LayerCodec for TcpCodec {
         if layer.reserved_bits > 7 {
             return Err(invalid(NAME, "reserved bits exceed three bits"));
         }
-        if layer.options.len() > 40 {
-            return Err(invalid(NAME, "options exceed the 40-byte TCP limit"));
-        }
+        let serialized = options::serialize(&layer.options)?;
         let mut diagnostics = Vec::new();
         if layer.reserved_bits != 0 {
             let message = "reserved TCP header bits are non-zero";
@@ -127,7 +132,7 @@ impl LayerCodec for TcpCodec {
             );
         }
         let options = pad_options_to_four_bytes(
-            &layer.options,
+            &serialized,
             "build.tcp_options_padded",
             "TCP",
             &mut diagnostics,
@@ -170,7 +175,7 @@ impl LayerCodec for TcpCodec {
         }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        materialized.options = Bytes::from(options);
+        materialized.options = options::parse(&options);
         Ok(EncodedLayer::header(prefix, Box::new(materialized))
             .with_fields(tcp_layout(header_len))
             .with_diagnostics(diagnostics))
@@ -230,7 +235,7 @@ impl LayerCodec for TcpCodec {
                 window: u16::from_be_bytes([header[14], header[15]]),
                 checksum: WireValue::Exact(checksum_value),
                 urgent_pointer: u16::from_be_bytes([header[18], header[19]]),
-                options: Bytes::copy_from_slice(options),
+                options: options::parse(options),
             }),
             consumed: header_len,
             payload_len,

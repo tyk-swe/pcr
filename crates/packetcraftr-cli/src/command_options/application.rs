@@ -30,14 +30,17 @@ impl ApplicationLimitsArgs {
         }
     }
     pub(crate) fn validate_output(self) -> Result<(), CliError> {
-        if self.max_application_output_bytes == 0
-            || self.max_application_output_bytes > 256 * 1024 * 1024
-        {
-            return Err(CliError::new(
-                packetcraftr_core::error::Kind::Cli,
-                "--max-application-output-bytes must be in 1..=268435456",
-            ));
-        }
-        Ok(())
+        validate_output_bytes(self.max_application_output_bytes)
     }
+}
+
+/// The shared `--max-application-output-bytes` range every consumer enforces.
+pub(crate) fn validate_output_bytes(value: usize) -> Result<(), CliError> {
+    if value == 0 || value > 256 * 1024 * 1024 {
+        return Err(CliError::new(
+            packetcraftr_core::error::Kind::Cli,
+            "--max-application-output-bytes must be in 1..=268435456",
+        ));
+    }
+    Ok(())
 }

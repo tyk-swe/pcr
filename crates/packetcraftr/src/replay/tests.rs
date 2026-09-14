@@ -797,3 +797,64 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
     ));
     assert_eq!(transmitter.transmission_calls, 3);
 }
+
+#[test]
+fn generated_capture_replays_verbatim_through_fake_providers() {
+    // `build --output pcap --link-type raw` emits exactly this: packets built
+    // by the codec builder framed under an explicit link type with
+    // deterministic timestamps.
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let builder = packetcraftr_core::build::Builder::new(std::sync::Arc::clone(&registry));
+    let mut bytes = Vec::new();
+    let mut writer = Writer::pcap(Vec::new(), LinkType::RAW).expect("pcap writer");
+    for ttl in [1_u8, 64] {
+        let packet = packetcraftr_core::expression::parse(
+            &format!("ipv4(src=192.0.2.1,dst=192.0.2.2,ttl={ttl})/udp(dport=9000)"),
+            &registry,
+            Default::default(),
+        )
+        .expect("recipe parses");
+        let built = builder
+            .build(
+                packet,
+                packetcraftr_core::codec::Context::default(),
+                packetcraftr_core::build::Options::default(),
+            )
+            .expect("packet builds");
+        bytes.push(built.bytes.clone());
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).expect("frame"))
+            .expect("capture frame writes");
+    }
+    let mut reader =
+        Reader::new(Cursor::new(writer.into_inner())).expect("generated capture opens");
+
+    let mut transmitter = RecordingTransmitter::default();
+    let mut authorizer = RecordingAuthorizer::default();
+    let mut evidence = Vec::new();
+    let summary = run_with_selector(
+        &mut reader,
+        &replay_options(Timing::Immediate),
+        None,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |frame| {
+            evidence.push(frame);
+            Ok(())
+        },
+    )
+    .expect("generated capture replays");
+
+    assert_eq!(summary.frames_transmitted, 2);
+    assert_eq!(
+        evidence
+            .iter()
+            .map(|frame| frame.frame.bytes().clone())
+            .collect::<Vec<_>>(),
+        bytes,
+        "transmitted frames are the exact built bytes"
+    );
+    assert_eq!(transmitter.transmission_calls, 2);
+    assert_eq!(authorizer.final_wire_calls, 2);
+}

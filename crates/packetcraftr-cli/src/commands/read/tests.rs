@@ -46,6 +46,7 @@ fn normalized_output_propagates_header_interface_packet_and_flush_failures() {
                 },
             },
             None,
+            None,
             FailingOutput { remaining },
         )
         .unwrap_err();

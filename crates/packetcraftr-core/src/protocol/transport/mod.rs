@@ -10,7 +10,7 @@ mod udp;
 
 pub use sctp::Sctp;
 pub(crate) use sctp::SctpCodec;
-pub use tcp::Tcp;
 pub(crate) use tcp::TcpCodec;
+pub use tcp::{SackBlock, Tcp, TcpOption};
 pub use udp::Udp;
 pub(crate) use udp::UdpCodec;

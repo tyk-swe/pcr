@@ -3,11 +3,12 @@
 
 //! Offline-read and live-capture stream output.
 
+use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
 use serde::Serialize;
 
 use super::contract::Error;
-use super::frame::{Captured, SourceFrame};
+use super::frame::{Captured, SourceFrame, Stack};
 
 /// One NDJSON event produced by `capture`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -16,6 +17,8 @@ pub enum Event {
     Frame {
         source_frame: SourceFrame,
         frame: Captured,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decoded: Option<Stack>,
     },
 }
 
@@ -24,6 +27,20 @@ impl Event {
         Ok(Self::Frame {
             source_frame: source_frame.try_into()?,
             frame: Captured::try_from_frame(frame)?,
+            decoded: None,
+        })
+    }
+
+    /// A frame record that also publishes its dissected stack and diagnostics.
+    pub fn try_from_decoded(
+        source_frame: u64,
+        frame: Frame,
+        decoded: &DecodedPacket,
+    ) -> Result<Self, Error> {
+        Ok(Self::Frame {
+            source_frame: source_frame.try_into()?,
+            frame: Captured::try_from_frame(frame)?,
+            decoded: Some(Stack::from_decoded(decoded)),
         })
     }
 }

@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use bytes::Bytes;
 use common::{
     CLIENT, SERVER, TcpSpec, client_tcp as client, reader, registry, server_tcp as server,
     tcp_frame as frame, udp_frame,
@@ -17,11 +16,11 @@ use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::analysis::{StreamRef, StreamTransport};
 
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::protocol::transport::Tcp;
+use packetcraftr_core::protocol::transport::{Tcp, TcpOption};
 use packetcraftr_core::registry::Registry;
 
 fn with_window_scale(mut spec: TcpSpec, shift: u8) -> TcpSpec {
-    spec.options = Bytes::from(vec![3, 3, shift, 0]);
+    spec.options = vec![TcpOption::WindowScale(shift), TcpOption::End];
     spec
 }
 
@@ -531,4 +530,212 @@ fn renewed_syn_clears_stale_tuple_window_state() {
         1,
         0,
     );
+}
+
+#[test]
+fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let full = udp_frame(
+        &registry,
+        epoch + Duration::from_secs(10),
+        CLIENT,
+        SERVER,
+        1_000,
+        9_999,
+        b"first",
+    );
+    let truncated = {
+        let frame = udp_frame(
+            &registry,
+            epoch + Duration::from_secs(11),
+            SERVER,
+            CLIENT,
+            9_999,
+            1_000,
+            b"second-payload",
+        );
+        // Simulate a snaplen-truncated record: fewer captured bytes than the
+        // wire length the frame declares.
+        let cut = frame.captured_length() - 6;
+        Frame::try_with_lengths(
+            epoch + Duration::from_secs(11),
+            frame.link_type,
+            cut,
+            frame.captured_length(),
+            frame.bytes().slice(..cut as usize),
+        )
+        .expect("truncated fixture frame is valid")
+    };
+    let regressed = udp_frame(
+        &registry,
+        epoch + Duration::from_secs(1),
+        CLIENT,
+        SERVER,
+        1_000,
+        9_999,
+        b"third",
+    );
+    let (findings, _summary) = analyze_frames(registry, &[full, truncated, regressed]);
+
+    let truncated_finding = findings
+        .iter()
+        .find(|finding| finding.code == "capture.frame_truncated")
+        .expect("truncated frame produces a finding");
+    assert_eq!(
+        truncated_finding.severity,
+        packetcraftr_core::diagnostic::Severity::Warning
+    );
+    assert_eq!(truncated_finding.number, 2);
+    assert!(truncated_finding.stream.is_none());
+    assert!(truncated_finding.message.contains("of "));
+
+    let regression_finding = findings
+        .iter()
+        .find(|finding| finding.code == "capture.clock_regression")
+        .expect("regressed timestamp produces a finding");
+    assert_eq!(
+        regression_finding.severity,
+        packetcraftr_core::diagnostic::Severity::Warning
+    );
+    assert_eq!(regression_finding.number, 3);
+    assert!(regression_finding.message.contains("10s"));
+}
+
+#[test]
+fn capture_evidence_stays_silent_on_well_formed_ordered_captures() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let frames = [
+        udp_frame(&registry, epoch, CLIENT, SERVER, 1_000, 9_999, b"a"),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            SERVER,
+            CLIENT,
+            9_999,
+            1_000,
+            b"b",
+        ),
+    ];
+    let (findings, _summary) = analyze_frames(registry, &frames);
+    assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.code.starts_with("capture.")),
+        "clean capture produced capture evidence: {findings:?}"
+    );
+}
+
+#[test]
+fn capture_evidence_combines_on_one_frame() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    let full = udp_frame(
+        &registry,
+        epoch + Duration::from_secs(10),
+        CLIENT,
+        SERVER,
+        1_000,
+        9_999,
+        b"high-water",
+    );
+    let combined = {
+        let frame = udp_frame(
+            &registry,
+            epoch + Duration::from_secs(2),
+            SERVER,
+            CLIENT,
+            9_999,
+            1_000,
+            b"truncated-and-late",
+        );
+        let cut = frame.captured_length() - 4;
+        Frame::try_with_lengths(
+            epoch + Duration::from_secs(2),
+            frame.link_type,
+            cut,
+            frame.captured_length(),
+            frame.bytes().slice(..cut as usize),
+        )
+        .expect("truncated fixture frame is valid")
+    };
+    let (findings, _summary) = analyze_frames(registry, &[full, combined]);
+    let codes: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.number == 2)
+        .map(|finding| finding.code)
+        .collect();
+    assert!(codes.contains(&"capture.frame_truncated"), "{codes:?}");
+    assert!(codes.contains(&"capture.clock_regression"), "{codes:?}");
+}
+
+#[test]
+fn capture_evidence_names_the_declared_interface_when_present() {
+    use packetcraftr_core::analysis::pcap::{Reader, Writer};
+    use std::io::Cursor;
+
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    let truncated = {
+        let frame = udp_frame(
+            &registry,
+            epoch,
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"payload-cut-short",
+        );
+        let cut = frame.captured_length() - 4;
+        Frame::try_with_lengths(
+            epoch,
+            frame.link_type,
+            cut,
+            frame.captured_length(),
+            frame.bytes().slice(..cut as usize),
+        )
+        .expect("truncated fixture frame is valid")
+    };
+    let mut writer = Writer::pcapng(Vec::new()).expect("pcapng writer initializes");
+    writer
+        .write_frame(&truncated)
+        .expect("pcapng frame writes with an interface description");
+    let mut regressed = truncated.clone();
+    regressed.timestamp = Some(SystemTime::UNIX_EPOCH);
+    writer.write_frame(&regressed).unwrap();
+    let mut capture = Reader::new(Cursor::new(writer.into_inner())).expect("pcapng fixture opens");
+
+    let mut collector = packetcraftr_core::analysis::expert::Collector::new();
+    let mut findings = Vec::new();
+    let run_summary = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options {
+            tcp_events: true,
+            ..Options::default()
+        },
+        |record| {
+            findings.extend(collector.observe(&record));
+            Ok(())
+        },
+    )
+    .expect("expert pass succeeds");
+    let _ = collector.finish(&run_summary);
+    let finding = findings
+        .iter()
+        .find(|finding| finding.code == "capture.frame_truncated")
+        .expect("truncated frame produces a finding");
+    assert_eq!(finding.number, 1);
+    assert!(
+        finding.message.contains("on interface 0"),
+        "{:?}",
+        finding.message
+    );
+    let regression = findings
+        .iter()
+        .find(|finding| finding.code == "capture.clock_regression")
+        .expect("regressed frame produces a finding");
+    assert_eq!(regression.number, 2);
+    assert!(regression.message.contains("on interface 0"));
 }

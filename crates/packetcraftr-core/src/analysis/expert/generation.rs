@@ -49,7 +49,7 @@ pub(super) fn apply(
         }
         sent.syn_seen = true;
         if !renews {
-            sent.window_shift = window_scale(tcp.options.as_ref());
+            sent.window_shift = window_scale(&tcp.options);
         }
         sent.reassembly_base = Some(first);
         if !renews {

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::{build::Builder, packet::Packet};
+use packetcraftr_core::{build::Builder, packet::Packet, template::Template};
 use packetcraftr_netio::{
     capture::Statistics,
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
@@ -13,7 +13,8 @@ use packetcraftr_netio::{
 use crate::Client;
 use crate::Error;
 use crate::Stats;
-use crate::send::{Options, Report};
+use crate::clock::{CancellableClock, Clock, SystemClock};
+use crate::send::{Options, Report, SentFrame, SetOptions, SetReport};
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -57,6 +58,139 @@ where
                 elapsed: started.elapsed(),
                 capture: Statistics::default(),
             },
+        })
+    }
+
+    /// Sends every packet a template expands to, `options.repeat` passes in
+    /// expansion order, under one packet/byte budget shared by the whole
+    /// operation. Each frame is handed to `emit` as soon as the provider
+    /// confirms it, so evidence published before a failure is preserved.
+    pub fn send_set_with_events<F>(
+        &self,
+        template: &Template,
+        options: SetOptions,
+        emit: F,
+    ) -> Result<SetReport, Error>
+    where
+        F: FnMut(&SentFrame) -> Result<(), Error>,
+    {
+        // A cancellation-aware clock keeps long pacing delays interruptible;
+        // without a signal the plain clock is equivalent.
+        match &self.cancellation {
+            Some(signal) => {
+                self.send_set_driven(template, &options, CancellableClock(signal.clone()), emit)
+            }
+            None => self.send_set_driven(template, &options, SystemClock, emit),
+        }
+    }
+
+    /// [`send_set_with_events`](Self::send_set_with_events) without an event
+    /// sink; the returned report retains every confirmed frame.
+    pub fn send_set(&self, template: &Template, options: SetOptions) -> Result<SetReport, Error> {
+        self.send_set_with_events(template, options, |_| Ok(()))
+    }
+
+    /// [`send_set_with_events`](Self::send_set_with_events) with an injectable
+    /// pacing clock so tests and simulations drive deterministic delays.
+    pub fn send_set_driven<C, F>(
+        &self,
+        template: &Template,
+        options: &SetOptions,
+        mut clock: C,
+        mut emit: F,
+    ) -> Result<SetReport, Error>
+    where
+        C: Clock,
+        C::Error: Into<Error>,
+        F: FnMut(&SentFrame) -> Result<(), Error>,
+    {
+        let total = options.validate_for(template)?;
+        let cancellation = clock.cancellation();
+        let check_cancelled = || -> Result<(), Error> {
+            self.check_cancelled()?;
+            if let Some(signal) = &cancellation {
+                signal.check()?;
+            }
+            Ok(())
+        };
+        check_cancelled()?;
+        let started = Instant::now();
+        // Packet admission precedes provider work. Exact bytes remain a
+        // cumulative per-frame budget, including link materialization.
+        self.policy.authorize(crate::policy::Operation::Budgeted(
+            crate::policy::WireBudget::new(total, 0),
+        ))?;
+        let delay = crate::clock::rate_delay(1, options.rate)
+            .expect("validate_for checked the pacing rate");
+
+        let builder = Builder::new(Arc::clone(&self.registry));
+        let mut sent = Vec::new();
+        let mut total_bytes = 0_u64;
+        for pass in 1..=options.repeat {
+            let expansion = template
+                .expand(options.max_template_packets)
+                .map_err(|source| Error::Template {
+                    message: source.to_string(),
+                })?;
+            for (offset, expanded) in expansion.into_iter().enumerate() {
+                check_cancelled()?;
+                let packet = expanded.map_err(|source| Error::Template {
+                    message: source.to_string(),
+                })?;
+                let plan = self.plan(&packet, options.send.destination, &options.send.plan)?;
+                let planned =
+                    self.plan_and_authorize(packet, plan, &builder, &options.send, None)?;
+                // The cumulative packet and exact wire-byte totals are
+                // re-authorized before every transmission.
+                total_bytes = total_bytes
+                    .checked_add(
+                        u64::try_from(planned.preliminary_build.bytes.len()).unwrap_or(u64::MAX),
+                    )
+                    .ok_or(crate::policy::Error::ByteLimit {
+                        actual: u64::MAX,
+                        limit: self.policy.max_bytes_per_operation,
+                    })?;
+                self.policy.authorize(crate::policy::Operation::Budgeted(
+                    crate::policy::WireBudget::new(
+                        u64::try_from(sent.len()).unwrap_or(u64::MAX) + 1,
+                        total_bytes,
+                    ),
+                ))?;
+                check_cancelled()?;
+                let prepared =
+                    self.materialize_and_authorize(planned, &builder, &options.send, None)?;
+                check_cancelled()?;
+                if !sent.is_empty() {
+                    clock.sleep(delay).map_err(Into::into)?;
+                    check_cancelled()?;
+                }
+                let io_report = self.io.send(TransmissionFrame::try_new(
+                    &prepared.built.bytes,
+                    &prepared.route,
+                )?)?;
+                sent.push(SentFrame {
+                    pass,
+                    index: offset as u64,
+                    packet: crate::SentPacket::try_new(prepared.built, prepared.route, io_report)?,
+                });
+                emit(sent.last().expect("frame was just recorded"))?;
+            }
+        }
+        let bytes = crate::evidence::total_bytes_sent(sent.iter().map(|frame| &frame.packet))
+            .unwrap_or(u64::MAX);
+        // Every failure path above returns early, so reaching here means each
+        // pass ran and every recorded frame reached the wire.
+        let packets = u64::try_from(sent.len()).unwrap_or(u64::MAX);
+        Ok(SetReport {
+            stats: Stats {
+                packets_attempted: packets,
+                packets_completed: packets,
+                bytes,
+                elapsed: started.elapsed(),
+                capture: Statistics::default(),
+            },
+            passes_completed: options.repeat,
+            sent,
         })
     }
 }

@@ -359,6 +359,7 @@ impl Collector {
             ports,
             io,
             ip_reassembly,
+            interfaces: summary.interfaces.clone(),
         }
     }
 }

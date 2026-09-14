@@ -98,7 +98,8 @@ impl Collector {
 
     /// Folds one matched frame, returning the findings it revealed.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
-        let mut findings = finding::from_diagnostics(record);
+        let mut findings = finding::from_capture_evidence(record);
+        findings.extend(finding::from_diagnostics(record));
         self.reconcile_tcp_evictions(record.tcp_events);
         if let Some(tcp) = record.tcp
             && let Some(conversation) = tcp.conversation

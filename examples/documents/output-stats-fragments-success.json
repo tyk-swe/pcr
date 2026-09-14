@@ -5,17 +5,6 @@
   "status": "success",
   "result": {
     "table": "fragments",
-    "frames_read": 3,
-    "frames_matched": 3,
-    "bytes_matched": 100,
-    "first_timestamp": {
-      "unix_seconds": 1,
-      "nanoseconds": 250000000
-    },
-    "last_timestamp": {
-      "unix_seconds": 3,
-      "nanoseconds": 250000000
-    },
     "fragments": {
       "families": [
         {
@@ -87,7 +76,32 @@
         }
       ],
       "outcomes_omitted": 0
-    }
+    },
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 100,
+    "first_timestamp": {
+      "unix_seconds": 1,
+      "nanoseconds": 250000000
+    },
+    "last_timestamp": {
+      "unix_seconds": 3,
+      "nanoseconds": 250000000
+    },
+    "duration": {
+      "secs": 2,
+      "nanos": 0
+    },
+    "average_packet_size": 33.333333333333336,
+    "packets_per_second": 1.5,
+    "bytes_per_second": 50.0,
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 1,
+        "snap_length": 65535
+      }
+    ]
   },
   "diagnostics": []
 }

@@ -27,7 +27,7 @@ use packetcraftr_core::protocol::ipv6::{
 };
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
 use packetcraftr_core::protocol::network::{Igmp, Ipv4};
-use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
+use packetcraftr_core::protocol::transport::{Sctp, Tcp, TcpOption, Udp};
 use packetcraftr_core::protocol::tunnel::{
     Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
@@ -488,7 +488,7 @@ fn ipv6_extensions_tcp_and_segment_routing_round_trip() {
         destination_port: 443,
         sequence: 99,
         flags: Tcp::SYN | Tcp::ACK,
-        options: Bytes::from_static(&[1, 1, 1]),
+        options: vec![TcpOption::Nop; 3],
         ..Tcp::default()
     });
     extension_packet.push(Raw::new(b"tls".to_vec()));
@@ -1120,6 +1120,71 @@ fn field_aliases_resolve_through_reflection_construction_and_filters_alike() {
         )
         .unwrap_or_else(|error| panic!("{path}: {error}"));
     }
+}
+
+#[test]
+fn icmp_body_views_construct_and_decode_verbatim() {
+    use packetcraftr_core::field::FieldValue;
+
+    let registry = registry();
+    let codec = registry.codec_named("icmpv4").expect("ICMPv4 codec");
+
+    // Typed views edit the same bytes `body` preserves, so construction may
+    // name echo fields or error fields without learning wire offsets.
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("identifier".to_owned(), FieldValue::Unsigned(0xbeef));
+    fields.insert("sequence".to_owned(), FieldValue::Unsigned(7));
+    fields.insert(
+        "rest".to_owned(),
+        FieldValue::Bytes(Bytes::from_static(b"PCR!")),
+    );
+    let layer = codec.make_layer(&fields).expect("echo construction");
+    assert_eq!(
+        layer.field("body"),
+        Some(FieldValue::Bytes(Bytes::from_static(&[
+            0xbe, 0xef, 0, 7, b'P', b'C', b'R', b'!'
+        ])))
+    );
+
+    let mut packet = Packet::new();
+    packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    packet.push_boxed(layer);
+    let (_, decoded) = round_trip(packet, "ipv4");
+    let echo = decoded
+        .packet
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == "icmpv4")
+        .expect("decoded ICMPv4 layer");
+    assert_eq!(echo.field("identifier"), Some(FieldValue::Unsigned(0xbeef)));
+    assert_eq!(echo.field("sequence"), Some(FieldValue::Unsigned(7)));
+    assert_eq!(
+        echo.field("rest"),
+        Some(FieldValue::Bytes(Bytes::from_static(b"PCR!")))
+    );
+
+    // An error body's typed views decode at their wire offsets while unknown
+    // and trailing bytes stay verbatim in `body`.
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("type".to_owned(), FieldValue::Unsigned(3));
+    fields.insert("code".to_owned(), FieldValue::Unsigned(4));
+    fields.insert("mtu".to_owned(), FieldValue::Unsigned(1400));
+    let layer = codec.make_layer(&fields).expect("error construction");
+    assert_eq!(layer.field("mtu"), Some(FieldValue::Unsigned(1400)));
+
+    let mut packet = Packet::new();
+    packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+    packet.push_boxed(layer);
+    let (built, _) = round_trip(packet, "ipv4");
+    let icmpv6 = registry.codec_named("icmpv6").expect("ICMPv6 codec");
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert("type".to_owned(), FieldValue::Unsigned(2));
+    fields.insert("mtu".to_owned(), FieldValue::Unsigned(1280));
+    let layer = icmpv6.make_layer(&fields).expect("ICMPv6 construction");
+    assert_eq!(
+        layer.field("body"),
+        Some(FieldValue::Bytes(Bytes::from_static(&[0, 0, 0x05, 0x00])))
+    );
+    assert!(built.bytes.len() >= 20 + 8);
 }
 
 #[test]

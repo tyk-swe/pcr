@@ -114,6 +114,7 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::Traceroute, "hops", traceroute_case),
     (Command::Dns, "timeout", dns_timeout_case),
     (Command::Dns, "validated response", dns_response_case),
+    (Command::Dns, "question batch", dns_batch_case),
     (Command::Fuzz, "offline campaign", fuzz_offline_case),
     (Command::Fuzz, "rejected case", fuzz_rejected_case),
     (Command::Fuzz, "live campaign", fuzz_live_case),
@@ -424,6 +425,22 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
             ],
             outcomes_omitted: 2,
         },
+        interfaces: vec![
+            packetcraftr_core::analysis::pcap::Interface {
+                link_type: packetcraftr_core::frame::LinkType(1),
+                snap_len: 65_535,
+                timestamp_resolution:
+                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(6),
+                timestamp_offset: 0,
+            },
+            packetcraftr_core::analysis::pcap::Interface {
+                link_type: packetcraftr_core::frame::LinkType(276),
+                snap_len: 9_000,
+                timestamp_resolution:
+                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
+            },
+        ],
     }
 }
 
@@ -571,8 +588,13 @@ fn plan_case() -> Value {
 
 fn send_case() -> Value {
     let (report, diagnostics, stats) =
-        send_output::Report::try_from_report(packetcraftr::send::Report {
-            sent: sent_packet(),
+        send_output::Report::try_from_report(packetcraftr::send::SetReport {
+            sent: vec![packetcraftr::send::SentFrame {
+                pass: 1,
+                index: 0,
+                packet: sent_packet(),
+            }],
+            passes_completed: 1,
             stats: workflow_stats(),
         })
         .expect("in-range send evidence converts");
@@ -590,8 +612,13 @@ fn send_without_neighbor_case() -> Value {
     let sent = packetcraftr::SentPacket::try_new(built, route, report)
         .expect("trusted transmission receipt");
     let (report, diagnostics, stats) =
-        send_output::Report::try_from_report(packetcraftr::send::Report {
-            sent,
+        send_output::Report::try_from_report(packetcraftr::send::SetReport {
+            sent: vec![packetcraftr::send::SentFrame {
+                pass: 1,
+                index: 0,
+                packet: sent,
+            }],
+            passes_completed: 1,
             stats: workflow_stats(),
         })
         .expect("in-range send evidence converts");
@@ -715,6 +742,7 @@ fn scan_case() -> Value {
             undecoded: vec![evidence_frame()],
             diagnostics: vec![diagnostic()],
             stats: workflow_stats(),
+            rtt: packetcraftr::scan::Rtt::default(),
         })
         .expect("in-range scan evidence converts");
     envelope_with_stats(Command::Scan, report, diagnostics, stats)
@@ -755,6 +783,7 @@ fn scan_icmp_case() -> Value {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: workflow_stats(),
+            rtt: packetcraftr::scan::Rtt::default(),
         })
         .expect("in-range scan evidence converts");
     envelope_with_stats(Command::Scan, report, diagnostics, stats)
@@ -872,6 +901,7 @@ fn follow_case() -> Value {
         },
         chunks,
         &analysis_stats_report().ip_reassembly,
+        Vec::new(),
     );
     envelope(Command::Follow, report, Vec::new())
 }
@@ -883,6 +913,7 @@ fn follow_empty_case() -> Value {
         FollowSummary::default(),
         Vec::new(),
         &IpReassemblyReport::default(),
+        Vec::new(),
     );
     envelope(Command::Follow, report, Vec::new())
 }
@@ -1096,6 +1127,84 @@ fn dns_timeout_case() -> Value {
     })
     .expect("in-range DNS evidence converts");
     envelope_with_stats(Command::Dns, report, diagnostics, stats)
+}
+
+/// A batch result exercises the `questions` shape: one completed question with
+/// its full report, one failed question carrying its classified error, and one
+/// the shared deadline never reached.
+fn dns_batch_case() -> Value {
+    let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
+    let summary = packetcraftr::dns::Summary {
+        server: "192.0.2.53".to_owned(),
+        server_port: 53,
+        resolved_addresses: vec![server_address],
+        query_name: "1.2.0.192.in-addr.arpa".to_owned(),
+        query_type: packetcraftr::dns::QueryType::PTR,
+        transaction_id: 0x1234,
+        stats: workflow_stats(),
+        completion: packetcraftr::dns::Completion::new(
+            packetcraftr::dns::Outcome::Timeout,
+            false,
+            None,
+            None,
+        )
+        .unwrap(),
+    };
+    let report = packetcraftr::dns::Report::new(
+        summary,
+        None,
+        vec![packetcraftr::dns::AttemptEvidence {
+            attempt: 1,
+            server_address,
+            status: packetcraftr::dns::Outcome::Timeout,
+            received_at: None,
+            latency: None,
+            response_code: None,
+            reason: "timeout".to_owned(),
+            exchange: packetcraftr::dns::AttemptTransport::Udp {
+                source_port: 49_152,
+                sent_at: UNIX_EPOCH,
+                response: None,
+            },
+        }],
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let batch = packetcraftr::dns::BatchReport {
+        server: "192.0.2.53".to_owned(),
+        server_port: 53,
+        stats: workflow_stats(),
+        questions: vec![
+            packetcraftr::dns::QuestionOutcome {
+                query_name: "1.2.0.192.in-addr.arpa".to_owned(),
+                query_type: packetcraftr::dns::QueryType::PTR,
+                transaction_id: 0x1234,
+                status: packetcraftr::dns::QuestionStatus::Completed,
+                report: Some(report),
+                error: None,
+            },
+            packetcraftr::dns::QuestionOutcome {
+                query_name: "unreachable.test".to_owned(),
+                query_type: packetcraftr::dns::QueryType::A,
+                transaction_id: 0x1235,
+                status: packetcraftr::dns::QuestionStatus::Failed,
+                report: None,
+                error: Some(packetcraftr::dns::Error::InvalidPort),
+            },
+            packetcraftr::dns::QuestionOutcome {
+                query_name: "later.test".to_owned(),
+                query_type: packetcraftr::dns::QueryType::A,
+                transaction_id: 0x1236,
+                status: packetcraftr::dns::QuestionStatus::Unattempted,
+                report: None,
+                error: None,
+            },
+        ],
+    };
+    let (result, diagnostics, stats) =
+        dns_output::BatchResult::try_from_batch(batch).expect("batch result converts");
+    envelope_with_stats(Command::Dns, result, diagnostics, stats)
 }
 
 fn dns_name(value: &str) -> dns_wire::Name {

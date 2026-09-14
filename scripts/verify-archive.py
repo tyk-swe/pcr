@@ -31,6 +31,9 @@ ASSETS = (
     'examples/documents/output-dns-tcp-success.json',
     'examples/documents/output-dns-tcp-complete.json',
     'examples/documents/output-replay-bit-rate-success.json',
+    'completions/packetcraftr.bash', 'completions/packetcraftr.elv',
+    'completions/packetcraftr.fish', 'completions/_packetcraftr',
+    'completions/_packetcraftr.ps1', 'man/packetcraftr.1',
 )
 EXPECTED = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
 
@@ -87,6 +90,18 @@ def verify(root, version, commit, target, variant):
     cli('tls', 'examples/captures/tls-handshake.pcapng')
     json.loads(cli('--output', 'json', 'build', '--packet-file',
                    'examples/documents/packet-ipv4-udp.json'))
+
+    # The generated man tree must cover every shipped subcommand; `help` is
+    # clap's implicit subcommand and gets no page.
+    commands = cli('--help').split('Commands:')[1].split('Options:')[0]
+    names = [line.split()[0] for line in commands.splitlines()
+             if line.split() and line.split()[0] != 'help']
+    if not names:
+        raise ValueError('could not read the packaged command list')
+    for name in names:
+        page = root / 'man' / f'packetcraftr-{name}.1'
+        if not page.is_file() or page.stat().st_size == 0:
+            raise ValueError(f'packaged man page for {name} is missing or empty')
 
 
 def main():

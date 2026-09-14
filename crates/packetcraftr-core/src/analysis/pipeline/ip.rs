@@ -4,7 +4,7 @@
 //! Capture-pipeline accounting around the standalone IP reassembler.
 
 use std::mem::size_of;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::analysis::Error;
 use crate::analysis::adapter::IpFragments;
@@ -136,9 +136,14 @@ impl IpDispatch {
         }
     }
 
-    /// The monotonic instant this frame's capture timestamp maps to. Every
-    /// physical frame advances IP expiry, matched or not.
-    pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
+    /// The monotonic instant this frame's capture timestamp maps to, plus the
+    /// rollback the timestamp showed when it regressed. Every physical frame
+    /// advances IP expiry, matched or not.
+    pub(super) fn at(
+        &mut self,
+        timestamp: SystemTime,
+        number: u64,
+    ) -> Result<(Instant, Option<Duration>), Error> {
         self.clock.at(timestamp, number)
     }
 

@@ -122,6 +122,7 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
         | BuiltinProtocol::Icmpv6
         | BuiltinProtocol::Igmp
         | BuiltinProtocol::Malformed
+        | BuiltinProtocol::Ntp
         | BuiltinProtocol::Padding
         | BuiltinProtocol::Raw
         | BuiltinProtocol::Sctp

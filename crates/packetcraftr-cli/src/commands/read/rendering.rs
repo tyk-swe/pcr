@@ -22,36 +22,46 @@ pub(super) fn render_record(
         decoded,
     } = &record;
     match format {
-        Format::Text => match decoded {
-            None => write_stdout_line(format_args!(
-                "{source_frame}: {}",
-                captured_frame_text(frame)
-            )),
-            Some(decoded) => {
-                write_stdout_line(format_args!(
-                    "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    decoded
-                        .packet
-                        .layers
-                        .iter()
-                        .map(|layer| layer.protocol.as_str())
-                        .collect::<Vec<_>>()
-                        .join("/"),
-                    spaced_hex(frame.bytes())
-                ))?;
-                render_dns_records(&decoded.packet)?;
-                if !decoded.diagnostics.is_empty() {
-                    write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
-                    render_diagnostics_text(&decoded.diagnostics)?;
-                }
-                Ok(())
-            }
-        },
+        Format::Text => render_frame_text(*source_frame, frame, decoded.as_ref()),
         Format::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
         Format::Ndjson => Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?),
         _ => unreachable!("capture-file output returned before frame rendering"),
+    }
+}
+
+/// One frame line for text output, with the dissected stack and its
+/// diagnostics when the command decoded the frame.
+pub(crate) fn render_frame_text(
+    source_frame: output::frame::SourceFrame,
+    frame: &output::frame::Captured,
+    decoded: Option<&output::frame::Stack>,
+) -> Result<(), CliError> {
+    match decoded {
+        None => write_stdout_line(format_args!(
+            "{source_frame}: {}",
+            captured_frame_text(frame)
+        )),
+        Some(decoded) => {
+            write_stdout_line(format_args!(
+                "{source_frame}: dlt={} caplen={} wirelen={} layers={} {}",
+                frame.link_type,
+                frame.captured_length,
+                frame.original_length,
+                decoded
+                    .packet
+                    .layers
+                    .iter()
+                    .map(|layer| layer.protocol.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                spaced_hex(frame.bytes())
+            ))?;
+            render_dns_records(&decoded.packet)?;
+            if !decoded.diagnostics.is_empty() {
+                write_stdout_line(format_args!("{source_frame}: diagnostics:"))?;
+                render_diagnostics_text(&decoded.diagnostics)?;
+            }
+            Ok(())
+        }
     }
 }

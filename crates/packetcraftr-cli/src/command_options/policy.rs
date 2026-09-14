@@ -45,6 +45,15 @@ pub(crate) struct SourceSpoofingArgs {
     allow_source_spoofing: bool,
 }
 
+#[derive(Clone, Debug, Args)]
+pub(crate) struct DestinationAllowlistArgs {
+    /// Restrict live destinations to an exact IP address or a canonical CIDR
+    /// network. Repeatable. Constraints only narrow permission; every other
+    /// policy opt-in still applies.
+    #[arg(long, value_name = "ADDRESS[/PREFIX]")]
+    allow_destination: Vec<packetcraftr::policy::DestinationConstraint>,
+}
+
 /// What `--max-packets` and `--max-bytes` default to, and what they are called,
 /// for one kind of operation.
 ///
@@ -145,6 +154,8 @@ pub(crate) struct SendPolicyArgs {
     #[command(flatten)]
     source_spoofing: SourceSpoofingArgs,
     #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
     budgets: TrafficBudgetArgs<Transmitted>,
 }
 
@@ -157,6 +168,8 @@ pub(crate) struct HostnamePolicyArgs {
     #[command(flatten)]
     hostname_resolution: HostnameResolutionArgs,
     #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
     budgets: TrafficBudgetArgs<Transmitted>,
 }
 
@@ -167,6 +180,8 @@ pub(crate) struct RoutePolicyArgs {
     public_destination: PublicDestinationArgs,
     #[command(flatten)]
     hostname_resolution: HostnameResolutionArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
 }
 
 /// `fuzz`: mutated packets, addressed numerically, so no hostname resolution.
@@ -178,6 +193,8 @@ pub(crate) struct FuzzPolicyArgs {
     permissive_packet: PermissivePacketArgs,
     #[command(flatten)]
     source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs<Transmitted>,
 }
@@ -191,6 +208,8 @@ pub(crate) struct ReplayPolicyArgs {
     permissive_packet: PermissivePacketArgs,
     #[command(flatten)]
     source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
     #[command(flatten)]
     budgets: TrafficBudgetArgs<Streamed>,
 }
@@ -220,6 +239,12 @@ impl SourceSpoofingArgs {
     }
 }
 
+impl DestinationAllowlistArgs {
+    pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
+        policy.allowed_destinations = self.allow_destination;
+    }
+}
+
 impl<B: Budget> TrafficBudgetArgs<B> {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
         policy.max_packets_per_operation = self.max_packets;
@@ -240,6 +265,7 @@ impl SendPolicyArgs {
         self.hostname_resolution.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
         self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }
@@ -250,6 +276,7 @@ impl HostnamePolicyArgs {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }
@@ -260,6 +287,7 @@ impl RoutePolicyArgs {
         let mut policy = packetcraftr::policy::Policy::default();
         self.public_destination.apply_to(&mut policy);
         self.hostname_resolution.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
         policy
     }
 }
@@ -270,6 +298,7 @@ impl FuzzPolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
         self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }
@@ -281,6 +310,7 @@ impl ReplayPolicyArgs {
         self.public_destination.apply_to(&mut policy);
         self.permissive_packet.apply_to(&mut policy);
         self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
         self.budgets.apply_to(&mut policy);
         policy
     }
@@ -300,7 +330,7 @@ mod tests {
     fn budgets_for(arguments: &[&str]) -> (u64, u64) {
         let cli = Cli::try_parse_from(arguments).expect("command must parse with defaults");
         let policy = match cli.command {
-            Command::Send(send) => send.policy.into_policy(),
+            Command::Send(send) => send.send.policy.into_policy(),
             Command::Exchange(exchange) => exchange.send.policy.into_policy(),
             Command::Scan(scan) => scan.policy.into_policy(),
             Command::Fuzz(fuzz) => fuzz.policy.into_policy(),
@@ -353,6 +383,42 @@ mod tests {
             captured,
         );
         assert_eq!(captured, (DEFAULT_CAPTURED_FRAMES, transmitted.1));
+    }
+
+    #[test]
+    fn destination_allowlists_parse_and_reject_malformed_entries() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "scan",
+            "192.0.2.1",
+            "--ports",
+            "80",
+            "--allow-destination",
+            "192.0.2.0/24",
+            "--allow-destination",
+            "2001:db8::1",
+        ])
+        .expect("allowlist entries parse");
+        let Command::Scan(scan) = cli.command else {
+            panic!("scan command")
+        };
+        assert_eq!(scan.policy.into_policy().allowed_destinations.len(), 2);
+
+        for bad in ["192.0.2.1/24", "10.0.0.0/33", "not-an-address"] {
+            assert!(
+                Cli::try_parse_from([
+                    "packetcraftr",
+                    "scan",
+                    "192.0.2.1",
+                    "--ports",
+                    "80",
+                    "--allow-destination",
+                    bad,
+                ])
+                .is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
     }
 
     #[test]

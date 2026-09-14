@@ -27,6 +27,8 @@ mod capture;
 mod dissect;
 mod dns;
 mod dns_read;
+// `startup` dispatches documentation generation before contract stream setup.
+pub(crate) mod documentation;
 mod exchange;
 mod execution;
 mod expert;
@@ -76,8 +78,8 @@ pub(crate) enum Command {
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
     Plan(plan::arguments::Args),
     /// Transmit a packet under traffic policy.
-    #[command(after_long_help = send::AFTER_LONG_HELP)]
-    Send(send::SendArgs),
+    #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
+    Send(send::arguments::Args),
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
     Exchange(exchange::arguments::Args),
@@ -128,11 +130,15 @@ pub(crate) enum Command {
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
     Routes(routes::Args),
+    /// Generate shell completions and man pages under a directory.
+    Documentation(documentation::Args),
 }
 
 impl Command {
-    pub(crate) const fn kind(&self) -> output::contract::Command {
-        match self {
+    /// The published machine-output kind; `None` for commands that generate
+    /// files instead of producing contract output.
+    pub(crate) const fn kind(&self) -> Option<output::contract::Command> {
+        Some(match self {
             Self::Merge(_) => output::contract::Command::Merge,
             Self::Fragment(_) => output::contract::Command::Fragment,
             Self::Build(_) => output::contract::Command::Build,
@@ -158,7 +164,8 @@ impl Command {
             Self::Rewrite(_) => output::contract::Command::Rewrite,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
             Self::Routes(_) => output::contract::Command::Routes,
-        }
+            Self::Documentation(_) => return None,
+        })
     }
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
@@ -211,7 +218,10 @@ impl Command {
     ///
     /// Rejects unsupported output formats before any command performs work.
     pub(crate) fn run(self, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+        // Documentation generates files outside the output contract, so
+        // startup dispatches it before stream setup and never reaches here.
         self.kind()
+            .expect("non-documentation commands have an output contract kind")
             .require_format(format)
             .map_err(CliError::classified)?;
         let publisher = self
@@ -250,6 +260,7 @@ impl Command {
             Self::Dns(arguments) => dns::run(arguments, format, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
             Self::Routes(arguments) => routes::run(arguments, format),
+            Self::Documentation(_) => unreachable!("documentation returned before dispatch"),
         }
     }
 }

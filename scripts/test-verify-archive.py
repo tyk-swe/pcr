@@ -27,7 +27,9 @@ expected = '450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f'
 command = next((x for x in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls') if x in args), '')
 if mode == 'exit-' + command or (mode == 'exit-recipe' and '--packet-file' in args):
     sys.exit(7)
-if command == '--version':
+if '--help' in args:
+    print('Commands:\n  build      fixture\n  protocols  fixture\n  help       fixture\n\nOptions:\n')
+elif command == '--version':
     print('packetcraftr 1.2.3')
 elif command in ('protocols', 'tls'):
     print('' if mode == 'empty-' + command else 'fixture')
@@ -67,6 +69,10 @@ class ArchiveTests(unittest.TestCase):
             path = self.root / asset
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture', encoding='utf-8')
+        # The verifier requires a man page per subcommand the fake --help lists.
+        for name in ('build', 'protocols'):
+            page = self.root / 'man' / f'packetcraftr-{name}.1'
+            page.write_text('fixture', encoding='utf-8')
         self.mode('ok')
         self.binary = self.root / 'packetcraftr'
         self.binary.write_text(f'#!{sys.executable}\n' + CHILD, encoding='utf-8')
@@ -127,6 +133,10 @@ class ArchiveTests(unittest.TestCase):
     def test_wrong_release_version(self):
         self.check(version='9.9.9')
 
+    def test_missing_subcommand_man_page(self):
+        (self.root / 'man' / 'packetcraftr-build.1').unlink()
+        self.check()
+
     def test_nonzero_commands(self):
         for command in ('--version', 'protocols', 'build', 'dissect', 'read', 'tls'):
             with self.subTest(command=command):
@@ -167,8 +177,13 @@ class NativeArchiveTests(unittest.TestCase):
             staging = temporary / 'staging' / 'packetcraftr-package'
             staging.mkdir(parents=True)
             shutil.copy2(binary, staging / binary.name)
+            # Completions and man pages come from the binary under test, as
+            # the release packaging does.
+            subprocess.run([str(staging / binary.name), 'documentation',
+                            '--directory', str(staging)], check=True, timeout=60)
             for asset in VERIFIER.ASSETS:
-                if asset == 'BUILD-METADATA.json':
+                if asset == 'BUILD-METADATA.json' \
+                        or asset.startswith(('completions/', 'man/')):
                     continue
                 destination = staging / asset
                 destination.parent.mkdir(parents=True, exist_ok=True)

@@ -98,7 +98,7 @@
                 "value": 2
               },
               "options": {
-                "type": "bytes",
+                "type": "list",
                 "value": []
               },
               "reserved_bits": {

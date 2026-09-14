@@ -584,7 +584,7 @@ fn unsupported_output_formats_fail_before_command_work() {
     let missing = directory.path().join("missing");
     let missing = missing.to_str().expect("temporary path is UTF-8");
     let cases: &[(&str, &[&str])] = &[
-        ("pcap", &["build", "--packet-file", missing]),
+        ("csv", &["build", "--packet-file", missing]),
         ("pcap", &["dissect", "--file", missing]),
         ("pcap", &["protocols", "unknown-protocol"]),
         ("raw", &["read", missing]),

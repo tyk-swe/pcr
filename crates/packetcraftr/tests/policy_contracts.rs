@@ -353,3 +353,197 @@ fn both_authorization_seams_refuse_a_malformed_policy_identically() {
         "cli.live_target"
     );
 }
+
+fn constrained_policy(entries: &[&str]) -> policy::Policy {
+    policy::Policy {
+        allowed_destinations: entries
+            .iter()
+            .map(|entry| entry.parse().expect("constraint parses"))
+            .collect(),
+        ..policy::Policy::default()
+    }
+}
+
+fn code(error: &packetcraftr::Error) -> String {
+    packetcraftr_core::error::Classified::classification(error)
+        .code
+        .to_owned()
+}
+
+#[test]
+fn destination_constraints_narrow_never_widen() {
+    let inside = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let outside = IpAddr::V4(Ipv4Addr::new(10, 0, 1, 2));
+
+    // An empty list adds no constraint: private destinations stay authorized.
+    policy::Policy::default()
+        .authorize_destination(inside)
+        .expect("empty allowlist is unconstrained");
+
+    // Exact and CIDR entries permit their members.
+    let policy = constrained_policy(&["10.0.0.2", "10.9.0.0/16"]);
+    policy
+        .authorize_destination(inside)
+        .expect("exact match is authorized");
+    policy
+        .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 9, 9, 9)))
+        .expect("CIDR member is authorized");
+
+    // Non-members are denied with the effective constraints in the evidence.
+    let error = policy
+        .authorize_destination(outside)
+        .expect_err("destination outside every constraint is denied");
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "policy.destination_not_allowed"
+    );
+    assert!(error.to_string().contains("10.0.0.2, 10.9.0.0/16"));
+
+    // Constraints never widen: an allowlisted public address still needs the
+    // public-destination opt-in.
+    let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
+    let error = constrained_policy(&["8.8.8.8"])
+        .authorize_destination(public)
+        .expect_err("allowlisting cannot grant the public opt-in");
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "policy.public_destination"
+    );
+    let authorized = policy::Policy {
+        allow_public_destinations: true,
+        ..constrained_policy(&["8.8.8.8"])
+    };
+    authorized
+        .authorize_destination(public)
+        .expect("both opt-ins together authorize");
+}
+
+#[test]
+fn destination_constraints_enforce_family_and_subnet_boundaries() {
+    let policy = constrained_policy(&["10.0.0.0/30", "2001:db8::/126"]);
+    // /30 covers .0-.3; .4 is the first address outside.
+    policy
+        .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)))
+        .expect("last in-range address is authorized");
+    let error = policy
+        .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4)))
+        .expect_err("first out-of-range address is denied");
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "policy.destination_not_allowed"
+    );
+
+    // An IPv6 constraint does not admit IPv4 destinations and vice versa.
+    assert!(
+        constrained_policy(&["2001:db8::/32"])
+            .authorize_destination(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)))
+            .is_err()
+    );
+    assert!(
+        constrained_policy(&["10.0.0.0/8"])
+            .authorize_destination("2001:db8::1".parse().unwrap())
+            .is_err()
+    );
+}
+
+#[test]
+fn every_resolved_address_must_satisfy_the_allowlist() {
+    let target = Target::from_str("example.test").expect("hostname must parse");
+    let resolver = CountingResolver {
+        calls: AtomicUsize::new(0),
+        addresses: vec![
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)),
+        ],
+    };
+    let mut policy = constrained_policy(&["10.0.0.0/30"]);
+    policy.allow_hostname_resolution = true;
+
+    let error = policy
+        .resolve_target(&target, &resolver)
+        .expect_err("a resolved address outside the allowlist denies the target");
+    assert!(
+        error
+            .to_string()
+            .contains("outside the configured allowlist")
+    );
+    // Resolution happened once; the denial is on the answer, not the name.
+    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn final_wire_destination_outside_allowlist_is_denied_even_when_target_passed() {
+    // The declared destination 10.0.0.2 is allowed; the bytes that would
+    // actually reach the wire carry 10.9.9.9 and must be denied at the final
+    // wire boundary.
+    let mut packet = Packet::new();
+    packet.push(Raw::new(vec![
+        0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0xfd, 0x65, 0x23, 0x0a, 0x00, 0x00,
+        0x02, 0x0a, 0x09, 0x09, 0x09,
+    ]));
+    let mut options = packetcraftr::send::Options {
+        destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+        ..packetcraftr::send::Options::default()
+    };
+    options.plan.link_mode = packetcraftr_netio::link::Mode::Layer3;
+
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        FixedRoutes,
+        NeverNeighbors,
+        NeverTransmit,
+        constrained_policy(&["10.0.0.0/24"]),
+    );
+    let error = client
+        .send(packet, options)
+        .expect_err("final wire destination must be authorized independently");
+    assert_eq!(code(&error), "policy.destination_not_allowed");
+    assert!(error.to_string().contains("10.9.9.9"));
+}
+
+#[test]
+fn a_constraint_list_beyond_its_bound_is_a_request_error() {
+    let mut policy = policy::Policy::default();
+    policy.allowed_destinations = (0..=policy::MAX_DESTINATION_CONSTRAINTS)
+        .map(|index| {
+            policy::DestinationConstraint::Exact(IpAddr::V4(Ipv4Addr::new(
+                10,
+                (index / 65_536) as u8,
+                (index / 256) as u8,
+                (index % 256) as u8,
+            )))
+        })
+        .collect();
+    let error = policy
+        .validate()
+        .expect_err("the constraint list is bounded");
+    assert_eq!(
+        packetcraftr_core::error::Classified::classification(&error).code,
+        "cli.live_target"
+    );
+}
+
+#[test]
+fn passive_planning_validates_the_destination_constraint_count() {
+    let policy = policy::Policy {
+        allowed_destinations: vec![
+            "10.0.0.0/8".parse().unwrap();
+            policy::MAX_DESTINATION_CONSTRAINTS + 1
+        ],
+        ..policy::Policy::default()
+    };
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        FixedRoutes,
+        NeverNeighbors,
+        NeverTransmit,
+        policy,
+    );
+    let mut packet = Packet::new();
+    packet.push(packetcraftr_core::protocol::network::Ipv4 {
+        destination: Ipv4Addr::new(10, 0, 0, 2),
+        ..Default::default()
+    });
+    let error = client.plan(&packet, None, &Default::default()).unwrap_err();
+    assert_eq!(code(&error), "cli.live_target");
+}

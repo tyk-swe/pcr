@@ -79,6 +79,35 @@ fn write_capture_byte_frames(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
     file
 }
 
+/// A microsecond-resolution PCAP whose records carry the given timestamps as
+/// `(seconds, microseconds)` pairs, in the given capture order.
+fn write_timed_capture(frames: &[((u32, u32), &str)]) -> tempfile::NamedTempFile {
+    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
+    file.write_all(&[
+        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
+        2, 0, 4, 0, // version 2.4
+        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
+        0xff, 0xff, 0, 0, // snap length
+        228, 0, 0, 0, // DLT_IPV4
+    ])
+    .expect("global header must write");
+    for ((seconds, micros), bytes) in frames {
+        let bytes = decode_hex(bytes);
+        let length = u32::try_from(bytes.len()).expect("fixture frame fits u32");
+        file.write_all(&seconds.to_le_bytes())
+            .expect("timestamp seconds must write");
+        file.write_all(&micros.to_le_bytes())
+            .expect("timestamp fraction must write");
+        file.write_all(&length.to_le_bytes())
+            .expect("captured length must write");
+        file.write_all(&length.to_le_bytes())
+            .expect("original length must write");
+        file.write_all(&bytes).expect("frame bytes must write");
+    }
+    file.flush().expect("capture must flush");
+    file
+}
+
 fn write_capture_with_later_missing_timestamp() -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     {
@@ -142,6 +171,43 @@ fn ipv6_fragment_hex() -> String {
 fn write_truncated_capture() -> tempfile::NamedTempFile {
     let mut file = write_capture();
     append_truncated_record(&mut file);
+    file
+}
+
+/// A capture whose second record is snaplen-truncated (incl < orig) and whose
+/// third record regresses below the established high-water timestamp.
+fn write_capture_evidence_capture() -> tempfile::NamedTempFile {
+    let truncated = decode_hex(UDP_SERVER);
+    let captured = u32::try_from(truncated.len() - 5).expect("fixture truncates");
+    let original = u32::try_from(truncated.len()).expect("fixture length fits");
+    let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
+    file.write_all(&[
+        0xd4, 0xc3, 0xb2, 0xa1, // little-endian microsecond PCAP
+        2, 0, 4, 0, // version 2.4
+        0, 0, 0, 0, 0, 0, 0, 0, // timezone and timestamp accuracy
+        0xff, 0xff, 0, 0, // snap length
+        228, 0, 0, 0, // DLT_IPV4
+    ])
+    .expect("global header must write");
+    let mut record = |seconds: u32, captured: u32, original: u32, bytes: &[u8]| {
+        file.write_all(&seconds.to_le_bytes())
+            .expect("timestamp seconds must write");
+        file.write_all(&0_u32.to_le_bytes())
+            .expect("timestamp fraction must write");
+        file.write_all(&captured.to_le_bytes())
+            .expect("captured length must write");
+        file.write_all(&original.to_le_bytes())
+            .expect("original length must write");
+        file.write_all(bytes).expect("frame bytes must write");
+    };
+    let full = decode_hex(UDP_CLIENT);
+    let full_length = u32::try_from(full.len()).expect("fixture frame fits u32");
+    record(100, full_length, full_length, &full);
+    record(101, captured, original, &truncated[..captured as usize]);
+    let last = decode_hex(TCP_CLIENT);
+    let last_length = u32::try_from(last.len()).expect("fixture frame fits u32");
+    record(50, last_length, last_length, &last);
+    file.flush().expect("capture must flush");
     file
 }
 
@@ -395,6 +461,85 @@ fn follow_handles_udp_directions_and_all_output_encodings() {
         let rejected = run(&["follow", path, "--stream", stream]);
         assert_eq!(rejected.status.code(), Some(2));
     }
+}
+
+#[test]
+fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
+    let capture = write_capture();
+    let path = path_text(capture.path());
+    let directory = tempfile::tempdir().expect("destination dir");
+    let dir = path_text(directory.path());
+
+    let output = run_success(&[
+        "--output", "json", "follow", path, "--stream", "udp:0", "--write", dir,
+    ]);
+    let value = parse_json(&output);
+    let written = value["result"]["written"]
+        .as_array()
+        .expect("written files list");
+    assert_eq!(written.len(), 2);
+    assert_eq!(written[0]["direction"], "client");
+    assert_eq!(written[0]["bytes"], 5);
+    assert_eq!(written[1]["direction"], "server");
+    assert_eq!(written[1]["bytes"], 5);
+    let client = directory.path().join("udp-0-client.bin");
+    let server = directory.path().join("udp-0-server.bin");
+    assert_eq!(std::fs::read(&client).unwrap(), b"hello");
+    assert_eq!(std::fs::read(&server).unwrap(), b"world");
+
+    // A second run collides without touching the first files.
+    let output = run(&["follow", path, "--stream", "udp:0", "--write", dir]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("already exists"));
+    assert_eq!(std::fs::read(&client).unwrap(), b"hello");
+    assert_eq!(std::fs::read(&server).unwrap(), b"world");
+
+    // --direction narrows which files publish.
+    let only = tempfile::tempdir().expect("destination dir");
+    run_success(&[
+        "follow",
+        path,
+        "--stream",
+        "udp:0",
+        "--direction",
+        "server",
+        "--write",
+        path_text(only.path()),
+    ]);
+    assert!(!only.path().join("udp-0-client.bin").exists());
+    assert_eq!(
+        std::fs::read(only.path().join("udp-0-server.bin")).unwrap(),
+        b"world"
+    );
+
+    // The output-byte budget is shared across the operation's files, and a
+    // mid-run failure publishes nothing.
+    let capped = tempfile::tempdir().expect("destination dir");
+    let output = run(&[
+        "follow",
+        path,
+        "--stream",
+        "udp:0",
+        "--write",
+        path_text(capped.path()),
+        "--max-application-output-bytes",
+        "6",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--max-application-output-bytes"));
+    assert_eq!(std::fs::read_dir(capped.path()).unwrap().count(), 0);
+
+    // A missing directory fails before the capture is read.
+    let missing = directory.path().join("absent");
+    let output = run(&[
+        "follow",
+        path,
+        "--stream",
+        "udp:0",
+        "--write",
+        path_text(&missing),
+    ]);
+    assert!(!output.status.success());
 }
 
 #[test]
@@ -960,6 +1105,243 @@ fn read_ndjson_completes_empty_and_fully_filtered_inputs_at_zero() {
             captured_bytes_read
         );
     }
+}
+
+#[test]
+fn read_epoch_bounds_select_inclusive_subsecond_endpoints() {
+    // Three frames share one second; selection distinguishes the fractions.
+    let capture = write_timed_capture(&[
+        ((1, 100_000), UDP_CLIENT),
+        ((1, 500_000), UDP_SERVER),
+        ((1, 900_000), TCP_CLIENT),
+    ]);
+    let path = path_text(capture.path());
+    let output = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path,
+        "--start-epoch",
+        "1.5",
+        "--stop-epoch",
+        "1.9",
+    ]);
+    let records = parse_ndjson(&output);
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["result"]["source_frame"], 2);
+    assert_eq!(records[1]["result"]["source_frame"], 3);
+    assert_eq!(records[2]["result"]["frames_read"], 3);
+    assert_eq!(records[2]["result"]["frames_matched"], 2);
+
+    // One-sided bounds leave the other end open; sub-microsecond bound
+    // precision still applies exactly, past the capture's own resolution.
+    for (arguments, expected) in [
+        (vec!["--start-epoch", "1.5"], vec![2, 3]),
+        (vec!["--stop-epoch", "1.5"], vec![1, 2]),
+        (vec!["--start-epoch", "1.5000005"], vec![3]),
+        (vec!["--stop-epoch", "1.4999995"], vec![1]),
+    ] {
+        let mut call = vec!["--output", "ndjson", "read", path];
+        call.extend(arguments);
+        let records = parse_ndjson(&run_success(&call));
+        let frames = records
+            .iter()
+            .filter(|record| record["event"] == "frame")
+            .map(|record| record["result"]["source_frame"].as_u64().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(frames, expected, "arguments {call:?}");
+    }
+}
+
+#[test]
+fn read_epoch_bounds_select_by_timestamp_not_capture_order() {
+    let capture = write_timed_capture(&[
+        ((1, 900_000), UDP_CLIENT),
+        ((1, 500_000), UDP_SERVER),
+        ((1, 100_000), TCP_CLIENT),
+    ]);
+    let output = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path_text(capture.path()),
+        "--stop-epoch",
+        "1.5",
+    ]);
+    let records = parse_ndjson(&output);
+    assert_eq!(records[0]["result"]["source_frame"], 2);
+    assert_eq!(records[1]["result"]["source_frame"], 3);
+    assert_eq!(records[2]["result"]["frames_matched"], 2);
+}
+
+#[test]
+fn read_projection_applies_epoch_bounds_on_both_decoding_paths() {
+    let capture = write_timed_capture(&[
+        ((9, 0), TCP_CLIENT),
+        ((1, 500_000), UDP_CLIENT),
+        ((1, 500_001), UDP_SERVER),
+        ((0, 100_000), UDP_CLIENT),
+    ]);
+    let path = path_text(capture.path());
+    for selections in [
+        vec!["--field", "frame.number", "--filter", "udp"],
+        vec![
+            "--field",
+            "frame.number",
+            "--field",
+            "udp.stream",
+            "--filter",
+            "udp",
+        ],
+        vec!["--field", "frame.number", "--filter", "udp.stream == 0"],
+    ] {
+        for (bounds, expected) in [
+            (
+                vec!["--start-epoch", "1.5", "--stop-epoch", "1.500001"],
+                vec![2, 3],
+            ),
+            (vec!["--start-epoch", "1.5000005"], vec![3]),
+            (vec!["--stop-epoch", "1.5"], vec![2, 4]),
+            (vec!["--start-epoch", "20"], vec![]),
+        ] {
+            let mut args = vec!["--output", "json", "read", path];
+            args.extend_from_slice(&selections);
+            args.extend_from_slice(&bounds);
+            let report = parse_json(&run_success(&args));
+            let result = &report["result"];
+            let frames = result["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|row| row["source_frame"].as_u64().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(frames, expected, "{args:?}");
+            assert_eq!(result["frames_read"], 4);
+            assert_eq!(result["captured_bytes_read"], 142);
+            assert_eq!(result["rows_written"], expected.len());
+        }
+        let mut reversed = vec!["--output", "json", "read", "/nonexistent"];
+        reversed.extend_from_slice(&selections);
+        reversed.extend(["--start-epoch", "2", "--stop-epoch", "1"]);
+        let output = run(&reversed);
+        assert!(!output.status.success());
+        assert_eq!(
+            parse_json(&output)["error"]["code"],
+            "cli.reversed_time_bounds"
+        );
+
+        let mut limited = vec![
+            "--output",
+            "json",
+            "read",
+            path,
+            "--start-epoch",
+            "20",
+            "--max-frames",
+            "3",
+        ];
+        limited.extend_from_slice(&selections);
+        assert!(
+            !run(&limited).status.success(),
+            "skipped frames still consume input budgets"
+        );
+    }
+}
+
+#[test]
+fn read_epoch_bounds_never_keep_timestampless_frames() {
+    let capture = write_capture_with_later_missing_timestamp();
+    let path = path_text(capture.path());
+    let unbounded = run_success(&["--output", "ndjson", "read", path]);
+    assert_eq!(parse_ndjson(&unbounded)[2]["result"]["frames_matched"], 2);
+    let bounded = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path,
+        "--stop-epoch",
+        "9999999999",
+    ]);
+    let records = parse_ndjson(&bounded);
+    assert_eq!(records[0]["result"]["source_frame"], 1);
+    assert_eq!(records[1]["result"]["frames_read"], 2);
+    assert_eq!(records[1]["result"]["frames_matched"], 1);
+    let projected = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path,
+        "--field",
+        "frame.number",
+        "--stop-epoch",
+        "9999999999",
+    ]);
+    let records = parse_ndjson(&projected);
+    assert_eq!(records[0]["result"]["source_frame"], 1);
+    assert_eq!(records[1]["result"]["frames_read"], 2);
+    assert_eq!(records[1]["result"]["rows_written"], 1);
+}
+
+#[test]
+fn read_epoch_bounds_apply_to_capture_rewrite_and_compose_with_filters() {
+    let capture = write_timed_capture(&[
+        ((1, 100_000), UDP_CLIENT),
+        ((1, 500_000), UDP_SERVER),
+        ((1, 900_000), TCP_CLIENT),
+    ]);
+    let path = path_text(capture.path());
+    let rewritten = run_success(&["--output", "pcap", "read", path, "--stop-epoch", "1.5"]);
+    let mut reader =
+        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(rewritten.stdout))
+            .expect("rewritten capture opens");
+    let mut kept = Vec::new();
+    while let Some(frame) = reader.next_frame().expect("rewritten frame reads") {
+        kept.push(frame);
+    }
+    assert_eq!(kept.len(), 2);
+
+    let filtered = run_success(&[
+        "--output",
+        "ndjson",
+        "read",
+        path,
+        "--filter",
+        "udp",
+        "--start-epoch",
+        "1.5",
+    ]);
+    let records = parse_ndjson(&filtered);
+    assert_eq!(records[0]["result"]["source_frame"], 2);
+    assert_eq!(records[1]["result"]["frames_matched"], 1);
+}
+
+#[test]
+fn epoch_bounds_reject_reversed_and_imprecise_values() {
+    let capture = write_timed_capture(&[((1, 500_000), UDP_CLIENT)]);
+    let path = path_text(capture.path());
+    for arguments in [
+        vec!["read", path, "--start-epoch", "2", "--stop-epoch", "1"],
+        vec!["read", path, "--start-epoch", "1.1234567890"],
+        vec!["read", path, "--start-epoch", "-1"],
+        vec!["stats", path, "--start-epoch", "2", "--stop-epoch", "1"],
+    ] {
+        let output = run(&arguments);
+        assert!(!output.status.success(), "arguments {arguments:?}");
+    }
+    let reversed = run(&["read", path, "--start-epoch", "2", "--stop-epoch", "1"]);
+    assert!(String::from_utf8_lossy(&reversed.stderr).contains("reversed"));
+}
+
+#[test]
+fn stats_epoch_bounds_restrict_the_matched_set() {
+    let capture = write_timed_capture(&[
+        ((1, 100_000), UDP_CLIENT),
+        ((1, 500_000), UDP_SERVER),
+        ((1, 900_000), TCP_CLIENT),
+    ]);
+    let path = path_text(capture.path());
+    let output = run_success(&["stats", path, "--stop-epoch", "1.5"]);
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("matched 2 of 3 frame(s)"));
 }
 
 #[test]
@@ -1733,4 +2115,101 @@ fn offline_dns_records_match_aggregate_stream_and_published_example_contracts() 
     );
     let rewritten = run_success(&["--output", "pcap", "read", path_text(&capture)]);
     assert_eq!(rewritten.stdout, std::fs::read(capture).unwrap());
+}
+
+#[test]
+fn expert_surfaces_capture_evidence_in_every_output_mode() {
+    let capture = write_capture_evidence_capture();
+    let path = path_text(capture.path());
+
+    let document = parse_json(&run_success(&["--output", "json", "expert", path]));
+    let findings = document["result"]["findings"]
+        .as_array()
+        .expect("aggregate expert output lists findings");
+    let codes: Vec<_> = findings
+        .iter()
+        .map(|finding| {
+            (
+                finding["code"].as_str().expect("code is a string"),
+                finding["frame"].as_u64().expect("frame is a number"),
+                finding["severity"].as_str().expect("severity is a string"),
+            )
+        })
+        .collect();
+    assert!(
+        codes.contains(&("capture.frame_truncated", 2, "warning")),
+        "{codes:?}"
+    );
+    assert!(
+        codes.contains(&("capture.clock_regression", 3, "warning")),
+        "{codes:?}"
+    );
+
+    let text = String::from_utf8(run_success(&["--output", "text", "expert", path]).stdout)
+        .expect("text output is UTF-8");
+    assert!(text.contains("capture.frame_truncated"), "{text}");
+    assert!(text.contains("capture.clock_regression"), "{text}");
+    assert!(text.contains("captured 28 of 33 bytes"), "{text}");
+
+    let records = parse_ndjson(&run_success(&["--output", "ndjson", "expert", path]));
+    let streamed: Vec<_> = records
+        .iter()
+        .filter(|record| record["event"] == "finding")
+        .filter_map(|record| record["result"]["code"].as_str())
+        .collect();
+    assert!(
+        streamed.contains(&"capture.frame_truncated"),
+        "{streamed:?}"
+    );
+    assert!(
+        streamed.contains(&"capture.clock_regression"),
+        "{streamed:?}"
+    );
+}
+
+#[test]
+fn bounded_analysis_and_stream_projection_skip_missing_timestamps_but_charge_input() {
+    let capture = write_capture_with_later_missing_timestamp();
+    let path = path_text(capture.path());
+    let bytes = (decode_hex(UDP_CLIENT).len() + decode_hex(UDP_SERVER).len()) as u64;
+    for start in ["0", "1"] {
+        let report = parse_json(&run_success(&[
+            "--output",
+            "json",
+            "read",
+            path,
+            "--field",
+            "udp.stream",
+            "--start-epoch",
+            start,
+        ]));
+        assert_eq!(report["result"]["frames_read"], 2);
+        assert_eq!(report["result"]["captured_bytes_read"], bytes);
+        assert_eq!(report["result"]["rows_written"], u64::from(start == "0"));
+        let stats = parse_json(&run_success(&[
+            "--output",
+            "json",
+            "stats",
+            path,
+            "--start-epoch",
+            start,
+        ]));
+        assert_eq!(stats["result"]["frames_read"], 2);
+        assert_eq!(stats["result"]["frames_matched"], u64::from(start == "0"));
+    }
+    let limited = run(&[
+        "--output",
+        "json",
+        "read",
+        path,
+        "--field",
+        "udp.stream",
+        "--start-epoch",
+        "1",
+        "--max-frames",
+        "1",
+    ]);
+    assert!(!limited.status.success());
+    // The unbounded analysis contract still refuses missing timestamps.
+    assert!(!run(&["stats", path]).status.success());
 }

@@ -26,7 +26,7 @@ use tunnel::{
 use crate::protocol::BuiltinProtocol;
 use crate::protocol::catalog::builtin_protocol_catalog;
 
-use application::{Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, TlsCodec};
+use application::{Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, TlsCodec};
 
 pub(crate) mod registration;
 

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, Captured, TrafficBudgetArgs};
+use crate::command_options::{CaptureLimitsArgs, Captured, DecodeArgs, TrafficBudgetArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
@@ -34,6 +34,14 @@ Operation frame/byte/time limits remain shared across every source and file.
 Text and NDJSON frame records use the one-based post-BPF source frame position.
 Display-filter rejection does not renumber later source_frame values; NDJSON envelope
 sequence remains the zero-based emitted-record position.
+
+--dissect decodes each emitted frame once and publishes its layer stack and
+decode diagnostics: NDJSON frame records gain a decoded object while text
+prints the layer list beside the frame. --field selects registered field paths
+per matched frame instead of frame records; rows stream as NDJSON fields
+events or text columns bounded by --max-projection-bytes. Both share the
+--filter/--decode-as registry and decode a frame at most once per selection
+and emission; decoded state never accumulates across frames.
 
 Examples:
   packetcraftr capture --interface 1 --timeout-ms 1000
@@ -82,6 +90,17 @@ pub(crate) struct Args {
     /// Keep only frames matching PacketcraftR's post-capture display filter.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
+    /// Decode each emitted frame and include its layer stack and diagnostics.
+    #[arg(long)]
+    pub(crate) dissect: bool,
+    /// Select a registered field per matched frame; repeat to preserve column order.
+    #[arg(long = "field", value_name = "PATH", conflicts_with = "dissect")]
+    pub(crate) fields: Vec<String>,
+    /// Maximum encoded projection data bytes across all rows (excluding envelopes).
+    #[arg(long, default_value_t = 16*1024*1024)]
+    pub(crate) max_projection_bytes: usize,
+    #[command(flatten)]
+    pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]

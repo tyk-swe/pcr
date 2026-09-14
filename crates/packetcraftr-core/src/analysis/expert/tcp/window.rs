@@ -9,6 +9,7 @@ use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey};
+use crate::protocol::transport::TcpOption;
 
 pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<Finding>) {
     if observation.tcp.window == 0 && !observation.rst {
@@ -152,17 +153,13 @@ pub(super) fn analyze_sender(
     }
 }
 
-pub(in crate::analysis::expert) fn scale(options: &[u8]) -> Option<u8> {
-    let mut rest = options;
-    loop {
-        match rest {
-            [] | [0, ..] => return None,
-            [1, tail @ ..] => rest = tail,
-            [3, 3, shift, ..] => return Some(*shift),
-            [_, length, tail @ ..] if *length >= 2 => {
-                rest = tail.get(usize::from(*length).checked_sub(2)?..)?;
-            }
-            _ => return None,
-        }
-    }
+pub(in crate::analysis::expert) fn scale(options: &[TcpOption]) -> Option<u8> {
+    // An end-of-list marker or an unparseable tail ends the option scan.
+    options
+        .iter()
+        .take_while(|option| !matches!(option, TcpOption::End | TcpOption::Trailing(_)))
+        .find_map(|option| match option {
+            TcpOption::WindowScale(shift) => Some(*shift),
+            _ => None,
+        })
 }

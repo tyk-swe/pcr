@@ -22,6 +22,24 @@ pub(super) fn render_text(
         "matched {} of {} frame(s), {} byte(s)",
         report.frames, frames_read, report.bytes
     ))?;
+    if let Some(duration) = report.duration() {
+        let average = report.average_packet_size().unwrap_or_default();
+        // Both rates share one zero-span guard, so they are present together.
+        match report.packet_rate().zip(report.byte_rate()) {
+            Some((packets, bytes)) => write_stdout_line(format_args!(
+                "duration {duration:?}; {packets:.3} frame(s)/s, {bytes:.3} byte(s)/s; average packet size {average:.3} byte(s)"
+            ))?,
+            None => write_stdout_line(format_args!(
+                "duration {duration:?}; rates unavailable (zero span); average packet size {average:.3} byte(s)"
+            ))?,
+        }
+    }
+    for (id, interface) in report.interfaces.iter().enumerate() {
+        write_stdout_line(format_args!(
+            "interface {id}: link-type {} snaplen {}",
+            interface.link_type.0, interface.snap_len,
+        ))?;
+    }
     crate::commands::offline_analysis::render_clock(&report.clock)?;
     match table {
         Table::Conversations => {

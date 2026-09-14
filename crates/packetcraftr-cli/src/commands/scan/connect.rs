@@ -65,6 +65,16 @@ pub(super) fn run(
                 report.summary.socket_stats.connections_attempted,
                 report.summary.socket_stats.connections_succeeded,
                 report.summary.socket_stats.elapsed
+            ))?;
+            let rtt = &report.summary.socket_stats.rtt;
+            write_stdout_line(format_args!(
+                "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+                rtt.sent,
+                rtt.received,
+                rtt.lost,
+                crate::rendering::optional_debug(rtt.min),
+                crate::rendering::optional_debug(rtt.avg),
+                crate::rendering::optional_debug(rtt.max),
             ))
         }
     }

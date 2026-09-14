@@ -75,6 +75,16 @@ pub enum Error {
         field: &'static str,
         message: String,
     },
+    #[error("invalid send option {field}: {message}")]
+    InvalidSendOption {
+        field: &'static str,
+        message: String,
+    },
+    #[error("send progressive output failed: {source}")]
+    SendOutput {
+        #[source]
+        source: Box<packetcraftr_core::error::BoundaryError>,
+    },
 }
 
 /// A `cli.*` code means "caller or request error": the request that reached a
@@ -108,7 +118,9 @@ impl Classified for Error {
             ),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
-            Self::ExchangeOutput { source } => source.classification(),
+            Self::ExchangeOutput { source } | Self::SendOutput { source } => {
+                source.classification()
+            }
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.classification(),
             Self::InvalidExchangeEvents { .. } => Classification::new(
                 "internal.exchange_event_coherence",
@@ -144,6 +156,11 @@ impl Classified for Error {
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),
             ),
+            Self::InvalidSendOption { .. } => Classification::new(
+                "cli.send_limit",
+                Kind::Cli,
+                Some("use finite repetition, rate, and expansion limits for one send operation"),
+            ),
         }
     }
 
@@ -154,7 +171,7 @@ impl Classified for Error {
             Self::Policy(error) => error.context(),
             Self::Io(error) => error.context(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
-            Self::ExchangeOutput { source } => source.context(),
+            Self::ExchangeOutput { source } | Self::SendOutput { source } => source.context(),
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
             Self::Wire(error) => error.context(),
             Self::UnsupportedOperation { .. }
@@ -166,6 +183,7 @@ impl Classified for Error {
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
             | Self::InvalidExchangeOption { .. }
+            | Self::InvalidSendOption { .. }
             | Self::Cancelled(_) => None,
         }
     }
@@ -200,5 +218,11 @@ impl Classified for Error {
             }
             error => packetcraftr_core::error::source_chain(error),
         }
+    }
+}
+
+impl From<std::convert::Infallible> for Error {
+    fn from(source: std::convert::Infallible) -> Self {
+        match source {}
     }
 }

@@ -64,6 +64,12 @@ pub struct Statistics {
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
     pub elapsed: Duration,
+    /// Round-trip accounting across the admitted connect attempts: a probe
+    /// counts as sent once the kernel accepted its connect call, and as
+    /// received when it finished with a connected, refused, or unreachable
+    /// verdict before its deadline. Timed-out, deadline-expired, and
+    /// local-error attempts count as lost and contribute no sample.
+    pub rtt: super::Rtt,
 }
 #[derive(Clone, Debug)]
 pub struct Summary {
@@ -399,6 +405,7 @@ where
     enforce_deadline(WORKFLOW, &deadline)?;
     let planned = planned(request, authorizer, &deadline)?;
     let mut stats = Statistics::default();
+    let mut rtt = super::report::RttAccumulator::default();
     let mut active: Vec<Active<P::Stream>> = Vec::new();
     let mut next = 0usize;
     let mut next_start = clock.now();
@@ -446,6 +453,15 @@ where
                 })?;
             stats.connections_attempted += u64::from(probe.attempted);
             stats.connections_succeeded += u64::from(probe.connect_succeeded == Some(true));
+            if probe.attempted {
+                rtt.note_sent();
+            }
+            if matches!(
+                probe.outcome,
+                Outcome::Connected | Outcome::Refused | Outcome::Unreachable
+            ) {
+                rtt.note_received(probe.elapsed);
+            }
             emit(probe, &deadline)?;
         }
         if next < planned.count || !active.is_empty() {
@@ -479,6 +495,7 @@ where
     }
     enforce_deadline(WORKFLOW, &deadline)?;
     stats.elapsed = started.elapsed();
+    stats.rtt = rtt.finish();
     Ok(Summary {
         target: request.targets.to_string(),
         resolved_addresses: planned.addresses,
@@ -673,5 +690,88 @@ mod tests {
             .is_err()
         );
         assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
+    }
+
+    /// Resolves each admitted connect by port: divisible by three connects,
+    /// one more refuses, two more never answer, so one run exercises the
+    /// sent/received/lost accounting and every RTT verdict class.
+    struct Verdicts {
+        closed: Arc<AtomicUsize>,
+    }
+    impl Provider for Verdicts {
+        type Stream = Socket;
+        fn connect(&self, endpoint: SocketAddr, _: Duration) -> io::Result<Socket> {
+            match endpoint.port() % 3 {
+                0 => Ok(Socket {
+                    peer: endpoint,
+                    closed: Arc::clone(&self.closed),
+                }),
+                1 => Err(io::Error::new(
+                    io::ErrorKind::ConnectionRefused,
+                    "scripted refusal",
+                )),
+                _ => Err(io::Error::new(io::ErrorKind::TimedOut, "scripted silence")),
+            }
+        }
+    }
+
+    #[test]
+    fn connect_scan_reports_rtt_statistics_across_verdicts() {
+        let request = Request {
+            targets: crate::target::Target::Address("127.0.0.1".parse().unwrap()).into(),
+            transport: Transport::Tcp,
+            udp_payload: bytes::Bytes::new(),
+            udp_profiles: Default::default(),
+            address_family: crate::target::Family::Any,
+            ports: vec![90, 91, 92],
+            attempts: 2,
+            timeout: Duration::from_secs(5),
+            probes_per_second: None,
+            max_in_flight: 1,
+            limits: super::super::Limits::default(),
+        };
+        let closed = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(Verdicts {
+            closed: Arc::clone(&closed),
+        });
+        let policy = crate::policy::Policy::default();
+        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let report = run(
+            &request,
+            &mut authorizer,
+            Arc::clone(&provider),
+            &mut crate::clock::SystemClock,
+        )
+        .unwrap();
+
+        let stats = &report.summary.stats;
+        assert_eq!(stats.connections_scheduled, 6);
+        assert_eq!(stats.connections_attempted, 6);
+        assert_eq!(stats.connections_succeeded, 2);
+        assert_eq!(stats.rtt.sent, 6);
+        assert_eq!(stats.rtt.received, 4);
+        assert_eq!(stats.rtt.lost, 2);
+        let (Some(min), Some(avg), Some(max)) = (stats.rtt.min, stats.rtt.avg, stats.rtt.max)
+        else {
+            panic!("received probes must produce RTT samples");
+        };
+        assert!(
+            min <= avg && avg <= max,
+            "min {min:?} avg {avg:?} max {max:?}"
+        );
+        let endpoint_verdicts: Vec<_> = report
+            .endpoints
+            .iter()
+            .map(|endpoint| (endpoint.port, endpoint.classification))
+            .collect();
+        assert_eq!(
+            endpoint_verdicts,
+            [
+                (90, Classification::Open),
+                (91, Classification::Closed),
+                (92, Classification::Timeout),
+            ]
+        );
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
     }
 }

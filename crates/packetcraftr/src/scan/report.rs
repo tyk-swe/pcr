@@ -95,6 +95,80 @@ pub struct Report {
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
+    pub rtt: Rtt,
+}
+
+/// Operation-level accounting for one bounded repeated-probe run.
+///
+/// `sent` counts probes whose transmission the provider confirmed (for the
+/// socket path, connect calls the kernel admitted). `received` counts probes
+/// that produced a definitive verdict inside their round's timeout: a
+/// checksum-valid, protocol-consistent correlated response for packet
+/// probes, or a connected/refused/unreachable connect verdict for TCP
+/// connect. `lost` is `sent - received`. `min`, `avg`, and `max` summarize
+/// one round-trip sample per received probe — the selected response's
+/// latency, or the connect verdict's elapsed time — and are `None` when no
+/// probe was received.
+///
+/// Each probe contributes at most one sample: duplicate responses inside one
+/// round add neither samples nor counts, and a response arriving after its
+/// round's window is unattributed evidence rather than a late `received`.
+/// When the capture backend reports dropped frames, `lost` may count probes
+/// whose replies arrived but were never delivered; the
+/// `capture.evidence_incomplete` diagnostic marks that caveat.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Rtt {
+    pub sent: u64,
+    pub received: u64,
+    pub lost: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<Duration>,
+}
+
+/// Accumulates per-probe verdicts into the published [`Rtt`] totals.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RttAccumulator {
+    sent: u64,
+    received: u64,
+    total: Duration,
+    min: Option<Duration>,
+    max: Option<Duration>,
+}
+
+impl RttAccumulator {
+    /// Counts one probe whose transmission the provider confirmed.
+    pub(crate) fn note_sent(&mut self) {
+        self.sent = self.sent.saturating_add(1);
+    }
+
+    /// Counts one received verdict and folds its round-trip sample in.
+    pub(crate) fn note_received(&mut self, sample: Duration) {
+        self.received = self.received.saturating_add(1);
+        self.total = self.total.saturating_add(sample);
+        self.min = Some(self.min.map_or(sample, |min| min.min(sample)));
+        self.max = Some(self.max.map_or(sample, |max| max.max(sample)));
+    }
+
+    /// Freezes the accumulated counts and samples into the reported form.
+    pub(crate) fn finish(&self) -> Rtt {
+        // received is bounded by the operation probe budget, far below u32::MAX;
+        // checked_div guards the narrowing anyway.
+        let avg = u32::try_from(self.received)
+            .ok()
+            .and_then(|count| self.total.checked_div(count));
+        Rtt {
+            sent: self.sent,
+            received: self.received,
+            lost: self.sent.saturating_sub(self.received),
+            min: self.min,
+            avg,
+            max: self.max,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +201,7 @@ pub struct Summary {
     pub resolved_addresses: Vec<IpAddr>,
     pub counts: ClassificationCounts,
     pub stats: Stats,
+    pub rtt: Rtt,
 }
 
 /// How many probed endpoints settled on each final classification, mirroring

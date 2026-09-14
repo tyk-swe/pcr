@@ -10,8 +10,10 @@ mod operation;
 mod wire;
 
 pub use capture::CaptureBudget;
-pub use model::{DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES};
-pub use model::{Error, Policy};
+pub use model::{
+    DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES,
+};
+pub use model::{DestinationConstraint, Error, Policy};
 
 pub use operation::{
     Authorizer, BudgetOverflow, DeclaredPackets, DnsOperation, Operation, PermissiveLive,

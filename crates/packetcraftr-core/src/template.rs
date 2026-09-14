@@ -13,6 +13,53 @@ use crate::packet::Packet;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 
+/// An inclusive ascending unsigned range expanded by a template axis.
+///
+/// `start` is the first value, `end` is the inclusive last value, and `step`
+/// is the positive stride between values. Descending ranges and zero steps
+/// are rejected so expansion size and ordering are always well defined.
+/// Values surface as [`FieldValue::Unsigned`]; layered field types decide
+/// whether each value is assignable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NumericRange {
+    start: u64,
+    end: u64,
+    step: u64,
+}
+
+impl NumericRange {
+    pub fn new(start: u64, end: u64, step: u64) -> Result<Self, Error> {
+        if step == 0 {
+            return Err(Error::InvalidRangeStep { step });
+        }
+        if start > end {
+            return Err(Error::ReversedRange { start, end });
+        }
+        Ok(Self { start, end, step })
+    }
+
+    /// Number of values the range produces, in `u128` so a `0..=u64::MAX`
+    /// span still reports its exact `u64::MAX + 1` length.
+    pub fn len(&self) -> u128 {
+        u128::from(self.end - self.start) / u128::from(self.step) + 1
+    }
+
+    /// An inclusive range always holds at least its start value.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    /// Values in ascending order, stopping at the inclusive end. Stepping
+    /// past `end` or overflowing `u64` terminates the sequence.
+    pub fn values(&self) -> impl Iterator<Item = FieldValue> + '_ {
+        let (end, step) = (self.end, self.step);
+        std::iter::successors(Some(self.start), move |value| {
+            value.checked_add(step).filter(|next| *next <= end)
+        })
+        .map(FieldValue::Unsigned)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TemplateAxis {
     layer: usize,
@@ -154,6 +201,10 @@ pub enum Error {
     ExpansionLimit { requested: usize, limit: usize },
     #[error("template repeats field {field} on layer {layer}")]
     DuplicateAxis { layer: usize, field: String },
+    #[error("template range step {step} is not a positive integer")]
+    InvalidRangeStep { step: u64 },
+    #[error("template range {start}..{end} is reversed; ranges ascend to an inclusive end")]
+    ReversedRange { start: u64, end: u64 },
     #[error("template layer index {index} is outside packet length {len}")]
     LayerIndex { index: usize, len: usize },
     #[error("could not set template field {field} on layer {layer}: {source}")]
@@ -170,14 +221,87 @@ impl Classified for Error {
         let code = match self {
             Self::ExpansionOverflow | Self::ExpansionLimit { .. } => "cli.template_limit",
             Self::DuplicateAxis { .. } => "cli.template_duplicate_axis",
+            Self::InvalidRangeStep { .. } | Self::ReversedRange { .. } => "cli.template_range",
             Self::LayerIndex { .. } | Self::Field { .. } => "cli.template_field",
         };
-        Classification::new(
-            code,
-            Kind::Cli,
-            Some(
-                "use distinct writable fields and keep the Cartesian product within the packet limit",
-            ),
-        )
+        let hint = match self {
+            Self::InvalidRangeStep { .. } | Self::ReversedRange { .. } => {
+                "write ascending unsigned ranges like 1..64 or 1..64:8 with a positive step"
+            }
+            _ => {
+                "use distinct writable fields and keep the Cartesian product within the packet limit"
+            }
+        };
+        Classification::new(code, Kind::Cli, Some(hint))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_ranges_count_and_yield_inclusive_unsigned_values() {
+        let range = NumericRange::new(3, 9, 2).expect("range");
+        assert_eq!(range.len(), 4);
+        assert!(!range.is_empty());
+        assert_eq!(
+            range.values().collect::<Vec<_>>(),
+            [
+                FieldValue::Unsigned(3),
+                FieldValue::Unsigned(5),
+                FieldValue::Unsigned(7),
+                FieldValue::Unsigned(9)
+            ]
+        );
+
+        // An inclusive end that the step cannot reach is still the bound.
+        let unaligned = NumericRange::new(3, 8, 2).expect("unaligned range");
+        assert_eq!(unaligned.len(), 3);
+        assert_eq!(
+            unaligned.values().collect::<Vec<_>>(),
+            [
+                FieldValue::Unsigned(3),
+                FieldValue::Unsigned(5),
+                FieldValue::Unsigned(7)
+            ]
+        );
+
+        let single = NumericRange::new(7, 7, 1).expect("single-value range");
+        assert_eq!(single.values().collect::<Vec<_>>(), [7_u8.into()]);
+
+        // Stepping beyond the end must not wrap around into extra values.
+        let wide = NumericRange::new(u64::MAX - 1, u64::MAX, u64::MAX).expect("wide-step range");
+        assert_eq!(wide.len(), 1);
+        assert_eq!(
+            wide.values().collect::<Vec<_>>(),
+            [FieldValue::Unsigned(u64::MAX - 1)]
+        );
+
+        let full = NumericRange::new(0, u64::MAX, u64::MAX).expect("full range");
+        assert_eq!(full.len(), 2);
+        assert_eq!(
+            full.values().collect::<Vec<_>>(),
+            [FieldValue::Unsigned(0), FieldValue::Unsigned(u64::MAX)]
+        );
+    }
+
+    #[test]
+    fn numeric_ranges_reject_zero_steps_and_reversed_bounds() {
+        assert!(matches!(
+            NumericRange::new(1, 5, 0),
+            Err(Error::InvalidRangeStep { step: 0 })
+        ));
+        assert!(matches!(
+            NumericRange::new(9, 2, 1),
+            Err(Error::ReversedRange { start: 9, end: 2 })
+        ));
+        assert_eq!(
+            NumericRange::new(9, 2, 1)
+                .unwrap_err()
+                .classification()
+                .code,
+            "cli.template_range"
+        );
     }
 }

@@ -20,6 +20,11 @@
     "planned_duration": {
       "secs": 1,
       "nanos": 0
+    },
+    "rtt": {
+      "sent": 1,
+      "received": 0,
+      "lost": 1
     }
   },
   "diagnostics": [],

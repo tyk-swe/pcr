@@ -13,7 +13,10 @@ use crate::{
     rendering::StreamEncoder,
     system::{InterfaceSelector, resolve},
 };
-use packetcraftr_cli::output::{capture::Retention, contract::Format};
+use packetcraftr_cli::output::{
+    capture::Retention,
+    contract::{Command, Format},
+};
 use packetcraftr_core::{analysis::pcap, error::Kind};
 use packetcraftr_netio as net;
 use std::{
@@ -61,11 +64,47 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             ));
         }
     }
+    if (args.dissect || !args.fields.is_empty()) && !matches!(format, Format::Text | Format::Ndjson)
+    {
+        return Err(CliError::from_classification(
+            packetcraftr_core::error::Classification::new(
+                "cli.capture_decode_format",
+                Kind::Cli,
+                Some("use --output text or --output ndjson for decoded frame output"),
+            ),
+            "--dissect and --field require text or NDJSON output",
+            Vec::new(),
+        ));
+    }
     let limits = args.limits.into_limits();
     limits.validate().map_err(CliError::classified)?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let selector =
-        FrameSelector::compile_optional(args.filter.as_deref(), &registry, limits.snap_length)?;
+    let registry = args.decode.registry()?;
+    let projector = if args.fields.is_empty() {
+        None
+    } else {
+        super::projection::Projector::prepare(
+            &args.fields,
+            args.max_projection_bytes,
+            &registry,
+            Command::Capture,
+            format,
+        )?
+    };
+    let decoding = rendering::Decoding::prepare(
+        args.dissect,
+        projector.is_some(),
+        args.filter.as_deref(),
+        &registry,
+        limits.snap_length,
+    )?;
+    // The raw selector remains the filter's owner when no output decoding was
+    // requested; `Decoding` otherwise evaluates the same filter itself so a
+    // frame is decoded at most once.
+    let selector = if decoding.is_none() {
+        FrameSelector::compile_optional(args.filter.as_deref(), &registry, limits.snap_length)?
+    } else {
+        None
+    };
     let policy = args.budgets.into_policy();
     let budget = packetcraftr::policy::CaptureBudget::new(&policy);
     let files = args
@@ -123,6 +162,8 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             format,
             compression: args.compression,
             selector,
+            decoding,
+            projector,
             files,
             stream,
         },

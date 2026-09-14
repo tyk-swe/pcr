@@ -281,6 +281,22 @@ fn representative_stats_report() -> packetcraftr_core::analysis::stats::Report {
             ],
             outcomes_omitted: 2,
         },
+        interfaces: vec![
+            packetcraftr_core::analysis::pcap::Interface {
+                link_type: packetcraftr_core::frame::LinkType(1),
+                snap_len: 65_535,
+                timestamp_resolution:
+                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(6),
+                timestamp_offset: 0,
+            },
+            packetcraftr_core::analysis::pcap::Interface {
+                link_type: packetcraftr_core::frame::LinkType(276),
+                snap_len: 9_000,
+                timestamp_resolution:
+                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(9),
+                timestamp_offset: 0,
+            },
+        ],
     }
 }
 
@@ -458,6 +474,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
         },
         chunks,
         &IpReassemblyReport::default(),
+        Vec::new(),
     );
 
     assert_eq!(followed.client.expect("client endpoint").port, 40_000);
@@ -479,6 +496,7 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
         packetcraftr_core::analysis::follow::Summary::default(),
         Vec::new(),
         &IpReassemblyReport::default(),
+        Vec::new(),
     );
     assert!(empty.client.is_none() && empty.server.is_none());
     assert_eq!(

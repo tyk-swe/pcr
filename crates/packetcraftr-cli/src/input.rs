@@ -3,7 +3,7 @@
 
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis::pcap::Reader;
@@ -90,8 +90,22 @@ pub(crate) fn read_recipe(
     let RecipeArgs {
         packet,
         packet_file,
+        payload_file,
     } = arguments;
 
+    let mut packet = resolve_recipe(packet, packet_file, registry, max_layers)?;
+    if let Some(spec) = payload_file {
+        apply_payload_file(&mut packet, &spec)?;
+    }
+    Ok(packet)
+}
+
+fn resolve_recipe(
+    packet: Option<String>,
+    packet_file: Option<PathBuf>,
+    registry: &core::registry::Registry,
+    max_layers: usize,
+) -> Result<Packet, CliError> {
     let (input, path) = match (packet, packet_file) {
         (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
         (None, Some(path)) => {
@@ -158,6 +172,70 @@ pub(crate) fn read_recipe(
             Err(expression_error)
         }
     }
+}
+
+/// Sets a bytes-typed recipe field from file contents. The field must exist,
+/// hold bytes, and be empty in the recipe so an embedded value is never
+/// silently replaced; the file reads under the packet input ceiling so saved
+/// documents stay self-contained once the value lands in the packet.
+fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
+    let syntax = || {
+        CliError::new(
+            Kind::Cli,
+            "--payload-file requires LAYER.FIELD=PATH with a zero-based layer index",
+        )
+    };
+    let (selector, path) = spec.split_once('=').ok_or_else(syntax)?;
+    let (layer, field) = selector.trim().split_once('.').ok_or_else(syntax)?;
+    let layer_index = layer.parse::<usize>().map_err(|_| syntax())?;
+    let field = field.trim().to_ascii_lowercase();
+    if field.is_empty() {
+        return Err(syntax());
+    }
+    let packet_len = packet.len();
+    let layer = packet.layer_mut(layer_index).ok_or_else(|| {
+        CliError::new(
+            Kind::Cli,
+            format!(
+                "--payload-file layer index {layer_index} is outside the recipe's {packet_len} layers"
+            ),
+        )
+    })?;
+    let current = layer.field_path(&field).ok_or_else(|| {
+        CliError::new(
+            Kind::Cli,
+            format!("--payload-file field {field} is unknown on layer {layer_index}"),
+        )
+    })?;
+    let core::field::FieldValue::Bytes(current) = current else {
+        return Err(CliError::new(
+            Kind::Cli,
+            format!("--payload-file field {field} on layer {layer_index} is not bytes-typed"),
+        ));
+    };
+    if !current.is_empty() {
+        return Err(CliError::new(
+            Kind::Cli,
+            format!(
+                "--payload-file field {field} on layer {layer_index} already holds recipe bytes"
+            ),
+        ));
+    }
+    let bytes = read_bounded_file_allow_empty(
+        Path::new(path),
+        core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+        InputKind::Recipe,
+    )?;
+    layer
+        .set_field_path(&field, core::field::FieldValue::Bytes(bytes.into()))
+        .map_err(|source| {
+            CliError::new(
+                Kind::Cli,
+                format!(
+                    "could not set --payload-file field {field} on layer {layer_index}: {source}"
+                ),
+            )
+        })
 }
 
 fn parse_expression(

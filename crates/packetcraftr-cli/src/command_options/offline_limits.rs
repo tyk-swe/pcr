@@ -87,6 +87,8 @@ pub(crate) struct OfflineLimitsArgs {
     pub(crate) max_provenance_bytes: usize,
     #[command(flatten)]
     pub(crate) capture: OfflineCaptureLimitsArgs,
+    #[command(flatten)]
+    pub(crate) epoch: super::EpochBoundsArgs,
     /// Maximum capture-global distinct conversations per transport.
     /// Expiry does not release index entries; raising this increases retained metadata.
     #[arg(long, default_value_t = analysis::Limits::default().max_flows)]

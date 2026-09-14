@@ -46,6 +46,7 @@ macro_rules! builtin_protocol_catalog {
             Llc { canonical: "llc", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: LlcCodec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: MplsCodec }
+            Ntp { canonical: "ntp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: NtpCodec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, exact_round_trip: true, matcher: none, codec: PaddingCodec }
             Ppp { canonical: "ppp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: PppCodec }
             Pppoe { canonical: "pppoe", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: PppoeCodec }

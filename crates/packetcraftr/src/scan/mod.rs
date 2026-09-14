@@ -48,7 +48,7 @@ pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
 pub use execution::{Batch, Execution, Executor, Probe, ProbeEndpoint};
 pub use report::{
-    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, ProbeStatus, Report,
+    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, ProbeStatus, Report, Rtt,
     SentProbe, Summary,
 };
 pub use request::{Limits, PortSpec, Request, Transport, select_ports};

@@ -7,6 +7,7 @@ use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 mod rendering;
+mod write;
 
 use packetcraftr_core::analysis;
 
@@ -38,6 +39,21 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         selector.index
     );
     let prepared = prepare(arguments.limits, Some(&source), &arguments.decode)?;
+    crate::command_options::validate_output_bytes(arguments.max_application_output_bytes)?;
+    // Stage one file per selected direction before any capture is read, so a
+    // missing or unwritable directory fails before the run.
+    let mut files = arguments
+        .write
+        .as_deref()
+        .map(|directory| {
+            write::DirectionFiles::stage(
+                directory,
+                selector,
+                arguments.direction,
+                arguments.max_application_output_bytes,
+            )
+        })
+        .transpose()?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Only TCP needs reassembly; UDP chunks come straight from frames.
@@ -54,6 +70,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             for chunk in collector.observe(&record) {
                 if !direction_matches(direction, &chunk) {
                     continue;
+                }
+                if let Some(files) = files.as_mut() {
+                    files.write(&chunk).map_err(CliError::into_boundary_error)?;
                 }
                 rendering::render_record(format, chunk, &mut state, stream)
                     .map_err(CliError::into_boundary_error)?;
@@ -74,16 +93,31 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         ));
     }
     let summary = collector.finish(&run_summary);
+    let written = files
+        .map(write::DirectionFiles::publish)
+        .transpose()?
+        .unwrap_or_default();
 
     match format {
-        Format::Text => rendering::render_text(selector, &summary),
-        Format::Json => {
-            rendering::render_aggregate(selector, summary, state, &run_summary.ip_reassembly)
+        Format::Text => rendering::render_text(selector, &summary, &written),
+        Format::Json => rendering::render_aggregate(
+            selector,
+            summary,
+            state,
+            &run_summary.ip_reassembly,
+            written,
+        ),
+        Format::Ndjson => rendering::render_stream(
+            selector,
+            summary,
+            &run_summary.ip_reassembly,
+            stream,
+            written,
+        ),
+        Format::Hex | Format::Raw => {
+            rendering::render_written(&written)?;
+            rendering::render_payload_warning(&summary)
         }
-        Format::Ndjson => {
-            rendering::render_stream(selector, summary, &run_summary.ip_reassembly, stream)
-        }
-        Format::Hex | Format::Raw => rendering::render_payload_warning(&summary),
         _ => unreachable!("command dispatch validated the output format"),
     }
 }

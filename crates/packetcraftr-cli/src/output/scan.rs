@@ -72,6 +72,7 @@ pub struct Report {
     pub resolved_addresses: Vec<IpAddr>,
     pub endpoints: Vec<Endpoint>,
     pub undecoded: Vec<Captured>,
+    pub rtt: packetcraftr::scan::Rtt,
 }
 
 impl Report {
@@ -86,6 +87,7 @@ impl Report {
             undecoded,
             diagnostics,
             stats,
+            rtt,
         } = result;
         let endpoint_outputs = endpoints
             .into_iter()
@@ -111,6 +113,7 @@ impl Report {
                 resolved_addresses,
                 endpoints: endpoint_outputs,
                 undecoded: Captured::try_from_frames(undecoded)?,
+                rtt,
             },
             diagnostics,
             stats,
@@ -178,6 +181,7 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
         counts: ClassificationCounts,
+        rtt: packetcraftr::scan::Rtt,
     },
 }
 
@@ -221,6 +225,7 @@ impl Event {
                 target: summary.target,
                 resolved_addresses: summary.resolved_addresses,
                 counts: summary.counts,
+                rtt: summary.rtt,
             },
             Vec::new(),
             summary.stats,

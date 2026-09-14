@@ -137,12 +137,14 @@ where
     enforce_deadline(WORKFLOW, &deadline)?;
     let mut state = EvidenceState::default();
     let mut winners = HashMap::new();
+    let mut rtt = super::report::RttAccumulator::default();
     let mut processor = Processor {
         registry,
         limits: request.limits,
         target: Arc::from(approved.declared_target.as_str()),
         state: &mut state,
         winners: &mut winners,
+        rtt: &mut rtt,
         emit: &mut emit,
     };
     let stats = if request.max_in_flight == 1 {
@@ -180,6 +182,7 @@ where
         resolved_addresses: approved.addresses,
         counts,
         stats,
+        rtt: rtt.finish(),
     })
 }
 
@@ -367,6 +370,7 @@ impl Collector {
             undecoded: self.undecoded,
             diagnostics: self.diagnostics,
             stats: summary.stats,
+            rtt: summary.rtt,
         }
     }
 }
@@ -529,6 +533,8 @@ struct Processor<'a, F> {
     /// The winning classification per endpoint, so the summary reports counts
     /// without a collector.
     winners: &'a mut HashMap<(IpAddr, Option<u16>), Classification>,
+    /// Operation-level round-trip accounting across every probe event.
+    rtt: &'a mut super::report::RttAccumulator,
     emit: &'a mut F,
 }
 struct Lifecycle<'a, 'b, E, F> {
@@ -616,6 +622,12 @@ where
                 .entry((evidence.address, evidence.port))
                 .or_insert(Classification::Timeout)
                 .promote(evidence.classification);
+            self.rtt.note_sent();
+            if evidence.status == ProbeStatus::Response
+                && let Some(latency) = evidence.latency
+            {
+                self.rtt.note_received(latency);
+            }
             (self.emit)(
                 Event::Probe {
                     target: Arc::clone(&self.target),

@@ -77,6 +77,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
         stats: Stats::default(),
+        rtt: scan::Rtt::default(),
     })
     .expect("in-range evidence converts");
 

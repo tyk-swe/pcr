@@ -32,7 +32,12 @@
         ]
       }
     ],
-    "undecoded": []
+    "undecoded": [],
+    "rtt": {
+      "sent": 1,
+      "received": 0,
+      "lost": 1
+    }
   },
   "diagnostics": [],
   "stats": {

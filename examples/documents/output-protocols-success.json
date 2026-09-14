@@ -46,6 +46,28 @@
         "decode_only": false
       },
       {
+        "protocol": "dhcpv4",
+        "aliases": [
+          "dhcp"
+        ],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "dhcpv6",
+        "aliases": [
+          "dhcp6"
+        ],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
         "protocol": "dns",
         "aliases": [],
         "build": true,
@@ -102,6 +124,17 @@
         "exact_round_trip": true,
         "matcher": false,
         "decode_only": false
+      },
+      {
+        "protocol": "http",
+        "aliases": [
+          "http1"
+        ],
+        "build": false,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": true
       },
       {
         "protocol": "icmpv4",
@@ -258,6 +291,15 @@
       },
       {
         "protocol": "mpls",
+        "aliases": [],
+        "build": true,
+        "dissect": true,
+        "exact_round_trip": true,
+        "matcher": false,
+        "decode_only": false
+      },
+      {
+        "protocol": "ntp",
         "aliases": [],
         "build": true,
         "dissect": true,

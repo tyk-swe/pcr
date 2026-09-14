@@ -267,6 +267,24 @@ macro_rules! unsigned_reflective_field {
 
 unsigned_reflective_field!(u8, u16, u32, u64, usize);
 
+impl ReflectiveField for i8 {
+    fn reflective_value(&self) -> FieldValue {
+        FieldValue::Signed(i64::from(*self))
+    }
+
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+        let value = match value {
+            FieldValue::Signed(value) => value,
+            FieldValue::Unsigned(value) => {
+                i64::try_from(value).map_err(|_| ReflectiveFieldError::OutOfRange)?
+            }
+            _ => return Err(ReflectiveFieldError::WrongType("signed")),
+        };
+        *self = Self::try_from(value).map_err(|_| ReflectiveFieldError::OutOfRange)?;
+        Ok(())
+    }
+}
+
 impl ReflectiveField for bool {
     fn reflective_value(&self) -> FieldValue {
         (*self).into()

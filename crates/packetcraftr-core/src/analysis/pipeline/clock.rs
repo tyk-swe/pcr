@@ -62,7 +62,16 @@ impl CaptureClock {
     /// Returns a monotonic instant for `timestamp`: never earlier than any
     /// instant already returned, so a capture whose timestamps run backwards
     /// cannot rewind idle accounting and expire still-active state early.
-    pub(super) fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, Error> {
+    ///
+    /// The second return value carries the rollback a regressed timestamp
+    /// observed, so callers can attribute the regression to this frame
+    /// without re-deriving the comparison the clock already performed.
+    pub(super) fn at(
+        &mut self,
+        timestamp: SystemTime,
+        number: u64,
+    ) -> Result<(Instant, Option<Duration>), Error> {
+        let mut regression = None;
         if let Some(latest) = self.latest_timestamp {
             match timestamp.duration_since(latest) {
                 Ok(step) if step > self.report.max_forward_step => {
@@ -70,6 +79,7 @@ impl CaptureClock {
                     self.report.max_forward_step_frame = Some(number);
                 }
                 Err(rollback) => {
+                    regression = Some(rollback.duration());
                     self.report.regressions = self.report.regressions.saturating_add(1);
                     self.report.max_regression =
                         self.report.max_regression.max(rollback.duration());
@@ -88,7 +98,7 @@ impl CaptureClock {
             .checked_add(offset)
             .ok_or(Error::TimestampRange { number })?
             .max(self.latest);
-        Ok(self.latest)
+        Ok((self.latest, regression))
     }
 
     pub(super) fn report(&self) -> &ClockReport {
@@ -116,16 +126,19 @@ mod tests {
         let mut clock = CaptureClock::new();
         let origin = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
 
-        let first = clock.at(origin, 1).expect("origin timestamp fits");
-        let advanced = clock
+        let (first, regressed) = clock.at(origin, 1).expect("origin timestamp fits");
+        assert_eq!(regressed, None);
+        let (advanced, regressed) = clock
             .at(origin + Duration::from_secs(3), 2)
             .expect("later timestamp fits");
-        let rewound = clock
+        assert_eq!(regressed, None);
+        let (rewound, regressed) = clock
             .at(origin + Duration::from_secs(1), 3)
             .expect("out-of-order timestamp is clamped");
 
         assert_eq!(advanced.duration_since(first), Duration::from_secs(3));
         assert_eq!(rewound, advanced);
+        assert_eq!(regressed, Some(Duration::from_secs(2)));
     }
 
     #[test]
@@ -148,11 +161,11 @@ mod anomaly_tests {
     fn forward_outlier_pins_expiry_and_reports_subsequent_rollbacks() {
         let mut clock = CaptureClock::new();
         let time = |seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
-        let first = clock.at(time(100), 1).unwrap();
-        let outlier = clock.at(time(10_000), 2).unwrap();
+        let (first, _) = clock.at(time(100), 1).unwrap();
+        let (outlier, _) = clock.at(time(10_000), 2).unwrap();
         assert_eq!(outlier.duration_since(first), Duration::from_secs(9900));
-        assert_eq!(clock.at(time(90), 3).unwrap(), outlier);
-        assert_eq!(clock.at(time(101), 4).unwrap(), outlier);
+        assert_eq!(clock.at(time(90), 3).unwrap().0, outlier);
+        assert_eq!(clock.at(time(101), 4).unwrap().0, outlier);
         assert_eq!(clock.report().regressions, 2);
         assert_eq!(clock.report().max_regression, Duration::from_secs(9910));
         assert_eq!(clock.report().max_forward_step_frame, Some(2));

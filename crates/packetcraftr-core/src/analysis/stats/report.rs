@@ -108,4 +108,54 @@ pub struct Report {
     /// reassembly state. This never contributes synthesized frames or derived
     /// bytes to [`Self::frames`] or [`Self::bytes`].
     pub ip_reassembly: IpReassemblyReport,
+    /// Interface descriptions the capture source declared, in the global
+    /// interface-ID order frames reference. Classic PCAP always contributes
+    /// exactly one entry; a PCAPNG source with no interface descriptions
+    /// yields an empty list rather than invented values.
+    pub interfaces: Vec<crate::analysis::pcap::Interface>,
+}
+
+impl Report {
+    /// Span between the earliest and latest matched timestamps.
+    ///
+    /// Both bounds are the observed extremes, so a frame arriving
+    /// out-of-order or carrying a regressed timestamp cannot make the
+    /// duration negative. `None` when no frame matched — every matched
+    /// frame carries a timestamp because the pipeline refuses frames
+    /// without one.
+    pub fn duration(&self) -> Option<Duration> {
+        let (first, last) = self.first_timestamp.zip(self.last_timestamp)?;
+        Some(last.duration_since(first).unwrap_or(Duration::ZERO))
+    }
+
+    /// Mean captured length over matched frames, in bytes.
+    ///
+    /// `None` for an empty match set; the value is otherwise `bytes /
+    /// frames` computed in floating point, so sub-byte means are not
+    /// truncated.
+    pub fn average_packet_size(&self) -> Option<f64> {
+        (self.frames > 0).then(|| self.bytes as f64 / self.frames as f64)
+    }
+
+    /// Matched frames per second over [`Self::duration`].
+    ///
+    /// `None` when no duration is available or it is zero — a single
+    /// instant cannot define a rate, and dividing by it would produce an
+    /// infinite or NaN result rather than a statistic.
+    pub fn packet_rate(&self) -> Option<f64> {
+        self.rate(self.frames)
+    }
+
+    /// Matched captured bytes per second over [`Self::duration`], under the
+    /// same availability rules as [`Self::packet_rate`].
+    pub fn byte_rate(&self) -> Option<f64> {
+        self.rate(self.bytes)
+    }
+
+    /// `count` spread over [`Self::duration`], under the availability rules
+    /// [`Self::packet_rate`] documents.
+    fn rate(&self, count: u64) -> Option<f64> {
+        let seconds = self.duration()?.as_secs_f64();
+        (seconds > 0.0).then(|| count as f64 / seconds)
+    }
 }

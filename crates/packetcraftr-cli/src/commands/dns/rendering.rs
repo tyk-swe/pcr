@@ -17,6 +17,40 @@ use crate::rendering::{
     render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
+/// Renders each batch question in input order: a status line first, then the
+/// completed question's ordinary detail block.
+pub(super) fn render_batch_text(
+    result: output::dns::BatchResult,
+    diagnostics: Vec<core::diagnostic::Diagnostic>,
+    stats: packetcraftr::Stats,
+) -> Result<(), CliError> {
+    let total = result.questions.len();
+    for (index, question) in result.questions.iter().enumerate() {
+        write_stdout_line(format_args!(
+            "question={}/{} name={} type={} id={} status={} error={}",
+            index + 1,
+            total,
+            question.query_name,
+            packetcraftr::dns::QueryType::new(question.query_type),
+            question.transaction_id,
+            question.status.as_str(),
+            question.error.as_deref().unwrap_or("none"),
+        ))?;
+        if let Some(report) = &question.result {
+            render_report_text((**report).clone())?;
+        }
+    }
+    write_stdout_line(format_args!(
+        "dns batch questions={} udp_packets_completed={} bytes={}",
+        total, stats.packets_completed, stats.bytes,
+    ))?;
+    render_diagnostics_text(&diagnostics)
+}
+
+fn render_report_text(result: output::dns::Report) -> Result<(), CliError> {
+    render_text(result, Vec::new(), packetcraftr::Stats::default())
+}
+
 pub(super) fn render_text(
     result: output::dns::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
@@ -174,6 +208,21 @@ pub(super) fn emit_complete(
 ) -> Result<(), CliError> {
     let (record, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
     Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+}
+
+/// The terminal record for a batch: one status entry per declared question.
+pub(super) fn emit_batch_complete(
+    batch: packetcraftr::dns::BatchReport,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let stats = batch.stats.clone();
+    let questions = output::dns::BatchResult::question_completions(&batch);
+    let record = output::dns::Event::BatchComplete {
+        server: batch.server,
+        server_port: batch.server_port,
+        questions,
+    };
+    Ok(stream.complete_with_stats(record, Vec::new(), stats)?)
 }
 
 #[cfg(test)]

@@ -55,3 +55,72 @@ fn storage_limits_are_checked_before_interface_lookup_or_activation() {
     assert_eq!(parse_json(&output)["error"]["code"], "io.capture_file");
     assert_eq!(std::fs::read(target).unwrap(), b"unrelated");
 }
+
+#[test]
+fn decoded_output_options_are_checked_before_interface_lookup() {
+    // --dissect/--field only apply to text and NDJSON; the rejection names the
+    // accepted formats before any native interface work runs.
+    for extra in [
+        vec!["--dissect"],
+        vec!["--field", "ipv4.destination"],
+        vec!["--dissect", "--decode-as", "udp.port=5353:dns"],
+    ] {
+        for format in ["json", "pcapng"] {
+            let mut args = vec![
+                "--output",
+                format,
+                "capture",
+                "--interface",
+                "does-not-exist",
+            ];
+            args.extend(extra.clone());
+            if format == "json" {
+                // JSON capture summaries require --write; decoded output is
+                // still rejected first.
+                args.extend(["--write", "/dev/null"]);
+            }
+            let output = run(&args);
+            assert!(!output.status.success(), "{args:?} must fail");
+            if format == "json" {
+                assert_eq!(
+                    parse_json(&output)["error"]["code"],
+                    "cli.capture_decode_format",
+                    "{args:?}"
+                );
+            } else {
+                // Binary formats cannot carry the machine error envelope.
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains("cli.capture_decode_format"),
+                    "{args:?} stderr"
+                );
+            }
+        }
+    }
+    // --field and --dissect conflict outright.
+    let output = run(&[
+        "--output",
+        "ndjson",
+        "capture",
+        "--interface",
+        "does-not-exist",
+        "--dissect",
+        "--field",
+        "frame.len",
+    ]);
+    assert!(!output.status.success());
+}
+
+#[test]
+fn live_capture_rejects_stream_projection_before_interface_discovery() {
+    let output = run(&[
+        "--output",
+        "ndjson",
+        "capture",
+        "--interface",
+        "does-not-exist",
+        "--field",
+        "tcp.stream",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("cannot select stream indices"));
+}

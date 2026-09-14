@@ -125,6 +125,58 @@ fn template_aliases_value_errors_and_overflow_are_rejected_before_iteration() {
     );
 }
 
+#[test]
+fn numeric_ranges_expand_to_validated_unsigned_values() {
+    use packetcraftr_core::protocol::network::Ipv4;
+
+    let range = template::NumericRange::new(1, 4, 1).expect("valid range");
+    assert_eq!(range.len(), 4);
+    let mut base = Packet::new();
+    base.push(Ipv4::default());
+    let expanded = template::Template::new(base.clone())
+        .axis(0, "ttl", range.values().collect())
+        .expand(10)
+        .expect("range axis expands")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("range values all set");
+    assert_eq!(
+        expanded
+            .iter()
+            .map(|packet| packet.layer(0).unwrap().field("ttl"))
+            .collect::<Vec<_>>(),
+        [
+            Some(FieldValue::Unsigned(1)),
+            Some(FieldValue::Unsigned(2)),
+            Some(FieldValue::Unsigned(3)),
+            Some(FieldValue::Unsigned(4))
+        ]
+    );
+
+    // A range that exceeds the field width fails axis validation before any
+    // packet is yielded.
+    let overflowing = template::Template::new(base).axis(
+        0,
+        "ttl",
+        template::NumericRange::new(250, 300, 10)
+            .unwrap()
+            .values()
+            .collect(),
+    );
+    assert!(matches!(
+        overflowing.expand(10),
+        Err(template::Error::Field { layer: 0, .. })
+    ));
+
+    assert!(matches!(
+        template::NumericRange::new(2, 1, 1),
+        Err(template::Error::ReversedRange { start: 2, end: 1 })
+    ));
+    assert!(matches!(
+        template::NumericRange::new(1, 2, 0),
+        Err(template::Error::InvalidRangeStep { step: 0 })
+    ));
+}
+
 fn parse_expression_fixture(registry: &packetcraftr_core::registry::Registry) -> Packet {
     let expression = concat!(
         "p(value=0x2a,enabled=true,label=\"hello\\nworld\",bytes=ignored,",

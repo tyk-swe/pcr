@@ -53,6 +53,8 @@ pub enum Error {
     CapturedLengthMismatch { declared: u32, actual: usize },
     #[error("frame original length {original} is smaller than captured length {captured}")]
     OriginalLengthTooSmall { captured: u32, original: u32 },
+    #[error("time bounds are reversed: the start is after the end")]
+    ReversedTimeBounds { start: SystemTime, end: SystemTime },
 }
 
 impl Classified for Error {
@@ -64,6 +66,11 @@ impl Classified for Error {
                 "packet.frame_metadata",
                 Kind::Packet,
                 Some("repair the capture record whose declared and actual frame lengths disagree"),
+            ),
+            Self::ReversedTimeBounds { .. } => Classification::new(
+                "cli.reversed_time_bounds",
+                Kind::Cli,
+                Some("order the bounds so the earlier time comes first"),
             ),
         }
     }
@@ -172,6 +179,51 @@ impl Frame {
     }
 }
 
+/// Inclusive capture-time bounds selecting which frames a command keeps.
+///
+/// Bounds compare against frame timestamps at full [`SystemTime`] precision;
+/// fractional endpoints are never rounded. Both endpoints are inclusive, and
+/// either side may be left open. A frame whose record carries no timestamp
+/// never satisfies bounds, so commands that keep timestamp-less frames must
+/// not apply bounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimeBounds {
+    start: Option<SystemTime>,
+    end: Option<SystemTime>,
+}
+
+impl TimeBounds {
+    /// Bounds over `[start, end]`; either side may be `None` for an open end.
+    /// Reversed bounds are rejected rather than matching nothing.
+    pub fn new(start: Option<SystemTime>, end: Option<SystemTime>) -> Result<Self, Error> {
+        if let (Some(start), Some(end)) = (start, end)
+            && start > end
+        {
+            return Err(Error::ReversedTimeBounds { start, end });
+        }
+        Ok(Self { start, end })
+    }
+
+    /// The inclusive lower bound, if any.
+    pub fn start(&self) -> Option<SystemTime> {
+        self.start
+    }
+
+    /// The inclusive upper bound, if any.
+    pub fn end(&self) -> Option<SystemTime> {
+        self.end
+    }
+
+    /// Whether `timestamp` lies within the bounds; `None` never does.
+    /// The check is a pure comparison, so capture timestamps may regress.
+    pub fn contains(&self, timestamp: Option<SystemTime>) -> bool {
+        timestamp.is_some_and(|timestamp| {
+            self.start.is_none_or(|start| timestamp >= start)
+                && self.end.is_none_or(|end| timestamp <= end)
+        })
+    }
+}
+
 impl<'de> Deserialize<'de> for Frame {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -200,5 +252,45 @@ impl<'de> Deserialize<'de> for Frame {
         frame.interface = record.interface;
         frame.direction = record.direction;
         Ok(frame)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn time_bounds_are_inclusive_at_representable_submicrosecond_precision() {
+        let start = SystemTime::UNIX_EPOCH + Duration::new(10, 500_000_000);
+        let end = SystemTime::UNIX_EPOCH + Duration::new(10, 900_000_100);
+        let bounds = TimeBounds::new(Some(start), Some(end)).unwrap();
+        assert!(bounds.contains(Some(start)));
+        assert!(bounds.contains(Some(end)));
+        assert!(!bounds.contains(Some(start - Duration::from_nanos(100))));
+        assert!(!bounds.contains(Some(end + Duration::from_nanos(100))));
+        assert!(!bounds.contains(None));
+    }
+
+    #[test]
+    fn one_sided_time_bounds_leave_the_other_end_open() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        let start_only = TimeBounds::new(Some(start), None).unwrap();
+        assert!(start_only.contains(Some(start)));
+        assert!(!start_only.contains(Some(start - Duration::from_nanos(100))));
+
+        let stop_only = TimeBounds::new(None, Some(start)).unwrap();
+        assert!(stop_only.contains(Some(start)));
+        assert!(!stop_only.contains(Some(start + Duration::from_nanos(100))));
+    }
+
+    #[test]
+    fn reversed_time_bounds_are_rejected() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
+        assert!(matches!(
+            TimeBounds::new(Some(start), Some(start - Duration::from_nanos(100))),
+            Err(Error::ReversedTimeBounds { .. })
+        ));
+        assert!(TimeBounds::new(Some(start), Some(start)).is_ok());
     }
 }

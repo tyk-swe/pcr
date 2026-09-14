@@ -6,9 +6,11 @@
 pub mod dhcp;
 pub mod dns;
 pub mod http;
+pub mod ntp;
 pub mod tls;
 
 pub(crate) use dhcp::{Dhcpv4Codec, Dhcpv6Codec};
 pub(crate) use dns::DnsCodec;
 pub(crate) use http::HttpCodec;
+pub(crate) use ntp::NtpCodec;
 pub(crate) use tls::codec::TlsCodec;

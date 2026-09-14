@@ -6,7 +6,7 @@
 
 use std::io::Read;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::analysis::pcap::Reader;
 use crate::budget::Deadline;
@@ -80,6 +80,11 @@ pub struct FrameRecord<'a> {
     pub udp: Option<UdpView<'a>>,
     /// Reassembly events in delivery order, including expiry of other flows.
     pub tcp_events: &'a [TcpEvent],
+    /// The rollback this frame's timestamp showed against the capture's
+    /// high-water mark, when it regressed. The shared capture clock detects
+    /// the regression for every physical frame; matched frames carry it so
+    /// downstream evidence can attribute it here.
+    pub clock_regression: Option<Duration>,
 }
 
 /// A capture-global stream index and the scoped flow it identifies.
@@ -206,6 +211,8 @@ pub struct Summary {
     pub source_outcomes_omitted: u64,
     pub clock: ClockReport,
     pub frames_read: u64,
+    /// Captured bytes charged to input budgets, including excluded frames.
+    pub bytes_read: u64,
     pub frames_matched: u64,
     /// Data still buffered when the capture ended, flushed flow by flow.
     /// Streams that never saw FIN or RST surface their bytes here.
@@ -215,6 +222,12 @@ pub struct Summary {
     /// event sink also observes. Additional outcomes increment
     /// `outcomes_omitted`.
     pub ip_reassembly: IpReassemblyReport,
+    /// Interface descriptions the capture source declared, in the global
+    /// interface-ID order [`crate::frame::Frame::interface`] references.
+    /// Classic PCAP always contributes exactly one entry; a PCAPNG source
+    /// with no interface-description blocks yields an empty list rather
+    /// than invented values.
+    pub interfaces: Vec<crate::analysis::pcap::Interface>,
 }
 
 /// Runs the shared analysis loop, dispatching each matched frame to `sink`.
@@ -298,10 +311,14 @@ where
     let mut bytes_read = 0_u64;
     loop {
         enforce_deadline(&deadline)?;
-        let Some((number, frame, timestamp)) =
-            next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
+        let Some((number, frame)) = next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
         else {
             break;
+        };
+        let timestamp = match frame.timestamp {
+            Some(timestamp) => timestamp,
+            None if options.time_bounds.is_some() => continue,
+            None => return Err(Error::TimestampUnavailable { number }),
         };
         let decoded = decoder
             .decode(
@@ -322,7 +339,7 @@ where
                 tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
             })
             .transpose()?;
-        let derived = advance_ip_reassembly(
+        let (derived, clock_regression) = advance_ip_reassembly(
             &mut ip_dispatch,
             &stage,
             &mut scopes,
@@ -393,6 +410,11 @@ where
                 flow,
             });
         }
+        if let Some(bounds) = options.time_bounds
+            && !bounds.contains(Some(timestamp))
+        {
+            continue;
+        }
         if let Some(filter) = options.filter {
             let filter_derived = derived
                 .iter()
@@ -438,6 +460,7 @@ where
             tcp: tcp_view,
             udp: udp_view,
             tcp_events: &tcp_events,
+            clock_regression,
         })
         .map_err(|source| Error::Sink { number, source })?;
     }
@@ -462,10 +485,12 @@ where
         incomplete_sources,
         source_outcomes_omitted,
         frames_read,
+        bytes_read,
         frames_matched,
         clock: ip_dispatch.clock_report().clone(),
         trailing_tcp_events: reassembly_dispatch.flush(),
         ip_reassembly: ip_dispatch.report().clone(),
+        interfaces: reader.interfaces().to_vec(),
     })
 }
 
@@ -497,7 +522,7 @@ fn advance_ip_reassembly<I>(
     ip_sink: &mut I,
     provenance: &mut Option<crate::analysis::provenance::Tracker>,
     physical_sources: Option<&crate::analysis::provenance::SourceSet>,
-) -> Result<Vec<DerivedDatagram>, Error>
+) -> Result<(Vec<DerivedDatagram>, Option<Duration>), Error>
 where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
 {
@@ -515,7 +540,7 @@ where
         Ok(())
     };
 
-    let now = ip_dispatch.at(timestamp, number)?;
+    let (now, clock_regression) = ip_dispatch.at(timestamp, number)?;
     emit(ip_dispatch.expire(now), ip_sink)?;
     if let Some(tracker) = provenance {
         tracker.retire(|key| ip_dispatch.contains_datagram(key));
@@ -569,7 +594,7 @@ where
         derived_memory_charge = next_derived_memory_charge;
         completed = next_completed;
     }
-    Ok(derived)
+    Ok((derived, clock_regression))
 }
 
 /// The transport of one kind a frame's records are attributed to, together
@@ -699,7 +724,7 @@ fn next_frame<R: Read>(
     frames_read: &mut u64,
     bytes_read: &mut u64,
     limits: &Limits,
-) -> Result<Option<(u64, crate::frame::Frame, SystemTime)>, Error> {
+) -> Result<Option<(u64, crate::frame::Frame)>, Error> {
     let number = frames_read.saturating_add(1);
     let Some(frame) = reader
         .next_frame()
@@ -713,10 +738,7 @@ fn next_frame<R: Read>(
         .map_err(|source| Error::Capture { number, source })?;
     *frames_read = number;
     *bytes_read = bytes;
-    let timestamp = frame
-        .timestamp
-        .ok_or(Error::TimestampUnavailable { number })?;
-    Ok(Some((number, frame, timestamp)))
+    Ok(Some((number, frame)))
 }
 
 /// Refuses to continue once the run's own processing budget is spent.

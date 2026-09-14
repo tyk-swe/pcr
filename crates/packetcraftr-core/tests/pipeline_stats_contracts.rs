@@ -196,3 +196,193 @@ fn selected_stats_equal_all_tables_without_retaining_other_aggregations() {
         check!(Io, io);
     }
 }
+
+#[test]
+fn stats_derives_duration_rates_and_average_from_matched_extremes() {
+    let registry = registry();
+    let epoch = SystemTime::UNIX_EPOCH;
+    // Out-of-order and regressed timestamps still bound a non-negative span.
+    let frames = [
+        udp_frame(
+            &registry,
+            epoch + Duration::from_millis(1500),
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"ab",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(3),
+            SERVER,
+            CLIENT,
+            9_999,
+            1_000,
+            b"cdef",
+        ),
+        udp_frame(
+            &registry,
+            epoch + Duration::from_secs(1),
+            CLIENT,
+            SERVER,
+            1_000,
+            9_999,
+            b"gh",
+        ),
+    ];
+    let bytes = frames
+        .iter()
+        .map(|frame| u64::from(frame.captured_length()))
+        .sum::<u64>();
+    let mut capture = reader(&frames);
+    let mut collector = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
+        .expect("valid interval");
+    let summary = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .expect("statistics pass succeeds");
+    let report = collector.finish(&summary);
+
+    assert_eq!(report.duration(), Some(Duration::from_secs(2)));
+    assert_eq!(report.average_packet_size(), Some(bytes as f64 / 3.0));
+    assert_eq!(report.packet_rate(), Some(1.5));
+    assert_eq!(report.byte_rate(), Some(bytes as f64 / 2.0));
+
+    // The classic-PCAP source declares exactly one interface with its
+    // link type and snap length; nothing is invented.
+    assert_eq!(report.interfaces.len(), 1);
+    assert_eq!(
+        report.interfaces[0].link_type,
+        packetcraftr_core::frame::LinkType::IPV4
+    );
+    assert!(report.interfaces[0].snap_len > 0);
+}
+
+#[test]
+fn stats_derived_metrics_stay_absent_for_empty_and_zero_span_captures() {
+    let registry = registry();
+
+    let empty = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
+        .expect("valid interval")
+        .finish(&RunSummary::default());
+    assert_eq!(empty.duration(), None);
+    assert_eq!(empty.average_packet_size(), None);
+    assert_eq!(empty.packet_rate(), None);
+    assert_eq!(empty.byte_rate(), None);
+    assert!(empty.interfaces.is_empty());
+
+    // One matched frame: duration exists but is zero, so rates stay absent.
+    let frames = [udp_frame(
+        &registry,
+        SystemTime::UNIX_EPOCH + Duration::from_secs(7),
+        CLIENT,
+        SERVER,
+        1_000,
+        9_999,
+        b"x",
+    )];
+    let mut capture = reader(&frames);
+    let mut collector = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
+        .expect("valid interval");
+    let summary = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .expect("statistics pass succeeds");
+    let report = collector.finish(&summary);
+    assert_eq!(report.duration(), Some(Duration::ZERO));
+    assert!(report.average_packet_size().is_some());
+    assert_eq!(report.packet_rate(), None);
+    assert_eq!(report.byte_rate(), None);
+}
+
+#[test]
+fn stats_reports_every_declared_pcapng_interface_without_collapsing() {
+    use packetcraftr_core::analysis::pcap::Writer;
+    use packetcraftr_core::frame::LinkType;
+
+    let registry = registry();
+    let mut writer = Writer::pcapng(Vec::new()).expect("pcapng writer initializes");
+    let first = writer
+        .add_interface(LinkType::IPV4)
+        .expect("first interface declares");
+    let second = writer
+        .add_interface(LinkType::ETHERNET)
+        .expect("second interface declares");
+    assert_eq!((first, second), (0, 1));
+
+    let first_frame = udp_frame(
+        &registry,
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        CLIENT,
+        SERVER,
+        1_000,
+        9_999,
+        b"one",
+    );
+    // A declared Ethernet interface expects link-layer bytes; build a minimal
+    // Ethernet-wrapped datagram rather than reusing the bare IPv4 packet.
+    let mut packet = packetcraftr_core::packet::Packet::new();
+    packet.push(packetcraftr_core::protocol::link::Ethernet::default());
+    packet.push(packetcraftr_core::protocol::network::Ipv4 {
+        source: CLIENT,
+        destination: SERVER,
+        ..Default::default()
+    });
+    packet.push(packetcraftr_core::protocol::transport::Udp {
+        source_port: 1_000,
+        destination_port: 9_999,
+        ..Default::default()
+    });
+    let built = packetcraftr_core::build::Builder::new(Arc::clone(&registry))
+        .build(
+            packet,
+            packetcraftr_core::codec::Context::default(),
+            packetcraftr_core::build::Options::default(),
+        )
+        .expect("Ethernet fixture builds");
+    let mut ethernet = packetcraftr_core::frame::Frame::new(
+        SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+        LinkType::ETHERNET,
+        built.bytes,
+    )
+    .expect("Ethernet fixture frame is valid");
+    ethernet.interface = Some(second);
+    writer
+        .write_frame(&first_frame)
+        .expect("first frame writes");
+    writer.write_frame(&ethernet).expect("second frame writes");
+
+    let mut capture =
+        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(writer.into_inner()))
+            .expect("multi-interface capture opens");
+    let mut collector = packetcraftr_core::analysis::stats::Collector::new(Duration::from_secs(1))
+        .expect("valid interval");
+    let summary = run(
+        &mut capture,
+        Arc::clone(&registry),
+        &Options::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .expect("statistics pass succeeds");
+    let report = collector.finish(&summary);
+    assert_eq!(report.interfaces.len(), 2);
+    assert_eq!(report.interfaces[0].link_type, LinkType::IPV4);
+    assert_eq!(report.interfaces[1].link_type, LinkType::ETHERNET);
+    assert!(report.interfaces.iter().all(|i| i.snap_len > 0));
+}

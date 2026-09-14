@@ -230,6 +230,14 @@ pub struct Options<'a> {
     /// or SNI selection to completed sessions instead. Matching observations may
     /// first expose stream indices out of numerical order.
     pub filter: Option<&'a Filter>,
+    /// Inclusive capture-time bounds applied with the filter. Comparison uses
+    /// the timestamp's full precision and assumes nothing about ordering, so
+    /// regressing clocks still select by value. Like the filter, bounds apply
+    /// after IP reconstruction and stream indexing for timestamped frames,
+    /// even when they are excluded. All physical frames consume read budgets.
+    /// Records without timestamps are skipped when bounds are set; without
+    /// bounds they still fail the run before selection.
+    pub time_bounds: Option<crate::frame::TimeBounds>,
     /// Drives bounded TCP reassembly over the matched frames and delivers
     /// its events with each record. Costs memory proportional to reordering,
     /// so commands that only count leave it off.

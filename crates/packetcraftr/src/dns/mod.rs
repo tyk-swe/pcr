@@ -51,6 +51,7 @@ const CLASS_IN: u16 = 1;
 const TYPE_OPT: u16 = 41;
 const MAX_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
+mod batch;
 mod classification;
 mod engine;
 mod error;
@@ -61,12 +62,16 @@ mod plan;
 mod probe;
 mod report;
 mod request;
+mod reverse;
 pub mod tcp;
 #[cfg(test)]
 mod tests;
 mod wire;
 
 pub use crate::probe::Executor;
+pub use batch::{
+    BatchReport, MAX_QUESTIONS, QuestionOutcome, QuestionStatus, run_batch, run_batch_with_events,
+};
 pub use classification::{ResponseClassification, classify_response, response_code_name};
 pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
@@ -92,6 +97,7 @@ pub use request::{
 };
 
 pub use probe::{unpredictable_source_port, unpredictable_transaction_id};
+pub use reverse::reverse_name;
 pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};
 
 use packetcraftr_core::protocol::application::dns::{Edns, Name, Record, RecordValue};

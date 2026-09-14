@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use packetcraftr_core::{packet::Packet, packet::semantics, protocol::link::Ethernet};
 use packetcraftr_netio::{link::MacAddress, route::Plan};
 
-use super::model::{Error, MAX_RESOLVED_ADDRESSES, Policy};
+use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::address::is_public;
 use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 
@@ -23,11 +23,38 @@ impl Policy {
                 maximum: MAX_RESOLVED_ADDRESSES,
             });
         }
+        if self.allowed_destinations.len() > MAX_DESTINATION_CONSTRAINTS {
+            return Err(Error::DestinationConstraintLimit {
+                actual: self.allowed_destinations.len(),
+                maximum: MAX_DESTINATION_CONSTRAINTS,
+            });
+        }
         Ok(())
     }
 
     /// Authorizes one already-resolved or packet-declared destination.
+    ///
+    /// A non-empty `allowed_destinations` list must contain the destination
+    /// before the remaining checks run; the constraint can deny but never
+    /// grants what the other stages refuse.
     pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), Error> {
+        if !self.allowed_destinations.is_empty()
+            && !self
+                .allowed_destinations
+                .iter()
+                .any(|constraint| constraint.contains(destination))
+        {
+            let constraints = self
+                .allowed_destinations
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(Error::DestinationNotAllowed {
+                destination,
+                constraints,
+            });
+        }
         if !self.allow_public_destinations && is_public(destination) {
             return Err(Error::PublicDestination { destination });
         }

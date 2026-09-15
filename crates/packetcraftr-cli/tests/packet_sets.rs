@@ -310,6 +310,55 @@ fn exchange_authorizes_expanded_destinations_before_route_preparation() {
     );
 }
 
+#[test]
+fn destination_allowlist_denies_before_route_preparation_on_every_send_command() {
+    // The invalid interface keeps every provider out of reach in every
+    // feature profile, so the policy failure must precede it.
+    for command in ["send", "exchange"] {
+        let denied = run(&[
+            "--output",
+            "json",
+            command,
+            "--packet",
+            "ipv4(dst=10.0.0.2)/udp(dport=9000)",
+            "--allow-destination",
+            "192.0.2.0/24",
+            "--interface",
+            "0",
+        ]);
+        assert_eq!(denied.status.code(), Some(6), "{command}");
+        let error = parse_json(&denied);
+        assert_eq!(
+            error["error"]["code"], "policy.destination_not_allowed",
+            "{command}"
+        );
+        assert_eq!(error["error"]["kind"], "policy", "{command}");
+        let message = error["error"]["message"].as_str().unwrap();
+        assert!(message.contains("10.0.0.2"), "{command}: {message}");
+        assert!(message.contains("192.0.2.0/24"), "{command}: {message}");
+
+        // Admitting the destination moves the failure past policy onto the
+        // interface check.
+        let allowed = run(&[
+            "--output",
+            "json",
+            command,
+            "--packet",
+            "ipv4(dst=10.0.0.2)/udp(dport=9000)",
+            "--allow-destination",
+            "10.0.0.0/8",
+            "--interface",
+            "0",
+        ]);
+        assert_eq!(allowed.status.code(), Some(2), "{command}");
+        assert_eq!(
+            parse_json(&allowed)["error"]["message"],
+            "--interface index must be non-zero",
+            "{command}"
+        );
+    }
+}
+
 fn read_capture(bytes: &[u8]) -> Vec<packetcraftr_core::frame::Frame> {
     let mut reader =
         packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(bytes.to_vec()))

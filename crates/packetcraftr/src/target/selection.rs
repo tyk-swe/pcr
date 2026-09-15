@@ -16,7 +16,7 @@ use std::{
 pub(crate) const MAX_CANDIDATES: usize = 100_000;
 const MAX_SPECIFICATIONS: usize = 4096;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Network {
     address: IpAddr,
     prefix: u8,
@@ -107,7 +107,12 @@ impl FromStr for Network {
             .map_or((value, None), |(address, prefix)| (address, Some(prefix)));
         let address: IpAddr = address.parse().map_err(|_| invalid())?;
         let prefix = prefix
-            .map(|prefix| prefix.parse::<u8>().map_err(|_| invalid()))
+            .map(|prefix| {
+                if prefix.is_empty() || !prefix.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(invalid());
+                }
+                prefix.parse::<u8>().map_err(|_| invalid())
+            })
             .transpose()?
             .unwrap_or(if address.is_ipv4() { 32 } else { 128 });
         Self::new(address, prefix)
@@ -279,6 +284,8 @@ mod tests {
             1
         );
         assert!("192.0.2.1/33".parse::<Network>().is_err());
+        assert!("192.0.2.0/+24".parse::<Network>().is_err());
+        assert!("192.0.2.0/".parse::<Network>().is_err());
         assert!(!network.contains("2001:db8::1".parse().unwrap()));
     }
 }

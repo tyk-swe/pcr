@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::str::FromStr;
 
 use thiserror::Error;
@@ -48,58 +48,24 @@ pub const MAX_DESTINATION_CONSTRAINTS: usize = 1_024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestinationConstraint {
     Exact(IpAddr),
-    Network { network: IpAddr, prefix: u8 },
+    /// Host bits are already masked by [`crate::target::Network::new`].
+    Network(crate::target::Network),
 }
 
 impl DestinationConstraint {
     pub fn contains(&self, address: IpAddr) -> bool {
-        match (*self, address) {
-            (Self::Exact(expected), address) => expected == address,
-            (
-                Self::Network {
-                    network: IpAddr::V4(network),
-                    prefix,
-                },
-                IpAddr::V4(address),
-            ) => masked_v4(address, prefix) == masked_v4(network, prefix),
-            (
-                Self::Network {
-                    network: IpAddr::V6(network),
-                    prefix,
-                },
-                IpAddr::V6(address),
-            ) => masked_v6(address, prefix) == masked_v6(network, prefix),
-            _ => false,
+        match *self {
+            Self::Exact(expected) => expected == address,
+            Self::Network(network) => network.contains(address),
         }
     }
-}
-
-// The enum variants are public, so a caller can bypass the canonicalization
-// `FromStr` performs: the stored network is masked alongside the candidate so a
-// host-bearing network such as `192.0.2.1/24` still matches its own subnet
-// instead of denying every address. A caller can likewise hand these a prefix
-// wider than the address family; saturating the shift keeps the mask total and
-// narrows the constraint to an exact host match rather than widening it to
-// every address.
-fn masked_v4(address: Ipv4Addr, prefix: u8) -> Ipv4Addr {
-    let mask = u32::MAX
-        .checked_shl(32_u32.saturating_sub(u32::from(prefix)))
-        .unwrap_or(0);
-    Ipv4Addr::from(u32::from(address) & mask)
-}
-
-fn masked_v6(address: Ipv6Addr, prefix: u8) -> Ipv6Addr {
-    let mask = u128::MAX
-        .checked_shl(128_u32.saturating_sub(u32::from(prefix)))
-        .unwrap_or(0);
-    Ipv6Addr::from(u128::from(address) & mask)
 }
 
 impl fmt::Display for DestinationConstraint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Exact(address) => write!(f, "{address}"),
-            Self::Network { network, prefix } => write!(f, "{network}/{prefix}"),
+            Self::Network(network) => network.fmt(f),
         }
     }
 }
@@ -117,35 +83,19 @@ impl FromStr for DestinationConstraint {
                 .parse::<IpAddr>()
                 .map(Self::Exact)
                 .map_err(|_| invalid("expected an IP address or CIDR network")),
-            Some((network, prefix)) => {
-                let network = network
+            Some((address, _)) => {
+                let spelled = address
                     .parse::<IpAddr>()
                     .map_err(|_| invalid("expected an IP address before the prefix separator"))?;
-                if prefix.is_empty() || !prefix.bytes().all(|byte| byte.is_ascii_digit()) {
-                    return Err(invalid(
-                        "expected a decimal prefix length after the separator",
-                    ));
-                }
-                let prefix: u8 = prefix
-                    .parse()
-                    .map_err(|_| invalid("prefix length is too large"))?;
-                let maximum = match network {
-                    IpAddr::V4(_) => 32,
-                    IpAddr::V6(_) => 128,
-                };
-                if prefix > maximum {
-                    return Err(invalid("prefix length exceeds the address family width"));
-                }
-                let canonical = match network {
-                    IpAddr::V4(network) => IpAddr::V4(masked_v4(network, prefix)),
-                    IpAddr::V6(network) => IpAddr::V6(masked_v6(network, prefix)),
-                };
-                if canonical != network {
+                let network = input.parse::<crate::target::Network>().map_err(|_| {
+                    invalid("expected a decimal prefix length no wider than the address family")
+                })?;
+                if network.address() != spelled {
                     return Err(invalid(
                         "network constraint must spell the canonical network address",
                     ));
                 }
-                Ok(Self::Network { network, prefix })
+                Ok(Self::Network(network))
             }
         }
     }
@@ -280,6 +230,7 @@ impl Classified for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     fn constraint(input: &str) -> Result<DestinationConstraint, Error> {
         input.parse()
@@ -348,6 +299,23 @@ mod tests {
         let error = constraint("192.0.2.1/24").expect_err("host bits must be spelled out");
         assert_eq!(error.classification().code, "cli.live_target");
         assert!(error.to_string().contains("canonical network"));
+    }
+
+    #[test]
+    fn constraint_and_target_network_parsers_agree_on_cidr_text() {
+        for input in ["10.0.0.0/8", "2001:db8::/32", "192.0.2.9/32", "::/0"] {
+            let network = input
+                .parse::<crate::target::Network>()
+                .expect("target network parses");
+            assert_eq!(
+                input.parse::<DestinationConstraint>(),
+                Ok(DestinationConstraint::Network(network)),
+                "{input} must parse identically on both surfaces"
+            );
+        }
+        let signed_prefix = "192.0.2.0/+24";
+        assert!(signed_prefix.parse::<DestinationConstraint>().is_err());
+        assert!(signed_prefix.parse::<crate::target::Network>().is_err());
     }
 
     #[test]

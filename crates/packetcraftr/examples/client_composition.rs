@@ -107,10 +107,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // permitted, and one operation may spend at most 8 packets / 16 KiB of
     // wire — the client enforces both before any provider sees a frame.
     let policy = Policy {
-        allowed_destinations: vec![DestinationConstraint::Network {
-            network: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)),
-            prefix: 24,
-        }],
+        allowed_destinations: vec![DestinationConstraint::Network(
+            packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,
+        )],
         max_packets_per_operation: 8,
         max_bytes_per_operation: 16 * 1024,
         ..Policy::default()

@@ -160,8 +160,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     })
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
+    staged.sync()?;
     check_deadline(&deadline).map_err(CliError::classified)?;
-    staged.publish()?;
+    staged.persist()?;
     let report = output::rewrite::Report {
         path: args.write.display().to_string(),
         rule_matches: counts,

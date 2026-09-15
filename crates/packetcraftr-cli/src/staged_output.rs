@@ -63,8 +63,9 @@ impl StagedFile {
         self.file.as_file_mut()
     }
 
-    /// Durably flushes the staged bytes. Callers publishing several files sync
-    /// every file before persisting any.
+    /// Durably flushes the staged bytes. Callers check cancellation and deadlines
+    /// after this potentially blocking operation, before persisting. Callers
+    /// publishing several files sync every file before persisting any.
     pub(crate) fn sync(&self) -> Result<(), CliError> {
         self.file
             .as_file()
@@ -79,12 +80,6 @@ impl StagedFile {
             .persist_noclobber(&destination)
             .map_err(|error| output("publish", &destination, error.error))?;
         Ok(())
-    }
-
-    /// `sync` then `persist`, for single-file callers.
-    pub(crate) fn publish(self) -> Result<(), CliError> {
-        self.sync()?;
-        self.persist()
     }
 }
 
@@ -135,7 +130,8 @@ mod tests {
         let destination = directory.path().join("out.pcapng");
         let mut staged = StagedFile::stage(&destination).expect("absent destination stages");
         staged.as_file_mut().write_all(b"payload").unwrap();
-        staged.publish().expect("publish succeeds");
+        staged.sync().expect("sync succeeds");
+        staged.persist().expect("publish succeeds");
         assert_eq!(std::fs::read(&destination).unwrap(), b"payload");
     }
 
@@ -146,7 +142,8 @@ mod tests {
         let staged = StagedFile::stage(&destination).expect("absent destination stages");
         std::fs::write(&destination, b"someone else").expect("colliding file");
 
-        let error = staged.publish().expect_err("colliding destination fails");
+        staged.sync().expect("sync succeeds");
+        let error = staged.persist().expect_err("colliding destination fails");
         assert_eq!(error.classification.code, "io.output_file");
         assert_eq!(error.exit_code(), 5);
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");

@@ -70,8 +70,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     )
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
+    staged.sync()?;
     crate::cancellation::check()?;
-    staged.publish()?;
+    staged.persist()?;
     let report = output::merge::Report::new(args.write.display().to_string(), report);
     match format {
         Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),

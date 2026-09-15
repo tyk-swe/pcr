@@ -78,8 +78,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     // Construct all fallible report fields before publishing the saved capture.
     let report = output::export::Report::new(args.write.display().to_string(), report, plan)
         .map_err(CliError::classified)?;
+    staged.sync()?;
     crate::cancellation::check()?;
-    staged.publish()?;
+    staged.persist()?;
     match format {
         Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),

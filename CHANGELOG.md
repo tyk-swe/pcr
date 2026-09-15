@@ -286,6 +286,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `rewrite`, `export`, and `merge` recheck interruption after syncing staged
+  output, so cancellation or an expired rewrite deadline prevents publication.
 - Capture-time bounds skip timestamp-less records without losing input-budget
   accounting; stream projections use the complete frame and byte totals.
   Timestamp parsing rejects fractions the host cannot represent exactly.

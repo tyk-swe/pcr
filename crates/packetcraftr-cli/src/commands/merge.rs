@@ -33,9 +33,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             "merge accepts at most 64 captures and one stdin source",
         ));
     }
-    if args.write.exists() {
-        return Err(CliError::new(Kind::Io, "merge destination already exists"));
-    }
+    let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
     let mut sources = args
         .paths
         .iter()
@@ -46,15 +44,8 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;
-    let parent = args
-        .write
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|source| CliError::new(Kind::Io, format!("create merge output: {source}")))?;
     let mut writer = pcap::Writer::pcapng_with_options(
-        args.compression.writer(temporary.as_file_mut())?,
+        args.compression.writer(staged.as_file_mut())?,
         pcap::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             max_interfaces: args.limits.reader.max_interfaces,
@@ -79,14 +70,8 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     )
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|source| CliError::new(Kind::Io, format!("flush merge output: {source}")))?;
     crate::cancellation::check()?;
-    temporary
-        .persist_noclobber(&args.write)
-        .map_err(|source| CliError::new(Kind::Io, format!("publish merge output: {source}")))?;
+    staged.publish()?;
     let report = output::merge::Report::new(args.write.display().to_string(), report);
     match format {
         Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),

@@ -848,6 +848,89 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
 }
 
 #[test]
+fn existing_output_destination_reports_the_same_io_failure_for_every_writer() {
+    let directory = tempfile::tempdir().expect("temporary directory must open");
+    let source_path = directory.path().join("source.pcap");
+    let mut writer = Writer::pcap(
+        std::fs::File::create(&source_path).expect("source capture must open"),
+        LinkType::IPV4,
+    )
+    .expect("capture writer must initialize");
+    writer
+        .write_frame(
+            &Frame::new(UNIX_EPOCH, LinkType::IPV4, decode_hex(IPV4_FRAME_HEX))
+                .expect("fixture frame must be valid"),
+        )
+        .expect("fixture frame must write");
+    writer.flush().expect("source capture must flush");
+    drop(writer);
+    let source = source_path.to_str().expect("temp path is UTF-8");
+
+    let occupied_path = directory.path().join("occupied.pcapng");
+    std::fs::write(&occupied_path, b"pre-existing").expect("occupied file must write");
+    let occupied = occupied_path.to_str().expect("temp path is UTF-8");
+
+    // follow --write stages one file per direction inside a directory.
+    let follow_dir_path = directory.path().join("follow-out");
+    std::fs::create_dir(&follow_dir_path).expect("follow directory must open");
+    let follow_occupied_path = follow_dir_path.join("tcp-0-client.bin");
+    std::fs::write(&follow_occupied_path, b"pre-existing").expect("occupied file must write");
+    let follow_dir = follow_dir_path.to_str().expect("temp path is UTF-8");
+    let follow_occupied = follow_occupied_path.to_str().expect("temp path is UTF-8");
+
+    let commands: [(&[&str], &str); 4] = [
+        (
+            &[
+                "--output", "json", "export", source, "--stream", "tcp:0", "--write", occupied,
+            ],
+            occupied,
+        ),
+        (
+            &[
+                "--output", "json", "merge", source, source, "--write", occupied,
+            ],
+            occupied,
+        ),
+        (
+            &[
+                "--output",
+                "json",
+                "rewrite",
+                source,
+                "--source-ip",
+                "2001:db8::9",
+                "--write",
+                occupied,
+            ],
+            occupied,
+        ),
+        (
+            &[
+                "--output", "json", "follow", source, "--stream", "tcp:0", "--write", follow_dir,
+            ],
+            follow_occupied,
+        ),
+    ];
+    for (arguments, occupied) in commands {
+        let output = run(arguments);
+        assert_eq!(output.status.code(), Some(5), "{arguments:?}");
+        let error = parse_json(&output)["error"].clone();
+        assert_eq!(error["code"], "io.output_file", "{arguments:?}");
+        let message = error["message"].as_str().expect("error message is text");
+        assert!(
+            message.contains("already exists"),
+            "{arguments:?}: {message}"
+        );
+        assert!(message.contains(occupied), "{arguments:?}: {message}");
+        assert_eq!(
+            std::fs::read(occupied).expect("occupied file must remain readable"),
+            b"pre-existing",
+            "{arguments:?}"
+        );
+    }
+}
+
+#[test]
 fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
     let mut packet = Packet::new();
     packet.push(Ipv4 {

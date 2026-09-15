@@ -4,15 +4,14 @@
 //! Staged per-direction payload files for `follow --write`.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
-
-use tempfile::NamedTempFile;
+use std::path::Path;
 
 use packetcraftr_core::analysis::StreamRef;
 use packetcraftr_core::analysis::follow::{Chunk, Direction};
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
+use crate::staged_output::StagedFile;
 
 use super::arguments::Direction as Selected;
 
@@ -20,8 +19,7 @@ use super::arguments::Direction as Selected;
 #[derive(Debug)]
 struct Staged {
     direction: Direction,
-    file: NamedTempFile,
-    destination: PathBuf,
+    file: StagedFile,
     bytes: u64,
 }
 
@@ -79,37 +77,10 @@ impl DirectionFiles {
                 selector.index,
                 direction_name(*direction),
             ));
-            match std::fs::symlink_metadata(&destination) {
-                Ok(_) => {
-                    return Err(CliError::new(
-                        Kind::Io,
-                        format!(
-                            "follow destination {} already exists",
-                            destination.display()
-                        ),
-                    ));
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(CliError::new(
-                        Kind::Io,
-                        format!(
-                            "inspect follow destination {}: {error}",
-                            destination.display()
-                        ),
-                    ));
-                }
-            }
-            let file = NamedTempFile::new_in(directory).map_err(|source| {
-                CliError::new(
-                    Kind::Io,
-                    format!("stage follow output in {}: {source}", directory.display()),
-                )
-            })?;
+            let file = StagedFile::stage(&destination)?;
             staged.push(Staged {
                 direction: *direction,
                 file,
-                destination,
                 bytes: 0,
             });
         }
@@ -138,6 +109,7 @@ impl DirectionFiles {
         self.remaining -= chunk.bytes.len();
         staged
             .file
+            .as_file_mut()
             .write_all(&chunk.bytes)
             .map_err(|source| CliError::new(Kind::Io, format!("write follow payload: {source}")))?;
         staged.bytes = staged
@@ -153,45 +125,30 @@ impl DirectionFiles {
     /// remove themselves. A direction with no payload publishes as an empty
     /// file.
     pub(super) fn publish(self) -> Result<Vec<Written>, CliError> {
-        self.publish_with_sync(std::fs::File::sync_all)
-    }
-
-    fn publish_with_sync(
-        self,
-        sync: impl FnMut(&std::fs::File) -> std::io::Result<()>,
-    ) -> Result<Vec<Written>, CliError> {
-        self.publish_with(sync, |path| std::fs::remove_file(path))
+        self.publish_with(StagedFile::sync, |path| std::fs::remove_file(path))
     }
 
     fn publish_with(
         self,
-        mut sync: impl FnMut(&std::fs::File) -> std::io::Result<()>,
+        mut sync: impl FnMut(&StagedFile) -> Result<(), CliError>,
         mut remove: impl FnMut(&Path) -> std::io::Result<()>,
     ) -> Result<Vec<Written>, CliError> {
         // No destination is published until every staged file is synchronized.
         for staged in &self.staged {
-            if let Err(source) = sync(staged.file.as_file()) {
-                return Err(CliError::new(
-                    Kind::Io,
-                    format!(
-                        "sync follow output {}: {source}",
-                        staged.destination.display()
-                    ),
-                ));
-            }
+            sync(&staged.file)?;
         }
         let mut published = Vec::new();
         let mut written = Vec::new();
         for staged in self.staged {
-            let destination = staged.destination.display().to_string();
-            match staged.file.persist_noclobber(&staged.destination) {
-                Ok(_) => {
-                    published.push(staged.destination);
+            let destination = staged.file.destination().to_owned();
+            match staged.file.persist() {
+                Ok(()) => {
                     written.push(Written {
                         direction: staged.direction,
-                        path: destination,
+                        path: destination.display().to_string(),
                         bytes: staged.bytes,
                     });
+                    published.push(destination);
                 }
                 Err(error) => {
                     let mut rolled_back = 0;
@@ -208,13 +165,13 @@ impl DirectionFiles {
                             )),
                         }
                     }
-                    let mut failure = CliError::new(
-                        Kind::Io,
+                    let mut failure = CliError::from_classification(
+                        error.classification,
                         format!(
-                            "publish follow output {destination}: {}; \
-                             rolled back {rolled_back} published file(s)",
-                            error.error,
+                            "{}; rolled back {rolled_back} published file(s)",
+                            error.message,
                         ),
+                        error.causes,
                     );
                     for cleanup in failures {
                         failure = failure.with_secondary("follow rollback", cleanup);
@@ -239,6 +196,7 @@ fn direction_name(direction: Direction) -> &'static str {
 mod tests {
     use super::*;
     use packetcraftr_core::analysis::StreamTransport;
+    use std::path::PathBuf;
 
     fn selector() -> StreamRef {
         StreamRef {
@@ -332,14 +290,23 @@ mod tests {
             .expect("staging succeeds");
         let mut calls = 0;
         let error = files
-            .publish_with_sync(|file| {
-                calls += 1;
-                if calls == 2 {
-                    Err(std::io::Error::other("injected synchronization failure"))
-                } else {
-                    file.sync_all()
-                }
-            })
+            .publish_with(
+                |staged: &StagedFile| {
+                    calls += 1;
+                    if calls == 2 {
+                        Err(CliError::new(
+                            Kind::Io,
+                            format!(
+                                "sync follow output {}: injected synchronization failure",
+                                staged.destination().display()
+                            ),
+                        ))
+                    } else {
+                        staged.sync()
+                    }
+                },
+                |path: &Path| std::fs::remove_file(path),
+            )
             .expect_err("the second synchronization fails");
         assert_eq!(calls, 2);
         assert!(error.message.contains("sync follow output"));
@@ -394,7 +361,7 @@ mod tests {
             DirectionFiles::stage(directory.path(), selector(), Selected::Both, 16).unwrap();
         std::fs::write(directory.path().join("tcp-7-server.bin"), b"collision").unwrap();
         let error = files
-            .publish_with(std::fs::File::sync_all, |_| {
+            .publish_with(StagedFile::sync, |_| {
                 Err(std::io::Error::other("injected rollback failure"))
             })
             .unwrap_err();

@@ -9,11 +9,8 @@ use packetcraftr_cli::output::{
     self,
     contract::{Command, Format},
 };
-use packetcraftr_core::{
-    analysis::{self, pcap},
-    error::Kind,
-};
-use std::path::{Path, PathBuf};
+use packetcraftr_core::analysis::{self, pcap};
+use std::path::PathBuf;
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Source PCAP/PCAPNG; - reads redirected stdin. Compression is detected.
@@ -54,9 +51,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         max_selected_frames: args.max_selected_frames,
     };
     selection.validate().map_err(CliError::classified)?;
-    if args.write.exists() {
-        return Err(CliError::new(Kind::Io, "export destination already exists"));
-    }
+    let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
     let limits = pcap::Limits {
         max_frames: args.limits.capture.max_frames,
         max_bytes: args.limits.capture.max_bytes,
@@ -72,34 +67,19 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     )
     .map_err(CliError::classified)?;
     reader.rewind().map_err(CliError::classified)?;
-    let parent = args
-        .write
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
     let (writer, report) = pcap::select(
         &mut reader,
-        args.compression.writer(temporary.as_file_mut())?,
+        args.compression.writer(staged.as_file_mut())?,
         limits,
         |number, _| Ok(plan.source_frames.contains(&number)),
     )
     .map_err(CliError::classified)?;
     let _ = writer.finish().map_err(CliError::classified)?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
     // Construct all fallible report fields before publishing the saved capture.
     let report = output::export::Report::new(args.write.display().to_string(), report, plan)
         .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    temporary
-        .persist_noclobber(&args.write)
-        .map_err(|error| CliError::classified(pcap::Error::from(error.error)))?;
+    staged.publish()?;
     match format {
         Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
         Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),

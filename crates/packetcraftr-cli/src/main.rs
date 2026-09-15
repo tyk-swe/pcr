@@ -16,6 +16,7 @@ mod filtering;
 mod input;
 mod rendering;
 mod resources;
+mod staged_output;
 mod startup;
 mod system;
 #[cfg(test)]

@@ -4,10 +4,11 @@
   "mode": "aggregate",
   "status": "error",
   "error": {
-    "code": "io.runtime",
+    "code": "io.output_file",
     "kind": "io",
-    "message": "merge destination already exists",
-    "causes": []
+    "message": "output destination captures/merged.pcapng already exists",
+    "causes": [],
+    "remediation": "choose a destination that does not exist inside a writable directory"
   },
   "diagnostics": []
 }

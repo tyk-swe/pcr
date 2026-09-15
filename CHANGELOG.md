@@ -185,7 +185,19 @@ All notable changes to PacketcraftR are documented here. The format follows
 - **Breaking:** `policy::Policy` gains an `allowed_destinations` constraint
   list bounded by `MAX_DESTINATION_CONSTRAINTS`; the new
   `policy::DestinationConstraint` type parses exact addresses and canonical
-  CIDR networks.
+  CIDR networks. Its `Network` variant wraps `target::Network`, so allowlist
+  entries, scan targets, and `--exclude` share one CIDR parser and matcher;
+  a signed prefix such as `/+24` is rejected on every surface.
+- Writer commands (`export`, `merge`, `rewrite`, `follow --write`) publish
+  through one staged-output path: an occupied destination — including a
+  dangling symlink — is refused before any input is read, and every staging,
+  sync, and publish failure classifies as `io.output_file` (previously
+  `io.runtime` or `io.capture_file` depending on the command).
+- `filter::Error` implements `Classified` in core and is the single owner of
+  display-filter classification. A filter that needs `frame.time_epoch` on a
+  frame without a timestamp reports `packet.timestamp_unavailable` (exit 3)
+  from every command, including `read --field`, `capture`, `replay`, and
+  `rewrite`, which previously reported `packet.error` or `cli.filter`.
 
 - **Breaking:** `send` aggregates results into a `frames` list with per-frame
   `pass`/`index` metadata plus `passes_completed`, replacing the single-frame

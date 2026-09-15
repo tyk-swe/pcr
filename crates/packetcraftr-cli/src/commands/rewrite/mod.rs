@@ -17,11 +17,7 @@ use packetcraftr_core::{
     error::{BoundaryError, Kind},
     transform::{self, HeaderRewrite, VlanTag},
 };
-use std::{
-    net::IpAddr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{net::IpAddr, path::PathBuf, time::Duration};
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Source capture; - reads redirected stdin. gzip and Zstd are detected.
@@ -118,29 +114,16 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         .filter_map(|(_, patch)| patch.vlans.as_ref().map(|tags| tags.len() * 4))
         .max()
         .unwrap_or(0);
-    if args.write.exists() {
-        return Err(CliError::new(
-            Kind::Io,
-            "rewrite destination already exists",
-        ));
-    }
+    let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
     let deadline = Deadline::new(Duration::from_millis(args.max_duration_ms))
         .with_cancellation(Some(crate::cancellation::signal().clone()));
     let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
-    let parent = args
-        .write
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
     let limits = pcap::Limits {
         max_frames: args.limits.max_frames,
         max_bytes: args.limits.max_bytes,
     };
     let mut writer = pcap::Writer::pcapng_with_options(
-        args.compression.writer(temporary.as_file_mut())?,
+        args.compression.writer(staged.as_file_mut())?,
         pcap::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             max_interfaces: args.limits.reader.max_interfaces,
@@ -177,15 +160,8 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     })
     .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
     check_deadline(&deadline).map_err(CliError::classified)?;
-    temporary
-        .persist_noclobber(&args.write)
-        .map_err(|error| CliError::classified(pcap::Error::from(error.error)))?;
+    staged.publish()?;
     let report = output::rewrite::Report {
         path: args.write.display().to_string(),
         rule_matches: counts,

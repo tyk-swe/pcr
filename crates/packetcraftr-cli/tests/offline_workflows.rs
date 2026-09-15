@@ -1399,12 +1399,33 @@ fn read_missing_filter_timestamp_uses_source_identity_and_next_envelope_position
     assert_eq!(records[0]["result"]["source_frame"], 1);
     assert_eq!(records[1]["sequence"], 1);
     assert_eq!(records[1]["status"], "error");
-    assert!(
-        records[1]["error"]["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("frame 2"))
-    );
+    assert_eq!(records[1]["error"]["code"], "packet.timestamp_unavailable");
+    assert_eq!(records[1]["error"]["context"]["source_frame"], 2);
     assert!(records.iter().all(|record| record["event"] != "complete"));
+}
+
+#[test]
+fn read_filter_timestamp_failure_classifies_identically_across_contracts() {
+    let capture = write_capture_with_later_missing_timestamp();
+    let path = path_text(capture.path());
+    let text = run(&["read", path, "--filter", "frame.time_epoch >= 0"]);
+    assert_eq!(text.status.code(), Some(3));
+    assert!(String::from_utf8_lossy(&text.stderr).contains("packet.timestamp_unavailable"));
+    let projected = run(&[
+        "--output",
+        "json",
+        "read",
+        path,
+        "--field",
+        "frame.number",
+        "--filter",
+        "frame.time_epoch >= 0",
+    ]);
+    assert_eq!(projected.status.code(), Some(3));
+    let report = parse_json(&projected);
+    assert_eq!(report["error"]["code"], "packet.timestamp_unavailable");
+    assert_eq!(report["error"]["kind"], "packet");
+    assert_eq!(report["error"]["context"]["source_frame"], 2);
 }
 
 #[test]

@@ -242,7 +242,9 @@ fn normalization_rejects_only_selected_timestamp_less_frames() {
     let selected = normalize(&input, &["--filter", "frame.number == 1"], 0);
     assert_eq!(read_frames(&selected.stdout).0.len(), 1);
     let timestamp_filter = normalize(&input, &["--filter", "frame.time_epoch > 0"], 3);
-    assert!(String::from_utf8_lossy(&timestamp_filter.stderr).contains("frame 2 has no timestamp"));
+    assert!(
+        String::from_utf8_lossy(&timestamp_filter.stderr).contains("packet.timestamp_unavailable")
+    );
 }
 
 #[test]

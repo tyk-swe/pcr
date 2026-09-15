@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use packetcraftr_core as core;
 use packetcraftr_core::error::Classification;
+use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::filter::Context;
 use packetcraftr_core::filter::Filter;
@@ -47,7 +48,7 @@ pub(crate) fn compile(
         registry,
         packetcraftr_core::filter::Options::default(),
     )
-    .map_err(cli_error)?;
+    .map_err(CliError::classified)?;
     if filter.requirements().stream_index && !capabilities.stream_index {
         return Err(CliError::from_classification(
             Classification::new(
@@ -66,23 +67,92 @@ pub(crate) fn compile(
     Ok(filter)
 }
 
-/// Evaluates a compiled filter against complete bounded frames.
-///
-/// Undissectable frames are errors rather than silent mismatches.
+/// Decodes complete bounded frames and applies an optional display filter, so
+/// every frame-at-a-time command dissects, budgets, and classifies identically.
 #[derive(Debug)]
-pub(crate) struct FrameSelector {
+pub(crate) struct FrameDecoder {
     decoder: core::decode::Dissector,
-    filter: Filter,
+    filter: Option<Filter>,
     max_frame_bytes: usize,
 }
 
-impl FrameSelector {
-    pub(crate) fn new(registry: Arc<Registry>, filter: Filter, max_frame_bytes: usize) -> Self {
+impl FrameDecoder {
+    pub(crate) fn new(
+        registry: Arc<Registry>,
+        filter: Option<Filter>,
+        max_frame_bytes: usize,
+    ) -> Self {
         Self {
             decoder: core::decode::Dissector::new(registry),
             filter,
             max_frame_bytes,
         }
+    }
+
+    /// Compiles `source` (if any) with `Capabilities::frames_only()`.
+    pub(crate) fn compile(
+        registry: &Arc<Registry>,
+        source: Option<&str>,
+        max_frame_bytes: usize,
+    ) -> Result<Self, CliError> {
+        let filter = source
+            .map(|source| compile(source, registry, Capabilities::frames_only()))
+            .transpose()?;
+        Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
+    }
+
+    /// Dissects `frame` under this decoder's bounded packet budget.
+    pub(crate) fn decode(&self, frame: &Frame) -> Result<core::decode::DecodedPacket, CliError> {
+        self.decoder
+            .decode(
+                frame.clone(),
+                core::decode::Options {
+                    max_packet_size: self.max_frame_bytes,
+                    ..core::decode::Options::default()
+                },
+            )
+            .map_err(CliError::classified)
+    }
+
+    /// Decodes then evaluates the filter with `derived=&[]` and no stream
+    /// indexes; `Ok(None)` means the frame decoded but was not selected.
+    /// Failures carry the source frame as their coordinate.
+    pub(crate) fn decode_selected(
+        &self,
+        source_frame: u64,
+        frame: &Frame,
+    ) -> Result<Option<core::decode::DecodedPacket>, CliError> {
+        let context = Some(Coordinate::SourceFrame(source_frame));
+        let decoded = self
+            .decode(frame)
+            .map_err(|error| error.with_context(context))?;
+        if let Some(filter) = &self.filter {
+            let keep = filter
+                .matches(&Context {
+                    decoded: &decoded,
+                    derived: &[],
+                    number: source_frame,
+                    tcp_stream: None,
+                    udp_stream: None,
+                })
+                .map_err(|error| CliError::classified(error).with_context(context))?;
+            if !keep {
+                return Ok(None);
+            }
+        }
+        Ok(Some(decoded))
+    }
+}
+
+/// Evaluates a compiled filter against complete bounded frames.
+///
+/// Undissectable frames are errors rather than silent mismatches.
+#[derive(Debug)]
+pub(crate) struct FrameSelector(FrameDecoder);
+
+impl FrameSelector {
+    pub(crate) fn new(registry: Arc<Registry>, filter: Filter, max_frame_bytes: usize) -> Self {
+        Self(FrameDecoder::new(registry, Some(filter), max_frame_bytes))
     }
 
     /// Compiles an optional display filter into a [`FrameSelector`].
@@ -101,25 +171,9 @@ impl FrameSelector {
 
     /// Decides whether the one-based `source_frame` is kept.
     pub(crate) fn keep(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
-        let decoded = self
-            .decoder
-            .decode(
-                frame.clone(),
-                core::decode::Options {
-                    max_packet_size: self.max_frame_bytes,
-                    ..core::decode::Options::default()
-                },
-            )
-            .map_err(CliError::classified)?;
-        self.filter
-            .matches(&Context {
-                decoded: &decoded,
-                derived: &[],
-                number: source_frame,
-                tcp_stream: None,
-                udp_stream: None,
-            })
-            .map_err(cli_error)
+        self.0
+            .decode_selected(source_frame, frame)
+            .map(|decoded| decoded.is_some())
     }
 }
 
@@ -137,39 +191,7 @@ impl packetcraftr::replay::Selector for FrameSelector {
 /// Evaluates a compiled filter against a dissection the caller already owns,
 /// so commands that decode a frame for output do not decode it again to filter.
 pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<bool, CliError> {
-    filter.matches(context).map_err(cli_error)
-}
-
-/// Converts a filter compilation failure into the CLI error taxonomy.
-fn cli_error(error: packetcraftr_core::filter::Error) -> CliError {
-    let remediation = match &error {
-        packetcraftr_core::filter::Error::UnknownField { .. }
-        | packetcraftr_core::filter::Error::UnresolvableProtocol { .. } => {
-            "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
-        }
-        packetcraftr_core::filter::Error::IncompatibleLiteral { .. }
-        | packetcraftr_core::filter::Error::OrderedPrefixComparison { .. } => {
-            "compare the field against a value of its own type"
-        }
-        packetcraftr_core::filter::Error::UnsliceableField { .. } => {
-            "slice only fields that hold bytes, such as an address or a byte string"
-        }
-        packetcraftr_core::filter::Error::SizeLimit { .. }
-        | packetcraftr_core::filter::Error::NestingLimit { .. }
-        | packetcraftr_core::filter::Error::TermLimit { .. }
-        | packetcraftr_core::filter::Error::SetMemberLimit { .. }
-        | packetcraftr_core::filter::Error::InvalidNestingLimit { .. } => {
-            "simplify the filter to fit the stable bounds"
-        }
-        // Covers `Empty` and `Syntax`, and — because `filter::Error` is
-        // non-exhaustive — any variant added later.
-        _ => "check the filter syntax; see `packetcraftr read --help` for examples",
-    };
-    CliError::from_classification(
-        Classification::new("cli.filter", Kind::Cli, Some(remediation)),
-        error.to_string(),
-        Vec::new(),
-    )
+    filter.matches(context).map_err(CliError::classified)
 }
 
 #[cfg(test)]
@@ -224,30 +246,6 @@ mod tests {
             .expect_err("decode errors cannot become silent mismatches");
         assert_eq!(error.classification.code, "policy.decode_resource_limit");
         assert_eq!(error.exit_code(), 6);
-    }
-
-    #[test]
-    fn filter_error_remediation_is_specific() {
-        let registry = registry();
-        let cases = [
-            ("ipv4.missing == 1", "list the fields a protocol exposes"),
-            ("udp.destination_port == 192.0.2.1", "value of its own type"),
-            ("frame.len[0] == 1", "slice only fields that hold bytes"),
-            ("(ethernet", "check the filter syntax"),
-        ];
-
-        for (source, expected_remediation) in cases {
-            let error = compile(source, &registry, Capabilities::frames_only())
-                .expect_err("fixture filter must fail");
-            assert!(
-                error
-                    .classification
-                    .remediation
-                    .is_some_and(|value| value.contains(expected_remediation)),
-                "{source}: {:?}",
-                error.classification.remediation
-            );
-        }
     }
 
     #[test]

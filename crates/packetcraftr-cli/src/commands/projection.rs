@@ -288,10 +288,7 @@ pub(super) fn read(
                     .as_ref()
                     .map(|filter| record.matches(filter))
                     .transpose()
-                    .map_err(|source| {
-                        CliError::new(core::error::Kind::Packet, source.to_string())
-                            .into_boundary_error()
-                    })?
+                    .map_err(|source| CliError::classified(source).into_boundary_error())?
                     .unwrap_or(true);
                 if kept {
                     let values = record
@@ -308,7 +305,13 @@ pub(super) fn read(
         frames = summary.frames_read;
         bytes = summary.bytes_read;
     } else {
-        let decoder = core::decode::Dissector::new(registry);
+        // The stream-capable filter takes the analysis branch above, so the
+        // frame-at-a-time seam applies here.
+        let decoder = crate::filtering::FrameDecoder::new(
+            registry,
+            filter,
+            args.limits.reader.max_frame_bytes,
+        );
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
             (frames, bytes) = core::analysis::pcap::Limits {
                 max_frames: args.limits.max_frames,
@@ -319,15 +322,9 @@ pub(super) fn read(
             if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
                 continue;
             }
-            let decoded = decoder
-                .decode(
-                    frame,
-                    core::decode::Options {
-                        max_packet_size: args.limits.reader.max_frame_bytes,
-                        ..Default::default()
-                    },
-                )
-                .map_err(CliError::classified)?;
+            let Some(decoded) = decoder.decode_selected(frames, &frame)? else {
+                continue;
+            };
             let context = core::filter::Context {
                 decoded: &decoded,
                 derived: &[],
@@ -335,19 +332,11 @@ pub(super) fn read(
                 tcp_stream: None,
                 udp_stream: None,
             };
-            if filter
-                .as_ref()
-                .map(|filter| filter.matches(&context))
-                .transpose()
-                .map_err(|source| CliError::new(core::error::Kind::Packet, source.to_string()))?
-                .unwrap_or(true)
-            {
-                let values = projector
-                    .projection
-                    .values(&context, projector.remaining())
-                    .map_err(CliError::classified)?;
-                projector.emit(frames, values, stream)?;
-            }
+            let values = projector
+                .projection
+                .values(&context, projector.remaining())
+                .map_err(CliError::classified)?;
+            projector.emit(frames, values, stream)?;
         }
     }
     projector.finish(frames, bytes, stream)

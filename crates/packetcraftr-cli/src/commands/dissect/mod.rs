@@ -73,15 +73,16 @@ pub(super) fn run(
     // decoded successfully, while an unsupported output format is refused
     // whether or not the frame matched.
     let kept = match &filter {
-        Some(filter) => filter
-            .matches(&core::filter::Context {
+        Some(filter) => filtering::matches_decoded(
+            filter,
+            &core::filter::Context {
                 decoded: &decoded,
                 derived: &[],
                 number: 1,
                 tcp_stream: None,
                 udp_stream: None,
-            })
-            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?,
+            },
+        )?,
         None => true,
     };
     if let Some(mut projector) = projector {

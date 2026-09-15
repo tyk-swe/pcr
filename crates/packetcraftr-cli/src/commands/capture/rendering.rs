@@ -5,7 +5,7 @@ use super::files::Files;
 use crate::{
     command_options::Compression,
     errors::CliError,
-    filtering::{FrameSelector, matches_decoded},
+    filtering::{FrameDecoder, FrameSelector},
     rendering::{
         StreamEncoder, captured_frame_text, emit_aggregate_with_stats, render_diagnostics_stderr,
         render_diagnostics_text, write_plain_line, write_stdout_line, write_summary_line,
@@ -36,9 +36,7 @@ use std::sync::Arc;
 /// Selection decodes a kept frame once and parks it so emission republishes
 /// the same dissection; decoded state never outlives one frame.
 pub(super) struct Decoding {
-    decoder: core::decode::Dissector,
-    filter: Option<core::filter::Filter>,
-    max_packet_size: usize,
+    frames: FrameDecoder,
     parked: RefCell<Option<(u64, DecodedPacket)>>,
 }
 
@@ -55,56 +53,20 @@ impl Decoding {
         if !dissect && !projector {
             return Ok(None);
         }
-        let filter = filter
-            .map(|source| {
-                crate::filtering::compile(
-                    source,
-                    registry,
-                    crate::filtering::Capabilities::frames_only(),
-                )
-            })
-            .transpose()?;
         Ok(Some(Self {
-            decoder: core::decode::Dissector::new(Arc::clone(registry)),
-            filter,
-            max_packet_size: snap_length,
+            frames: FrameDecoder::compile(registry, filter, snap_length)?,
             parked: RefCell::new(None),
         }))
-    }
-
-    fn decode(&self, frame: &Frame) -> Result<DecodedPacket, CliError> {
-        self.decoder
-            .decode(
-                frame.clone(),
-                core::decode::Options {
-                    max_packet_size: self.max_packet_size,
-                    ..core::decode::Options::default()
-                },
-            )
-            .map_err(CliError::classified)
     }
 
     /// The filter half of frame selection, run by the capture admission
     /// callback; a kept frame's dissection is parked for the emit callback.
     pub(super) fn select(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
-        let decoded = self.decode(frame)?;
-        let keep = match &self.filter {
-            Some(filter) => matches_decoded(
-                filter,
-                &core::filter::Context {
-                    decoded: &decoded,
-                    derived: &[],
-                    number: source_frame,
-                    tcp_stream: None,
-                    udp_stream: None,
-                },
-            )?,
-            None => true,
+        let Some(decoded) = self.frames.decode_selected(source_frame, frame)? else {
+            return Ok(false);
         };
-        if keep {
-            self.parked.replace(Some((source_frame, decoded)));
-        }
-        Ok(keep)
+        self.parked.replace(Some((source_frame, decoded)));
+        Ok(true)
     }
 
     /// Reuses the dissection `select` parked for this frame, decoding only
@@ -119,7 +81,7 @@ impl Decoding {
         {
             return Ok(decoded);
         }
-        self.decode(frame)
+        self.frames.decode(frame)
     }
 }
 

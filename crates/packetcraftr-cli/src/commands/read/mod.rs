@@ -26,7 +26,7 @@ use packetcraftr_cli::output;
 use self::arguments::Args;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
-use crate::filtering::{self, Capabilities};
+use crate::filtering::FrameDecoder;
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::StreamEncoder;
 
@@ -36,8 +36,7 @@ use rendering::render_record;
 /// The decoding one `read` invocation needs, built only when `--filter` or
 /// `--dissect` asks for it.
 struct Decoding {
-    decoder: core::decode::Dissector,
-    filter: Option<core::filter::Filter>,
+    frames: FrameDecoder,
     /// Whether the decoded stack is published, not merely used to filter.
     publish_layers: bool,
 }
@@ -91,7 +90,12 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         Format::PcapNg => Some(capture::Format::PcapNg),
         _ => None,
     };
-    let decoding = prepare_decoding(filter.as_deref(), dissect, &decode)?;
+    let decoding = prepare_decoding(
+        filter.as_deref(),
+        dissect,
+        &decode,
+        limits.reader.max_frame_bytes,
+    )?;
     let mut reader = open_capture(&path, limits.reader)?;
     if normalize {
         let stdout = io::stdout();
@@ -119,7 +123,6 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             stream_limits,
             bounds,
             decoding.as_ref(),
-            limits.reader.max_frame_bytes,
             &mut destination,
         )?;
         drop(destination.finish().map_err(CliError::classified)?);
@@ -154,17 +157,14 @@ fn prepare_decoding(
     filter: Option<&str>,
     dissect: bool,
     decode: &crate::command_options::DecodeArgs,
+    max_frame_bytes: usize,
 ) -> Result<Option<Decoding>, CliError> {
     let registry = decode.registry()?;
     if filter.is_none() && !dissect {
         return Ok(None);
     }
-    let filter = filter
-        .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
-        .transpose()?;
     Ok(Some(Decoding {
-        decoder: core::decode::Dissector::new(registry),
-        filter,
+        frames: FrameDecoder::compile(&registry, filter, max_frame_bytes)?,
         publish_layers: dissect,
     }))
 }
@@ -181,7 +181,6 @@ fn rewrite_capture(
     limits: Limits,
     bounds: Option<core::frame::TimeBounds>,
     decoding: Option<&Decoding>,
-    max_packet_size: usize,
     destination: &mut impl Write,
 ) -> Result<(), CliError> {
     if format != reader.format() {
@@ -210,7 +209,9 @@ fn rewrite_capture(
         let Some(decoding) = decoding else {
             return Ok(true);
         };
-        decode_selected(frame, number, decoding, max_packet_size)
+        decoding
+            .frames
+            .decode_selected(number, frame)
             .map(|decoded| decoded.is_some())
             .map_err(CliError::into_boundary_error)
     })
@@ -232,7 +233,7 @@ fn read_records(
         if !kept_by_time(bounds, &frame) {
             continue;
         }
-        let Some(record) = convert_frame(frame, source_frame, decoding, limits)? else {
+        let Some(record) = convert_frame(frame, source_frame, decoding)? else {
             continue;
         };
         render_record(record, format, stream)?;
@@ -279,13 +280,10 @@ fn normalize_capture(
             continue;
         }
         if let Some(decoding) = decoding
-            && decode_selected(
-                &frame,
-                source_frame,
-                decoding,
-                limits.reader.max_frame_bytes,
-            )?
-            .is_none()
+            && decoding
+                .frames
+                .decode_selected(source_frame, &frame)?
+                .is_none()
         {
             continue;
         }
@@ -342,20 +340,13 @@ fn convert_frame(
     frame: core::frame::Frame,
     source_frame: u64,
     decoding: Option<&Decoding>,
-    limits: OfflineCaptureLimitsArgs,
 ) -> Result<Option<output::read::Frame>, CliError> {
     let Some(decoding) = decoding else {
         return output::read::Frame::try_from_frame(source_frame, frame)
             .map(Some)
             .map_err(CliError::classified);
     };
-    let Some(decoded) = decode_selected(
-        &frame,
-        source_frame,
-        decoding,
-        limits.reader.max_frame_bytes,
-    )?
-    else {
+    let Some(decoded) = decoding.frames.decode_selected(source_frame, &frame)? else {
         return Ok(None);
     };
     if decoding.publish_layers {
@@ -365,57 +356,4 @@ fn convert_frame(
     }
     .map(Some)
     .map_err(CliError::classified)
-}
-
-fn decode_selected(
-    frame: &core::frame::Frame,
-    source_frame: u64,
-    decoding: &Decoding,
-    max_packet_size: usize,
-) -> Result<Option<core::decode::DecodedPacket>, CliError> {
-    let decoded = decoding
-        .decoder
-        .decode(
-            frame.clone(),
-            core::decode::Options {
-                max_packet_size,
-                ..core::decode::Options::default()
-            },
-        )
-        .map_err(CliError::classified)?;
-    if let Some(filter) = &decoding.filter {
-        validate_filter_timestamp(filter, frame, source_frame)?;
-        if !filter
-            .matches(&core::filter::Context {
-                decoded: &decoded,
-                derived: &[],
-                number: source_frame,
-                tcp_stream: None,
-                udp_stream: None,
-            })
-            .map_err(|source| CliError::new(Kind::Packet, source.to_string()))?
-        {
-            return Ok(None);
-        }
-    }
-    Ok(Some(decoded))
-}
-
-fn validate_filter_timestamp(
-    filter: &core::filter::Filter,
-    frame: &core::frame::Frame,
-    source_frame: u64,
-) -> Result<(), CliError> {
-    if filter.requirements().timestamp && frame.timestamp.is_none() {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "packet.timestamp_unavailable",
-                Kind::Packet,
-                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
-            ),
-            format!("frame {source_frame} has no timestamp required by frame.time_epoch"),
-            Vec::new(),
-        ));
-    }
-    Ok(())
 }

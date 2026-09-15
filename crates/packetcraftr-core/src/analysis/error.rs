@@ -129,17 +129,7 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
-            Self::Filter {
-                source: crate::filter::Error::TimestampUnavailable,
-                ..
-            } => Classification::new(
-                "packet.timestamp_unavailable",
-                Kind::Packet,
-                Some("remove frame.time_epoch from the filter or use timestamped packet blocks"),
-            ),
-            Self::Filter { .. } => {
-                Classification::new("cli.filter", Kind::Cli, Some("repair the display filter"))
-            }
+            Self::Filter { source, .. } => source.classification(),
             Self::StreamLimit { .. } | Self::DurationLimit { .. } => {
                 resource_limit(GENERAL_RESOURCE_REMEDIATION)
             }

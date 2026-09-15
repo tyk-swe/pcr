@@ -83,17 +83,21 @@ impl StagedFile {
     }
 }
 
-fn output(action: &'static str, destination: &Path, source: impl std::fmt::Display) -> CliError {
+fn output(action: &'static str, destination: &Path, source: std::io::Error) -> CliError {
+    let causes = std::iter::once(source.to_string())
+        .chain(packetcraftr_core::error::source_chain(&source))
+        .collect();
     CliError::from_classification(
         CLASSIFICATION,
         format!("{action} output {}: {source}", destination.display()),
-        Vec::new(),
+        causes,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use packetcraftr_core::error::Classified;
     use std::io::Write;
 
     #[test]
@@ -146,8 +150,32 @@ mod tests {
         let error = staged.persist().expect_err("colliding destination fails");
         assert_eq!(error.classification.code, "io.output_file");
         assert_eq!(error.exit_code(), 5);
+        assert!(!error.causes.is_empty());
         assert_eq!(std::fs::read(&destination).unwrap(), b"someone else");
         // The un-published staged file cleans itself up.
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn output_failures_preserve_the_io_source_chain() {
+        #[derive(Debug, thiserror::Error)]
+        #[error("storage backend failed")]
+        struct StorageFailure;
+
+        let source = std::io::Error::other(StorageFailure);
+        let error = output("stage", Path::new("out.pcapng"), source);
+
+        assert_eq!(error.classification.code, "io.output_file");
+        assert_eq!(error.causes, ["storage backend failed"]);
+        assert_eq!(
+            error.output_error().causes,
+            ["storage backend failed"],
+            "machine output retains the I/O source"
+        );
+        assert_eq!(
+            error.into_boundary_error().causes(),
+            ["storage backend failed"],
+            "boundary errors retain the I/O source"
+        );
     }
 }

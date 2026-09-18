@@ -245,10 +245,8 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
     });
 
     // Model the CLI's transactional spooled capture path with enough payload
-    // to expose capture-sized memory growth in peak-RSS measurements. The
-    // payload is shared by every frame, so measured growth belongs to encoded
-    // output rather than benchmark setup. This stays practical for local runs
-    // while producing a capture a little over 16 MiB.
+    // to expose capture-sized growth in peak-RSS: every frame shares the
+    // payload, so measured growth is encoded output (~16 MiB, still practical).
     const LARGE_FRAME_COUNT: u64 = 4_096;
     const LARGE_PAYLOAD_BYTES: usize = 4_096;
     let large_payload = Bytes::from(vec![0x5a; LARGE_PAYLOAD_BYTES]);

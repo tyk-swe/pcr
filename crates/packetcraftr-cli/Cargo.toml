@@ -14,7 +14,8 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["native-route"]
+# Match workspace builds so focused CLI builds can reuse workflow artifacts.
+default = ["native-route", "packetcraftr/default"]
 native-route = ["packetcraftr/native-route"]
 native-layer2 = ["packetcraftr/native-layer2"]
 native-layer3 = ["packetcraftr/native-layer3"]

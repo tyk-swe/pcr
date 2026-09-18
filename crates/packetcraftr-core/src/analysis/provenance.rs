@@ -67,7 +67,7 @@ impl Drop for Lease {
 impl Budget {
     fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Lease, Error> {
         self.used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes).filter(|used| *used <= self.limit)
             })
             .map_err(|_| Error::Limit { limit: self.limit })?;

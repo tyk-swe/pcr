@@ -40,7 +40,7 @@ criterion = { version = "0.8.2", default-features = false, features = ["cargo_be
 noyalib = { version = "0.0.39", default-features = false, features = ["std", "fast-int", "fast-float"] }
 jsonschema = { version = "0.55.0", default-features = false }
 # RustCrypto hashes for TLS client fingerprints: MD5 for JA3, SHA-256 for JA4.
-md-5 = { version = "0.11.0", default-features = false }
+md5 = { package = "md-5", version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["unbounded_depth"] }

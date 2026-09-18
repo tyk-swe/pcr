@@ -89,7 +89,7 @@ impl ReaperClient {
     fn retain(&self, task: ReapTask) {
         let _ = self
             .retained_tasks
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             });
         std::mem::forget(task);

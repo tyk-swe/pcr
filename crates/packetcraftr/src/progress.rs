@@ -108,13 +108,13 @@ struct WorkerPermit(Arc<WorkerStatus>);
 impl WorkerBudget {
     fn acquire(self: &Arc<Self>) -> Result<WorkerPermit, BoundaryError> {
         self.active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < self.capacity).then(|| active + 1)
             })
             .map_err(|_| {
                 let _ = self
                     .rejected
-                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                    .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                         Some(value.saturating_add(1))
                     });
                 worker_budget_exhausted(self.capacity)

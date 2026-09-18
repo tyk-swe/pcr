@@ -347,12 +347,6 @@ fn frame(registry: &Arc<Registry>, timestamp: SystemTime, spec: Segment, payload
         .expect("fixture frame must be valid")
 }
 
-// Shared by several test binaries, not all of which call this builder, so a
-// lint expectation would be unfulfilled where it is unused.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "fixture builder mirrors the wire fields"
-)]
 fn fragment_frame(
     registry: &Arc<Registry>,
     timestamp: SystemTime,

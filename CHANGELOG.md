@@ -182,6 +182,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Default CLI builds align workflow dependency features with workspace builds,
+  avoiding redundant workflow and CLI recompilation when switching between
+  them. Native capabilities, portable builds, debug information, and release
+  overflow checks are unchanged; see `CONTRIBUTING.md` for measurement commands.
+- CI denies Clippy warnings across portable, default, Layer 2 only, Layer 3
+  only, and full-native profiles on Linux, macOS, and Windows. PRs also compile
+  all 15 fuzz targets with locked dependencies on the pinned nightly.
 - **Breaking:** `policy::Policy` gains an `allowed_destinations` constraint
   list bounded by `MAX_DESTINATION_CONSTRAINTS`; the new
   `policy::DestinationConstraint` type parses exact addresses and canonical
@@ -286,6 +293,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Atomic updates use `try_update` without changing memory ordering, overflow
+  handling, or resource budgets, avoiding pinned-nightly deprecation warnings.
+- Windows test builds no longer import the Unix-only `PathBuf`; obsolete
+  fixture lint allowances are removed, and the `md-5` dependency is aliased as
+  `md5` to match its Rust imports and avoid dependency-audit false positives.
 - macOS route parsing accepts Darwin's aligned zero-length default netmask,
   and local routes may select a source assigned to another local interface.
 - HTTP analysis advances its application generation when TCP reassembly

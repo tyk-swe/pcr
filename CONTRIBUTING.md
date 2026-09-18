@@ -19,19 +19,36 @@ doctests. There is no required test runner or command wrapper.
 |---|---|---|
 | Portable | `--no-default-features` | Offline processing; native packet and route providers report unavailable |
 | Default | none | Passive interface enumeration and route lookup |
+| Layer 2 only | `--no-default-features --features native-layer2` | Default capabilities and Layer 2 capture/injection |
 | Pcap-free | `--no-default-features --features native-layer3` | Default capabilities and raw Layer 3 I/O |
 | Full native | `--all-features` | All providers, including Layer 2 capture/injection |
 
 Features belong to netio; workflow and CLI features select those capabilities.
 The explicitly selected standard-library TCP provider is independent of these
 packet-I/O feature flags; it remains available in the portable library profile.
-CI tests full native, portable and the exact pcap-free feature profile on Linux.
-Default and all-features contracts run on Intel macOS, Apple Silicon macOS,
-and Windows. PRs run five jobs: full-native Linux, portable
-Linux, and the three platform jobs. The pcap-free binary is built independently
-and checked for absence of libpcap. Linux also runs architecture and validation
-failure fixtures, archive-verifier failure fixtures, and documentation checks.
+CI denies Clippy warnings for all five profiles on Linux, Intel macOS, Apple
+Silicon macOS, and Windows. Runtime tests cover full native, portable and the
+exact pcap-free feature profile on Linux; default and all-features contracts
+also run on the three other platform runners. PRs run six jobs: full-native
+Linux, portable Linux, the three platform jobs, and compilation of all 15 fuzz
+targets on the pinned nightly with warnings denied. The pcap-free binary is
+built independently and checked for absence of libpcap. Linux also runs
+architecture and validation failure fixtures, archive-verifier failure
+fixtures, and documentation checks.
 Release builds verify packaged archives, linkage, checksums, and provenance.
+
+To reproduce the Clippy profiles locally:
+
+```sh
+cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer2 -- -D warnings
+cargo clippy --locked --workspace --all-targets --no-default-features --features packetcraftr-cli/native-layer3 -- -D warnings
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+```
+
+Use native macOS and Windows CI results when reviewing platform changes. A
+Windows GNU cross-check does not validate MSVC or the Npcap adapter at runtime.
 
 ## Optional tools
 
@@ -47,6 +64,7 @@ locally with cargo-fuzz and the known-working nightly-2026-08-28 toolchain, for 
 
 ```sh
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+RUSTFLAGS="-D warnings" cargo +nightly-2026-08-28 check --locked --manifest-path fuzz/Cargo.toml --bins
 (cd fuzz && cargo +nightly-2026-08-28 fuzz run --target x86_64-unknown-linux-gnu ip_reassembly corpora/ip_reassembly -- -max_total_time=30)
 ```
 
@@ -105,6 +123,23 @@ CI builds documentation with warnings denied for the portable, pcap-free and
 full-native profiles. Dependency upgrades
 must also pass `document_limit_contracts::yaml_stream_exhaustion_dependency_contract`
 until the YAML dependency provides a typed streaming end signal.
+
+The CLI default features include `packetcraftr/default` so workspace and focused
+CLI builds select the same workflow features and can reuse their artifacts.
+In three paired Linux measurements, the median workspace-to-focused-CLI
+transition fell from 28.38 seconds to 0.23 seconds with aligned features.
+Timings depend on the host and cache. Native capabilities are unchanged, and
+`--no-default-features` still selects the portable profile. Keep full development
+debug information and release overflow checks.
+
+When measuring build changes, use separate before/after target directories,
+starting each clean-build sample with an empty directory. Keep the toolchain
+and feature profile fixed, alternate run order, and compare medians for clean
+workspace builds, rebuilds after the same source edit, and focused tests.
+Investigate regressions above 5%. For default artifact reuse,
+run `cargo build --locked --workspace` followed by
+`cargo build --locked -p packetcraftr-cli -v` in the same target directory and
+confirm that both `packetcraftr` and `packetcraftr-cli` are reported `Fresh`.
 
 Keep the existing integration-test layout unless clean, incremental and focused
 compile measurements justify a change. Narrow regressions remain runnable as

@@ -262,7 +262,7 @@ impl Captured {
     /// identity space.
     pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
         let identity = NEXT_RECORD_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .expect("capture record identity space exhausted");

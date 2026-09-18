@@ -196,7 +196,6 @@ fn direction_name(direction: Direction) -> &'static str {
 mod tests {
     use super::*;
     use packetcraftr_core::analysis::StreamTransport;
-    use std::path::PathBuf;
 
     fn selector() -> StreamRef {
         StreamRef {
@@ -378,6 +377,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn staging_rejects_dangling_symlinks_without_creating_temporary_files() {
+        use std::path::PathBuf;
+
         let directory = tempfile::tempdir().unwrap();
         let destination = directory.path().join("tcp-7-client.bin");
         std::os::unix::fs::symlink("missing-target", &destination).unwrap();

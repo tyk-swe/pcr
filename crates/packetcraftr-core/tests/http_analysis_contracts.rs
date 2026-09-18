@@ -15,7 +15,7 @@ use packetcraftr_core::{
     frame::Frame,
     protocol::{application::http::StartLine, transport::Tcp},
 };
-fn collect(frames: &[Frame]) -> (Vec<Message>, analysis::http::Summary) {
+fn collect_events(frames: &[Frame]) -> (Vec<Event>, analysis::http::Summary) {
     let mut collector = Collector::new(Limits::default(), vec![80], 1024).unwrap();
     let mut events = Vec::new();
     let run = analysis::run(
@@ -38,6 +38,10 @@ fn collect(frames: &[Frame]) -> (Vec<Message>, analysis::http::Summary) {
     .unwrap();
     let (trailing, summary) = collector.finish(&run).unwrap();
     events.extend(trailing);
+    (events, summary)
+}
+fn collect(frames: &[Frame]) -> (Vec<Message>, analysis::http::Summary) {
+    let (events, summary) = collect_events(frames);
     (
         events
             .into_iter()
@@ -59,6 +63,108 @@ fn setup() -> (Capture, Stream) {
     capture.open(&mut stream);
     (capture, stream)
 }
+
+#[test]
+fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    stream.server_port = 80;
+
+    capture.client(&mut stream, b"GET /old HTTP/1.1\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    capture.reopen(&mut stream, 10_000);
+    capture.client(&mut stream, b"GET /new HTTP/1.1\r\n\r\n");
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n",
+    );
+
+    let (events, summary) = collect_events(&capture.frames);
+    let issues: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Issue(issue) => Some(issue),
+            Event::Message(_) => None,
+        })
+        .collect();
+    assert_eq!(issues.len(), 2, "one eviction per TCP direction");
+    assert!(issues.iter().all(|issue| issue.status == Status::Evicted));
+    assert_ne!(issues[0].flow, issues[1].flow);
+    let messages: Vec<_> = events
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Message(message) => Some(*message),
+            Event::Issue(_) => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 4);
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.status == Status::Complete)
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| message.generation)
+            .collect::<Vec<_>>(),
+        [0, 0, 1, 1]
+    );
+    assert!(matches!(
+        messages[2].head.as_ref().map(|head| &head.start),
+        Some(StartLine::Request { target, .. }) if target.as_ref() == b"/new"
+    ));
+    assert_eq!(
+        messages[3].head.as_ref().and_then(|head| head.status()),
+        Some(201)
+    );
+    assert_eq!(messages[3].request, Some(messages[2].index));
+    assert_eq!(summary.complete_messages, 4);
+}
+
+#[test]
+fn syn_ack_only_reuse_after_a_midstream_capture_starts_a_new_generation() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    stream.server_port = 80;
+
+    capture.client(&mut stream, b"GET /old HTTP/1.1\r\n\r\n");
+    capture.server(&mut stream, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    let first_opening_frame = capture.frames.len();
+    capture.reopen(&mut stream, 10_000);
+    capture.frames.remove(first_opening_frame);
+    capture.client(&mut stream, b"GET /new HTTP/1.1\r\n\r\n");
+    capture.server(
+        &mut stream,
+        b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n",
+    );
+
+    let (messages, summary) = collect(&capture.frames);
+    assert_eq!(messages.len(), 4);
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.status == Status::Complete)
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| message.generation)
+            .collect::<Vec<_>>(),
+        [0, 0, 1, 1]
+    );
+    assert!(matches!(
+        messages[2].head.as_ref().map(|head| &head.start),
+        Some(StartLine::Request { target, .. }) if target.as_ref() == b"/new"
+    ));
+    assert_eq!(
+        messages[3].head.as_ref().and_then(|head| head.status()),
+        Some(201)
+    );
+    assert_eq!(messages[3].request, Some(messages[2].index));
+    assert_eq!(summary.complete_messages, 4);
+}
+
 #[test]
 fn split_headers_pipeline_head_responses_and_chunked_trailers_keep_boundaries() {
     let (mut capture, mut stream) = setup();

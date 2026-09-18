@@ -175,24 +175,36 @@ impl TcpSources {
                 }
                 self.generations.entry(conversation.index).or_insert(0);
                 self.streams.insert(flow.clone(), conversation.index);
+                let last_stream_eviction = record.tcp_events.iter().rposition(|event| {
+                    matches!(event, TcpEvent::Evicted { flow: expired, .. }
+                        if self.streams.get(expired) == Some(&conversation.index))
+                });
                 if let Some(scope) = record.scope_definition(flow.scope) {
                     self.scopes
                         .entry(scope.id.get())
                         .or_insert_with(|| scope.clone());
                 }
-                if view.header.flags & Tcp::SYN != 0 && view.header.flags & Tcp::ACK == 0 {
-                    let reused = self
+                let syn = view.header.flags & Tcp::SYN != 0;
+                let initial_syn = syn && view.header.flags & Tcp::ACK == 0;
+                // Reassembly can prove tuple reuse from sequence state even
+                // when this collector sees only the new connection's SYN-ACK.
+                let reassembly_reused = syn && last_stream_eviction.is_some();
+                let observed_reused = initial_syn
+                    && (self
                         .syns
                         .get(flow)
                         .is_some_and(|sequence| *sequence != view.header.sequence)
-                        || (self.closed.contains(flow) && self.closed.contains(&flow.reverse()));
-                    if reused {
-                        self.reset_stream(conversation.index);
+                        || (self.closed.contains(flow) && self.closed.contains(&flow.reverse())));
+                if reassembly_reused || observed_reused {
+                    self.reset_stream(conversation.index);
+                    if !reassembly_reused {
                         output.push(Event::Evicted {
                             flow: flow.clone(),
                             stream: conversation.index,
                         });
                     }
+                }
+                if initial_syn {
                     self.syns.insert(flow.clone(), view.header.sequence);
                     self.closed.remove(flow);
                 }
@@ -219,7 +231,7 @@ impl TcpSources {
                             sources,
                         },
                     ));
-                    insert_after=record.tcp_events.iter().rposition(|event|matches!(event,TcpEvent::Evicted {flow:expired,..} if self.streams.get(expired)==Some(&conversation.index)));
+                    insert_after = last_stream_eviction;
                 }
             }
         }

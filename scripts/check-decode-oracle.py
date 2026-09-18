@@ -58,10 +58,42 @@ def tshark(data, fields, binary="tshark"):
     return subprocess.check_output(command, input=data, stderr=subprocess.PIPE, timeout=30).decode().splitlines()
 
 
+def tcp_options_wire(options):
+    wire = bytearray()
+    for option in options:
+        members = {name: field['value'] for name, field in option['value'].items()}
+        if 'trailing' in members:
+            wire += bytes(members['trailing'])
+            continue
+        kind = members['kind']
+        if 'data' in members:
+            body = bytes(members['data'])
+            wire += bytes((kind, len(body) + 2)) + body
+        elif kind == 2:
+            wire += bytes((2, 4)) + members['mss'].to_bytes(2, 'big')
+        elif kind == 3:
+            wire += bytes((3, 3, members['window_scale']))
+        elif kind == 4:
+            wire += bytes((4, 2))
+        elif kind == 5:
+            body = b''.join(block['value']['left_edge']['value'].to_bytes(4, 'big')
+                            + block['value']['right_edge']['value'].to_bytes(4, 'big')
+                            for block in members['sack'])
+            wire += bytes((5, len(body) + 2)) + body
+        elif kind == 8:
+            wire += (bytes((8, 10)) + members['tsval'].to_bytes(4, 'big')
+                     + members['tsecr'].to_bytes(4, 'big'))
+        else:
+            wire.append(kind)
+    return bytes(wire)
+
+
 def normalize(value, kind, core=False):
     if kind == 'names': return value.rstrip('.')
     if kind == 'address':
         return str(ipaddress.ip_address(value))
+    if kind == 'tcp_options':
+        return tcp_options_wire(value).hex() if core else value.replace(':', '').lower()
     if kind == 'bytes':
         return bytes(value).hex() if core else value.replace(':', '').lower()
     value = int(value) if isinstance(value, int) else int(value, 16 if value.startswith('0x') else 10)
@@ -116,7 +148,7 @@ def compare(args, report):
                 observed = [layer['fields'][field]['value'] for layer in layers
                             if layer['protocol'] == protocol and field in layer['fields']]
                 if kind == 'names': observed = [name['value'] for names in observed for name in names]
-                if kind == 'bytes': observed = [value for value in observed if value]
+                if kind in ('bytes', 'tcp_options'): observed = [value for value in observed if value]
                 observed = [normalize(value, kind, True) for value in observed]
                 expected = [normalize(value, kind) for value in reference_value.split(',') if value]
                 if observed != expected:

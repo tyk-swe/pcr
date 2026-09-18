@@ -17,8 +17,8 @@ use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats, spaced_hex,
-    stream_capture_error, write_stdout_line, write_summary_line,
+    SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats, finish_compressed_output,
+    spaced_hex, stream_capture_error, write_stdout_line, write_summary_line,
 };
 
 type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
@@ -147,19 +147,36 @@ where
     C: packetcraftr::clock::Clock,
 {
     let stdout = io::stdout();
-    let mut writer = capture_writer(
-        run.reader,
-        settings.compression.writer(stdout.lock())?,
-        settings.format,
-        run.options.limits,
-        settings.max_interfaces,
-    )?;
-    run.drive(|evidence| render_capture_record(&mut writer, evidence))?;
-    writer
-        .flush()
-        .map_err(|source| stream_capture_error("flush capture output failed", source))?;
-    drop(writer.into_inner().finish().map_err(CliError::classified)?);
-    Ok(())
+    render_capture_to(run, settings, stdout.lock())
+}
+
+fn render_capture_to<R, A, T, C, W>(
+    run: Run<'_, R, A, T, C>,
+    settings: CaptureSettings,
+    destination: W,
+) -> Result<(), CliError>
+where
+    R: Read + std::io::Seek,
+    A: packetcraftr::replay::Authorizer,
+    T: packetcraftr::replay::Transmitter,
+    C: packetcraftr::clock::Clock,
+    W: Write,
+{
+    let mut destination = settings.compression.writer(destination)?;
+    let result = (|| {
+        let mut writer = capture_writer(
+            run.reader,
+            &mut destination,
+            settings.format,
+            run.options.limits,
+            settings.max_interfaces,
+        )?;
+        run.drive(|evidence| render_capture_record(&mut writer, evidence))?;
+        writer
+            .flush()
+            .map_err(|source| stream_capture_error("flush capture output failed", source))
+    })();
+    finish_compressed_output(result, destination)
 }
 
 fn output_error(source_index: u64, message: impl Into<String>) -> packetcraftr::replay::Error {
@@ -297,7 +314,7 @@ fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> packetcr
 mod tests {
 
     use std::convert::Infallible;
-    use std::io::{self, Cursor};
+    use std::io::{self, Cursor, Read};
     use std::time::UNIX_EPOCH;
 
     use packetcraftr_core::error::{Classification, Kind};
@@ -548,5 +565,50 @@ mod tests {
         );
         assert!(!stream.is_open());
         assert!(!stream.is_terminal());
+    }
+
+    #[test]
+    fn failed_replay_finalizes_zstd_and_keeps_completed_frames() {
+        let mut source = reader(2);
+        let options = options();
+        let mut authorizer = FakeAuthorizer {
+            calls: 0,
+            deny_on: Some(2),
+        };
+        let mut transmitter = FakeTransmitter;
+        let mut clock = FakeClock;
+        let mut compressed = Cursor::new(Vec::new());
+
+        let error = render_capture_to(
+            Run {
+                reader: &mut source,
+                options: &options,
+                selector: None,
+                authorizer: &mut authorizer,
+                transmitter: &mut transmitter,
+                clock: &mut clock,
+            },
+            CaptureSettings {
+                compression: crate::command_options::Compression::Zstd,
+                format: Format::Pcap,
+                max_interfaces: 1,
+            },
+            &mut compressed,
+        )
+        .expect_err("second fake replay authorization is denied");
+        assert_eq!(error.classification.code, "policy.fixture_replay");
+
+        let mut decoder = capture::compression::Input::new(
+            Cursor::new(compressed.into_inner()),
+            Default::default(),
+        )
+        .expect("Zstd output must have a readable header");
+        let mut bytes = Vec::new();
+        decoder
+            .read_to_end(&mut bytes)
+            .expect("Zstd stream must finish cleanly");
+        let mut output = Reader::new(Cursor::new(bytes)).expect("capture header must survive");
+        assert_eq!(output.next_frame().unwrap().unwrap().bytes().as_ref(), [0]);
+        assert!(output.next_frame().unwrap().is_none());
     }
 }

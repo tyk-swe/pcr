@@ -9,8 +9,11 @@ use packetcraftr_core::analysis::pcap::Error;
 use packetcraftr_core::analysis::pcap::Format;
 use packetcraftr_core::analysis::pcap::Interface;
 use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::analysis::pcap::compression;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
+
+use crate::errors::CliError;
 
 /// A streaming writer plus the interface mapping its callers register.
 ///
@@ -26,6 +29,22 @@ pub(crate) type LinkCaptureWriter<W> = CaptureWriter<W, LinkType>;
 
 /// Maps declared interface descriptions into a newly generated capture.
 pub(crate) type SourceCaptureWriter<W> = CaptureWriter<W, Option<u32>>;
+
+/// Finishes an initialized compressor after capture processing, retaining the
+/// processing failure as primary when finalization also fails.
+pub(crate) fn finish_compressed_output<W: Write, T>(
+    result: Result<T, CliError>,
+    output: compression::Output<W>,
+) -> Result<T, CliError> {
+    let finished = output.finish().map_err(CliError::classified);
+    match (result, finished) {
+        (Err(primary), Err(secondary)) => {
+            Err(primary.with_secondary("output finalization", secondary))
+        }
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        (Ok(value), Ok(_)) => Ok(value),
+    }
+}
 
 impl<W: Write, K: Copy + PartialEq> CaptureWriter<W, K> {
     pub(crate) fn new(writer: Writer<W>) -> Self {
@@ -104,10 +123,11 @@ impl<W: Write> SourceCaptureWriter<W> {
 #[cfg(test)]
 mod tests {
 
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;
 
     use packetcraftr_core::analysis::pcap::{Limits, PcapOptions, Reader, TimestampResolution};
+    use packetcraftr_core::error::{Classification, Kind};
 
     use super::*;
 
@@ -131,6 +151,47 @@ mod tests {
             frames.push(frame);
         }
         (frames, reader.interfaces().to_vec())
+    }
+
+    #[test]
+    fn output_finalization_failure_remains_secondary_to_processing_failure() {
+        struct FailingFlush;
+
+        impl Write for FailingFlush {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::other("fixture flush failed"))
+            }
+        }
+
+        let primary = CliError::from_classification(
+            Classification::new("policy.fixture", Kind::Policy, None),
+            "processing failed",
+            vec!["processing cause".to_owned()],
+        );
+        let output = compression::Output::new(FailingFlush, compression::Format::None)
+            .expect("plain output opens");
+
+        let error = finish_compressed_output::<_, ()>(Err(primary), output)
+            .expect_err("both processing and finalization fail");
+
+        assert_eq!(error.classification.code, "policy.fixture");
+        assert_eq!(error.classification.kind, Kind::Policy);
+        assert_eq!(
+            error.message,
+            "processing failed; output finalization also failed: None capture compression I/O failed: fixture flush failed"
+        );
+        assert_eq!(
+            error.causes,
+            [
+                "processing cause",
+                "None capture compression I/O failed: fixture flush failed",
+                "fixture flush failed"
+            ]
+        );
     }
 
     #[test]

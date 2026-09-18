@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 mod support;
-use packetcraftr_core::analysis::pcap::compression::Input;
+use packetcraftr_core::analysis::pcap::{Reader, Writer, compression::Input};
+use packetcraftr_core::frame::{Frame, LinkType};
 use std::{
-    io::{Cursor, Read},
+    io::{Cursor, Read, Write},
     path::PathBuf,
+    time::UNIX_EPOCH,
 };
-use support::{parse_ndjson, run, run_success};
+use support::{parse_ndjson, path_text, run, run_success};
 
 #[test]
 fn capture_paths_and_outputs_detect_both_formats_without_filename_hints() {
@@ -66,6 +68,49 @@ fn invalid_compression_output_is_rejected_before_live_or_input_work() {
             String::from_utf8(output.stderr)
                 .unwrap()
                 .contains("--compression requires")
+        );
+    }
+}
+
+#[test]
+fn failed_read_finalizes_zstd_and_keeps_completed_frames() {
+    let expected = Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![0x45, 0, 0, 0]).unwrap();
+    let mut source = Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
+    source.write_frame(&expected).unwrap();
+    source.write_frame(&expected).unwrap();
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(&source.into_inner()).unwrap();
+
+    for (format, normalize) in [("pcap", false), ("pcapng", true)] {
+        let mut arguments = vec![
+            "--output",
+            format,
+            "read",
+            path_text(file.path()),
+            "--max-frames",
+            "1",
+            "--compression",
+            "zstd",
+        ];
+        if normalize {
+            arguments.push("--normalize");
+        }
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(6), "{arguments:?}: {output:?}");
+
+        let input = Input::new(Cursor::new(output.stdout), Default::default())
+            .expect("Zstd output must have a readable header");
+        let mut reader = Reader::new(input).expect("capture header must survive");
+        assert_eq!(
+            reader.next_frame().unwrap().unwrap().bytes(),
+            expected.bytes()
+        );
+        assert!(
+            reader
+                .next_frame()
+                .expect("Zstd stream must finish cleanly")
+                .is_none(),
+            "{arguments:?} emitted more than the completed prefix"
         );
     }
 }

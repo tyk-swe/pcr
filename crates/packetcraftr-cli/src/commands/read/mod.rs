@@ -28,7 +28,7 @@ use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
 use crate::filtering::FrameDecoder;
 use crate::input::{open_capture, validate_capture_stream_limits};
-use crate::rendering::StreamEncoder;
+use crate::rendering::{StreamEncoder, finish_compressed_output};
 
 use super::increment_counter;
 use rendering::render_record;
@@ -100,15 +100,14 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     if normalize {
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
-        normalize_capture(
+        let result = normalize_capture(
             &mut reader,
             limits,
             bounds,
             decoding.as_ref(),
             &mut destination,
-        )?;
-        drop(destination.finish().map_err(CliError::classified)?);
-        return Ok(());
+        );
+        return finish_compressed_output(result, destination);
     }
     if let Some(rewrite_format) = rewrite_format {
         let stream_limits = Limits {
@@ -117,16 +116,15 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         };
         let stdout = io::stdout();
         let mut destination = compression.writer(stdout.lock())?;
-        rewrite_capture(
+        let result = rewrite_capture(
             &mut reader,
             rewrite_format,
             stream_limits,
             bounds,
             decoding.as_ref(),
             &mut destination,
-        )?;
-        drop(destination.finish().map_err(CliError::classified)?);
-        return Ok(());
+        );
+        return finish_compressed_output(result, destination);
     }
     read_records(
         &mut reader,

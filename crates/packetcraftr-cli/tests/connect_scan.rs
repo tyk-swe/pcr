@@ -51,6 +51,8 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
         &ports,
         "--max-in-flight",
         "2",
+        "--timeout-ms",
+        "5000",
     ]));
     schema(&report);
     assert_eq!(report["result"]["method"], "tcp_connect");

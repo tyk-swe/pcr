@@ -24,7 +24,7 @@ DECODE_FIELDS = (
     ('tcp', 'destination_port', 'tcp.dstport', 'integer'),
     ('tcp', 'sequence', 'tcp.seq_raw', 'integer'),
     ('tcp', 'checksum', 'tcp.checksum', 'integer'),
-    ('tcp', 'options', 'tcp.options', 'bytes'),
+    ('tcp', 'options', 'tcp.options', 'tcp_options'),
     ('udp', 'source_port', 'udp.srcport', 'integer'),
     ('udp', 'destination_port', 'udp.dstport', 'integer'),
     ('udp', 'length', 'udp.length', 'integer'),

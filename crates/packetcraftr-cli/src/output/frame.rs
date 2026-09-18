@@ -89,12 +89,10 @@ impl Timestamp {
             if seconds > MAX_SIGNED_SECONDS {
                 return Err(Error::TimestampOutOfRange);
             }
-            // A fractional instant before the epoch is represented with
-            // floor seconds. `i64::MAX` seconds plus a fraction therefore
-            // maps to `(i64::MIN, positive nanos)`, which is still inside the
-            // signed-seconds range.
-            // `seconds` is below `MAX_SIGNED_SECONDS` here, the equal case having been taken above,
-            // so `signed_seconds + 1` and its negation both stay inside `i64`
+            // A fractional instant before the epoch uses floor seconds: `i64::MAX`
+            // seconds plus a fraction maps to `(i64::MIN, positive nanos)`, still
+            // in range. In the remaining arm `seconds` is below
+            // `MAX_SIGNED_SECONDS`, so `signed_seconds + 1` and its negation fit `i64`.
             let unix_seconds = if seconds == MAX_SIGNED_SECONDS {
                 i64::MIN
             } else {

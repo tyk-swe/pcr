@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //
 // Third-party format notice
-// -------------------------
 // JA3 is the fingerprint format published by Salesforce
 // (<https://github.com/salesforce/ja3>, BSD-3-Clause). JA4 is the fingerprint
 // format published by FoxIO (<https://github.com/FoxIO-LLC/ja4>); the JA4

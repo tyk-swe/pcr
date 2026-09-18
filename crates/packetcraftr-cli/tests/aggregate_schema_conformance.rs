@@ -155,7 +155,7 @@ fn the_case_table_covers_every_command_that_publishes_an_aggregate() {
     );
 }
 
-// ---------------------------------------------------------------- envelopes
+// envelopes
 
 fn envelope<T: serde::Serialize>(
     command: Command,
@@ -176,7 +176,7 @@ fn envelope_with_stats<T: serde::Serialize>(
         .expect("aggregate envelope serializes")
 }
 
-// ---------------------------------------------------------------- fixtures
+// fixtures
 
 fn diagnostic() -> Diagnostic {
     let mut diagnostic = Diagnostic::warning("fixture.conformance", "representative warning");
@@ -444,7 +444,7 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
     }
 }
 
-// ------------------------------------------------------------------- cases
+// cases
 
 fn fragment_case() -> Value {
     let frame =
@@ -1583,7 +1583,7 @@ fn unknown_envelope_fields_and_invalid_known_payload_fields_are_rejected() {
     assert!(schema_validator().validate(&document).is_err());
 }
 
-// --------------------------------------------------------- frozen vocabulary
+// frozen vocabulary
 
 /// One enum whose serialized names the schema pins: where its vocabulary lives
 /// in the schema, and every variant the Rust type can produce.

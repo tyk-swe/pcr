@@ -32,7 +32,6 @@ fuzz_target!(|data: &[u8]| {
     let mut reassembler = Reassembler::new(limits);
     let now = Instant::now();
 
-    // Chunk input data into pseudo-segments
     let mut offset = 0;
     while offset + 8 <= data.len() {
         let seq = u32::from_be_bytes([

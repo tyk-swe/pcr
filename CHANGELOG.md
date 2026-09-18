@@ -286,6 +286,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- macOS route parsing accepts Darwin's aligned zero-length default netmask,
+  and local routes may select a source assigned to another local interface.
+- HTTP analysis advances its application generation when TCP reassembly
+  confirms tuple reuse after a capture began midstream.
+- Pipelined scans consume replies already queued within their ingress windows
+  before classifying expired probes as timeouts.
+- `read` and replay finalize initialized capture compression after processing
+  failures, preserving completed output records and the primary error.
 - `rewrite`, `export`, and `merge` recheck interruption after syncing staged
   output, so cancellation or an expired rewrite deadline prevents publication.
 - Capture-time bounds skip timestamp-less records without losing input-budget

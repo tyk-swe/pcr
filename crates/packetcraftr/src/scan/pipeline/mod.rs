@@ -218,25 +218,53 @@ where
         let mut next = 0usize;
         let mut next_send = Instant::now();
         let mut retained = plan.base_bytes;
+        let source_count = group.sources().len();
+        let capture_drain_limit = group
+            .sources()
+            .map(|source| source.limits.max_frames)
+            .max()
+            .expect("validated capture group contains a source")
+            * source_count;
+        let mut capture_drain_remaining = capture_drain_limit;
+        let mut draining_expired = HashSet::new();
         while next < batches.len() || !pending.is_empty() {
             check(executor.client, deadline)?;
+            let now = Instant::now();
             let expired: Vec<_> = pending
                 .iter()
-                .filter(|(_, entry): &(&usize, &Pending)| Instant::now() >= entry.deadline)
+                .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
                 .map(|(index, _)| *index)
                 .collect();
-            for index in expired {
-                complete(
-                    index,
-                    batches,
-                    &mut pending,
-                    &mut retained,
-                    emit,
-                    &mut failed_probe,
-                    &mut evidence,
-                )?;
+            let cohort_len = draining_expired.len();
+            draining_expired.extend(expired.iter().copied());
+            if draining_expired.len() > cohort_len {
+                capture_drain_remaining = capture_drain_limit;
             }
-            while next < batches.len()
+            // A callback can consume the rest of another probe's timeout after
+            // its reply has already entered a capture queue. Give each expired
+            // cohort enough fair rotations to reach every record that could
+            // occupy the partitioned queues, even if newer traffic refills
+            // slots. Correlation below still enforces each ingress deadline.
+            let draining_captures = !expired.is_empty() && capture_drain_remaining > 0;
+            if !draining_captures {
+                if !expired.is_empty() {
+                    for index in expired {
+                        complete(
+                            index,
+                            batches,
+                            &mut pending,
+                            &mut retained,
+                            emit,
+                            &mut failed_probe,
+                            &mut evidence,
+                        )?;
+                    }
+                }
+                draining_expired.clear();
+                capture_drain_remaining = capture_drain_limit;
+            }
+            while !draining_captures
+                && next < batches.len()
                 && pending.len() < options.max_in_flight
                 && Instant::now() >= next_send
                 && retained.saturating_add(plan.costs[next].memory) <= options.max_prepared_bytes
@@ -332,10 +360,17 @@ where
             } else {
                 earliest
             };
-            let wait = wake
+            let mut wait = wake
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_millis(5));
+            if draining_captures {
+                capture_drain_remaining -= 1;
+                wait = Duration::ZERO;
+            }
             let Some(record) = group.next_record(wait).map_err(BoundaryError::from_error)? else {
+                if draining_captures {
+                    capture_drain_remaining = 0;
+                }
                 continue;
             };
             if !seen.insert(record.captured.identity()) {

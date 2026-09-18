@@ -36,7 +36,7 @@ struct State {
     sends: usize,
     pending: usize,
     peak: usize,
-    replies: VecDeque<Frame>,
+    replies: VecDeque<capture::Captured>,
     fail_after: Option<usize>,
     send_times: Vec<Instant>,
     bad_ingress: Option<Option<Instant>>,
@@ -112,17 +112,16 @@ impl transmit::Sender for Io {
             .build(response, Default::default(), Default::default())
             .unwrap()
             .bytes;
-        state
-            .replies
-            .push_back(Frame::new(SystemTime::now(), LinkType::RAW, wire).unwrap());
+        let report = transmit::Report::committed(frame.bytes().len(), frame.bytes().clone());
+        state.replies.push_back(capture::Captured::new(
+            Frame::new(SystemTime::now(), LinkType::RAW, wire).unwrap(),
+            Instant::now(),
+        ));
         state.sends += 1;
         state.pending += 1;
         state.peak = state.peak.max(state.pending);
         state.send_times.push(Instant::now());
-        Ok(transmit::Report::committed(
-            frame.bytes().len(),
-            frame.bytes().clone(),
-        ))
+        Ok(report)
     }
 }
 struct Capture {
@@ -149,18 +148,18 @@ impl capture::Session for Capture {
             return Ok(None);
         }
         if let Some(marker) = state.bad_ingress.take()
-            && let Some(frame) = state.replies.front()
+            && let Some(captured) = state.replies.front()
         {
             return Ok(Some(capture::Captured::with_ingress_time(
-                frame.clone(),
+                captured.frame.clone(),
                 marker,
             )));
         }
-        let frame = state.replies.pop_front();
-        if frame.is_some() {
+        let captured = state.replies.pop_front();
+        if captured.is_some() {
             state.pending -= 1;
         }
-        Ok(frame.map(|frame| capture::Captured::new(frame, Instant::now())))
+        Ok(captured)
     }
     fn shutdown(&mut self) -> Result<(), net::Error> {
         self.state.lock().unwrap().shutdowns += 1;
@@ -249,6 +248,61 @@ fn pending_windows_overlap_refill_and_use_one_ready_capture() {
     assert_eq!(state.peak, 2);
     assert_eq!(state.armed, 1);
     assert_eq!(state.shutdowns, 1);
+}
+
+#[test]
+fn queued_replies_keep_their_ingress_verdict_across_callback_latency() {
+    let state = Arc::new(Mutex::new(State::default()));
+    let mut request = request();
+    request.ports = vec![80, 81];
+    request.timeout = Duration::from_millis(100);
+    let policy = Policy {
+        max_packets_per_operation: 32,
+        max_bytes_per_operation: 32 * 1500,
+        ..Default::default()
+    };
+    let registry = builtin::registry();
+    let client = Client::new(
+        registry.clone(),
+        Routes,
+        NoNeighbors,
+        Io(state),
+        policy.clone(),
+    );
+    let mut options = packetcraftr::exchange::Options::default();
+    options.send.plan.link_mode = Mode::Layer3;
+    options.capture.snap_length = 1500;
+    let classifications = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&classifications);
+
+    let summary = scan::run_with_events(
+        &request,
+        &mut PolicyAuthorizer::for_packets(&policy),
+        &registry,
+        &mut ExchangeExecutor::new(&client, options),
+        &mut SystemClock,
+        &packetcraftr::progress::Runtime::default(),
+        move |event| {
+            if let scan::Event::Probe { probe, .. } = event {
+                let delay = {
+                    let mut observed = observed.lock().unwrap();
+                    observed.push((probe.sequence, probe.classification));
+                    observed.len() == 1
+                };
+                if delay {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(summary.counts.open, 2);
+    assert_eq!(
+        *classifications.lock().unwrap(),
+        vec![(0, Classification::Open), (1, Classification::Open)]
+    );
 }
 #[test]
 fn pacing_and_preparation_limits_apply_to_the_whole_pipeline() {

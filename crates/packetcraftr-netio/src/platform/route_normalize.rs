@@ -14,6 +14,7 @@ use crate::{
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: interface::Info,
+    pub local_addresses: Vec<IpAddr>,
     pub selected_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
     pub route_mtu: Option<u32>,
@@ -53,12 +54,14 @@ pub(crate) fn finish_route(
             message: "selected source family differs from destination family".to_owned(),
         });
     }
-    if !snapshot
+    let assigned_to_output = snapshot
         .interface
         .addresses
         .iter()
-        .any(|assigned| assigned.address == selected_source)
-    {
+        .any(|assigned| assigned.address == selected_source);
+    let assigned_locally = snapshot.selection_reason == SelectionReason::Local
+        && snapshot.local_addresses.contains(&selected_source);
+    if !assigned_to_output && !assigned_locally {
         return Err(if let Some(preferred_source) = preferred_source {
             SystemError::SourceUnavailable {
                 preferred_source,
@@ -430,8 +433,14 @@ mod tests {
     }
 
     fn snapshot() -> NativeRouteSnapshot {
+        let interface = interface();
         NativeRouteSnapshot {
-            interface: interface(),
+            local_addresses: interface
+                .addresses
+                .iter()
+                .map(|assigned| assigned.address)
+                .collect(),
+            interface,
             selected_source: None,
             next_hop: Some(v4(10, 2, 3, 1)),
             route_mtu: Some(1_400),
@@ -485,6 +494,49 @@ mod tests {
         assert_eq!(decision.destination_scope, Scope::Private);
         assert_eq!(decision.mtu, 1_400);
         assert_eq!(decision.interface, interface().id);
+    }
+
+    #[test]
+    fn finish_route_accepts_a_local_source_owned_by_another_interface() {
+        let local_address = v4(192, 0, 2, 8);
+        let mut local = snapshot();
+        local.interface.id = InterfaceId {
+            name: "lo".to_owned(),
+            index: 1,
+        };
+        local.interface.mac_address = None;
+        local.interface.addresses = vec![interface::Address {
+            address: v4(127, 0, 0, 1),
+            prefix_length: 8,
+        }];
+        local.interface.flags.loopback = true;
+        local.interface.capability = Capability::Layer3;
+        local.interface.link_type = LinkType::RAW;
+        local.selected_source = Some(local_address);
+        local.next_hop = None;
+        local.selection_reason = SelectionReason::Local;
+        local.local_addresses.push(local_address);
+
+        let decision = finish_route(local_address, None, None, local)
+            .expect("source is assigned to another local interface");
+
+        assert_eq!(decision.selected_source, Some(local_address));
+        assert_eq!(decision.selection_reason, SelectionReason::Local);
+        assert_eq!(decision.interface.name, "lo");
+    }
+
+    #[test]
+    fn finish_route_rejects_a_local_source_not_owned_by_any_interface() {
+        let local_address = v4(192, 0, 2, 8);
+        let mut local = snapshot();
+        local.selected_source = Some(local_address);
+        local.next_hop = None;
+        local.selection_reason = SelectionReason::Local;
+
+        assert!(matches!(
+            finish_route(local_address, None, None, local),
+            Err(SystemError::InvalidResponse { .. })
+        ));
     }
 
     #[test]

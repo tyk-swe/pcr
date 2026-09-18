@@ -48,7 +48,8 @@ pub(super) fn parse_route_addresses(
             });
         };
         let length = usize::from(length_byte);
-        if length < 2 {
+        let empty_netmask = index == libc::RTAX_NETMASK as usize && length == 0;
+        if length < 2 && !empty_netmask {
             return Err(SystemError::InvalidResponse {
                 message: format!(
                     "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
@@ -75,7 +76,7 @@ pub(super) fn parse_route_addresses(
         let next_offset = match padded_end {
             Some(end) if end <= bytes.len() => end,
             // Darwin may omit the unused alignment trailer after the final sockaddr.
-            _ if !has_later_address && address_end == bytes.len() => address_end,
+            _ if !empty_netmask && !has_later_address && address_end == bytes.len() => address_end,
             _ => {
                 return Err(SystemError::InvalidResponse {
                     message: format!(
@@ -85,7 +86,16 @@ pub(super) fn parse_route_addresses(
                 });
             }
         };
-        *slot = bytes.get(offset..address_end).and_then(sockaddr_ip);
+        if empty_netmask {
+            if bytes[offset..next_offset].iter().any(|byte| *byte != 0) {
+                return Err(SystemError::InvalidResponse {
+                    message: "macOS route response zero-length netmask slot contains nonzero bytes"
+                        .to_owned(),
+                });
+            }
+        } else {
+            *slot = bytes.get(offset..address_end).and_then(sockaddr_ip);
+        }
         offset = next_offset;
     }
     Ok(output)
@@ -98,5 +108,99 @@ pub(super) fn roundup(length: usize) -> usize {
         alignment
     } else {
         length.next_multiple_of(alignment)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ipv4_sockaddr(address: Ipv4Addr) -> Vec<u8> {
+        let mut bytes = vec![0; size_of::<libc::sockaddr_in>()];
+        bytes[0] = u8::try_from(bytes.len()).expect("Darwin sockaddr_in length fits in u8");
+        bytes[1] = u8::try_from(libc::AF_INET).expect("Darwin AF_INET fits in u8");
+        let address_offset = offset_of!(libc::sockaddr_in, sin_addr);
+        bytes[address_offset..address_offset + 4].copy_from_slice(&address.octets());
+        bytes
+    }
+
+    fn mask(indices: &[libc::c_int]) -> libc::c_int {
+        indices.iter().fold(0, |mask, index| mask | (1 << *index))
+    }
+
+    #[test]
+    fn accepts_aligned_zero_length_default_route_netmask() {
+        let destination = Ipv4Addr::UNSPECIFIED;
+        let gateway = Ipv4Addr::new(192, 0, 2, 1);
+        let mut bytes = ipv4_sockaddr(destination);
+        bytes.extend(ipv4_sockaddr(gateway));
+        bytes.extend([0; size_of::<u32>()]);
+
+        let addresses = parse_route_addresses(
+            &bytes,
+            mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK]),
+        )
+        .expect("zero-length default-route netmask is valid");
+
+        assert_eq!(
+            addresses[libc::RTAX_DST as usize],
+            Some(IpAddr::V4(destination))
+        );
+        assert_eq!(
+            addresses[libc::RTAX_GATEWAY as usize],
+            Some(IpAddr::V4(gateway))
+        );
+        assert_eq!(addresses[libc::RTAX_NETMASK as usize], None);
+    }
+
+    #[test]
+    fn rejects_zero_length_destination_and_gateway_slots() {
+        let valid = ipv4_sockaddr(Ipv4Addr::new(192, 0, 2, 1));
+        for (bytes, address_mask) in [
+            (vec![0; size_of::<u32>()], mask(&[libc::RTAX_DST])),
+            (
+                {
+                    let mut bytes = valid.clone();
+                    bytes.extend([0; size_of::<u32>()]);
+                    bytes
+                },
+                mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY]),
+            ),
+        ] {
+            assert!(matches!(
+                parse_route_addresses(&bytes, address_mask),
+                Err(SystemError::InvalidResponse { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_truncated_zero_length_netmask_slot() {
+        let mut bytes = ipv4_sockaddr(Ipv4Addr::UNSPECIFIED);
+        bytes.extend(ipv4_sockaddr(Ipv4Addr::new(192, 0, 2, 1)));
+        bytes.push(0);
+
+        assert!(matches!(
+            parse_route_addresses(
+                &bytes,
+                mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
+            ),
+            Err(SystemError::InvalidResponse { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_nonzero_bytes_in_a_zero_length_netmask_slot() {
+        let mut bytes = ipv4_sockaddr(Ipv4Addr::UNSPECIFIED);
+        bytes.extend(ipv4_sockaddr(Ipv4Addr::new(192, 0, 2, 1)));
+        bytes.extend([0, 0, 1, 0]);
+
+        assert!(matches!(
+            parse_route_addresses(
+                &bytes,
+                mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
+            ),
+            Err(SystemError::InvalidResponse { .. })
+        ));
     }
 }

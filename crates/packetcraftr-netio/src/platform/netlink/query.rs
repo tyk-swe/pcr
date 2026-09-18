@@ -85,6 +85,10 @@ pub(super) async fn query_route(
             message: "Linux route response omitted its output interface".to_owned(),
         })?;
     let interfaces = query_interfaces(&handle).await?;
+    let local_addresses = interfaces
+        .iter()
+        .flat_map(|interface| interface.addresses.iter().map(|assigned| assigned.address))
+        .collect();
     let interface = interfaces
         .into_iter()
         .find(|interface| interface.id.index == output_index)
@@ -102,6 +106,7 @@ pub(super) async fn query_route(
         preferred_source,
         NativeRouteSnapshot {
             interface,
+            local_addresses,
             selected_source,
             next_hop: next_hop.filter(|address| !address.is_unspecified()),
             route_mtu,

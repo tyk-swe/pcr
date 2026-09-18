@@ -51,6 +51,10 @@ pub(in crate::platform) fn route(
             .map(|interface| interface.id.index),
     )?;
     let output_index = u32::from(response.header.rtm_index);
+    let local_addresses = available
+        .iter()
+        .flat_map(|interface| interface.addresses.iter().map(|assigned| assigned.address))
+        .collect();
     let interface = available
         .into_iter()
         .find(|interface| interface.id.index == output_index)
@@ -72,6 +76,7 @@ pub(in crate::platform) fn route(
         preferred_source,
         NativeRouteSnapshot {
             interface,
+            local_addresses,
             selected_source: response.selected_source,
             next_hop,
             route_mtu: (response.header.rtm_rmx.rmx_mtu != 0)

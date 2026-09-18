@@ -49,6 +49,16 @@ pub(in crate::platform) fn route(
 
     let selected_source =
         sockaddr_inet_ip(&best_source).filter(|address| !address.is_unspecified());
+    let local_addresses = available
+        .iter()
+        .flat_map(|adapter| {
+            adapter
+                .interface
+                .addresses
+                .iter()
+                .map(|assigned| assigned.address)
+        })
+        .collect();
     let output_index = best_route.InterfaceIndex;
     let adapter = available
         .iter()
@@ -90,6 +100,7 @@ pub(in crate::platform) fn route(
         preferred_source,
         NativeRouteSnapshot {
             interface,
+            local_addresses,
             selected_source,
             next_hop,
             route_mtu: None,

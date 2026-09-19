@@ -544,8 +544,14 @@ where
     };
 
     let (now, clock_regression) = ip_dispatch.at(timestamp, number)?;
-    emit(ip_dispatch.expire(now), ip_sink)?;
-    if let Some(tracker) = provenance {
+    let (expired, removed) = ip_dispatch.expire(now);
+    emit(expired, ip_sink)?;
+    // The scan reconciles tracked keys with datagrams the reassembler
+    // dropped; completions release their keys through `Tracker::completed`,
+    // so only an expiry sweep that removed something can leave work here.
+    if let Some(tracker) = provenance
+        && removed
+    {
         tracker.retire(|key| ip_dispatch.contains_datagram(key));
     }
     let fragments =
@@ -747,4 +753,226 @@ fn next_frame<R: Read>(
 /// Refuses to continue once the run's own processing budget is spent.
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
     deadline.enforce().map_err(Error::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::provenance::{IncompleteSources, SourceFrame, Tracker};
+    use crate::analysis::reassembly::ip::OverlapPolicy;
+    use crate::build::{Builder, Options as BuildOptions};
+    use crate::codec::Context as BuildContext;
+    use crate::field::WireValue;
+    use crate::layer::Raw;
+    use crate::packet::Packet;
+    use crate::protocol::builtin;
+    use crate::protocol::network::Ipv4;
+    use crate::protocol::transport::Udp;
+    use std::net::Ipv4Addr;
+
+    fn build(registry: &Arc<Registry>, packet: Packet, seconds: u64) -> Frame {
+        let bytes = Builder::new(Arc::clone(registry))
+            .build(packet, BuildContext::default(), BuildOptions::default())
+            .expect("fixture packet builds")
+            .bytes;
+        Frame::new(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),
+            LinkType::IPV4,
+            bytes,
+        )
+        .expect("fixture frame is valid")
+    }
+
+    /// A non-atomic IPv4 fragment: one pending datagram per identification.
+    fn fragment_frame(registry: &Arc<Registry>, seconds: u64, identification: u16) -> Frame {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            identification,
+            more_fragments: true,
+            protocol: WireValue::Exact(17),
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        });
+        packet.push(Raw::new(vec![0_u8; 8]));
+        build(registry, packet, seconds)
+    }
+
+    /// An unfragmented datagram: in scope for provenance but never pending.
+    fn datagram_frame(registry: &Arc<Registry>, seconds: u64) -> Frame {
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        });
+        packet.push(Udp {
+            source_port: 50_000,
+            destination_port: 9_999,
+            ..Udp::default()
+        });
+        packet.push(Raw::new(vec![1_u8; 8]));
+        build(registry, packet, seconds)
+    }
+
+    /// The per-frame IP stage of `run`, driven directly so the provenance
+    /// tracker stays observable between frames.
+    struct Rig {
+        decoder: Dissector,
+        deadline: Deadline,
+        dispatch: IpDispatch,
+        scopes: Interner,
+        provenance: Option<Tracker>,
+        max_frame_bytes: usize,
+        max_ip_reassembly_bytes: usize,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            let limits = Limits::default();
+            Self {
+                decoder: Dissector::new(builtin::registry()),
+                deadline: Deadline::new(limits.max_duration),
+                dispatch: IpDispatch::new(limits.ip_reassembly(), OverlapPolicy::default()),
+                scopes: Interner::new(),
+                provenance: Some(
+                    Tracker::new(limits.max_provenance_bytes, limits.max_ip_outcomes)
+                        .expect("tracker"),
+                ),
+                max_frame_bytes: limits.max_frame_bytes,
+                max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+            }
+        }
+
+        fn scans(&self) -> usize {
+            self.provenance
+                .as_ref()
+                .expect("tracker held")
+                .retire_scans()
+        }
+
+        fn advance(&mut self, frame: Frame, number: u64) {
+            let timestamp = frame.timestamp.expect("fixture frames timestamp");
+            let decoded = self
+                .decoder
+                .decode(
+                    frame,
+                    crate::decode::Options {
+                        max_packet_size: self.max_frame_bytes,
+                        ..crate::decode::Options::default()
+                    },
+                )
+                .expect("frame decodes");
+            let sources = self
+                .provenance
+                .as_ref()
+                .expect("tracker held")
+                .single(SourceFrame { number, timestamp })
+                .expect("sources");
+            let stage = FrameStage {
+                decoder: &self.decoder,
+                deadline: &self.deadline,
+                max_ip_reassembly_bytes: self.max_ip_reassembly_bytes,
+            };
+            advance_ip_reassembly(
+                &mut self.dispatch,
+                &stage,
+                &mut self.scopes,
+                PhysicalFrame {
+                    decoded: &decoded,
+                    number,
+                    timestamp,
+                },
+                &mut |_| Ok(()),
+                &mut self.provenance,
+                Some(&sources),
+            )
+            .expect("frame advances");
+        }
+
+        fn finish(&mut self) -> (Vec<IncompleteSources>, u64) {
+            self.provenance.take().expect("tracker held").finish()
+        }
+    }
+
+    fn keyed_sources(incomplete: &[IncompleteSources]) -> Vec<(u16, Vec<u64>)> {
+        let mut sources = incomplete
+            .iter()
+            .map(|entry| {
+                let DatagramKey::Ipv4(key) = &entry.key else {
+                    panic!("fixture uses IPv4 keys only");
+                };
+                (
+                    key.identification,
+                    entry
+                        .sources
+                        .frames()
+                        .iter()
+                        .map(|frame| frame.number)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        sources.sort();
+        sources
+    }
+
+    #[test]
+    fn provenance_reconciliation_waits_for_a_removal() {
+        let registry = builtin::registry();
+        let mut rig = Rig::new();
+
+        rig.advance(fragment_frame(&registry, 0, 1), 1);
+        for number in 2..=6_u64 {
+            rig.advance(datagram_frame(&registry, number - 1), number);
+        }
+
+        assert_eq!(
+            rig.scans(),
+            0,
+            "no datagram left the reassembler, so no reconciliation ran"
+        );
+
+        let (incomplete, omitted) = rig.finish();
+        assert_eq!(omitted, 0);
+        assert_eq!(
+            keyed_sources(&incomplete),
+            [(1, vec![1])],
+            "the pending datagram retires at end of capture with its source"
+        );
+    }
+
+    #[test]
+    fn expiry_still_retires_tracked_sources() {
+        let registry = builtin::registry();
+        let mut rig = Rig::new();
+
+        rig.advance(fragment_frame(&registry, 0, 7), 1);
+        assert_eq!(rig.scans(), 0);
+
+        // The next frame's sweep expires idle datagram 7, so the scan runs.
+        rig.advance(datagram_frame(&registry, 40), 2);
+        assert_eq!(rig.scans(), 1);
+        assert_eq!(
+            rig.dispatch.report().counters.ipv4.idle_expired_datagrams,
+            1
+        );
+
+        // Frame three retires nothing on its own; its scan is skipped again.
+        rig.advance(fragment_frame(&registry, 41, 8), 3);
+        assert_eq!(rig.scans(), 1);
+
+        let (incomplete, omitted) = rig.finish();
+        assert_eq!(omitted, 0);
+        assert_eq!(
+            keyed_sources(&incomplete),
+            [(7, vec![1]), (8, vec![3])],
+            "expiry swept datagram 7; end of capture swept datagram 8"
+        );
+        assert_eq!(
+            rig.dispatch.report().counters.ipv4.end_of_capture_datagrams,
+            0,
+            "the pipeline flush path is not what retired the datagrams here"
+        );
+    }
 }

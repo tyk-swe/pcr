@@ -200,6 +200,10 @@ pub(crate) struct Tracker {
     incomplete: Vec<IncompleteSources>,
     max_outcomes: usize,
     pub(crate) outcomes_omitted: u64,
+    /// Times [`Self::retire`] ran its reconciliation scan, for tests that
+    /// prove callers skip it when the reassembler retired nothing.
+    #[cfg(test)]
+    retire_scans: usize,
 }
 impl Tracker {
     pub(crate) fn new(limit: usize, max_outcomes: usize) -> Result<Self, Error> {
@@ -217,12 +221,19 @@ impl Tracker {
             incomplete: Vec::new(),
             max_outcomes,
             outcomes_omitted: 0,
+            #[cfg(test)]
+            retire_scans: 0,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn union_reservations(&self) -> usize {
         self.budget.union_reservations.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retire_scans(&self) -> usize {
+        self.retire_scans
     }
     pub(crate) fn single(&self, source: SourceFrame) -> Result<SourceSet, Error> {
         let lease = self
@@ -255,6 +266,10 @@ impl Tracker {
         self.entries.remove(key).map(|(sources, _)| sources)
     }
     pub(crate) fn retire(&mut self, mut active: impl FnMut(&DatagramKey) -> bool) {
+        #[cfg(test)]
+        {
+            self.retire_scans += 1;
+        }
         let retired: Vec<_> = self
             .entries
             .keys()

@@ -310,9 +310,15 @@ impl IpDispatch {
         Ok((Some(datagram), events))
     }
 
-    pub(super) fn expire(&mut self, now: Instant) -> Vec<IpEvent> {
+    /// Idle-expiry sweep. Besides the bounded events, it reports whether the
+    /// reassembler removed any datagram at all — including retirements whose
+    /// outcome records were bounded away into the omitted counters — so the
+    /// caller can skip provenance reconciliation when nothing left.
+    pub(super) fn expire(&mut self, now: Instant) -> (Vec<IpEvent>, bool) {
         let retired = self.reassembler.expire(now);
-        self.drain(retired, IncompleteReason::IdleExpired)
+        let removed =
+            !retired.outcomes.is_empty() || retired.omitted_ipv4 > 0 || retired.omitted_ipv6 > 0;
+        (self.drain(retired, IncompleteReason::IdleExpired), removed)
     }
 
     pub(super) fn flush(&mut self) -> Vec<IpEvent> {
@@ -377,5 +383,100 @@ impl IpDispatch {
                     counters.end_of_capture_datagrams.saturating_add(count);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::reassembly::ip::{
+        Fragment, Ipv4DatagramKey, Ipv4Fragment, Limits as ReassemblyLimits,
+    };
+    use crate::analysis::scope::Interner;
+    use bytes::Bytes;
+    use std::net::Ipv4Addr;
+
+    fn fragment(identification: u16) -> Fragment {
+        let payload = Bytes::from_static(&[7_u8; 8]);
+        let mut header = [0_u8; 20];
+        let total_length = u16::try_from(header.len() + payload.len())
+            .expect("fixture length fits")
+            .to_be_bytes();
+        header[0] = 0x45;
+        header[2..4].copy_from_slice(&total_length);
+        header[4..6].copy_from_slice(&identification.to_be_bytes());
+        header[6..8].copy_from_slice(&0x2000_u16.to_be_bytes());
+        header[8] = 64;
+        header[9] = 17;
+        header[12..16].copy_from_slice(&[192, 0, 2, 1]);
+        header[16..20].copy_from_slice(&[198, 51, 100, 2]);
+        Fragment::Ipv4(Ipv4Fragment {
+            key: Ipv4DatagramKey {
+                scope: Interner::new()
+                    .intern(None, Vec::new())
+                    .expect("scope interns"),
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(198, 51, 100, 2),
+                identification,
+                protocol: 17,
+            },
+            fragment_offset: 0,
+            more_fragments: true,
+            header: Bytes::copy_from_slice(&header),
+            payload,
+        })
+    }
+
+    #[test]
+    fn expire_reports_removal_only_when_datagrams_leave() {
+        let mut dispatch = IpDispatch::new(
+            ReassemblyLimits {
+                idle_expiry: Duration::from_secs(30),
+                ..ReassemblyLimits::default()
+            },
+            OverlapPolicy::Reject,
+        );
+        let start = Instant::now();
+        dispatch
+            .reassembler
+            .push(fragment(1), start)
+            .expect("fragment admitted");
+
+        let (events, removed) = dispatch.expire(start + Duration::from_secs(10));
+        assert!(events.is_empty());
+        assert!(!removed, "a quiet sweep removed nothing");
+
+        let (events, removed) = dispatch.expire(start + Duration::from_secs(31));
+        assert!(removed, "the expired datagram must signal a removal");
+        assert_eq!(events.len(), 1);
+        assert_eq!(dispatch.report().counters.ipv4.idle_expired_datagrams, 1);
+    }
+
+    #[test]
+    fn expire_reports_removal_when_every_outcome_is_omitted() {
+        let mut dispatch = IpDispatch::new(
+            ReassemblyLimits {
+                idle_expiry: Duration::from_secs(30),
+                max_retained_outcomes: 0,
+                ..ReassemblyLimits::default()
+            },
+            OverlapPolicy::Reject,
+        );
+        let start = Instant::now();
+        for identification in 1..=2 {
+            dispatch
+                .reassembler
+                .push(fragment(identification), start)
+                .expect("fragment admitted");
+        }
+
+        let (events, removed) = dispatch.expire(start + Duration::from_secs(31));
+        assert!(
+            removed,
+            "retirements bounded into omitted counters still prove removal"
+        );
+        assert!(events.is_empty(), "no outcomes fit the zero cap");
+        assert_eq!(dispatch.report().outcomes_omitted, 2);
+        assert_eq!(dispatch.report().counters.ipv4.idle_expired_datagrams, 2);
     }
 }

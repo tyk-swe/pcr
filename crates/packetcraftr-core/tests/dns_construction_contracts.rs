@@ -204,3 +204,29 @@ fn named_object_documents_charge_members_keys_and_nesting_in_both_formats() {
         .is_err()
     );
 }
+
+#[test]
+fn borrowed_dns_wire_enforces_message_byte_limit() {
+    // One opaque record fills the maximum message without other decoder limits.
+    let mut wire = vec![0; 12];
+    wire[7] = 1;
+    wire.extend_from_slice(&[0, 0xfd, 0xe8, 0, 1, 0, 0, 0, 0]);
+    wire.extend_from_slice(&65_512u16.to_be_bytes());
+    wire.resize(65_535, 0);
+    assert_eq!(
+        Dns::try_from(wire.as_slice()).unwrap().wire().as_ref(),
+        wire
+    );
+
+    wire.push(0);
+    let error = Dns::try_from(wire.as_slice()).unwrap_err();
+    assert!(matches!(
+        &error,
+        codec::Error::Invalid { message, .. }
+            if message == "DNS message is 65536 bytes; maximum is 65535"
+    ));
+    assert_eq!(
+        error.to_string(),
+        Dns::try_from(wire).unwrap_err().to_string()
+    );
+}

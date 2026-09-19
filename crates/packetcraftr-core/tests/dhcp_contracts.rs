@@ -273,3 +273,29 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
     assert!(Duid::link_layer(1, vec![0; 65_536]).is_err());
     assert!(Duid::link_layer(1, []).is_err());
 }
+
+#[test]
+fn borrowed_dhcp_wire_enforces_message_byte_limit() {
+    use packetcraftr_core::protocol::application::dhcp::Error;
+
+    // DHCPv4 retains trailing bytes after the end option.
+    let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
+    v4.resize(65_535, 0);
+    assert_eq!(Dhcpv4::try_from(v4.as_slice()).unwrap().wire().as_ref(), v4);
+    v4.push(0);
+    assert_eq!(
+        Dhcpv4::try_from(v4.as_slice()).unwrap_err(),
+        Error::Limit("message bytes")
+    );
+
+    // One unknown DHCPv6 option fills the remaining message bytes.
+    let mut v6 = vec![1, 0, 0, 0, 0xfd, 0xe8];
+    v6.extend_from_slice(&65_527u16.to_be_bytes());
+    v6.resize(65_535, 0);
+    assert_eq!(Dhcpv6::try_from(v6.as_slice()).unwrap().wire().as_ref(), v6);
+    v6.push(0);
+    assert_eq!(
+        Dhcpv6::try_from(v6.as_slice()).unwrap_err(),
+        Error::Limit("message bytes")
+    );
+}

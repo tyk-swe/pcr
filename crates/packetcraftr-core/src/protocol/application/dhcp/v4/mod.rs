@@ -74,6 +74,7 @@ impl TryFrom<&[u8]> for Dhcpv4 {
     type Error = Error;
 
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        Budget::new(Limits::default(), wire.len())?;
         Self::try_from(Bytes::copy_from_slice(wire))
     }
 }

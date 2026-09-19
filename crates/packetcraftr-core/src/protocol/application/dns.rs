@@ -109,6 +109,17 @@ impl TryFrom<&[u8]> for Dns {
     type Error = crate::codec::Error;
 
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        let maximum = DecodeLimits::default().max_message_bytes;
+        if wire.len() > maximum {
+            return Err(invalid(
+                NAME,
+                DecodeError::MessageTooLarge {
+                    actual: wire.len(),
+                    maximum,
+                }
+                .to_string(),
+            ));
+        }
         Self::try_from(Bytes::copy_from_slice(wire))
     }
 }

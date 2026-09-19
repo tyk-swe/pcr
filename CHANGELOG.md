@@ -330,6 +330,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- DNS, DHCPv4, and DHCPv6 borrowed wire conversions reject oversized input
+  before allocating a copy.
+
 - Atomic updates use `try_update` without changing memory ordering, overflow
   handling, or resource budgets, avoiding pinned-nightly deprecation warnings.
 - Windows test builds no longer import the Unix-only `PathBuf`; obsolete

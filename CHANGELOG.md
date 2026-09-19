@@ -26,6 +26,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   `VlanRewrite` (with `From<link::VlanTag>`), `analysis::follow::Direction` is
   renamed `PeerDirection`, and `budget::Interrupted` plus the capture-group
   `Failure`/`Error` structs are `#[non_exhaustive]`.
+- CLI `output::contract::Command::require_format` is generic and returns a
+  narrowed proof enum (`AggregateFormat`, `ToolFormat`, `BuildFormat`,
+  `CaptureFormat`, `DissectFormat`, `SendFormat`, `ExchangeFormat`,
+  `ReadFormat`, `FollowFormat`) instead of `()`, so a command that cannot
+  emit a format fails at dispatch rather than re-checking `Format` inside
+  rendering.
+- `document::Error::Parse.source` is `Box<dyn Error + Send + Sync>` (was
+  `String`), retaining the packet parser's typed error in the chain.
 
 ### Added
 
@@ -203,6 +211,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Workflow and netio errors retain their original typed sources instead of
+  flattened display strings: probe `ErrorKind` implements `std::error::Error`
+  with `#[source]` fields, `source()` chains reach the underlying `io::Error`
+  on worker-reaper and capture-output failures, route materialization,
+  authorization, send-execution, and DNS-classification failures keep their
+  typed causes, and `fuzz::CaseFailure` implements `Error`. The exported
+  `packetcraftr_core::deadline_error_conversions!` and `display_via_as_str!`
+  macros keep the repeated conversion and `Display` impls in one place.
 - Default CLI builds align workflow dependency features with workspace builds,
   avoiding redundant workflow and CLI recompilation when switching between
   them. Native capabilities, portable builds, debug information, and release

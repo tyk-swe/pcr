@@ -439,3 +439,58 @@ The command produces files rather than a contract document: it ignores
 `--output` and reports failures on stderr with the `io.documentation`
 classification. Release archives now carry both trees, and the archive
 verifier requires a man page for every shipped subcommand.
+## Standard traits and narrower APIs
+
+Wire constructors moved to `TryFrom`: `Dns`, `Dhcpv4`, and `Dhcpv6` implement
+`TryFrom<Bytes>`/`TryFrom<Vec<u8>>`/`TryFrom<&[u8]>`, `Http` and `Tls` implement
+`TryFrom<&[u8]>`, and `Tls` implements `TryFrom<Hello>`. Replace `X::from_wire(b)`
+with `X::try_from(b)` (or `b.as_ref()` for `&Bytes`); the bounded
+`*_with_limits` constructors stay inherent. `field::Path::parse` is removed —
+use `FromStr` (`"a.b".parse::<Path>()`); `BuiltinProtocol` also implements
+`FromStr` over canonical names and aliases, while `from_name` remains
+canonical-only.
+
+`Packet` supports `for layer in &packet` and `packet.extend(layers)`;
+`SourceSet` dereferences to `[SourceFrame]`. The `as_str`-backed enums
+(`error::Kind`, `FieldKind`, `BuiltinProtocol`, `scan::Classification`,
+traceroute `ResponseKind`/`Completion`, `fuzz::CaseOutcome`, `ProbeStatus`,
+`dns::Outcome`, `QuestionStatus`, and netio `Capability`/`Mode`/
+`OverflowPolicy`) implement `Display`.
+
+Registry APIs take the `LinkType` newtype (`RegistryBuilder::bind_link_type`,
+`Registry::root_for_link_type`, `registry::Error::DuplicateLinkType`) and
+`impl Into<Discriminator>` (`From<u64>`) instead of bare integers — drop `.0`
+peels at call sites. `Frame::try_with_lengths`/`try_with_optional_timestamp`
+take `frame::Lengths { captured, original }`, and
+`Interner::with_limits` takes `analysis::scope::Limits { limit, max_bytes }`,
+removing adjacent-scalar swaps. `Malformed::new` takes `Option<String>`;
+analysis HTTP/DNS collectors take `impl IntoIterator<Item = u16>` for ports.
+
+`transform::VlanTag` is renamed `VlanRewrite` (`From<link::VlanTag>` provided);
+`analysis::follow::Direction` is renamed `PeerDirection`, distinct from
+`frame::Direction`. `budget::Interrupted` and netio capture `Failure`/`Error`
+are `#[non_exhaustive]` — add a wildcard arm to exhaustive matches.
+
+## Typed error sources
+
+Errors keep typed sources instead of display strings.
+`document::Error::Parse.source` is now
+`Box<dyn std::error::Error + Send + Sync>` (was `String`); construct it with
+the parser's error or a message-boxing helper rather than `.to_string()`.
+probe `ErrorKind` implements `std::error::Error` and `Error::source()`
+delegates to it, so `source().downcast_ref::<SelectionError>()` (and similar)
+recovers the original cause through worker-reaper, route materialization,
+authorization, send-execution, DNS-classification, and capture-output
+failures. `fuzz::CaseFailure` implements `Error`. `CliError` implements
+`std::error::Error`; `rules::vlan`/`mac` return it directly.
+
+## Format proof enums
+
+`output::contract::Command::require_format` is generic:
+`require_format::<F>(format) -> Result<F, contract::Error>` narrows `Format`
+to one of the per-command proof enums (`AggregateFormat`, `ToolFormat`,
+`BuildFormat`, `CaptureFormat`, `DissectFormat`, `SendFormat`,
+`ExchangeFormat`, `ReadFormat`, `FollowFormat`). Each exposes `FORMATS`,
+`as_format()`, `From` into `Format`, `TryFrom<Format, Error = Format>`, and
+`Display`. Shared helpers accept `impl Into<Format>`, and dead rendering arms
+surface typed `internal` errors instead of panicking.

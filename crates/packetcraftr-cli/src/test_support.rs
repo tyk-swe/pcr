@@ -35,10 +35,16 @@ impl Write for SharedBuffer {
 }
 
 pub(crate) fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {
-    std::str::from_utf8(bytes)
-        .expect("NDJSON output must be UTF-8")
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("each NDJSON line must be valid JSON"))
+    let text = std::str::from_utf8(bytes).expect("NDJSON output must be UTF-8");
+    assert!(
+        text.is_empty() || text.ends_with('\n'),
+        "nonempty NDJSON output ends every record with a newline"
+    );
+    text.lines()
+        .map(|line| {
+            serde_json::from_str(line)
+                .expect("each NDJSON line holds exactly one complete JSON value")
+        })
         .collect()
 }
 

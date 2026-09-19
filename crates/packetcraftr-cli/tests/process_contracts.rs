@@ -1056,6 +1056,25 @@ fn binary_stdout_requires_deliberate_override_on_a_terminal() {
 }
 
 #[test]
+fn hex_fixtures_decode_empty_even_and_mixed_case_text() {
+    assert!(decode_hex("").is_empty());
+    assert_eq!(decode_hex("00ffA5"), vec![0x00, 0xff, 0xa5]);
+    assert_eq!(decode_hex("4500"), vec![0x45, 0x00]);
+}
+
+#[test]
+#[should_panic(expected = "fixture hex must not have an unmatched final nibble")]
+fn hex_fixtures_reject_an_unmatched_final_nibble() {
+    let _ = decode_hex("abc");
+}
+
+#[test]
+#[should_panic(expected = "fixture hex must be valid")]
+fn hex_fixtures_reject_non_hexadecimal_digits() {
+    let _ = decode_hex("zz");
+}
+
+#[test]
 fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
     for query_type in [
         "65536",

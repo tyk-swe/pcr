@@ -115,15 +115,7 @@ impl Collector {
         max_body_bytes: u64,
     ) -> Result<Self, Error> {
         limits.validate()?;
-        let mut ports: Vec<u16> = ports.into_iter().collect();
-        ports.sort_unstable();
-        ports.dedup();
-        if ports.is_empty() || ports.len() > 256 || ports.contains(&0) {
-            return Err(Error::Limit {
-                field: "http_ports",
-                limit: 256,
-            });
-        }
+        let ports = application::normalize_ports(ports, "http_ports")?;
         if max_body_bytes == 0 || max_body_bytes > 256 * 1024 * 1024 {
             return Err(Error::Limit {
                 field: "max_http_body_bytes",

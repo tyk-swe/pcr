@@ -81,14 +81,26 @@ fn an_operation_deadline_bounds_waiting_for_the_encoder_lock() {
     assert!(owner.is_open());
 }
 
+/// Generous bound on the fixture's release wait so a broken test fails
+/// instead of blocking the writer worker forever; far above the millisecond
+/// production deadline under test.
+const RELEASE_WATCHDOG: Duration = Duration::from_secs(30);
+
 struct Blocked {
     entered: mpsc::Sender<()>,
     release: mpsc::Receiver<()>,
+    expired: Arc<AtomicBool>,
 }
 impl Write for Blocked {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.entered.send(()).unwrap();
-        self.release.recv().unwrap();
+        if self.release.recv_timeout(RELEASE_WATCHDOG).is_err() {
+            self.expired.store(true, Ordering::Release);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Blocked fixture release watchdog expired",
+            ));
+        }
         Ok(bytes.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -100,11 +112,13 @@ fn writer_wait_uses_remaining_operation_budget_and_retains_cleanup_capacity() {
     let runtime = Runtime::new(1);
     let (entered, waiting) = mpsc::channel();
     let (release, released) = mpsc::channel();
+    let expired = Arc::new(AtomicBool::new(false));
     let owner = StreamEncoder::new_bounded(
         Command::Read,
         Blocked {
             entered,
             release: released,
+            expired: expired.clone(),
         },
         &runtime,
         Duration::from_secs(30),
@@ -130,6 +144,10 @@ fn writer_wait_uses_remaining_operation_budget_and_retains_cleanup_capacity() {
     assert_eq!(
         retained, 1,
         "a deadline never releases a still-blocked writer"
+    );
+    assert!(
+        !expired.load(Ordering::Acquire),
+        "the release watchdog fired; the test never released the writer"
     );
     assert!(!owner.is_open());
     assert!(!owner.is_complete());

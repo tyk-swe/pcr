@@ -846,6 +846,29 @@ fn complete(
 }
 
 #[test]
+fn ndjson_framing_requires_one_complete_value_per_newline_terminated_line() {
+    use std::io::Write as _;
+    let mut buffer = support::SharedBuffer::default();
+    buffer.write_all(b"{\"sequence\":0}\n").unwrap();
+    assert_eq!(buffer.records().len(), 1);
+    assert!(support::SharedBuffer::default().records().is_empty());
+    for malformed in [
+        &b"{\"sequence\":0}"[..],                   // unterminated final record
+        &b"{\"sequence\":0}{\"sequence\":1}\n"[..], // two values on one line
+        &b"{\n\"sequence\":0\n}\n"[..],             // a record spread across lines
+        &b"{\"sequence\":0}\n\n"[..],               // a blank line is not a record
+    ] {
+        let mut buffer = support::SharedBuffer::default();
+        buffer.write_all(malformed).unwrap();
+        let result = std::panic::catch_unwind(|| buffer.records());
+        assert!(
+            result.is_err(),
+            "malformed framing must be rejected: {malformed:?}"
+        );
+    }
+}
+
+#[test]
 fn schema_rejects_legacy_event_placement_and_unknown_root_discriminators() {
     let original: Value = serde_json::from_str(include_str!(
         "../../../examples/documents/output-tls-event.json"

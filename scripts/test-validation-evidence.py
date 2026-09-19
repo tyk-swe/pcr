@@ -4,6 +4,7 @@
 """Failure-path contracts for release evidence and architecture checks."""
 import copy
 import importlib.util
+import io
 import json
 import pathlib
 import struct
@@ -14,7 +15,7 @@ from unittest import mock
 
 from validation_evidence import (
     DECODE_FIELDS, DECODE_PROFILES, EVIDENCE_VERSION, NATIVE_SCENARIOS,
-    provenance, tshark_matches,
+    digest, provenance, tshark_matches,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -34,6 +35,7 @@ release = module('check-release-evidence')
 architecture = module('check-architecture')
 oracle = module('check-decode-oracle')
 native = module('test-native-isolated')
+manifest = module('build-manifest')
 
 
 def provenance_report():
@@ -419,6 +421,163 @@ class EvidenceTests(unittest.TestCase):
             changed = copy.deepcopy(metadata)
             changed['packages'][0]['dependencies'].append(dict(name=child, kind=None, optional=True, target='cfg(unix)'))
             self.assertTrue(architecture.validate(changed))
+
+    def test_cargo_metadata_is_time_bounded(self):
+        with mock.patch.object(architecture.subprocess, 'check_output',
+                               side_effect=subprocess.TimeoutExpired('cargo metadata', 60)):
+            with self.assertRaises(SystemExit) as raised:
+                architecture.main()
+        self.assertIn('cargo metadata', str(raised.exception))
+        with mock.patch.object(architecture.subprocess, 'check_output',
+                               side_effect=subprocess.CalledProcessError(1, 'cargo metadata')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                architecture.main()
+
+    def test_release_gh_calls_are_time_bounded(self):
+        expired = subprocess.TimeoutExpired('gh api', 60)
+        argv = ['release', '--repository', 'owner/repo', '--commit', COMMIT, '--output', 'unused']
+        with (mock.patch('sys.argv', argv),
+              mock.patch.object(release.subprocess, 'check_output', side_effect=expired)):
+            with self.assertRaises(SystemExit) as raised:
+                release.main()
+        self.assertIn('run lookup', str(raised.exception))
+        runs = json.dumps(dict(workflow_runs=[dict(id=1, html_url='ci-run-1')]))
+        with tempfile.TemporaryDirectory() as directory:
+            argv[-1] = directory
+            with (mock.patch('sys.argv', argv),
+                  mock.patch.object(release.subprocess, 'check_output', return_value=runs),
+                  mock.patch.object(release.subprocess, 'run',
+                                    side_effect=subprocess.TimeoutExpired('gh run download', 300))):
+                with self.assertRaises(SystemExit) as raised:
+                    release.main()
+        self.assertIn('decode-oracle-evidence', str(raised.exception))
+
+    def test_provenance_git_calls_are_time_bounded(self):
+        with mock.patch('validation_evidence.subprocess.check_output',
+                        side_effect=subprocess.TimeoutExpired('git', 30)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                provenance(pathlib.Path('unused'))
+        with mock.patch('validation_evidence.subprocess.check_output',
+                        side_effect=subprocess.CalledProcessError(128, 'git rev-parse')):
+            with self.assertRaises(subprocess.CalledProcessError):
+                provenance(pathlib.Path('unused'))
+
+
+def fake_versions(command, **kwargs):
+    if command[0] == 'rustc':
+        return 'rustc 1.98.1 (fixture 2026-09-01)\n'
+    return 'packetcraftr 9.9.9\n'
+
+
+class ManifestTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='manifest fixture ')
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.binary = self.root / 'fixture binary'
+        self.binary.write_bytes(b'fixture binary bytes')
+        self.document = dict(
+            commit=COMMIT, target='x86_64-fixture', feature_variant='pcap-free',
+            rustc='rustc 1.98.1 (fixture 2026-09-01)', version='packetcraftr 9.9.9',
+            binary=self.binary.name, binary_sha256=digest(self.binary))
+        self.path = self.root / 'BUILD-METADATA.json'
+
+    def run_manifest(self, *args):
+        manifest.main([str(arg) for arg in args])
+
+    def write_manifest(self, document=None):
+        self.path.write_text(json.dumps(self.document if document is None else document),
+                             encoding='utf-8')
+        return self.path
+
+    def test_import_performs_no_parsing_io_or_subprocess(self):
+        with (mock.patch('sys.argv', ['build-manifest.py', '--binary', '/nonexistent',
+                                      '--output', '/nonexistent/out.json']),
+              mock.patch('subprocess.check_output') as calls):
+            module('build-manifest')
+        calls.assert_not_called()
+
+    def test_write_emits_complete_identity_document_with_bounded_commands(self):
+        output = self.root / 'nested out' / 'BUILD-METADATA.json'
+        output.parent.mkdir()
+        with mock.patch.object(manifest.subprocess, 'check_output',
+                               side_effect=fake_versions) as calls:
+            self.run_manifest('--binary', self.binary, '--output', output,
+                              '--commit', COMMIT, '--target', 'x86_64-fixture',
+                              '--variant', 'pcap-free')
+        self.assertEqual(json.loads(output.read_text(encoding='utf-8')), self.document)
+        self.assertEqual({call.kwargs.get('timeout') for call in calls.call_args_list},
+                         {manifest.COMMAND_TIMEOUT})
+
+    def test_write_requires_complete_release_metadata(self):
+        with mock.patch('sys.stderr', io.StringIO()):
+            for args in [
+                ('--commit', COMMIT, '--target', 't', '--variant', 'v'),
+                ('--output', self.root / 'm.json', '--target', 't', '--variant', 'v'),
+            ]:
+                with self.assertRaises(SystemExit) as raised:
+                    self.run_manifest('--binary', self.binary, *args)
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_output_and_verify_modes_are_mutually_exclusive(self):
+        with (mock.patch('sys.stderr', io.StringIO()),
+              self.assertRaises(SystemExit) as raised):
+            self.run_manifest('--binary', self.binary, '--output', self.root / 'a.json',
+                              '--verify', self.root / 'b.json')
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_verify_accepts_matching_metadata_with_or_without_expectations(self):
+        path = self.write_manifest()
+        with mock.patch.object(manifest.subprocess, 'check_output', side_effect=fake_versions):
+            self.run_manifest('--binary', self.binary, '--verify', path,
+                              '--commit', COMMIT, '--target', 'x86_64-fixture',
+                              '--variant', 'pcap-free')
+            self.run_manifest('--binary', self.binary, '--verify', path)
+
+    def test_verify_rejects_wrong_expected_metadata(self):
+        path = self.write_manifest()
+        for flag, value in [('--commit', 'b' * 40), ('--target', 'other'),
+                            ('--variant', 'all-features')]:
+            with self.subTest(flag=flag):
+                with (mock.patch.object(manifest.subprocess, 'check_output',
+                                        side_effect=fake_versions),
+                      self.assertRaises(SystemExit) as raised):
+                    self.run_manifest('--binary', self.binary, '--verify', path, flag, value)
+                self.assertIn('does not match release metadata', str(raised.exception))
+
+    def test_verify_rejects_digest_and_version_drift(self):
+        path = self.write_manifest()
+        with mock.patch.object(manifest.subprocess, 'check_output', side_effect=fake_versions):
+            self.binary.write_bytes(b'other bytes')
+            with self.assertRaises(SystemExit) as raised:
+                self.run_manifest('--binary', self.binary, '--verify', path)
+            self.assertIn('binary does not match', str(raised.exception))
+            self.binary.write_bytes(b'fixture binary bytes')
+        with (mock.patch.object(manifest.subprocess, 'check_output',
+                                return_value='packetcraftr 0.0.0\n'),
+              self.assertRaises(SystemExit) as raised):
+            self.run_manifest('--binary', self.binary, '--verify', path)
+        self.assertIn('version does not match', str(raised.exception))
+
+    def test_verify_reports_malformed_missing_and_mistyped_metadata(self):
+        missing = dict(self.document)
+        del missing['binary_sha256']
+        cases = [
+            ('{', 'not valid JSON'),
+            ('[1]', 'must contain a JSON object'),
+            (json.dumps(missing), 'missing required field binary_sha256'),
+            (json.dumps(dict(self.document, version=123)), 'field version must be a string'),
+        ]
+        for text, message in cases:
+            self.path.write_text(text, encoding='utf-8')
+            with self.subTest(message=message), self.assertRaises(SystemExit) as raised:
+                self.run_manifest('--binary', self.binary, '--verify', self.path)
+            self.assertIn(message, str(raised.exception))
+
+    def test_unreadable_binary_reports_a_diagnostic(self):
+        with self.assertRaises(SystemExit) as raised:
+            self.run_manifest('--binary', self.root / 'missing', '--verify', self.write_manifest())
+        self.assertIn('cannot read binary', str(raised.exception))
 
 
 if __name__ == '__main__':

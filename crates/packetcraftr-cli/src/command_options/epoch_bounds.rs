@@ -12,13 +12,13 @@ use crate::errors::CliError;
 #[derive(Clone, Copy, Debug, Default, Args)]
 pub(crate) struct EpochBoundsArgs {
     /// Keep only frames captured at or after this Unix epoch time, written
-    /// `SECONDS[.FRACTION]` with up to nanosecond precision. Frames without
-    /// timestamps are never kept.
+    /// `SECONDS[.FRACTION]` with up to nanosecond precision; only nonnegative
+    /// values are accepted. Frames without timestamps are never kept.
     #[arg(long, value_name = "EPOCH", allow_negative_numbers = true, value_parser = epoch)]
     pub(crate) start_epoch: Option<SystemTime>,
     /// Keep only frames captured at or before this Unix epoch time, written
-    /// `SECONDS[.FRACTION]` with up to nanosecond precision. Frames without
-    /// timestamps are never kept.
+    /// `SECONDS[.FRACTION]` with up to nanosecond precision; only nonnegative
+    /// values are accepted. Frames without timestamps are never kept.
     #[arg(long, value_name = "EPOCH", allow_negative_numbers = true, value_parser = epoch)]
     pub(crate) stop_epoch: Option<SystemTime>,
 }

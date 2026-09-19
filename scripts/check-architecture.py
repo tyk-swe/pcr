@@ -14,6 +14,16 @@ ALLOWED = {
     'packetcraftr-cli': {'packetcraftr-core', 'packetcraftr-netio', 'packetcraftr'},
 }
 NATIVE = {'pcap', 'socket2', 'tokio', 'windows', 'libc', 'libloading', 'rtnetlink'}
+METADATA_TIMEOUT = 60
+
+
+def load_metadata():
+    try:
+        return json.loads(subprocess.check_output(
+            ['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'],
+            cwd=ROOT, timeout=METADATA_TIMEOUT))
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f'cargo metadata timed out after {METADATA_TIMEOUT} seconds')
 
 
 def validate(metadata):
@@ -39,9 +49,12 @@ def validate(metadata):
     return errors
 
 
-if __name__ == '__main__':
-    metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'], cwd=ROOT))
-    errors = validate(metadata)
+def main():
+    errors = validate(load_metadata())
     if errors:
         raise SystemExit('\n'.join(errors))
     print('Four-crate dependency direction verified')
+
+
+if __name__ == '__main__':
+    main()

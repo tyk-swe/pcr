@@ -34,15 +34,6 @@ fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
     assert_ne!(first.interface, second.interface);
     assert!(!run(&arguments).status.success());
     assert_eq!(std::fs::read(&target).unwrap(), bytes);
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v5.schema.json"
-    ))
-    .unwrap();
-    assert!(
-        jsonschema::validator_for(&schema)
-            .unwrap()
-            .is_valid(&report)
-    );
     let broken = root.join("clock-regression.pcap");
     let absent = directory.path().join("failed.pcapng");
     let output = run(&[

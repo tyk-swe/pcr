@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis::pcap as capture;
-use packetcraftr_core::error::Kind;
 
 use packetcraftr_cli::output;
 
@@ -62,25 +61,8 @@ fn prepare(arguments: Args) -> Result<PreparedSend, CliError> {
             packetcraftr::policy::WireBudget::new(total, 0),
         ))
         .map_err(CliError::classified)?;
-    // Authorize every expanded packet's declared destinations before hostname
-    // or interface side effects; the workflow repeats the checks per frame.
-    let mut packets = template
-        .expand(max_template_packets)
-        .map_err(CliError::classified)?;
-    let first = packets
-        .next()
-        .transpose()
-        .map_err(CliError::classified)?
-        .ok_or_else(|| CliError::new(Kind::Cli, "packet set must contain at least one packet"))?;
-    policy
-        .authorize_packet_destinations(&first)
-        .map_err(CliError::classified)?;
-    for packet in packets {
-        crate::cancellation::check()?;
-        policy
-            .authorize_packet_destinations(&packet.map_err(CliError::classified)?)
-            .map_err(CliError::classified)?;
-    }
+    let first =
+        crate::system::authorize_expanded_destinations(&template, max_template_packets, &policy)?;
     let prepared = prepare_packet_route(first, send.route.destination, send.route.route, policy)?;
     let client = client(Arc::clone(&registry), prepared.policy);
     options.send = packetcraftr::send::Options {

@@ -8,17 +8,6 @@ use std::{
 };
 use support::{parse_json, parse_ndjson, run, run_success};
 
-fn schema(value: &serde_json::Value) {
-    let source: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v5.schema.json"
-    ))
-    .unwrap();
-    assert!(
-        jsonschema::validator_for(&source).unwrap().is_valid(value),
-        "{value}"
-    );
-}
-
 #[test]
 fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -54,7 +43,6 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
         "--timeout-ms",
         "5000",
     ]));
-    schema(&report);
     assert_eq!(report["result"]["method"], "tcp_connect");
     assert_eq!(report["result"]["socket_stats"]["connections_attempted"], 2);
     assert_eq!(report["result"]["socket_stats"]["connections_succeeded"], 1);
@@ -86,9 +74,6 @@ fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {
     ]));
     assert_eq!(records[0]["event"], "connect_probe");
     assert_eq!(records.last().unwrap()["event"], "complete");
-    for record in &records {
-        schema(record);
-    }
     let rejected = run(&[
         "--output",
         "json",

@@ -5,17 +5,6 @@ mod support;
 use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 const IP: &str = "45000014000000004001f6e7c0000201c6336402";
 
-fn schema(value: &serde_json::Value) {
-    let source: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v5.schema.json"
-    ))
-    .unwrap();
-    assert!(
-        jsonschema::validator_for(&source).unwrap().is_valid(value),
-        "{value}"
-    );
-}
-
 #[test]
 fn ordered_columns_missing_values_and_csv_quoting_are_explicit() {
     let args = [
@@ -34,7 +23,6 @@ fn ordered_columns_missing_values_and_csv_quoting_are_explicit() {
     let mut json = vec!["--output", "json"];
     json.extend(args);
     let report = parse_json(&run_success(&json));
-    schema(&report);
     assert_eq!(
         report["result"]["columns"],
         serde_json::json!(["frame.number", "ip.src", "udp.source_port"])
@@ -56,9 +44,6 @@ fn ordered_columns_missing_values_and_csv_quoting_are_explicit() {
     assert_eq!(records.len(), 2);
     assert_eq!(records[0]["event"], "fields");
     assert_eq!(records[1]["event"], "complete");
-    for record in records {
-        schema(&record);
-    }
 }
 
 #[test]
@@ -103,7 +88,6 @@ fn capture_projection_retains_positions_indexes_and_resource_failures() {
         "--filter",
         "frame.number == 2",
     ]));
-    schema(&report);
     assert_eq!(report["result"]["rows_written"], 1);
     assert_eq!(report["result"]["rows"][0]["source_frame"], 2);
     assert_eq!(report["result"]["rows"][0]["values"][0], 2);

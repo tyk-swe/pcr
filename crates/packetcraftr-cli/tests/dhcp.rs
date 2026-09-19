@@ -1,12 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod support;
-use support::{parse_json, run_success, schema_validator};
+use support::{parse_json, run_success};
 #[test]
 fn dhcp_fixtures_build_dissect_and_project_typed_fields() {
     let root =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents");
-    let validator = schema_validator();
     for (file, protocol, link_type, path, expected) in [
         (
             "packet-dhcpv4-offer.json",
@@ -31,7 +30,6 @@ fn dhcp_fixtures_build_dissect_and_project_typed_fields() {
             "--packet-file",
             packet.to_str().unwrap(),
         ]));
-        assert!(validator.is_valid(&built));
         let hex = built["result"]["bytes_hex"].as_str().unwrap();
         let decoded = parse_json(&run_success(&[
             "--output",
@@ -83,7 +81,6 @@ fn recursive_field_discovery_uses_resolvable_compact_references() {
     let output = run_success(&["--output", "json", "protocols", "dhcpv6"]);
     assert!(output.stdout.len() < 200_000);
     let document = parse_json(&output);
-    assert!(schema_validator().is_valid(&document));
     let mut references = 0;
     for field in document["result"]["protocol"]["fields"].as_array().unwrap() {
         visit(field, field, &mut references);

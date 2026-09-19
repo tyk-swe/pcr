@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod support;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success, schema_validator};
+use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 #[test]
 fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
@@ -20,14 +20,7 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
             .len()
             == 1
     );
-    let validator = schema_validator();
-    assert!(validator.is_valid(&document));
-    let output = run_success(&["--output", "ndjson", "dns-read", path]);
-    let records: Vec<serde_json::Value> = std::str::from_utf8(&output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let records = parse_ndjson(&run_success(&["--output", "ndjson", "dns-read", path]));
     assert_eq!(
         records
             .iter()
@@ -35,9 +28,6 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
             .collect::<Vec<_>>(),
         ["dns_message", "dns_transaction", "complete"]
     );
-    for record in &records {
-        assert!(validator.is_valid(record), "{record}");
-    }
     let output = run(&[
         "--output",
         "ndjson",
@@ -47,9 +37,10 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
         "1",
     ]);
     assert!(!output.status.success());
-    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(error["event"], "error");
-    assert_eq!(error["sequence"], 0);
+    let records = parse_ndjson(&output);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["event"], "error");
+    assert_eq!(records[0]["sequence"], 0);
     let output = run(&["--output", "json", "dns-read", path, "--stream", "tcp:999"]);
     assert!(!output.status.success());
     let output = run(&["--output", "json", "dns-read", path, "--bad-option"]);

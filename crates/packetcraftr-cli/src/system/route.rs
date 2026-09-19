@@ -35,6 +35,40 @@ pub(crate) fn prepare_route(
     prepare_packet_route(packet, destination, route, policy)
 }
 
+/// Expands the bounded template lazily and authorizes every expanded packet's
+/// declared destinations before hostname or interface work, returning the
+/// first packet for route preparation. The library repeats these checks
+/// against every final packet before transmission.
+pub(crate) fn authorize_expanded_destinations(
+    template: &core::template::Template,
+    max_template_packets: usize,
+    policy: &packetcraftr::policy::Policy,
+) -> Result<Packet, CliError> {
+    let mut packets = template
+        .expand(max_template_packets)
+        .map_err(CliError::classified)?;
+    let first = packets
+        .next()
+        .transpose()
+        .map_err(CliError::classified)?
+        .ok_or_else(|| {
+            CliError::new(
+                core::error::Kind::Cli,
+                "packet set must contain at least one packet",
+            )
+        })?;
+    policy
+        .authorize_packet_destinations(&first)
+        .map_err(CliError::classified)?;
+    for packet in packets {
+        crate::cancellation::check()?;
+        policy
+            .authorize_packet_destinations(&packet.map_err(CliError::classified)?)
+            .map_err(CliError::classified)?;
+    }
+    Ok(first)
+}
+
 pub(crate) fn prepare_packet_route(
     packet: Packet,
     destination: Option<String>,

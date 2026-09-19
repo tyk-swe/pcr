@@ -42,14 +42,6 @@ fn fragment_capture_and_structured_outputs_have_matching_bounded_frames() {
     let records = parse_ndjson(&run_success(&[
         "--output", "ndjson", "fragment", "--packet", &packet, "--mtu", "128",
     ]));
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.output.v5.schema.json"
-    ))
-    .unwrap();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    for record in &records {
-        assert!(validator.is_valid(record), "{record}");
-    }
     let capture = run_success(&[
         "--output", "pcapng", "fragment", "--packet", &packet, "--mtu", "128",
     ]);

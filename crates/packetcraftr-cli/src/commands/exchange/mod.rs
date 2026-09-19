@@ -63,25 +63,8 @@ pub(super) fn run(
             packetcraftr::policy::WireBudget::new(u64::try_from(count).unwrap_or(u64::MAX), 0),
         ))
         .map_err(CliError::classified)?;
-    let mut packets = template
-        .expand(max_template_packets)
-        .map_err(CliError::classified)?;
-    let first = packets
-        .next()
-        .transpose()
-        .map_err(CliError::classified)?
-        .ok_or_else(|| CliError::new(Kind::Cli, "packet set must contain at least one packet"))?;
-    // Authorize actual expanded destinations before hostname or interface work.
-    // The library repeats these checks against every final packet before sending.
-    policy
-        .authorize_packet_destinations(&first)
-        .map_err(CliError::classified)?;
-    for packet in packets {
-        crate::cancellation::check()?;
-        policy
-            .authorize_packet_destinations(&packet.map_err(CliError::classified)?)
-            .map_err(CliError::classified)?;
-    }
+    let first =
+        crate::system::authorize_expanded_destinations(&template, max_template_packets, &policy)?;
     let prepared = crate::system::prepare_packet_route(
         first,
         send.route.destination,

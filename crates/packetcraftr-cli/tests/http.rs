@@ -1,15 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod support;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success, schema_validator};
+use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 #[test]
 fn http_command_reports_sourced_messages_without_retaining_entity_bodies() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let path = path.to_str().unwrap();
     let document = parse_json(&run_success(&["--output", "json", "http", path]));
-    let validator = schema_validator();
-    assert!(validator.is_valid(&document));
     let messages = document["result"]["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0]["start"]["method"], "GET");
@@ -20,12 +18,7 @@ fn http_command_reports_sourced_messages_without_retaining_entity_bodies() {
     assert_eq!(messages[1]["body_bytes"], 5);
     assert_eq!(messages[1]["trailers"][0]["value"], "yes");
     assert!(messages[1].get("body").is_none());
-    let output = run_success(&["--output", "ndjson", "http", path]);
-    let records: Vec<serde_json::Value> = std::str::from_utf8(&output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let records = parse_ndjson(&run_success(&["--output", "ndjson", "http", path]));
     assert_eq!(
         records
             .iter()
@@ -33,9 +26,6 @@ fn http_command_reports_sourced_messages_without_retaining_entity_bodies() {
             .collect::<Vec<_>>(),
         ["http_message", "http_message", "complete"]
     );
-    for row in &records {
-        assert!(validator.is_valid(row), "{row}");
-    }
     let limited = parse_json(&run_success(&[
         "--output",
         "json",

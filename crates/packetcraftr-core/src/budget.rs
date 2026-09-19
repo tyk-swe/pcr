@@ -222,6 +222,7 @@ pub struct DeadlineExceeded {
 
 /// Why a [`Deadline::enforce`] gate refused to continue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum Interrupted {
     #[error(transparent)]
     Cancelled(#[from] Cancelled),

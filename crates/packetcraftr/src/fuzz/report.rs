@@ -29,6 +29,8 @@ impl CaseOutcome {
     }
 }
 
+packetcraftr_core::display_via_as_str!(CaseOutcome);
+
 #[derive(Clone, Debug)]
 pub struct Case {
     pub prepared: packet_fuzz::Case,

@@ -42,6 +42,8 @@ impl ResponseKind {
     }
 }
 
+packetcraftr_core::display_via_as_str!(ResponseKind);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Completion {
@@ -62,6 +64,8 @@ impl Completion {
         }
     }
 }
+
+packetcraftr_core::display_via_as_str!(Completion);
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {

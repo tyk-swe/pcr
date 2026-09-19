@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::{
     budget::Deadline,
     error::{BoundaryError, Classification, Classified, Kind, source_chain},
-    frame::{Direction, Frame, LinkType},
+    frame::{Direction, Frame, Lengths, LinkType},
 };
 
 #[derive(Debug)]
@@ -106,8 +106,10 @@ fn frame_accepts_truncated_capture_when_original_is_larger() {
     let frame = Frame::try_with_lengths(
         SystemTime::UNIX_EPOCH,
         LinkType::LINUX_SLL2,
-        2,
-        100,
+        Lengths {
+            captured: 2,
+            original: 100,
+        },
         vec![0xaa_u8, 0xbb],
     )
     .expect("capture records may retain only a prefix of the original frame");
@@ -144,8 +146,7 @@ fn frame_lengths_fail_closed_during_construction_and_deserialization() {
         let error = Frame::try_with_lengths(
             SystemTime::UNIX_EPOCH,
             LinkType::ETHERNET,
-            captured,
-            original,
+            Lengths { captured, original },
             bytes,
         )
         .expect_err("invalid capture lengths must be rejected");

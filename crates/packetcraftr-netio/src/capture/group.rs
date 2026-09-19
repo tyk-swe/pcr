@@ -94,6 +94,7 @@ pub enum Phase {
 }
 #[derive(Debug, thiserror::Error)]
 #[error("capture source {index} ({}) during {phase:?}: {source}",.interface.name)]
+#[non_exhaustive]
 pub struct Failure {
     pub index: usize,
     pub interface: Id,
@@ -128,6 +129,7 @@ impl Classified for Cause {
     }
 }
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub struct Error {
     #[source]
     pub cause: Box<Cause>,

@@ -56,7 +56,11 @@ pub(super) fn append_malformed(
 ) {
     let index = packet.len();
     let end = absolute_offset.saturating_add(bytes.len());
-    packet.push(Malformed::new(intended, bytes, reason));
+    packet.push(Malformed::new(
+        intended.map(|id| id.as_str().to_owned()),
+        bytes,
+        reason,
+    ));
     layouts.push(LayerLayout {
         index,
         protocol: crate::layer::Id::new(BuiltinProtocol::Malformed.as_str()),

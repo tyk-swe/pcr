@@ -279,7 +279,9 @@ pub(crate) fn probe_registry() -> packetcraftr_core::registry::Registry {
     builder
         .register_codec(ChildCodec, &[])
         .expect("register child");
-    builder.bind_link_type(777, "probe").expect("bind root");
+    builder
+        .bind_link_type(LinkType(777), "probe")
+        .expect("bind root");
     builder.bind("probe", 7, "child", 10).expect("bind child");
     builder.build().expect("valid test registry")
 }

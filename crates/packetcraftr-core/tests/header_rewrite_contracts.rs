@@ -7,7 +7,7 @@ use packetcraftr_core::{
     decode::Dissector,
     error::BoundaryError,
     field::WireValue,
-    frame::{Frame, LinkType},
+    frame::{Frame, Lengths, LinkType},
     layer::Raw,
     packet::Packet,
     protocol::{
@@ -16,7 +16,7 @@ use packetcraftr_core::{
         network::{Ipv4, Ipv6},
         transport::{Tcp, Udp},
     },
-    transform::{self, FragmentOptions, HeaderRewrite, RewriteLimits, VlanTag},
+    transform::{self, FragmentOptions, HeaderRewrite, RewriteLimits, VlanRewrite},
 };
 use std::{io::Cursor, time::UNIX_EPOCH};
 fn frame(ipv6: bool, tcp: bool, ethernet: bool, disabled: bool) -> Frame {
@@ -125,13 +125,13 @@ fn vlan_stack_replacement_and_disabled_ipv4_udp_checksum_are_faithful() {
         destination_mac: Some([2, 0, 0, 0, 0, 8]),
         source_ip: Some("192.0.2.9".parse().unwrap()),
         vlans: Some(vec![
-            VlanTag {
+            VlanRewrite {
                 ether_type: 0x88a8,
                 identifier: 7,
                 priority: 3,
                 drop_eligible: false,
             },
-            VlanTag {
+            VlanRewrite {
                 ether_type: 0x8100,
                 identifier: 8,
                 priority: 0,
@@ -197,8 +197,10 @@ fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
     let truncated = Frame::try_with_lengths(
         UNIX_EPOCH,
         original.link_type,
-        40,
-        original.original_length(),
+        Lengths {
+            captured: 40,
+            original: original.original_length(),
+        },
         original.bytes().slice(..40),
     )
     .unwrap();

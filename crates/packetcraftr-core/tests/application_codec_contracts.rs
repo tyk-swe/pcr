@@ -32,7 +32,9 @@ fn per_frame_application_headers_round_trip_with_unconsumed_tcp_tail() {
             packet.push(Dns::default());
             packet.push(Raw::new(vec![0, 12, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
         } else {
-            packet.push(Http::from_wire(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n").unwrap());
+            packet.push(
+                Http::try_from(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n".as_slice()).unwrap(),
+            );
             packet.push(Raw::new(b"GET /next HTTP/1.1\r\n\r\n".to_vec()));
         }
         let builder = Builder::new(builtin::registry());

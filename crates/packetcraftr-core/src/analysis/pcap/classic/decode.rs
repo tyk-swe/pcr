@@ -6,7 +6,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use crate::frame::{Frame, LinkType};
+use crate::frame::{Frame, Lengths, LinkType};
 
 use crate::analysis::pcap::error::Error;
 use crate::analysis::pcap::model::{
@@ -127,8 +127,10 @@ pub(in crate::analysis::pcap) fn read_next_pcap_record<R: Read>(
     let frame = Frame::try_with_lengths(
         timestamp,
         link_type,
-        captured_length,
-        original_length,
+        Lengths {
+            captured: captured_length,
+            original: original_length,
+        },
         Bytes::copy_from_slice(&bytes),
     )?;
     let mut raw = Vec::with_capacity(PCAP_RECORD_HEADER_LEN.saturating_add(bytes.len()));

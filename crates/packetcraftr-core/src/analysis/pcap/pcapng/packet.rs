@@ -5,7 +5,7 @@
 
 use bytes::Bytes;
 
-use crate::frame::{Direction, Frame};
+use crate::frame::{Direction, Frame, Lengths};
 
 use super::options::visit_options;
 use crate::analysis::pcap::error::Error;
@@ -141,8 +141,10 @@ fn parse<'a>(
     let mut frame = Frame::try_with_lengths(
         timestamp,
         interface.link_type,
-        captured_length,
-        original_length,
+        Lengths {
+            captured: captured_length,
+            original: original_length,
+        },
         Bytes::from(copy_bytes_fallibly(data)?),
     )?;
     frame.interface = Some(global_interface);
@@ -210,8 +212,10 @@ pub(in crate::analysis::pcap) fn parse_simple_packet<'a>(
     let mut frame = Frame::try_with_optional_timestamp(
         None,
         interface.link_type,
-        captured_length,
-        original_length,
+        Lengths {
+            captured: captured_length,
+            original: original_length,
+        },
         Bytes::from(copy_bytes_fallibly(data)?),
     )?;
     frame.interface = Some(interface_base);

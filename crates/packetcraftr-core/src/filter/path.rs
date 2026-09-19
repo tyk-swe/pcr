@@ -238,7 +238,7 @@ pub(super) fn resolve(path: &str, registry: &Registry, offset: usize) -> Result<
                     path: path.to_owned(),
                     protocol,
                 })?;
-        let nested = crate::field::Path::parse(tail).map_err(|_| unknown())?;
+        let nested = tail.parse::<crate::field::Path>().map_err(|_| unknown())?;
         let declared = nested.schema(schema).ok_or_else(unknown)?;
         if nested.is_nested() {
             return Ok(Resolved::Field(FieldRef {

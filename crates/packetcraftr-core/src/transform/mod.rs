@@ -6,7 +6,7 @@
 mod fragment;
 mod rewrite;
 pub use fragment::{FragmentOptions, fragment};
-pub use rewrite::{HeaderRewrite, RewriteLimits, VlanTag, rewrite};
+pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 
 use crate::error::{Classification, Classified, Kind};
 

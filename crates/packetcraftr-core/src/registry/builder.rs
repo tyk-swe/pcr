@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
 use super::error::Error;
 use crate::codec::LayerCodec;
+use crate::frame::LinkType;
 
 use crate::matcher::ResponseMatcher;
 
@@ -14,7 +15,7 @@ use crate::matcher::ResponseMatcher;
 pub struct Builder {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
-    pub(super) roots: HashMap<u32, crate::layer::Id>,
+    pub(super) roots: HashMap<LinkType, crate::layer::Id>,
     pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
     pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
@@ -64,7 +65,7 @@ impl Builder {
 
     pub fn bind_link_type(
         &mut self,
-        link_type: u32,
+        link_type: LinkType,
         root: impl Into<crate::layer::Id>,
     ) -> Result<&mut Self, Error> {
         if self.roots.contains_key(&link_type) {
@@ -77,17 +78,18 @@ impl Builder {
     pub fn bind(
         &mut self,
         parent: impl Into<crate::layer::Id>,
-        discriminator: u64,
+        discriminator: impl Into<Discriminator>,
         child: impl Into<crate::layer::Id>,
         priority: i32,
     ) -> Result<&mut Self, Error> {
         let parent = parent.into();
         let child = child.into();
+        let discriminator = discriminator.into();
         let entries = self
             .bindings
             .entry(parent)
             .or_default()
-            .entry(Discriminator(discriminator))
+            .entry(discriminator)
             .or_default();
         if entries.iter().any(|entry| {
             (entry.priority == priority && entry.child != child)
@@ -95,7 +97,7 @@ impl Builder {
         }) {
             return Err(Error::BindingConflict {
                 parent,
-                discriminator,
+                discriminator: discriminator.0,
                 priority,
             });
         }

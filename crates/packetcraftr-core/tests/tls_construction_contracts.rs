@@ -32,8 +32,8 @@ fn typed_hellos_derive_lengths_and_fingerprints_and_preserve_unknown_extensions(
                 .extensions
                 .push(HelloExtension::alpn(&[Bytes::from_static(b"h2")]).unwrap());
         }
-        let layer = Tls::from_hello(hello.clone()).unwrap();
-        let decoded = Tls::from_wire(layer.wire()).unwrap();
+        let layer = Tls::try_from(hello.clone()).unwrap();
+        let decoded = Tls::try_from(layer.wire().as_ref()).unwrap();
         assert_eq!(decoded.hello, Some(hello));
         assert_eq!(decoded.wire(), layer.wire());
         if kind == HelloKind::Client {
@@ -71,7 +71,7 @@ fn recipes_and_template_axes_author_nested_hello_fields() {
 
 #[test]
 fn oversized_fields_invalid_extensions_and_failed_edits_are_rejected_atomically() {
-    let mut layer = Tls::from_hello(Hello::default()).unwrap();
+    let mut layer = Tls::try_from(Hello::default()).unwrap();
     let original = layer.clone();
     assert!(
         layer
@@ -101,6 +101,6 @@ fn oversized_fields_invalid_extensions_and_failed_edits_are_rejected_atomically(
             ..Default::default()
         },
     ] {
-        assert!(Tls::from_hello(hello).is_err());
+        assert!(Tls::try_from(hello).is_err());
     }
 }

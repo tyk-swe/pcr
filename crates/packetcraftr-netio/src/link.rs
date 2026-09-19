@@ -3,8 +3,6 @@
 
 //! Link-layer addressing, VLAN tags, and transmission capabilities.
 
-use std::fmt;
-
 /// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;
 
@@ -54,11 +52,7 @@ impl Capability {
     }
 }
 
-impl fmt::Display for Capability {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(Capability);
 
 impl Mode {
     /// The serialized spelling, so a text renderer and the JSON document never
@@ -73,8 +67,4 @@ impl Mode {
     }
 }
 
-impl fmt::Display for Mode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(Mode);

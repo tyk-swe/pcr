@@ -733,7 +733,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
         0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 3, b'w', b'w',
         b'w', 7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, 0, 1, 0, 1,
     ];
-    let dns = Dns::from_wire(query.clone()).expect("valid DNS query");
+    let dns = Dns::try_from(query.clone()).expect("valid DNS query");
     assert_eq!(dns.id, 0x1234);
     assert_eq!(dns.questions[0].name.to_string(), "www.example.com.");
     assert_eq!(dns.questions[0].query_type, 1);
@@ -746,7 +746,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     assert_eq!(decoded.packet.get::<Dns>().map(|dns| dns.id), Some(0x1234));
 
     assert!(matches!(
-        Dns::from_wire(vec![0; 11]),
+        Dns::try_from(vec![0; 11]),
         Err(packetcraftr_core::codec::Error::Truncated {
             needed: 12,
             available: 11,
@@ -757,7 +757,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_name[4..6].copy_from_slice(&1_u16.to_be_bytes());
     truncated_name.extend_from_slice(&[3, b'w', b'w']);
     assert!(matches!(
-        Dns::from_wire(truncated_name),
+        Dns::try_from(truncated_name),
         Err(packetcraftr_core::codec::Error::Truncated {
             needed: 16,
             available: 15,
@@ -768,7 +768,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
     truncated_question_type.extend_from_slice(&[0, 0]);
     assert!(matches!(
-        Dns::from_wire(truncated_question_type),
+        Dns::try_from(truncated_question_type),
         Err(packetcraftr_core::codec::Error::Truncated {
             needed: 15,
             available: 14,
@@ -779,7 +779,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
     truncated_rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
     assert!(matches!(
-        Dns::from_wire(truncated_rdata),
+        Dns::try_from(truncated_rdata),
         Err(packetcraftr_core::codec::Error::Truncated {
             needed: 27,
             available: 25,
@@ -788,7 +788,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     ));
     let mut too_many = vec![0; 12];
     too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
-    let record_cap = Dns::from_wire(too_many).expect_err("record count above the cap");
+    let record_cap = Dns::try_from(too_many).expect_err("record count above the cap");
     assert!(
         matches!(record_cap, packetcraftr_core::codec::Error::Invalid { .. }),
         "{record_cap:?}"
@@ -797,7 +797,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     pointer_loop[4..6].copy_from_slice(&1_u16.to_be_bytes());
     pointer_loop[12] = 0xc0;
     pointer_loop[13] = 12;
-    let looped = Dns::from_wire(pointer_loop).expect_err("self-referential name pointer");
+    let looped = Dns::try_from(pointer_loop).expect_err("self-referential name pointer");
     assert!(
         matches!(looped, packetcraftr_core::codec::Error::Invalid { .. }),
         "{looped:?}"

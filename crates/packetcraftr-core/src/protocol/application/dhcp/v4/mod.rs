@@ -54,6 +54,30 @@ impl Default for Dhcpv4 {
         }
     }
 }
+impl TryFrom<Bytes> for Dhcpv4 {
+    type Error = Error;
+
+    fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
+        Self::from_wire_with_limits(wire, Limits::default())
+    }
+}
+
+impl TryFrom<Vec<u8>> for Dhcpv4 {
+    type Error = Error;
+
+    fn try_from(wire: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::from(wire))
+    }
+}
+
+impl TryFrom<&[u8]> for Dhcpv4 {
+    type Error = Error;
+
+    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::copy_from_slice(wire))
+    }
+}
+
 impl Dhcpv4 {
     pub fn wire(&self) -> &Bytes {
         &self.wire
@@ -76,9 +100,6 @@ impl Dhcpv4 {
             .iter()
             .chain(&self.file_options)
             .chain(&self.server_name_options)
-    }
-    pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, Error> {
-        Self::from_wire_with_limits(wire, Limits::default())
     }
     pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
         let wire = wire.into();

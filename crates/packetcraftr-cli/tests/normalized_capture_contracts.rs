@@ -17,7 +17,7 @@ use packetcraftr_core::analysis::pcap::TimestampResolution;
 use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::frame::Direction;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::frame::{Lengths, LinkType};
 
 #[path = "support/process.rs"]
 mod process_support;
@@ -160,8 +160,10 @@ fn normalization_maps_global_interfaces_across_sections_and_keeps_packet_facts()
         let mut selected = Frame::try_with_lengths(
             UNIX_EPOCH + Duration::from_millis(1250),
             descriptions[section].link_type,
-            3,
-            9,
+            Lengths {
+                captured: 3,
+                original: 9,
+            },
             vec![1, 2, 3],
         )
         .unwrap();
@@ -201,8 +203,10 @@ fn normalization_preserves_classic_timestamp_resolution_and_lengths() {
         let original = Frame::try_with_lengths(
             UNIX_EPOCH + Duration::from_micros(1_234_567),
             LinkType::IPV4,
-            3,
-            9,
+            Lengths {
+                captured: 3,
+                original: 9,
+            },
             vec![1, 2, 3],
         )
         .unwrap();

@@ -62,11 +62,7 @@ impl SystemAuthorizer {
     }
 
     fn validate_link_type(&self, frame: &Frame) -> Result<(), BoundaryError> {
-        if self
-            .registry
-            .root_for_link_type(frame.link_type.0)
-            .is_some()
-        {
+        if self.registry.root_for_link_type(frame.link_type).is_some() {
             return Ok(());
         }
         Err(BoundaryError::from_error(
@@ -329,7 +325,7 @@ mod tests {
             .register_codec(OpaqueRawCodec, &[])
             .expect("opaque codec registration");
         builder
-            .bind_link_type(LinkType::RAW.0, "raw")
+            .bind_link_type(LinkType::RAW, "raw")
             .expect("opaque raw root binding");
         Arc::new(builder.build().expect("opaque registry"))
     }
@@ -621,8 +617,10 @@ mod tests {
         let truncated = Frame::try_with_lengths(
             UNIX_EPOCH,
             packetcraftr_core::frame::LinkType::RAW,
-            1,
-            2,
+            packetcraftr_core::frame::Lengths {
+                captured: 1,
+                original: 2,
+            },
             vec![0x45_u8],
         )
         .expect("valid truncated capture record");

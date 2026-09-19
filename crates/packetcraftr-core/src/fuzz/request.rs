@@ -68,7 +68,7 @@ impl FromStr for Target {
             .map_err(|_| TargetParseError::InvalidLayer {
                 target: value.to_owned(),
             })?;
-        if crate::field::Path::parse(field).is_err() {
+        if field.parse::<crate::field::Path>().is_err() {
             return Err(TargetParseError::InvalidField {
                 target: value.to_owned(),
             });

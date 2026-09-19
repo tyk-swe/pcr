@@ -125,7 +125,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         if let Some(value) = self.field(name) {
             return Some(value);
         }
-        let path = crate::field::Path::parse(name).ok()?;
+        let path = name.parse::<crate::field::Path>().ok()?;
         path.schema(self.schema())?;
         path.get(&self.field(path.root())?).cloned()
     }
@@ -136,7 +136,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
             protocol: *self.protocol_id(),
             field: name.to_owned(),
         };
-        let path = crate::field::Path::parse(name).map_err(|_| unknown())?;
+        let path = name.parse::<crate::field::Path>().map_err(|_| unknown())?;
         path.schema(self.schema()).ok_or_else(unknown)?;
         if !path.is_nested() {
             return self.set_field(path.root(), value);
@@ -270,12 +270,12 @@ pub struct Malformed {
 
 impl Malformed {
     pub fn new(
-        intended_protocol: Option<Id>,
+        intended_protocol: Option<String>,
         bytes: impl Into<Bytes>,
         reason: impl Into<String>,
     ) -> Self {
         Self {
-            intended_protocol: intended_protocol.map(|protocol| protocol.as_str().to_owned()),
+            intended_protocol,
             bytes: bytes.into(),
             reason: reason.into(),
         }

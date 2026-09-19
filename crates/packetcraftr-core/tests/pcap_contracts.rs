@@ -7,14 +7,16 @@ use std::time::{Duration, SystemTime};
 use packetcraftr_core::analysis::pcap::{
     Endianness, Error, Format, PcapOptions, Reader, ReaderOptions, Writer,
 };
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
 fn frame() -> Frame {
     Frame::try_with_lengths(
         SystemTime::UNIX_EPOCH + Duration::from_secs(7),
         LinkType::ETHERNET,
-        4,
-        9,
+        Lengths {
+            captured: 4,
+            original: 9,
+        },
         vec![1_u8, 2, 3, 4],
     )
     .expect("fixture frame must be valid")

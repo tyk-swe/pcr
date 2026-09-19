@@ -15,7 +15,7 @@ use packetcraftr_core::{
     analysis::pcap,
     budget::Deadline,
     error::{BoundaryError, Kind},
-    transform::{self, HeaderRewrite, VlanTag},
+    transform::{self, HeaderRewrite, VlanRewrite},
 };
 use std::{net::IpAddr, path::PathBuf, time::Duration};
 #[derive(Debug, clap::Args)]
@@ -45,7 +45,7 @@ pub(crate) struct Args {
     pub(crate) destination_port: Option<u16>,
     /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
     #[arg(long="vlan",value_parser=rules::vlan,conflicts_with="strip_vlans")]
-    pub(crate) vlans: Vec<VlanTag>,
+    pub(crate) vlans: Vec<VlanRewrite>,
     #[arg(long)]
     pub(crate) strip_vlans: bool,
     #[arg(long,value_enum,default_value_t=Compression::None)]
@@ -196,5 +196,6 @@ fn check_deadline(deadline: &Deadline) -> Result<(), BoundaryError> {
             Vec::new(),
             error,
         ),
+        _ => BoundaryError::from_error(packetcraftr_core::budget::Cancelled),
     })
 }

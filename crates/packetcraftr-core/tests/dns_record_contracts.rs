@@ -356,19 +356,19 @@ fn offline_opt_version_and_section_are_wire_facts_and_names_can_be_edited() {
     let mut wire = question();
     wire[7] = 1;
     record(&mut wire, &[0xc0, 12], 41, 512, 0x0001_8000, &[]);
-    let dns = Dns::from_wire(wire).unwrap();
+    let dns = Dns::try_from(wire).unwrap();
     let RecordValue::Opt(edns) = &dns.answers[0].value else {
         panic!("OPT stays in answer section")
     };
     assert_eq!(edns.version, 1);
-    let mut dns = Dns::from_wire(response()).unwrap();
+    let mut dns = Dns::try_from(response()).unwrap();
     dns.answers[0].owner = Name::from_labels(["EXAMPLE", "test"]).unwrap();
     let mut packet = Packet::new();
     packet.push(dns);
     let built = build::Builder::new(builtin::registry())
         .build(packet, Default::default(), Default::default())
         .unwrap();
-    let edited = Dns::from_wire(built.bytes).unwrap();
+    let edited = Dns::try_from(built.bytes).unwrap();
     assert_eq!(edited.answers[0].owner.to_string(), "EXAMPLE.test.");
 }
 

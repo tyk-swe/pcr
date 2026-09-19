@@ -194,6 +194,28 @@ impl<L: Layer> FromIterator<L> for Packet {
     }
 }
 
+impl<L: Layer> Extend<L> for Packet {
+    fn extend<T: IntoIterator<Item = L>>(&mut self, iter: T) {
+        self.layers.extend(
+            iter.into_iter()
+                .map(|layer| Box::new(layer) as Box<dyn Layer>),
+        );
+        self.invalidate_encoded_payload_lengths();
+    }
+}
+
+impl<'a> IntoIterator for &'a Packet {
+    type Item = &'a dyn Layer;
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, Box<dyn Layer>>,
+        fn(&'a Box<dyn Layer>) -> &'a dyn Layer,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.layers.iter().map(Box::as_ref)
+    }
+}
+
 /// Why a structural [`crate::packet::Packet`] operation was refused.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]

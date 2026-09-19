@@ -20,7 +20,7 @@ use crate::analysis::reassembly::tcp::ScopedFlowKey;
 /// conversation — which for a capture that includes the handshake is the
 /// endpoint that sent the SYN.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-pub enum Direction {
+pub enum PeerDirection {
     #[serde(rename = "client")]
     ClientToServer,
     #[serde(rename = "server")]
@@ -114,10 +114,10 @@ impl Deduplicator {
         }
     }
 
-    pub(crate) fn generation(&self, direction: Direction) -> u64 {
+    pub(crate) fn generation(&self, direction: PeerDirection) -> u64 {
         match direction {
-            Direction::ClientToServer => self.client_generation,
-            Direction::ServerToClient => self.server_generation,
+            PeerDirection::ClientToServer => self.client_generation,
+            PeerDirection::ServerToClient => self.server_generation,
         }
     }
 
@@ -129,13 +129,13 @@ impl Deduplicator {
     /// edge advances over what remains.
     pub(crate) fn deduplicate(
         &mut self,
-        direction: Direction,
+        direction: PeerDirection,
         sequence: u32,
         bytes: &Bytes,
     ) -> Option<Bytes> {
         let delivered = match direction {
-            Direction::ClientToServer => &mut self.client_delivered,
-            Direction::ServerToClient => &mut self.server_delivered,
+            PeerDirection::ClientToServer => &mut self.client_delivered,
+            PeerDirection::ServerToClient => &mut self.server_delivered,
         };
         let end = sequence.wrapping_add(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
         let bytes = match *delivered {

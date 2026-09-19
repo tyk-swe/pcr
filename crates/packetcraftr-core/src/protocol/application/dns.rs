@@ -82,10 +82,11 @@ pub struct Dns {
     wire: Bytes,
 }
 
-impl Dns {
+impl TryFrom<Bytes> for Dns {
+    type Error = crate::codec::Error;
+
     /// Parses a complete DNS message under the default bounded decoder limits.
-    pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, crate::codec::Error> {
-        let wire = wire.into();
+    fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
         let available = wire.len();
         Self::from_wire_with_limits(wire, DecodeLimits::default()).map_err(|error| {
             error.truncation_needed().map_or_else(
@@ -94,7 +95,25 @@ impl Dns {
             )
         })
     }
+}
 
+impl TryFrom<Vec<u8>> for Dns {
+    type Error = crate::codec::Error;
+
+    fn try_from(wire: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::from(wire))
+    }
+}
+
+impl TryFrom<&[u8]> for Dns {
+    type Error = crate::codec::Error;
+
+    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::copy_from_slice(wire))
+    }
+}
+
+impl Dns {
     /// Decodes every declared section while retaining the complete original
     /// wire. Malformed or truncated data returns a typed failure, never an
     /// invented record. OPT records remain in their original section.
@@ -261,7 +280,7 @@ impl LayerCodec for DnsCodec {
                 .filter(|length| *length >= HEADER_LEN)
                 .and_then(|length| input.get(2..length + 2).map(|body| (length, body)))
                 .and_then(|(length, body)| {
-                    Dns::from_wire(Bytes::copy_from_slice(body))
+                    Dns::try_from(Bytes::copy_from_slice(body))
                         .ok()
                         .map(|layer| (length, layer))
                 });
@@ -310,7 +329,7 @@ impl LayerCodec for DnsCodec {
                 .to_string(),
             ));
         }
-        let layer = Dns::from_wire(Bytes::copy_from_slice(input))?;
+        let layer = Dns::try_from(Bytes::copy_from_slice(input))?;
         Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: input.len(),
@@ -328,7 +347,7 @@ impl LayerCodec for DnsCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let mut layer = if let Some(FieldValue::Bytes(wire)) = fields.get("wire") {
-            Dns::from_wire(wire.clone())?
+            Dns::try_from(wire.clone())?
         } else {
             Dns::default()
         };

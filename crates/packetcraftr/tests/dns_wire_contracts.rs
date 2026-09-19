@@ -1211,7 +1211,7 @@ fn edns_query_has_one_exact_bounded_opt_and_no_options() {
             expected.extend_from_slice(&[0, 0, if dnssec_ok { 0x80 } else { 0 }, 0, 0, 0]);
             assert_eq!(query.as_ref(), expected);
             assert_eq!(query.len(), plain.len() + 11);
-            let decoded = Dns::from_wire(query).unwrap();
+            let decoded = Dns::try_from(query).unwrap();
             assert_eq!(decoded.additionals.len(), 1);
             let RecordValue::Opt(opt) = &decoded.additionals[0].value else {
                 panic!("expected OPT")

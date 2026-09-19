@@ -36,7 +36,7 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert!(registry.codec_named("P").is_some());
     assert_eq!(
         registry
-            .root_for_link_type(777)
+            .root_for_link_type(LinkType(777))
             .map(|protocol| protocol.as_str()),
         Some("probe")
     );
@@ -237,10 +237,14 @@ fn assert_registry_binding_conflicts() {
     ));
 
     let mut roots = packetcraftr_core::registry::Builder::new();
-    roots.bind_link_type(1, "probe").expect("first root");
+    roots
+        .bind_link_type(LinkType(1), "probe")
+        .expect("first root");
     assert!(matches!(
-        roots.bind_link_type(1, "child"),
-        Err(packetcraftr_core::registry::Error::DuplicateLinkType { link_type: 1 })
+        roots.bind_link_type(LinkType(1), "child"),
+        Err(packetcraftr_core::registry::Error::DuplicateLinkType {
+            link_type: LinkType(1)
+        })
     ));
     assert!(matches!(
         roots.build(),

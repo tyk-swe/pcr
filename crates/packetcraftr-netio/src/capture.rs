@@ -5,7 +5,6 @@
 
 pub mod group;
 
-use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -305,11 +304,7 @@ impl OverflowPolicy {
     }
 }
 
-impl fmt::Display for OverflowPolicy {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(OverflowPolicy);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {

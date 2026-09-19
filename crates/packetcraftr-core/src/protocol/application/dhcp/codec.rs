@@ -39,7 +39,7 @@ macro_rules! codec {
                         ..Default::default()
                     })
                     .map_err(|error| invalid($name, error.to_string()))?;
-                let normalized = $ty::from_wire(wire.clone())
+                let normalized = $ty::try_from(wire.clone())
                     .map_err(|error| invalid($name, error.to_string()))?;
                 Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized))
                     .with_fields($module::layout()))
@@ -59,7 +59,7 @@ macro_rules! codec {
                     raw.fields = raw_layout(input.len());
                     return Ok(raw);
                 }
-                let layer = $ty::from_wire(Bytes::copy_from_slice(input))
+                let layer = $ty::try_from(Bytes::copy_from_slice(input))
                     .map_err(|error| invalid($name, error.to_string()))?;
                 let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
                 decoded.fields = $module::layout();
@@ -70,7 +70,7 @@ macro_rules! codec {
                 fields: &BTreeMap<String, FieldValue>,
             ) -> Result<Box<dyn Layer>, crate::codec::Error> {
                 let mut layer = match fields.get("wire") {
-                    Some(FieldValue::Bytes(wire)) => $ty::from_wire(wire.clone())
+                    Some(FieldValue::Bytes(wire)) => $ty::try_from(wire.clone())
                         .map_err(|error| invalid($name, error.to_string()))?,
                     Some(_) => return Err(invalid($name, "wire must be retained bytes")),
                     None => $ty::default(),

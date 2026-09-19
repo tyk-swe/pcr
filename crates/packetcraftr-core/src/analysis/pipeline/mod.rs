@@ -24,7 +24,7 @@ use crate::analysis::reassembly::ip::{
     CompletedDatagram, DatagramKey, ResourceError as IpResourceError,
 };
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
-use crate::analysis::scope::{Interner, ScopeId};
+use crate::analysis::scope::{Interner, Limits as ScopeLimits, ScopeId};
 use crate::frame::{Frame, LinkType};
 use crate::protocol::transport::Tcp;
 
@@ -288,7 +288,10 @@ where
     let scope_limit = usize::try_from(limits.max_frames)
         .unwrap_or(usize::MAX)
         .saturating_mul(3);
-    let mut scopes = Interner::with_limits(scope_limit, limits.max_scope_bytes);
+    let mut scopes = Interner::with_limits(ScopeLimits {
+        limit: scope_limit,
+        max_bytes: limits.max_scope_bytes,
+    });
     let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
     let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
     let mut provenance = options

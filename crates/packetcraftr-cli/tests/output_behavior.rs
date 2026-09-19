@@ -27,7 +27,7 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_core::field::FieldKind as PacketFieldKind;
 use packetcraftr_core::frame::Direction as CaptureDirection;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::frame::{Lengths, LinkType};
 use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_netio::interface::Address;
@@ -236,8 +236,10 @@ fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
         let mut frame = Frame::try_with_lengths(
             UNIX_EPOCH + Duration::from_secs(1),
             LinkType::ETHERNET,
-            3,
-            8,
+            Lengths {
+                captured: 3,
+                original: 8,
+            },
             vec![1, 2, 3],
         )
         .expect("truncated frame metadata is valid");

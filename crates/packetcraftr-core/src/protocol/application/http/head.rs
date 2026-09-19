@@ -63,13 +63,13 @@ impl Head {
     pub fn method(&self) -> Option<&str> {
         match &self.start {
             StartLine::Request { method, .. } => Some(method),
-            _ => None,
+            StartLine::Response { .. } => None,
         }
     }
     pub fn status(&self) -> Option<u16> {
         match self.start {
             StartLine::Response { status, .. } => Some(status),
-            _ => None,
+            StartLine::Request { .. } => None,
         }
     }
     pub fn values<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a [u8]> {

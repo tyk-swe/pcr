@@ -99,6 +99,28 @@ pub enum Error {
     Bytes { actual: usize, limit: usize },
 }
 
+/// Finite entry-count and retained-byte ceilings for [`Interner`].
+///
+/// The two ceilings use unrelated units, so they travel in one named struct
+/// rather than adjacent `usize` parameters.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// Maximum number of interned scopes. Zero refuses new entries.
+    pub limit: usize,
+    /// Conservative retained-byte ceiling covering path copies and table
+    /// capacity headroom, not RSS.
+    pub max_bytes: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            limit: usize::MAX,
+            max_bytes: usize::MAX,
+        }
+    }
+}
+
 /// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug)]
 pub struct Interner {
@@ -129,20 +151,14 @@ impl Interner {
         Self::default()
     }
 
-    pub(crate) fn with_limit(limit: usize) -> Self {
-        Self {
-            limit,
-            ..Self::default()
-        }
-    }
-
     /// Finite count and conservative retained-byte ceilings. Zero refuses new
     /// entries. Includes both path copies and table capacity headroom, not RSS.
     #[must_use]
-    pub fn with_limits(limit: usize, max_bytes: usize) -> Self {
+    pub fn with_limits(limits: Limits) -> Self {
         Self {
-            max_bytes,
-            ..Self::with_limit(limit)
+            limit: limits.limit,
+            max_bytes: limits.max_bytes,
+            ..Self::default()
         }
     }
 
@@ -332,7 +348,10 @@ mod tests {
 
     #[test]
     fn configured_scope_limit_bounds_persistent_path_metadata() {
-        let mut interner = Interner::with_limit(1);
+        let mut interner = Interner::with_limits(Limits {
+            limit: 1,
+            ..Limits::default()
+        });
         let first = interner
             .intern(Some(1), tunnel_path(10))
             .expect("first scope fits");
@@ -359,7 +378,10 @@ mod byte_boundary_tests {
         measured.intern(Some(1), path.clone()).unwrap();
         let charge = measured.retained_bytes();
         for limit in [charge - 1, charge, charge + 1] {
-            let mut scopes = Interner::with_limits(2, limit);
+            let mut scopes = Interner::with_limits(Limits {
+                limit: 2,
+                max_bytes: limit,
+            });
             let result = scopes.intern(Some(1), path.clone());
             if limit < charge {
                 assert!(matches!(result, Err(Error::Bytes { .. })));

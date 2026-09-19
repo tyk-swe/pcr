@@ -16,7 +16,7 @@ use std::{
 use crate::platform::workers::WorkerPermit;
 
 use crate::{Error, capture::Captured};
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
 use super::{NativeCaptureEvent, NativeCaptureSource, queue::CaptureQueue};
 use crate::platform::worker_reaper::{ReaperClient, wait_until_finished};
@@ -62,8 +62,10 @@ pub(super) fn capture_worker(
                 let mut frame = Frame::try_with_lengths(
                     packet.timestamp,
                     link_type,
-                    packet.captured_length,
-                    packet.original_length,
+                    Lengths {
+                        captured: packet.captured_length,
+                        original: packet.original_length,
+                    },
                     packet.bytes,
                 )
                 .map_err(|error| Error::Capture {

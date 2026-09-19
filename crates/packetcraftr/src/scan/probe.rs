@@ -75,7 +75,7 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
                         packet.push(Raw::new(probe.udp_payload.clone()));
                     }
                 } else {
-                    if let Ok(dns) = Dns::from_wire(probe.udp_payload.clone()) {
+                    if let Ok(dns) = Dns::try_from(probe.udp_payload.clone()) {
                         packet.push(dns);
                     } else {
                         packet.push(Raw::new(probe.udp_payload.clone()));
@@ -122,21 +122,21 @@ fn push_udp_payload(packet: &mut Packet, port: u16, payload: &Bytes) {
     }
     let registry = builtin::registry();
     if port == DNS_PORT
-        && let Ok(dns) = Dns::from_wire(payload.clone())
+        && let Ok(dns) = Dns::try_from(payload.clone())
     {
         packet.push(dns);
         return;
     }
     if matches!(port, 67 | 68)
         && let Ok(dhcp) =
-            packetcraftr_core::protocol::application::dhcp::Dhcpv4::from_wire(payload.clone())
+            packetcraftr_core::protocol::application::dhcp::Dhcpv4::try_from(payload.clone())
     {
         packet.push(dhcp);
         return;
     }
     if matches!(port, 546 | 547)
         && let Ok(dhcp) =
-            packetcraftr_core::protocol::application::dhcp::Dhcpv6::from_wire(payload.clone())
+            packetcraftr_core::protocol::application::dhcp::Dhcpv6::try_from(payload.clone())
     {
         packet.push(dhcp);
         return;

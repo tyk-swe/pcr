@@ -76,7 +76,7 @@ pub(crate) fn decode_wire(
         })
     };
     let registry = packetcraftr_core::protocol::builtin::registry();
-    if registry.root_for_link_type(link_type.0).is_none() {
+    if registry.root_for_link_type(link_type).is_none() {
         return Err(unsupported(format!(
             "trusted wire authorization does not support link type {}",
             link_type.0

@@ -40,8 +40,7 @@ fn frame(tcp: bool, source: u16, destination: u16, payload: &[u8]) -> Frame {
     }
     if !tcp && (source == 53 || destination == 53) {
         packet.push(
-            packetcraftr_core::protocol::application::dns::Dns::from_wire(payload.to_vec())
-                .unwrap(),
+            packetcraftr_core::protocol::application::dns::Dns::try_from(payload.to_vec()).unwrap(),
         );
     } else {
         packet.push(Raw::new(payload.to_vec()));

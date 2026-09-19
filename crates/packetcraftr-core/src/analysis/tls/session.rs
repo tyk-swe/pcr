@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use bytes::{Buf as _, Bytes, BytesMut};
 use serde::Serialize;
 
-use crate::analysis::dedup::{Deduplicator, Direction};
+use crate::analysis::dedup::{Deduplicator, PeerDirection};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::tls::codec::escape_wire_text;
 use crate::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
@@ -344,10 +344,10 @@ impl Side {
 
     /// The deduplicator's view of this direction, which stays bound to the
     /// captured direction across a role swap.
-    pub(super) fn dedup(self) -> Direction {
+    pub(super) fn dedup(self) -> PeerDirection {
         match self {
-            Self::First => Direction::ClientToServer,
-            Self::Reverse => Direction::ServerToClient,
+            Self::First => PeerDirection::ClientToServer,
+            Self::Reverse => PeerDirection::ServerToClient,
         }
     }
 }
@@ -879,8 +879,8 @@ mod tests {
         assert_eq!(live.role(Side::Reverse), Role::Server);
         assert_eq!(Side::First.other(), Side::Reverse);
         assert_eq!(Side::Reverse.other(), Side::First);
-        assert_eq!(Side::First.dedup(), Direction::ClientToServer);
-        assert_eq!(Side::Reverse.dedup(), Direction::ServerToClient);
+        assert_eq!(Side::First.dedup(), PeerDirection::ClientToServer);
+        assert_eq!(Side::Reverse.dedup(), PeerDirection::ServerToClient);
     }
 
     #[test]

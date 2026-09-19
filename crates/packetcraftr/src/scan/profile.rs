@@ -213,7 +213,7 @@ impl UdpProfile {
             charge,
         };
         if matches!(profile.config.response, ResponseCheck::Dns) {
-            let query = Dns::from_wire(profile.payload(0))
+            let query = Dns::try_from(profile.payload(0))
                 .map_err(|_| Error("DNS response validation needs a valid DNS request"))?;
             if query.response || query.questions.is_empty() {
                 return Err(Error(
@@ -286,8 +286,8 @@ impl UdpProfile {
             ),
             ResponseCheck::Dns => {
                 let (Ok(query), Ok(response)) = (
-                    Dns::from_wire(Bytes::copy_from_slice(query)),
-                    Dns::from_wire(Bytes::copy_from_slice(response)),
+                    Dns::try_from(Bytes::copy_from_slice(query)),
+                    Dns::try_from(Bytes::copy_from_slice(response)),
                 ) else {
                     return self.evidence(
                         Status::Rejected,

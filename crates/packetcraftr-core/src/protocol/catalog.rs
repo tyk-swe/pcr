@@ -180,11 +180,28 @@ macro_rules! define_builtin_protocol {
                 matches!(self, Self::Raw | Self::Padding | Self::Malformed)
             }
         }
+
+        crate::display_via_as_str!(BuiltinProtocol);
+
+        /// Parses a canonical name or one of [`Self::aliases`].
+        impl ::std::str::FromStr for BuiltinProtocol {
+            type Err = UnknownProtocolName;
+
+            fn from_str(name: &str) -> Result<Self, Self::Err> {
+                Self::from_name_or_alias(name)
+                    .ok_or_else(|| UnknownProtocolName(name.to_owned()))
+            }
+        }
     };
     (@matcher none) => { false };
     (@matcher reverse_flow) => { true };
     (@matcher echo_v4) => { true };
     (@matcher echo_v6) => { true };
 }
+
+/// A name that is not a built-in protocol's canonical name or alias.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown protocol {0:?}")]
+pub struct UnknownProtocolName(pub String);
 
 builtin_protocol_catalog!(define_builtin_protocol);

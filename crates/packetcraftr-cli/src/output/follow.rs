@@ -3,7 +3,7 @@
 
 //! Structured conversation-following output.
 
-use packetcraftr_core::analysis::follow::Direction;
+use packetcraftr_core::analysis::follow::PeerDirection;
 
 use std::net::IpAddr;
 
@@ -19,7 +19,7 @@ use packetcraftr_core::analysis::Endpoint;
 /// One run of conversation payload, in delivery order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Chunk {
-    pub direction: Direction,
+    pub direction: PeerDirection,
     pub direction_generation: u64,
     /// Frame whose arrival delivered these bytes.
     pub frame: u64,
@@ -40,7 +40,7 @@ impl From<AnalysisChunk> for Chunk {
 /// One direction payload file `follow --write` published.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct WrittenFile {
-    pub direction: Direction,
+    pub direction: PeerDirection,
     pub path: String,
     pub bytes: u64,
 }

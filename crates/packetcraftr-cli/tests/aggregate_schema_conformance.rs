@@ -30,7 +30,7 @@ use packetcraftr_cli::output::{
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamTransport;
 use packetcraftr_core::analysis::follow::Chunk as AnalysisChunk;
-use packetcraftr_core::analysis::follow::Direction as AnalysisDirection;
+use packetcraftr_core::analysis::follow::PeerDirection as AnalysisDirection;
 use packetcraftr_core::analysis::follow::Summary as FollowSummary;
 use packetcraftr_core::analysis::reassembly::tcp::FlowKey;
 use packetcraftr_core::analysis::stats::ConversationStat;
@@ -1748,11 +1748,11 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr_core::analysis::follow::Direction",
+            "packetcraftr_core::analysis::follow::PeerDirection",
             "/$defs/followChunk/properties/direction/enum",
             [
-                packetcraftr_core::analysis::follow::Direction::ClientToServer,
-                packetcraftr_core::analysis::follow::Direction::ServerToClient,
+                packetcraftr_core::analysis::follow::PeerDirection::ClientToServer,
+                packetcraftr_core::analysis::follow::PeerDirection::ServerToClient,
             ],
         ),
         vocabulary(

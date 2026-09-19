@@ -171,7 +171,7 @@ pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> 
 
 fn direction_marker(chunk: &Chunk) -> &'static str {
     match chunk.direction {
-        analysis::follow::Direction::ClientToServer => ">",
-        analysis::follow::Direction::ServerToClient => "<",
+        analysis::follow::PeerDirection::ClientToServer => ">",
+        analysis::follow::PeerDirection::ServerToClient => "<",
     }
 }

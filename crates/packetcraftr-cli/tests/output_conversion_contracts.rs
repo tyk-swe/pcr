@@ -19,7 +19,7 @@ use packetcraftr_core::analysis::StreamRef;
 use packetcraftr_core::analysis::StreamTransport as AnalysisStreamTransport;
 use packetcraftr_core::analysis::expert::Finding as AnalysisFinding;
 use packetcraftr_core::analysis::follow::Chunk as AnalysisChunk;
-use packetcraftr_core::analysis::follow::Direction as AnalysisDirection;
+use packetcraftr_core::analysis::follow::PeerDirection as AnalysisDirection;
 use packetcraftr_core::analysis::reassembly::ip::DatagramKey as AnalysisDatagramKey;
 use packetcraftr_core::analysis::reassembly::ip::IncompleteDatagram;
 use packetcraftr_core::analysis::reassembly::ip::IncompleteReason;
@@ -482,11 +482,11 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     assert_eq!(followed.chunks[0].bytes_hex, "00ff");
     assert_eq!(
         followed.chunks[0].direction,
-        packetcraftr_core::analysis::follow::Direction::ClientToServer
+        packetcraftr_core::analysis::follow::PeerDirection::ClientToServer
     );
     assert_eq!(
         followed.chunks[1].direction,
-        packetcraftr_core::analysis::follow::Direction::ServerToClient
+        packetcraftr_core::analysis::follow::PeerDirection::ServerToClient
     );
     assert_eq!(followed.undelivered_bytes, 4);
 

@@ -54,6 +54,8 @@ impl Kind {
     }
 }
 
+display_via_as_str!(Kind);
+
 /// Deterministic machine code, CLI class, and operator guidance for an error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]

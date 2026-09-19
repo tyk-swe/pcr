@@ -14,7 +14,7 @@ pub enum Error {
         existing: crate::layer::Id,
     },
     #[error("link type {link_type} already has a root binding")]
-    DuplicateLinkType { link_type: u32 },
+    DuplicateLinkType { link_type: crate::frame::LinkType },
     #[error(
         "binding conflict for parent {parent}, discriminator {discriminator}, priority {priority}"
     )]

@@ -6,7 +6,7 @@
 mod common;
 
 use common::{CLIENT, SERVER, client_tcp, reader, registry, server_tcp, tcp_frame, udp_frame};
-use packetcraftr_core::analysis::follow::Direction as FollowDirection;
+use packetcraftr_core::analysis::follow::PeerDirection as FollowDirection;
 use packetcraftr_core::analysis::reassembly::tcp;
 use packetcraftr_core::analysis::{
     Options, StreamRef, StreamTransport, Summary as RunSummary, run,

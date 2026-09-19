@@ -30,6 +30,30 @@ impl Default for Dhcpv6 {
         }
     }
 }
+impl TryFrom<Bytes> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: Bytes) -> Result<Self, Self::Error> {
+        Self::from_wire_with_limits(wire, Limits::default())
+    }
+}
+
+impl TryFrom<Vec<u8>> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::from(wire))
+    }
+}
+
+impl TryFrom<&[u8]> for Dhcpv6 {
+    type Error = Error;
+
+    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::copy_from_slice(wire))
+    }
+}
+
 impl Dhcpv6 {
     pub fn relay_forward(
         hop_count: u8,
@@ -58,9 +82,6 @@ impl Dhcpv6 {
     pub fn edit(&mut self, edit: impl FnOnce(&mut Self)) {
         self.wire = Bytes::new();
         edit(self);
-    }
-    pub fn from_wire(wire: impl Into<Bytes>) -> Result<Self, Error> {
-        Self::from_wire_with_limits(wire, Limits::default())
     }
     pub fn from_wire_with_limits(wire: impl Into<Bytes>, limits: Limits) -> Result<Self, Error> {
         let wire = wire.into();

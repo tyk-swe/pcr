@@ -11,7 +11,7 @@ use std::net::IpAddr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VlanTag {
+pub struct VlanRewrite {
     pub ether_type: u16,
     pub identifier: u16,
     #[serde(default)]
@@ -19,7 +19,7 @@ pub struct VlanTag {
     #[serde(default)]
     pub drop_eligible: bool,
 }
-impl VlanTag {
+impl VlanRewrite {
     fn tci(self) -> Result<u16, Error> {
         if !matches!(self.ether_type, 0x8100 | 0x88a8)
             || self.identifier > 4095
@@ -32,6 +32,16 @@ impl VlanTag {
             | self.identifier)
     }
 }
+impl From<crate::packet::link::VlanTag> for VlanRewrite {
+    fn from(tag: crate::packet::link::VlanTag) -> Self {
+        Self {
+            ether_type: tag.kind.ether_type(),
+            identifier: tag.vlan_id,
+            priority: tag.priority,
+            drop_eligible: tag.drop_eligible,
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HeaderRewrite {
@@ -42,7 +52,7 @@ pub struct HeaderRewrite {
     pub source_port: Option<u16>,
     pub destination_port: Option<u16>,
     /// Replace the outer Ethernet VLAN stack; an empty list removes all tags.
-    pub vlans: Option<Vec<VlanTag>>,
+    pub vlans: Option<Vec<VlanRewrite>>,
 }
 impl HeaderRewrite {
     pub fn is_empty(&self) -> bool {

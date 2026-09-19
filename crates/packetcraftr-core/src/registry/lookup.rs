@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding, ReverseBinding};
 use super::builder::Builder;
 use crate::codec::LayerCodec;
+use crate::frame::LinkType;
 
 use crate::matcher::ResponseMatcher;
 
@@ -15,7 +16,7 @@ use crate::matcher::ResponseMatcher;
 pub struct Registry {
     pub(super) codecs: BTreeMap<crate::layer::Id, Arc<dyn LayerCodec>>,
     pub(super) aliases: HashMap<String, crate::layer::Id>,
-    pub(super) roots: HashMap<u32, crate::layer::Id>,
+    pub(super) roots: HashMap<LinkType, crate::layer::Id>,
     pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
     pub(super) reverse_bindings:
         HashMap<crate::layer::Id, HashMap<crate::layer::Id, Vec<ReverseBinding>>>,
@@ -71,7 +72,7 @@ impl Registry {
         self.aliases.get(&name.trim().to_ascii_lowercase()).copied()
     }
 
-    pub fn root_for_link_type(&self, link_type: u32) -> Option<crate::layer::Id> {
+    pub fn root_for_link_type(&self, link_type: LinkType) -> Option<crate::layer::Id> {
         self.roots.get(&link_type).copied()
     }
 

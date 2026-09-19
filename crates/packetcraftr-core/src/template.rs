@@ -154,7 +154,10 @@ impl Template {
                     field: axis.field.clone(),
                 })
             };
-            let path = crate::field::Path::parse(&axis.field).map_err(|_| unknown())?;
+            let path = axis
+                .field
+                .parse::<crate::field::Path>()
+                .map_err(|_| unknown())?;
             path.schema(layer.schema()).ok_or_else(unknown)?;
             let root = layer
                 .schema()

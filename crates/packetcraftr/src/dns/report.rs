@@ -93,11 +93,7 @@ impl Transport {
     }
 }
 
-impl fmt::Display for Transport {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(Transport);
 
 impl Outcome {
     /// Precedence across retries and across several correlated frames in one
@@ -128,6 +124,8 @@ impl Outcome {
         }
     }
 }
+
+packetcraftr_core::display_via_as_str!(Outcome);
 
 /// Transport-specific evidence. Kernel TCP never carries a captured frame;
 /// a transmitted UDP query always has a source port and transmission time.

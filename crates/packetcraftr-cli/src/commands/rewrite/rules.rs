@@ -4,7 +4,7 @@ use crate::errors::CliError;
 use packetcraftr_core::{
     analysis::pcap,
     error::Kind,
-    transform::{HeaderRewrite, VlanTag},
+    transform::{HeaderRewrite, VlanRewrite},
 };
 use std::{io::Read, path::Path};
 #[derive(Debug, serde::Deserialize)]
@@ -73,7 +73,7 @@ pub(super) fn mac(value: &str) -> Result<[u8; 6], CliError> {
     }
     Ok(address)
 }
-pub(super) fn vlan(value: &str) -> Result<VlanTag, CliError> {
+pub(super) fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
     fn number(value: &str) -> Result<u16, CliError> {
         if let Some(value) = value.strip_prefix("0x") {
             u16::from_str_radix(value, 16)
@@ -84,7 +84,7 @@ pub(super) fn vlan(value: &str) -> Result<VlanTag, CliError> {
     }
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {
-        [id] => VlanTag {
+        [id] => VlanRewrite {
             ether_type: 0x8100,
             identifier: number(id)?,
             priority: 0,
@@ -99,7 +99,7 @@ pub(super) fn vlan(value: &str) -> Result<VlanTag, CliError> {
                     "VLAN priority must be 0..=7 and DEI 0 or 1",
                 ));
             }
-            VlanTag {
+            VlanRewrite {
                 ether_type: number(kind)?,
                 identifier: number(id)?,
                 priority: priority as u8,

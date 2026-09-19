@@ -82,7 +82,7 @@ fn named_recipes_build_dns_and_support_nested_filters_templates_and_fuzzing() {
 #[test]
 fn wire_images_survive_documents_and_explicit_edits_rebuild_counts() {
     let original = Bytes::from_static(b"\x12\x34\x81\x80\0\x01\0\x01\0\0\0\0\x01a\0\0\x01\0\x01\xc0\x0c\0\x01\0\x01\0\0\0\x01\0\x04\xc0\0\x02\x08");
-    let dns = Dns::from_wire(original.clone()).unwrap();
+    let dns = Dns::try_from(original.clone()).unwrap();
     let mut packet = packetcraftr_core::packet::Packet::new();
     packet.push(dns);
     let document = document::Packet::from_packet(&packet);
@@ -93,7 +93,7 @@ fn wire_images_survive_documents_and_explicit_edits_rebuild_counts() {
         .set_field_path("answers[0].owner", "different.example.test.".into())
         .unwrap();
     edited.edit(|message| message.answers.clear());
-    let decoded = Dns::from_wire(edited.to_wire().unwrap()).unwrap();
+    let decoded = Dns::try_from(edited.to_wire().unwrap()).unwrap();
     assert_eq!(decoded.answer_count, WireValue::Exact(0));
     assert_eq!(decoded.questions.len(), 1);
 }

@@ -12,7 +12,7 @@ use common::tls_frames::{
     server_hello, split,
 };
 use packetcraftr_core::analysis::tls::{Limits as TlsLimits, Status};
-use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
 #[test]
 fn a_reassembly_gap_reports_the_session_as_a_gap_with_a_reason() {
@@ -136,8 +136,10 @@ fn a_snaplen_truncated_frame_mid_handshake_is_a_gap_rather_than_truncated() {
         Frame::try_with_optional_timestamp(
             cut.timestamp,
             LinkType::IPV4,
-            u32::try_from(bytes.len()).expect("captured length fits"),
-            cut.original_length(),
+            Lengths {
+                captured: u32::try_from(bytes.len()).expect("captured length fits"),
+                original: cut.original_length(),
+            },
             bytes,
         )
         .expect("a snaplen-truncated frame is valid"),

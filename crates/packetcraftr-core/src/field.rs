@@ -74,6 +74,8 @@ impl FieldKind {
     }
 }
 
+display_via_as_str!(FieldKind);
+
 /// A dynamically inspectable or editable layer-field value.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]

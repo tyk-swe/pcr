@@ -35,6 +35,25 @@ impl LinkType {
     pub const LINUX_SLL2: Self = Self(276);
 }
 
+impl std::fmt::Display for LinkType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Captured and on-wire frame lengths carried by a capture record.
+///
+/// Both values travel in one named struct so the two `u32` lengths cannot be
+/// transposed at a call site: a swap is only detectable at runtime when
+/// `captured > original`, which a fully captured frame never exhibits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Lengths {
+    /// Bytes retained in the capture record.
+    pub captured: u32,
+    /// Bytes the frame occupied on the wire before truncation.
+    pub original: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -104,17 +123,10 @@ impl Frame {
     pub fn try_with_lengths(
         timestamp: SystemTime,
         link_type: LinkType,
-        captured_length: u32,
-        original_length: u32,
+        lengths: Lengths,
         bytes: impl Into<Bytes>,
     ) -> Result<Self, Error> {
-        Self::try_with_optional_timestamp(
-            Some(timestamp),
-            link_type,
-            captured_length,
-            original_length,
-            bytes,
-        )
+        Self::try_with_optional_timestamp(Some(timestamp), link_type, lengths, bytes)
     }
 
     /// Constructs a frame whose source record does not provide a timestamp.
@@ -131,34 +143,41 @@ impl Frame {
         let length = u32::try_from(bytes.len()).map_err(|_| Error::CapturedLengthTooLarge {
             actual: bytes.len(),
         })?;
-        Self::try_with_optional_timestamp(timestamp, link_type, length, length, bytes)
+        Self::try_with_optional_timestamp(
+            timestamp,
+            link_type,
+            Lengths {
+                captured: length,
+                original: length,
+            },
+            bytes,
+        )
     }
 
     /// Constructs a frame with explicit lengths and optional capture time.
     pub fn try_with_optional_timestamp(
         timestamp: Option<SystemTime>,
         link_type: LinkType,
-        captured_length: u32,
-        original_length: u32,
+        lengths: Lengths,
         bytes: impl Into<Bytes>,
     ) -> Result<Self, Error> {
         let bytes = bytes.into();
-        if usize::try_from(captured_length) != Ok(bytes.len()) {
+        if usize::try_from(lengths.captured) != Ok(bytes.len()) {
             return Err(Error::CapturedLengthMismatch {
-                declared: captured_length,
+                declared: lengths.captured,
                 actual: bytes.len(),
             });
         }
-        if original_length < captured_length {
+        if lengths.original < lengths.captured {
             return Err(Error::OriginalLengthTooSmall {
-                captured: captured_length,
-                original: original_length,
+                captured: lengths.captured,
+                original: lengths.original,
             });
         }
         Ok(Self {
             timestamp,
-            captured_length,
-            original_length,
+            captured_length: lengths.captured,
+            original_length: lengths.original,
             link_type,
             interface: None,
             direction: None,
@@ -244,8 +263,10 @@ impl<'de> Deserialize<'de> for Frame {
         let mut frame = Frame::try_with_optional_timestamp(
             record.timestamp,
             record.link_type,
-            record.captured_length,
-            record.original_length,
+            Lengths {
+                captured: record.captured_length,
+                original: record.original_length,
+            },
             record.bytes,
         )
         .map_err(serde::de::Error::custom)?;

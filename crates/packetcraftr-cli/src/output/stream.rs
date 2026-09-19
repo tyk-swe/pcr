@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use packetcraftr_core::budget::{Deadline, Interrupted};
+use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
 use packetcraftr::progress::{Runtime, Sink};
@@ -361,6 +361,7 @@ fn check_publication_budget(
             .map_err(|interrupted| match interrupted {
                 Interrupted::Cancelled(cancelled) => EncodeError::Cancelled(cancelled),
                 Interrupted::Exceeded(source) => EncodeError::Deadline { phase, source },
+                _ => EncodeError::Cancelled(Cancelled),
             })?;
     }
     Ok(())

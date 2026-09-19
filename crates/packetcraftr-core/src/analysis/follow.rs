@@ -13,7 +13,7 @@ use crate::analysis::{StreamRef, StreamTransport};
 
 /// Direction lives with the deduplicator every TCP conversation collector
 /// shares; this is its public path.
-pub use crate::analysis::dedup::Direction;
+pub use crate::analysis::dedup::PeerDirection;
 
 /// One run of conversation payload, in delivery order.
 ///
@@ -22,7 +22,7 @@ pub use crate::analysis::dedup::Direction;
 /// datagram's payload is one chunk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chunk {
-    pub direction: Direction,
+    pub direction: PeerDirection,
     /// Run-local reassembly generation within this direction, starting at zero.
     /// Reuse/eviction starts a new generation; this is not a claim of a complete
     /// TCP connection handshake. UDP always uses zero.
@@ -168,9 +168,9 @@ impl Collector {
             } = event
             {
                 let direction = if *sender == client {
-                    Direction::ClientToServer
+                    PeerDirection::ClientToServer
                 } else if *sender == client.reverse() {
-                    Direction::ServerToClient
+                    PeerDirection::ServerToClient
                 } else {
                     continue;
                 };
@@ -213,9 +213,9 @@ impl Collector {
             .clone();
         self.summary.frames = self.summary.frames.saturating_add(1);
         let direction = if *flow == client {
-            Direction::ClientToServer
+            PeerDirection::ClientToServer
         } else {
-            Direction::ServerToClient
+            PeerDirection::ServerToClient
         };
         // Every datagram is one chunk, an empty one included: the frame and
         // direction are part of the conversation's shape.
@@ -229,10 +229,10 @@ impl Collector {
         }]
     }
 
-    fn tally(&mut self, direction: Direction, length: usize) {
+    fn tally(&mut self, direction: PeerDirection, length: usize) {
         let counter = match direction {
-            Direction::ClientToServer => &mut self.summary.client_bytes,
-            Direction::ServerToClient => &mut self.summary.server_bytes,
+            PeerDirection::ClientToServer => &mut self.summary.client_bytes,
+            PeerDirection::ServerToClient => &mut self.summary.server_bytes,
         };
         *counter = counter.saturating_add(length as u64);
     }

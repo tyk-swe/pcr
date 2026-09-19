@@ -25,7 +25,7 @@ use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
 };
 use packetcraftr_core::{
-    budget::{Deadline, Interrupted},
+    budget::{Cancelled, Deadline, Interrupted},
     decode::DecodedPacket,
     diagnostic::Diagnostic,
     packet::Packet,
@@ -80,6 +80,7 @@ pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Resul
     deadline.enforce().map_err(|interrupted| match interrupted {
         Interrupted::Cancelled(source) => Error::new(workflow, ErrorKind::Cancelled(source)),
         Interrupted::Exceeded(error) => duration_limit(workflow, error.actual, error.limit),
+        _ => Error::new(workflow, ErrorKind::Cancelled(Cancelled)),
     })
 }
 

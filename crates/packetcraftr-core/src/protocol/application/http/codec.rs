@@ -23,7 +23,12 @@ impl Http {
     pub fn head(&self) -> &Head {
         &self.head
     }
-    pub fn from_wire(input: &[u8]) -> Result<Self, crate::codec::Error> {
+}
+
+impl TryFrom<&[u8]> for Http {
+    type Error = crate::codec::Error;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
         let (head, length) = parse_head(input)
             .map_err(|e| invalid(NAME, e.to_string()))?
             .ok_or_else(|| invalid(NAME, "incomplete HTTP/1 headers"))?;
@@ -112,7 +117,7 @@ impl LayerCodec for HttpCodec {
                 "HTTP/1 dissection requires retained header wire",
             ));
         };
-        let mut layer = Http::from_wire(wire)?;
+        let mut layer = Http::try_from(wire.as_ref())?;
         for (name, value) in fields {
             if layer.field(name).as_ref() != Some(value) {
                 layer.set_field(name, value.clone())?;

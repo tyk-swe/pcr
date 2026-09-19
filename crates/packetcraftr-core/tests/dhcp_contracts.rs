@@ -34,7 +34,7 @@ fn dhcpv4_overload_unknown_options_and_original_wire_survive_round_trips() {
         .server_name_options
         .push(Option4::parameter_request(Bytes::from_static(&[1, 3, 6])));
     let wire = message.to_wire().unwrap();
-    let parsed = Dhcpv4::from_wire(wire.clone()).unwrap();
+    let parsed = Dhcpv4::try_from(wire.clone()).unwrap();
     assert_eq!(parsed.transaction_id, 0x12345678);
     assert_eq!(parsed.file_options, message.file_options);
     assert_eq!(parsed.server_name_options, message.server_name_options);
@@ -48,7 +48,7 @@ fn dhcpv4_overload_unknown_options_and_original_wire_survive_round_trips() {
     let mut noncanonical = Dhcpv4::default().to_wire().unwrap().to_vec();
     noncanonical.splice(240..240, [0, 0]);
     noncanonical.extend([0xaa, 0xbb]);
-    let mut parsed = Dhcpv4::from_wire(noncanonical.clone()).unwrap();
+    let mut parsed = Dhcpv4::try_from(noncanonical.clone()).unwrap();
     assert_eq!(parsed.to_wire().unwrap().as_ref(), noncanonical);
     parsed.edit(|message| message.transaction_id = 9);
     let edited = parsed.to_wire().unwrap();
@@ -149,7 +149,7 @@ fn dhcpv6_relay_address_associations_and_prefixes_are_typed_and_editable() {
         inner,
     );
     let wire = relay.to_wire().unwrap();
-    let mut decoded = Dhcpv6::from_wire(wire.clone()).unwrap();
+    let mut decoded = Dhcpv6::try_from(wire.clone()).unwrap();
     assert_eq!(decoded.to_wire().unwrap(), wire);
     assert_eq!(decoded.message_type, 12);
     let path = "options[0].value.message.options[1].value.options[0].value.address";
@@ -161,7 +161,7 @@ fn dhcpv6_relay_address_associations_and_prefixes_are_typed_and_editable() {
         .set_field_path(path, FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
         .unwrap();
     let changed = decoded.to_wire().unwrap();
-    let parsed = Dhcpv6::from_wire(changed).unwrap();
+    let parsed = Dhcpv6::try_from(changed).unwrap();
     assert_eq!(
         parsed.field_path(path),
         Some(FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
@@ -187,8 +187,8 @@ fn dhcp_limits_and_malformed_lengths_fail_without_losing_capture_bytes() {
         )
         .is_err()
     );
-    assert!(Dhcpv6::from_wire(wire.slice(..wire.len() - 1)).is_err());
-    assert!(Dhcpv4::from_wire(vec![0; 239]).is_err());
+    assert!(Dhcpv6::try_from(wire.slice(..wire.len() - 1)).is_err());
+    assert!(Dhcpv4::try_from(vec![0; 239]).is_err());
     let mut relay = Dhcpv6::default();
     for _ in 0..9 {
         relay = Dhcpv6::relay_forward(
@@ -237,7 +237,7 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
     use packetcraftr_core::{document, fuzz, packet::Packet};
     let registry = builtin::registry();
     let mut packet = Packet::new();
-    packet.push(Dhcpv6::from_wire(reply().to_wire().unwrap()).unwrap());
+    packet.push(Dhcpv6::try_from(reply().to_wire().unwrap()).unwrap());
     let document = document::Packet::from_packet(&packet);
     let recreated = document.to_packet(&registry, 8).unwrap();
     assert_eq!(
@@ -267,7 +267,7 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
         );
     }
     let mut packet = Packet::new();
-    packet.push(Dhcpv6::from_wire(relay.to_wire().unwrap()).unwrap());
+    packet.push(Dhcpv6::try_from(relay.to_wire().unwrap()).unwrap());
     let document = document::Packet::from_packet(&packet);
     assert!(document.to_packet(&builtin::registry(), 8).is_ok());
     assert!(Duid::link_layer(1, vec![0; 65_536]).is_err());

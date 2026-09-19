@@ -15,7 +15,7 @@ use packetcraftr_core::analysis::expert::Finding;
 use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::analysis::{StreamRef, StreamTransport};
 
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::{Frame, Lengths};
 use packetcraftr_core::protocol::transport::{Tcp, TcpOption};
 use packetcraftr_core::registry::Registry;
 
@@ -561,8 +561,10 @@ fn capture_evidence_surfaces_truncated_frames_and_clock_regressions() {
         Frame::try_with_lengths(
             epoch + Duration::from_secs(11),
             frame.link_type,
-            cut,
-            frame.captured_length(),
+            Lengths {
+                captured: cut,
+                original: frame.captured_length(),
+            },
             frame.bytes().slice(..cut as usize),
         )
         .expect("truncated fixture frame is valid")
@@ -654,8 +656,10 @@ fn capture_evidence_combines_on_one_frame() {
         Frame::try_with_lengths(
             epoch + Duration::from_secs(2),
             frame.link_type,
-            cut,
-            frame.captured_length(),
+            Lengths {
+                captured: cut,
+                original: frame.captured_length(),
+            },
             frame.bytes().slice(..cut as usize),
         )
         .expect("truncated fixture frame is valid")
@@ -691,8 +695,10 @@ fn capture_evidence_names_the_declared_interface_when_present() {
         Frame::try_with_lengths(
             epoch,
             frame.link_type,
-            cut,
-            frame.captured_length(),
+            Lengths {
+                captured: cut,
+                original: frame.captured_length(),
+            },
             frame.bytes().slice(..cut as usize),
         )
         .expect("truncated fixture frame is valid")

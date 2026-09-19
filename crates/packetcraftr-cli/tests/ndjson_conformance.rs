@@ -373,7 +373,7 @@ fn production_typed_event_variants_are_schema_valid() {
         output::contract::Command::Follow,
         output::follow::Chunk {
             direction_generation: 0,
-            direction: packetcraftr_core::analysis::follow::Direction::ClientToServer,
+            direction: packetcraftr_core::analysis::follow::PeerDirection::ClientToServer,
             frame: 1,
             bytes_hex: "01".to_owned(),
         },

@@ -125,9 +125,11 @@ struct Dissection {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl Tls {
+impl TryFrom<super::Hello> for Tls {
+    type Error = crate::codec::Error;
+
     /// Constructs bounded hello records and derives their inspection fields.
-    pub fn from_hello(hello: super::Hello) -> Result<Self, crate::codec::Error> {
+    fn try_from(hello: super::Hello) -> Result<Self, Self::Error> {
         let wire = hello.to_wire()?;
         let parsed = Self::from_records(&wire)
             .ok_or_else(|| invalid(NAME, "hello did not encode complete TLS records"))?;
@@ -136,9 +138,13 @@ impl Tls {
         }
         Ok(parsed.layer)
     }
+}
+
+impl TryFrom<&[u8]> for Tls {
+    type Error = crate::codec::Error;
 
     /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
-    pub fn from_wire(wire: &[u8]) -> Result<Self, crate::codec::Error> {
+    fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
         let parsed =
             Self::from_records(wire).ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
         if parsed.remainder != 0 {
@@ -146,10 +152,12 @@ impl Tls {
         }
         Ok(parsed.layer)
     }
+}
 
+impl Tls {
     fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::layer::FieldError> {
         let hello = super::Hello::from_value(value)?;
-        let replacement = Self::from_hello(hello)
+        let replacement = Self::try_from(hello)
             .map_err(|_| crate::protocol::common::out_of_range(tls_schema(), "hello"))?;
         *self = replacement;
         Ok(())
@@ -457,9 +465,9 @@ impl LayerCodec for TlsCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         let mut layer = match fields.get("wire") {
-            Some(FieldValue::Bytes(wire)) => Tls::from_wire(wire)?,
+            Some(FieldValue::Bytes(wire)) => Tls::try_from(wire.as_ref())?,
             Some(_) => return Err(invalid(NAME, "wire must be bytes")),
-            None => Tls::from_hello(super::Hello::default())?,
+            None => Tls::try_from(super::Hello::default())?,
         };
         for (name, value) in fields {
             if name == "wire" || layer.field(name).as_ref() == Some(value) {

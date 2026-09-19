@@ -18,7 +18,7 @@ pub(crate) const ROOT_LINK_TYPE: LinkType = LinkType(u32::MAX);
 pub(crate) fn rooted_registry(root: &'static str) -> Arc<Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
-            builder.bind_link_type(ROOT_LINK_TYPE.0, root)?;
+            builder.bind_link_type(ROOT_LINK_TYPE, root)?;
             Ok(())
         })
         .unwrap_or_else(|error| panic!("{root} root binding: {error}")),

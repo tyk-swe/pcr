@@ -12,9 +12,30 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr.output/v5`. Schemas and published examples migrate together.
   DNS questions use one typed list and section counts use `WireValue<u16>`.
   See `docs/migration-unreleased.md`.
+- Rust APIs now use standard conversion and collection traits. Wire
+  constructors become `TryFrom` (`Dns`, `Dhcpv4`, and `Dhcpv6` from
+  `Bytes`/`Vec<u8>`/`&[u8]`; `Http` and `Tls` from `&[u8]`; `Tls` also from
+  `Hello`), while `from_wire_with_limits` stays inherent. `field::Path` and
+  `BuiltinProtocol` parse through `FromStr`; the inherent `Path::parse` is
+  removed. Registry bindings take the `LinkType` newtype and
+  `impl Into<Discriminator>` instead of bare integers, `Frame` length
+  constructors take `Lengths { captured, original }`, and
+  `analysis::scope::Interner::with_limits` takes `Limits { limit, max_bytes }`.
+  `Malformed::new` takes `Option<String>`, analysis HTTP/DNS collectors take
+  `impl IntoIterator<Item = u16>`, `transform::VlanTag` is renamed
+  `VlanRewrite` (with `From<link::VlanTag>`), `analysis::follow::Direction` is
+  renamed `PeerDirection`, and `budget::Interrupted` plus the capture-group
+  `Failure`/`Error` structs are `#[non_exhaustive]`.
 
 ### Added
 
+- `Packet` implements `Extend` and `&Packet` implements `IntoIterator`,
+  `analysis::SourceSet` dereferences to `[SourceFrame]`, `LinkType` implements
+  `Display`, and the `as_str`-backed enums (`error::Kind`, `FieldKind`,
+  `BuiltinProtocol`, `scan::Classification`, traceroute `ResponseKind` and
+  `Completion`, `fuzz::CaseOutcome`, `ProbeStatus`, `dns::Outcome`,
+  `QuestionStatus`, and netio `Capability`, `Mode`, and `OverflowPolicy`)
+  implement `Display`.
 - Portable TCP connect scans expose bounded socket outcomes and cleanup, with
   explicit multi-target/CIDR selections, exclusions, and stable deduplication.
 - Replay maps source interfaces or filters to output interfaces and supports

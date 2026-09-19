@@ -73,7 +73,7 @@ fn bytes_profile() -> Arc<UdpProfile> {
 fn explicit_checks_distinguish_dns_identity_bytes_and_unchecked_replies() {
     let profile = dns_profile();
     let query = profile.payload(7);
-    let mut response = Dns::from_wire(query.clone()).unwrap();
+    let mut response = Dns::try_from(query.clone()).unwrap();
     response.edit(|dns| dns.response = true);
     assert_eq!(
         profile

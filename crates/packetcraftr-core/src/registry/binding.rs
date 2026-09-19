@@ -4,6 +4,12 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Discriminator(pub u64);
 
+impl From<u64> for Discriminator {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 /// How one display-filter path resolves onto reflective layer fields.
 ///
 /// Canonical `<protocol>.<field>` paths need no binding: the filter compiler

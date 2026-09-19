@@ -106,7 +106,7 @@ impl CaptureOutput {
     ) -> Result<(), CliError> {
         let registry = builtin::registry();
         let root = registry
-            .root_for_link_type(self.link_type.0)
+            .root_for_link_type(self.link_type)
             .expect("validate_root checked the registered capture root");
         let decoded = registry
             .codec(root.as_str())
@@ -162,7 +162,7 @@ fn validate_link_type(
     packet: &Packet,
     link_type: LinkType,
 ) -> Result<(), CliError> {
-    let Some(root) = registry.root_for_link_type(link_type.0) else {
+    let Some(root) = registry.root_for_link_type(link_type) else {
         return Err(CliError::new(
             Kind::Cli,
             format!("link type {} has no built-in decode root", link_type.0),

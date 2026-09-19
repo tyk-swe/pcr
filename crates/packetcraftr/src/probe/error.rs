@@ -88,11 +88,7 @@ impl Workflow {
     }
 }
 
-impl fmt::Display for Workflow {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(Workflow);
 
 /// The published codes and remediations one workflow attaches to its errors.
 struct Codes {

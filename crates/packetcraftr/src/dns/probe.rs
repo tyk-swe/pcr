@@ -42,7 +42,7 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
         ..Udp::default()
     });
     if probe.server_port == DEFAULT_SERVER_PORT || probe.source_port == DEFAULT_SERVER_PORT {
-        if let Ok(dns) = Dns::from_wire(probe.query.clone()) {
+        if let Ok(dns) = Dns::try_from(probe.query.clone()) {
             packet.push(dns);
         } else {
             packet.push(Raw::new(probe.query.clone()));

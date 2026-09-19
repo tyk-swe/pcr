@@ -10,6 +10,8 @@
 //! `packetcraftr-netio`; authorization-gated live workflows live in
 //! `packetcraftr`.
 
+#[macro_export]
+#[doc(hidden)]
 macro_rules! display_via_as_str {
     ($type:ty) => {
         impl ::std::fmt::Display for $type {

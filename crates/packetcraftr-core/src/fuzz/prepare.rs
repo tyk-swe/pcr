@@ -460,8 +460,10 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                 target: target.clone(),
                 message: format!("layer index is outside packet length {}", packet.len()),
             })?;
-        let path =
-            crate::field::Path::parse(&target.field).map_err(|source| Error::InvalidTarget {
+        let path = target
+            .field
+            .parse::<crate::field::Path>()
+            .map_err(|source| Error::InvalidTarget {
                 target: target.clone(),
                 message: source.to_string(),
             })?;

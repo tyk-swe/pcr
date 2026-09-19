@@ -26,8 +26,10 @@ pub struct PathError {
     pub path: String,
 }
 
-impl Path {
-    pub fn parse(input: &str) -> Result<Self, PathError> {
+impl std::str::FromStr for Path {
+    type Err = PathError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
         let invalid = || PathError {
             path: input.chars().take(256).collect(),
         };
@@ -74,7 +76,9 @@ impl Path {
         }
         Ok(Self { root, components })
     }
+}
 
+impl Path {
     pub fn root(&self) -> &str {
         &self.root
     }

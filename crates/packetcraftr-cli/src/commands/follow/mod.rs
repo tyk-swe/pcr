@@ -130,7 +130,7 @@ pub(super) fn run(
 fn direction_matches(direction: Direction, chunk: &Chunk) -> bool {
     match direction {
         Direction::Both => true,
-        Direction::Client => chunk.direction == analysis::follow::Direction::ClientToServer,
-        Direction::Server => chunk.direction == analysis::follow::Direction::ServerToClient,
+        Direction::Client => chunk.direction == analysis::follow::PeerDirection::ClientToServer,
+        Direction::Server => chunk.direction == analysis::follow::PeerDirection::ServerToClient,
     }
 }

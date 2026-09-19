@@ -49,6 +49,8 @@ impl QuestionStatus {
     }
 }
 
+packetcraftr_core::display_via_as_str!(QuestionStatus);
+
 /// The deterministic outcome of one batch question, in input order.
 #[derive(Debug)]
 pub struct QuestionOutcome {

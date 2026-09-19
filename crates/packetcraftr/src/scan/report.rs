@@ -57,6 +57,8 @@ impl Classification {
     }
 }
 
+packetcraftr_core::display_via_as_str!(Classification);
+
 pub use crate::probe::ProbeStatus;
 
 #[derive(Clone, Debug)]

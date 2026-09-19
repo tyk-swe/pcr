@@ -44,7 +44,7 @@ fn udp_frame(
         destination_port,
         ..Default::default()
     });
-    packet.push(Dns::from_wire(payload.to_vec()).unwrap());
+    packet.push(Dns::try_from(payload.to_vec()).unwrap());
     let built = Builder::new(registry.clone())
         .build(packet, Default::default(), Default::default())
         .unwrap();

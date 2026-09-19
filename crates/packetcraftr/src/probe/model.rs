@@ -3,8 +3,6 @@
 
 //! Probe vocabulary shared by the scan and traceroute workflows.
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 /// The wire protocol a probe is sent over, as a request names it.
@@ -29,11 +27,7 @@ impl Transport {
     }
 }
 
-impl fmt::Display for Transport {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
+packetcraftr_core::display_via_as_str!(Transport);
 
 /// The transport-specific destination one probe addresses.
 ///
@@ -86,3 +80,5 @@ impl ProbeStatus {
         }
     }
 }
+
+packetcraftr_core::display_via_as_str!(ProbeStatus);

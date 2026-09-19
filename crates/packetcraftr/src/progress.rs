@@ -14,7 +14,7 @@ use std::{
     thread,
 };
 
-use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 /// Maximum concurrent callback workers admitted by one runtime.
@@ -173,12 +173,15 @@ pub enum EmitError {
     Output(#[from] BoundaryError),
 }
 
+impl From<Cancelled> for EmitError {
+    fn from(cancelled: Cancelled) -> Self {
+        Self::Output(cancelled.into_boundary_error())
+    }
+}
+
 impl From<Interrupted> for EmitError {
     fn from(interrupted: Interrupted) -> Self {
-        match interrupted {
-            Interrupted::Cancelled(cancelled) => Self::Output(cancelled.into_boundary_error()),
-            Interrupted::Exceeded(exceeded) => Self::Deadline(exceeded),
-        }
+        interrupted.into_error()
     }
 }
 

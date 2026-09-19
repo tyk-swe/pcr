@@ -90,6 +90,13 @@ impl fmt::Debug for SourceSet {
         f.debug_tuple("SourceSet").field(&self.0.frames).finish()
     }
 }
+impl std::ops::Deref for SourceSet {
+    type Target = [SourceFrame];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.frames
+    }
+}
 impl SourceSet {
     pub fn frames(&self) -> &[SourceFrame] {
         &self.0.frames

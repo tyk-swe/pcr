@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 
 use packetcraftr_core::analysis::StreamRef;
-use packetcraftr_core::analysis::follow::{Chunk, Direction};
+use packetcraftr_core::analysis::follow::{Chunk, PeerDirection};
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
@@ -18,7 +18,7 @@ use super::arguments::Direction as Selected;
 /// One direction's staged payload and its deterministic destination.
 #[derive(Debug)]
 struct Staged {
-    direction: Direction,
+    direction: PeerDirection,
     file: StagedFile,
     bytes: u64,
 }
@@ -26,7 +26,7 @@ struct Staged {
 /// A direction payload this invocation published.
 #[derive(Clone, Debug)]
 pub(super) struct Written {
-    pub(super) direction: Direction,
+    pub(super) direction: PeerDirection,
     pub(super) path: String,
     pub(super) bytes: u64,
 }
@@ -64,10 +64,10 @@ impl DirectionFiles {
         selected: Selected,
         max_bytes: usize,
     ) -> Result<Self, CliError> {
-        let directions: &[Direction] = match selected {
-            Selected::Both => &[Direction::ClientToServer, Direction::ServerToClient],
-            Selected::Client => &[Direction::ClientToServer],
-            Selected::Server => &[Direction::ServerToClient],
+        let directions: &[PeerDirection] = match selected {
+            Selected::Both => &[PeerDirection::ClientToServer, PeerDirection::ServerToClient],
+            Selected::Client => &[PeerDirection::ClientToServer],
+            Selected::Server => &[PeerDirection::ServerToClient],
         };
         let mut staged = Vec::with_capacity(directions.len());
         for direction in directions {
@@ -185,10 +185,10 @@ impl DirectionFiles {
 }
 
 /// The filename suffix each direction publishes under.
-fn direction_name(direction: Direction) -> &'static str {
+fn direction_name(direction: PeerDirection) -> &'static str {
     match direction {
-        Direction::ClientToServer => "client",
-        Direction::ServerToClient => "server",
+        PeerDirection::ClientToServer => "client",
+        PeerDirection::ServerToClient => "server",
     }
 }
 
@@ -204,7 +204,7 @@ mod tests {
         }
     }
 
-    fn chunk(direction: Direction, bytes: &'static [u8]) -> Chunk {
+    fn chunk(direction: PeerDirection, bytes: &'static [u8]) -> Chunk {
         Chunk {
             direction,
             direction_generation: 0,
@@ -220,13 +220,13 @@ mod tests {
             DirectionFiles::stage(directory.path(), selector(), Selected::Both, usize::MAX)
                 .expect("staging succeeds");
         files
-            .write(&chunk(Direction::ClientToServer, b"hello"))
+            .write(&chunk(PeerDirection::ClientToServer, b"hello"))
             .unwrap();
         files
-            .write(&chunk(Direction::ServerToClient, b"world!"))
+            .write(&chunk(PeerDirection::ServerToClient, b"world!"))
             .unwrap();
         files
-            .write(&chunk(Direction::ClientToServer, b" again"))
+            .write(&chunk(PeerDirection::ClientToServer, b" again"))
             .unwrap();
         let written = files.publish().expect("publish succeeds");
         assert_eq!(
@@ -235,8 +235,8 @@ mod tests {
                 .map(|file| (file.direction, file.bytes))
                 .collect::<Vec<_>>(),
             [
-                (Direction::ClientToServer, 11),
-                (Direction::ServerToClient, 6),
+                (PeerDirection::ClientToServer, 11),
+                (PeerDirection::ServerToClient, 6),
             ]
         );
         assert_eq!(
@@ -267,10 +267,10 @@ mod tests {
             DirectionFiles::stage(directory.path(), selector(), Selected::Both, usize::MAX)
                 .expect("staging succeeds");
         files
-            .write(&chunk(Direction::ClientToServer, b"hello"))
+            .write(&chunk(PeerDirection::ClientToServer, b"hello"))
             .unwrap();
         files
-            .write(&chunk(Direction::ServerToClient, b"world"))
+            .write(&chunk(PeerDirection::ServerToClient, b"world"))
             .unwrap();
         // A colliding server destination appears after staging: publishing the
         // client file must be rolled back and the colliding file untouched.
@@ -325,7 +325,7 @@ mod tests {
                 .expect("staging succeeds");
         let written = files.publish().expect("publish succeeds");
         assert_eq!(written.len(), 1);
-        assert_eq!(written[0].direction, Direction::ClientToServer);
+        assert_eq!(written[0].direction, PeerDirection::ClientToServer);
         assert_eq!(written[0].bytes, 0);
         assert_eq!(
             std::fs::read(directory.path().join("tcp-7-client.bin")).unwrap(),
@@ -340,13 +340,13 @@ mod tests {
         let mut files = DirectionFiles::stage(directory.path(), selector(), Selected::Both, 6)
             .expect("staging succeeds");
         files
-            .write(&chunk(Direction::ClientToServer, b"hello"))
+            .write(&chunk(PeerDirection::ClientToServer, b"hello"))
             .unwrap();
         files
-            .write(&chunk(Direction::ServerToClient, b"w"))
+            .write(&chunk(PeerDirection::ServerToClient, b"w"))
             .unwrap();
         let error = files
-            .write(&chunk(Direction::ServerToClient, b"orld"))
+            .write(&chunk(PeerDirection::ServerToClient, b"orld"))
             .expect_err("shared budget trips");
         assert!(error.message.contains("--max-application-output-bytes"));
         drop(files);

@@ -144,8 +144,9 @@ pub struct Collector {
 }
 impl Collector {
     /// Ports are explicit and bounded; use `[53]` for standard DNS.
-    pub fn new(limits: Limits, mut ports: Vec<u16>) -> Result<Self, Error> {
+    pub fn new(limits: Limits, ports: impl IntoIterator<Item = u16>) -> Result<Self, Error> {
         limits.validate()?;
+        let mut ports: Vec<u16> = ports.into_iter().collect();
         ports.sort_unstable();
         ports.dedup();
         if ports.is_empty() || ports.len() > 256 || ports.contains(&0) {

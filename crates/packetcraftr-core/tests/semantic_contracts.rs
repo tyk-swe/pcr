@@ -339,7 +339,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
         (ipv6_fragment, "non-atomic ipv6_fragment fragment"),
         (
             [Malformed::new(
-                Some(packetcraftr_core::layer::Id::new("ipv4")),
+                Some("ipv4".to_owned()),
                 Bytes::new(),
                 "short header",
             )]
@@ -367,7 +367,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
     }
 
     let harmless: Packet = [Malformed::new(
-        Some(packetcraftr_core::layer::Id::new("tcp")),
+        Some("tcp".to_owned()),
         Bytes::new(),
         "short segment",
     )]

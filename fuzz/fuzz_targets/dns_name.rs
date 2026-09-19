@@ -57,5 +57,5 @@ fuzz_target!(|data: &[u8]| {
         );
     }
 
-    let _ = Dns::from_wire(Bytes::copy_from_slice(message));
+    let _ = Dns::try_from(Bytes::copy_from_slice(message));
 });

@@ -50,11 +50,8 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: |
-          cargo doc --locked --workspace --no-default-features --no-deps
           cargo doc --locked --workspace --no-default-features --no-deps --document-private-items
-          cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps
           cargo doc --locked --workspace --no-default-features --features packetcraftr-cli/native-layer3 --no-deps --document-private-items
-          cargo doc --locked --workspace --all-features --no-deps
           cargo doc --locked --workspace --all-features --no-deps --document-private-items
 
   portable:

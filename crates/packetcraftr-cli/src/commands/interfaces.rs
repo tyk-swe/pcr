@@ -11,10 +11,10 @@ use crate::errors::CliError;
 use crate::rendering::optional_display;
 use crate::system::{InterfaceSelector, select_interfaces};
 
-pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
+pub(super) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr interfaces
   packetcraftr interfaces --interface lo
-  packetcraftr --output json interfaces"#;
+  packetcraftr --output json interfaces";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

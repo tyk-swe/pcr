@@ -79,7 +79,7 @@ pub struct FieldSchema {
     pub description: &'static str,
     /// Named members of an object or of each object in a list.
     #[serde(skip_serializing_if = "<[FieldSchema]>::is_empty")]
-    pub children: &'static [FieldSchema],
+    pub children: &'static [Self],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

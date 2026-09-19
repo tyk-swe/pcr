@@ -115,7 +115,10 @@ fn connection_reuse_after_a_midstream_capture_starts_a_new_generation() {
         Some(StartLine::Request { target, .. }) if target.as_ref() == b"/new"
     ));
     assert_eq!(
-        messages[3].head.as_ref().and_then(|head| head.status()),
+        messages[3]
+            .head
+            .as_ref()
+            .and_then(packetcraftr_core::protocol::application::http::Head::status),
         Some(201)
     );
     assert_eq!(messages[3].request, Some(messages[2].index));
@@ -158,7 +161,10 @@ fn syn_ack_only_reuse_after_a_midstream_capture_starts_a_new_generation() {
         Some(StartLine::Request { target, .. }) if target.as_ref() == b"/new"
     ));
     assert_eq!(
-        messages[3].head.as_ref().and_then(|head| head.status()),
+        messages[3]
+            .head
+            .as_ref()
+            .and_then(packetcraftr_core::protocol::application::http::Head::status),
         Some(201)
     );
     assert_eq!(messages[3].request, Some(messages[2].index));

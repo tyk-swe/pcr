@@ -215,7 +215,7 @@ impl Tls {
             }
         }
         let first = records.first()?;
-        let mut layer = Tls {
+        let mut layer = Self {
             content_type: first.content_type,
             version: first.legacy_version,
             record_count: u16::try_from(records.len()).ok()?,

@@ -362,13 +362,13 @@ impl Collector {
                 self.directions.insert(data.flow, direction);
             }
             application::Event::Gap { flow, stream } => {
-                self.stop(flow, stream, Status::Gap, events)?
+                self.stop(flow, stream, Status::Gap, events)?;
             }
             application::Event::Conflict { flow, stream } => {
-                self.stop(flow, stream, Status::Conflict, events)?
+                self.stop(flow, stream, Status::Conflict, events)?;
             }
             application::Event::Evicted { flow, stream } => {
-                self.stop(flow, stream, Status::Evicted, events)?
+                self.stop(flow, stream, Status::Evicted, events)?;
             }
             application::Event::Closed {
                 flow,

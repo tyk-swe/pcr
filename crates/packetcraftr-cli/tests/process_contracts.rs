@@ -993,7 +993,7 @@ fn stalled_ndjson_stdout_exits_within_the_budget_and_shutdown_allowance() {
                 break;
             }
             Ok(None) if started.elapsed() < allowance => {
-                std::thread::sleep(Duration::from_millis(10))
+                std::thread::sleep(Duration::from_millis(10));
             }
             result => {
                 let _ = child.kill();

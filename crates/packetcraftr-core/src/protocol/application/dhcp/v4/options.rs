@@ -66,7 +66,7 @@ impl Option4 {
         match (&self.value, self.code) {
             (Value4::MessageType(value), 53) => output.push(*value),
             (Value4::Address(value), 1 | 16 | 28 | 32 | 50 | 54) => {
-                output.extend_from_slice(&value.octets())
+                output.extend_from_slice(&value.octets());
             }
             (Value4::Addresses(values), 3..=11 | 41 | 42 | 44 | 45 | 48 | 49 | 65 | 68..=76) => {
                 if values.is_empty() || values.len() > 63 {
@@ -77,14 +77,14 @@ impl Option4 {
                 }
             }
             (Value4::Seconds(value), 24 | 35 | 38 | 51 | 58 | 59) => {
-                output.extend_from_slice(&value.to_be_bytes())
+                output.extend_from_slice(&value.to_be_bytes());
             }
             (Value4::Number(value), 13 | 22 | 26 | 57) => {
-                output.extend_from_slice(&value.to_be_bytes())
+                output.extend_from_slice(&value.to_be_bytes());
             }
             (Value4::Codes(value), 55)
             | (Value4::Text(value), 12 | 14 | 15 | 17 | 18 | 40 | 56 | 60 | 64 | 66 | 67) => {
-                extend(&mut output, value, 255)?
+                extend(&mut output, value, 255)?;
             }
             (
                 Value4::ClientIdentifier {
@@ -101,7 +101,7 @@ impl Option4 {
             }
             (Value4::Overload(value), 52) if (1..=3).contains(value) => output.push(*value),
             (Value4::Raw(value), code) if !matches!(code, 0 | 255) => {
-                extend(&mut output, value, 255)?
+                extend(&mut output, value, 255)?;
             }
             _ => {
                 return Err(Error::Invalid(

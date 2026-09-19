@@ -46,7 +46,7 @@ pub(super) fn run(
     let builder = core::build::Builder::new(registry);
     let mut writer = capture
         .as_ref()
-        .map(|capture| capture.writer())
+        .map(crate::command_options::CaptureOutput::writer)
         .transpose()?;
     let mut summary = output::build::Complete::default();
     let mut diagnostics = Vec::new();

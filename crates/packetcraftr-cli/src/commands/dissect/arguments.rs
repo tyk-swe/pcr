@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::command_options::{DecodeArgs, PacketBudgetArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
+pub(crate) const AFTER_LONG_HELP: &str = r"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
 With --filter, text, hex, and raw output emit the dissection only when the frame matches; when the frame does not match, stdout stays empty (still a success) and `frame did not match the filter` is reported on stderr. Aggregate JSON always emits one document: result.matched reports the filter outcome and result.dissection is null only when the frame does not match.
 
@@ -13,7 +13,7 @@ Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1
   packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'
-  packetcraftr dissect --file frame.bin --link-type 228 --tls-port 4433"#;
+  packetcraftr dissect --file frame.bin --link-type 228 --tls-port 4433";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

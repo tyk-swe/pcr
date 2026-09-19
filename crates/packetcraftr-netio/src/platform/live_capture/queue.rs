@@ -40,7 +40,7 @@ impl CaptureQueue {
     pub(super) fn lock(&self) -> MutexGuard<'_, CaptureState> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Waits for a state change, returning the guard and whether it timed out.
@@ -54,7 +54,7 @@ impl CaptureQueue {
         let (state, result) = self
             .changed
             .wait_timeout(state, timeout)
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (state, result.timed_out())
     }
 

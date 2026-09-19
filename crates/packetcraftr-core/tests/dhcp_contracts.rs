@@ -57,7 +57,7 @@ fn dhcpv4_overload_unknown_options_and_original_wire_survive_round_trips() {
 #[test]
 fn named_dhcpv4_options_are_editable_through_templates_and_filters() {
     let registry = builtin::registry();
-    let packet=expression::parse(r#"ipv4(source=192.0.2.1,destination=192.0.2.10)/udp(source_port=67,destination_port=68)/dhcpv4(operation=2,message_type=5,transaction_id=7,your_address=192.0.2.10,options=[{code=53,value={message_type=5}},{code=51,value={seconds=3600}},{code=54,value={address=192.0.2.1}}])"#,&registry,Default::default()).unwrap();
+    let packet=expression::parse(r"ipv4(source=192.0.2.1,destination=192.0.2.10)/udp(source_port=67,destination_port=68)/dhcpv4(operation=2,message_type=5,transaction_id=7,your_address=192.0.2.10,options=[{code=53,value={message_type=5}},{code=51,value={seconds=3600}},{code=54,value={address=192.0.2.1}}])",&registry,Default::default()).unwrap();
     let template = Template::new(packet).axis(
         2,
         "options[1].value.seconds",

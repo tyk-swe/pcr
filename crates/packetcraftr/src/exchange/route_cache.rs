@@ -45,7 +45,7 @@ fn cached<K: Clone + Eq + std::hash::Hash, V: Clone, E>(
 ) -> Result<V, E> {
     let hit = cache
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&key)
         .cloned();
     if let Some(value) = hit {
@@ -54,7 +54,7 @@ fn cached<K: Clone + Eq + std::hash::Hash, V: Clone, E>(
     let value = lookup()?;
     cache
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(key, value.clone());
     Ok(value)
 }

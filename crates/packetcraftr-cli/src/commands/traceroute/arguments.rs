@@ -10,9 +10,9 @@ use crate::command_options::{
 
 pub(crate) const LONG_ABOUT: &str = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.";
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
+pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr traceroute 192.0.2.1 --strategy icmp
-  packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;
+  packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum Strategy {

@@ -224,7 +224,7 @@ impl Classified for Error {
     }
 
     fn context(&self) -> Option<Coordinate> {
-        Error::context(self)
+        Self::context(self)
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.

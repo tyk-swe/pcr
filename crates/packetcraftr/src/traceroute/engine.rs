@@ -292,10 +292,11 @@ impl Default for TracerouteState {
 impl TracerouteState {
     fn observe_probe(&mut self, probe: &ProbeEvidence) {
         self.completion = match (self.completion, probe.response_kind, probe.status) {
-            (_, Some(ResponseKind::DestinationReached), _) => Completion::DestinationReached,
-            (Completion::DestinationReached, _, _) => Completion::DestinationReached,
-            (_, Some(ResponseKind::Unreachable), _) => Completion::Unreachable,
-            (Completion::Unreachable, _, _) => Completion::Unreachable,
+            (_, Some(ResponseKind::DestinationReached), _)
+            | (Completion::DestinationReached, _, _) => Completion::DestinationReached,
+            (_, Some(ResponseKind::Unreachable), _) | (Completion::Unreachable, _, _) => {
+                Completion::Unreachable
+            }
             (_, _, ProbeStatus::Response) => Completion::MaximumHops,
             (completion, _, _) => completion,
         };

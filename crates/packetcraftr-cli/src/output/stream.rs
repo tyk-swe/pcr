@@ -300,7 +300,7 @@ impl StreamEncoder {
                     Ok(output) => break output,
                     Err(std::sync::TryLockError::Poisoned(_)) => return Err(EncodeError::Poisoned),
                     Err(std::sync::TryLockError::WouldBlock) => {
-                        std::thread::sleep(Duration::from_millis(1))
+                        std::thread::sleep(Duration::from_millis(1));
                     }
                 }
             }

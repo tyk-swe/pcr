@@ -10,7 +10,7 @@ use packetcraftr_cli::output::contract::Format;
 use crate::commands::Command;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
 
-const ROOT_HELP_FORMATS: &str = r#"Output formats:
+const ROOT_HELP_FORMATS: &str = r"Output formats:
   text    Human-readable summaries and diagnostics.
   json    One aggregate JSON document.
   ndjson  One JSON record per streamed event.
@@ -21,16 +21,16 @@ const ROOT_HELP_FORMATS: &str = r#"Output formats:
   pcap    Classic PCAP capture bytes.
   pcapng  PCAPNG capture bytes.
 
-Output availability is command-specific. Machine formats never contain terminal colour codes."#;
+Output availability is command-specific. Machine formats never contain terminal colour codes.";
 
-const ROOT_HELP_EXAMPLES: &str = r#"The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
+const ROOT_HELP_EXAMPLES: &str = r"The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
 
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
-Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#;
+Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";
 
 /// The root help trailer, with the exit-code table rendered from the same
 /// mapping the process exits with.

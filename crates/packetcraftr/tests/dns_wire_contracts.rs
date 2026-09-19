@@ -147,6 +147,7 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
 
 #[test]
 fn names_are_lossless_case_insensitive_and_safely_presented() {
+    type Expected = fn(&DecodeError) -> bool;
     let upper = Name::from_labels([Bytes::from_static(b"WWW"), Bytes::from_static(b"Example")])
         .expect("wire name");
     let lower = Name::from_labels([Bytes::from_static(b"www"), Bytes::from_static(b"example")])
@@ -157,7 +158,6 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
 
     let escaped = Name::from_labels([Bytes::from_static(b"a.b\\\0")]).expect("octet label");
     assert_eq!(escaped.to_string(), "a\\046b\\092\\000.");
-    type Expected = fn(&DecodeError) -> bool;
     let cases: [(Vec<Bytes>, &str, Expected); 3] = [
         (vec![Bytes::new()], "empty label", |error| {
             matches!(error, DecodeError::InvalidName { .. })

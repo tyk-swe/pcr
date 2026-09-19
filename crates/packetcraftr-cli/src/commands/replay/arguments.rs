@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::command_options::{CaptureReaderBoundsArgs, LinkMode, ReplayPolicyArgs};
 use clap::ValueEnum;
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
+pub(crate) const AFTER_LONG_HELP: &str = r"Replay is policy-gated and may require native features, dependencies, and privileges.
 
 Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. With original/scaled timing, the delay before a kept frame spans any skipped frames in between.
 
@@ -16,7 +16,7 @@ Examples:
   packetcraftr replay capture.pcapng --interface eth0 --timing immediate
   packetcraftr replay capture.pcap --interface 2 --rate 100
   packetcraftr replay capture.pcap --interface 2 --bps 8000000
-  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
+  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'";
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum Timing {

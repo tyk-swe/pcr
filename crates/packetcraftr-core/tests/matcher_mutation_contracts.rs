@@ -16,6 +16,7 @@ use packetcraftr_core::{build, codec, decode, packet::Packet};
 
 #[test]
 fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
+    type Mutator = fn(&mut Packet);
     let registry = registry();
     let tcp_matcher = registry.matcher("tcp").expect("TCP matcher");
     let mut response = Packet::new();
@@ -28,7 +29,6 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
         ..Tcp::default()
     });
 
-    type Mutator = fn(&mut Packet);
     let mutators: [(&str, Mutator); 3] = [
         ("get_mut", |packet| {
             packet.get_mut::<Raw>().expect("Raw").bytes = Bytes::from_static(&[2, 3, 4]);

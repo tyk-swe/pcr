@@ -3,12 +3,12 @@
 
 use crate::command_options::{SendArgs, TemplateArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Live transmission is policy-gated and may require native features, dependencies, and privileges.
+pub(crate) const AFTER_LONG_HELP: &str = r"Live transmission is policy-gated and may require native features, dependencies, and privileges.
 
 --axis expands the recipe into a packet set and --repeat repeats the whole set in expansion order; --rate bounds transmission starts across the operation. The complete expansion times repetition is admitted against one packet budget before provider work; exact wire bytes accumulate against one byte budget before each transmission.
 
 Example:
-  packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'"#;
+  packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

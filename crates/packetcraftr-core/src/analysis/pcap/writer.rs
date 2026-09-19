@@ -39,7 +39,7 @@ pub(super) enum WriterState {
 #[derive(Debug)]
 struct ChainSnapshot {
     message: String,
-    source: Option<Arc<ChainSnapshot>>,
+    source: Option<Arc<Self>>,
 }
 
 impl ChainSnapshot {
@@ -378,7 +378,6 @@ impl<W: Write> Writer<W> {
     /// This performs the same validation as `write_frame` without changing this
     /// writer, its counters, or its destination.
     pub fn encoded_frame_size(&self, frame: &Frame) -> Result<usize, Error> {
-        self.ensure_output_available()?;
         struct Counter(usize);
         impl Write for Counter {
             fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -392,6 +391,7 @@ impl<W: Write> Writer<W> {
                 Ok(())
             }
         }
+        self.ensure_output_available()?;
         let mut preview = Writer {
             inner: Counter(0),
             state: self.state.clone(),

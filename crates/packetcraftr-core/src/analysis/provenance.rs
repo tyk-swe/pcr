@@ -137,9 +137,8 @@ impl SourceSet {
                     a.next()
                 }
                 (Some(left), Some(right)) if left.number < right.number => a.next(),
-                (Some(_), Some(_)) => b.next(),
+                (Some(_), Some(_)) | (None, Some(_)) => b.next(),
                 (Some(_), None) => a.next(),
-                (None, Some(_)) => b.next(),
                 _ => None,
             };
             if let Some(next) = next {

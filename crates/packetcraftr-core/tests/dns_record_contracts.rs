@@ -254,9 +254,9 @@ fn malformed_and_truncated_records_remain_exact_malformed_capture_bytes() {
 
 #[test]
 fn every_message_record_name_and_txt_bound_is_enforced() {
+    type Expected = fn(&DecodeError) -> bool;
     let wire = response();
     let defaults = DecodeLimits::default();
-    type Expected = fn(&DecodeError) -> bool;
     let cases: [(DecodeLimits, Expected); 5] = [
         (
             DecodeLimits {

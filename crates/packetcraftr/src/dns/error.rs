@@ -169,14 +169,13 @@ impl Classified for Error {
                     "reduce attempts, timeout, or retry delay, or deliberately raise the finite duration limit",
                 ),
             ),
-            Self::Execution { source, .. } => source.classification(),
+            Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::TcpExecution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
                 "io.dns_clock",
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
-            Self::Output { source } => source.classification(),
             Self::BudgetOverflow(_)
             | Self::IncoherentReport(_)
             | Self::InvalidEvidence { .. }

@@ -199,7 +199,7 @@ fn decode_inner(
     decoded
         .packet
         .iter()
-        .map(|layer| layer.clone_box())
+        .map(packetcraftr_core::layer::Layer::clone_box)
         .collect()
 }
 
@@ -431,7 +431,7 @@ mod tests {
                 !decoded
                     .diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic.is_checksum_failure())
+                    .any(packetcraftr_core::diagnostic::Diagnostic::is_checksum_failure)
             );
             assert_eq!(
                 decoded.packet.get::<Raw>().unwrap().bytes,

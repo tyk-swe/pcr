@@ -891,7 +891,7 @@ fn recursive_key_permutations_preserve_semantic_acceptance() {
                         match (&expected, actual) {
                             (Ok(expected), Ok(actual)) => assert_eq!(*expected, actual),
                             (Err(expected), Err(actual)) => {
-                                assert_eq!(expected.limit(), actual.limit())
+                                assert_eq!(expected.limit(), actual.limit());
                             }
                             other => panic!("key order changed acceptance: {other:?}"),
                         }

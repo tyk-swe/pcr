@@ -49,7 +49,7 @@ pub struct Field {
     pub derived: bool,
     pub description: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<Field>,
+    pub children: Vec<Self>,
     /// JSON Pointer to a previously described child array within this top-level field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children_reference: Option<String>,

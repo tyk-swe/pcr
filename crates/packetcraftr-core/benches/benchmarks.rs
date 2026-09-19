@@ -168,6 +168,11 @@ layers:
 }
 
 fn bench_capture_processing_and_encoding(c: &mut Criterion) {
+    // Model the CLI's transactional spooled capture path with enough payload
+    // to expose capture-sized growth in peak-RSS: every frame shares the
+    // payload, so measured growth is encoded output (~16 MiB, still practical).
+    const LARGE_FRAME_COUNT: u64 = 4_096;
+    const LARGE_PAYLOAD_BYTES: usize = 4_096;
     let frame_payload = Bytes::from_static(b"\x45\x00\x00\x28\x00\x01\x00\x00\x40\x06\x00\x00\x0a\x00\x00\x01\x0a\x00\x00\x02\x04\xd2\x00\x50\x00\x00\x03\xe8\x00\x00\x00\x00\x50\x02\x20\x00\x00\x00\x00\x00");
     let frame = Frame::new(SystemTime::now(), LinkType::IPV4, frame_payload).expect("frame");
 
@@ -244,11 +249,6 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
         });
     });
 
-    // Model the CLI's transactional spooled capture path with enough payload
-    // to expose capture-sized growth in peak-RSS: every frame shares the
-    // payload, so measured growth is encoded output (~16 MiB, still practical).
-    const LARGE_FRAME_COUNT: u64 = 4_096;
-    const LARGE_PAYLOAD_BYTES: usize = 4_096;
     let large_payload = Bytes::from(vec![0x5a; LARGE_PAYLOAD_BYTES]);
     let large_frame =
         Frame::new(SystemTime::now(), LinkType::IPV4, large_payload).expect("large frame");

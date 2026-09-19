@@ -33,7 +33,9 @@ pub(crate) struct Lease {
 }
 impl Lease {
     fn retain(&self) {
-        let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !self.retained.swap(true, Ordering::Relaxed) {
             state.retained += 1;
         }
@@ -41,7 +43,9 @@ impl Lease {
 }
 impl Drop for Lease {
     fn drop(&mut self) {
-        let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = STATE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.active -= 1;
         if self.retained.load(Ordering::Relaxed) {
             state.retained -= 1;
@@ -49,7 +53,9 @@ impl Drop for Lease {
     }
 }
 fn reserve() -> Result<Arc<Lease>, ConnectError> {
-    let mut state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+    let mut state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if state.active >= crate::tcp::MAX_PENDING_CONNECTIONS {
         state.rejected = state.rejected.saturating_add(1);
         return Err(ConnectError::Capacity {
@@ -62,7 +68,9 @@ fn reserve() -> Result<Arc<Lease>, ConnectError> {
     }))
 }
 pub(super) fn snapshot() -> crate::resources::NativeSnapshot {
-    let state = STATE.lock().unwrap_or_else(|error| error.into_inner());
+    let state = STATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     crate::resources::NativeSnapshot {
         supported: true,
         capacity: crate::tcp::MAX_PENDING_CONNECTIONS,
@@ -90,7 +98,7 @@ impl<S> Pending<S> {
         let mut state = self
             .cancel
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.cancelled = true;
         state.attempted
     }
@@ -160,7 +168,9 @@ where
             let connection_provider = provider;
             let remaining = deadline.saturating_duration_since(Instant::now());
             let attempted = {
-                let mut state = cancelled.lock().unwrap_or_else(|error| error.into_inner());
+                let mut state = cancelled
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if state.cancelled
                     || remaining.is_zero()
                     || cancellation

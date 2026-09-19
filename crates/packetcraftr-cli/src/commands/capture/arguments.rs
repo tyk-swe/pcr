@@ -3,7 +3,7 @@
 
 use crate::command_options::{CaptureLimitsArgs, Captured, DecodeArgs, TrafficBudgetArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
+pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
 
 --capture-filter <BPF> uses the stable resolver-free core of libpcap/Npcap BPF syntax and narrows what reaches PacketcraftR. Frames it rejects never enter PacketcraftR's capture queue and do not consume queue capacity or operation frame and byte budgets.
 
@@ -52,7 +52,7 @@ Examples:
     --rotate-interval-ms 1000 --rotate-files 3 --retention ring
   packetcraftr capture --interface 1 --promiscuous \
     --capture-filter 'udp port 53' \
-    --filter 'udp.source_port == 53'"#;
+    --filter 'udp.source_port == 53'";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

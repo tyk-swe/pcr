@@ -10,7 +10,7 @@ use crate::command_options::{
     AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
 };
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
+pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr scan 192.0.2.10 --transport udp --ports 53,8000-8100
   packetcraftr scan 192.0.2.10 --ports 1-1024 --max-in-flight 32
@@ -51,7 +51,7 @@ reachability: open does not imply confirmed. DNS responses must match ID, opcode
 and questions. Configured byte checks only confirm those checks, not identity.
 A nonmatching UDP reply remains evidence while a rolling window waits for a valid
 application reply or its deadline. Profiles do not perform hidden resolution.
-"#;
+";
 
 /// One CLI `--ports` token, parsed into the library's own port selection.
 ///

@@ -498,7 +498,7 @@ fn an_alpn_list_past_the_limit_is_malformed() {
 fn alpn_keeps_the_raw_bytes_of_a_name_that_is_not_utf8() {
     let hello = parsed_client_hello(&[alpn_extension(&[b"\xffh2", b"h2"])]);
     assert_eq!(
-        hello.alpn_raw.first().map(|raw| raw.as_ref()),
+        hello.alpn_raw.first().map(std::convert::AsRef::as_ref),
         Some(&b"\xffh2"[..])
     );
     assert_eq!(hello.alpn_raw.len(), 2);

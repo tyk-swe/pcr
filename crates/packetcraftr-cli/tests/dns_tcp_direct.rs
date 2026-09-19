@@ -23,7 +23,7 @@ fn direct_tcp_dns_uses_sockets_and_publishes_no_udp_or_fallback_evidence() {
                         if error.kind() == std::io::ErrorKind::WouldBlock
                             && Instant::now() < deadline =>
                     {
-                        std::thread::sleep(Duration::from_millis(1))
+                        std::thread::sleep(Duration::from_millis(1));
                     }
                     Err(error) => panic!("bounded DNS fixture did not accept: {error}"),
                 }

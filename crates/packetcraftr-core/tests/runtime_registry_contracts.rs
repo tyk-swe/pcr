@@ -30,20 +30,20 @@ fn assert_registry_queries(registry: &packetcraftr_core::registry::Registry) {
     assert_eq!(
         registry
             .protocol_named(" P ")
-            .map(|protocol| protocol.as_str()),
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("probe")
     );
     assert!(registry.codec_named("P").is_some());
     assert_eq!(
         registry
             .root_for_link_type(LinkType(777))
-            .map(|protocol| protocol.as_str()),
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("probe")
     );
     assert_eq!(
         registry
             .child_for("probe", Discriminator(7))
-            .map(|protocol| protocol.as_str()),
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("child")
     );
     assert_eq!(

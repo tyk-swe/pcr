@@ -7,7 +7,7 @@ use clap::{ArgAction, ValueEnum};
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
+pub(crate) const AFTER_LONG_HELP: &str = r"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
 Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes, and capture-level evidence — snaplen-truncated frames and timestamps that regress below the capture's high-water mark — surfaces as capture.* findings attributed to the frame that carried it. Stream-aware filters such as 'tcp.stream == 7' are supported.
 
@@ -16,7 +16,7 @@ Examples:
   packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
   packetcraftr expert capture.pcapng --min-severity warning
   packetcraftr expert capture.pcapng --code tcp.reset --code tcp.retransmission
-  packetcraftr --output ndjson expert capture.pcapng"#;
+  packetcraftr --output ndjson expert capture.pcapng";
 
 /// Minimum finding severity selector for `expert`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

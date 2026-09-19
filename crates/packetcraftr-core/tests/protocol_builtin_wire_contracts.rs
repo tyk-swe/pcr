@@ -79,7 +79,9 @@ fn advertised_protocols_and_capture_roots_are_registered() {
         );
         for alias in protocol.aliases() {
             assert_eq!(
-                registry.protocol_named(alias).map(|value| value.as_str()),
+                registry
+                    .protocol_named(alias)
+                    .map(packetcraftr_core::layer::Id::as_str),
                 Some(protocol.as_str())
             );
         }
@@ -118,7 +120,7 @@ fn advertised_protocols_and_capture_roots_are_registered() {
         assert_eq!(
             registry
                 .root_for_link_type(root.link_type)
-                .map(|value| value.as_str()),
+                .map(packetcraftr_core::layer::Id::as_str),
             Some(root.protocol.as_str())
         );
     }

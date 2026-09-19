@@ -391,7 +391,7 @@ pub(super) fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValu
                 push(FieldValue::Bytes(shrunk));
             }
             if !value.is_empty() {
-                push(FieldValue::Bytes(Bytes::from(vec![0; value.len()])))
+                push(FieldValue::Bytes(Bytes::from(vec![0; value.len()])));
             }
         }
         FieldValue::Ipv4(_) => push(FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED)),

@@ -7,7 +7,7 @@ use packetcraftr_cli::output::stats::Table;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
+pub(crate) const AFTER_LONG_HELP: &str = r"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
 
 Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
 
@@ -17,7 +17,7 @@ Examples:
   packetcraftr stats capture.pcapng --table conversations
   packetcraftr stats capture.pcapng --table fragments
   packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
-  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
+  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

@@ -36,7 +36,7 @@ mod compression;
 pub(crate) use compression::Compression;
 
 mod capture_output;
-pub(crate) use capture_output::CaptureOutputArgs;
+pub(crate) use capture_output::{CaptureOutput, CaptureOutputArgs};
 
 mod application;
 pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};

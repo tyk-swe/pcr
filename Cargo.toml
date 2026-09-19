@@ -19,6 +19,12 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+use_self = "warn"
+semicolon_if_nothing_returned = "warn"
+redundant_closure_for_method_calls = "warn"
+needless_raw_string_hashes = "warn"
+items_after_statements = "warn"
+match_same_arms = "warn"
 
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency

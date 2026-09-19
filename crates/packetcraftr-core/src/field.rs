@@ -94,9 +94,9 @@ pub enum FieldValue {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),
     Mac([u8; 6]),
-    List(Vec<FieldValue>),
+    List(Vec<Self>),
     /// Named, recursively typed fields, ordered by name for stable serialization.
-    Object(BTreeMap<String, FieldValue>),
+    Object(BTreeMap<String, Self>),
 }
 
 pub(crate) fn parse_mac(input: &str) -> Option<[u8; 6]> {

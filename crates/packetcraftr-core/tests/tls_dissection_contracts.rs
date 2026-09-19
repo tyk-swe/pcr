@@ -447,7 +447,7 @@ fn extra_tls_ports_are_additive_and_leave_the_defaults_bound() {
         assert_eq!(
             registry
                 .child_for("tcp", packetcraftr_core::registry::Discriminator(port))
-                .map(|protocol| protocol.as_str()),
+                .map(packetcraftr_core::layer::Id::as_str),
             Some("tls"),
             "port {port}"
         );
@@ -455,7 +455,7 @@ fn extra_tls_ports_are_additive_and_leave_the_defaults_bound() {
     assert_eq!(
         registry
             .child_for("tcp", packetcraftr_core::registry::Discriminator(0))
-            .map(|protocol| protocol.as_str()),
+            .map(packetcraftr_core::layer::Id::as_str),
         Some("raw")
     );
 }

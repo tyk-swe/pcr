@@ -102,12 +102,21 @@ impl Classified for Error {
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
             ),
             Self::Capture { source, .. } => source.classification(),
-            // A frame refused for exceeding the configured per-frame budget
-            // is a resource condition, not malformed input.
+            // Refusals for exceeding a configured finite budget are resource
+            // conditions, not malformed input.
             Self::Decode {
                 source: crate::decode::Error::PacketSizeLimit { .. },
                 ..
-            } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
+            }
+            | Self::Scope {
+                source:
+                    crate::analysis::scope::Error::Capacity
+                    | crate::analysis::scope::Error::Limit { .. }
+                    | crate::analysis::scope::Error::Bytes { .. },
+                ..
+            }
+            | Self::StreamLimit { .. }
+            | Self::DurationLimit { .. } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Decode { .. } | Self::DerivedDecode { .. } => Classification::new(
                 "packet.decode",
                 Kind::Packet,
@@ -129,16 +138,6 @@ impl Classified for Error {
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
             Self::Filter { source, .. } => source.classification(),
-            Self::StreamLimit { .. } | Self::DurationLimit { .. } => {
-                resource_limit(GENERAL_RESOURCE_REMEDIATION)
-            }
-            Self::Scope {
-                source:
-                    crate::analysis::scope::Error::Capacity
-                    | crate::analysis::scope::Error::Limit { .. }
-                    | crate::analysis::scope::Error::Bytes { .. },
-                ..
-            } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Scope { .. } => Classification::new(
                 "internal.scope_composition",
                 Kind::Internal,

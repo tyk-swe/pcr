@@ -140,8 +140,8 @@ pub(super) fn upper_layer_icmpv6(mut next_header: u8, mut payload: &[u8]) -> Opt
                 let length = (usize::from(header[1]) + 2).checked_mul(4)?;
                 payload = payload.get(length..)?;
             }
-            // RFC 6980 requires receivers to discard fragmented NDP messages.
-            44 => return None,
+            // RFC 6980 requires receivers to discard fragmented NDP messages
+            // (header 44); any other header cannot carry an NDP payload either.
             _ => return None,
         }
     }

@@ -260,7 +260,7 @@ impl<'de> Deserialize<'de> for Frame {
         }
 
         let record = Record::deserialize(deserializer)?;
-        let mut frame = Frame::try_with_optional_timestamp(
+        let mut frame = Self::try_with_optional_timestamp(
             record.timestamp,
             record.link_type,
             Lengths {

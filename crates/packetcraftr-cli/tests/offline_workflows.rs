@@ -2042,7 +2042,7 @@ fn protocol_details_discover_filter_spellings_and_their_comparison_semantics() {
             match field["kind"].as_str().unwrap() {
                 "direct" => assert!(description.contains(field["fields"][0].as_str().unwrap())),
                 "either" => {
-                    assert!(description.contains("!= matches when any listed field differs"))
+                    assert!(description.contains("!= matches when any listed field differs"));
                 }
                 "bits" => {
                     assert!(description.contains("before comparison"));

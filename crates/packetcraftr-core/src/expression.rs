@@ -512,7 +512,7 @@ impl<'a> TopLevelScanner<'a> {
                     self.object_depth = self
                         .object_depth
                         .checked_sub(1)
-                        .ok_or_else(|| unbalanced(character))?
+                        .ok_or_else(|| unbalanced(character))?;
                 }
                 '(' => self.paren_depth = self.paren_depth.saturating_add(1),
                 ')' => {

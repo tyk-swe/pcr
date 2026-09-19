@@ -63,10 +63,6 @@ fn dhcp_fixtures_build_dissect_and_project_typed_fields() {
 }
 #[test]
 fn recursive_field_discovery_uses_resolvable_compact_references() {
-    let output = run_success(&["--output", "json", "protocols", "dhcpv6"]);
-    assert!(output.stdout.len() < 200_000);
-    let document = parse_json(&output);
-    assert!(schema_validator().is_valid(&document));
     fn visit(value: &serde_json::Value, root: &serde_json::Value, references: &mut usize) {
         if let Some(reference) = value
             .get("children_reference")
@@ -84,6 +80,10 @@ fn recursive_field_discovery_uses_resolvable_compact_references() {
             }
         }
     }
+    let output = run_success(&["--output", "json", "protocols", "dhcpv6"]);
+    assert!(output.stdout.len() < 200_000);
+    let document = parse_json(&output);
+    assert!(schema_validator().is_valid(&document));
     let mut references = 0;
     for field in document["result"]["protocol"]["fields"].as_array().unwrap() {
         visit(field, field, &mut references);

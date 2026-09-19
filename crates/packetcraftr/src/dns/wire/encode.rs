@@ -18,13 +18,13 @@ pub fn encode_query(
     recursion_desired: bool,
     edns: Option<crate::dns::EdnsRequest>,
 ) -> Result<Bytes, crate::dns::error::WireError> {
+    use packetcraftr_core::protocol::application::dns::{
+        Dns, Edns, Name, Question, Record, RecordValue,
+    };
     if let Some(edns) = edns {
         edns.validate()?;
     }
     let query_name = canonical_query_name(query_name)?;
-    use packetcraftr_core::protocol::application::dns::{
-        Dns, Edns, Name, Question, Record, RecordValue,
-    };
     let mut message = Dns::default();
     message.id = transaction_id;
     message.recursion_desired = recursion_desired;

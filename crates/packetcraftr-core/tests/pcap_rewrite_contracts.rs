@@ -195,6 +195,16 @@ fn selection_validates_rejected_input_and_preserves_predicate_failures() {
 #[test]
 fn selection_stops_on_write_and_flush_failures() {
     use packetcraftr_core::analysis::pcap::select;
+    #[derive(Debug)]
+    struct FlushFailure;
+    impl Write for FlushFailure {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("flush failed"))
+        }
+    }
     let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one");
     let input = pcap_bytes(PcapOptions::default(), &[frame.clone(), frame]);
     let mut reader = Reader::new(Cursor::new(&input)).unwrap();
@@ -214,16 +224,6 @@ fn selection_stops_on_write_and_flush_failures() {
     .unwrap_err();
     assert_eq!(visited, 1);
     assert_eq!(error.classification().code, "io.capture_file");
-    #[derive(Debug)]
-    struct FlushFailure;
-    impl Write for FlushFailure {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Err(io::Error::other("flush failed"))
-        }
-    }
     let mut reader = Reader::new(Cursor::new(input)).unwrap();
     let error = select(&mut reader, FlushFailure, Limits::default(), |_, _| {
         Ok(false)

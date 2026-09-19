@@ -7,7 +7,7 @@ use clap::ValueEnum;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
+pub(crate) const AFTER_LONG_HELP: &str = r"Following is computed offline over dissected frames; no live capture or transmission is involved.
 
 The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. Completed IP-fragmented datagrams join their transport conversation on the fragment that completes them. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
 
@@ -25,7 +25,7 @@ Examples:
   packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
   packetcraftr follow capture.pcapng --stream tcp:0 --write ./directions
   packetcraftr --output json follow capture.pcapng --stream udp:2
-  packetcraftr --output ndjson follow capture.pcapng --stream tcp:7"#;
+  packetcraftr --output ndjson follow capture.pcapng --stream tcp:7";
 
 /// How a followed conversation's chunks are narrowed by sender.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

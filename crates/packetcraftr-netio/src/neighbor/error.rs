@@ -65,7 +65,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         #[source]
-        operation: Box<Error>,
+        operation: Box<Self>,
         cleanup: crate::Error,
     },
 }
@@ -73,8 +73,7 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Io { source, .. } => source.classification(),
-            Self::Cleanup { source, .. } => source.classification(),
+            Self::Io { source, .. } | Self::Cleanup { source, .. } => source.classification(),
             Self::OperationAndCleanup { operation, .. } => operation.classification(),
             Self::NotFound { .. } => Classification::new(
                 "io.neighbor_timeout",

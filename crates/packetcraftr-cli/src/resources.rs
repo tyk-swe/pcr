@@ -5,7 +5,7 @@
 //! admission decisions depend on these observations.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use clap::{ArgMatches, CommandFactory, parser::ValueSource};
 use packetcraftr::progress::Runtime;
@@ -215,7 +215,7 @@ pub(crate) fn runtime(name: &'static str, capacity: usize) -> Runtime {
         let mut runtimes = context
             .runtimes
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(PoisonError::into_inner);
         // A CLI invocation constructs at most one runtime per assembly owner.
         // Keep the diagnostic registry bounded even if future commands change.
         if runtimes.len() < 16 {
@@ -237,7 +237,7 @@ pub(crate) fn snapshot() -> Option<Report> {
         context
             .runtimes
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .map(|(name, runtime)| Worker::progress(*name, runtime.snapshot())),
     );

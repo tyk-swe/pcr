@@ -3,10 +3,10 @@
 
 use crate::command_options::{RouteArgs, RoutePolicyArgs};
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Route planning is passive: it performs no packet transmission.
+pub(crate) const AFTER_LONG_HELP: &str = r"Route planning is passive: it performs no packet transmission.
 
 Example:
-  packetcraftr plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'"#;
+  packetcraftr plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

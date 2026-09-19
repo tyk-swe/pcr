@@ -108,7 +108,7 @@ impl Option6 {
             value: Value6::Identifier(duid),
         }
     }
-    pub fn ia_na(iaid: u32, t1: u32, t2: u32, options: Vec<Option6>) -> Self {
+    pub fn ia_na(iaid: u32, t1: u32, t2: u32, options: Vec<Self>) -> Self {
         Self {
             code: 3,
             value: Value6::Association {
@@ -119,7 +119,7 @@ impl Option6 {
             },
         }
     }
-    pub fn ia_pd(iaid: u32, t1: u32, t2: u32, options: Vec<Option6>) -> Self {
+    pub fn ia_pd(iaid: u32, t1: u32, t2: u32, options: Vec<Self>) -> Self {
         Self {
             code: 25,
             value: Value6::Association {
@@ -358,7 +358,7 @@ fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<V
         (Value6::Byte(value), 7 | 19) => extend(&mut output, &[*value], maximum)?,
         (Value6::Number(value), 8) => extend(&mut output, &value.to_be_bytes(), maximum)?,
         (Value6::Seconds(value), 32 | 82 | 83) => {
-            extend(&mut output, &value.to_be_bytes(), maximum)?
+            extend(&mut output, &value.to_be_bytes(), maximum)?;
         }
         (Value6::Relay(message), 9) => {
             let message = message.encode(budget, depth + 1)?;

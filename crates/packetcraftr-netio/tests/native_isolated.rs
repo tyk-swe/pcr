@@ -204,8 +204,6 @@ fn native_filter_error_preserves_diagnostic_and_releases_admission() {
 #[test]
 #[ignore = "requires the isolated Linux launcher"]
 fn interface_disappearance_reports_driver_failure_and_cleans_up() {
-    isolated();
-    ip(&["link", "add", "pcr-test", "type", "dummy"]);
     struct Remove;
     impl Drop for Remove {
         fn drop(&mut self) {
@@ -214,6 +212,8 @@ fn interface_disappearance_reports_driver_failure_and_cleans_up() {
                 .output();
         }
     }
+    isolated();
+    ip(&["link", "add", "pcr-test", "type", "dummy"]);
     let _remove = Remove;
     ip(&["link", "set", "pcr-test", "up"]);
     let index = ip(&["-o", "link", "show", "dev", "pcr-test"])

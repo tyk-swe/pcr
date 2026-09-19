@@ -220,11 +220,10 @@ pub(crate) fn decode_family(
     let big = u32::from_be_bytes(*bytes);
     let little = u32::from_le_bytes(*bytes);
     let (family, byte_order) = match header {
-        FamilyHeader::Loop => (big, ByteOrder::Big),
         FamilyHeader::Null if matches!(little, 2 | 10 | 24 | 28 | 30) => {
             (little, ByteOrder::Little)
         }
-        FamilyHeader::Null => (big, ByteOrder::Big),
+        FamilyHeader::Loop | FamilyHeader::Null => (big, ByteOrder::Big),
     };
     let layer: Box<dyn Layer> = match header {
         FamilyHeader::Loop => Box::new(BsdLoop { family }),

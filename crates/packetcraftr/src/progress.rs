@@ -95,7 +95,10 @@ struct WorkerStatus {
 
 impl WorkerStatus {
     fn mark_timed_out(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*state, WorkerState::Running) {
             self.budget.timed_out.fetch_add(1, Ordering::AcqRel);
             *state = WorkerState::TimedOut;
@@ -132,7 +135,7 @@ impl Drop for WorkerPermit {
             .0
             .state
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(*state, WorkerState::TimedOut) {
             self.0.budget.timed_out.fetch_sub(1, Ordering::AcqRel);
         }

@@ -56,7 +56,10 @@ impl PermitPool {
         }
     }
     pub(super) fn snapshot(&self) -> NativeSnapshot {
-        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         NativeSnapshot {
             supported: true,
             capacity: self.capacity,
@@ -66,7 +69,10 @@ impl PermitPool {
         }
     }
     pub(super) fn reserve(self: &Arc<Self>) -> Result<WorkerPermit, Exhausted> {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.active >= self.capacity {
             state.rejected = state.rejected.saturating_add(1);
             return Err(Exhausted {
@@ -95,7 +101,7 @@ impl RetentionMarker {
             .pool
             .state
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.phase.load(Ordering::Relaxed) == 0 {
             self.phase.store(1, Ordering::Relaxed);
             state.retained += 1;
@@ -110,7 +116,7 @@ impl Drop for WorkerPermit {
             .pool
             .state
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if self.marker.phase.swap(2, Ordering::Relaxed) == 1 {
             state.retained -= 1;
         }

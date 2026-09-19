@@ -11,10 +11,10 @@ use packetcraftr_netio::route::Provider as _;
 use crate::errors::CliError;
 use crate::rendering::optional_display;
 
-pub(super) const AFTER_LONG_HELP: &str = r#"Examples:
+pub(super) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr routes
   packetcraftr routes --all
-  packetcraftr --output json routes"#;
+  packetcraftr --output json routes";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

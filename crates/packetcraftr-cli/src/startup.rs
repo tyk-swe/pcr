@@ -241,7 +241,6 @@ fn command_failure(
                 .map_err(CliError::from),
             true,
         ),
-        output::contract::Format::Ndjson => (emit_stderr_error(&error), false),
         _ => (emit_stderr_error(&error), false),
     };
     if let Err(write_error) = emitted {

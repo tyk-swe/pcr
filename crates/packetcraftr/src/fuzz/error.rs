@@ -67,13 +67,12 @@ impl Classified for Error {
                 Some("reduce cases, packet sizes, timeout, or rate delay"),
             ),
             Self::Authorization(error) => error.classification(),
-            Self::Execution { source, .. } => source.classification(),
+            Self::Execution { source, .. } | Self::Output { source } => source.classification(),
             Self::Clock { .. } => Classification::new(
                 "io.fuzz_clock",
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
-            Self::Output { source } => source.classification(),
             Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.fuzz_evidence",
                 Kind::Internal,

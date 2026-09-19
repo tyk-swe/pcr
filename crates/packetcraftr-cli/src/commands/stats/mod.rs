@@ -67,9 +67,6 @@ fn cap_table(
     table: Table,
     top: Option<usize>,
 ) -> Vec<core::diagnostic::Diagnostic> {
-    let Some(limit) = top else {
-        return Vec::new();
-    };
     fn cap<T>(
         rows: &mut Vec<T>,
         limit: usize,
@@ -80,6 +77,9 @@ fn cap_table(
         rows.truncate(limit);
         omitted_diagnostic(code, subject, omitted, "--top")
     }
+    let Some(limit) = top else {
+        return Vec::new();
+    };
     match table {
         Table::Conversations => cap(
             &mut report.conversations,

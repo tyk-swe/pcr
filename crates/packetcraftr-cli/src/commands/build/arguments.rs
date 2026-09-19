@@ -5,7 +5,7 @@ use crate::command_options::{
     BuildMode, CaptureOutputArgs, PacketBudgetArgs, RecipeArgs, TemplateArgs,
 };
 
-pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
+pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output raw build --packet-file packet.json
   packetcraftr --output ndjson build --packet 'ipv4(dst=192.0.2.1)/udp()' --axis '0.ttl=[1,64]' --axis '1.dport=[53,5353]'
@@ -18,7 +18,7 @@ errors may follow already emitted packets. JSON and raw require exactly one pack
 
 PCAP and PCAPNG write the packet set to stdout as a capture stream and require
 --link-type naming the recipe's first layer. Every frame receives --timestamp
-or the Unix epoch, keeping generated captures byte-deterministic."#;
+or the Unix epoch, keeping generated captures byte-deterministic.";
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {

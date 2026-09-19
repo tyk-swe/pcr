@@ -137,7 +137,7 @@ fn encode_record(output: &mut Encoder, record: &Record, maximum: usize) -> Resul
         RecordValue::A(address) => data.bytes(&address.octets())?,
         RecordValue::Aaaa(address) => data.bytes(&address.octets())?,
         RecordValue::Cname(value) | RecordValue::Ns(value) | RecordValue::Ptr(value) => {
-            name(&mut data, value)?
+            name(&mut data, value)?;
         }
         RecordValue::Mx {
             preference,

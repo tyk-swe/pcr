@@ -9,7 +9,7 @@ use crate::{
 };
 use packetcraftr_cli::output::{
     self,
-    contract::{Command, Format},
+    contract::{Command, ToolFormat},
     dns_analysis as wire,
 };
 use packetcraftr_core::{
@@ -38,7 +38,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut collector =
         Collector::new(args.application.core(), args.dns_ports).map_err(CliError::classified)?;
@@ -86,7 +86,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         &mut reader,
         setup.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for event in collector
                 .observe(&record)
@@ -116,7 +118,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         ip_reassembly: output::reassembly::Report::from_analysis(&run.ip_reassembly),
     };
     match format {
-        Format::Json => emit_aggregate(
+        ToolFormat::Json => emit_aggregate(
             Command::DnsRead,
             wire::Report {
                 messages,
@@ -126,15 +128,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             },
             Vec::new(),
         ),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => write_plain_line(format_args!(
+        ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+        ToolFormat::Text => write_plain_line(format_args!(
             "{} DNS messages; {} matched and {} unanswered transactions in {} captured frames",
             complete.summary.messages,
             complete.summary.matched_transactions,
             complete.summary.unanswered_transactions,
             complete.frames_read
         )),
-        _ => unreachable!("format validated"),
     }
 }
 fn render_message(value: &wire::Message) -> Result<(), CliError> {

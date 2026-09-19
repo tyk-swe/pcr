@@ -6,7 +6,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use std::time::Duration;
 
@@ -25,7 +25,11 @@ use crate::rendering::StreamEncoder;
 /// only ever needs room for one packet template.
 const MAX_TEMPLATE_PACKETS: usize = 1;
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
         return Err(CliError::new(
             core::error::Kind::Cli,
@@ -60,7 +64,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
             &mut clock,
         );
     }
-    if format == Format::Ndjson {
+    if format == ToolFormat::Ndjson {
         let events = stream.clone();
         let batch = packetcraftr::dns::run_batch_with_events(
             &requests,
@@ -86,15 +90,18 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .map_err(CliError::classified)?;
         let (result, diagnostics, stats) =
             output::dns::BatchResult::try_from_batch(batch).map_err(CliError::classified)?;
-        if format == Format::Text {
-            rendering::render_batch_text(result, diagnostics, stats)
-        } else {
-            crate::rendering::emit_aggregate_with_stats(
+        match format {
+            ToolFormat::Text => rendering::render_batch_text(result, diagnostics, stats),
+            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
                 output::contract::Command::Dns,
                 result,
                 diagnostics,
                 stats,
-            )
+            ),
+            ToolFormat::Ndjson => Err(CliError::new(
+                core::error::Kind::Internal,
+                "NDJSON DNS batch streaming returned before aggregate rendering",
+            )),
         }
     }
 }
@@ -108,7 +115,7 @@ struct Channels<'a> {
 
 fn run_single(
     request: &packetcraftr::dns::Request,
-    format: Format,
+    format: ToolFormat,
     stream: &StreamEncoder,
     channels: Channels<'_>,
     authorizer: &mut packetcraftr::policy::PolicyAuthorizer<'_>,
@@ -119,7 +126,7 @@ fn run_single(
         executor,
         runtime,
     } = channels;
-    if format == Format::Ndjson {
+    if format == ToolFormat::Ndjson {
         let events = stream.clone();
         let summary = packetcraftr::dns::run_with_events(
             request,
@@ -139,15 +146,18 @@ fn run_single(
             .map_err(CliError::classified)?;
         let (result, diagnostics, stats) =
             output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
-        if format == Format::Text {
-            rendering::render_text(result, diagnostics, stats)
-        } else {
-            crate::rendering::emit_aggregate_with_stats(
+        match format {
+            ToolFormat::Text => rendering::render_text(result, diagnostics, stats),
+            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
                 output::contract::Command::Dns,
                 result,
                 diagnostics,
                 stats,
-            )
+            ),
+            ToolFormat::Ndjson => Err(CliError::new(
+                core::error::Kind::Internal,
+                "NDJSON DNS streaming returned before aggregate rendering",
+            )),
         }
     }
 }

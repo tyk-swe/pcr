@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
@@ -51,25 +51,24 @@ impl State {
 }
 
 pub(super) fn render_session(
-    format: Format,
+    format: ToolFormat,
     session: analysis::tls::Session,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     state.select();
     match format {
-        Format::Text => {
+        ToolFormat::Text => {
             write_stdout_line(format_args!("{}", session_line(&Session::from(session))))
         }
-        Format::Json => {
+        ToolFormat::Json => {
             state.retained.push(|| Session::from(session));
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(
+        ToolFormat::Ndjson => Ok(stream.emit_data(
             output::tls::Event::session(Session::from(session)),
             Vec::new(),
         )?),
-        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

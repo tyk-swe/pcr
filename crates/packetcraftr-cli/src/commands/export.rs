@@ -7,7 +7,7 @@ use crate::{
 };
 use packetcraftr_cli::output::{
     self,
-    contract::{Command, Format},
+    contract::{Command, ToolFormat},
 };
 use packetcraftr_core::analysis::{self, pcap};
 use std::path::PathBuf;
@@ -36,7 +36,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     let streams = args
         .streams
         .iter()
@@ -82,9 +82,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     crate::cancellation::check()?;
     staged.persist()?;
     match format {
-        Format::Json => emit_aggregate(Command::Export, report, Vec::new()),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => write_plain_line(format_args!(
+        ToolFormat::Json => emit_aggregate(Command::Export, report, Vec::new()),
+        ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        ToolFormat::Text => write_plain_line(format_args!(
             "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
             report.capture.frames_selected,
             report.capture.frames_read,
@@ -94,6 +94,5 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             report.unmatched_streams.len(),
             report.unmatched_datagram_frames.len()
         )),
-        _ => unreachable!("format validated"),
     }
 }

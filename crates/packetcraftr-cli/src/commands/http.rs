@@ -9,7 +9,7 @@ use crate::{
 };
 use packetcraftr_cli::output::{
     self,
-    contract::{Command, Format},
+    contract::{Command, ToolFormat},
     http as wire,
 };
 use packetcraftr_core::{
@@ -40,7 +40,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
 }
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
@@ -82,7 +82,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         &mut reader,
         setup.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for event in collector
                 .observe(&record)
@@ -112,7 +114,7 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         ip_reassembly: output::reassembly::Report::from_analysis(&run.ip_reassembly),
     };
     match format {
-        Format::Json => emit_aggregate(
+        ToolFormat::Json => emit_aggregate(
             Command::Http,
             wire::Report {
                 messages,
@@ -121,8 +123,8 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             },
             Vec::new(),
         ),
-        Format::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        Format::Text => write_plain_line(format_args!(
+        ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
+        ToolFormat::Text => write_plain_line(format_args!(
             "{} HTTP/1 messages, {} complete, {} incomplete, {} malformed; {} requests without a captured final response",
             complete.summary.messages,
             complete.summary.complete_messages,
@@ -130,7 +132,6 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             complete.summary.malformed_messages,
             complete.summary.requests_without_final_response
         )),
-        _ => unreachable!("format validated"),
     }
 }
 fn render_message(value: &wire::Message) -> Result<(), CliError> {

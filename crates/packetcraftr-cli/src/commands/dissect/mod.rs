@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::DissectFormat;
 
 use packetcraftr_core::error::Kind;
 
@@ -26,7 +26,7 @@ use crate::rendering::{
 
 pub(super) fn run(
     arguments: Args,
-    format: Format,
+    format: DissectFormat,
     stream: &crate::rendering::StreamEncoder,
 ) -> Result<(), CliError> {
     let registry = arguments.decode.registry()?;
@@ -35,7 +35,7 @@ pub(super) fn run(
         arguments.max_projection_bytes,
         &registry,
         output::contract::Command::Dissect,
-        format,
+        format.as_format(),
     )?;
     if projector
         .as_ref()
@@ -106,11 +106,11 @@ pub(super) fn run(
     }
     // An unmatched frame keeps byte-oriented stdout empty on success; the
     // notice goes to stderr through the shared human renderer.
-    if !kept && !matches!(format, Format::Json) {
+    if !kept && !matches!(format, DissectFormat::Json) {
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        Format::Text => {
+        DissectFormat::Text => {
             write_summary_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
                 decoded.original.len(),
@@ -124,12 +124,12 @@ pub(super) fn run(
             ))?;
             render_diagnostics_text(&decoded.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!(
+        DissectFormat::Hex => write_plain_line(format_args!(
             "{}",
             output::hex::CompactHex(&decoded.original)
         )),
-        Format::Raw => write_raw(&decoded.original),
-        Format::Json => {
+        DissectFormat::Raw => write_raw(&decoded.original),
+        DissectFormat::Json => {
             let (dissection, diagnostics) = if kept {
                 let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
                 (Some(result), diagnostics)
@@ -142,6 +142,9 @@ pub(super) fn run(
                 diagnostics,
             )
         }
-        _ => unreachable!("command dispatch validated the output format"),
+        DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv => Err(CliError::new(
+            Kind::Internal,
+            "--field output returned before dissection rendering",
+        )),
     }
 }

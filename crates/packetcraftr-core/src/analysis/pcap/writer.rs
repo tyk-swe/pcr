@@ -289,26 +289,14 @@ impl<W: Write> Writer<W> {
                     limit: self.max_size,
                 })?;
         }
-        let (endianness, interface_id) = match &self.state {
-            WriterState::Pcap { .. } => {
-                return Err(Error::WrongWriterFormat {
-                    expected: Format::PcapNg,
-                    actual: Format::Pcap,
-                });
-            }
-            WriterState::PcapNg {
-                endianness,
-                interfaces,
-            } => (
-                *endianness,
-                validate_new_interface(
-                    &description,
-                    interfaces,
-                    self.max_size,
-                    self.max_interfaces,
-                )?,
-            ),
-        };
+        let (max_size, max_interfaces) = (self.max_size, self.max_interfaces);
+        let interface_id = validate_new_interface(
+            &description,
+            self.pcapng_interfaces()?,
+            max_size,
+            max_interfaces,
+        )?;
+        let endianness = self.endianness();
 
         self.write_output(|inner| {
             write_interface_description(
@@ -321,13 +309,19 @@ impl<W: Write> Writer<W> {
                 options,
             )
         })?;
-        match &mut self.state {
-            WriterState::PcapNg { interfaces, .. } => {
-                interfaces.push(description);
-            }
-            WriterState::Pcap { .. } => unreachable!("format checked above"),
-        }
+        self.pcapng_interfaces()?.push(description);
         Ok(interface_id)
+    }
+
+    /// The PCAPNG interface table, or `WrongWriterFormat` on a classic writer.
+    fn pcapng_interfaces(&mut self) -> Result<&mut Vec<Interface>, Error> {
+        match &mut self.state {
+            WriterState::PcapNg { interfaces, .. } => Ok(interfaces),
+            WriterState::Pcap { .. } => Err(Error::WrongWriterFormat {
+                expected: Format::PcapNg,
+                actual: Format::Pcap,
+            }),
+        }
     }
 
     /// Counts the uncompressed capture bytes a frame would add under the current
@@ -405,11 +399,8 @@ impl<W: Write> Writer<W> {
     }
 
     fn write_pcapng_frame(&mut self, frame: &Frame) -> Result<(), Error> {
-        let interfaces = match &self.state {
-            WriterState::PcapNg { interfaces, .. } => interfaces,
-            WriterState::Pcap { .. } => unreachable!("format checked by caller"),
-        };
-        let plan = select_interface(frame, interfaces, self.max_size, self.max_interfaces)?;
+        let (max_size, max_interfaces) = (self.max_size, self.max_interfaces);
+        let plan = select_interface(frame, self.pcapng_interfaces()?, max_size, max_interfaces)?;
         let interface_id = plan.id;
         let interface = plan.description;
         let endianness = self.endianness();

@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ExchangeFormat;
 
 use std::time::Duration;
 
@@ -18,9 +18,13 @@ use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ExchangeFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let compression = arguments.send.compression;
-    compression.validate(format)?;
+    compression.validate(format.as_format())?;
     let Args {
         send,
         template,
@@ -94,7 +98,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         allow_permissive_live: send.allow_permissive_live,
     };
     let client = crate::system::client(registry, prepared.policy);
-    if format == Format::Ndjson {
+    if format == ExchangeFormat::Ndjson {
         let event_stream = stream.clone();
         let summary = client
             .exchange_with_events(&template, options, move |event| {
@@ -112,10 +116,17 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .exchange(&template, options)
         .map_err(CliError::classified)?;
     match format {
-        Format::Text => rendering::render_text(&result),
-        Format::Json => rendering::render_aggregate(result),
-        Format::Pcap => rendering::render_capture(&result, capture::Format::Pcap, compression),
-        Format::PcapNg => rendering::render_capture(&result, capture::Format::PcapNg, compression),
-        _ => unreachable!("streaming returned before aggregate rendering"),
+        ExchangeFormat::Text => rendering::render_text(&result),
+        ExchangeFormat::Json => rendering::render_aggregate(result),
+        ExchangeFormat::Pcap => {
+            rendering::render_capture(&result, capture::Format::Pcap, compression)
+        }
+        ExchangeFormat::PcapNg => {
+            rendering::render_capture(&result, capture::Format::PcapNg, compression)
+        }
+        ExchangeFormat::Ndjson => Err(CliError::new(
+            Kind::Internal,
+            "NDJSON exchange streaming returned before aggregate rendering",
+        )),
     }
 }

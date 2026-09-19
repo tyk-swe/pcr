@@ -3,7 +3,7 @@
 
 //! Fuzz CLI command logic.
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use packetcraftr_core::error::Kind;
 
@@ -33,7 +33,11 @@ struct PreparedLive {
     interface: Option<InterfaceSelector>,
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
@@ -131,7 +135,7 @@ fn execute_and_render(
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     live: Option<PreparedLive>,
-    format: Format,
+    format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
@@ -145,11 +149,11 @@ fn execute_offline(
     request: core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
-    format: Format,
+    format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
-    if format == Format::Ndjson {
+    if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
         let runtime =
             crate::resources::runtime("fuzz_progress", packetcraftr::progress::MAX_WORKER_CAPACITY);
@@ -189,7 +193,7 @@ fn execute_live(
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
     live: PreparedLive,
-    format: Format,
+    format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut executor = Executor {
@@ -199,7 +203,7 @@ fn execute_live(
     };
     let mut authorizer = packetcraftr::policy::PolicyAuthorizer::for_packets(&live.policy);
     let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
-    if format == Format::Ndjson {
+    if format == ToolFormat::Ndjson {
         let event_stream = stream.clone();
         let runtime =
             crate::resources::runtime("fuzz_progress", packetcraftr::progress::MAX_WORKER_CAPACITY);
@@ -245,14 +249,17 @@ fn render_collected(
     result: output::fuzz::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
     stats: packetcraftr::Stats,
-    format: Format,
+    format: ToolFormat,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
     match format {
-        Format::Text => rendering::render_text(result, diagnostics, stats),
-        Format::Json => {
+        ToolFormat::Text => rendering::render_text(result, diagnostics, stats),
+        ToolFormat::Json => {
             emit_aggregate_with_stats(output::contract::Command::Fuzz, result, diagnostics, stats)
         }
-        _ => unreachable!("streaming returned before aggregate rendering"),
+        ToolFormat::Ndjson => Err(CliError::new(
+            Kind::Internal,
+            "NDJSON fuzz streaming returned before aggregate rendering",
+        )),
     }
 }

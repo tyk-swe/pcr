@@ -77,41 +77,48 @@ impl Command {
     /// Formats deliberately supported by this command contract.
     pub const fn formats(self) -> &'static [Format] {
         match self {
-            Self::Rewrite | Self::Export | Self::Merge | Self::Http | Self::DnsRead => TOOL_FORMATS,
-            Self::Build => BUILD_FORMATS,
-            Self::Fragment => &[
-                Format::Text,
-                Format::Json,
-                Format::Ndjson,
-                Format::Hex,
-                Format::Pcap,
-                Format::PcapNg,
-            ],
-            Self::Dissect => DISSECT_FORMATS,
+            Self::Rewrite
+            | Self::Export
+            | Self::Merge
+            | Self::Http
+            | Self::DnsRead
+            | Self::Scan
+            | Self::Traceroute
+            | Self::Dns
+            | Self::Fuzz
+            | Self::Expert
+            | Self::Tls => ToolFormat::FORMATS,
+            Self::Build => BuildFormat::FORMATS,
+            Self::Fragment | Self::Capture => CaptureFormat::FORMATS,
+            Self::Dissect => DissectFormat::FORMATS,
             Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
-                AGGREGATE_FORMATS
+                AggregateFormat::FORMATS
             }
-            Self::Send => SEND_FORMATS,
-            Self::Exchange => EXCHANGE_FORMATS,
-            Self::Capture => CAPTURE_FORMATS,
-            Self::Read => READ_FORMATS,
-            Self::Replay => REPLAY_FORMATS,
-            Self::Follow => FOLLOW_FORMATS,
-            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert | Self::Tls => {
-                TOOL_FORMATS
-            }
+            Self::Send => SendFormat::FORMATS,
+            Self::Exchange | Self::Replay => ExchangeFormat::FORMATS,
+            Self::Read => ReadFormat::FORMATS,
+            Self::Follow => FollowFormat::FORMATS,
         }
     }
 
-    /// Rejects unsupported combinations before a command performs I/O.
-    pub fn require_format(self, format: Format) -> Result<(), Error> {
-        if self.formats().contains(&format) {
-            Ok(())
-        } else {
-            Err(Error::UnsupportedFormat {
+    /// Rejects unsupported combinations before a command performs I/O,
+    /// returning the format narrowed to the enum the command dispatches on so
+    /// its matches are exhaustive without an `unreachable!` fallback.
+    ///
+    /// `F` is the command's narrow format type, inferred from the call site.
+    /// Both the command's declared [`formats`](Self::formats) and `F`'s own
+    /// subset are checked, so a mismatched `F` still rejects rather than
+    /// silently admitting a format the command does not support.
+    pub fn require_format<F>(self, format: Format) -> Result<F, Error>
+    where
+        F: TryFrom<Format, Error = Format>,
+    {
+        match F::try_from(format) {
+            Ok(narrowed) if self.formats().contains(&format) => Ok(narrowed),
+            _ => Err(Error::UnsupportedFormat {
                 command: self,
                 format,
-            })
+            }),
         }
     }
 }
@@ -168,73 +175,164 @@ pub enum Mode {
     Stream,
 }
 
-const BUILD_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Hex,
-    Format::Raw,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const DISSECT_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Csv,
-    Format::Tsv,
-    Format::Hex,
-    Format::Raw,
-];
-const READ_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Csv,
-    Format::Tsv,
-    Format::Hex,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const AGGREGATE_FORMATS: &[Format] = &[Format::Text, Format::Json];
-const SEND_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Hex,
-    Format::Raw,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const EXCHANGE_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const CAPTURE_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Hex,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const REPLAY_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Pcap,
-    Format::PcapNg,
-];
-const TOOL_FORMATS: &[Format] = &[Format::Text, Format::Json, Format::Ndjson];
-const FOLLOW_FORMATS: &[Format] = &[
-    Format::Text,
-    Format::Json,
-    Format::Ndjson,
-    Format::Hex,
-    Format::Raw,
-];
+/// Declares a narrow output-format enum covering one command's supported
+/// subset of [`Format`]. Each variant maps to the [`Format`] of the same
+/// name: `FORMATS` is the subset as `Format` values, [`From`] widens a narrow
+/// value into `Format`, and [`TryFrom`] narrows a checked `Format`, returning
+/// the rejected value on failure. Commands match their own enum exhaustively,
+/// so a newly added [`Format`] variant becomes a compile error at every site
+/// that must handle it rather than a runtime `unreachable!`.
+macro_rules! format_subset {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident { $($variant:ident),+ $(,)? }
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum $name {
+            $($variant,)+
+        }
+
+        impl $name {
+            /// The subset as shared [`Format`] values, in declared order.
+            pub const FORMATS: &'static [Format] = &[$(Format::$variant),+];
+
+            /// The shared [`Format`] this narrowed value denotes.
+            pub const fn as_format(self) -> Format {
+                match self {
+                    $(Self::$variant => Format::$variant,)+
+                }
+            }
+        }
+
+        impl From<$name> for Format {
+            fn from(value: $name) -> Self {
+                value.as_format()
+            }
+        }
+
+        impl TryFrom<Format> for $name {
+            type Error = Format;
+
+            fn try_from(format: Format) -> Result<Self, Format> {
+                match format {
+                    $(Format::$variant => Ok(Self::$variant),)+
+                    _ => Err(format),
+                }
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.as_format().fmt(formatter)
+            }
+        }
+    };
+}
+
+format_subset! {
+    /// Formats for commands that emit one aggregate document or text lines.
+    pub enum AggregateFormat {
+        Text,
+        Json,
+    }
+}
+
+format_subset! {
+    /// Formats for commands that either stream records or emit one aggregate
+    /// document or text lines.
+    pub enum ToolFormat {
+        Text,
+        Json,
+        Ndjson,
+    }
+}
+
+format_subset! {
+    /// Formats the `build` command emits.
+    pub enum BuildFormat {
+        Text,
+        Json,
+        Ndjson,
+        Hex,
+        Raw,
+        Pcap,
+        PcapNg,
+    }
+}
+
+format_subset! {
+    /// Formats the `capture` and `fragment` commands emit.
+    pub enum CaptureFormat {
+        Text,
+        Json,
+        Ndjson,
+        Hex,
+        Pcap,
+        PcapNg,
+    }
+}
+
+format_subset! {
+    /// Formats the `dissect` command emits.
+    pub enum DissectFormat {
+        Text,
+        Json,
+        Ndjson,
+        Csv,
+        Tsv,
+        Hex,
+        Raw,
+    }
+}
+
+format_subset! {
+    /// Formats the `send` command emits.
+    pub enum SendFormat {
+        Text,
+        Json,
+        Hex,
+        Raw,
+        Pcap,
+        PcapNg,
+    }
+}
+
+format_subset! {
+    /// Formats the `exchange` and `replay` commands emit.
+    pub enum ExchangeFormat {
+        Text,
+        Json,
+        Ndjson,
+        Pcap,
+        PcapNg,
+    }
+}
+
+format_subset! {
+    /// Formats the `read` command emits.
+    pub enum ReadFormat {
+        Text,
+        Json,
+        Ndjson,
+        Csv,
+        Tsv,
+        Hex,
+        Pcap,
+        PcapNg,
+    }
+}
+
+format_subset! {
+    /// Formats the `follow` command emits.
+    pub enum FollowFormat {
+        Text,
+        Json,
+        Ndjson,
+        Hex,
+        Raw,
+    }
+}
 
 /// Failure produced while enforcing the shared output contract.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

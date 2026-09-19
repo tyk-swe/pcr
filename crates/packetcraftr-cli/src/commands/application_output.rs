@@ -5,17 +5,17 @@ use crate::{
     errors::CliError,
     rendering::{StreamEncoder, bounded_json_len},
 };
-use packetcraftr_cli::output::{contract::Format, stream::StreamRecord};
+use packetcraftr_cli::output::{contract::ToolFormat, stream::StreamRecord};
 use packetcraftr_core::error::Kind;
 
 pub(super) struct EventOutput<'a> {
-    format: Format,
+    format: ToolFormat,
     stream: &'a StreamEncoder,
     remaining: usize,
 }
 
 impl<'a> EventOutput<'a> {
-    pub(super) fn new(format: Format, stream: &'a StreamEncoder, maximum: usize) -> Self {
+    pub(super) fn new(format: ToolFormat, stream: &'a StreamEncoder, maximum: usize) -> Self {
         Self {
             format,
             stream,
@@ -39,13 +39,12 @@ impl<'a> EventOutput<'a> {
         })?;
         self.remaining -= bytes;
         match self.format {
-            Format::Json => retained.push(value),
-            Format::Ndjson => self
+            ToolFormat::Json => retained.push(value),
+            ToolFormat::Ndjson => self
                 .stream
                 .emit_data(value, Vec::new())
                 .map_err(CliError::from)?,
-            Format::Text => render_text(&value)?,
-            _ => unreachable!("format validated"),
+            ToolFormat::Text => render_text(&value)?,
         }
         Ok(())
     }
@@ -101,7 +100,7 @@ mod tests {
 
     #[test]
     fn exact_budget_routes_each_format_to_its_own_sink() {
-        for format in [Format::Json, Format::Ndjson, Format::Text] {
+        for format in [ToolFormat::Json, ToolFormat::Ndjson, ToolFormat::Text] {
             let buffer = SharedBuffer::default();
             let stream = StreamEncoder::new(Command::Http, buffer.clone());
             let mut output = EventOutput::new(format, &stream, 4);
@@ -113,11 +112,11 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-            assert_eq!(retained.len(), usize::from(format == Format::Json));
-            assert_eq!(rendered.get(), format == Format::Text);
+            assert_eq!(retained.len(), usize::from(format == ToolFormat::Json));
+            assert_eq!(rendered.get(), format == ToolFormat::Text);
             assert_eq!(
                 buffer.records().len(),
-                usize::from(format == Format::Ndjson)
+                usize::from(format == ToolFormat::Ndjson)
             );
             let mut retained = Vec::new();
             let rendered = Cell::new(false);
@@ -136,7 +135,7 @@ mod tests {
             assert!(!rendered.get());
             assert_eq!(
                 buffer.records().len(),
-                usize::from(format == Format::Ndjson)
+                usize::from(format == ToolFormat::Ndjson)
             );
         }
     }
@@ -145,7 +144,7 @@ mod tests {
     fn the_budget_is_shared_across_record_types_and_retention_vectors() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer);
-        let mut output = EventOutput::new(Format::Json, &stream, 5);
+        let mut output = EventOutput::new(ToolFormat::Json, &stream, 5);
         let mut strings: Vec<TestRecord<&str>> = Vec::new();
         let mut numbers: Vec<TestRecord<u64>> = Vec::new();
         let rendered = Cell::new(false);
@@ -178,7 +177,7 @@ mod tests {
     fn failed_sizing_and_serialization_preserve_the_remaining_budget() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer.clone());
-        let mut output = EventOutput::new(Format::Ndjson, &stream, 4);
+        let mut output = EventOutput::new(ToolFormat::Ndjson, &stream, 4);
         let mut failures = Vec::new();
         let rendered = Cell::new(false);
         let mut rejected = Vec::new();
@@ -227,7 +226,7 @@ mod tests {
     fn text_render_failures_propagate_unchanged_after_sizing() {
         let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(Command::Http, buffer.clone());
-        let mut output = EventOutput::new(Format::Text, &stream, 4);
+        let mut output = EventOutput::new(ToolFormat::Text, &stream, 4);
         let mut retained = Vec::new();
         let error = output
             .emit(TestRecord("ab"), &mut retained, |_| {
@@ -247,7 +246,7 @@ mod tests {
     #[test]
     fn stream_write_failures_keep_their_io_classification() {
         let stream = StreamEncoder::new(Command::Http, BrokenPipe);
-        let mut output = EventOutput::new(Format::Ndjson, &stream, usize::MAX);
+        let mut output = EventOutput::new(ToolFormat::Ndjson, &stream, usize::MAX);
         let mut retained = Vec::new();
         let rendered = Cell::new(false);
         let error = output

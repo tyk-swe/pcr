@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::FollowFormat;
 
 use packetcraftr_core::error::Kind;
 
@@ -21,9 +21,13 @@ use analysis::StreamTransport;
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: FollowFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let selector = parse_stream_selector(&arguments.stream)?;
-    if format == Format::Raw && arguments.direction == Direction::Both {
+    if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             Kind::Cli,
             "raw output interleaves both directions indistinguishably; \
@@ -65,7 +69,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
+        super::offline_analysis::ip_event_sink(
+            (format == FollowFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for chunk in collector.observe(&record) {
                 if !direction_matches(direction, &chunk) {
@@ -99,26 +105,25 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .unwrap_or_default();
 
     match format {
-        Format::Text => rendering::render_text(selector, &summary, &written),
-        Format::Json => rendering::render_aggregate(
+        FollowFormat::Text => rendering::render_text(selector, &summary, &written),
+        FollowFormat::Json => rendering::render_aggregate(
             selector,
             summary,
             state,
             &run_summary.ip_reassembly,
             written,
         ),
-        Format::Ndjson => rendering::render_stream(
+        FollowFormat::Ndjson => rendering::render_stream(
             selector,
             summary,
             &run_summary.ip_reassembly,
             stream,
             written,
         ),
-        Format::Hex | Format::Raw => {
+        FollowFormat::Hex | FollowFormat::Raw => {
             rendering::render_written(&written)?;
             rendering::render_payload_warning(&summary)
         }
-        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

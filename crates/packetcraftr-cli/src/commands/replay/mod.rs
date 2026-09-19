@@ -8,7 +8,7 @@ mod conversion;
 mod rendering;
 mod selection;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ExchangeFormat;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,8 +41,12 @@ struct ReplayRun {
     max_interfaces: usize,
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    arguments.compression.validate(format)?;
+pub(super) fn run(
+    arguments: Args,
+    format: ExchangeFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    arguments.compression.validate(format.as_format())?;
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.selector.filter.is_some();
     let requested_interface = prepared.requested_interface.clone();
@@ -56,10 +60,10 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         clock: &mut prepared.clock,
     };
     match format {
-        Format::Text => rendering::render_text(run, filtered),
-        Format::Json => rendering::render_aggregate(run, requested_interface),
-        Format::Ndjson => rendering::render_stream(run, stream),
-        Format::Pcap => rendering::render_capture(
+        ExchangeFormat::Text => rendering::render_text(run, filtered),
+        ExchangeFormat::Json => rendering::render_aggregate(run, requested_interface),
+        ExchangeFormat::Ndjson => rendering::render_stream(run, stream),
+        ExchangeFormat::Pcap => rendering::render_capture(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::Pcap,
@@ -67,7 +71,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 compression: arguments.compression,
             },
         ),
-        Format::PcapNg => rendering::render_capture(
+        ExchangeFormat::PcapNg => rendering::render_capture(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::PcapNg,
@@ -75,7 +79,6 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 compression: arguments.compression,
             },
         ),
-        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

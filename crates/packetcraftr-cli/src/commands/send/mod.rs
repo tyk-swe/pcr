@@ -3,7 +3,7 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::SendFormat;
 
 use std::sync::Arc;
 
@@ -121,12 +121,12 @@ fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
     )
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
     let compression = arguments.send.compression;
-    compression.validate(format)?;
+    compression.validate(format.as_format())?;
     let prepared = prepare(arguments)?;
     match format {
-        Format::Text => {
+        SendFormat::Text => {
             // Each confirmed frame is reported as it happens, so partial
             // progress is preserved when a later frame fails.
             let report = prepared
@@ -144,7 +144,7 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             }
             render_diagnostics_text(&diagnostics)
         }
-        Format::Json => {
+        SendFormat::Json => {
             let report = prepared
                 .client
                 .send_set(&prepared.template, prepared.options)
@@ -153,7 +153,7 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
                 output::send::Report::try_from_report(report).map_err(CliError::classified)?;
             emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
         }
-        Format::Hex => prepared
+        SendFormat::Hex => prepared
             .client
             .send_set_with_events(&prepared.template, prepared.options, |frame| {
                 write_plain_line(format_args!(
@@ -164,22 +164,23 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
             })
             .map_err(CliError::classified)
             .map(|_| ()),
-        Format::Raw => prepared
+        SendFormat::Raw => prepared
             .client
             .send_set_with_events(&prepared.template, prepared.options, |frame| {
                 write_raw(frame.packet.wire_bytes()).map_err(output_failure)
             })
             .map_err(CliError::classified)
             .map(|_| ()),
-        Format::Pcap | Format::PcapNg => {
+        SendFormat::Pcap | SendFormat::PcapNg => {
             // The report already holds every confirmed frame, in order.
             let report = prepared
                 .client
                 .send_set(&prepared.template, prepared.options)
                 .map_err(CliError::classified)?;
-            let capture_format = match format {
-                Format::Pcap => capture::Format::Pcap,
-                _ => capture::Format::PcapNg,
+            let capture_format = if format == SendFormat::Pcap {
+                capture::Format::Pcap
+            } else {
+                capture::Format::PcapNg
             };
             let frames = report
                 .sent
@@ -187,7 +188,6 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
                 .map(|frame| frame.packet.frame().clone());
             write_capture_file(capture_format, frames, compression)
         }
-        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

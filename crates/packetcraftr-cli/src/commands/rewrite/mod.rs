@@ -9,7 +9,7 @@ use crate::{
 };
 use packetcraftr_cli::output::{
     self,
-    contract::{Command, Format},
+    contract::{Command, ToolFormat},
 };
 use packetcraftr_core::{
     analysis::pcap,
@@ -57,7 +57,7 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
     let patch = HeaderRewrite {
         source_mac: args.source_mac,
@@ -169,16 +169,15 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         capture: report,
     };
     match format {
-        Format::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => write_plain_line(format_args!(
+        ToolFormat::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
+        ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        ToolFormat::Text => write_plain_line(format_args!(
             "rewrote {} of {} frames across {} interfaces into {}",
             report.capture.frames_changed,
             report.capture.frames_read,
             report.capture.interfaces,
             report.path
         )),
-        _ => unreachable!("format validated"),
     }
 }
 

@@ -15,7 +15,7 @@ use crate::{
 };
 use packetcraftr_cli::output::{
     capture::Retention,
-    contract::{Command, Format},
+    contract::{CaptureFormat, Command},
 };
 use packetcraftr_core::{analysis::pcap, error::Kind};
 use packetcraftr_netio as net;
@@ -24,7 +24,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    args: Args,
+    format: CaptureFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let timeout = Duration::from_millis(args.timeout_ms);
     if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
@@ -39,14 +43,17 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
         ));
     }
     if args.write.is_some() {
-        if !matches!(format, Format::Text | Format::Json | Format::Ndjson) {
+        if !matches!(
+            format,
+            CaptureFormat::Text | CaptureFormat::Json | CaptureFormat::Ndjson
+        ) {
             return Err(CliError::new(
                 Kind::Cli,
                 "--write requires text, JSON, or NDJSON reporting",
             ));
         }
     } else {
-        args.compression.validate(format)?;
+        args.compression.validate(format.as_format())?;
         if args.rotate_bytes.is_some()
             || args.rotate_interval_ms.is_some()
             || args.rotate_files != 1
@@ -57,14 +64,15 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
                 "capture rotation requires --write",
             ));
         }
-        if format == Format::Json {
+        if format == CaptureFormat::Json {
             return Err(CliError::new(
                 Kind::Cli,
                 "JSON capture summaries require --write to retain packet data",
             ));
         }
     }
-    if (args.dissect || !args.fields.is_empty()) && !matches!(format, Format::Text | Format::Ndjson)
+    if (args.dissect || !args.fields.is_empty())
+        && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson)
     {
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
@@ -87,7 +95,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             args.max_projection_bytes,
             &registry,
             Command::Capture,
-            format,
+            format.as_format(),
         )?
     };
     let decoding = rendering::Decoding::prepare(
@@ -138,7 +146,7 @@ pub(super) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             interfaces.push(interface);
         }
     }
-    if format == Format::Pcap && interfaces.len() != 1 {
+    if format == CaptureFormat::Pcap && interfaces.len() != 1 {
         return Err(CliError::new(
             Kind::Cli,
             "multiple interfaces require PCAPNG capture output",

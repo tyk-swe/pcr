@@ -6,7 +6,7 @@ use crate::{
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_plain_line},
 };
-use packetcraftr_cli::output::{self, contract::Format};
+use packetcraftr_cli::output::{self, contract::CaptureFormat};
 use packetcraftr_core::{
     self as core,
     frame::{Frame, LinkType},
@@ -35,8 +35,12 @@ pub(crate) struct Args {
     pub(crate) budget: PacketBudgetArgs,
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    args.compression.validate(format)?;
+pub(crate) fn run(
+    args: Args,
+    format: CaptureFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    args.compression.validate(format.as_format())?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
     crate::cancellation::check()?;
@@ -71,9 +75,9 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     )
     .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    if matches!(format, Format::Pcap | Format::PcapNg) {
+    if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
         return write_capture_file(
-            if format == Format::Pcap {
+            if format == CaptureFormat::Pcap {
                 core::analysis::pcap::Format::Pcap
             } else {
                 core::analysis::pcap::Format::PcapNg
@@ -95,19 +99,24 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             frame: output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?,
         };
         match format {
-            Format::Json => records.push(record),
-            Format::Ndjson => stream.emit_data(record, Vec::new())?,
-            Format::Hex => write_plain_line(format_args!("{}", record.frame.bytes_hex()))?,
-            Format::Text => write_plain_line(format_args!(
+            CaptureFormat::Json => records.push(record),
+            CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
+            CaptureFormat::Hex => write_plain_line(format_args!("{}", record.frame.bytes_hex()))?,
+            CaptureFormat::Text => write_plain_line(format_args!(
                 "fragment {index}: {} bytes {}",
                 record.frame.captured_length,
                 record.frame.bytes_hex()
             ))?,
-            _ => unreachable!("format validated"),
+            CaptureFormat::Pcap | CaptureFormat::PcapNg => {
+                return Err(CliError::new(
+                    core::error::Kind::Internal,
+                    "capture output returned before fragment rendering",
+                ));
+            }
         }
     }
     match format {
-        Format::Json => emit_aggregate(
+        CaptureFormat::Json => emit_aggregate(
             output::contract::Command::Fragment,
             output::fragment::Report {
                 summary,
@@ -115,9 +124,11 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
             },
             built.diagnostics,
         ),
-        Format::Ndjson => stream
+        CaptureFormat::Ndjson => stream
             .complete(summary, built.diagnostics)
             .map_err(Into::into),
-        _ => Ok(()),
+        CaptureFormat::Text | CaptureFormat::Hex | CaptureFormat::Pcap | CaptureFormat::PcapNg => {
+            Ok(())
+        }
     }
 }

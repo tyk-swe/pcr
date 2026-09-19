@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::AggregateFormat;
 
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ use crate::input::open_capture;
 use crate::rendering::emit_aggregate;
 use packetcraftr_cli::output::stats::Table;
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let prepared = prepare(
@@ -47,14 +47,15 @@ pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
     let diagnostics = cap_table(&mut report, arguments.table, arguments.top);
 
     match format {
-        Format::Text => rendering::render_text(arguments.table, &report, frames_read, &diagnostics),
-        Format::Json => {
+        AggregateFormat::Text => {
+            rendering::render_text(arguments.table, &report, frames_read, &diagnostics)
+        }
+        AggregateFormat::Json => {
             let result =
                 output::stats::Report::try_from_report(arguments.table, report, frames_read)
                     .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }
-        _ => unreachable!("command dispatch validated the output format"),
     }
 }
 

@@ -9,7 +9,7 @@ mod payload;
 mod profiles;
 mod rendering;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use std::time::Duration;
 
@@ -20,7 +20,11 @@ use super::execution;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     if arguments.connect && !matches!(arguments.transport, arguments::Transport::Tcp) {
         return Err(CliError::new(
             packetcraftr_core::error::Kind::Cli,
@@ -117,7 +121,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let resolver = packetcraftr::target::SystemResolver;
     let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
     let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
-    if format == Format::Ndjson {
+    if format == ToolFormat::Ndjson {
         let events = stream.clone();
         let summary = packetcraftr::scan::run_with_events(
             &request,
@@ -143,15 +147,18 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         .map_err(rendering::scan_error)?;
         let (result, diagnostics, stats) =
             output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
-        if format == Format::Text {
-            rendering::render_text(result, diagnostics, stats)
-        } else {
-            crate::rendering::emit_aggregate_with_stats(
+        match format {
+            ToolFormat::Text => rendering::render_text(result, diagnostics, stats),
+            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
                 output::contract::Command::Scan,
                 result,
                 diagnostics,
                 stats,
-            )
+            ),
+            ToolFormat::Ndjson => Err(CliError::new(
+                packetcraftr_core::error::Kind::Internal,
+                "NDJSON scan streaming returned before aggregate rendering",
+            )),
         }
     }
 }

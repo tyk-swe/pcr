@@ -3,7 +3,7 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::BuildFormat;
 
 use packetcraftr_cli::output;
 use packetcraftr_core as core;
@@ -19,8 +19,12 @@ use crate::rendering::{
     stream_capture_error, write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    let capture = arguments.capture.resolve(format)?;
+pub(super) fn run(
+    arguments: Args,
+    format: BuildFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let capture = arguments.capture.resolve(format.as_format())?;
     let maximum = arguments.template.max_template_packets;
     let axes = arguments.template.parse()?;
     let registry = packetcraftr_core::protocol::builtin::registry();
@@ -33,7 +37,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     crate::cancellation::install()?;
     let template = axes.into_template(packet);
     let packets = template.expand(maximum).map_err(CliError::classified)?;
-    if packets.len() != 1 && matches!(format, Format::Json | Format::Raw) {
+    if packets.len() != 1 && matches!(format, BuildFormat::Json | BuildFormat::Raw) {
         return Err(CliError::new(
             Kind::Cli,
             "JSON and raw build output require exactly one packet; use text, hex, or NDJSON for packet sets",
@@ -42,7 +46,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     let builder = core::build::Builder::new(registry);
     let mut writer = capture
         .as_ref()
-        .map(|capture| capture.writer(format))
+        .map(|capture| capture.writer())
         .transpose()?;
     let mut summary = output::build::Complete::default();
     let mut diagnostics = Vec::new();
@@ -76,7 +80,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
                 writer.write_frame(&frame).map_err(|source| {
                     stream_capture_error("write capture output failed", source)
                 })?;
-            } else if format == Format::Ndjson {
+            } else if format == BuildFormat::Ndjson {
                 let (packet, packet_diagnostics) = output::build::Report::from_built(built);
                 stream.emit_data(
                     output::build::PacketEvent {
@@ -111,29 +115,34 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     }
     // Startup handles cancellation after JSON publication without appending
     // a second aggregate document to stdout.
-    if format != Format::Json {
+    if format != BuildFormat::Json {
         crate::cancellation::check()?;
     }
-    if format == Format::Ndjson {
+    if format == BuildFormat::Ndjson {
         stream.complete(summary, Vec::new())?;
     }
     Ok(())
 }
 
-fn render_packet(built: core::build::BuiltPacket, format: Format) -> Result<(), CliError> {
+fn render_packet(built: core::build::BuiltPacket, format: BuildFormat) -> Result<(), CliError> {
     match format {
-        Format::Text => {
+        BuildFormat::Text => {
             write_summary_line(format_args!("built {} bytes", built.bytes.len()))?;
             write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
             render_diagnostics_text(&built.diagnostics)
         }
-        Format::Hex => write_plain_line(format_args!("{}", output::hex::CompactHex(&built.bytes))),
-        Format::Raw => write_raw(&built.bytes),
-        Format::Json => {
+        BuildFormat::Hex => {
+            write_plain_line(format_args!("{}", output::hex::CompactHex(&built.bytes)))
+        }
+        BuildFormat::Raw => write_raw(&built.bytes),
+        BuildFormat::Json => {
             let (result, diagnostics) = output::build::Report::from_built(built);
             emit_aggregate(output::contract::Command::Build, result, diagnostics)
         }
-        _ => unreachable!("command dispatch validated the output format"),
+        BuildFormat::Ndjson | BuildFormat::Pcap | BuildFormat::PcapNg => Err(CliError::new(
+            Kind::Internal,
+            "streaming and capture build output returned before packet rendering",
+        )),
     }
 }
 

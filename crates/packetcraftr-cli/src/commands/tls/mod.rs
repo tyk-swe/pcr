@@ -3,7 +3,7 @@
 
 //! TLS session assembly CLI command.
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use std::sync::OnceLock;
 
@@ -108,7 +108,11 @@ impl SniPattern {
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let selected_stream = arguments
         .stream
         .as_deref()
@@ -150,7 +154,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for event in collector.observe(&record) {
                 if selector.matches(&event.session) {
@@ -188,10 +194,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &run_summary.ip_reassembly,
     );
     match format {
-        Format::Text => rendering::render_text(&state, &summary, &prepared.registry),
-        Format::Json => rendering::render_aggregate(state, summary),
-        Format::Ndjson => rendering::render_stream(summary, stream),
-        _ => unreachable!("command dispatch validated the output format"),
+        ToolFormat::Text => rendering::render_text(&state, &summary, &prepared.registry),
+        ToolFormat::Json => rendering::render_aggregate(state, summary),
+        ToolFormat::Ndjson => rendering::render_stream(summary, stream),
     }
 }
 

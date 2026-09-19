@@ -6,7 +6,7 @@ use crate::{
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
 };
-use packetcraftr_cli::output::{self, contract::Format};
+use packetcraftr_cli::output::{self, contract::ToolFormat};
 use packetcraftr_core::{analysis::pcap, error::Kind};
 use std::path::{Path, PathBuf};
 
@@ -25,7 +25,7 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }
 
-pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
     if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {
         return Err(CliError::new(
@@ -75,15 +75,14 @@ pub(crate) fn run(args: Args, format: Format, stream: &StreamEncoder) -> Result<
     staged.persist()?;
     let report = output::merge::Report::new(args.write.display().to_string(), report);
     match format {
-        Format::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
-        Format::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        Format::Text => write_plain_line(format_args!(
+        ToolFormat::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
+        ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
+        ToolFormat::Text => write_plain_line(format_args!(
             "merged {} frames ({} bytes) across {} interfaces into {}",
             report.frames,
             report.captured_bytes,
             report.interfaces.len(),
             report.path
         )),
-        _ => unreachable!("format validated"),
     }
 }

@@ -17,7 +17,7 @@ use packetcraftr::{
 };
 use packetcraftr_cli::output::{
     self,
-    contract::{Command, Format},
+    contract::{CaptureFormat, Command},
 };
 use packetcraftr_core::{
     self as core,
@@ -86,7 +86,7 @@ impl Decoding {
 }
 
 pub(super) struct Rendering<'a> {
-    pub(super) format: Format,
+    pub(super) format: CaptureFormat,
     pub(super) compression: Compression,
     pub(super) selector: Option<FrameSelector>,
     pub(super) decoding: Option<Decoding>,
@@ -132,14 +132,14 @@ pub(super) fn run<P: Provider>(
                     files
                         .initialize(sources)
                         .map_err(BoundaryError::from_error)?;
-                } else if matches!(format, Format::Pcap | Format::PcapNg) {
+                } else if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
                     let destination =
                         compression::Output::new(io::stdout(), rendering.compression.format())
                             .map_err(BoundaryError::from_error)?;
                     writer = Some(
                         super::writer::initialize(
                             destination,
-                            if format == Format::Pcap {
+                            if format == CaptureFormat::Pcap {
                                 pcap::Format::Pcap
                             } else {
                                 pcap::Format::PcapNg
@@ -226,7 +226,7 @@ pub(super) fn run<P: Provider>(
     }
     // A projection that never matched a frame still owes its text header; the
     // NDJSON terminal is the capture summary, never a second complete record.
-    if format == Format::Text
+    if format == CaptureFormat::Text
         && let Some(projector) = rendering.projector.take()
     {
         projector
@@ -264,7 +264,7 @@ fn emit_frame(
     decoding: Option<&Decoding>,
     projector: Option<&mut super::super::projection::Projector>,
     stream: &StreamEncoder,
-    format: Format,
+    format: CaptureFormat,
     writer: &mut Option<pcap::Writer<compression::Output<io::Stdout>>>,
     source_frame: u64,
     frame: Frame,
@@ -288,7 +288,7 @@ fn emit_frame(
             return projector.emit(source_frame, values, stream);
         }
         return match format {
-            Format::Text => {
+            CaptureFormat::Text => {
                 // Only the text rendering needs a stack here; the NDJSON event
                 // builds its own inside `try_from_decoded`.
                 let stack = output::frame::Stack::from_decoded(&decoded);
@@ -297,16 +297,22 @@ fn emit_frame(
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 super::super::read::rendering::render_frame_text(source_frame, &frame, Some(&stack))
             }
-            Format::Ndjson => {
+            CaptureFormat::Ndjson => {
                 output::capture::Event::try_from_decoded(source_frame, frame, &decoded)
                     .map_err(CliError::classified)
                     .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into))
             }
-            _ => unreachable!("decoded output requires text or NDJSON"),
+            CaptureFormat::Json
+            | CaptureFormat::Hex
+            | CaptureFormat::Pcap
+            | CaptureFormat::PcapNg => Err(CliError::new(
+                packetcraftr_core::error::Kind::Internal,
+                "decoded output requires text or NDJSON",
+            )),
         };
     }
     match format {
-        Format::Text => output::frame::Captured::try_from_frame(frame)
+        CaptureFormat::Text => output::frame::Captured::try_from_frame(frame)
             .map_err(CliError::classified)
             .and_then(|frame| {
                 write_stdout_line(format_args!(
@@ -314,36 +320,35 @@ fn emit_frame(
                     captured_frame_text(&frame)
                 ))
             }),
-        Format::Hex => output::frame::Captured::try_from_frame(frame)
+        CaptureFormat::Hex => output::frame::Captured::try_from_frame(frame)
             .map_err(CliError::classified)
             .and_then(|frame| write_plain_line(format_args!("{}", frame.bytes_hex()))),
-        Format::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
+        CaptureFormat::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
             .map_err(CliError::classified)
             .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),
-        Format::Json => Ok(()),
-        Format::Pcap | Format::PcapNg => writer
+        CaptureFormat::Json => Ok(()),
+        CaptureFormat::Pcap | CaptureFormat::PcapNg => writer
             .as_mut()
             .expect("writer initialized before frames")
             .write_frame(&frame)
             .map_err(CliError::classified),
-        _ => unreachable!("format checked before activation"),
     }
 }
 fn render_complete(
-    format: Format,
+    format: CaptureFormat,
     summary: &output::capture::Summary,
     stats: &Stats,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        Format::Json => {
+        CaptureFormat::Json => {
             emit_aggregate_with_stats(Command::Capture, summary, diagnostics, stats.clone())
         }
-        Format::Ndjson => stream
+        CaptureFormat::Ndjson => stream
             .complete_with_stats(summary, diagnostics, stats.clone())
             .map_err(Into::into),
-        Format::Text => {
+        CaptureFormat::Text => {
             write_summary_line(format_args!(
                 "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {:?}",
                 stats.packets_attempted,
@@ -500,7 +505,7 @@ mod tests {
             &request,
             options(2),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: None,
@@ -552,7 +557,7 @@ mod tests {
             &request,
             options(10),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: None,
@@ -662,7 +667,7 @@ mod tests {
             &request,
             options(3),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: dissecting(),
@@ -733,7 +738,7 @@ mod tests {
             4096,
             &registry(),
             Command::Capture,
-            Format::Ndjson,
+            CaptureFormat::Ndjson.as_format(),
         )
         .unwrap();
         run(
@@ -741,7 +746,7 @@ mod tests {
             &request,
             options(1),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: Decoding::prepare(false, true, None, &registry(), 256).unwrap(),
@@ -787,7 +792,7 @@ mod tests {
             16,
             &registry(),
             Command::Capture,
-            Format::Ndjson,
+            CaptureFormat::Ndjson.as_format(),
         )
         .unwrap();
         let error = run(
@@ -795,7 +800,7 @@ mod tests {
             &request,
             options(2),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: Decoding::prepare(false, true, None, &registry(), 256).unwrap(),
@@ -835,7 +840,7 @@ mod tests {
             &request,
             options(1),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding: dissecting(),
@@ -873,7 +878,7 @@ mod tests {
             &request,
             options(2),
             Rendering {
-                format: Format::Ndjson,
+                format: CaptureFormat::Ndjson,
                 compression: Compression::None,
                 selector: None,
                 decoding,

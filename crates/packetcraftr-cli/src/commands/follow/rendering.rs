@@ -3,7 +3,7 @@
 
 use std::net::SocketAddr;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::FollowFormat;
 
 use packetcraftr_core::analysis;
 
@@ -33,20 +33,20 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: Format,
+    format: FollowFormat,
     chunk: Chunk,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        Format::Text => write_stdout_line(format_args!(
+        FollowFormat::Text => write_stdout_line(format_args!(
             "{} #{} generation={} {}",
             direction_marker(&chunk),
             chunk.number,
             chunk.direction_generation,
             chunk.bytes.escape_ascii()
         )),
-        Format::Hex => {
+        FollowFormat::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(
                 "{} #{} generation={} {}",
@@ -56,13 +56,14 @@ pub(super) fn render_record(
                 rendered.bytes_hex
             ))
         }
-        Format::Raw => write_raw(&chunk.bytes),
-        Format::Json => {
+        FollowFormat::Raw => write_raw(&chunk.bytes),
+        FollowFormat::Json => {
             state.retained.push(|| chunk.into());
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?),
-        _ => unreachable!("command dispatch validated the output format"),
+        FollowFormat::Ndjson => {
+            Ok(stream.emit_data(output::follow::Chunk::from(chunk), Vec::new())?)
+        }
     }
 }
 

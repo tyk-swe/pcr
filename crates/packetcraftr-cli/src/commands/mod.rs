@@ -217,13 +217,15 @@ impl Command {
     /// Dispatches to the selected command.
     ///
     /// Rejects unsupported output formats before any command performs work.
+    /// Each arm narrows the shared [`Format`] into the command's own format
+    /// enum, so command code matches exhaustively instead of trusting a
+    /// catch-all `unreachable!`.
     pub(crate) fn run(self, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
         // Documentation generates files outside the output contract, so
         // startup dispatches it before stream setup and never reaches here.
-        self.kind()
-            .expect("non-documentation commands have an output contract kind")
-            .require_format(format)
-            .map_err(CliError::classified)?;
+        let kind = self
+            .kind()
+            .expect("non-documentation commands have an output contract kind");
         let publisher = self
             .publication_duration()
             .filter(|_| format == Format::Ndjson)
@@ -235,31 +237,45 @@ impl Command {
             });
         let stream = publisher.as_ref().unwrap_or(stream);
         match self {
-            Self::Merge(arguments) => merge::run(arguments, format, stream),
-            Self::Fragment(arguments) => fragment::run(arguments, format, stream),
-            Self::Build(arguments) => build::run(arguments, format, stream),
-            Self::Dissect(arguments) => dissect::run(arguments, format, stream),
-            Self::Protocols(arguments) => protocols::run(arguments, format),
-            Self::Read(arguments) => read::run(arguments, format, stream),
-            Self::Interfaces(arguments) => interfaces::run(arguments, format),
-            Self::Plan(arguments) => plan::run(arguments, format),
-            Self::Send(arguments) => send::run(arguments, format),
-            Self::Capture(arguments) => capture::run(arguments, format, stream),
-            Self::Expert(arguments) => expert::run(arguments, format, stream),
-            Self::Follow(arguments) => follow::run(arguments, format, stream),
-            Self::Exchange(arguments) => exchange::run(arguments, format, stream),
-            Self::Replay(arguments) => replay::run(arguments, format, stream),
-            Self::Scan(arguments) => scan::run(arguments, format, stream),
-            Self::Stats(arguments) => stats::run(arguments, format),
-            Self::Tls(arguments) => tls::run(arguments, format, stream),
-            Self::DnsRead(arguments) => dns_read::run(arguments, format, stream),
-            Self::Http(arguments) => http::run(arguments, format, stream),
-            Self::Export(arguments) => export::run(arguments, format, stream),
-            Self::Rewrite(arguments) => rewrite::run(arguments, format, stream),
-            Self::Traceroute(arguments) => traceroute::run(arguments, format, stream),
-            Self::Dns(arguments) => dns::run(arguments, format, stream),
-            Self::Fuzz(arguments) => fuzz::run(arguments, format, stream),
-            Self::Routes(arguments) => routes::run(arguments, format),
+            Self::Merge(arguments) => merge::run(arguments, kind.require_format(format)?, stream),
+            Self::Fragment(arguments) => {
+                fragment::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Build(arguments) => build::run(arguments, kind.require_format(format)?, stream),
+            Self::Dissect(arguments) => {
+                dissect::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Protocols(arguments) => protocols::run(arguments, kind.require_format(format)?),
+            Self::Read(arguments) => read::run(arguments, kind.require_format(format)?, stream),
+            Self::Interfaces(arguments) => interfaces::run(arguments, kind.require_format(format)?),
+            Self::Plan(arguments) => plan::run(arguments, kind.require_format(format)?),
+            Self::Send(arguments) => send::run(arguments, kind.require_format(format)?),
+            Self::Capture(arguments) => {
+                capture::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Expert(arguments) => expert::run(arguments, kind.require_format(format)?, stream),
+            Self::Follow(arguments) => follow::run(arguments, kind.require_format(format)?, stream),
+            Self::Exchange(arguments) => {
+                exchange::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Replay(arguments) => replay::run(arguments, kind.require_format(format)?, stream),
+            Self::Scan(arguments) => scan::run(arguments, kind.require_format(format)?, stream),
+            Self::Stats(arguments) => stats::run(arguments, kind.require_format(format)?),
+            Self::Tls(arguments) => tls::run(arguments, kind.require_format(format)?, stream),
+            Self::DnsRead(arguments) => {
+                dns_read::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Http(arguments) => http::run(arguments, kind.require_format(format)?, stream),
+            Self::Export(arguments) => export::run(arguments, kind.require_format(format)?, stream),
+            Self::Rewrite(arguments) => {
+                rewrite::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Traceroute(arguments) => {
+                traceroute::run(arguments, kind.require_format(format)?, stream)
+            }
+            Self::Dns(arguments) => dns::run(arguments, kind.require_format(format)?, stream),
+            Self::Fuzz(arguments) => fuzz::run(arguments, kind.require_format(format)?, stream),
+            Self::Routes(arguments) => routes::run(arguments, kind.require_format(format)?),
             Self::Documentation(_) => unreachable!("documentation returned before dispatch"),
         }
     }
@@ -269,20 +285,19 @@ impl Command {
 /// document.
 fn render_aggregate_rows<T, R: serde::Serialize>(
     command: output::contract::Command,
-    format: Format,
+    format: output::contract::AggregateFormat,
     result: &R,
     rows: &[T],
     line: impl Fn(&T) -> String,
 ) -> Result<(), CliError> {
     match format {
-        Format::Text => {
+        output::contract::AggregateFormat::Text => {
             for row in rows {
                 write_stdout_line(format_args!("{}", line(row)))?;
             }
             Ok(())
         }
-        Format::Json => emit_aggregate(command, result, Vec::new()),
-        _ => unreachable!("command dispatch validated the output format"),
+        output::contract::AggregateFormat::Json => emit_aggregate(command, result, Vec::new()),
     }
 }
 

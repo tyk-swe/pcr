@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use packetcraftr_core::analysis;
 
@@ -28,7 +28,11 @@ fn matches_selector(
     true
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+pub(super) fn run(
+    arguments: Args,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
     let prepared = prepare(
         arguments.limits,
         arguments.filter.as_deref(),
@@ -44,7 +48,9 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         &mut reader,
         prepared.registry.clone(),
         &options,
-        super::offline_analysis::ip_event_sink((format == Format::Ndjson).then(|| stream.clone())),
+        super::offline_analysis::ip_event_sink(
+            (format == ToolFormat::Ndjson).then(|| stream.clone()),
+        ),
         |record| {
             for finding in collector.observe(&record) {
                 if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
@@ -66,9 +72,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     }
 
     match format {
-        Format::Text => rendering::render_text(&summary, &state),
-        Format::Json => rendering::render_aggregate(&summary, state),
-        Format::Ndjson => rendering::render_stream(&summary, state, stream),
-        _ => unreachable!("command dispatch validated the output format"),
+        ToolFormat::Text => rendering::render_text(&summary, &state),
+        ToolFormat::Json => rendering::render_aggregate(&summary, state),
+        ToolFormat::Ndjson => rendering::render_stream(&summary, state, stream),
     }
 }

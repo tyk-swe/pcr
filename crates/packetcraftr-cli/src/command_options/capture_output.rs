@@ -38,6 +38,7 @@ pub(crate) struct CaptureOutputArgs {
 pub(crate) struct CaptureOutput {
     pub(crate) link_type: LinkType,
     pub(crate) timestamp: SystemTime,
+    format: pcap::Format,
     compression: super::Compression,
 }
 
@@ -49,12 +50,12 @@ impl CaptureOutputArgs {
         format: packetcraftr_cli::output::contract::Format,
     ) -> Result<Option<CaptureOutput>, CliError> {
         self.compression.validate(format)?;
-        let captures = matches!(
-            format,
-            packetcraftr_cli::output::contract::Format::Pcap
-                | packetcraftr_cli::output::contract::Format::PcapNg
-        );
-        if !captures {
+        let captures = match format {
+            packetcraftr_cli::output::contract::Format::Pcap => Some(pcap::Format::Pcap),
+            packetcraftr_cli::output::contract::Format::PcapNg => Some(pcap::Format::PcapNg),
+            _ => None,
+        };
+        let Some(capture_format) = captures else {
             if self.link_type.is_some() {
                 return Err(CliError::new(
                     Kind::Cli,
@@ -68,7 +69,7 @@ impl CaptureOutputArgs {
                 ));
             }
             return Ok(None);
-        }
+        };
         let link_type = self.link_type.ok_or_else(|| {
             CliError::new(
                 Kind::Cli,
@@ -83,6 +84,7 @@ impl CaptureOutputArgs {
         Ok(Some(CaptureOutput {
             link_type: parse_link_type(&link_type)?,
             timestamp,
+            format: capture_format,
             compression: self.compression,
         }))
     }
@@ -144,15 +146,9 @@ impl CaptureOutput {
     /// Opens the bounded streaming writer on stdout under compression.
     pub(crate) fn writer(
         &self,
-        format: packetcraftr_cli::output::contract::Format,
     ) -> Result<pcap::Writer<pcap::compression::Output<std::io::Stdout>>, CliError> {
         let destination = self.compression.writer(std::io::stdout())?;
-        let format = match format {
-            packetcraftr_cli::output::contract::Format::Pcap => pcap::Format::Pcap,
-            packetcraftr_cli::output::contract::Format::PcapNg => pcap::Format::PcapNg,
-            _ => unreachable!("capture output resolves only capture formats"),
-        };
-        pcap::Writer::new(destination, format, self.link_type).map_err(|source| {
+        pcap::Writer::new(destination, self.format, self.link_type).map_err(|source| {
             crate::rendering::stream_capture_error("initialize capture output failed", source)
         })
     }

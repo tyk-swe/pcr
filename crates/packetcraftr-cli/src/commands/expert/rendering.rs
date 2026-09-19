@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ToolFormat;
 
 use std::collections::BTreeMap;
 
@@ -50,13 +50,13 @@ impl State {
 }
 
 pub(super) fn render_record(
-    format: Format,
+    format: ToolFormat,
     finding: output::expert::Finding,
     state: &mut State,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     match format {
-        Format::Text => match (finding.transport, finding.stream) {
+        ToolFormat::Text => match (finding.transport, finding.stream) {
             (Some(transport), Some(stream)) => write_stdout_line(format_args!(
                 "#{} {} {} ({} stream {stream}): {}",
                 finding.frame,
@@ -73,12 +73,11 @@ pub(super) fn render_record(
                 finding.message
             )),
         },
-        Format::Json => {
+        ToolFormat::Json => {
             state.retained.push(|| finding);
             Ok(())
         }
-        Format::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
-        _ => unreachable!("command dispatch validated the output format"),
+        ToolFormat::Ndjson => Ok(stream.emit_data(finding, Vec::new())?),
     }
 }
 

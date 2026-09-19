@@ -113,6 +113,13 @@ impl From<output::stream::EncodeError> for CliError {
     }
 }
 
+/// Format-contract failures keep their own classification.
+impl From<output::contract::Error> for CliError {
+    fn from(error: output::contract::Error) -> Self {
+        Self::classified(error)
+    }
+}
+
 const fn fallback_code(kind: Kind) -> &'static str {
     match kind {
         Kind::Cli => "cli.error",

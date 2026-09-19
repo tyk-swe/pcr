@@ -8,7 +8,7 @@ pub(crate) mod rendering;
 #[cfg(test)]
 mod tests;
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::ReadFormat;
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -48,12 +48,16 @@ struct StreamState {
     captured_bytes_read: u64,
 }
 
-pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
-    arguments.compression.validate(format)?;
+pub(super) fn run(
+    arguments: Args,
+    format: ReadFormat,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    arguments.compression.validate(format.as_format())?;
     if !arguments.fields.is_empty() {
-        return super::projection::read(arguments, format, stream);
+        return super::projection::read(arguments, format.as_format(), stream);
     }
-    if matches!(format, Format::Json | Format::Csv | Format::Tsv) {
+    if matches!(format, ReadFormat::Json | ReadFormat::Csv | ReadFormat::Tsv) {
         return Err(CliError::new(
             Kind::Cli,
             "this read output format requires --field selections",
@@ -74,7 +78,7 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     validate_capture_stream_limits(limits)?;
     let bounds = epoch.resolve()?;
     validate_dissect_format(dissect, format)?;
-    if normalize && format != Format::PcapNg {
+    if normalize && format != ReadFormat::PcapNg {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_normalize_format",
@@ -86,8 +90,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
         ));
     }
     let rewrite_format = match format {
-        Format::Pcap => Some(capture::Format::Pcap),
-        Format::PcapNg => Some(capture::Format::PcapNg),
+        ReadFormat::Pcap => Some(capture::Format::Pcap),
+        ReadFormat::PcapNg => Some(capture::Format::PcapNg),
         _ => None,
     };
     let decoding = prepare_decoding(
@@ -136,8 +140,8 @@ pub(super) fn run(arguments: Args, format: Format, stream: &StreamEncoder) -> Re
     )
 }
 
-fn validate_dissect_format(dissect: bool, format: Format) -> Result<(), CliError> {
-    if dissect && !matches!(format, Format::Text | Format::Ndjson) {
+fn validate_dissect_format(dissect: bool, format: ReadFormat) -> Result<(), CliError> {
+    if dissect && !matches!(format, ReadFormat::Text | ReadFormat::Ndjson) {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
@@ -222,7 +226,7 @@ fn read_records(
     limits: OfflineCaptureLimitsArgs,
     bounds: Option<core::frame::TimeBounds>,
     decoding: Option<&Decoding>,
-    format: Format,
+    format: ReadFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let mut state = StreamState::default();
@@ -237,7 +241,7 @@ fn read_records(
         render_record(record, format, stream)?;
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
-    if format == Format::Ndjson {
+    if format == ReadFormat::Ndjson {
         stream.complete(
             output::read::Event::Complete {
                 frames_read: state.frames_read,

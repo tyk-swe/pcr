@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::contract::AggregateFormat;
 
 use packetcraftr_cli::output;
 use packetcraftr_netio as net;
@@ -29,7 +29,7 @@ impl Args {
     }
 }
 
-pub(super) fn run(arguments: Args, format: Format) -> Result<(), CliError> {
+pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;

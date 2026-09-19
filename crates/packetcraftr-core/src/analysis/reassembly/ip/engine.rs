@@ -939,10 +939,13 @@ fn reconstruction_retained_bytes(
 }
 
 fn accumulated_ecn(existing: Option<&DatagramState>, incoming: &Incoming) -> Result<Ecn, Error> {
-    match existing {
-        Some(state) => Ok(state.reconstruction.ecn().merge(incoming.ecn)?),
-        None => Ok(incoming.ecn),
-    }
+    existing.map_or(Ok(incoming.ecn), |state| {
+        state
+            .reconstruction
+            .ecn()
+            .merge(incoming.ecn)
+            .map_err(Error::from)
+    })
 }
 
 fn materialize_reconstruction(

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::check_limits;
+use crate::probe::evidence::CaptureEvidenceLimits;
 
 use crate::fuzz::MAX_RATE;
 use crate::fuzz::error::Error;
@@ -32,26 +32,16 @@ impl Default for LiveLimits {
 impl LiveLimits {
     /// Rejects any retention bound above the ceiling this crate enforces.
     pub fn validate(&self) -> Result<(), Error> {
-        check_limits(
-            &[
-                (
-                    "max_evidence_frames",
-                    self.max_evidence_frames,
-                    MAX_CAPTURE_QUEUE_FRAMES,
-                ),
-                (
-                    "max_evidence_bytes",
-                    self.max_evidence_bytes,
-                    MAX_CAPTURE_QUEUE_BYTES,
-                ),
-            ],
-            &[],
-            |field, value, reason| Error::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-        )?;
+        CaptureEvidenceLimits {
+            max_evidence_frames: self.max_evidence_frames,
+            max_evidence_bytes: self.max_evidence_bytes,
+            max_undecoded: None,
+        }
+        .validate(|field, value, reason| Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        })?;
         Ok(())
     }
 }

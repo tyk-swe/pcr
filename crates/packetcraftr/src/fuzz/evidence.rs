@@ -120,30 +120,20 @@ pub(super) fn retain_evidence(
     deadline: &Deadline,
 ) -> Result<(), Error> {
     let mut omitted = false;
-    for frame in evidence.responses {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.responses.push(frame);
-        } else {
-            omitted = true;
+    let mut retain = |frames: Vec<Frame>, sink: &mut Vec<Frame>| -> Result<(), Error> {
+        for frame in frames {
+            deadline.check().map_err(duration_limit)?;
+            if retain_fuzz_evidence(budget, &frame, limits) {
+                sink.push(frame);
+            } else {
+                omitted = true;
+            }
         }
-    }
-    for frame in evidence.unmatched {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.unmatched.push(frame);
-        } else {
-            omitted = true;
-        }
-    }
-    for frame in evidence.undecoded {
-        deadline.check().map_err(duration_limit)?;
-        if retain_fuzz_evidence(budget, &frame, limits) {
-            case.undecoded.push(frame);
-        } else {
-            omitted = true;
-        }
-    }
+        Ok(())
+    };
+    retain(evidence.responses, &mut case.responses)?;
+    retain(evidence.unmatched, &mut case.unmatched)?;
+    retain(evidence.undecoded, &mut case.undecoded)?;
     if omitted {
         diagnostics.push_once(Diagnostic::warning(
             "fuzz.evidence_limit",

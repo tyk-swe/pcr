@@ -7,7 +7,6 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::BoundaryError;
-use packetcraftr_core::budget::DeadlineExceeded;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::protocol::application::dns::name;
 
@@ -128,20 +127,7 @@ pub enum Error {
     },
 }
 
-impl From<DeadlineExceeded> for Error {
-    fn from(error: DeadlineExceeded) -> Self {
-        Self::DurationLimit {
-            actual: error.actual,
-            limit: error.limit,
-        }
-    }
-}
-
-impl From<packetcraftr_core::budget::Interrupted> for Error {
-    fn from(interrupted: packetcraftr_core::budget::Interrupted) -> Self {
-        interrupted.into_error()
-    }
-}
+packetcraftr_core::deadline_error_conversions!(Error);
 
 impl Classified for Error {
     fn classification(&self) -> Classification {

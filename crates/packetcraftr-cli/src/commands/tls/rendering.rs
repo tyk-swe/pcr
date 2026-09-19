@@ -189,12 +189,10 @@ fn session_line(session: &Session) -> String {
     }
     if !session.alerts.is_empty() {
         line.push_str(" alerts=");
-        line.push_str(&comma_separated(
-            session.alerts.iter().map(alert_text).collect::<Vec<_>>(),
-        ));
+        line.push_str(&comma_separated(session.alerts.iter().map(alert_text)));
     }
     if session.alerts_dropped > 0 {
-        line.push_str(&format!(" alerts_dropped={}", session.alerts_dropped));
+        let _ = write!(line, " alerts_dropped={}", session.alerts_dropped);
     }
     // Last, because the free-text reason carries spaces.
     if let Some(reason) = &session.reason {

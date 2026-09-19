@@ -9,7 +9,6 @@ use thiserror::Error;
 use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::ip::Error as IpError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
-use crate::budget::DeadlineExceeded;
 
 use crate::error::{Classification, Classified, Kind};
 
@@ -178,20 +177,7 @@ impl Classified for Error {
     }
 }
 
-impl From<DeadlineExceeded> for Error {
-    fn from(error: DeadlineExceeded) -> Self {
-        Self::DurationLimit {
-            actual: error.actual,
-            limit: error.limit,
-        }
-    }
-}
-
-impl From<crate::budget::Interrupted> for Error {
-    fn from(interrupted: crate::budget::Interrupted) -> Self {
-        interrupted.into_error()
-    }
-}
+crate::deadline_error_conversions!(Error);
 
 const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
 const IP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \

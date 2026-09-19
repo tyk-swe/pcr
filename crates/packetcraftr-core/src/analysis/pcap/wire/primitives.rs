@@ -216,41 +216,23 @@ fn decode_array<const LENGTH: usize>(
         .expect("length-checked byte slice"))
 }
 
-pub(in crate::analysis::pcap) fn write_u16<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    value: u16,
-) -> Result<(), Error> {
-    let bytes = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
+macro_rules! write_int {
+    ($function:ident, $type:ty) => {
+        pub(in crate::analysis::pcap) fn $function<W: Write>(
+            writer: &mut W,
+            endianness: Endianness,
+            value: $type,
+        ) -> Result<(), Error> {
+            let bytes = match endianness {
+                Endianness::Little => value.to_le_bytes(),
+                Endianness::Big => value.to_be_bytes(),
+            };
+            writer.write_all(&bytes)?;
+            Ok(())
+        }
     };
-    writer.write_all(&bytes)?;
-    Ok(())
 }
 
-pub(in crate::analysis::pcap) fn write_u32<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    value: u32,
-) -> Result<(), Error> {
-    let bytes = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    };
-    writer.write_all(&bytes)?;
-    Ok(())
-}
-
-pub(in crate::analysis::pcap) fn write_i64<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    value: i64,
-) -> Result<(), Error> {
-    let bytes = match endianness {
-        Endianness::Little => value.to_le_bytes(),
-        Endianness::Big => value.to_be_bytes(),
-    };
-    writer.write_all(&bytes)?;
-    Ok(())
-}
+write_int!(write_u16, u16);
+write_int!(write_u32, u32);
+write_int!(write_i64, i64);

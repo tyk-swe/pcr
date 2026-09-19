@@ -171,19 +171,15 @@ where
             }
             false
         }
-        FieldSource::Frame(which) => match frame_value(context, *which) {
-            Some(value) => predicate(&value),
-            None => false,
-        },
+        FieldSource::Frame(which) => {
+            frame_value(context, *which).is_some_and(|value| predicate(&value))
+        }
         FieldSource::Stream(transport) => {
             let stream = match transport {
                 StreamTransport::Tcp => context.tcp_stream,
                 StreamTransport::Udp => context.udp_stream,
             };
-            match stream {
-                Some(index) => predicate(&FieldValue::Unsigned(index)),
-                None => false,
-            }
+            stream.is_some_and(|index| predicate(&FieldValue::Unsigned(index)))
         }
         FieldSource::Layer {
             binding,

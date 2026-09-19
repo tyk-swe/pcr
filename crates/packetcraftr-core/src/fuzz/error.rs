@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::budget::DeadlineExceeded;
 use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 use super::request::Target;
@@ -105,17 +104,4 @@ impl Classified for Error {
     }
 }
 
-impl From<DeadlineExceeded> for Error {
-    fn from(error: DeadlineExceeded) -> Self {
-        Self::DurationLimit {
-            actual: error.actual,
-            limit: error.limit,
-        }
-    }
-}
-
-impl From<crate::budget::Interrupted> for Error {
-    fn from(interrupted: crate::budget::Interrupted) -> Self {
-        interrupted.into_error()
-    }
-}
+crate::deadline_error_conversions!(Error);

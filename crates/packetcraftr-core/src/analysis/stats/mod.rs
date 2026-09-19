@@ -196,10 +196,10 @@ impl Collector {
             self.first_timestamp
                 .map_or(timestamp, |first| first.min(timestamp)),
         );
-        self.last_timestamp = Some(match self.last_timestamp {
-            Some(last) => last.max(timestamp),
-            None => timestamp,
-        });
+        self.last_timestamp = Some(
+            self.last_timestamp
+                .map_or(timestamp, |last| last.max(timestamp)),
+        );
 
         if !self.collects(Table::Io) {
             return;

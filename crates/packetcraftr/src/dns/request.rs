@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::{check_limits, duration_violation};
+use crate::probe::evidence::{CaptureEvidenceLimits, check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
@@ -219,31 +219,16 @@ impl Limits {
     /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         self.message.validate()?;
-        check_limits(
-            &[
-                (
-                    "max_evidence_frames",
-                    self.max_evidence_frames,
-                    MAX_CAPTURE_QUEUE_FRAMES,
-                ),
-                (
-                    "max_evidence_bytes",
-                    self.max_evidence_bytes,
-                    MAX_CAPTURE_QUEUE_BYTES,
-                ),
-            ],
-            &[(
-                "max_undecoded",
-                self.max_undecoded,
-                self.max_evidence_frames,
-                "cannot exceed max_evidence_frames",
-            )],
-            |field, value, reason| Error::InvalidLimit {
-                field,
-                value,
-                reason,
-            },
-        )?;
+        CaptureEvidenceLimits {
+            max_evidence_frames: self.max_evidence_frames,
+            max_evidence_bytes: self.max_evidence_bytes,
+            max_undecoded: Some(self.max_undecoded),
+        }
+        .validate(|field, value, reason| Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        })?;
         if duration_violation(self.max_duration, MAX_DURATION) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,

@@ -240,6 +240,27 @@ impl Interrupted {
     }
 }
 
+#[macro_export]
+#[doc(hidden)]
+macro_rules! deadline_error_conversions {
+    ($error:ty) => {
+        impl ::std::convert::From<$crate::budget::DeadlineExceeded> for $error {
+            fn from(error: $crate::budget::DeadlineExceeded) -> Self {
+                Self::DurationLimit {
+                    actual: error.actual,
+                    limit: error.limit,
+                }
+            }
+        }
+
+        impl ::std::convert::From<$crate::budget::Interrupted> for $error {
+            fn from(interrupted: $crate::budget::Interrupted) -> Self {
+                interrupted.into_error()
+            }
+        }
+    };
+}
+
 /// Cloneable cooperative stop signal. Construction starts no threads, and
 /// cancelling one operation does not affect independently constructed signals.
 #[derive(Clone, Debug, Default)]

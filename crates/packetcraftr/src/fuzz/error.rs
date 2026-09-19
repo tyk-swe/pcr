@@ -49,17 +49,7 @@ pub enum Error {
     },
 }
 
-impl From<DeadlineExceeded> for Error {
-    fn from(error: DeadlineExceeded) -> Self {
-        duration_limit(error)
-    }
-}
-
-impl From<packetcraftr_core::budget::Interrupted> for Error {
-    fn from(interrupted: packetcraftr_core::budget::Interrupted) -> Self {
-        interrupted.into_error()
-    }
-}
+packetcraftr_core::deadline_error_conversions!(Error);
 
 impl Classified for Error {
     fn classification(&self) -> Classification {

@@ -16,7 +16,8 @@ pub(crate) use exact_validation::{
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 pub(crate) use limits::{
-    check_limits, check_probe_count, check_probe_duration, duration_violation,
+    CaptureEvidenceLimits, check_limits, check_probe_count, check_probe_duration,
+    duration_violation,
 };
 
 mod budget;

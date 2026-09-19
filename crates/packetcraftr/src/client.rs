@@ -200,8 +200,5 @@ where
 }
 
 fn ensure_deadline(deadline: Option<Instant>) -> Result<(), Error> {
-    match deadline {
-        Some(deadline) => ensure_preparation_deadline(deadline),
-        None => Ok(()),
-    }
+    deadline.map_or(Ok(()), ensure_preparation_deadline)
 }

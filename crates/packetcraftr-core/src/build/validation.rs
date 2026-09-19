@@ -28,20 +28,17 @@ pub(super) fn validate_bindings(
         };
         validate_padding(packet, protocols, index, padding, mode, diagnostics)?;
     }
-    validate_adjacent_bindings(registry, packet, protocols, mode, diagnostics)
+    validate_adjacent_bindings(registry, protocols, mode, diagnostics)
 }
 
 fn validate_adjacent_bindings(
     registry: &Registry,
-    packet: &Packet,
     protocols: &[crate::layer::Id],
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let mut previous_binding = None;
-    for index in 0..packet.len().saturating_sub(1) {
-        // `protocols.len() == packet.len()` and `index + 1` stays below that length
-        let (parent, child) = (&protocols[index], &protocols[index + 1]);
+    for (index, (parent, child)) in protocols.iter().zip(protocols.iter().skip(1)).enumerate() {
         let discriminator = match previous_binding {
             Some((previous_parent, previous_child, discriminator))
                 if previous_parent == parent && previous_child == child =>

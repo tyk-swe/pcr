@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::ast::Op;
 use super::error::Error;
-use super::eval::{self, Context};
+use super::eval::Context;
 use super::parser::{self, Options, Requirements};
+use super::plan::Plan;
 use crate::registry::Registry;
 
 /// A compiled display filter.
@@ -14,7 +14,7 @@ use crate::registry::Registry;
 /// quietly matching no packets. Evaluation diagnoses unavailable frame facts.
 #[derive(Clone, Debug)]
 pub struct Filter {
-    program: Vec<Op>,
+    plan: Plan,
     requirements: Requirements,
 }
 
@@ -23,7 +23,7 @@ impl Filter {
     pub fn compile(source: &str, registry: &Registry, options: Options) -> Result<Self, Error> {
         let compiled = parser::compile(source, registry, &options)?;
         Ok(Self {
-            program: compiled.program,
+            plan: Plan::compile(compiled.program),
             requirements: compiled.requirements,
         })
     }
@@ -42,6 +42,6 @@ impl Filter {
         if self.requirements.timestamp && context.decoded.frame.timestamp.is_none() {
             return Err(Error::TimestampUnavailable);
         }
-        Ok(eval::evaluate(&self.program, context))
+        Ok(self.plan.evaluate(context))
     }
 }

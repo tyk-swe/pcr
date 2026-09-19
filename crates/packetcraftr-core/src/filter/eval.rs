@@ -1,11 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::borrow::Cow;
 use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
 
-use super::ast::{Op, Predicate};
+use super::ast::Predicate;
 use super::comparison;
 use super::lexer::CompareOperator;
 use super::path::{ByteSlice, FieldRef, FieldSource, FrameField, StreamTransport};
@@ -48,38 +49,7 @@ pub struct DerivedPacket<'a> {
     pub replayed_prefix_layers: usize,
 }
 
-/// Runs a compiled program over one packet.
-///
-/// The program is postfix, so this is a flat pass with a boolean stack and no
-/// recursion regardless of how deeply the source filter nested.
-pub(super) fn evaluate(program: &[Op], context: &Context<'_>) -> bool {
-    let mut stack: Vec<bool> = Vec::with_capacity(program.len());
-    for op in program {
-        match op {
-            Op::Leaf(predicate) => stack.push(test(predicate, context)),
-            Op::Not => {
-                let Some(value) = stack.pop() else {
-                    return false;
-                };
-                stack.push(!value);
-            }
-            Op::And | Op::Or => {
-                let (Some(right), Some(left)) = (stack.pop(), stack.pop()) else {
-                    return false;
-                };
-                stack.push(if matches!(op, Op::And) {
-                    left && right
-                } else {
-                    left || right
-                });
-            }
-        }
-    }
-    // The parser only emits balanced programs, so exactly one value remains.
-    stack.pop().unwrap_or(false)
-}
-
-fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
+pub(super) fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
     match predicate {
         Predicate::LayerPresent {
             protocol,
@@ -146,6 +116,25 @@ pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicat
 where
     F: FnMut(&FieldValue) -> bool,
 {
+    let mut matched = false;
+    each_value(context, field, |value| {
+        matched = predicate(&value);
+        matched
+    });
+    matched
+}
+
+/// Offers each value `field` reads to `consume`, stopping when it returns true.
+///
+/// Layer fields arrive already owned, so a consumer that keeps values — the
+/// projection's output row — can move them instead of cloning. A nested
+/// selection stays borrowed from its owned root: predicates inspect it in
+/// place, and only a consumer that retains it pays for the materializing
+/// clone.
+pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
+where
+    F: FnMut(Cow<'_, FieldValue>) -> bool,
+{
     match &field.source {
         FieldSource::NestedLayer {
             protocol,
@@ -159,27 +148,26 @@ where
                 let Some(value) = path.get(&root) else {
                     continue;
                 };
-                let binding = FilterFieldBinding::Direct {
-                    protocol: *protocol,
-                    field: "",
-                };
-                if let Some(value) = project(value.clone(), &binding, field.slice)
-                    && predicate(&value)
+                if let Some(value) = project_nested(value, field.slice)
+                    && consume(value)
                 {
-                    return true;
+                    return;
                 }
             }
-            false
         }
         FieldSource::Frame(which) => {
-            frame_value(context, *which).is_some_and(|value| predicate(&value))
+            if let Some(value) = frame_value(context, *which) {
+                consume(Cow::Owned(value));
+            }
         }
         FieldSource::Stream(transport) => {
             let stream = match transport {
                 StreamTransport::Tcp => context.tcp_stream,
                 StreamTransport::Udp => context.udp_stream,
             };
-            stream.is_some_and(|index| predicate(&FieldValue::Unsigned(index)))
+            if let Some(index) = stream {
+                consume(Cow::Owned(FieldValue::Unsigned(index)));
+            }
         }
         FieldSource::Layer {
             binding,
@@ -193,12 +181,11 @@ where
                     let Some(value) = project(value, binding, field.slice) else {
                         continue;
                     };
-                    if predicate(&value) {
-                        return true;
+                    if consume(Cow::Owned(value)) {
+                        return;
                     }
                 }
             }
-            false
         }
     }
 }
@@ -253,15 +240,51 @@ fn project(
         FieldValue::Ipv6(address) => Bytes::copy_from_slice(&address.octets()),
         _ => return None,
     };
-    let end = slice.end.unwrap_or(bytes.len()).min(bytes.len());
-    if slice.start > end {
-        return None;
-    }
+    let (start, end) = slice_range(bytes.len(), slice)?;
     Some(FieldValue::Bytes(crate::byte_slice::checked_slice(
-        &bytes,
-        slice.start,
-        end,
+        &bytes, start, end,
     )?))
+}
+
+/// Applies a path's byte slice to a value borrowed from an owned root.
+///
+/// An unsliced value is passed through untouched, so a predicate inspects the
+/// nested field where it lives instead of testing a clone. A sliced `Bytes`
+/// shares its parent's storage; the remaining byte-addressable kinds copy
+/// only the selected range, which is never larger than the field itself.
+fn project_nested<'a>(
+    value: &'a FieldValue,
+    slice: Option<ByteSlice>,
+) -> Option<Cow<'a, FieldValue>> {
+    let Some(slice) = slice else {
+        return Some(Cow::Borrowed(value));
+    };
+    match value {
+        FieldValue::Bytes(bytes) => {
+            let (start, end) = slice_range(bytes.len(), slice)?;
+            crate::byte_slice::checked_slice(bytes, start, end)
+                .map(|bytes| Cow::Owned(FieldValue::Bytes(bytes)))
+        }
+        FieldValue::Mac(mac) => sliced_bytes(mac, slice).map(Cow::Owned),
+        FieldValue::Text(text) => sliced_bytes(text.as_bytes(), slice).map(Cow::Owned),
+        FieldValue::Ipv4(address) => sliced_bytes(&address.octets(), slice).map(Cow::Owned),
+        FieldValue::Ipv6(address) => sliced_bytes(&address.octets(), slice).map(Cow::Owned),
+        _ => None,
+    }
+}
+
+/// Clamps a byte slice's range to `len`, rejecting a start past the end.
+fn slice_range(len: usize, slice: ByteSlice) -> Option<(usize, usize)> {
+    let end = slice.end.unwrap_or(len).min(len);
+    (slice.start <= end).then_some((slice.start, end))
+}
+
+/// Reads a fixed-size byte-addressable value as the selected byte run.
+fn sliced_bytes(bytes: &[u8], slice: ByteSlice) -> Option<FieldValue> {
+    let (start, end) = slice_range(bytes.len(), slice)?;
+    Some(FieldValue::Bytes(Bytes::copy_from_slice(
+        &bytes[start..end],
+    )))
 }
 
 fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {

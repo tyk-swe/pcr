@@ -59,12 +59,23 @@ pub enum Error {
     #[error("exchange packets selected different interfaces or link modes")]
     HeterogeneousExchangeRoute,
     #[error("packet template expansion failed: {message}")]
-    Template { message: String },
+    Template {
+        message: String,
+        /// The expansion failure the template reported, when this refusal is
+        /// not the workflow's own empty-expansion check.
+        #[source]
+        source: Option<packetcraftr_core::template::Error>,
+    },
     #[error("could not materialize {field} on layer {layer}: {message}")]
     PacketMaterialization {
         layer: usize,
         field: &'static str,
         message: String,
+        /// The packet-layer failure the materialization step ran into, when
+        /// one exists; a missing route value is the packet's own refusal and
+        /// has none.
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     #[error(
         "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"

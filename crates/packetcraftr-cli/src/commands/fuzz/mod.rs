@@ -52,7 +52,7 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
         .map(|field| {
             field
                 .parse::<core::fuzz::Target>()
-                .map_err(|source| CliError::new(Kind::Cli, source.to_string()))
+                .map_err(CliError::classified)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let request = core::fuzz::Request {

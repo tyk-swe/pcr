@@ -96,7 +96,17 @@ impl DecodeArgs {
             Ok(())
         })
         .map(Arc::new)
-        .map_err(|source| error(source.to_string()))
+        .map_err(|source| {
+            CliError::from_classification(
+                Classification::new(
+                    "cli.decode_as",
+                    Kind::Cli,
+                    Some("declare one compatible protocol per TCP or UDP port"),
+                ),
+                source.to_string(),
+                packetcraftr_core::error::source_chain(&source),
+            )
+        })
     }
 }
 

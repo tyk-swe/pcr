@@ -7,15 +7,23 @@ use crate::error::{Classification, Classified, Kind};
 
 use super::types::{DocumentLimits, Limit};
 
+/// A parse refusal that is the document module's own invariant rather than a
+/// syntax failure reported by the underlying parser, so `Parse` can retain it
+/// as its typed source.
+#[derive(Debug, Error)]
+#[error("{0}")]
+pub(super) struct Refused(pub(super) String);
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error("packet document has {actual} bytes, exceeding limit {limit}")]
     SizeLimit { actual: usize, limit: usize },
-    #[error("could not parse {format} packet document: {message}")]
+    #[error("could not parse {format} packet document: {source}")]
     Parse {
         format: &'static str,
-        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     #[error("unsupported packet document schema {actual}; expected {expected}")]
     Schema {

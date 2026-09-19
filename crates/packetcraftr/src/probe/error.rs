@@ -108,57 +108,59 @@ struct Codes {
 }
 
 /// Why a probe workflow stopped, independent of which workflow it was.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    TargetSelection(crate::target::SelectionError),
-    Cancelled(packetcraftr_core::budget::Cancelled),
+    #[error("{0}")]
+    TargetSelection(#[source] crate::target::SelectionError),
+    #[error("{0}")]
+    Cancelled(#[source] packetcraftr_core::budget::Cancelled),
+    #[error("invalid limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
         value: u64,
         reason: String,
     },
     /// The requested port selection cannot be probed.
-    InvalidPort {
-        message: String,
-    },
+    #[error("invalid port selection: {message}")]
+    InvalidPort { message: String },
     /// The requested source port is zero or unsupported by the strategy.
+    #[error("invalid source port: must be non-zero and is only supported for UDP/TCP")]
     InvalidSourcePort,
-    InvalidTimeout {
-        value: Duration,
-        maximum: Duration,
-    },
-    InvalidDuration {
-        value: Duration,
-        maximum: Duration,
-    },
-    Authorization(BoundaryError),
-    Family {
-        family: &'static str,
-    },
-    DurationLimit {
-        actual: Duration,
-        limit: Duration,
-    },
+    #[error("timeout {value:?} is invalid; maximum is {maximum:?}")]
+    InvalidTimeout { value: Duration, maximum: Duration },
+    #[error("duration {value:?} is invalid; maximum is {maximum:?}")]
+    InvalidDuration { value: Duration, maximum: Duration },
+    #[error("authorization failed: {0}")]
+    Authorization(#[source] BoundaryError),
+    #[error("resolved target has no {family} address selected")]
+    Family { family: &'static str },
+    #[error("worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
+    DurationLimit { actual: Duration, limit: Duration },
+    #[error("pipeline execution failed: {source}")]
     PipelineExecution {
+        #[source]
         source: BoundaryError,
     },
+    #[error("execution failed at probe {sequence}: {source}")]
     Execution {
         sequence: u64,
+        #[source]
         source: BoundaryError,
     },
+    #[error("rate clock failed before probe {sequence}")]
     Clock {
         sequence: u64,
+        #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    InvalidEvidence {
-        sequence: u64,
-        message: String,
-    },
-    StatisticsOverflow {
-        sequence: u64,
-    },
+    #[error("executor returned invalid evidence at probe {sequence}: {message}")]
+    InvalidEvidence { sequence: u64, message: String },
+    #[error("statistic accounting overflowed at probe {sequence}")]
+    StatisticsOverflow { sequence: u64 },
+    #[error("progressive output failed: {source}")]
     Output {
+        #[source]
         source: BoundaryError,
     },
 }
@@ -253,16 +255,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
-            ErrorKind::Cancelled(source) => Some(source),
-            ErrorKind::TargetSelection(source) => Some(source),
-            ErrorKind::Authorization(source)
-            | ErrorKind::PipelineExecution { source }
-            | ErrorKind::Execution { source, .. }
-            | ErrorKind::Output { source } => Some(source),
-            ErrorKind::Clock { source, .. } => Some(source.as_ref()),
-            _ => None,
-        }
+        self.kind.source()
     }
 }
 

@@ -5,8 +5,6 @@ mod budget;
 mod buffered;
 mod seed;
 
-use std::fmt;
-
 use serde::Deserialize;
 use serde::de::{self, DeserializeSeed};
 
@@ -72,7 +70,9 @@ impl Packet {
                 match de::IgnoredAny::deserialize(&mut deserializer) {
                     Ok(_) => Err(Error::Parse {
                         format: "YAML",
-                        message: "multiple YAML documents are not supported".to_owned(),
+                        source: Box::new(super::error::Refused(
+                            "multiple YAML documents are not supported".to_owned(),
+                        )),
                     }),
                     Err(source) if yaml_stream_ended(&source) => Ok(document),
                     Err(source) => Err(map_yaml_parse_error(source, &budget, limits)),
@@ -155,7 +155,7 @@ fn validate_json_container_depth(input: &str, max_nesting: usize) -> Result<(), 
 
 fn map_parse_error(
     format: &'static str,
-    source: impl fmt::Display,
+    source: impl std::error::Error + Send + Sync + 'static,
     budget: &Budget<'_>,
     limits: &DocumentLimits,
 ) -> Error {
@@ -163,7 +163,7 @@ fn map_parse_error(
         Some(limit) => Error::exceeded(limit, limits),
         None => Error::Parse {
             format,
-            message: source.to_string(),
+            source: Box::new(source),
         },
     }
 }

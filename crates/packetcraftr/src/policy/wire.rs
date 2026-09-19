@@ -70,7 +70,10 @@ pub(crate) fn decode_wire(
     bytes: &Bytes,
 ) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
     let unsupported = |reason| {
-        WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics { reason })
+        WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics {
+            reason,
+            source: None,
+        })
     };
     let registry = packetcraftr_core::protocol::builtin::registry();
     if registry.root_for_link_type(link_type.0).is_none() {

@@ -41,6 +41,16 @@ impl CliError {
         Self::from_classification(classification, error.to_string(), causes).with_context(context)
     }
 
+    /// A CLI-originated failure retaining the typed source's rendered chain
+    /// in `causes` — for sources that carry no classification of their own.
+    pub(crate) fn caused(kind: Kind, source: &(impl std::error::Error + ?Sized)) -> Self {
+        Self::from_classification(
+            Classification::new(fallback_code(kind), kind, None),
+            source.to_string(),
+            packetcraftr_core::error::source_chain(source),
+        )
+    }
+
     pub(crate) fn from_classification(
         classification: Classification,
         message: impl Into<String>,
@@ -104,6 +114,17 @@ impl CliError {
         .with_scan(self.scan.clone())
     }
 }
+
+/// `CliError` renders its headline message; implementing [`std::error::Error`]
+/// lets clap value parsers return it and preserves the classification for
+/// callers that read it back.
+impl std::fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CliError {}
 
 /// The NDJSON encoder reports failures without an exit code, and every CLI
 /// failure path starts from a [`CliError`].

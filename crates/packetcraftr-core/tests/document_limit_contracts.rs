@@ -546,10 +546,26 @@ fn malformed_input_near_each_threshold_is_a_format_error_not_a_limit() {
 }
 
 #[test]
+fn parse_failures_retain_their_typed_source_in_the_chain() {
+    let json = document(&layer(
+        "raw",
+        &["\"a\":{\"type\":\"bytes\",\"value\":[1,\"two\"]}".to_owned()],
+    ));
+    let error = Packet::parse_with_limits(&json, Format::Json, &DocumentLimits::DEFAULT)
+        .expect_err("a malformed document is a parse failure");
+    assert!(matches!(error, Error::Parse { .. }), "{error:?}");
+    assert!(
+        !packetcraftr_core::error::source_chain(&error).is_empty(),
+        "{error:?} must retain its typed parse source in the chain"
+    );
+}
+
+#[test]
 fn duplicate_fields_are_rejected_deliberately_in_both_formats() {
     let json = document(&layer("raw", &[unsigned("dup", 1), unsigned("dup", 2)]));
     match Packet::parse_with_limits(&json, Format::Json, &DocumentLimits::DEFAULT) {
-        Err(Error::Parse { message, .. }) => {
+        Err(Error::Parse { source, .. }) => {
+            let message = source.to_string();
             assert!(
                 message.contains("duplicate reflective field \"dup\""),
                 "{message}"

@@ -38,20 +38,31 @@ struct ReaperService {
     _workers: Vec<JoinHandle<()>>,
 }
 
+/// Shared rather than boxed so [`shared_reaper`] can clone the startup
+/// failure out of its `OnceLock` — a live-I/O failure then retains this as
+/// its typed source instead of formatting it into a message.
 #[derive(Clone, Debug)]
 pub(super) struct ReaperStartError {
-    message: Arc<str>,
+    source: Arc<std::io::Error>,
 }
 
 impl fmt::Display for ReaperStartError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.message.fmt(formatter)
+        write!(
+            formatter,
+            "start shared native worker reaper failed: {}",
+            self.source
+        )
     }
 }
 
-/// So a live-I/O failure can retain this as its typed source instead of
-/// formatting it into a message.
-impl std::error::Error for ReaperStartError {}
+impl std::error::Error for ReaperStartError {
+    /// The original `std::io::Error` itself, so `raw_os_error()` and the
+    /// error's own chain stay reachable through `source()`.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.source)
+    }
+}
 
 pub(super) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
@@ -122,9 +133,7 @@ fn start_reaper(
                     let _ = worker.join();
                 }
                 return Err(ReaperStartError {
-                    message: Arc::from(format!(
-                        "start shared native worker reaper failed: {error}"
-                    )),
+                    source: Arc::new(error),
                 });
             }
         }
@@ -206,6 +215,19 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("injected spawn failure"));
+    }
+
+    #[test]
+    fn reaper_start_failure_exposes_the_os_error_source() {
+        let result = start_with(1, |_| Err(io::Error::from_raw_os_error(13)));
+        let error = match result {
+            Ok(_) => panic!("injected reaper spawn must fail"),
+            Err(error) => error,
+        };
+        let source = std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<io::Error>())
+            .expect("the retained source is the original io error");
+        assert_eq!(source.raw_os_error(), Some(13));
     }
 
     #[test]

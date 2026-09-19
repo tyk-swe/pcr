@@ -42,7 +42,7 @@ pub(super) fn read(
             ));
         }
         return packetcraftr_core::protocol::raw::parse_hex(hex)
-            .map_err(|source| CliError::new(Kind::Cli, source.to_string()));
+            .map_err(|source| CliError::caused(Kind::Cli, &source));
     }
     if let Some(path) = path {
         return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Frame)

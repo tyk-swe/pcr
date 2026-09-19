@@ -19,7 +19,7 @@ use crate::probe::evidence::{ResponseCandidate, retain_evidence};
 use crate::probe::{self, Transport as ProbeTransport};
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::error::Error;
+use super::error::{Error, WireError};
 use super::wire::{decode_response, decode_tcp_frame};
 use super::{AttemptEvidence, Limits, MessageLimits, Outcome, Probe, ValidatedResponse};
 
@@ -53,9 +53,20 @@ pub const fn response_code_name(code: u16) -> &'static str {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResponseClassification {
     Response(ValidatedResponse),
-    Unrelated { reason: String },
-    DecodeFailure { reason: String },
-    NetworkFailure { reason: String },
+    /// A wire error the caller can match on; `reason` keeps its message for
+    /// the report, and a correlation refusal that is not a wire failure has
+    /// no source.
+    Unrelated {
+        reason: String,
+        source: Option<WireError>,
+    },
+    DecodeFailure {
+        reason: String,
+        source: Option<WireError>,
+    },
+    NetworkFailure {
+        reason: String,
+    },
 }
 
 impl ResponseClassification {
@@ -99,11 +110,13 @@ pub fn classify_response(
         {
             return Some(ResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
+                source: None,
             });
         }
         let Some(payload) = dns_payload(&response.packet) else {
             return Some(ResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has no complete DNS payload".to_owned(),
+                source: None,
             });
         };
         return Some(
@@ -117,9 +130,11 @@ pub fn classify_response(
                 Ok(validated) => ResponseClassification::Response(validated),
                 Err(error) if error.is_unrelated() => ResponseClassification::Unrelated {
                     reason: error.to_string(),
+                    source: Some(error),
                 },
                 Err(error) => ResponseClassification::DecodeFailure {
                     reason: error.to_string(),
+                    source: Some(error),
                 },
             },
         );
@@ -216,11 +231,11 @@ fn classify_attempt(classification: ResponseClassification) -> AttemptClassifica
             status: Outcome::NetworkFailure,
             reason,
         },
-        ResponseClassification::DecodeFailure { reason } => AttemptClassification::Failed {
+        ResponseClassification::DecodeFailure { reason, .. } => AttemptClassification::Failed {
             status: Outcome::DecodeFailure,
             reason,
         },
-        ResponseClassification::Unrelated { reason } => AttemptClassification::Failed {
+        ResponseClassification::Unrelated { reason, .. } => AttemptClassification::Failed {
             status: Outcome::Unrelated,
             reason,
         },

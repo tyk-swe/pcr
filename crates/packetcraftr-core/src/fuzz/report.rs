@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +29,8 @@ pub struct Mutation {
     pub value: FieldValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct CaseFailure {
     message: String,
     classification: Classification,
@@ -50,14 +50,6 @@ impl CaseFailure {
         }
     }
 }
-
-impl fmt::Display for CaseFailure {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for CaseFailure {}
 
 impl Classified for CaseFailure {
     fn classification(&self) -> Classification {

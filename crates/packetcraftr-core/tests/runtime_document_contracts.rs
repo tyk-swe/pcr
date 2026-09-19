@@ -345,8 +345,9 @@ fn expressions_and_documents_round_trip_and_enforce_resource_bounds() {
         (duplicate, document::Format::Yaml, "YAML", "duplicate"),
     ] {
         match document::Packet::parse(input, format, input.len()) {
-            Err(document::Error::Parse { format, message }) => {
+            Err(document::Error::Parse { format, source }) => {
                 assert_eq!(format, expected_format, "{input:?}");
+                let message = source.to_string();
                 assert!(
                     message.to_lowercase().contains(expected_fragment),
                     "{input:?}: {message}"

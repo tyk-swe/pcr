@@ -56,7 +56,7 @@ pub(super) fn run(
         .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
-            .map_err(|source| CliError::new(Kind::Cli, source.to_string()))?
+            .map_err(|source| CliError::caused(Kind::Cli, &source))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
         (None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,

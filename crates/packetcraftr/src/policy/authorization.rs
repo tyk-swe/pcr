@@ -117,6 +117,7 @@ impl Policy {
         let destinations = semantics::live_destinations(packet).map_err(|source| {
             Error::InvalidPacketSemantics {
                 reason: source.to_string(),
+                source: Some(source),
             }
         })?;
         for destination in destinations {
@@ -135,6 +136,7 @@ impl Policy {
         let packet_source = semantics::outer_ip_path(packet)
             .map_err(|source| Error::InvalidPacketSemantics {
                 reason: source.to_string(),
+                source: Some(source),
             })?
             .map(|path| path.source)
             .map_or(plan.packet_source, |source| {

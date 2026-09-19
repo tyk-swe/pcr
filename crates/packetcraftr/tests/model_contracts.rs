@@ -412,6 +412,7 @@ fn public_errors_retain_stable_policy_and_target_classification() {
         (
             Box::new(policy::Error::InvalidPacketSemantics {
                 reason: "fixture".to_owned(),
+                source: None,
             }),
             "policy.invalid_packet_semantics",
             Kind::Policy,

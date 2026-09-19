@@ -7,6 +7,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{Classification, Classified, Kind};
+
 use crate::layout::DEFAULT_MAX_PACKET_SIZE;
 
 use super::error::Error;
@@ -88,6 +90,16 @@ pub enum TargetParseError {
     InvalidLayer { target: String },
     #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
     InvalidField { target: String },
+}
+
+impl Classified for TargetParseError {
+    fn classification(&self) -> Classification {
+        Classification::new(
+            "cli.fuzz_limit",
+            Kind::Cli,
+            Some("use LAYER.FIELD targets naming a layer index and a reflective field path"),
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

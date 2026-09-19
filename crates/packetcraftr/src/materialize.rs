@@ -57,6 +57,7 @@ pub(crate) fn materialize_link_structure(
             layer: 0,
             field: BuiltinProtocol::Ethernet.as_str(),
             message: source.to_string(),
+            source: Some(Box::new(source)),
         })?;
     Ok(())
 }
@@ -97,6 +98,7 @@ pub(crate) fn materialize_network_fields(
                     layer: index,
                     field: "source",
                     message: "route source family does not match the packet layer".to_owned(),
+                    source: None,
                 });
             }
         };
@@ -106,6 +108,7 @@ pub(crate) fn materialize_network_fields(
                 layer: index,
                 field: "source",
                 message: source.to_string(),
+                source: Some(Box::new(source)),
             })?;
     }
 
@@ -123,6 +126,7 @@ pub(crate) fn materialize_network_fields(
                     layer: index,
                     field: "destination",
                     message: "route destination family does not match the packet layer".to_owned(),
+                    source: None,
                 });
             }
         };
@@ -132,6 +136,7 @@ pub(crate) fn materialize_network_fields(
                 layer: index,
                 field: "destination",
                 message: source.to_string(),
+                source: Some(Box::new(source)),
             })?;
     }
     Ok(())
@@ -164,6 +169,7 @@ pub(crate) fn materialize_link_fields(
                 layer: index,
                 field: "source",
                 message: "route has no interface-owned source MAC".to_owned(),
+                source: None,
             })?;
         layer
             .set_field("source", FieldValue::Mac(source_mac.0))
@@ -171,6 +177,7 @@ pub(crate) fn materialize_link_fields(
                 layer: index,
                 field: "source",
                 message: source.to_string(),
+                source: Some(Box::new(source)),
             })?;
         changed = true;
     }
@@ -186,6 +193,7 @@ pub(crate) fn materialize_link_fields(
                     layer: index,
                     field: "destination",
                     message: "route has no resolved destination MAC".to_owned(),
+                    source: None,
                 })?;
         layer
             .set_field("destination", FieldValue::Mac(destination_mac.0))
@@ -193,6 +201,7 @@ pub(crate) fn materialize_link_fields(
                 layer: index,
                 field: "destination",
                 message: source.to_string(),
+                source: Some(Box::new(source)),
             })?;
         changed = true;
     }
@@ -211,6 +220,7 @@ pub(crate) fn require_fixed_width_link_materialization(
             message: format!(
                 "link materialization changed frame length from {preliminary_len} to {materialized_len} bytes"
             ),
+            source: None,
         });
     }
     Ok(())
@@ -380,6 +390,7 @@ mod tests {
                 layer: 0,
                 field: "source",
                 message,
+                ..
             }) if message.contains("family does not match")
         ));
 
@@ -396,6 +407,7 @@ mod tests {
                 layer: 0,
                 field: "destination",
                 message,
+                ..
             }) if message.contains("family does not match")
         ));
     }
@@ -455,6 +467,7 @@ mod tests {
                 layer: 0,
                 field: "source",
                 message,
+                ..
             }) if message.contains("source MAC")
         ));
 
@@ -471,6 +484,7 @@ mod tests {
                 layer: 0,
                 field: "destination",
                 message,
+                ..
             }) if message.contains("destination MAC")
         ));
     }
@@ -485,6 +499,7 @@ mod tests {
                 layer: 0,
                 field: "ethernet",
                 message,
+                ..
             }) if message.contains("from 64 to 65 bytes")
         ));
     }

@@ -131,11 +131,13 @@ where
                 .expand(options.max_template_packets)
                 .map_err(|source| Error::Template {
                     message: source.to_string(),
+                    source: Some(source),
                 })?;
             for (offset, expanded) in expansion.into_iter().enumerate() {
                 check_cancelled()?;
                 let packet = expanded.map_err(|source| Error::Template {
                     message: source.to_string(),
+                    source: Some(source),
                 })?;
                 let plan = self.plan(&packet, options.send.destination, &options.send.plan)?;
                 let planned =

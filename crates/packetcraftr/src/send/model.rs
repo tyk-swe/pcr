@@ -88,6 +88,7 @@ impl SetOptions {
             .expansion_len()
             .map_err(|source| crate::Error::Template {
                 message: source.to_string(),
+                source: Some(source),
             })?;
         if count == 0 || count > self.max_template_packets {
             return Err(crate::Error::InvalidSendOption {

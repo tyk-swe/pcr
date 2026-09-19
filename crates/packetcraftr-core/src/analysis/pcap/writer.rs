@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fmt;
 use std::io::{self, Write};
+use std::sync::Arc;
 
 use crate::frame::{Frame, LinkType};
 
@@ -31,26 +33,73 @@ pub(super) enum WriterState {
     },
 }
 
+/// A `dyn Error`'s rendered chain, retained for re-reporting: `&dyn Error`
+/// cannot be cloned, so the sticky failure keeps each link's message and
+/// shape rather than only the outermost string.
+#[derive(Debug)]
+struct ChainSnapshot {
+    message: String,
+    source: Option<Arc<ChainSnapshot>>,
+}
+
+impl ChainSnapshot {
+    fn of(error: &(dyn std::error::Error + 'static)) -> Arc<Self> {
+        Arc::new(Self {
+            message: error.to_string(),
+            source: error.source().map(Self::of),
+        })
+    }
+}
+
+impl fmt::Display for ChainSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ChainSnapshot {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn std::error::Error + 'static))
+    }
+}
+
+/// The shared retained payload a re-reported `io::Error` carries, so the
+/// same chain backs every later report.
+#[derive(Debug)]
+struct SharedIo(Arc<dyn std::error::Error + Send + Sync>);
+
+impl fmt::Display for SharedIo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::error::Error for SharedIo {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
 #[derive(Debug)]
 struct OutputFailure {
     kind: io::ErrorKind,
     raw_os_error: Option<i32>,
-    message: String,
+    /// The original payload's retained chain, when the failure carried one.
+    /// OS and simple `io::Error`s reproduce exactly from `kind` and
+    /// `raw_os_error` and need none.
+    source: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
 impl OutputFailure {
-    fn from_error(error: &io::Error) -> Self {
-        Self {
-            kind: error.kind(),
-            raw_os_error: error.raw_os_error(),
-            message: error.to_string(),
-        }
-    }
-
     fn to_error(&self) -> Error {
-        let error = match self.raw_os_error {
-            Some(code) => io::Error::from_raw_os_error(code),
-            None => io::Error::new(self.kind, self.message.clone()),
+        let error = if let Some(code) = self.raw_os_error {
+            io::Error::from_raw_os_error(code)
+        } else if let Some(source) = &self.source {
+            io::Error::new(self.kind, SharedIo(Arc::clone(source)))
+        } else {
+            self.kind.into()
         };
         Error::Io(error)
     }
@@ -471,7 +520,30 @@ impl<W: Write> Writer<W> {
         self.ensure_output_available()?;
         match operation(&mut self.inner) {
             Err(Error::Io(error)) => {
-                self.output_failure = Some(OutputFailure::from_error(&error));
+                let (kind, raw_os_error) = (error.kind(), error.raw_os_error());
+                // An `io::Error` payload cannot be cloned: the error returned
+                // now keeps it so `get_ref` downcasts and the typed chain stay
+                // intact, while the sticky state retains a shareable snapshot
+                // of the same chain for every later report.
+                let (source, error) = match error.into_inner() {
+                    Some(payload) => {
+                        let snapshot: Arc<dyn std::error::Error + Send + Sync> =
+                            ChainSnapshot::of(&*payload);
+                        (Some(snapshot), io::Error::new(kind, payload))
+                    }
+                    None => (
+                        None,
+                        match raw_os_error {
+                            Some(code) => io::Error::from_raw_os_error(code),
+                            None => kind.into(),
+                        },
+                    ),
+                };
+                self.output_failure = Some(OutputFailure {
+                    kind,
+                    raw_os_error,
+                    source,
+                });
                 Err(Error::Io(error))
             }
             result => result,

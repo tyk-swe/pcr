@@ -121,6 +121,7 @@ where
         let Some(first_packet) = prepared.packets.first() else {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
+                source: None,
             });
         };
         let first_route = &first_packet.route.plan;
@@ -187,6 +188,7 @@ where
             .expect("validated bounded exchange timeout must fit Instant");
         let expansion_len = template.expansion_len().map_err(|source| Error::Template {
             message: source.to_string(),
+            source: Some(source),
         })?;
         self.policy.authorize(crate::policy::Operation::Budgeted(
             crate::policy::WireBudget::new(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0),
@@ -194,12 +196,14 @@ where
         if expansion_len == 0 {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
+                source: None,
             });
         }
         let expanded_packets = template
             .expand(options.max_template_packets)
             .map_err(|source| Error::Template {
                 message: source.to_string(),
+                source: Some(source),
             })?;
         let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
         let builder = Builder::new(Arc::clone(&self.registry));
@@ -246,6 +250,7 @@ where
             ensure_preparation_deadline(deadline)?;
             let packet_to_send = expanded_packet.map_err(|source| Error::Template {
                 message: source.to_string(),
+                source: Some(source),
             })?;
             self.check_cancelled()?;
             ensure_preparation_deadline(deadline)?;

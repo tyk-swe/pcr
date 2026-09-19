@@ -75,6 +75,7 @@ impl SystemAuthorizer {
                     "replay authorization does not support link type {}",
                     frame.link_type.0
                 ),
+                source: None,
             },
         ))
     }

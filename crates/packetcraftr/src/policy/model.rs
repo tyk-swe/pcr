@@ -135,7 +135,13 @@ pub enum Error {
     #[error("destination constraint count {actual} exceeds policy limit {maximum}")]
     DestinationConstraintLimit { actual: usize, maximum: usize },
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
-    InvalidPacketSemantics { reason: String },
+    InvalidPacketSemantics {
+        reason: String,
+        /// The semantics traversal failure this refusal reports, when it
+        /// came from the packet rather than from policy's own checks.
+        #[source]
+        source: Option<packetcraftr_core::packet::semantics::Error>,
+    },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]

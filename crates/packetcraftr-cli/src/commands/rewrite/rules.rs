@@ -58,26 +58,29 @@ pub(super) fn load(path: &Path) -> Result<Vec<Rule>, CliError> {
     }
     Ok(document.rules)
 }
-pub(super) fn mac(value: &str) -> Result<[u8; 6], String> {
+pub(super) fn mac(value: &str) -> Result<[u8; 6], CliError> {
     let parts: Vec<_> = value.split(':').collect();
     if parts.len() != 6 || parts.iter().any(|part| part.len() != 2) {
-        return Err("MAC addresses require six colon-separated hexadecimal bytes".to_owned());
+        return Err(CliError::new(
+            Kind::Cli,
+            "MAC addresses require six colon-separated hexadecimal bytes",
+        ));
     }
     let mut address = [0; 6];
     for (part, byte) in parts.iter().zip(&mut address) {
         *byte = u8::from_str_radix(part, 16)
-            .map_err(|_| "invalid hexadecimal MAC address".to_owned())?;
+            .map_err(|_| CliError::new(Kind::Cli, "invalid hexadecimal MAC address"))?;
     }
     Ok(address)
 }
-pub(super) fn vlan(value: &str) -> Result<VlanTag, String> {
-    fn number(value: &str) -> Result<u16, String> {
+pub(super) fn vlan(value: &str) -> Result<VlanTag, CliError> {
+    fn number(value: &str) -> Result<u16, CliError> {
         if let Some(value) = value.strip_prefix("0x") {
             u16::from_str_radix(value, 16)
         } else {
             value.parse()
         }
-        .map_err(|_| "invalid VLAN number".to_owned())
+        .map_err(|_| CliError::new(Kind::Cli, "invalid VLAN number"))
     }
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {
@@ -91,7 +94,10 @@ pub(super) fn vlan(value: &str) -> Result<VlanTag, String> {
             let priority = rest.first().map(|s| number(s)).transpose()?.unwrap_or(0);
             let dei = rest.get(1).map(|s| number(s)).transpose()?.unwrap_or(0);
             if priority > 7 || dei > 1 {
-                return Err("VLAN priority must be 0..=7 and DEI 0 or 1".to_owned());
+                return Err(CliError::new(
+                    Kind::Cli,
+                    "VLAN priority must be 0..=7 and DEI 0 or 1",
+                ));
             }
             VlanTag {
                 ether_type: number(kind)?,
@@ -100,13 +106,18 @@ pub(super) fn vlan(value: &str) -> Result<VlanTag, String> {
                 drop_eligible: dei == 1,
             }
         }
-        _ => return Err("use VID or TPID:VID[:PRIORITY[:DEI]]".to_owned()),
+        _ => {
+            return Err(CliError::new(
+                Kind::Cli,
+                "use VID or TPID:VID[:PRIORITY[:DEI]]",
+            ));
+        }
     };
     HeaderRewrite {
         vlans: Some(vec![tag]),
         ..Default::default()
     }
     .validate()
-    .map_err(|e| e.to_string())?;
+    .map_err(CliError::classified)?;
     Ok(tag)
 }

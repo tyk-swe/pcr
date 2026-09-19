@@ -110,14 +110,23 @@ class ArchiveTests(unittest.TestCase):
         self.check(success=True)
 
     def test_missing_and_empty_assets(self):
+        # Missing/empty assets fail before manifest or binary subprocess work,
+        # so these cases call verify() directly; check() keeps the entry
+        # point's nonzero exit and diagnostic covered for deeper failures.
         for asset in (*VERIFIER.ASSETS, self.binary.name):
             with self.subTest(asset=asset):
                 path = self.root / asset
                 original = path.read_bytes()
                 path.write_bytes(b'')
-                self.check()
+                with self.assertRaises(ValueError) as raised:
+                    VERIFIER.verify(self.root, '1.2.3', 'abc', self.target, 'pcap-free')
+                self.assertEqual(str(raised.exception),
+                                 f'packaged {asset} is missing or empty')
                 path.unlink()
-                self.check()
+                with self.assertRaises(ValueError) as raised:
+                    VERIFIER.verify(self.root, '1.2.3', 'abc', self.target, 'pcap-free')
+                self.assertEqual(str(raised.exception),
+                                 f'packaged {asset} is missing or empty')
                 path.write_bytes(original)
                 if path == self.binary:
                     path.chmod(0o755)

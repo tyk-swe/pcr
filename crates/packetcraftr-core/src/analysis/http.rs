@@ -262,6 +262,10 @@ impl Collector {
         let connection = (data.stream, data.generation);
         let mut direction = self.direction_for(&data, output)?;
         let mut input = data.bytes.as_ref();
+        // A message still open from an earlier delivery merges this
+        // delivery's sources once; a message this delivery opens already
+        // starts from its set.
+        let mut merged = direction.live.is_none();
         while !input.is_empty() && !direction.disabled && !self.upgraded.contains(&connection) {
             if direction.live.is_none() {
                 if self.summary.messages as usize >= self.limits.max_messages {
@@ -282,7 +286,10 @@ impl Collector {
                 });
             }
             let live = direction.live.as_mut().expect("initialized live message");
-            live.sources = live.sources.union(&data.sources)?;
+            if !merged {
+                live.sources = live.sources.union(&data.sources)?;
+                merged = true;
+            }
             if live.sources.frames().len() > self.limits.max_source_spans {
                 return Err(Error::Limit {
                     field: "max_source_spans",
@@ -553,5 +560,200 @@ impl Collector {
             sources: live.sources,
         })));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::{
+        provenance::{SourceFrame, Tracker},
+        reassembly::tcp::FlowKey,
+        scope::Interner,
+    };
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Duration, SystemTime};
+
+    fn flow() -> ScopedFlowKey {
+        let scope = Interner::new()
+            .intern(None, Vec::new())
+            .expect("scope interns");
+        ScopedFlowKey {
+            scope,
+            flow: FlowKey {
+                source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                source_port: 40_000,
+                destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                destination_port: 80,
+            },
+        }
+    }
+
+    fn delivery(
+        tracker: &Tracker,
+        flow: &ScopedFlowKey,
+        number: u64,
+        bytes: &'static [u8],
+    ) -> application::Delivery {
+        application::Delivery {
+            flow: flow.clone(),
+            stream: 1,
+            generation: 0,
+            bytes: Bytes::from_static(bytes),
+            sources: tracker
+                .single(SourceFrame {
+                    number,
+                    timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(number),
+                })
+                .expect("source set"),
+        }
+    }
+
+    fn messages(output: &[Event]) -> Vec<&Message> {
+        output
+            .iter()
+            .filter_map(|event| match event {
+                Event::Message(message) => Some(message.as_ref()),
+                Event::Issue(_) => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn carried_message_merges_each_delivery_once() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+
+        let baseline = tracker.union_reservations();
+        collector
+            .data(delivery(&tracker, &flow, 4, b"GET /lo"), &mut output)
+            .expect("first header bytes");
+        collector
+            .data(
+                delivery(&tracker, &flow, 5, b"ng HTTP/1.1\r\nHost: exa"),
+                &mut output,
+            )
+            .expect("continuation bytes");
+        collector
+            .data(
+                delivery(&tracker, &flow, 6, b"mple.test\r\n\r\n"),
+                &mut output,
+            )
+            .expect("final header bytes");
+
+        assert_eq!(
+            tracker.union_reservations() - baseline,
+            2,
+            "one merge per contributing delivery, not per byte"
+        );
+        let messages = messages(&output);
+        let [message] = messages.as_slice() else {
+            panic!("one complete message expected, got {}", messages.len());
+        };
+        assert_eq!(message.status, Status::Complete);
+        assert_eq!(
+            message
+                .sources
+                .frames()
+                .iter()
+                .map(|frame| frame.number)
+                .collect::<Vec<_>>(),
+            [4, 5, 6]
+        );
+    }
+
+    #[test]
+    fn pipelined_messages_open_with_the_delivery_set_without_merging() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+
+        let baseline = tracker.union_reservations();
+        collector
+            .data(
+                delivery(
+                    &tracker,
+                    &flow,
+                    9,
+                    b"GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\n\r\n",
+                ),
+                &mut output,
+            )
+            .expect("pipelined requests");
+
+        assert_eq!(tracker.union_reservations(), baseline);
+        let messages = messages(&output);
+        assert_eq!(messages.len(), 2);
+        for message in messages {
+            assert_eq!(
+                message
+                    .sources
+                    .frames()
+                    .iter()
+                    .map(|frame| frame.number)
+                    .collect::<Vec<_>>(),
+                [9]
+            );
+        }
+    }
+
+    #[test]
+    fn subset_delivery_merges_without_allocating() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+
+        collector
+            .data(delivery(&tracker, &flow, 4, b"GET /x"), &mut output)
+            .expect("first bytes");
+        collector
+            .data(delivery(&tracker, &flow, 5, b" HTTP/1.1"), &mut output)
+            .expect("second delivery");
+        let baseline = tracker.union_reservations();
+        // The third delivery contributes only a frame the message already
+        // holds, so the one permitted merge is allocation-free.
+        collector
+            .data(delivery(&tracker, &flow, 5, b"\r\n\r\n"), &mut output)
+            .expect("subset delivery");
+
+        assert_eq!(tracker.union_reservations(), baseline);
+        let messages = messages(&output);
+        let [message] = messages.as_slice() else {
+            panic!("one complete message expected, got {}", messages.len());
+        };
+        assert_eq!(
+            message
+                .sources
+                .frames()
+                .iter()
+                .map(|frame| frame.number)
+                .collect::<Vec<_>>(),
+            [4, 5]
+        );
+    }
+
+    #[test]
+    fn delivery_without_consumed_bytes_merges_nothing() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+
+        collector
+            .data(delivery(&tracker, &flow, 4, b"GET /x"), &mut output)
+            .expect("first bytes");
+        let baseline = tracker.union_reservations();
+        collector
+            .data(delivery(&tracker, &flow, 5, b""), &mut output)
+            .expect("empty delivery");
+        assert_eq!(tracker.union_reservations(), baseline);
     }
 }

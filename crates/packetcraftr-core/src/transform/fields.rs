@@ -93,7 +93,7 @@ impl<'de> Deserialize<'de> for FieldAssignment {
     /// Accepts either `"<field>=<value>"` or `{"field": ..., "value": N}`.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
-        #[serde(untagged)]
+        #[serde(untagged, deny_unknown_fields)]
         enum Repr {
             Text(String),
             Object { field: String, value: u64 },

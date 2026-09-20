@@ -364,6 +364,40 @@ fn v2_rules_file_assigns_fields_in_order() {
 }
 
 #[test]
+fn v2_rules_file_rejects_unknown_assignment_properties() {
+    let source = examples().join("captures/http-stream.pcap");
+    let directory = tempfile::tempdir().unwrap();
+    let rules = directory.path().join("rules.json");
+    let target = directory.path().join("edited.pcapng");
+    let document = serde_json::json!({
+        "schema": "packetcraftr.rewrite/v2",
+        "rules": [{"assign": [{"field": "ipv4.ttl", "value": 63, "occurrence": 2}]}],
+    });
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/packetcraftr.rewrite.v2.schema.json"
+    ))
+    .unwrap();
+    assert!(
+        !jsonschema::validator_for(&schema)
+            .unwrap()
+            .is_valid(&document)
+    );
+    std::fs::write(&rules, serde_json::to_vec(&document).unwrap()).unwrap();
+
+    let output = run(&[
+        "rewrite",
+        path_text(&source),
+        "--rules-file",
+        path_text(&rules),
+        "--write",
+        path_text(&target),
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid rewrite rules"));
+    assert!(!target.exists());
+}
+
+#[test]
 fn a_failing_edit_publishes_nothing() {
     let source = examples().join("captures/dns-response.pcap");
     let directory = tempfile::tempdir().unwrap();

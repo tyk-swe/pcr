@@ -352,6 +352,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Rewrite v2 rule loading rejects unknown assignment properties instead of
+  silently ignoring them, matching the published schema.
 - Repair inner checksums before enclosing transport checksums when editing
   tunneled packet fields, preserving valid outer UDP checksums in VXLAN.
 

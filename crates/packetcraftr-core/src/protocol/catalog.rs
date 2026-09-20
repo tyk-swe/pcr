@@ -24,7 +24,7 @@ macro_rules! builtin_protocol_catalog {
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
             Dhcpv4 { canonical: "dhcpv4", aliases: ["dhcp"], constructible: true, exact_round_trip: true, matcher: none, codec: Dhcpv4Codec }
             Dhcpv6 { canonical: "dhcpv6", aliases: ["dhcp6"], constructible: true, exact_round_trip: true, matcher: none, codec: Dhcpv6Codec }
-            Dns { canonical: "dns", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: DnsCodec }
+            Dns { canonical: "dns", aliases: [], constructible: true, exact_round_trip: true, matcher: dns, codec: DnsCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, exact_round_trip: true, matcher: none, codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
@@ -197,6 +197,7 @@ macro_rules! define_builtin_protocol {
     (@matcher reverse_flow) => { true };
     (@matcher echo_v4) => { true };
     (@matcher echo_v6) => { true };
+    (@matcher dns) => { true };
 }
 
 /// A name that is not a built-in protocol's canonical name or alias.

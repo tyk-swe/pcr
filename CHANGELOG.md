@@ -53,6 +53,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   finite repeated passes under shared budgets over a validated capture snapshot.
 - Rolling raw-packet scan windows share ready capture sources, pacing, deadlines,
   and evidence bounds; per-port UDP profiles add DNS and masked-byte validation.
+- Generic exchange correlation attributes structured DNS-over-UDP replies by
+  application identity: the registered `dns` matcher verifies the reversed
+  UDP flow, response direction, transaction identifier, opcode, and the
+  complete ordered question section (ASCII case-insensitive wire names), so
+  concurrent requests sharing one tuple stay distinct while wrong-ID,
+  wrong-question, malformed, or undecodable replies can no longer succeed
+  through the weaker UDP tuple match. Identical outstanding requests stay
+  ambiguous, and non-DNS UDP plus quoted-ICMP error evidence are unchanged.
 - Multi-interface capture shares queue/operation budgets, readiness, and cleanup,
   with per-source evidence and bounded PCAPNG size/time rotation and stop/ring retention.
 - DHCPv4/DHCPv6 fixture construction and typed options, including overloaded
@@ -356,6 +364,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   silently ignoring them, matching the published schema.
 - Repair inner checksums before enclosing transport checksums when editing
   tunneled packet fields, preserving valid outer UDP checksums in VXLAN.
+- DNS matching preserves sequence-aware TCP correlation, and UDP probes validate
+  inner tunnel endpoints and transport identity before reporting an open port.
 
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the

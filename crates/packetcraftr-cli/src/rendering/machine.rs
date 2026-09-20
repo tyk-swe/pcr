@@ -65,6 +65,7 @@ pub(crate) fn bounded_json_len(
 }
 
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
+    crate::invocation::check()?;
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
     serde_json::to_writer_pretty(&mut writer, value).map_err(json_error)?;

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v5",
+  "schema": "packetcraftr.output/v6",
   "command": "dns-read",
   "mode": "aggregate",
   "status": "success",

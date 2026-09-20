@@ -656,3 +656,53 @@ fn time_bounds_compose_with_the_display_filter() {
     assert_eq!(summary.frames_matched, 1);
     assert_eq!(matched, [3]);
 }
+
+#[test]
+fn physical_plan_skips_unrequested_indexes_without_renumbering_requested_streams() {
+    let registry = registry();
+    let frames = [
+        udp_frame(
+            &registry,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+            CLIENT,
+            SERVER,
+            40000,
+            9000,
+            b"a",
+        ),
+        udp_frame(
+            &registry,
+            SystemTime::UNIX_EPOCH + Duration::from_secs(2),
+            CLIENT,
+            SERVER,
+            40001,
+            9000,
+            b"b",
+        ),
+    ];
+    let mut options = Options {
+        plan: packetcraftr_core::analysis::Plan::physical(Default::default()),
+        limits: Limits {
+            max_flows: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let summary = run(&mut reader(&frames), registry.clone(), &options, |record| {
+        assert!(record.physical_context().udp_stream.is_none());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(summary.frames_read, 2);
+
+    options.plan.udp_index = true;
+    assert!(run(&mut reader(&frames), registry.clone(), &options, |_| Ok(())).is_err());
+    options.limits.max_flows = 2;
+    let mut indexes = Vec::new();
+    run(&mut reader(&frames), registry, &options, |record| {
+        indexes.push(record.physical_context().udp_stream);
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(indexes, [Some(0), Some(1)]);
+}

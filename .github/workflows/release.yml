@@ -247,6 +247,9 @@ jobs:
               "examples/documents/output-dns-tcp-success.json",
               "examples/documents/output-dns-tcp-complete.json",
               "examples/documents/output-replay-bit-rate-success.json",
+              "examples/consumers/forwarding.py",
+              "examples/consumers/fixtures/v5-forwarding.json",
+              "examples/consumers/fixtures/v6-forwarding.json",
           )
           for source in map(pathlib.Path, assets):
               destination = staging / source

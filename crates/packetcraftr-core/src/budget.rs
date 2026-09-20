@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 /// elapsed-time accounting. A blocked provider cannot be interrupted; callers
 /// must check immediately before and after each provider boundary.
 pub struct Deadline {
+    parents: Vec<Arc<Self>>,
     cancellation: Option<Cancellation>,
     baseline: Instant,
     accounted: Duration,
@@ -21,7 +22,28 @@ pub struct Deadline {
     now: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
+impl std::fmt::Debug for Deadline {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Deadline")
+            .field("limit", &self.limit)
+            .field("accounted", &self.accounted)
+            .field("parent_count", &self.parents.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl Deadline {
+    /// Applies an immutable operation-wide ceiling in addition to this
+    /// phase's allowance. Accounting a child never restarts the parent.
+    #[must_use]
+    pub fn with_parent(mut self, parent: Option<Arc<Self>>) -> Self {
+        if let Some(parent) = parent {
+            self.parents.push(parent);
+        }
+        self
+    }
+
     /// Starts a deadline that expires once accounted time exceeds `limit`.
     #[must_use]
     pub fn new(limit: Duration) -> Self {
@@ -39,6 +61,7 @@ impl Deadline {
     ) -> Self {
         let now = Arc::new(now);
         Self {
+            parents: Vec::new(),
             cancellation: None,
             baseline: now(),
             accounted: Duration::ZERO,
@@ -57,6 +80,9 @@ impl Deadline {
     }
 
     pub fn check_cancelled(&self) -> Result<(), Cancelled> {
+        for parent in &self.parents {
+            parent.check_cancelled()?;
+        }
         self.cancellation
             .as_ref()
             .map_or(Ok(()), Cancellation::check)
@@ -92,6 +118,9 @@ impl Deadline {
     /// Returns [`DeadlineExceeded`] when the prospective time would pass the
     /// limit, leaving the accounted total untouched.
     pub fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
+        for parent in &self.parents {
+            parent.check_additional(additional)?;
+        }
         let actual = self
             .elapsed_at((self.now)())?
             .checked_add(additional)
@@ -132,6 +161,9 @@ impl Deadline {
     }
 
     fn check_elapsed(&self, actual: Duration) -> Result<(), DeadlineExceeded> {
+        for parent in &self.parents {
+            parent.check()?;
+        }
         if actual > self.limit {
             return Err(DeadlineExceeded {
                 actual,
@@ -150,7 +182,11 @@ impl Deadline {
     pub fn remaining(&self) -> Result<Duration, DeadlineExceeded> {
         let elapsed = self.elapsed_at((self.now)())?;
         self.check_elapsed(elapsed)?;
-        Ok(self.limit.saturating_sub(elapsed))
+        let mut remaining = self.limit.saturating_sub(elapsed);
+        for parent in &self.parents {
+            remaining = remaining.min(parent.remaining()?);
+        }
+        Ok(remaining)
     }
 
     /// Clips a child boundary's `requested` timeout to the wall-clock budget

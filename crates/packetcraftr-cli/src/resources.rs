@@ -36,6 +36,11 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
     definition.build();
     let mut settings = BTreeMap::new();
     let selected = matches.subcommand().map(|(_, values)| values);
+    let preset = matches
+        .get_one::<crate::presets::Preset>("resource_preset")
+        .copied();
+    let forwarding = command == Command::VerifyForwarding;
+    let indexed_forwarding = forwarding && selected.is_some_and(forwarding_needs_index);
     let tcp_enabled = matches!(
         command,
         Command::Expert | Command::DnsRead | Command::Http | Command::Tls
@@ -73,8 +78,18 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
             settings.insert(
                 name.clone(),
                 Setting {
-                    enabled: !(id.starts_with("max_tcp_") || id == "tcp_idle_expiry_ms")
-                        || tcp_enabled,
+                    enabled: if forwarding
+                        && (id.starts_with("max_ip_")
+                            || matches!(
+                                id,
+                                "ip_idle_expiry_ms" | "ip_overlap" | "max_provenance_bytes"
+                            )) {
+                        false
+                    } else if forwarding && matches!(id, "max_flows" | "max_scope_bytes") {
+                        indexed_forwarding
+                    } else {
+                        !(id.starts_with("max_tcp_") || id == "tcp_idle_expiry_ms") || tcp_enabled
+                    },
                     name,
                     value,
                     unit: unit.to_owned(),
@@ -85,11 +100,13 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
                         .map(ToString::to_string)
                         .unwrap_or_default(),
                     source: if values.value_source(id) == Some(ValueSource::CommandLine) {
-                        "override"
+                        "override".to_owned()
+                    } else if let Some(preset) = preset.filter(|preset| preset.value(id).is_some())
+                    {
+                        format!("preset:{}", preset.name())
                     } else {
-                        "default"
-                    }
-                    .to_owned(),
+                        "default".to_owned()
+                    },
                 },
             );
         }
@@ -153,10 +170,27 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
     settings.into_values().collect()
 }
 
+fn forwarding_needs_index(values: &ArgMatches) -> bool {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    ["ingress_filter", "egress_filter"].into_iter().any(|id| {
+        values.get_one::<String>(id).is_some_and(|source| {
+            crate::filtering::compile(
+                source,
+                &registry,
+                crate::filtering::Capabilities::stream_capable(),
+            )
+            // Invalid input will fail before analysis; conservatively avoid
+            // claiming the index is disabled on an uncompiled query.
+            .map_or(true, |filter| filter.requirements().stream_index)
+        })
+    })
+}
+
 fn stage(id: &str, command: Command) -> Option<&'static str> {
     let offline = matches!(
         command,
-        Command::Rewrite
+        Command::VerifyForwarding
+            | Command::Rewrite
             | Command::Export
             | Command::Merge
             | Command::Read
@@ -171,7 +205,11 @@ fn stage(id: &str, command: Command) -> Option<&'static str> {
         "output_timeout_ms" => "output",
         "rotate_bytes" | "rotate_interval_ms" | "rotate_files" | "retention" => "capture_storage",
         "max_prepared_bytes" => "preparation",
-        "max_application_output_bytes"
+        "max_scratch_bytes" => "comparison",
+        "max_evidence_bytes" | "max_field_bytes" => "observation_collection",
+        "max_details"
+        | "max_detail_bytes"
+        | "max_application_output_bytes"
         | "max_projection_bytes"
         | "max_output_bytes"
         | "top"

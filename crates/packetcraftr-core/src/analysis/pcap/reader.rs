@@ -40,6 +40,7 @@ pub struct Reader<R> {
     scratch: Vec<u8>,
     finished: bool,
     cancellation: Option<Cancellation>,
+    deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
 }
 
 fn wrap_pcap_header(
@@ -144,6 +145,7 @@ impl<R: Read> Reader<R> {
             scratch,
             finished: false,
             cancellation: None,
+            deadline: None,
         })
     }
 
@@ -153,6 +155,36 @@ impl<R: Read> Reader<R> {
     pub fn with_cancellation(mut self, cancellation: Cancellation) -> Self {
         self.cancellation = Some(cancellation);
         self
+    }
+
+    /// Shares the invocation ceiling across records, metadata, EOF, and rewind.
+    /// Construction reads a header, so callers also gate before and after
+    /// constructing a reader. Blocking `Read` calls remain cooperative.
+    #[must_use]
+    pub fn with_deadline(mut self, deadline: std::sync::Arc<crate::budget::Deadline>) -> Self {
+        self.deadline = Some(deadline);
+        self
+    }
+
+    pub(crate) fn deadline(&self) -> Option<std::sync::Arc<crate::budget::Deadline>> {
+        self.deadline.clone()
+    }
+
+    pub(crate) fn replace_deadline(
+        &mut self,
+        deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
+    ) {
+        self.deadline = deadline;
+    }
+
+    fn check_interrupted(&self) -> Result<(), Error> {
+        if let Some(signal) = &self.cancellation {
+            signal.check()?;
+        }
+        if let Some(deadline) = &self.deadline {
+            deadline.enforce()?;
+        }
+        Ok(())
     }
 
     /// Returns the detected capture format.
@@ -206,9 +238,7 @@ impl<R: Read> Reader<R> {
     }
 
     fn read_record(&mut self) -> Result<Option<CaptureRecord>, Error> {
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
+        self.check_interrupted()?;
         let record = match &mut self.state {
             ReaderState::Pcap {
                 endianness,
@@ -231,9 +261,7 @@ impl<R: Read> Reader<R> {
                 &mut self.scratch,
             ),
         }?;
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
+        self.check_interrupted()?;
         Ok(record)
     }
 
@@ -276,9 +304,7 @@ impl<R: Read + Seek> Reader<R> {
     /// Reopens a seekable capture from its first header, resetting all section
     /// and interface state while retaining limits and cancellation.
     pub fn rewind(&mut self) -> Result<(), Error> {
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
+        self.check_interrupted()?;
         self.finished = true;
         self.inner.rewind()?;
         let fresh = Reader::with_options(&mut self.inner, self.options)?;
@@ -287,9 +313,7 @@ impl<R: Read + Seek> Reader<R> {
         self.interfaces = fresh.interfaces;
         self.scratch = fresh.scratch;
         self.finished = false;
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
+        self.check_interrupted()?;
         Ok(())
     }
 }

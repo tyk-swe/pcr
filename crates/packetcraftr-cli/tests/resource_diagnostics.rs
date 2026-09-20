@@ -124,3 +124,28 @@ fn failure_reports_effective_settings_and_invalid_options_fail_before_work() {
     ]));
     assert_eq!(error["error"]["kind"], "cli");
 }
+
+#[test]
+fn versioned_presets_and_explicit_overrides_match_the_resource_schema() {
+    let path = capture();
+    for (preset, flows) in [("ci-v1", 1024), ("workstation-v1", 8192)] {
+        let report = parse_json(&run_success(&[
+            "--resource-preset",
+            preset,
+            "--resource-diagnostics",
+            "--output",
+            "json",
+            "stats",
+            &path,
+            "--max-frames",
+            "7",
+        ]));
+        assert_eq!(setting(&report, "--max-frames")["source"], "override");
+        assert_eq!(setting(&report, "--max-frames")["value"], 7);
+        assert_eq!(setting(&report, "--max-flows")["value"], flows);
+        assert_eq!(
+            setting(&report, "--max-flows")["source"],
+            format!("preset:{preset}")
+        );
+    }
+}

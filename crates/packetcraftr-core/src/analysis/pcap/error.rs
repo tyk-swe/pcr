@@ -12,6 +12,11 @@ use crate::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("capture operation exceeded its duration budget: {actual:?} > {limit:?}")]
+    DurationLimit {
+        actual: std::time::Duration,
+        limit: std::time::Duration,
+    },
     #[error(transparent)]
     Cancelled(#[from] crate::budget::Cancelled),
     #[error("failed to allocate {requested} bytes for {kind}")]
@@ -105,6 +110,11 @@ pub enum Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::DurationLimit { .. } => Classification::new(
+                "policy.duration_limit",
+                Kind::Policy,
+                Some("reduce input or raise the finite invocation duration"),
+            ),
             Self::Cancelled(source) => source.classification(),
             Self::Io(source)
                 if source
@@ -202,3 +212,5 @@ impl Classified for SelectionError {
         }
     }
 }
+
+crate::deadline_error_conversions!(Error);

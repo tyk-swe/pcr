@@ -106,6 +106,21 @@ impl Projection {
         self.requirements
     }
 
+    /// Independent columns for consumers that must retain earlier successful
+    /// evidence when a later column exhausts a shared projection budget.
+    pub(crate) fn single_columns(&self) -> Vec<Self> {
+        self.columns
+            .iter()
+            .zip(&self.fields)
+            .map(|(column, field)| Self {
+                columns: vec![column.clone()],
+                fields: vec![field.clone()],
+                // A conservative superset; never hide a required context.
+                requirements: self.requirements,
+            })
+            .collect()
+    }
+
     /// Missing fields are `None`; repeated occurrences become ordered lists.
     /// The ceiling counts compact JSON cell bytes (byte values encoded as hex),
     /// before cloning values into the result. Container nesting is capped at 64.

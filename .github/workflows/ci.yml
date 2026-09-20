@@ -44,6 +44,9 @@ jobs:
         run: |
           python3 scripts/check-architecture.py
           python3 scripts/test-validation-evidence.py
+          python3 scripts/test-output-consumer.py
+          python3 scripts/test-forwarding-regression.py
+          python3 scripts/test-native-capture.py
       - name: Test archive verifier failure fixtures
         run: python3 scripts/test-verify-archive.py
       - name: Documentation for supported feature profiles
@@ -69,6 +72,20 @@ jobs:
           cargo run --locked -p packetcraftr-core --example build_decode_filter
           cargo run --locked -p packetcraftr-core --example capture_analysis
           cargo run --locked -p packetcraftr --example client_composition --no-default-features
+      - name: Test a detached external consumer
+        run: python3 scripts/check-external-consumer.py
+      - name: Run reproducible offline regression contracts
+        run: |
+          cargo build --locked -p packetcraftr-cli --no-default-features
+          python3 scripts/forwarding-regression.py --binary target/debug/packetcraftr --large --output target/forwarding-regression
+      - name: Preserve regression bundles on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: forwarding-regression
+          path: target/forwarding-regression
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test the shipped pcap-free feature profile
         run: cargo test --locked -p packetcraftr-cli -p packetcraftr-netio --no-default-features --features packetcraftr-cli/native-layer3,packetcraftr-netio/native-layer3
       - name: Build the isolated pcap-free CLI
@@ -118,7 +135,6 @@ jobs:
         run: cargo +nightly-2026-08-28 check --locked --manifest-path fuzz/Cargo.toml --bins
 
   decoder-oracle:
-    if: github.event_name != 'pull_request'
     name: Decoder oracle
     runs-on: ubuntu-24.04
     timeout-minutes: 45

@@ -29,11 +29,11 @@ packet-I/O feature flags; it remains available in the portable library profile.
 CI denies Clippy warnings for all five profiles on Linux, Intel macOS, Apple
 Silicon macOS, and Windows. Runtime tests cover full native, portable and the
 exact pcap-free feature profile on Linux; default and all-features contracts
-also run on the three other platform runners. PRs run six jobs: full-native
-Linux, portable Linux, the three platform jobs, and compilation of all 15 fuzz
-targets on the pinned nightly with warnings denied. The pcap-free binary is
-built independently and checked for absence of libpcap. Linux also runs
-architecture and validation failure fixtures, archive-verifier failure
+also run on the three other platform runners. PRs run seven jobs: full-native
+Linux, portable Linux, the three platform jobs, the compact decoder oracle, and
+compilation of all 15 fuzz targets on the pinned nightly with warnings denied.
+The pcap-free binary is built independently and checked for absence of libpcap.
+Linux also runs architecture and validation failure fixtures, archive-verifier failure
 fixtures, and documentation checks.
 Release builds verify packaged archives, linkage, checksums, and provenance.
 
@@ -81,9 +81,11 @@ with TShark 4.6.4. It explicitly accounts for opaque physical fragment children;
 no live traffic is involved. See [resource measurements](docs/analysis-resources.md)
 for complete workflow/scaling/RSS and separate heaptrack profiles.
 
-The decoder oracle and isolated Linux native validation run on main pushes,
-weekly, and through manual CI dispatch; PRs skip both jobs. The weekly decoder
-run adds the full generated growth/overlap corpus. `scripts/build-decode-oracle.sh` builds
+The compact decoder oracle runs on pull requests as well as main pushes and
+manual CI dispatch. The weekly decoder run adds the full generated growth/overlap
+corpus. Isolated Linux native validation runs after integration and through
+manual dispatch; the explicit, commit-bound `native-review.yml` workflow can
+supply pre-merge evidence after operator approval. `scripts/build-decode-oracle.sh` builds
 TShark 4.6.4 from checksum-pinned upstream source when the exact tool is absent.
 Reports include input/binary digests, tool identity, allowances and failures.
 
@@ -155,3 +157,24 @@ timeout, cancellation, partial-I/O, accounting, and cleanup behavior using
 fake providers or isolated loopback tests. Record unavailable platform checks
 as unavailable. Prefer one authoritative implementation over compatibility
 wrappers; version changed machine contracts and migrate their consumers.
+
+## Verification and consumer changes
+
+Changes to forwarding semantics require the regression and external-consumer
+checks described in [verification-contract.md](docs/verification-contract.md)
+and [consumer-compatibility.md](docs/consumer-compatibility.md). Run:
+
+```sh
+python3 scripts/test-output-consumer.py
+python3 scripts/test-forwarding-regression.py
+python3 scripts/test-native-capture.py
+python3 scripts/check-external-consumer.py
+cargo test --locked -p packetcraftr-core --test forwarding_verify --test invocation_deadline_contracts --test pipeline_limit_contracts
+cargo test --locked -p packetcraftr-cli --test verify_forwarding --test aggregate_schema_conformance
+cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+```
+
+The compact decoder oracle now also runs before merge. Native changes require
+applicable [reviewed native evidence](docs/native-validation.md); platform
+compilation is not substituted for runtime validation. Required environment
+reviewers and merge protections are administrator-owned configuration.

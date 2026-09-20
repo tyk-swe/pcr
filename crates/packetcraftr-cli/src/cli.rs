@@ -109,6 +109,9 @@ pub(crate) struct Cli {
     /// Include effective resource settings and worker snapshots in JSON/NDJSON.
     #[arg(long, global = true, help_heading = "Global options")]
     pub(crate) resource_diagnostics: bool,
+    /// Versioned offline resource defaults; explicit flags override the preset.
+    #[arg(long, global = true, value_enum, help_heading = "Global options")]
+    pub(crate) resource_preset: Option<crate::presets::Preset>,
     /// NDJSON per-write wait in milliseconds (default 1000; range 1..=3600000).
     #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(1..=3_600_000), help_heading = "Global options")]
     pub(crate) output_timeout_ms: Option<u64>,

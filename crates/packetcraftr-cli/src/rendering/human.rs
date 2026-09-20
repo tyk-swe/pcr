@@ -194,6 +194,7 @@ pub(crate) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
 }
 
 fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliError> {
+    crate::invocation::check()?;
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
     write_terminated(&mut stdout, rendered, append_newline)

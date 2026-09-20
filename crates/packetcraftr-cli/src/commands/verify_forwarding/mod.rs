@@ -17,8 +17,9 @@ use super::offline_analysis::{self, AnalysisSetup};
 use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::input::open_capture;
+use crate::input::open_capture_hashed;
 use crate::rendering::StreamEncoder;
+use packetcraftr_cli::output::forwarding::CaptureSource;
 
 /// The process status when the comparison completed and published its report
 /// but the verdict was not `pass`. `fail` and `inconclusive` share this code;
@@ -45,10 +46,14 @@ pub(super) fn run(
     let prepared = offline_analysis::prepare(arguments.limits, None, &arguments.decode)?;
     // Rules and selection filters compile before either capture is opened,
     // so a malformed declaration never reads input.
-    let rules = forwarding::Rules::compile(
-        &arguments.identity,
-        &arguments.preserve,
-        &arguments.expect,
+    let rules = forwarding::Rules::compile_declarations(
+        forwarding::Declarations {
+            identity: &arguments.identity,
+            preserve: &arguments.preserve,
+            preserve_presence: &arguments.preserve_presence,
+            expect: &arguments.expect,
+            expect_absent: &arguments.expect_absent,
+        },
         &prepared.registry,
         arguments.max_field_bytes,
     )
@@ -56,7 +61,7 @@ pub(super) fn run(
     let ingress_filter = compile_selection(arguments.ingress_filter.as_deref(), &prepared)?;
     let egress_filter = compile_selection(arguments.egress_filter.as_deref(), &prepared)?;
 
-    let ingress = collect(
+    let (ingress, ingress_source) = collect(
         &prepared,
         &arguments.ingress,
         arguments.limits.capture.reader,
@@ -65,7 +70,7 @@ pub(super) fn run(
         &rules,
         arguments.max_evidence_bytes,
     )?;
-    let egress = collect(
+    let (egress, egress_source) = collect(
         &prepared,
         &arguments.egress,
         arguments.limits.capture.reader,
@@ -74,12 +79,18 @@ pub(super) fn run(
         &rules,
         arguments.max_evidence_bytes,
     )?;
-    let report = forwarding::verify(
+    let deadline = crate::invocation::deadline();
+    let report = forwarding::verify_with_limits(
         &rules,
         ingress,
         egress,
-        arguments.max_details,
+        forwarding::VerifyLimits {
+            max_details: arguments.max_details,
+            max_detail_bytes: arguments.max_detail_bytes,
+            max_scratch_bytes: arguments.max_scratch_bytes,
+        },
         Some(crate::cancellation::signal()),
+        deadline.as_deref(),
     )
     .map_err(CliError::classified)?;
     let exit = match report.verdict {
@@ -88,7 +99,16 @@ pub(super) fn run(
             CommandExit::status(VERDICT_NOT_PASS)
         }
     };
-    rendering::render(format, stream, &report, &arguments)?;
+    rendering::render(
+        format,
+        stream,
+        &report,
+        &arguments,
+        forwarding::Sided {
+            ingress: ingress_source,
+            egress: egress_source,
+        },
+    )?;
     Ok(exit)
 }
 
@@ -114,11 +134,20 @@ fn collect(
     filter: Option<&Filter>,
     rules: &forwarding::Rules,
     max_evidence_bytes: usize,
-) -> Result<forwarding::SideInput, CliError> {
-    let mut reader = open_capture(path, bounds)?;
+) -> Result<(forwarding::SideInput, CaptureSource), CliError> {
+    let (mut reader, fingerprint) = open_capture_hashed(path, bounds)?;
     // Select physical packets in the callback: pipeline filters also see
     // reconstructed datagrams, whose provenance this report cannot represent.
-    let options = prepared.options(false);
+    let mut options = prepared.options(false);
+    let mut requirements = rules.requirements();
+    if let Some(filter) = filter {
+        let next = filter.requirements();
+        requirements.stream_index |= next.stream_index;
+        requirements.tcp_stream |= next.tcp_stream;
+        requirements.udp_stream |= next.udp_stream;
+        requirements.timestamp |= next.timestamp;
+    }
+    options.plan = analysis::Plan::physical(requirements);
     let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
         if let Some(filter) = filter
@@ -133,8 +162,12 @@ fn collect(
             .map_err(|error| CliError::classified(error).into_boundary_error())
     })
     .map_err(CliError::classified)?;
-    Ok(forwarding::SideInput {
-        frames_read: summary.frames_read,
-        observations: collector.into_observations(),
-    })
+    crate::cancellation::check()?;
+    Ok((
+        forwarding::SideInput {
+            frames_read: summary.frames_read,
+            observations: collector.into_observations(),
+        },
+        fingerprint.finish(),
+    ))
 }

@@ -153,7 +153,7 @@ def main():
                   memory_note='Peak process RSS, not a heap limit. No post-exit heap exists; in-process cleanup is tested separately.',
                   measurements=[])
     # Store exact effective defaults and command lines alongside each run.
-    for command in ['read', 'follow', 'tls', 'stats']:
+    for command in ['read', 'follow', 'tls', 'stats', 'http', 'verify-forwarding']:
         (out / f'{command}-limits.txt').write_bytes(subprocess.check_output([binary, command, '--help']))
     for size in options.sizes:
         for kind in ['flows', 'segments', 'overlaps', 'fragments', 'scopes', 'tls-gaps', 'tcp-growth', 'tcp-growth-reverse']:
@@ -168,6 +168,13 @@ def main():
                     ('follow-ndjson', ['--output', 'ndjson', 'follow', str(path), '--stream', 'tcp:0', *limits]),
                     ('filtered-stats', ['--output', 'json', 'stats', str(path), '--table', 'protocols', '--filter', 'tcp.stream == 0', *limits]),
                     ('flow-limit', ['--output', 'json', 'stats', str(path), '--max-flows', str(max(1, size // 2))]),
+                    ('http-provenance', ['--output', 'ndjson', 'http', str(path), '--http-port', '4444', *limits]),
+                    ('forwarding-keys', ['--output', 'ndjson', '--resource-diagnostics', 'verify-forwarding',
+                                         str(path), str(path), '--identity', 'tcp.source_port',
+                                         '--preserve', 'ipv4.ttl', *limits]),
+                    ('forwarding-no-details', ['--output', 'ndjson', '--resource-diagnostics', 'verify-forwarding',
+                                               str(path), str(path), '--identity', 'tcp.source_port',
+                                               '--preserve', 'ipv4.ttl', '--max-details', '0', *limits]),
                 ])
             if kind == 'scopes':
                 workloads.append(('scope-limit', ['--output', 'json', 'stats', str(path), '--max-scope-bytes', '1024']))

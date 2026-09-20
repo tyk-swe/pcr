@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Write;
-use std::time::UNIX_EPOCH;
 
 use crate::frame::{Frame, LinkType};
 
 use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Endianness, Format, TimestampPrecision};
-use crate::analysis::pcap::wire::{write_u16, write_u32};
+use crate::analysis::pcap::model::{Endianness, TimestampPrecision};
+use crate::analysis::pcap::wire::{PCAP_RECORD_HEADER_LEN, write_u16, write_u32};
 
 pub(in crate::analysis::pcap) fn write_pcap_header<W: Write>(
     writer: &mut W,
@@ -33,78 +32,25 @@ pub(in crate::analysis::pcap) fn write_pcap_header<W: Write>(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn write_pcap_record<W: Write>(
+// Timestamp and representability checks are shared by preview and output in Writer.
+pub(in crate::analysis::pcap) fn write_pcap_frame<W: Write>(
     writer: &mut W,
     endianness: Endianness,
     seconds: u32,
     fraction: u32,
     frame: &Frame,
 ) -> Result<(), Error> {
-    write_u32(writer, endianness, seconds)?;
-    write_u32(writer, endianness, fraction)?;
-    write_u32(writer, endianness, frame.captured_length())?;
-    write_u32(writer, endianness, frame.original_length())?;
+    let mut header = [0; PCAP_RECORD_HEADER_LEN];
+    let mut fields = header.as_mut_slice();
+    for value in [
+        seconds,
+        fraction,
+        frame.captured_length(),
+        frame.original_length(),
+    ] {
+        write_u32(&mut fields, endianness, value)?;
+    }
+    writer.write_all(&header)?;
     writer.write_all(frame.bytes())?;
     Ok(())
-}
-
-pub(in crate::analysis::pcap) fn write_pcap_frame<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    precision: TimestampPrecision,
-    snap_len: u32,
-    link_type: LinkType,
-    frame: &Frame,
-) -> Result<(), Error> {
-    if frame.interface.is_some() {
-        return Err(Error::MetadataNotRepresentable {
-            format: Format::Pcap,
-            field: "interface",
-        });
-    }
-    if frame.direction.is_some() {
-        return Err(Error::MetadataNotRepresentable {
-            format: Format::Pcap,
-            field: "direction",
-        });
-    }
-    if frame.link_type != link_type {
-        return Err(Error::InterfaceLinkTypeMismatch {
-            interface: 0,
-            expected: link_type.0,
-            actual: frame.link_type.0,
-        });
-    }
-    if frame.captured_length() > snap_len {
-        return Err(Error::SizeLimitExceeded {
-            kind: "pcap captured packet",
-            declared: u64::from(frame.captured_length()),
-            limit: snap_len as usize,
-        });
-    }
-
-    let timestamp = frame.timestamp.ok_or(Error::TimestampUnavailable {
-        format: Format::Pcap,
-    })?;
-    let elapsed = timestamp
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| Error::TimestampOutOfRange {
-            format: Format::Pcap,
-        })?;
-    let seconds = u32::try_from(elapsed.as_secs()).map_err(|_| Error::TimestampOutOfRange {
-        format: Format::Pcap,
-    })?;
-
-    let fraction = match precision {
-        TimestampPrecision::Microseconds if !elapsed.subsec_nanos().is_multiple_of(1_000) => {
-            return Err(Error::MetadataNotRepresentable {
-                format: Format::Pcap,
-                field: "microsecond timestamp precision",
-            });
-        }
-        TimestampPrecision::Microseconds => elapsed.subsec_micros(),
-        TimestampPrecision::Nanoseconds => elapsed.subsec_nanos(),
-    };
-
-    write_pcap_record(writer, endianness, seconds, fraction, frame)
 }

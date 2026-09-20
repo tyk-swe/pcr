@@ -57,15 +57,20 @@ impl NeighborCache {
         &self,
         key: &NeighborCacheKey,
     ) -> Result<Option<MacAddress>, crate::neighbor::Error> {
-        let now = Instant::now();
         let mut cache = self
             .entries
             .lock()
             .map_err(|_| crate::neighbor::Error::State {
                 message: "neighbor cache mutex was poisoned".to_owned(),
             })?;
-        cache.retain(|_, entry| entry.expires_at > now);
-        Ok(cache.get(key).map(|entry| entry.mac_address))
+        let Some(entry) = cache.get(key) else {
+            return Ok(None);
+        };
+        if entry.expires_at > Instant::now() {
+            return Ok(Some(entry.mac_address));
+        }
+        cache.remove(key);
+        Ok(None)
     }
 
     pub(super) fn insert(
@@ -205,11 +210,18 @@ mod tests {
             .insert(
                 MacAddress([0x02, 0, 0, 0, 0, 2]),
                 key.clone(),
-                &options(1, Duration::from_nanos(1)),
+                &options(1, Duration::from_secs(60)),
             )
             .expect("short-lived insert");
-        std::thread::sleep(Duration::from_millis(1));
+        cache
+            .entries
+            .lock()
+            .unwrap()
+            .get_mut(&key)
+            .unwrap()
+            .expires_at = Instant::now();
         assert_eq!(cache.get(&key).expect("expired lookup"), None);
+        assert!(cache.entries.lock().unwrap().is_empty());
 
         assert!(matches!(
             cache.insert(
@@ -219,6 +231,213 @@ mod tests {
             ),
             Err(crate::neighbor::Error::InvalidOptions { .. })
         ));
+    }
+
+    fn key(index: u32) -> NeighborCacheKey {
+        NeighborCacheKey::from(&request(IpAddr::V6(Ipv6Addr::new(
+            0x2001,
+            0xdb8,
+            0,
+            0,
+            0,
+            0,
+            (index >> 16) as u16,
+            index as u16,
+        ))))
+    }
+
+    fn seed(cache: &NeighborCache, index: u32, inserted_at: Instant, expires_at: Instant) {
+        cache.entries.lock().unwrap().insert(
+            key(index),
+            NeighborCacheEntry {
+                mac_address: MacAddress([2, 0, 0, 0, 0, index as u8]),
+                inserted_at,
+                expires_at,
+            },
+        );
+    }
+
+    #[test]
+    fn repeated_hits_preserve_ttl_insertion_age_and_retained_size() {
+        let cache = NeighborCache::default();
+        let now = Instant::now();
+        let inserted = now - Duration::from_secs(10);
+        let expires = now + Duration::from_secs(3600);
+        seed(&cache, 1, inserted, expires);
+        seed(&cache, 2, inserted, now);
+        seed(&cache, 3, inserted, now);
+        for _ in 0..10 {
+            assert_eq!(
+                cache.get(&key(1)).unwrap(),
+                Some(MacAddress([2, 0, 0, 0, 0, 1]))
+            );
+            assert_eq!(cache.get(&key(4)).unwrap(), None);
+            let entries = cache.entries.lock().unwrap();
+            // Hits and misses leave unrelated entries alone; insertion bounds cleanup.
+            assert_eq!(entries.len(), 3);
+            assert_eq!(entries[&key(1)].inserted_at, inserted);
+            assert_eq!(entries[&key(1)].expires_at, expires);
+        }
+        assert_eq!(cache.get(&key(2)).unwrap(), None);
+        assert!(!cache.entries.lock().unwrap().contains_key(&key(2)));
+        assert_eq!(cache.entries.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn insertion_prunes_expired_entries_and_replacement_renews_only_its_entry() {
+        let cache = NeighborCache::default();
+        let now = Instant::now();
+        let old = now - Duration::from_secs(10);
+        let expires = now + Duration::from_secs(3600);
+        seed(&cache, 1, old, expires);
+        seed(&cache, 2, old, now);
+        seed(&cache, 3, old, now);
+        let settings = options(3, Duration::from_secs(60));
+        let mac = MacAddress([2, 0, 0, 0, 0, 42]);
+        cache.insert(mac, key(4), &settings).unwrap();
+        {
+            let entries = cache.entries.lock().unwrap();
+            assert_eq!(entries.len(), 2);
+            assert!(entries.contains_key(&key(1)));
+            assert!(entries.contains_key(&key(4)));
+        }
+        cache.insert(mac, key(1), &settings).unwrap();
+        let entries = cache.entries.lock().unwrap();
+        assert_eq!(entries.len(), 2);
+        let renewed = &entries[&key(1)];
+        assert_eq!(renewed.mac_address, mac);
+        assert!(renewed.inserted_at >= now);
+        assert_eq!(
+            renewed.expires_at.duration_since(renewed.inserted_at),
+            settings.cache_ttl
+        );
+    }
+
+    #[test]
+    fn hits_do_not_change_fifo_eviction_and_replacement_is_a_new_insertion() {
+        let cache = NeighborCache::default();
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(3600);
+        seed(&cache, 1, now - Duration::from_secs(30), expires);
+        seed(&cache, 2, now - Duration::from_secs(20), expires);
+        seed(&cache, 3, now - Duration::from_secs(10), expires);
+        let settings = options(3, Duration::from_secs(3600));
+        let mac = MacAddress([2, 0, 0, 0, 0, 42]);
+        for _ in 0..10 {
+            assert!(cache.get(&key(1)).unwrap().is_some());
+        }
+        cache.insert(mac, key(4), &settings).unwrap();
+        assert_eq!(cache.get(&key(1)).unwrap(), None);
+        assert!(cache.get(&key(2)).unwrap().is_some());
+        cache.insert(mac, key(2), &settings).unwrap();
+        assert_eq!(cache.entries.lock().unwrap().len(), 3);
+        cache.insert(mac, key(5), &settings).unwrap();
+        assert_eq!(cache.get(&key(3)).unwrap(), None);
+        assert_eq!(cache.get(&key(2)).unwrap(), Some(mac));
+        assert_eq!(cache.entries.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn every_identity_field_separates_cache_hits() {
+        let original = key(1);
+        let mut variants = Vec::new();
+        let mut changed = original.clone();
+        changed.interface.name.push('x');
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.interface.index += 1;
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.interface_source = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.interface_mac.0[5] += 1;
+        variants.push(changed);
+        variants.push(key(2));
+        let mut changed = original.clone();
+        changed.vlan_tags[0].kind = VlanKind::Ieee8021Ad;
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.vlan_tags[0].priority += 1;
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.vlan_tags[0].drop_eligible = true;
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.vlan_tags[0].vlan_id += 1;
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.vlan_tags.clear();
+        variants.push(changed);
+        let mut changed = original.clone();
+        changed.link_type = LinkType::RAW;
+        variants.push(changed);
+        let cache = NeighborCache::default();
+        let mac = MacAddress([2, 0, 0, 0, 0, 42]);
+        cache
+            .insert(
+                mac,
+                original.clone(),
+                &options(1, Duration::from_secs(3600)),
+            )
+            .unwrap();
+        for changed in variants {
+            assert_eq!(cache.get(&changed).unwrap(), None);
+        }
+        assert_eq!(cache.get(&original).unwrap(), Some(mac));
+    }
+
+    #[test]
+    #[ignore = "release measurement; no wall-clock assertions"]
+    fn measure_neighbor_cache_hits() {
+        use std::sync::Barrier;
+
+        const HITS: usize = 10_000;
+        for size in [16, 512, 4096] {
+            for readers in [1, 4] {
+                let mut samples = Vec::new();
+                for _ in 0..5 {
+                    let cache = NeighborCache::default();
+                    let now = Instant::now();
+                    for index in 0..size {
+                        seed(&cache, index, now, now + Duration::from_secs(3600));
+                    }
+                    let ready = Barrier::new(readers + 1);
+                    let start = Barrier::new(readers + 1);
+                    let end = Barrier::new(readers + 1);
+                    let elapsed = std::thread::scope(|scope| {
+                        for reader in 0..readers {
+                            let (cache, ready, start, end) = (&cache, &ready, &start, &end);
+                            scope.spawn(move || {
+                                let key = key((reader as u32) % size);
+                                ready.wait();
+                                start.wait();
+                                for _ in 0..HITS {
+                                    std::hint::black_box(
+                                        cache.get(std::hint::black_box(&key)).unwrap().unwrap(),
+                                    );
+                                }
+                                end.wait();
+                            });
+                        }
+                        // Population and thread startup precede the processing barrier.
+                        ready.wait();
+                        let begin = Instant::now();
+                        start.wait();
+                        end.wait();
+                        begin.elapsed()
+                    });
+                    samples.push(elapsed.as_nanos() as f64 / (HITS * readers) as f64);
+                    assert_eq!(cache.entries.lock().unwrap().len(), size as usize);
+                }
+                samples.sort_by(f64::total_cmp);
+                println!(
+                    "neighbor,entries={size},readers={readers},hits={},ns/hit={:.1}",
+                    HITS * readers,
+                    samples[2]
+                );
+            }
+        }
     }
 
     #[test]

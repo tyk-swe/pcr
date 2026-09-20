@@ -26,6 +26,20 @@ pub(in crate::analysis::pcap) struct InterfacePlan {
     pub requires_description_block: bool,
 }
 
+impl InterfacePlan {
+    pub(in crate::analysis::pcap) fn description_block_length(&self) -> usize {
+        if self.requires_description_block {
+            interface_description_base_length(self.description.timestamp_offset)
+        } else {
+            0
+        }
+    }
+}
+
+fn interface_description_base_length(timestamp_offset: i64) -> usize {
+    if timestamp_offset == 0 { 32 } else { 44 }
+}
+
 pub(in crate::analysis::pcap) fn write_section_header<W: Write>(
     writer: &mut W,
     endianness: Endianness,
@@ -49,7 +63,7 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
     timestamp_offset: i64,
     options: &[crate::analysis::pcap::PcapNgOption],
 ) -> Result<(), Error> {
-    let base = if timestamp_offset == 0 { 32usize } else { 44 };
+    let base = interface_description_base_length(timestamp_offset);
     let block_length = usize_to_u32_limit(
         options
             .iter()
@@ -107,32 +121,47 @@ pub(in crate::analysis::pcap) fn write_enhanced_packet<W: Write>(
     block_length: u32,
     frame: &Frame,
 ) -> Result<(), Error> {
-    write_u32(writer, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
-    write_u32(writer, endianness, block_length)?;
-    write_u32(writer, endianness, interface_id)?;
+    let mut header = [0; 28];
+    let mut fields = header.as_mut_slice();
     // the PCAPNG enhanced packet block stores its 64-bit timestamp as two 32-bit halves, so
     // discarding the upper bits of each half is the format
     let (timestamp_high, timestamp_low) = ((timestamp >> 32) as u32, timestamp as u32);
-    write_u32(writer, endianness, timestamp_high)?;
-    write_u32(writer, endianness, timestamp_low)?;
-    write_u32(writer, endianness, frame.captured_length())?;
-    write_u32(writer, endianness, frame.original_length())?;
-    writer.write_all(frame.bytes())?;
-    write_padding(writer, frame.captured_length())?;
+    for value in [
+        PCAPNG_ENHANCED_PACKET_BLOCK,
+        block_length,
+        interface_id,
+        timestamp_high,
+        timestamp_low,
+        frame.captured_length(),
+        frame.original_length(),
+    ] {
+        write_u32(&mut fields, endianness, value)?;
+    }
+
+    // At most three padding bytes, twelve option bytes, and the block footer.
+    // The payload stays borrowed and is written directly, regardless of its size.
+    let mut tail = [0; 3 + 12 + 4];
+    let capacity = tail.len();
+    let mut fields = tail.as_mut_slice();
+    write_padding(&mut fields, frame.captured_length())?;
 
     if let Some(direction) = frame.direction {
-        write_u16(writer, endianness, PCAPNG_OPTION_EPB_FLAGS)?;
-        write_u16(writer, endianness, 4)?;
+        write_u16(&mut fields, endianness, PCAPNG_OPTION_EPB_FLAGS)?;
+        write_u16(&mut fields, endianness, 4)?;
         let flags = match direction {
             Direction::Unknown => 0,
             Direction::Inbound => 1,
             Direction::Outbound => 2,
         };
-        write_u32(writer, endianness, flags)?;
-        write_u16(writer, endianness, PCAPNG_OPTION_END)?;
-        write_u16(writer, endianness, 0)?;
+        write_u32(&mut fields, endianness, flags)?;
+        write_u16(&mut fields, endianness, PCAPNG_OPTION_END)?;
+        write_u16(&mut fields, endianness, 0)?;
     }
-    write_u32(writer, endianness, block_length)?;
+    write_u32(&mut fields, endianness, block_length)?;
+    let tail_length = capacity - fields.len();
+    writer.write_all(&header)?;
+    writer.write_all(frame.bytes())?;
+    writer.write_all(&tail[..tail_length])?;
     Ok(())
 }
 
@@ -143,11 +172,7 @@ pub(in crate::analysis::pcap) fn validate_new_interface(
     max_interfaces: usize,
 ) -> Result<u32, Error> {
     validate_timestamp_resolution(description.timestamp_resolution)?;
-    let block_length = if description.timestamp_offset == 0 {
-        32
-    } else {
-        44
-    };
+    let block_length = interface_description_base_length(description.timestamp_offset);
     if max_size < block_length {
         return Err(Error::SizeLimitExceeded {
             kind: "pcapng interface description",

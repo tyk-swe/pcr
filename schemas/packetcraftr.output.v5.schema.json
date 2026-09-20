@@ -9618,6 +9618,52 @@
         }
       }
     },
+    "rewriteChange": {
+      "type": "object",
+      "description": "One applied field-edit byte-range change attributed to its source frame and ordered rule.",
+      "required": [
+        "frame",
+        "rule",
+        "field",
+        "layer",
+        "range",
+        "old",
+        "new",
+        "origin"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "rule": {
+          "$ref": "#/$defs/uint64"
+        },
+        "field": {
+          "type": "string",
+          "description": "Canonical <protocol>#<occurrence>.<field> path of the changed field."
+        },
+        "layer": {
+          "$ref": "#/$defs/uint64"
+        },
+        "range": {
+          "$ref": "#/$defs/byteRange"
+        },
+        "old": {
+          "$ref": "#/$defs/uint64"
+        },
+        "new": {
+          "$ref": "#/$defs/uint64"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "requested",
+            "derived"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
     "rewriteResult": {
       "type": "object",
       "required": [
@@ -9658,6 +9704,20 @@
           "$ref": "#/$defs/uint64"
         },
         "source_metadata_records": {
+          "$ref": "#/$defs/uint64"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Present and true when --dry-run reported without publishing the destination."
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/rewriteChange"
+          }
+        },
+        "changes_omitted": {
           "$ref": "#/$defs/uint64"
         }
       },

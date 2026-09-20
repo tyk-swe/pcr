@@ -59,6 +59,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   fields, relay messages, DUIDs, address associations, and retained unknown wire.
 - Bounded capture header rewriting and ordered JSON rules with checksum repair,
   VLAN replacement, preserved interface identity, and atomic compressed output.
+- `rewrite` field assignments patch fixed-width decoded fields in place over
+  original capture bytes through `--set <protocol>[#occurrence].<field>=<value>`
+  or `packetcraftr.rewrite/v2` rule documents (`assign`). Supported fields are
+  `ipv4.ttl`, `ipv6.hop_limit`, `tcp.sequence`, `tcp.acknowledgment`, TCP/UDP
+  ports, and `dns.id`. `--checksum-mode repair|preserve` selects recomputed or
+  retained covering checksums, and `--dry-run` emits a bounded requested/derived
+  change report without publishing the destination.
 - Dependency-preserving `export` selects complete streams and reconstructed or
   incomplete IP groups, then atomically copies their original capture records.
 - Cleartext HTTP/1 headers and sourced TCP message inspection through `http`,
@@ -357,6 +364,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Forwarding verification uses physical-frame evidence, keeps exhausted identities
   unkeyable, shares the field budget across all observation cells, counts reordered
   pairs independently of detail limits, and rejects nonliteral expectation values.
+- Rewrite v2 rule loading rejects unknown assignment properties instead of
+  silently ignoring them, matching the published schema.
+- Repair inner checksums before enclosing transport checksums when editing
+  tunneled packet fields, preserving valid outer UDP checksums in VXLAN.
 
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the

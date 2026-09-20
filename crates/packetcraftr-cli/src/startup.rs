@@ -128,7 +128,7 @@ pub(crate) fn run() -> ExitCode {
         return command_failure(format, command, error, &stream);
     }
     match cli.command.run(format, &stream) {
-        Ok(()) => {
+        Ok(exit) => {
             if let Err(error) = crate::cancellation::check() {
                 if format == output::contract::Format::Json {
                     // The aggregate document has already been published. A
@@ -140,7 +140,7 @@ pub(crate) fn run() -> ExitCode {
                 return command_failure(format, command, error, &stream);
             }
             match require_success_terminal(format, &stream) {
-                Ok(()) => ExitCode::SUCCESS,
+                Ok(()) => ExitCode::from(exit.get()),
                 Err(error) => command_failure(format, command, error, &stream),
             }
         }

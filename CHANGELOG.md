@@ -81,6 +81,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Offline `dns-read` inspection frames reassembled TCP DNS and correlates scoped
   UDP/TCP transactions, preserving source frames, retries, duplicate/orphan
   responses, partial messages, and capture-clock regressions.
+- Bounded offline `verify-forwarding` compares an ingress and an egress capture
+  under explicit `--identity`, `--preserve`, and `--expect FIELD=VALUE` rules.
+  Each side runs through the shared analysis pipeline with its own
+  `--ingress-filter`/`--egress-filter` selection; identity pairs only unique
+  one-to-one key groups while repeated keys stay ambiguous and unpaired. The
+  report lists unique matches, unmatched observations, unkeyed and ambiguous
+  groups, attributable field violations, and counted omissions — evidence, not
+  device-attribution claims. A completed `fail` or `inconclusive` verdict exits
+  1 with one terminal output record.
 
 - Explicit bounded IPv4/IPv6 fragmentation and the offline `fragment` command.
 - Ordered multi-capture merging with source/interface provenance and atomic file publication.
@@ -360,6 +369,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Forwarding verification uses physical-frame evidence, keeps exhausted identities
+  unkeyable, shares the field budget across all observation cells, counts reordered
+  pairs independently of detail limits, and rejects nonliteral expectation values.
 - Rewrite v2 rule loading rejects unknown assignment properties instead of
   silently ignoring them, matching the published schema.
 - Repair inner checksums before enclosing transport checksums when editing

@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "verify-forwarding",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.verify_rule",
+    "kind": "cli",
+    "message": "identity field \"frame.number\" is a per-capture position; rules must name packet fields, not per-capture positions",
+    "causes": [],
+    "remediation": "declare identity, preservation, and expectation rules over packet fields"
+  },
+  "diagnostics": []
+}

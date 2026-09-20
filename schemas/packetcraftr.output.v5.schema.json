@@ -63,7 +63,8 @@
             "dns-read",
             "http",
             "export",
-            "rewrite"
+            "rewrite",
+            "verify-forwarding"
           ]
         },
         "mode": {
@@ -233,6 +234,9 @@
             },
             {
               "$ref": "#/$defs/captureAggregateSuccess"
+            },
+            {
+              "$ref": "#/$defs/verifyForwardingSuccess"
             }
           ]
         }
@@ -329,6 +333,9 @@
             },
             {
               "$ref": "#/$defs/rewriteStreamSuccess"
+            },
+            {
+              "$ref": "#/$defs/verifyForwardingStreamSuccess"
             }
           ]
         }
@@ -10279,6 +10286,563 @@
         },
         "reason": {
           "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyForwardingSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "verify-forwarding"
+        },
+        "result": {
+          "$ref": "#/$defs/verifyForwardingReport"
+        }
+      }
+    },
+    "verifyForwardingStreamSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result",
+        "event"
+      ],
+      "properties": {
+        "command": {
+          "const": "verify-forwarding"
+        },
+        "event": {
+          "const": "complete"
+        },
+        "result": {
+          "$ref": "#/$defs/verifyForwardingReport"
+        }
+      }
+    },
+    "verifyForwardingReport": {
+      "description": "Bounded offline ingress/egress capture comparison. Correspondence is observational evidence under the declared rules, never proof of device forwarding, loss, or duplication; unmatched and ambiguous observations are reported, not attributed.",
+      "type": "object",
+      "required": [
+        "verdict",
+        "rules",
+        "assumptions",
+        "captures",
+        "summary",
+        "matches",
+        "violations",
+        "unmatched",
+        "unkeyed",
+        "ambiguous",
+        "omitted"
+      ],
+      "properties": {
+        "verdict": {
+          "enum": [
+            "pass",
+            "fail",
+            "inconclusive"
+          ]
+        },
+        "rules": {
+          "type": "object",
+          "required": [
+            "identity",
+            "preserve",
+            "expect"
+          ],
+          "properties": {
+            "identity": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "preserve": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "expect": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/verifyExpectationRule"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "captures": {
+          "type": "object",
+          "required": [
+            "ingress",
+            "egress"
+          ],
+          "properties": {
+            "ingress": {
+              "$ref": "#/$defs/verifyCapture"
+            },
+            "egress": {
+              "$ref": "#/$defs/verifyCapture"
+            }
+          },
+          "additionalProperties": true
+        },
+        "summary": {
+          "$ref": "#/$defs/verifySummary"
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyMatch"
+          }
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyViolation"
+          }
+        },
+        "unmatched": {
+          "type": "object",
+          "required": [
+            "ingress",
+            "egress"
+          ],
+          "properties": {
+            "ingress": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/verifyEvidence"
+              }
+            },
+            "egress": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/verifyEvidence"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "unkeyed": {
+          "type": "object",
+          "required": [
+            "ingress",
+            "egress"
+          ],
+          "properties": {
+            "ingress": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/verifyUnkeyed"
+              }
+            },
+            "egress": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/verifyUnkeyed"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "ambiguous": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyAmbiguousGroup"
+          }
+        },
+        "omitted": {
+          "$ref": "#/$defs/verifyOmissions"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyExpectationRule": {
+      "description": "One FIELD=VALUE egress expectation as declared.",
+      "type": "object",
+      "required": [
+        "field",
+        "value"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyCapture": {
+      "description": "One capture's place in the comparison: the path it was read from plus its observation census, counted over its own frames only.",
+      "type": "object",
+      "required": [
+        "path",
+        "read",
+        "selected",
+        "keyed",
+        "unkeyed",
+        "incomplete"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "selected": {
+          "$ref": "#/$defs/uint64"
+        },
+        "keyed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unkeyed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "incomplete": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifySummary": {
+      "description": "Comparison counters computed over complete evidence before any detail bound applies.",
+      "type": "object",
+      "required": [
+        "unique_matches",
+        "reordered_pairs",
+        "ingress_only",
+        "egress_only",
+        "ambiguous_groups",
+        "ambiguous_observations",
+        "checks_evaluated",
+        "checks_satisfied",
+        "checks_violated",
+        "checks_unevaluable"
+      ],
+      "properties": {
+        "unique_matches": {
+          "$ref": "#/$defs/uint64"
+        },
+        "reordered_pairs": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ingress_only": {
+          "$ref": "#/$defs/uint64"
+        },
+        "egress_only": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ambiguous_groups": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ambiguous_observations": {
+          "$ref": "#/$defs/uint64"
+        },
+        "checks_evaluated": {
+          "$ref": "#/$defs/uint64"
+        },
+        "checks_satisfied": {
+          "$ref": "#/$defs/uint64"
+        },
+        "checks_violated": {
+          "$ref": "#/$defs/uint64"
+        },
+        "checks_unevaluable": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyEvidence": {
+      "description": "A reference to one frame inside its own capture. The frame number is 1-based and capture-local; the timestamp is per-capture evidence that is never subtracted across captures.",
+      "type": "object",
+      "required": [
+        "frame",
+        "timestamp",
+        "link_type"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/sourceFrame"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "interface": {
+          "$ref": "#/$defs/uint32"
+        },
+        "link_type": {
+          "$ref": "#/$defs/uint32"
+        },
+        "incomplete": {
+          "enum": [
+            "truncated",
+            "field_budget"
+          ]
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyCheck": {
+      "description": "One declared rule echoed beside the outcome it produced.",
+      "type": "object",
+      "required": [
+        "kind",
+        "field"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "preserve",
+            "expect"
+          ]
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyCheckEvaluation": {
+      "type": "object",
+      "required": [
+        "check",
+        "outcome"
+      ],
+      "properties": {
+        "check": {
+          "$ref": "#/$defs/verifyCheck"
+        },
+        "outcome": {
+          "enum": [
+            "satisfied",
+            "violated",
+            "unevaluable"
+          ]
+        },
+        "expected": {
+          "$ref": "#/$defs/fieldValue"
+        },
+        "actual": {
+          "$ref": "#/$defs/fieldValue"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyMatch": {
+      "description": "A uniquely matched observation pair, listed in ingress observation order.",
+      "type": "object",
+      "required": [
+        "key",
+        "ingress",
+        "egress",
+        "ingress_order",
+        "egress_order",
+        "reordered",
+        "checks"
+      ],
+      "properties": {
+        "key": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        },
+        "ingress": {
+          "$ref": "#/$defs/verifyEvidence"
+        },
+        "egress": {
+          "$ref": "#/$defs/verifyEvidence"
+        },
+        "ingress_order": {
+          "$ref": "#/$defs/uint64"
+        },
+        "egress_order": {
+          "$ref": "#/$defs/uint64"
+        },
+        "reordered": {
+          "type": "boolean"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyCheckEvaluation"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyViolation": {
+      "description": "A demonstrably violated check attributed to concrete observations, carrying the offending value.",
+      "type": "object",
+      "required": [
+        "check",
+        "egress"
+      ],
+      "properties": {
+        "check": {
+          "$ref": "#/$defs/verifyCheck"
+        },
+        "key": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        },
+        "ingress": {
+          "$ref": "#/$defs/verifyEvidence"
+        },
+        "egress": {
+          "$ref": "#/$defs/verifyEvidence"
+        },
+        "expected": {
+          "$ref": "#/$defs/fieldValue"
+        },
+        "actual": {
+          "$ref": "#/$defs/fieldValue"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyUnkeyed": {
+      "description": "A selected observation whose identity could not fully resolve.",
+      "type": "object",
+      "required": [
+        "evidence",
+        "key"
+      ],
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/verifyEvidence"
+        },
+        "key": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/fieldValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyAmbiguousGroup": {
+      "description": "An identity carried by more than one observation on at least one side. Members are listed in capture order and never paired.",
+      "type": "object",
+      "required": [
+        "key",
+        "ingress",
+        "egress",
+        "ingress_total",
+        "egress_total",
+        "ingress_indistinguishable",
+        "egress_indistinguishable"
+      ],
+      "properties": {
+        "key": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        },
+        "ingress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyEvidence"
+          }
+        },
+        "egress": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verifyEvidence"
+          }
+        },
+        "ingress_total": {
+          "$ref": "#/$defs/uint64"
+        },
+        "egress_total": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ingress_indistinguishable": {
+          "type": "boolean"
+        },
+        "egress_indistinguishable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "verifyOmissions": {
+      "description": "Per-category counts of detail entries the --max-details bound kept out of the document.",
+      "type": "object",
+      "required": [
+        "matches",
+        "violations",
+        "unmatched_ingress",
+        "unmatched_egress",
+        "unkeyed_ingress",
+        "unkeyed_egress",
+        "ambiguous_groups",
+        "group_members"
+      ],
+      "properties": {
+        "matches": {
+          "$ref": "#/$defs/uint64"
+        },
+        "violations": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unmatched_ingress": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unmatched_egress": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unkeyed_ingress": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unkeyed_egress": {
+          "$ref": "#/$defs/uint64"
+        },
+        "ambiguous_groups": {
+          "$ref": "#/$defs/uint64"
+        },
+        "group_members": {
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": true

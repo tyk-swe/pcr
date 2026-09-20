@@ -187,7 +187,7 @@ impl FieldEdit {
     ///
     /// Resolution accepts protocol and field aliases exactly like display
     /// filters, canonicalizes them, and then refuses anything outside the
-    /// fixed [`EDITABLE`] set, nested paths, non-unsigned values, or values
+    /// fixed editable field set, nested paths, non-unsigned values, or values
     /// wider than the field's wire width.
     pub fn compile(assignment: &FieldAssignment, registry: &Registry) -> Result<Self, Error> {
         let (head, tail) = assignment.field.split_once('.').ok_or(Error::Invalid(
@@ -455,7 +455,7 @@ fn screen_stack(layout: &PacketLayout) -> Result<(), Error> {
 
 /// Queues every checksum that covers `range` and this transform can recompute.
 ///
-/// The edited layer's own [`Coverage`] contributes its header or transport
+/// The edited layer's checksum coverage contributes its header or transport
 /// checksum. Each TCP/UDP ancestor contributes its pseudo-header checksum
 /// whenever its declared span covers the change — this is what keeps tunneled
 /// inner fields faithful by also repairing the outer datagram. An ancestor

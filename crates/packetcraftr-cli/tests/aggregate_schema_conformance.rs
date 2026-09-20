@@ -117,6 +117,11 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::Fuzz, "live campaign", fuzz_live_case),
     (Command::Interfaces, "interfaces", interfaces_case),
     (Command::Routes, "routes", routes_case),
+    (
+        Command::VerifyForwarding,
+        "forwarding comparison",
+        verify_forwarding_case,
+    ),
 ];
 
 #[test]
@@ -1396,6 +1401,63 @@ fn routes_case() -> Value {
         },
         Vec::new(),
     )
+}
+
+fn verify_forwarding_case() -> Value {
+    use packetcraftr_cli::output::forwarding as forwarding_output;
+    use packetcraftr_core::analysis::forwarding;
+    use packetcraftr_core::field::FieldValue;
+
+    let registry = builtin::registry();
+    let rules = forwarding::Rules::compile(
+        &["raw.bytes".to_owned()],
+        &["ipv4.ttl".to_owned()],
+        &["ipv4.destination=198.51.100.2".to_owned()],
+        &registry,
+        4096,
+    )
+    .expect("fixture rules compile");
+    let observation = |frame: u64, expectations| forwarding::Observation {
+        frame,
+        timestamp: UNIX_EPOCH + Duration::from_secs(frame),
+        interface: Some(0),
+        link_type: LinkType::IPV4,
+        incomplete: None,
+        diagnostics: Vec::new(),
+        key_cells: vec![Some(FieldValue::Bytes(Bytes::from_static(b"payload")))],
+        preserved: vec![Some(FieldValue::Unsigned(64))],
+        expectations,
+        retained_bytes: 0,
+    };
+    let report = forwarding::verify(
+        &rules,
+        forwarding::SideInput {
+            frames_read: 1,
+            observations: vec![observation(1, Vec::new())],
+        },
+        forwarding::SideInput {
+            frames_read: 1,
+            observations: vec![observation(
+                1,
+                vec![forwarding::ExpectationOutcome {
+                    satisfied: true,
+                    actual: Some(FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 2))),
+                }],
+            )],
+        },
+        256,
+        None,
+    )
+    .expect("fixture comparison runs");
+    let document = forwarding_output::Report::from_report(
+        &report,
+        forwarding::Sided {
+            ingress: "pre-forwarding.pcap".to_owned(),
+            egress: "post-forwarding.pcap".to_owned(),
+        },
+    )
+    .expect("the report converts");
+    envelope(Command::VerifyForwarding, document, Vec::new())
 }
 
 #[test]

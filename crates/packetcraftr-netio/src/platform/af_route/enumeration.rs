@@ -190,7 +190,7 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
             address.cast::<u8>().add(address_offset),
             bytes.as_mut_ptr(),
             6,
-        )
+        );
     };
     Some(MacAddress(bytes))
 }

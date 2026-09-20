@@ -490,7 +490,8 @@ impl Rules {
             Ok(cells) => {
                 let states = cells
                     .iter()
-                    .map(|cell| cell_state(cell.as_ref(), record))
+                    .zip(projection.selects_single_values())
+                    .map(|(cell, single)| cell_state(cell.as_ref(), single, record))
                     .collect();
                 Ok((cells, states))
             }
@@ -510,26 +511,35 @@ impl Rules {
     }
 }
 
-fn cell_state(value: Option<&FieldValue>, record: &crate::analysis::FrameRecord<'_>) -> ValueState {
+fn cell_state(
+    value: Option<&FieldValue>,
+    single: bool,
+    record: &crate::analysis::FrameRecord<'_>,
+) -> ValueState {
     let frame = &record.decoded.frame;
     let truncated = frame.captured_length() < frame.original_length();
+    let decode_incomplete = !record.decoded.diagnostics.is_empty();
     // Fixed-size decoded values can establish a contradiction despite missing
     // unrelated payload bytes. Lists and variable-size values may be prefixes.
-    let fixed = matches!(
-        value,
-        Some(
-            FieldValue::Bool(_)
-                | FieldValue::Unsigned(_)
-                | FieldValue::Signed(_)
-                | FieldValue::Ipv4(_)
-                | FieldValue::Ipv6(_)
-                | FieldValue::Mac(_)
-        )
-    );
+    // An unqualified path can also be a prefix when decoding stopped before a
+    // later occurrence, even if only one value was returned. A selected scalar
+    // or a diagnostic-free decoded traversal establishes occurrence completeness.
+    let fixed = (single || !decode_incomplete)
+        && matches!(
+            value,
+            Some(
+                FieldValue::Bool(_)
+                    | FieldValue::Unsigned(_)
+                    | FieldValue::Signed(_)
+                    | FieldValue::Ipv4(_)
+                    | FieldValue::Ipv6(_)
+                    | FieldValue::Mac(_)
+            )
+        );
     if truncated && !fixed {
         return ValueState::Truncated;
     }
-    if !record.decoded.diagnostics.is_empty() && !fixed {
+    if decode_incomplete && !fixed {
         return ValueState::DecodeIncomplete;
     }
     if value.is_some() {

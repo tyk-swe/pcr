@@ -720,8 +720,8 @@ fn completed_reports_bind_the_consumed_input_and_decoder_context() {
     assert!(document["result"]["decode"]["bindings"].is_array());
 }
 
-fn large_identity_capture() -> tempfile::NamedTempFile {
-    let frames = (0..256u16)
+fn large_identity_capture(count: u16) -> tempfile::NamedTempFile {
+    let frames = (0..count)
         .map(|identity| {
             let mut wire = decode_hex(UDP_CLIENT)[..28].to_vec();
             let mut payload = vec![255u8; 32760];
@@ -752,7 +752,7 @@ fn large_identity_capture() -> tempfile::NamedTempFile {
 
 #[test]
 fn permitted_large_identities_publish_a_bounded_terminal_summary() {
-    let capture = large_identity_capture();
+    let capture = large_identity_capture(256);
     for detail_bytes in ["0", "4194304"] {
         let args = [
             "--output",
@@ -775,6 +775,40 @@ fn permitted_large_identities_publish_a_bounded_terminal_summary() {
         assert_eq!(kept + report["omitted"]["matches"].as_u64().unwrap(), 256);
         assert!(kept < 256);
     }
+}
+
+#[test]
+fn aggregate_publication_bounds_the_pretty_envelope_before_writing() {
+    let capture = large_identity_capture(40);
+    let mut args = vec![
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "verify-forwarding",
+        path_text(capture.path()),
+        path_text(capture.path()),
+        "--identity",
+        "raw.bytes",
+    ];
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(output.stdout.len() <= packetcraftr_cli::output::stream::MAX_RECORD_BYTES);
+    // Parsing the entire output also rejects any partially written success.
+    let envelope = parse_json(&output);
+    assert_eq!(envelope["status"], "error");
+    assert_eq!(envelope["error"]["code"], "policy.verify_report_limit");
+    assert!(envelope["result"].is_null());
+
+    args.extend(["--max-detail-bytes", "0"]);
+    let output = run_success(&args);
+    assert!(output.stdout.len() <= packetcraftr_cli::output::stream::MAX_RECORD_BYTES);
+    let envelope = parse_json(&output);
+    let report = &envelope["result"];
+    assert_eq!(report["verdict"], "pass");
+    assert_eq!(report["summary"]["unique_matches"], 40);
+    assert_eq!(report["omitted"]["matches"], 40);
+    assert!(report["matches"].as_array().unwrap().is_empty());
+    assert!(envelope["resources"].is_object());
 }
 
 #[test]

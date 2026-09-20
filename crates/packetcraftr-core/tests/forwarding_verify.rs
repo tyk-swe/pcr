@@ -8,6 +8,7 @@ mod common;
 
 use std::error::Error as _;
 use std::net::Ipv4Addr;
+use std::slice::from_ref;
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr_core::analysis::forwarding::{
@@ -102,13 +103,53 @@ fn short_record(timestamp: u64, payload: &[u8]) -> Frame {
     .expect("short-record fixture is valid")
 }
 
+fn double_vlan_frame() -> Frame {
+    let mut bytes = vec![
+        2, 0, 0, 0, 0, 1, // destination
+        2, 0, 0, 0, 0, 2, // source
+        0x81, 0, // VLAN EtherType
+        0, 7, 0x81, 0, // tag 7, followed by another VLAN
+        0, 8, 0x08, 0, // tag 8, followed by IPv4
+    ];
+    bytes
+        .extend_from_slice(frame(1, common::CLIENT, common::SERVER, (40000, 9000), b"one").bytes());
+    Frame::new(
+        UNIX_EPOCH + Duration::from_secs(1),
+        LinkType::ETHERNET,
+        bytes,
+    )
+    .unwrap()
+}
+
+fn frame_prefix(full: &Frame, captured: usize, truncated: bool) -> Frame {
+    Frame::try_with_lengths(
+        full.timestamp.unwrap(),
+        full.link_type,
+        Lengths {
+            captured: captured as u32,
+            original: if truncated {
+                full.original_length()
+            } else {
+                captured as u32
+            },
+        },
+        full.bytes()[..captured].to_vec(),
+    )
+    .unwrap()
+}
+
 fn collect(
     rules: &forwarding::Rules,
     side: Side,
     frames: &[Frame],
     filter: Option<&Filter>,
 ) -> SideInput {
-    let mut reader = common::reader(frames);
+    let mut reader = common::ip_fragments::reader_with_link_type(
+        frames
+            .first()
+            .map_or(LinkType::IPV4, |frame| frame.link_type),
+        frames,
+    );
     let options = analysis::Options {
         filter,
         ..analysis::Options::default()
@@ -1062,6 +1103,89 @@ fn truncation_cannot_erase_a_readable_header_violation() {
     assert_eq!(report.verdict, Verdict::Fail);
     assert_eq!(report.summary.checks_violated, 1);
     assert_eq!(report.sides.egress.incomplete, 1);
+}
+
+#[test]
+fn incomplete_repeated_fields_are_unevaluable_even_when_the_projection_is_scalar() {
+    let rules = rules(
+        &["ethernet#1.source"],
+        &["vlan.vlan_id"],
+        &["vlan.vlan_id=8"],
+    );
+    let full = double_vlan_frame();
+    let complete = compare(&rules, from_ref(&full), from_ref(&full));
+    assert_eq!(complete.verdict, Verdict::Pass);
+    assert_eq!(complete.summary.checks_satisfied, 2);
+
+    for captured in [18, 20] {
+        // At the second tag boundary and inside it.
+        for truncated in [false, true] {
+            let partial = frame_prefix(&full, captured, truncated);
+            let state = if truncated {
+                forwarding::ValueState::Truncated
+            } else {
+                forwarding::ValueState::DecodeIncomplete
+            };
+            let report = compare(&rules, from_ref(&full), from_ref(&partial));
+            assert_eq!(report.verdict, Verdict::Inconclusive);
+            assert_eq!(report.summary.unique_matches, 1);
+            assert_eq!(report.summary.checks_unevaluable, 2);
+            assert!(report.violations.is_empty());
+            for check in &report.matches[0].checks {
+                assert_eq!(check.actual_state, state);
+                assert_eq!(check.outcome, Outcome::Unevaluable);
+            }
+
+            let reversed = compare(&rules, from_ref(&partial), from_ref(&full));
+            assert_eq!(reversed.verdict, Verdict::Inconclusive);
+            assert_eq!(reversed.summary.checks_unevaluable, 1);
+            assert_eq!(reversed.summary.checks_satisfied, 1);
+            assert_eq!(reversed.matches[0].checks[0].expected_state, Some(state));
+            assert!(reversed.violations.is_empty());
+        }
+    }
+}
+
+#[test]
+fn incomplete_occurrences_cannot_supply_an_identity() {
+    let full = double_vlan_frame();
+    let partial = frame_prefix(&full, 20, true);
+    for identity in ["vlan.vlan_id", "ethernet.source"] {
+        let rules = rules(&[identity], &["vlan.vlan_id"], &[]);
+        let input = collect(&rules, Side::Egress, from_ref(&partial), None);
+        assert!(input.observations[0].key_cells()[0].is_some());
+        assert!(!input.observations[0].is_keyed());
+        let report = compare(&rules, from_ref(&full), from_ref(&partial));
+        assert_eq!(report.verdict, Verdict::Inconclusive);
+        assert_eq!(report.sides.egress.unkeyed, 1);
+        assert!(report.violations.is_empty());
+    }
+}
+
+#[test]
+fn selected_occurrences_can_establish_violations_before_an_incomplete_header() {
+    let rules = rules(
+        &["ethernet#1.source"],
+        &["vlan#1.vlan_id", "vlan.vlan_id"],
+        &["vlan#1.vlan_id=7"],
+    );
+    let full = double_vlan_frame();
+    let mut changed = full.bytes().to_vec();
+    changed[15] = 9;
+    let changed = Frame::new(full.timestamp.unwrap(), full.link_type, changed).unwrap();
+    for truncated in [false, true] {
+        let partial = frame_prefix(&changed, 20, truncated);
+        let report = compare(&rules, from_ref(&full), from_ref(&partial));
+        assert_eq!(report.verdict, Verdict::Fail);
+        assert_eq!(report.summary.unique_matches, 1);
+        assert_eq!(report.summary.checks_violated, 2);
+        assert_eq!(report.summary.checks_unevaluable, 1);
+        assert_eq!(
+            report.matches[0].checks[0].actual_state,
+            forwarding::ValueState::Observed
+        );
+        assert_eq!(report.matches[0].checks[1].outcome, Outcome::Unevaluable);
+    }
 }
 
 #[test]

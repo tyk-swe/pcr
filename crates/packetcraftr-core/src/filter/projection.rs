@@ -7,7 +7,7 @@ use super::{
     Context, Requirements,
     ast::{Op, Predicate},
     eval, parser,
-    path::FieldRef,
+    path::{FieldRef, FieldSource},
 };
 use crate::{
     error::{Classification, Classified, Kind},
@@ -104,6 +104,20 @@ impl Projection {
     }
     pub fn requirements(&self) -> Requirements {
         self.requirements
+    }
+
+    /// Whether each column selects one value independently of later layer
+    /// occurrences. A scalar result alone does not establish this: an
+    /// unqualified layer path can have additional, undecoded occurrences.
+    pub(crate) fn selects_single_values(&self) -> impl Iterator<Item = bool> + '_ {
+        self.fields.iter().map(|field| match &field.source {
+            FieldSource::Frame(_) | FieldSource::Stream(_) => true,
+            FieldSource::NestedLayer { occurrence, .. } => occurrence.is_some(),
+            FieldSource::Layer {
+                binding,
+                occurrence,
+            } => occurrence.is_some() && binding.fields().len() == 1,
+        })
     }
 
     /// Independent columns for consumers that must retain earlier successful

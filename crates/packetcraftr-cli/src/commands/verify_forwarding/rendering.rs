@@ -9,7 +9,7 @@ use packetcraftr_core::field::FieldValue;
 use super::arguments::Args;
 use crate::commands::offline_analysis::omitted_diagnostic;
 use crate::errors::CliError;
-use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
+use crate::rendering::{StreamEncoder, emit_json, write_stdout_line};
 
 pub(super) fn render(
     format: ToolFormat,
@@ -45,26 +45,6 @@ pub(super) fn render(
                 tls_ports: arguments.decode.ports.clone(),
                 bindings: arguments.decode.bindings.clone(),
             });
-            // Guard the composition, not just individual detail lists. Reserve
-            // 1 MiB for envelope/diagnostics even when output is aggregate JSON.
-            crate::rendering::bounded_json_len(
-                &document,
-                output::stream::MAX_RECORD_BYTES - 1024 * 1024,
-            )
-            .map_err(|error| {
-                error.into_cli_error(|| {
-                    CliError::from_classification(
-                        packetcraftr_core::error::Classification::new(
-                            "policy.verify_report_limit",
-                            packetcraftr_core::error::Kind::Policy,
-                            Some("reduce the report detail budget"),
-                        ),
-                        "forwarding report exceeds its publication budget",
-                        Vec::new(),
-                    )
-                })
-            })?;
-            crate::cancellation::check()?;
             let diagnostics = omitted_diagnostic(
                 "verify_forwarding.details_omitted",
                 "report detail entries",
@@ -72,16 +52,45 @@ pub(super) fn render(
                 "--max-details / --max-detail-bytes",
             );
             if format == ToolFormat::Json {
-                emit_aggregate(
+                let envelope = crate::resources::decorate(output::envelope::Envelope::success(
                     output::contract::Command::VerifyForwarding,
                     document,
                     diagnostics,
+                ));
+                // Measure the complete pretty-printed envelope, including its
+                // indentation and resources, and reserve the final newline.
+                crate::rendering::bounded_pretty_json_len(
+                    &envelope,
+                    output::stream::MAX_RECORD_BYTES - 1,
                 )
+                .map_err(|error| error.into_cli_error(report_limit_error))?;
+                crate::cancellation::check()?;
+                emit_json(&envelope)
             } else {
+                // Guard the composition, not just individual detail lists.
+                // The stream encoder also bounds the complete compact record.
+                crate::rendering::bounded_json_len(
+                    &document,
+                    output::stream::MAX_RECORD_BYTES - 1024 * 1024,
+                )
+                .map_err(|error| error.into_cli_error(report_limit_error))?;
+                crate::cancellation::check()?;
                 Ok(stream.complete(document, diagnostics)?)
             }
         }
     }
+}
+
+fn report_limit_error() -> CliError {
+    CliError::from_classification(
+        packetcraftr_core::error::Classification::new(
+            "policy.verify_report_limit",
+            packetcraftr_core::error::Kind::Policy,
+            Some("reduce the report detail budget"),
+        ),
+        "forwarding report exceeds its publication budget",
+        Vec::new(),
+    )
 }
 
 fn omitted_total(omitted: &analysis::Omissions) -> u64 {

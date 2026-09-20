@@ -38,8 +38,12 @@ They do not establish the absence of an unknown or unsupported wire protocol.
 Readable fixed-size decoded fields may establish a contradiction even when
 unrelated payload bytes are missing. Variable-size values and repeated/list
 projections may be prefixes, so incomplete captures do not establish their
-preservation. A later projection-budget failure does not erase an earlier
-successful field projection. Capture-level incompleteness still prevents pass.
+preservation. An unqualified layer path can have unread occurrences even when
+only one scalar was decoded. When decoding has diagnostics, use an explicit
+occurrence such as `ethernet#1.source` or `vlan#1.vlan_id` to retain readable
+fixed-size evidence from that header; unqualified values remain unevaluable.
+A later projection-budget failure does not erase an earlier successful field
+projection. Capture-level incompleteness still prevents pass.
 
 The current implementation trusts the decoder's fixed-size scalar values. It
 does not carry byte-range proofs for individual fields. Presence is a decoder
@@ -66,7 +70,9 @@ Collection, comparison scratch, retained detail, and publication are distinct
 accounting domains. Defaults are 64 MiB collection evidence per input, 128 MiB
 comparison scratch, 256 entries per detail category, and one shared 4 MiB detail
 charge. The CLI permits at most 8 MiB of detail charges. The terminal record
-remains bounded to 16 MiB; preflight reserves envelope headroom.
+remains bounded to 16 MiB; stream preflight reserves envelope headroom. Aggregate
+JSON preflight counts the complete pretty-printed envelope and final newline
+against the same ceiling before writing any success output.
 
 Reducing detail counts/bytes never changes summary counters or verdict.
 Omissions are explicit. Charges are deterministic conservative accounting,

@@ -402,6 +402,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Forwarding verification keeps incomplete layer occurrences unevaluable even
+  when only one scalar value was decoded, preventing false preservation and
+  expectation failures after truncation. Explicit occurrence selectors retain
+  readable fixed-size header evidence.
+- Forwarding aggregate publication measures the complete pretty-printed JSON
+  envelope and newline before writing, enforcing the consumer's 16 MiB ceiling.
 - Forwarding stream indexes retain canonical numbering after fragmented
   conversations without using reconstructed packets as comparison evidence.
   Resource diagnostics include indexes and IP reconstruction required by rules

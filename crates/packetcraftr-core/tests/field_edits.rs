@@ -12,6 +12,7 @@ use packetcraftr_core::{
         link::{Ethernet, Vlan},
         network::{Ipv4, Ipv6},
         transport::{Tcp, Udp},
+        tunnel::Vxlan,
     },
     transform::{
         self, ChangeOrigin, ChecksumMode, FieldAssignment, FieldEditOutcome, FieldEdits,
@@ -352,6 +353,96 @@ fn ipv4_udp_zero_checksum_stays_zero_under_repair() {
             .iter()
             .all(|change| change.origin == ChangeOrigin::Requested)
     );
+}
+
+#[test]
+fn vxlan_inner_edits_preserve_inner_and_outer_checksums() {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: "192.0.2.10".parse().unwrap(),
+        destination: "198.51.100.20".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Udp {
+        source_port: 50000,
+        destination_port: 4789,
+        ..Default::default()
+    });
+    packet.push(Vxlan::default());
+    packet.push(Ethernet::default());
+    packet.push(Ipv4 {
+        source: "192.0.2.1".parse().unwrap(),
+        destination: "198.51.100.2".parse().unwrap(),
+        ..Default::default()
+    });
+    packet.push(Udp {
+        source_port: 40000,
+        destination_port: 40001,
+        ..Default::default()
+    });
+    packet.push(Raw::new(vec![0x51; 61]));
+    let built = Builder::new(builtin::registry())
+        .build(packet, Default::default(), Default::default())
+        .unwrap();
+    let original = Frame::new(UNIX_EPOCH, LinkType::IPV4, built.bytes).unwrap();
+
+    for assignments in [
+        vec![],
+        vec!["udp#2.source_port=4444"],
+        vec!["ipv4#2.ttl=33"],
+        vec!["udp#2.source_port=4444", "ipv4#2.ttl=33"],
+    ] {
+        let outcome = apply(&original, &assignments, ChecksumMode::Repair).unwrap();
+        let bytes = outcome.frame.bytes();
+        for change in &outcome.changes {
+            if change.origin == ChangeOrigin::Requested {
+                assert_ne!(change.old, change.new);
+                let actual = bytes[change.range.start..change.range.end]
+                    .iter()
+                    .fold(0_u64, |value, byte| (value << 8) | u64::from(*byte));
+                assert_eq!(actual, change.new);
+            }
+        }
+        let decoded = Dissector::new(builtin::registry())
+            .decode(outcome.frame.clone(), Default::default())
+            .unwrap();
+        let networks: Vec<_> = decoded
+            .layout
+            .layers
+            .iter()
+            .filter(|layer| layer.protocol.as_str() == "ipv4")
+            .collect();
+        let transports: Vec<_> = decoded
+            .layout
+            .layers
+            .iter()
+            .filter(|layer| layer.protocol.as_str() == "udp")
+            .collect();
+        assert_eq!(networks.len(), 2);
+        assert_eq!(transports.len(), 2);
+        for (network, transport) in networks.iter().zip(&transports) {
+            let ip = network.range.start;
+            let udp = transport.range.start;
+            let length = &bytes[udp + 4..udp + 6];
+            let end = udp + usize::from(u16::from_be_bytes([length[0], length[1]]));
+            assert_eq!(
+                packetcraftr_core::protocol::checksum(&bytes[ip..network.range.end]),
+                0,
+                "IPv4 checksum at {ip} after {assignments:?}"
+            );
+            assert_ne!(&bytes[udp + 6..udp + 8], &[0, 0]);
+            assert_eq!(
+                packetcraftr_core::protocol::checksum_parts(&[
+                    &bytes[ip + 12..ip + 20],
+                    &[0, 17],
+                    length,
+                    &bytes[udp..end],
+                ]),
+                0,
+                "UDP checksum at {udp} after {assignments:?}"
+            );
+        }
+    }
 }
 
 #[test]

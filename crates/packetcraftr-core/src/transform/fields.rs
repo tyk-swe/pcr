@@ -393,7 +393,7 @@ impl FieldEdits {
 
         let mut bytes = frame.bytes().to_vec();
         let mut changes = Vec::new();
-        // Repairs keyed by checksum field offset, so several edits in one
+        // Repairs keyed by layer index, so several edits in one
         // layer recompute that layer's checksum exactly once.
         let mut repairs: BTreeMap<usize, Repair> = BTreeMap::new();
         for (edit, resolved) in self.edits.iter().zip(&resolved) {
@@ -414,7 +414,8 @@ impl FieldEdits {
                 collect_repairs(layout, resolved.layer, resolved.range, &bytes, &mut repairs)?;
             }
         }
-        for repair in repairs.values() {
+        // Repair inner layers first so enclosing checksums cover final bytes.
+        for repair in repairs.values().rev() {
             if let Some(change) = repair.run(&mut bytes, layout)? {
                 changes.push(change);
             }

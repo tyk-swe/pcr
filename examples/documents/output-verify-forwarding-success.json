@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v5",
+  "schema": "packetcraftr.output/v6",
   "command": "verify-forwarding",
   "mode": "aggregate",
   "status": "success",
@@ -12,13 +12,20 @@
       "preserve": [
         "ipv4.ttl"
       ],
-      "expect": []
+      "expect": [],
+      "comparison": "property_checks",
+      "warnings": [],
+      "preserve_presence": [],
+      "expect_absent": []
     },
     "assumptions": [
       "identity is exact equality of the declared decoded field values; a field absent from an observation makes it unkeyable",
       "timestamps are per-capture evidence only; no clock relationship between the two captures is assumed, and no cross-capture difference is a latency measurement",
       "correspondence is observational evidence, not proof of device forwarding, loss, duplication, or reordering",
-      "no NAT inference, tunnel reconstruction, stream reassembly, or fragment correspondence is performed"
+      "no NAT inference, tunnel reconstruction, stream reassembly, or fragment correspondence is performed",
+      "ordinary value checks require readable values; two missing fields do not satisfy preservation",
+      "presence and absence assertions describe the declared decoder view, not the absence of unknown wire protocols",
+      "capture incompleteness does not erase a contradiction already established by readable fields"
     ],
     "captures": {
       "ingress": {
@@ -97,7 +104,9 @@
             "actual": {
               "type": "unsigned",
               "value": 64
-            }
+            },
+            "expected_state": "observed",
+            "actual_state": "observed"
           }
         ]
       },
@@ -147,7 +156,9 @@
             "actual": {
               "type": "unsigned",
               "value": 64
-            }
+            },
+            "expected_state": "observed",
+            "actual_state": "observed"
           }
         ]
       }

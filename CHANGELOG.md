@@ -8,8 +8,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Forwarding ordinary preservation requires readable values on both sides;
+  missing values are unevaluable. Explicit presence/absence checks are separate.
+  v6 publishes check-specific evidence states and comparison labels.
+- Forwarding observations are opaque and bound to a compiled rules instance and
+  capture side. `verify` returns `forwarding::Error`; `analysis::Options` gains
+  `plan` and a shared optional `deadline`. See the unreleased migration note.
+- Analysis duration exhaustion reports `policy.duration_limit` consistently
+  across packet processing and capture reads, replacing the generic
+  `policy.analysis_resource_limit` classification for processing deadlines.
+
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
-  `packetcraftr.output/v5`. Schemas and published examples migrate together.
+  `packetcraftr.output/v6`. Schemas and published examples migrate together.
   DNS questions use one typed list and section counts use `WireValue<u16>`.
   See `docs/migration-unreleased.md`.
 - Rust APIs now use standard conversion and collection traits. Wire
@@ -39,6 +49,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   need not form a contiguous prefix.
 
 ### Added
+
+- Independent forwarding detail-byte and comparison-scratch budgets, input
+  fingerprints, decode/filter context, correspondence-only and identity-overlap
+  diagnostics, and demand-driven physical comparison analysis.
+- Versioned `ci-v1` / `workstation-v1` offline resource presets with explicit
+  override precedence and resolved resource diagnostics.
+- A strict bounded downstream forwarding consumer, frozen v5/v6 fixtures,
+  mutation tests, and a checksummed reproducible offline regression harness.
+- Composed compression/capture, capture transformation, forwarding-semantic,
+  and HTTP segmentation fuzz targets; forwarding/HTTP measurement workloads.
+- A detached public API consumer test, compact pre-merge decoder-oracle checks,
+  explicitly reviewed native validation, and an opt-in passive native capture
+  smoke runner with honest platform capability reporting.
+- Task-oriented onboarding and explicit verification, compatibility, preset,
+  and native-validation contracts.
 
 - `Packet` implements `Extend` and `&Packet` implements `IntoIterator`,
   `analysis::SourceSet` dereferences to `[SourceFrame]`, `LinkType` implements
@@ -376,6 +401,25 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr::dns::response_code_name` function.
 
 ### Fixed
+
+- Forwarding verification keeps incomplete layer occurrences unevaluable even
+  when only one scalar value was decoded, preventing false preservation and
+  expectation failures after truncation. Explicit occurrence selectors retain
+  readable fixed-size header evidence.
+- Forwarding aggregate publication measures the complete pretty-printed JSON
+  envelope and newline before writing, enforcing the consumer's 16 MiB ceiling.
+- Forwarding stream indexes retain canonical numbering after fragmented
+  conversations without using reconstructed packets as comparison evidence.
+  Resource diagnostics include indexes and IP reconstruction required by rules
+  as well as filters. The reference consumer rejects comparison counters that
+  contradict the capture census.
+- Capture preparation, metadata reads, repeated analysis, comparison and
+  pre-publication checks share an invocation deadline. Reader clock scopes
+  restore correctly on errors and callback unwinding; committed files remain
+  committed after a later reporting failure.
+- Missing checks cannot silently satisfy preservation, changed rules cannot
+  reuse mismatched observations, and unrequested forwarding conversation indexes
+  no longer exhaust the flow budget before physical-frame selection.
 
 - Restore native Windows Layer 2 builds by passing default native settings
   when opening the Npcap transmit handle.

@@ -96,6 +96,11 @@ impl Classified for Error {
         match self {
             Self::Cancelled(source) => source.classification(),
             Self::Provenance(source) => source.classification(),
+            Self::DurationLimit { .. } => Classification::new(
+                "policy.duration_limit",
+                Kind::Policy,
+                Some("reduce input or raise the finite invocation duration"),
+            ),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.analysis_limit",
                 Kind::Cli,
@@ -115,8 +120,7 @@ impl Classified for Error {
                     | crate::analysis::scope::Error::Bytes { .. },
                 ..
             }
-            | Self::StreamLimit { .. }
-            | Self::DurationLimit { .. } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
+            | Self::StreamLimit { .. } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
             Self::Decode { .. } | Self::DerivedDecode { .. } => Classification::new(
                 "packet.decode",
                 Kind::Packet,

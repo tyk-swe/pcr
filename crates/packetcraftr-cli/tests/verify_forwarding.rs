@@ -29,6 +29,30 @@ fn write_capture(frames: &[&str]) -> tempfile::NamedTempFile {
     write_capture_bytes(&frames)
 }
 
+fn ipv4_fragments(whole: &[u8]) -> Vec<Vec<u8>> {
+    let mut fragments = Vec::new();
+    for (payload, flags) in [(&whole[20..28], 0x2000_u16), (&whole[28..], 1)] {
+        let mut bytes = whole[..20].to_vec();
+        bytes.extend_from_slice(payload);
+        let length = bytes.len() as u16;
+        bytes[2..4].copy_from_slice(&length.to_be_bytes());
+        bytes[6..8].copy_from_slice(&flags.to_be_bytes());
+        bytes[10..12].fill(0);
+        let mut sum: u32 = bytes[..20]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u32::from(u16::from_be_bytes([pair[0], pair[1]])))
+            .sum();
+        while sum >> 16 != 0 {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        bytes[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
+        fragments.push(bytes);
+    }
+    fragments
+}
+
 fn write_capture_bytes(frames: &[Vec<u8>]) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().expect("temporary capture must open");
     file.write_all(&[
@@ -323,6 +347,8 @@ fn detail_lists_are_bounded_and_omissions_counted() {
             // Distinct payload bytes give every frame a unique raw identity.
             let mut bytes = decode_hex(UDP_CLIENT);
             *bytes.last_mut().expect("UDP payload") = index;
+            // IPv4 permits an omitted UDP checksum after changing the payload.
+            bytes[26..28].fill(0);
             bytes
         })
         .collect();
@@ -495,47 +521,76 @@ fn an_unsupported_output_format_is_rejected() {
 
 #[test]
 fn fragment_completion_cannot_supply_physical_udp_evidence() {
-    let whole = decode_hex(UDP_CLIENT);
-    let mut fragments = Vec::new();
-    for (payload, flags) in [(&whole[20..28], 0x2000_u16), (&whole[28..], 1)] {
-        let mut bytes = whole[..20].to_vec();
-        bytes.extend_from_slice(payload);
-        let length = bytes.len() as u16;
-        bytes[2..4].copy_from_slice(&length.to_be_bytes());
-        bytes[6..8].copy_from_slice(&flags.to_be_bytes());
-        bytes[10..12].fill(0);
-        let mut sum: u32 = bytes[..20]
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| u32::from(u16::from_be_bytes([pair[0], pair[1]])))
-            .sum();
-        while sum >> 16 != 0 {
-            sum = (sum & 0xffff) + (sum >> 16);
-        }
-        bytes[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
-        fragments.push(bytes);
-    }
+    let fragments = ipv4_fragments(&decode_hex(UDP_CLIENT));
     let ingress = write_capture(&[UDP_CLIENT]);
     let egress = write_capture_bytes(&fragments);
-    let output = run(&[
-        "--output",
-        "json",
-        "verify-forwarding",
-        path_text(ingress.path()),
-        path_text(egress.path()),
-        "--identity",
-        "udp.source_port",
-        "--ingress-filter",
-        "udp",
-        "--egress-filter",
-        "udp",
-    ]);
-    assert_eq!(output.status.code(), Some(1));
-    let document = parse_json(&output);
-    assert_eq!(document["result"]["verdict"], "inconclusive");
-    assert_eq!(document["result"]["summary"]["unique_matches"], 0);
-    assert_eq!(document["result"]["captures"]["egress"]["selected"], 0);
+    for filter in ["udp", "udp.stream == 0"] {
+        let output = run(&[
+            "--output",
+            "json",
+            "verify-forwarding",
+            path_text(ingress.path()),
+            path_text(egress.path()),
+            "--identity",
+            "udp.source_port",
+            "--ingress-filter",
+            filter,
+            "--egress-filter",
+            filter,
+        ]);
+        assert_eq!(output.status.code(), Some(1));
+        let document = parse_json(&output);
+        assert_eq!(document["result"]["verdict"], "inconclusive");
+        assert_eq!(document["result"]["summary"]["unique_matches"], 0);
+        assert_eq!(document["result"]["captures"]["egress"]["selected"], 0);
+    }
+}
+
+#[test]
+fn fragmented_conversations_cannot_shift_a_stream_selected_ttl_violation() {
+    let ordinary = |wire, port: u16| {
+        let mut bytes = decode_hex(wire);
+        bytes[20..22].copy_from_slice(&port.to_be_bytes());
+        bytes[26..28].fill(0); // Valid IPv4 UDP with checksum disabled.
+        bytes
+    };
+    let mut frames = ipv4_fragments(&decode_hex(UDP_CLIENT));
+    frames.push(ordinary(UDP_CLIENT, 12346));
+    frames.push(ordinary(UDP_CLIENT, 12347));
+    let ingress = write_capture_bytes(&frames);
+    frames[2] = ordinary(UDP_CLIENT_FORWARDED, 12346);
+    let egress = write_capture_bytes(&frames);
+    for filter in ["udp.stream == 1", "frame.number == 3"] {
+        let mut args = vec![
+            "--output",
+            "json",
+            "verify-forwarding",
+            path_text(ingress.path()),
+            path_text(egress.path()),
+            "--identity",
+            "ipv4.identification",
+            "--preserve",
+            "ipv4.ttl",
+            "--ingress-filter",
+            filter,
+            "--egress-filter",
+            filter,
+        ];
+        if filter == "frame.number == 3" {
+            args.extend(["--expect", "udp.stream=1"]);
+        }
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(1));
+        let report = &parse_json(&output)["result"];
+        assert_eq!(report["verdict"], "fail");
+        assert_eq!(report["summary"]["unique_matches"], 1);
+        assert_eq!(report["summary"]["checks_violated"], 1);
+        assert_eq!(report["matches"][0]["ingress"]["frame"], 3);
+        assert_eq!(report["matches"][0]["egress"]["frame"], 3);
+        if filter == "frame.number == 3" {
+            assert_eq!(report["summary"]["checks_satisfied"], 1);
+        }
+    }
 }
 
 #[test]
@@ -553,4 +608,295 @@ fn compound_expectations_are_rejected_before_reading_input() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("single literal"), "{stderr}");
     assert!(!stderr.contains("does-not-exist"), "{stderr}");
+}
+
+#[test]
+fn missing_values_and_explicit_presence_have_different_contracts() {
+    let capture = write_capture(&[UDP_CLIENT]);
+    for (rule, verdict, code) in [
+        ("--preserve", "inconclusive", 1),
+        ("--preserve-presence", "pass", 0),
+        ("--expect-absent", "pass", 0),
+    ] {
+        let args = [
+            "--output",
+            "json",
+            "verify-forwarding",
+            path_text(capture.path()),
+            path_text(capture.path()),
+            "--identity",
+            "ipv4.identification",
+            rule,
+            "tcp.sequence",
+        ];
+        let output = run(&args);
+        assert_eq!(output.status.code(), Some(code));
+        let document = parse_json(&output);
+        assert_eq!(document["schema"], "packetcraftr.output/v6");
+        assert_eq!(document["result"]["verdict"], verdict);
+        assert_eq!(
+            document["result"]["matches"][0]["checks"][0]["actual_state"],
+            "absent"
+        );
+    }
+}
+
+#[test]
+fn forwarding_indexes_only_requested_conversations_but_charges_all_input() {
+    let first = decode_hex(UDP_CLIENT);
+    let mut second = first.clone();
+    second[20..22].copy_from_slice(&12346u16.to_be_bytes());
+    second[26..28].fill(0); // UDP checksum intentionally disabled, valid for IPv4.
+    let capture = write_capture_bytes(&[first, second]);
+    let make = |filter: &str| {
+        vec![
+            "--output".to_owned(),
+            "json".to_owned(),
+            "verify-forwarding".to_owned(),
+            path_text(capture.path()).to_owned(),
+            path_text(capture.path()).to_owned(),
+            "--identity".to_owned(),
+            "ipv4.identification".to_owned(),
+            "--ingress-filter".to_owned(),
+            filter.to_owned(),
+            "--egress-filter".to_owned(),
+            filter.to_owned(),
+            "--max-flows".to_owned(),
+            "1".to_owned(),
+        ]
+    };
+    let args = make("udp.source_port == 12345");
+    let output = run_success(&args.iter().map(String::as_str).collect::<Vec<_>>());
+    let document = parse_json(&output);
+    assert_eq!(document["result"]["summary"]["unique_matches"], 1);
+    assert_eq!(document["result"]["captures"]["ingress"]["read"], 2);
+
+    let indexed = make("udp.stream == 0");
+    let output = run(&indexed.iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(
+        !output.status.success(),
+        "requested capture-global index still has its ceiling"
+    );
+    let mut bounded = args;
+    bounded.extend(["--max-frames".to_owned(), "1".to_owned()]);
+    let output = run(&bounded.iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(
+        !output.status.success(),
+        "excluded frames still consume input budgets"
+    );
+}
+
+#[test]
+fn completed_reports_bind_the_consumed_input_and_decoder_context() {
+    use sha2::{Digest, Sha256};
+    let capture = write_capture(&[UDP_CLIENT]);
+    let args = [
+        "--output",
+        "json",
+        "verify-forwarding",
+        path_text(capture.path()),
+        path_text(capture.path()),
+        "--identity",
+        "ipv4.identification",
+        "--preserve",
+        "ipv4.ttl",
+    ];
+    let document = parse_json(&run_success(&args));
+    let bytes = std::fs::read(capture.path()).unwrap();
+    let digest = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    for side in ["ingress", "egress"] {
+        assert_eq!(
+            document["result"]["captures"][side]["source"]["sha256"],
+            digest
+        );
+        assert_eq!(
+            document["result"]["captures"][side]["source"]["encoded_bytes"],
+            bytes.len()
+        );
+    }
+    assert!(document["result"]["decode"]["bindings"].is_array());
+}
+
+fn large_identity_capture(count: u16) -> tempfile::NamedTempFile {
+    let frames = (0..count)
+        .map(|identity| {
+            let mut wire = decode_hex(UDP_CLIENT)[..28].to_vec();
+            let mut payload = vec![255u8; 32760];
+            payload[..2].copy_from_slice(&identity.to_be_bytes());
+            let ip_length = (28 + payload.len()) as u16;
+            let udp_length = (8 + payload.len()) as u16;
+            wire[2..4].copy_from_slice(&ip_length.to_be_bytes());
+            wire[4..6].copy_from_slice(&identity.to_be_bytes());
+            wire[10..12].fill(0);
+            wire[24..26].copy_from_slice(&udp_length.to_be_bytes());
+            wire[26..28].fill(0);
+            let mut sum = wire[..20]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|pair| u32::from(u16::from_be_bytes([pair[0], pair[1]])))
+                .sum::<u32>();
+            while sum > 65535 {
+                sum = (sum & 65535) + (sum >> 16);
+            }
+            wire[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
+            wire.extend(payload);
+            wire
+        })
+        .collect::<Vec<_>>();
+    write_capture_bytes(&frames)
+}
+
+#[test]
+fn permitted_large_identities_publish_a_bounded_terminal_summary() {
+    let capture = large_identity_capture(256);
+    for detail_bytes in ["0", "4194304"] {
+        let args = [
+            "--output",
+            "ndjson",
+            "verify-forwarding",
+            path_text(capture.path()),
+            path_text(capture.path()),
+            "--identity",
+            "raw.bytes",
+            "--max-detail-bytes",
+            detail_bytes,
+        ];
+        let output = run_success(&args);
+        assert!(output.stdout.len() < 16 * 1024 * 1024);
+        let records = parse_ndjson(&output);
+        let report = &records.last().unwrap()["result"];
+        assert_eq!(report["verdict"], "pass");
+        assert_eq!(report["summary"]["unique_matches"], 256);
+        let kept = report["matches"].as_array().unwrap().len() as u64;
+        assert_eq!(kept + report["omitted"]["matches"].as_u64().unwrap(), 256);
+        assert!(kept < 256);
+    }
+}
+
+#[test]
+fn aggregate_publication_bounds_the_pretty_envelope_before_writing() {
+    let capture = large_identity_capture(40);
+    let mut args = vec![
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "verify-forwarding",
+        path_text(capture.path()),
+        path_text(capture.path()),
+        "--identity",
+        "raw.bytes",
+    ];
+    let output = run(&args);
+    assert!(!output.status.success());
+    assert!(output.stdout.len() <= packetcraftr_cli::output::stream::MAX_RECORD_BYTES);
+    // Parsing the entire output also rejects any partially written success.
+    let envelope = parse_json(&output);
+    assert_eq!(envelope["status"], "error");
+    assert_eq!(envelope["error"]["code"], "policy.verify_report_limit");
+    assert!(envelope["result"].is_null());
+
+    args.extend(["--max-detail-bytes", "0"]);
+    let output = run_success(&args);
+    assert!(output.stdout.len() <= packetcraftr_cli::output::stream::MAX_RECORD_BYTES);
+    let envelope = parse_json(&output);
+    let report = &envelope["result"];
+    assert_eq!(report["verdict"], "pass");
+    assert_eq!(report["summary"]["unique_matches"], 40);
+    assert_eq!(report["omitted"]["matches"], 40);
+    assert!(report["matches"].as_array().unwrap().is_empty());
+    assert!(envelope["resources"].is_object());
+}
+
+#[test]
+fn comparison_resource_diagnostics_validate_new_stages_and_disabled_indexes() {
+    let capture = write_capture(&[UDP_CLIENT]);
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "--resource-preset",
+        "ci-v1",
+        "--resource-diagnostics",
+        "verify-forwarding",
+        path_text(capture.path()),
+        path_text(capture.path()),
+        "--identity",
+        "ipv4.identification",
+        "--preserve",
+        "ipv4.ttl",
+    ]));
+    let settings = report["resources"]["settings"].as_array().unwrap();
+    for (name, stage) in [
+        ("--max-evidence-bytes", "observation_collection"),
+        ("--max-scratch-bytes", "comparison"),
+    ] {
+        let setting = settings
+            .iter()
+            .find(|setting| setting["name"] == name)
+            .unwrap();
+        assert_eq!(setting["stage"], stage);
+        assert_eq!(setting["source"], "preset:ci-v1");
+    }
+    for name in ["--max-flows", "--max-scope-bytes", "--max-ip-datagrams"] {
+        let setting = settings
+            .iter()
+            .find(|setting| setting["name"] == name)
+            .unwrap();
+        assert_eq!(setting["enabled"], false, "{name}");
+    }
+    assert_eq!(report["result"]["verdict"], "pass");
+}
+
+#[test]
+fn forwarding_resource_diagnostics_include_rule_and_filter_requirements() {
+    let first = decode_hex(UDP_CLIENT);
+    let mut second = first.clone();
+    second[20..22].copy_from_slice(&12346u16.to_be_bytes());
+    second[26..28].fill(0); // Valid IPv4 UDP with checksum disabled.
+    let capture = write_capture_bytes(&[first, second]);
+    for (option, value) in [
+        ("--expect", "udp.stream=0"),
+        ("--ingress-filter", "udp.stream == 0"),
+        ("--egress-filter", "udp.stream == 0"),
+    ] {
+        let output = run(&[
+            "--output",
+            "json",
+            "--resource-diagnostics",
+            "verify-forwarding",
+            path_text(capture.path()),
+            path_text(capture.path()),
+            "--identity",
+            "ipv4.identification",
+            option,
+            value,
+            "--max-flows",
+            "1",
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(6),
+            "{option} {value}: {output:?}"
+        );
+        let report = parse_json(&output);
+        assert_eq!(report["error"]["code"], "policy.analysis_resource_limit");
+        let settings = report["resources"]["settings"].as_array().unwrap();
+        for (name, enabled) in [
+            ("--max-flows", true),
+            ("--max-scope-bytes", true),
+            ("--max-ip-datagrams", true),
+            ("--ip-overlap", true),
+            ("--max-provenance-bytes", false),
+            ("--max-tcp-reassembly-bytes", false),
+        ] {
+            let setting = settings
+                .iter()
+                .find(|setting| setting["name"] == name)
+                .unwrap();
+            assert_eq!(setting["enabled"], enabled, "{option} {value}: {name}");
+        }
+    }
 }

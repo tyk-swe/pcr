@@ -228,3 +228,30 @@ one output allocation and copies the retained interval once. These counters
 exclude decoder work, history copies, serialization and allocator internals.
 The 8,192-segment capture has 8,193 physical frames, 819,200 pending bytes and an
 819,201-byte directional reordering window, within the default limits.
+
+## Composed invocation and forwarding bounds
+
+The [versioned presets](resource-presets.md) provide optional named defaults;
+explicit flags override them and resource diagnostics show the resolved source.
+They do not define a total RSS budget.
+
+Forwarding skips unrequested stream indexes and retains IP reconstruction when
+an index is required, preserving capture-global numbering. Resource diagnostics
+include requirements from both rules and selection filters. Comparison evidence
+remains physical, and every input consumes frame and byte budgets before selection.
+
+Forwarding collection charges, comparison scratch, shared detail retention,
+and terminal publication limits are separate. Detail omission changes retained
+evidence, not counters or verdict. See [the verification contract](verification-contract.md)
+for defaults, caveats, consumed-input hashes, and check-specific completeness.
+
+The CLI compression wrapper enforces cumulative encoded and decoded bytes,
+including metadata; this is stronger than a bare library Reader's per-record
+and metadata bounds. Invocation and phase deadlines reach Reader metadata/EOF
+boundaries but remain cooperative around blocking I/O.
+
+`measure-analysis.py` now includes HTTP source tracking and forwarding with and
+without retained details on generated flow workloads. It retains time/RSS and
+optional allocation profiles as measurements, not noisy shared-runner gates.
+Semantic fuzz targets and deterministic contract tests guard verdict/detail
+invariance separately from those process measurements.

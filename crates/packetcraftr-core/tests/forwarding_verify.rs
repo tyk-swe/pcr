@@ -8,6 +8,7 @@ mod common;
 
 use std::error::Error as _;
 use std::net::Ipv4Addr;
+use std::slice::from_ref;
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr_core::analysis::forwarding::{
@@ -102,13 +103,53 @@ fn short_record(timestamp: u64, payload: &[u8]) -> Frame {
     .expect("short-record fixture is valid")
 }
 
+fn double_vlan_frame() -> Frame {
+    let mut bytes = vec![
+        2, 0, 0, 0, 0, 1, // destination
+        2, 0, 0, 0, 0, 2, // source
+        0x81, 0, // VLAN EtherType
+        0, 7, 0x81, 0, // tag 7, followed by another VLAN
+        0, 8, 0x08, 0, // tag 8, followed by IPv4
+    ];
+    bytes
+        .extend_from_slice(frame(1, common::CLIENT, common::SERVER, (40000, 9000), b"one").bytes());
+    Frame::new(
+        UNIX_EPOCH + Duration::from_secs(1),
+        LinkType::ETHERNET,
+        bytes,
+    )
+    .unwrap()
+}
+
+fn frame_prefix(full: &Frame, captured: usize, truncated: bool) -> Frame {
+    Frame::try_with_lengths(
+        full.timestamp.unwrap(),
+        full.link_type,
+        Lengths {
+            captured: captured as u32,
+            original: if truncated {
+                full.original_length()
+            } else {
+                captured as u32
+            },
+        },
+        full.bytes()[..captured].to_vec(),
+    )
+    .unwrap()
+}
+
 fn collect(
     rules: &forwarding::Rules,
     side: Side,
     frames: &[Frame],
     filter: Option<&Filter>,
 ) -> SideInput {
-    let mut reader = common::reader(frames);
+    let mut reader = common::ip_fragments::reader_with_link_type(
+        frames
+            .first()
+            .map_or(LinkType::IPV4, |frame| frame.link_type),
+        frames,
+    );
     let options = analysis::Options {
         filter,
         ..analysis::Options::default()
@@ -573,7 +614,8 @@ fn truncated_evidence_is_explicit_and_unkeyable() {
 #[test]
 fn a_short_record_still_flags_incomplete_evidence() {
     // The keyed bytes decode consistently, but the capture record itself
-    // admits it lost wire bytes, so no check on the pair may claim evidence.
+    // admits it lost wire bytes. The header is readable, but capture-level
+    // incompleteness still prevents an overall pass.
     let full = frame(1, common::CLIENT, common::SERVER, (53_000, 9_000), b"one");
     let short = short_record(1, b"one");
     let rules = rules(&["ipv4.source"], &["ipv4.ttl"], &[]);
@@ -581,7 +623,8 @@ fn a_short_record_still_flags_incomplete_evidence() {
 
     assert_eq!(report.verdict, Verdict::Inconclusive);
     assert_eq!(report.summary.unique_matches, 1);
-    assert_eq!(report.summary.checks_unevaluable, 1);
+    assert_eq!(report.summary.checks_satisfied, 1);
+    assert_eq!(report.summary.checks_unevaluable, 0);
     assert_eq!(
         report.matches[0].egress.incomplete,
         Some(Incomplete::Truncated)
@@ -831,7 +874,12 @@ fn all_observation_projections_share_one_budget() {
             if budget < required {
                 assert_eq!(report.verdict, Verdict::Inconclusive);
                 assert_eq!(report.sides.egress.incomplete, 1);
-                assert_eq!(report.summary.checks_evaluated, 0);
+                // Earlier readable fields remain evaluated when the final
+                // field exhausts the shared observation budget.
+                assert_eq!(
+                    report.summary.checks_evaluated,
+                    if required == 3 { 0 } else { 1 }
+                );
                 assert_eq!(
                     report.matches[0].egress.incomplete,
                     Some(Incomplete::FieldBudget)
@@ -898,7 +946,397 @@ fn forwarding_observations_ignore_reconstructed_children() {
     let side = collect(&rules, Side::Egress, &fragments, None);
     let completion = &side.observations[1];
     assert!(completion.key().is_none());
-    assert_eq!(completion.preserved, vec![None]);
-    assert_eq!(completion.expectations[0].actual, None);
-    assert!(!completion.expectations[0].satisfied);
+    assert_eq!(completion.preserved(), &[None]);
+    assert_eq!(completion.expectations()[0].actual, None);
+    assert!(!completion.expectations()[0].satisfied);
+}
+
+#[test]
+fn two_missing_values_never_satisfy_ordinary_preservation() {
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let rules = rules(&["ipv4.identification"], &["tcp.sequence"], &[]);
+    let report = compare(&rules, &frames, &frames);
+    assert_eq!(report.verdict, Verdict::Inconclusive);
+    assert_eq!(report.summary.checks_satisfied, 0);
+    assert_eq!(report.summary.checks_unevaluable, 1);
+    assert_eq!(
+        report.matches[0].checks[0].actual_state,
+        forwarding::ValueState::Absent
+    );
+}
+
+#[test]
+fn explicit_decoder_view_absence_is_not_value_equality() {
+    let identity = vec!["ipv4.identification".to_owned()];
+    let presence = vec!["tcp.sequence".to_owned()];
+    let rules = forwarding::Rules::compile_declarations(
+        forwarding::Declarations {
+            identity: &identity,
+            preserve_presence: &presence,
+            expect_absent: &presence,
+            ..forwarding::Declarations::default()
+        },
+        &builtin::registry(),
+        FIELD_BUDGET,
+    )
+    .unwrap();
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let report = compare(&rules, &frames, &frames);
+    assert_eq!(report.verdict, Verdict::Pass);
+    assert_eq!(report.summary.checks_satisfied, 2);
+    assert_eq!(
+        report.matches[0].checks[0].check.kind,
+        CheckKind::PreservePresence
+    );
+    assert_eq!(
+        report.matches[0].checks[1].check.kind,
+        CheckKind::ExpectAbsent
+    );
+}
+
+#[test]
+fn missing_value_expectations_require_readable_evidence() {
+    let rules = rules(&["ipv4.identification"], &[], &["tcp.sequence=1"]);
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let report = compare(&rules, &frames, &frames);
+    assert_eq!(report.verdict, Verdict::Inconclusive);
+    assert_eq!(report.summary.checks_violated, 0);
+    assert_eq!(report.summary.checks_unevaluable, 1);
+}
+
+#[test]
+fn rules_side_and_capture_order_cannot_be_substituted() {
+    let first = rules(&["ipv4.identification"], &[], &[]);
+    let second = rules(&["ipv4.identification"], &[], &["ipv4.ttl=1"]);
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let ingress = collect(&first, Side::Ingress, &frames, None);
+    let egress = collect(&first, Side::Egress, &frames, None);
+    assert!(matches!(
+        forwarding::verify(&second, ingress.clone(), egress.clone(), 256, None),
+        Err(forwarding::Error::ObservationContract { .. })
+    ));
+    assert!(matches!(
+        forwarding::verify(&first, egress, ingress, 256, None),
+        Err(forwarding::Error::ObservationContract { .. })
+    ));
+    let mut ingress = collect(
+        &first,
+        Side::Ingress,
+        &[frames[0].clone(), frames[0].clone()],
+        None,
+    );
+    ingress.observations.reverse();
+    let egress = collect(&first, Side::Egress, &frames, None);
+    assert!(matches!(
+        forwarding::verify(&first, ingress, egress, 256, None),
+        Err(forwarding::Error::ObservationContract { .. })
+    ));
+}
+
+#[test]
+fn unrelated_projection_exhaustion_cannot_erase_a_header_violation() {
+    let rules = forwarding::Rules::compile(
+        &["ipv4.identification".to_owned()],
+        &["udp.source_port".to_owned(), "raw.bytes".to_owned()],
+        &[],
+        &builtin::registry(),
+        8,
+    )
+    .unwrap();
+    let ingress = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"large-payload",
+    )];
+    let egress = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40001, 9000),
+        b"large-payload",
+    )];
+    let report = compare(&rules, &ingress, &egress);
+    assert_eq!(report.verdict, Verdict::Fail);
+    assert_eq!(report.summary.checks_violated, 1);
+    assert_eq!(report.summary.checks_unevaluable, 1);
+}
+
+#[test]
+fn truncation_cannot_erase_a_readable_header_violation() {
+    let rules = rules(&["ipv4.identification"], &["udp.source_port"], &[]);
+    let ingress = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    // This source port is 53000; the capture admits missing unrelated bytes.
+    let egress = [short_record(1, b"one")];
+    let report = compare(&rules, &ingress, &egress);
+    assert_eq!(report.verdict, Verdict::Fail);
+    assert_eq!(report.summary.checks_violated, 1);
+    assert_eq!(report.sides.egress.incomplete, 1);
+}
+
+#[test]
+fn incomplete_repeated_fields_are_unevaluable_even_when_the_projection_is_scalar() {
+    let rules = rules(
+        &["ethernet#1.source"],
+        &["vlan.vlan_id"],
+        &["vlan.vlan_id=8"],
+    );
+    let full = double_vlan_frame();
+    let complete = compare(&rules, from_ref(&full), from_ref(&full));
+    assert_eq!(complete.verdict, Verdict::Pass);
+    assert_eq!(complete.summary.checks_satisfied, 2);
+
+    for captured in [18, 20] {
+        // At the second tag boundary and inside it.
+        for truncated in [false, true] {
+            let partial = frame_prefix(&full, captured, truncated);
+            let state = if truncated {
+                forwarding::ValueState::Truncated
+            } else {
+                forwarding::ValueState::DecodeIncomplete
+            };
+            let report = compare(&rules, from_ref(&full), from_ref(&partial));
+            assert_eq!(report.verdict, Verdict::Inconclusive);
+            assert_eq!(report.summary.unique_matches, 1);
+            assert_eq!(report.summary.checks_unevaluable, 2);
+            assert!(report.violations.is_empty());
+            for check in &report.matches[0].checks {
+                assert_eq!(check.actual_state, state);
+                assert_eq!(check.outcome, Outcome::Unevaluable);
+            }
+
+            let reversed = compare(&rules, from_ref(&partial), from_ref(&full));
+            assert_eq!(reversed.verdict, Verdict::Inconclusive);
+            assert_eq!(reversed.summary.checks_unevaluable, 1);
+            assert_eq!(reversed.summary.checks_satisfied, 1);
+            assert_eq!(reversed.matches[0].checks[0].expected_state, Some(state));
+            assert!(reversed.violations.is_empty());
+        }
+    }
+}
+
+#[test]
+fn incomplete_occurrences_cannot_supply_an_identity() {
+    let full = double_vlan_frame();
+    let partial = frame_prefix(&full, 20, true);
+    for identity in ["vlan.vlan_id", "ethernet.source"] {
+        let rules = rules(&[identity], &["vlan.vlan_id"], &[]);
+        let input = collect(&rules, Side::Egress, from_ref(&partial), None);
+        assert!(input.observations[0].key_cells()[0].is_some());
+        assert!(!input.observations[0].is_keyed());
+        let report = compare(&rules, from_ref(&full), from_ref(&partial));
+        assert_eq!(report.verdict, Verdict::Inconclusive);
+        assert_eq!(report.sides.egress.unkeyed, 1);
+        assert!(report.violations.is_empty());
+    }
+}
+
+#[test]
+fn selected_occurrences_can_establish_violations_before_an_incomplete_header() {
+    let rules = rules(
+        &["ethernet#1.source"],
+        &["vlan#1.vlan_id", "vlan.vlan_id"],
+        &["vlan#1.vlan_id=7"],
+    );
+    let full = double_vlan_frame();
+    let mut changed = full.bytes().to_vec();
+    changed[15] = 9;
+    let changed = Frame::new(full.timestamp.unwrap(), full.link_type, changed).unwrap();
+    for truncated in [false, true] {
+        let partial = frame_prefix(&changed, 20, truncated);
+        let report = compare(&rules, from_ref(&full), from_ref(&partial));
+        assert_eq!(report.verdict, Verdict::Fail);
+        assert_eq!(report.summary.unique_matches, 1);
+        assert_eq!(report.summary.checks_violated, 2);
+        assert_eq!(report.summary.checks_unevaluable, 1);
+        assert_eq!(
+            report.matches[0].checks[0].actual_state,
+            forwarding::ValueState::Observed
+        );
+        assert_eq!(report.matches[0].checks[1].outcome, Outcome::Unevaluable);
+    }
+}
+
+#[test]
+fn details_are_presentation_and_scratch_is_a_separate_failure_domain() {
+    let rules = rules(&["raw.bytes"], &["udp.source_port"], &[]);
+    let ingress = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let egress = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40001, 9000),
+        b"one",
+    )];
+    let reference = compare(&rules, &ingress, &egress);
+    for max_details in [0, 1, 256] {
+        for max_detail_bytes in [0, 1, 4096] {
+            let report = forwarding::verify_with_limits(
+                &rules,
+                collect(&rules, Side::Ingress, &ingress, None),
+                collect(&rules, Side::Egress, &egress, None),
+                forwarding::VerifyLimits {
+                    max_details,
+                    max_detail_bytes,
+                    ..forwarding::VerifyLimits::default()
+                },
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(report.verdict, reference.verdict);
+            assert_eq!(report.summary, reference.summary);
+            assert_eq!(report.matches.len() as u64 + report.omitted.matches, 1);
+            assert_eq!(
+                report.violations.len() as u64 + report.omitted.violations,
+                1
+            );
+        }
+    }
+    let error = forwarding::verify_with_limits(
+        &rules,
+        collect(&rules, Side::Ingress, &ingress, None),
+        collect(&rules, Side::Egress, &egress, None),
+        forwarding::VerifyLimits {
+            max_scratch_bytes: 0,
+            ..Default::default()
+        },
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, "policy.verify_scratch_limit");
+}
+
+#[test]
+fn identity_only_and_overlapping_rules_explain_their_scope() {
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let identity_only = rules(&["raw.bytes"], &[], &[]);
+    let report = compare(&identity_only, &frames, &frames);
+    assert_eq!(
+        report.rules.comparison,
+        forwarding::ComparisonKind::CorrespondenceOnly
+    );
+    assert!(
+        report
+            .rules
+            .warnings
+            .iter()
+            .any(|w| w.code == "verify.correspondence_only")
+    );
+    let overlap = rules(&["raw.bytes"], &["raw.bytes"], &[]);
+    let report = compare(&overlap, &frames, &frames);
+    assert!(
+        report
+            .rules
+            .warnings
+            .iter()
+            .any(|w| w.code == "verify.identity_preservation_overlap")
+    );
+}
+
+#[test]
+fn an_expired_comparison_cannot_publish_a_verdict() {
+    use packetcraftr_core::budget::Deadline;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+    use std::time::Instant;
+    let rules = rules(&["ipv4.identification"], &["ipv4.ttl"], &[]);
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40000, 9000),
+        b"one",
+    )];
+    let ingress = collect(&rules, Side::Ingress, &frames, None);
+    let egress = collect(&rules, Side::Egress, &frames, None);
+    let ticks = Arc::new(AtomicU64::new(0));
+    let observed = ticks.clone();
+    let start = Instant::now();
+    let deadline = Deadline::with_time_source(Duration::from_millis(5), move || {
+        start + Duration::from_millis(observed.load(Ordering::SeqCst))
+    });
+    ticks.store(6, Ordering::SeqCst);
+    let error = forwarding::verify_with_limits(
+        &rules,
+        ingress,
+        egress,
+        Default::default(),
+        None,
+        Some(&deadline),
+    )
+    .unwrap_err();
+    assert_eq!(error.classification().code, "policy.duration_limit");
+}
+
+#[test]
+fn introducing_an_absent_field_breaks_the_explicit_absence_contract() {
+    let identity = vec!["ipv4.identification".to_owned()];
+    let absence = vec!["tcp.sequence".to_owned()];
+    let rules = forwarding::Rules::compile_declarations(
+        forwarding::Declarations {
+            identity: &identity,
+            expect_absent: &absence,
+            ..Default::default()
+        },
+        &builtin::registry(),
+        FIELD_BUDGET,
+    )
+    .unwrap();
+    let before = frame(1, common::CLIENT, common::SERVER, (40000, 9000), b"one");
+    let after = common::tcp_frame(
+        &common::registry(),
+        UNIX_EPOCH + Duration::from_secs(1),
+        common::client_tcp(1, 0, packetcraftr_core::protocol::transport::Tcp::SYN, 1024),
+        b"",
+    );
+    let report = compare(&rules, &[before], &[after]);
+    assert_eq!(report.verdict, Verdict::Fail);
+    assert_eq!(report.summary.checks_violated, 1);
 }

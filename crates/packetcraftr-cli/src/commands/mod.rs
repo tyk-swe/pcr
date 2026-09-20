@@ -176,6 +176,7 @@ impl Command {
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
         let millis = match self {
+            Self::Stats(args) => args.limits.max_duration_ms,
             Self::Expert(args) => args.limits.max_duration_ms,
             Self::Follow(args) => args.limits.max_duration_ms,
             Self::Tls(args) => args.limits.max_duration_ms,
@@ -238,15 +239,9 @@ impl Command {
         let kind = self
             .kind()
             .expect("non-documentation commands have an output contract kind");
-        let publisher = self
-            .publication_duration()
-            .filter(|_| format == Format::Ndjson)
-            .map(|duration| {
-                stream.clone().with_deadline(std::sync::Arc::new(
-                    packetcraftr_core::budget::Deadline::new(duration)
-                        .with_cancellation(Some(crate::cancellation::signal().clone())),
-                ))
-            });
+        let _invocation = crate::invocation::enter(self.publication_duration());
+        let publisher =
+            crate::invocation::deadline().map(|deadline| stream.clone().with_deadline(deadline));
         let stream = publisher.as_ref().unwrap_or(stream);
         let result = match self {
             Self::Merge(arguments) => merge::run(arguments, kind.require_format(format)?, stream),

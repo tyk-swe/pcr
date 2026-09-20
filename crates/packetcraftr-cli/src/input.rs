@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+mod fingerprint;
+pub(crate) use fingerprint::Fingerprint;
+
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -305,18 +308,32 @@ pub(crate) fn parse_target(target: String) -> Result<packetcraftr::target::Targe
 
 /// Opens a capture reader under its per-item bounds; the aggregate frame and
 /// byte ceilings are charged per frame while streaming, not while opening.
+fn capture_source(path: &Path) -> Result<Box<dyn Read>, CliError> {
+    crate::cancellation::check()?;
+    if path == Path::new("-") {
+        let stdin = io::stdin();
+        require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
+        Ok(Box::new(stdin.lock()))
+    } else {
+        Ok(Box::new(open_file(path)?))
+    }
+}
+
 pub(crate) fn open_capture(
     path: &Path,
     bounds: CaptureReaderBoundsArgs,
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
-    let source: Box<dyn Read> = if path == Path::new("-") {
-        let stdin = io::stdin();
-        require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
-        Box::new(stdin.lock())
-    } else {
-        Box::new(open_file(path)?)
-    };
-    capture_reader(source, bounds)
+    capture_reader(capture_source(path)?, bounds)
+}
+
+/// The fingerprint covers the same read stream as the comparison, including
+/// compression/container bytes. Publish it only after a successful EOF.
+pub(crate) fn open_capture_hashed(
+    path: &Path,
+    bounds: CaptureReaderBoundsArgs,
+) -> Result<(Reader<Box<dyn Read>>, Fingerprint), CliError> {
+    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(path)?);
+    Ok((capture_reader(source, bounds)?, fingerprint))
 }
 
 pub(crate) fn open_capture_file(
@@ -334,6 +351,7 @@ pub(crate) fn snapshot_capture<R: Read>(
     limits: core::analysis::pcap::Limits,
 ) -> Result<Reader<File>, CliError> {
     use core::analysis::pcap;
+    crate::cancellation::check()?;
     let snapshot = tempfile::tempfile()
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;
@@ -341,6 +359,7 @@ pub(crate) fn snapshot_capture<R: Read>(
     std::io::Seek::rewind(&mut snapshot)
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;
+    crate::cancellation::check()?;
     Reader::with_options(
         snapshot,
         ReaderOptions {
@@ -349,7 +368,9 @@ pub(crate) fn snapshot_capture<R: Read>(
             ..Default::default()
         },
     )
-    .map(|reader| reader.with_cancellation(crate::cancellation::signal().clone()))
+    .map(|reader| {
+        crate::invocation::reader(reader.with_cancellation(crate::cancellation::signal().clone()))
+    })
     .map_err(CliError::classified)
 }
 
@@ -379,7 +400,9 @@ fn capture_reader<R: Read + 'static>(
     )
     .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    Ok(reader.with_cancellation(crate::cancellation::signal().clone()))
+    Ok(crate::invocation::reader(
+        reader.with_cancellation(crate::cancellation::signal().clone()),
+    ))
 }
 
 fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {

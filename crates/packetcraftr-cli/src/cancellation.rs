@@ -11,7 +11,8 @@ pub(crate) fn signal() -> &'static Cancellation {
 }
 
 pub(crate) fn check() -> Result<(), CliError> {
-    signal().check().map_err(CliError::classified)
+    signal().check().map_err(CliError::classified)?;
+    crate::invocation::check()
 }
 
 pub(crate) fn install() -> Result<(), CliError> {

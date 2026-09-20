@@ -98,7 +98,8 @@ fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
         assert!(stderr.contains("invalid value"), "{label}: {stderr}");
     }
     // Valid explicit settings proceed past validation to interface resolution,
-    // which reports the unknown interface rather than a setting rejection.
+    // which reports the unknown interface (or an unavailable native capability
+    // in portable builds) rather than a setting rejection.
     let output = run(&[
         "--output",
         "text",
@@ -114,7 +115,16 @@ fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
     ]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("does-not-exist"), "{stderr}");
+    if cfg!(any(
+        feature = "native-route",
+        feature = "native-layer2",
+        feature = "native-layer3"
+    )) {
+        assert!(stderr.contains("does-not-exist"), "{stderr}");
+    } else {
+        assert_eq!(output.status.code(), Some(4), "{stderr}");
+        assert!(stderr.contains("capability.unsupported"), "{stderr}");
+    }
     assert!(!stderr.contains("cli.capture_setting"), "{stderr}");
 }
 

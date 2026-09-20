@@ -13,6 +13,12 @@ ASSETS = (
     'docs/migration-beta.3.md', 'docs/migration-unreleased.md', 'docs/analysis-resources.md',
     'BUILD-METADATA.json', 'schemas/packetcraftr.packet.v2.schema.json',
     'schemas/packetcraftr.output.v5.schema.json',
+    'schemas/packetcraftr.output.v6.schema.json',
+    'docs/verification-contract.md', 'docs/consumer-compatibility.md',
+    'docs/resource-presets.md', 'docs/tasks.md', 'docs/native-validation.md',
+    'examples/consumers/forwarding.py',
+    'examples/consumers/fixtures/v5-forwarding.json',
+    'examples/consumers/fixtures/v6-forwarding.json',
     'schemas/packetcraftr.rewrite.v1.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'examples/captures/tls-handshake.pcapng',
@@ -82,7 +88,7 @@ def verify(root, version, commit, target, variant):
     if records[-1].get('event') != 'complete':
         raise ValueError('stream has no terminal completion')
     for index, record in enumerate(records):
-        if (record.get('schema') != 'packetcraftr.output/v5'
+        if (record.get('schema') != 'packetcraftr.output/v6'
                 or type(record.get('sequence')) is not int
                 or record['sequence'] != index
                 or record.get('event') != ('complete' if index == len(records) - 1 else 'frame')):

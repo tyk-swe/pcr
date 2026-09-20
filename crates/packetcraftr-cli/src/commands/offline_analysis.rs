@@ -35,6 +35,8 @@ impl AnalysisSetup {
     /// choose only whether the run drives TCP reassembly.
     pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
         analysis::Options {
+            plan: analysis::Plan::default(),
+            deadline: crate::invocation::deadline(),
             track_sources: false,
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),

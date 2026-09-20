@@ -33,6 +33,21 @@ pub(crate) fn bounded_json_len(
     value: &impl Serialize,
     limit: usize,
 ) -> Result<usize, BoundedJsonError> {
+    bounded_json_len_with_formatter(value, limit, serde_json::ser::CompactFormatter)
+}
+
+pub(crate) fn bounded_pretty_json_len(
+    value: &impl Serialize,
+    limit: usize,
+) -> Result<usize, BoundedJsonError> {
+    bounded_json_len_with_formatter(value, limit, serde_json::ser::PrettyFormatter::new())
+}
+
+fn bounded_json_len_with_formatter(
+    value: &impl Serialize,
+    limit: usize,
+    formatter: impl serde_json::ser::Formatter,
+) -> Result<usize, BoundedJsonError> {
     struct Counter {
         remaining: usize,
         exceeded: bool,
@@ -57,7 +72,10 @@ pub(crate) fn bounded_json_len(
         remaining: limit,
         exceeded: false,
     };
-    match serde_json::to_writer(&mut counter, value) {
+    match value.serialize(&mut serde_json::Serializer::with_formatter(
+        &mut counter,
+        formatter,
+    )) {
         Ok(()) => Ok(limit - counter.remaining),
         Err(_) if counter.exceeded => Err(BoundedJsonError::Limit),
         Err(source) => Err(BoundedJsonError::Serialize(source)),
@@ -65,6 +83,7 @@ pub(crate) fn bounded_json_len(
 }
 
 pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
+    crate::invocation::check()?;
     let stdout = io::stdout().lock();
     let mut writer = io::BufWriter::with_capacity(64 * 1024, stdout);
     serde_json::to_writer_pretty(&mut writer, value).map_err(json_error)?;
@@ -112,7 +131,7 @@ mod tests {
     use serde::Serialize;
     use serde::ser::{Error as _, SerializeSeq};
 
-    use super::{BoundedJsonError, bounded_json_len};
+    use super::{BoundedJsonError, bounded_json_len, bounded_pretty_json_len};
 
     struct Instrumented<'a> {
         second: &'a Cell<bool>,
@@ -145,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn bounded_json_len_counts_exact_compact_bytes() {
+    fn bounded_json_len_counts_exact_compact_and_pretty_bytes() {
         let cases = [
             serde_json::json!(null),
             serde_json::json!(""),
@@ -153,20 +172,30 @@ mod tests {
             serde_json::json!({"nested": [1, "two", {"three": [null, true]}], "empty": []}),
         ];
         for value in cases {
-            let n = serde_json::to_vec(&value).unwrap().len();
-            assert_eq!(bounded_json_len(&value, n).unwrap(), n, "{value}");
-            assert!(
-                matches!(
-                    bounded_json_len(&value, n - 1),
-                    Err(BoundedJsonError::Limit)
-                ),
-                "{value}"
-            );
-            assert!(
-                matches!(bounded_json_len(&value, 0), Err(BoundedJsonError::Limit)),
-                "{value}"
-            );
-            assert_eq!(bounded_json_len(&value, usize::MAX).unwrap(), n, "{value}");
+            for pretty in [false, true] {
+                let n = if pretty {
+                    serde_json::to_vec_pretty(&value).unwrap().len()
+                } else {
+                    serde_json::to_vec(&value).unwrap().len()
+                };
+                let measure = |limit| {
+                    if pretty {
+                        bounded_pretty_json_len(&value, limit)
+                    } else {
+                        bounded_json_len(&value, limit)
+                    }
+                };
+                assert_eq!(measure(n).unwrap(), n, "{value}");
+                assert!(
+                    matches!(measure(n - 1), Err(BoundedJsonError::Limit)),
+                    "{value}"
+                );
+                assert!(
+                    matches!(measure(0), Err(BoundedJsonError::Limit)),
+                    "{value}"
+                );
+                assert_eq!(measure(usize::MAX).unwrap(), n, "{value}");
+            }
         }
     }
 
@@ -179,14 +208,24 @@ mod tests {
             Err(BoundedJsonError::Limit)
         ));
         assert!(!second.get());
+        assert!(matches!(
+            bounded_pretty_json_len(&value, 1),
+            Err(BoundedJsonError::Limit)
+        ));
+        assert!(!second.get());
     }
 
     #[test]
     fn bounded_json_len_preserves_serialization_failures() {
-        let error = bounded_json_len(&FailingSerialization, usize::MAX).unwrap_err();
-        let BoundedJsonError::Serialize(source) = error else {
-            panic!("expected serialization failure, got {error:?}");
-        };
-        assert_eq!(source.to_string(), "fixture serialization failure");
+        for result in [
+            bounded_json_len(&FailingSerialization, usize::MAX),
+            bounded_pretty_json_len(&FailingSerialization, usize::MAX),
+        ] {
+            let error = result.unwrap_err();
+            let BoundedJsonError::Serialize(source) = error else {
+                panic!("expected serialization failure, got {error:?}");
+            };
+            assert_eq!(source.to_string(), "fixture serialization failure");
+        }
     }
 }

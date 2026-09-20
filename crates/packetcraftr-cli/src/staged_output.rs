@@ -29,6 +29,7 @@ impl StagedFile {
     /// symlink — before any input is read, then stages a temporary file in
     /// the destination's directory so publication is a same-filesystem rename.
     pub(crate) fn stage(destination: &Path) -> Result<Self, CliError> {
+        crate::cancellation::check()?;
         match std::fs::symlink_metadata(destination) {
             Ok(_) => {
                 return Err(CliError::from_classification(
@@ -67,14 +68,19 @@ impl StagedFile {
     /// after this potentially blocking operation, before persisting. Callers
     /// publishing several files sync every file before persisting any.
     pub(crate) fn sync(&self) -> Result<(), CliError> {
+        crate::cancellation::check()?;
         self.file
             .as_file()
             .sync_all()
-            .map_err(|source| output("sync", &self.destination, source))
+            .map_err(|source| output("sync", &self.destination, source))?;
+        crate::cancellation::check()
     }
 
     /// Publishes the staged file at its destination without clobbering.
     pub(crate) fn persist(self) -> Result<(), CliError> {
+        // This is the commit boundary. Expiry after a successful rename must
+        // not claim that the already-published artifact was rolled back.
+        crate::cancellation::check()?;
         let destination = self.destination;
         self.file
             .persist_noclobber(&destination)
@@ -177,5 +183,61 @@ mod tests {
             ["storage backend failed"],
             "boundary errors retain the I/O source"
         );
+    }
+    #[test]
+    fn expiry_at_the_commit_boundary_leaves_no_destination_or_staged_file() {
+        use packetcraftr_core::budget::Deadline;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        use std::time::{Duration, Instant};
+
+        let ticks = Arc::new(AtomicU64::new(0));
+        let observed = ticks.clone();
+        let start = Instant::now();
+        let deadline = Arc::new(Deadline::with_time_source(
+            Duration::from_millis(5),
+            move || start + Duration::from_millis(observed.load(Ordering::SeqCst)),
+        ));
+        let _scope = crate::invocation::enter_deadline(Some(deadline));
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("expired.pcap");
+        let mut staged = StagedFile::stage(&destination).unwrap();
+        staged.as_file_mut().write_all(b"prepared").unwrap();
+        staged.sync().unwrap();
+        ticks.store(6, Ordering::SeqCst);
+        let error = staged.persist().unwrap_err();
+        assert_eq!(error.classification.code, "policy.duration_limit");
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn expiry_after_commit_does_not_remove_an_already_published_artifact() {
+        use packetcraftr_core::budget::Deadline;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        use std::time::{Duration, Instant};
+
+        let ticks = Arc::new(AtomicU64::new(0));
+        let observed = ticks.clone();
+        let start = Instant::now();
+        let deadline = Arc::new(Deadline::with_time_source(
+            Duration::from_millis(5),
+            move || start + Duration::from_millis(observed.load(Ordering::SeqCst)),
+        ));
+        let _scope = crate::invocation::enter_deadline(Some(deadline));
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("committed.pcap");
+        let mut staged = StagedFile::stage(&destination).unwrap();
+        staged.as_file_mut().write_all(b"committed").unwrap();
+        staged.sync().unwrap();
+        staged.persist().unwrap();
+        ticks.store(6, Ordering::SeqCst);
+        assert!(crate::invocation::check().is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"committed");
     }
 }

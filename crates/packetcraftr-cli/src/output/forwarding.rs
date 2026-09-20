@@ -17,10 +17,29 @@ use packetcraftr_core::frame::LinkType;
 use super::contract::Error;
 use super::frame::{SourceFrame, Timestamp};
 
+/// SHA-256 of the exact encoded source stream consumed through successful
+/// EOF. It binds a completed report to bytes, not merely a mutable pathname.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CaptureSource {
+    pub sha256: String,
+    pub encoded_bytes: u64,
+}
+
+/// Decoder overrides are part of the interpretation, not acquisition facts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DecodeContext {
+    pub tls_ports: Vec<u16>,
+    pub bindings: Vec<String>,
+}
+
 /// One capture's place in the comparison: the path it was read from plus its
 /// observation census, counted over its own frames only.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Capture {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<CaptureSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_filter: Option<String>,
     /// The input path as invoked; `-` for a capture read from stdin.
     pub path: String,
     /// Physical frames the capture reader yielded, selected or not.
@@ -200,6 +219,8 @@ impl TryFrom<&analysis::AmbiguousGroup> for AmbiguousGroup {
 /// terminal `complete` record carry the same document.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decode: Option<DecodeContext>,
     pub verdict: analysis::Verdict,
     /// The rules exactly as declared, so the report stands alone.
     pub rules: analysis::RequestedRules,
@@ -234,11 +255,14 @@ impl Report {
         paths: analysis::Sided<String>,
     ) -> Result<Self, Error> {
         Ok(Self {
+            decode: None,
             verdict: report.verdict,
             rules: report.rules.clone(),
             assumptions: report.assumptions,
             captures: analysis::Sided {
                 ingress: Capture {
+                    source: None,
+                    selection_filter: None,
                     path: paths.ingress,
                     read: report.sides.ingress.read,
                     selected: report.sides.ingress.selected,
@@ -247,6 +271,8 @@ impl Report {
                     incomplete: report.sides.ingress.incomplete,
                 },
                 egress: Capture {
+                    source: None,
+                    selection_filter: None,
                     path: paths.egress,
                     read: report.sides.egress.read,
                     selected: report.sides.egress.selected,

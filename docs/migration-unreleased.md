@@ -2,7 +2,33 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
-## Named packet fields and output/v5
+## Forwarding semantics and output/v6
+
+Ordinary preservation no longer treats two missing fields as a satisfied check.
+Use explicit `--preserve-presence` / `--expect-absent` for decoder-view absence.
+Checks expose evidence states; an unrelated incomplete field cannot erase a
+readable-field violation. Rules now label correspondence-only comparisons and
+warn about identity/preservation overlap.
+
+Rust `Observation` fields are private and observations bind to the exact
+compiled rules and side. Use collectors and read-only getters, not literals.
+`verify` returns `forwarding::Error`; `verify_with_limits` accepts independent
+detail/scratch budgets and a shared deadline. `analysis::Options` gains `plan`
+and `deadline`; exhaustive struct initializers must add them or use defaults.
+The default analysis plan preserves previous reconstruction/index semantics.
+Analysis processing deadlines now classify as `policy.duration_limit`, matching
+capture-reader and invocation deadlines, instead of `policy.analysis_resource_limit`.
+
+Forwarding defaults now retain at most 4 MiB of detail charges across categories,
+in addition to the per-category entry ceiling. Omission counts remain explicit
+and do not change verdicts. Consumed input SHA-256/byte counts and decode context
+are published by the CLI. Evidence charges account for typed JSON serialization.
+
+See [verification semantics](verification-contract.md), [consumer compatibility](consumer-compatibility.md),
+and [resource presets](resource-presets.md). The frozen v5 schema is retained;
+old consumers must reject or explicitly migrate v6 rather than infer semantics.
+
+## Named packet fields and output/v6
 
 Field values now include `{ "type": "object", "value": { "name": TAGGED_VALUE } }`.
 Object members share the list-item, nesting, node, and payload budgets; key bytes
@@ -23,11 +49,11 @@ The reflected `wire` field preserves the original message through document
 round trips; explicit structured edits invalidate that retained image.
 
 
-All structured command envelopes now identify `packetcraftr.output/v5` and
-validate against `schemas/packetcraftr.output.v5.schema.json`. Packet documents now use `packetcraftr.packet/v2` and the corresponding v2 schema.
+All structured command envelopes now identify `packetcraftr.output/v6` and
+validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents now use `packetcraftr.packet/v2` and the corresponding v2 schema.
 Earlier packet-document versions are rejected with a schema error.
 
-Output/v5 includes streamed `build` packet/completion events and replay
+Output/v6 includes streamed `build` packet/completion events and replay
 `{"bit_rate": BITS_PER_SECOND}` timing. Successful TCP DNS can have
 `fallback_attempted=false`: this represents a direct TCP query. Consumers
 must inspect the actual attempt transport rather than infer it from fallback.
@@ -50,7 +76,7 @@ with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CN
 `MX`, `NS`, `PTR`, `SOA`, `SRV`, `TXT`, and `ANY`; update names such as `Aaaa` to
 `AAAA`. Match constants or numeric codes with a fallback for other values.
 Use `Display` for presentation and integer serde values for data. The CLI
-contract constant is now `SCHEMA_V5`.
+contract constant is now `SCHEMA_V6`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
 Text parsing returns `QueryTypeParseError`, preserving the original integer
 parse error for out-of-range values.
@@ -132,7 +158,7 @@ The CLI enables EDNS with `--edns-udp-payload-size SIZE`; `--dnssec-ok` requires
 that flag. DO requests DNSSEC data and performs no signature validation. The
 advertised receive size is independent of `--max-message-bytes`, which bounds
 response decoding. Existing output `edns` fields still describe the response;
-these request settings add no fields to the output/v5 or packet/v2 contracts.
+these request settings add no fields to the output/v6 or packet/v2 contracts.
 
 ## Offline DNS records
 
@@ -216,12 +242,12 @@ and final query-byte checks.
 ## Resource and output hardening
 
 Existing client constructors remain available; the feature additions in this
-release add fields to public limits and migrate output to v5. Share callback admission with
+release add fields to public limits and migrate output to v6. Share callback admission with
 `client.with_progress_runtime(runtime.clone())`; inspect it with
 `client.progress_runtime().snapshot()`. Native admission remains process-wide.
 
 `--resource-diagnostics` opts into an optional `resources` envelope member.
-Output/v5 schemas include this member. Resource diagnostics add no NDJSON events
+Output/v6 schemas include this member. Resource diagnostics add no NDJSON events
 or sequence positions.
 `--output-timeout-ms` affects NDJSON writes only; the default and terminal-error
 cleanup allowance remain one second, and operation deadlines take precedence.
@@ -338,7 +364,7 @@ CLI executor delegation preserves this capability. Raw scan NDJSON adds
 `scan::Summary`, `scan::Report`, and `connect::Statistics` gain `rtt`:
 confirmed sends, verdicts received inside their round, `lost = sent - received`,
 and min/avg/max over one sample per received probe. Rust literal constructors
-must supply `scan::Rtt::default()` or an accumulated value. The output/v5
+must supply `scan::Rtt::default()` or an accumulated value. The output/v6
 schema adds the corresponding `rtt` objects on scan summaries and
 `socket_stats`; absent duration fields mean no response produced a sample.
 
@@ -442,7 +468,7 @@ instead of sending exactly one packet. `Client::send` is unchanged; new
 `send::SetOptions` (`repeat`, `rate`, `max_template_packets`) and return
 `send::SetReport` — `sent: Vec<SentFrame>` records each carry one-based `pass`
 and expansion `index`, and `passes_completed` counts finished passes. The
-output/v5 `sendResult` replaces `frame`/`route` with a `frames` list plus
+output/v6 `sendResult` replaces `frame`/`route` with a `frames` list plus
 `passes_completed`. Invalid repeat/rate values classify as `cli.send_limit`;
 the pacing ceiling is `send::MAX_SEND_DURATION`.
 

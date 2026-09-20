@@ -37,7 +37,7 @@ pub use clock::ClockReport;
 pub use ip::{
     IpCounters, IpDatagramOutcome, IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport,
 };
-pub use limits::{Limits, Options};
+pub use limits::{Limits, Options, Plan};
 
 use dispatch::ReassemblyDispatch;
 use ip::IpDispatch;
@@ -283,6 +283,52 @@ pub fn run_with_ip_events<R, I, F>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
     options: &Options<'_>,
+    ip_sink: I,
+    sink: F,
+) -> Result<Summary, Error>
+where
+    R: Read,
+    I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
+    F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
+{
+    options.limits.validate()?;
+    let previous = reader.deadline();
+    let deadline = Arc::new(
+        Deadline::new(options.limits.max_duration)
+            .with_cancellation(options.cancellation.clone())
+            .with_parent(options.deadline.clone())
+            .with_parent(previous.clone()),
+    );
+    // `next_frame` may consume arbitrarily many metadata records. Give those
+    // record boundaries the same phase and invocation clocks as packet work.
+    reader.replace_deadline(Some(deadline.clone()));
+    let scope = ReaderDeadlineScope { reader, previous };
+    run_inner(
+        &mut *scope.reader,
+        registry,
+        options,
+        deadline,
+        ip_sink,
+        sink,
+    )
+}
+
+struct ReaderDeadlineScope<'a, R: Read> {
+    reader: &'a mut Reader<R>,
+    previous: Option<Arc<Deadline>>,
+}
+
+impl<R: Read> Drop for ReaderDeadlineScope<'_, R> {
+    fn drop(&mut self) {
+        self.reader.replace_deadline(self.previous.take());
+    }
+}
+
+fn run_inner<R, I, F>(
+    reader: &mut Reader<R>,
+    registry: Arc<Registry>,
+    options: &Options<'_>,
+    deadline: Arc<Deadline>,
     mut ip_sink: I,
     mut sink: F,
 ) -> Result<Summary, Error>
@@ -291,10 +337,7 @@ where
     I: FnMut(IpEventRecord) -> Result<(), crate::error::BoundaryError>,
     F: FnMut(FrameRecord<'_>) -> Result<(), crate::error::BoundaryError>,
 {
-    options.limits.validate()?;
     let limits = &options.limits;
-    let deadline =
-        Deadline::new(limits.max_duration).with_cancellation(options.cancellation.clone());
     let decoder = Dissector::new(registry);
     let mut tcp_streams = StreamIndex::default();
     let mut udp_streams = StreamIndex::default();
@@ -359,19 +402,23 @@ where
                 tracker.single(crate::analysis::provenance::SourceFrame { number, timestamp })
             })
             .transpose()?;
-        let (derived, clock_regression) = advance_ip_reassembly(
-            &mut ip_dispatch,
-            &stage,
-            &mut scopes,
-            PhysicalFrame {
-                decoded: &decoded,
-                number,
-                timestamp,
-            },
-            &mut ip_sink,
-            &mut provenance,
-            physical_sources.as_ref(),
-        )?;
+        let (derived, clock_regression) = if options.plan.ip_reassembly || options.track_sources {
+            advance_ip_reassembly(
+                &mut ip_dispatch,
+                &stage,
+                &mut scopes,
+                PhysicalFrame {
+                    decoded: &decoded,
+                    number,
+                    timestamp,
+                },
+                &mut ip_sink,
+                &mut provenance,
+                physical_sources.as_ref(),
+            )?
+        } else {
+            (Vec::new(), None)
+        };
         let TransportViews { tcp, udp } = elect_transport_views(&decoded, &derived);
         let mut tcp_view = tcp.as_ref().map(|elected| TcpView {
             decoded: elected.decoded,
@@ -397,7 +444,7 @@ where
         };
 
         // Assign stream IDs before filtering to keep them stable across runs.
-        let segment = match tcp {
+        let segment = match tcp.filter(|_| options.plan.tcp_index || options.tcp_events) {
             Some(elected) => tcp_segment(
                 elected.decoded,
                 elected.transport,
@@ -414,7 +461,7 @@ where
             });
             view.payload = &segment.payload;
         }
-        let udp_flow = match udp {
+        let udp_flow = match udp.filter(|_| options.plan.udp_index) {
             Some(elected) => udp_flow(
                 elected.decoded,
                 elected.transport,

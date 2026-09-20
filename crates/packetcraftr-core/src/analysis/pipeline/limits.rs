@@ -214,9 +214,46 @@ impl Limits {
     }
 }
 
+/// Required optional stages, independent of input accounting. The default
+/// preserves full capture-global indexing and IP reconstruction semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub ip_reassembly: bool,
+    pub tcp_index: bool,
+    pub udp_index: bool,
+}
+
+impl Default for Plan {
+    fn default() -> Self {
+        Self {
+            ip_reassembly: true,
+            tcp_index: true,
+            udp_index: true,
+        }
+    }
+}
+
+impl Plan {
+    /// Only the conversation indexes requested by compiled filters/projections,
+    /// retaining IP reconstruction when needed for canonical stream numbering.
+    /// IDs include reconstructed conversations before selection. Consumers use
+    /// [`super::FrameRecord::physical_context`] to select and project only
+    /// physical evidence; this plan does not push filters upstream.
+    pub fn physical(requirements: crate::filter::Requirements) -> Self {
+        Self {
+            ip_reassembly: requirements.tcp_stream || requirements.udp_stream,
+            tcp_index: requirements.tcp_stream,
+            udp_index: requirements.udp_stream,
+        }
+    }
+}
+
 /// What one analysis run computes beyond dispatching matched frames.
 #[derive(Clone, Debug, Default)]
 pub struct Options<'a> {
+    pub plan: Plan,
+    /// Shared invocation ceiling; a local phase limit may tighten it.
+    pub deadline: Option<std::sync::Arc<crate::budget::Deadline>>,
     /// Track contributing physical records through nested IP reconstruction.
     pub track_sources: bool,
     pub cancellation: Option<crate::budget::Cancellation>,

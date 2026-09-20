@@ -13,6 +13,15 @@ and [beta.3 migration note](docs/migration-beta.3.md) before upgrading.
 > testing, and diagnostics on systems and networks you own or are explicitly
 > authorized to test. Its opt-in flags are technical controls, not permission.
 
+## Start with a task
+
+[Build and verify a fixture](docs/tasks.md#1-build-a-fixture-and-test-one-property),
+[investigate a capture](docs/tasks.md#2-investigate-a-capture-without-losing-evidence),
+or [run an authorized isolated diagnostic](docs/tasks.md#3-run-an-authorized-diagnostic-in-an-isolated-lab).
+For automation, start with the [forwarding contract](docs/verification-contract.md),
+[versioned resource presets](docs/resource-presets.md), and
+[consumer compatibility policy](docs/consumer-compatibility.md).
+
 ## Quick Start
 
 These offline examples work in every feature profile:
@@ -66,7 +75,7 @@ count filtered-out frames too; the same block and interface ceilings bound outpu
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |
-| Offline analysis | `expert`, `follow`, `stats`, `tls`, `fuzz` |
+| Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `verify-forwarding`, `fuzz` |
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
 
@@ -222,7 +231,7 @@ shell completion and `man1` directories of the platform.
 ## Contracts
 
 - Packet JSON/YAML: [`packetcraftr.packet/v2`](schemas/packetcraftr.packet.v2.schema.json)
-- Structured command output: [`packetcraftr.output/v5`](schemas/packetcraftr.output.v5.schema.json)
+- Structured command output: [`packetcraftr.output/v6`](schemas/packetcraftr.output.v6.schema.json)
 - Published packet and output examples: [`examples/documents`](examples/documents)
 
 Aggregate output consumers must ignore unknown fields in result objects and
@@ -485,7 +494,7 @@ attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 ### Structured fixtures, fragmentation, and capture processing
 
 Packet recipes use `packetcraftr.packet/v2`; command JSON/NDJSON uses
-`packetcraftr.output/v5`. Named objects, `hex("00ff")`, and `bytes("text")`
+`packetcraftr.output/v6`. Named objects, `hex("00ff")`, and `bytes("text")`
 can appear inside expressions and nested template axes.
 
 ```sh

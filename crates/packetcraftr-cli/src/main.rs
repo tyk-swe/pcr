@@ -14,6 +14,8 @@ mod commands;
 mod errors;
 mod filtering;
 mod input;
+mod invocation;
+mod presets;
 mod rendering;
 mod resources;
 mod staged_output;

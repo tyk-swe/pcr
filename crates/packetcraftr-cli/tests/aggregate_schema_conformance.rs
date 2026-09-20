@@ -1406,7 +1406,7 @@ fn routes_case() -> Value {
 fn verify_forwarding_case() -> Value {
     use packetcraftr_cli::output::forwarding as forwarding_output;
     use packetcraftr_core::analysis::forwarding;
-    use packetcraftr_core::field::FieldValue;
+    use packetcraftr_core::analysis::{self, pcap};
 
     let registry = builtin::registry();
     let rules = forwarding::Rules::compile(
@@ -1417,34 +1417,41 @@ fn verify_forwarding_case() -> Value {
         4096,
     )
     .expect("fixture rules compile");
-    let observation = |frame: u64, expectations| forwarding::Observation {
-        frame,
-        timestamp: UNIX_EPOCH + Duration::from_secs(frame),
-        interface: Some(0),
-        link_type: LinkType::IPV4,
-        incomplete: None,
-        diagnostics: Vec::new(),
-        key_cells: vec![Some(FieldValue::Bytes(Bytes::from_static(b"payload")))],
-        preserved: vec![Some(FieldValue::Unsigned(64))],
-        expectations,
-        retained_bytes: 0,
+    let wire = built_packet();
+    let frame = Frame::new(
+        UNIX_EPOCH + Duration::from_secs(1),
+        LinkType::IPV4,
+        wire.bytes,
+    )
+    .expect("fixture frame");
+    let collect = |side| {
+        let mut bytes = Vec::new();
+        let mut writer = pcap::Writer::new(&mut bytes, pcap::Format::Pcap, LinkType::IPV4).unwrap();
+        writer.write_frame(&frame).unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+        let mut reader = pcap::Reader::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut collector = forwarding::Collector::new(&rules, side, 1024 * 1024);
+        let summary = analysis::run(
+            &mut reader,
+            registry.clone(),
+            &analysis::Options::default(),
+            |record| {
+                collector
+                    .observe(&record)
+                    .map_err(packetcraftr_core::error::BoundaryError::from_error)
+            },
+        )
+        .unwrap();
+        forwarding::SideInput {
+            frames_read: summary.frames_read,
+            observations: collector.into_observations(),
+        }
     };
     let report = forwarding::verify(
         &rules,
-        forwarding::SideInput {
-            frames_read: 1,
-            observations: vec![observation(1, Vec::new())],
-        },
-        forwarding::SideInput {
-            frames_read: 1,
-            observations: vec![observation(
-                1,
-                vec![forwarding::ExpectationOutcome {
-                    satisfied: true,
-                    actual: Some(FieldValue::Ipv4(Ipv4Addr::new(198, 51, 100, 2))),
-                }],
-            )],
-        },
+        collect(forwarding::Side::Ingress),
+        collect(forwarding::Side::Egress),
         256,
         None,
     )

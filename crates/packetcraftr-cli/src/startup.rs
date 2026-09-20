@@ -11,11 +11,9 @@ mod context;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use clap::{CommandFactory, FromArgMatches};
 use packetcraftr_cli::output;
 
 use self::context::{Context, MachineFormat, from_env};
-use super::cli::Cli;
 use super::errors::{CANCELLED_EXIT_CODE, CliError, exit_code_for};
 use super::rendering::{
     StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
@@ -26,10 +24,7 @@ use crate::commands;
 pub(crate) fn run() -> ExitCode {
     let context = from_env();
     context.color.write_global();
-    let (cli, matches) = match Cli::command()
-        .try_get_matches()
-        .and_then(|matches| Cli::from_arg_matches(&matches).map(|cli| (cli, matches)))
-    {
+    let (cli, matches) = match crate::presets::parse_from(std::env::args_os().collect()) {
         Ok(parsed) => parsed,
         Err(error) => return parse_error_exit(&context, &error),
     };

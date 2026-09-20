@@ -14,3 +14,7 @@ scripts/__pycache__/
 linked-libraries.txt
 fuzz/fuzz-run-metadata.txt
 fuzz/crash-*
+
+# Local Python validation caches
+__pycache__/
+*.py[cod]

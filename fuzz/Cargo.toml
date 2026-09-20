@@ -106,3 +106,33 @@ name = "tls_schedule"
 path = "fuzz_targets/tls_schedule.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "compression_pipeline"
+path = "fuzz_targets/compression_pipeline.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "capture_transform"
+path = "fuzz_targets/capture_transform.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "forwarding_semantics"
+path = "fuzz_targets/forwarding_semantics.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http_segmentation"
+path = "fuzz_targets/http_segmentation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http_pipeline"
+path = "fuzz_targets/http_pipeline.rs"
+test = false
+doc = false

@@ -1,0 +1,155 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Composes a `Client` over explicitly local providers — a fixed route
+//! decision, a resolver that never sends neighbor traffic, and a sender that
+//! records submissions — gated by an explicit `Policy` carrying a destination
+//! allowlist and finite per-operation budgets. Nothing touches the network.
+//!
+//! Production composition swaps in the `SystemProvider`/`SystemResolver`/
+//! `SystemLayer*`/`PacketIo` adapters behind the `native-*` features; the
+//! policy and budget contract is identical either way.
+//!
+//! Run with scripts/check-external-consumer.py from a checkout.
+
+use std::convert::Infallible;
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{Arc, Mutex};
+
+use packetcraftr::Client;
+use packetcraftr::policy::{DestinationConstraint, Policy};
+use packetcraftr::send;
+use packetcraftr_core::expression;
+use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::protocol::builtin;
+use packetcraftr_netio::interface::Id as InterfaceId;
+use packetcraftr_netio::link::{Capability, MacAddress};
+use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
+use packetcraftr_netio::transmit;
+use packetcraftr_netio::{Error as LiveIoError, neighbor};
+
+/// The documentation source this composition's route selects.
+const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
+
+/// A route provider that puts every destination on-link over one dual
+/// capability Ethernet interface — the shape a host route lookup returns.
+struct DocumentationRoutes;
+
+impl Provider for DocumentationRoutes {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
+    ) -> Result<Decision, Self::Error> {
+        Ok(Decision {
+            interface: InterfaceId {
+                name: "example0".to_owned(),
+                index: 1,
+            },
+            source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
+            selected_source: Some(IpAddr::V4(SELECTED_SOURCE)),
+            preferred_source: None,
+            next_hop: Some(destination),
+            selection_reason: SelectionReason::OnLink,
+            destination_scope: Scope::Global,
+            mtu: 1_500,
+            capability: Capability::Layer2AndLayer3,
+            link_type: LinkType::ETHERNET,
+        })
+    }
+}
+
+/// Neighbor discovery must never run in this example: the sender observes
+/// Layer 3 frames only, so resolution would prove the wiring wrong.
+struct NeverNeighbors;
+
+impl neighbor::Resolver for NeverNeighbors {
+    fn resolve(
+        &self,
+        _request: &neighbor::Request,
+    ) -> Result<neighbor::Resolution, neighbor::Error> {
+        unreachable!("Layer 3 sends never resolve neighbors")
+    }
+}
+
+/// A sender that retains each submitted wire so the example can report what
+/// transmission would have emitted.
+#[derive(Clone, Default)]
+struct RecordingSender {
+    sent: Arc<Mutex<Vec<Vec<u8>>>>,
+}
+
+impl transmit::Sender for RecordingSender {
+    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+        self.sent
+            .lock()
+            .expect("sent lock")
+            .push(frame.bytes().to_vec());
+        Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+fn packet(destination: Ipv4Addr) -> Result<packetcraftr_core::packet::Packet, expression::Error> {
+    expression::parse(
+        &format!(
+            "ipv4(src={SELECTED_SOURCE},dst={destination})/udp(sport=12345,dport=9)/raw(text=ping)"
+        ),
+        &builtin::registry(),
+        expression::Options::default(),
+    )
+}
+
+#[test]
+fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
+    // Explicit authorization: only the TEST-NET-1 documentation prefix is
+    // permitted, and one operation may spend at most 8 packets / 16 KiB of
+    // wire — the client enforces both before any provider sees a frame.
+    let policy = Policy {
+        allowed_destinations: vec![DestinationConstraint::Network(
+            packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,
+        )],
+        max_packets_per_operation: 8,
+        max_bytes_per_operation: 16 * 1024,
+        ..Policy::default()
+    };
+
+    let recorded = Arc::new(Mutex::new(Vec::new()));
+    let sender = RecordingSender {
+        sent: Arc::clone(&recorded),
+    };
+    let client = Client::new(
+        builtin::registry(),
+        DocumentationRoutes,
+        NeverNeighbors,
+        sender,
+        policy,
+    );
+
+    // Layer 3 planning skips link materialization entirely, so the composed
+    // client is fully exercised without capture or neighbor providers.
+    let options = send::Options {
+        plan: packetcraftr_netio::route::Options {
+            link_mode: packetcraftr_netio::link::Mode::Layer3,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
+    let report = client.send(allowed, options.clone())?;
+    println!(
+        "sent {} bytes to an allowed destination",
+        report.sent.bytes_sent()
+    );
+
+    let outside = packet(Ipv4Addr::new(198, 51, 100, 1))?;
+    match client.send(outside, options) {
+        Err(error) => println!("denied outside the allowlist: {error}"),
+        Ok(_) => unreachable!("the allowlist must reject other destinations"),
+    }
+    assert_eq!(recorded.lock().expect("sent lock").len(), 1);
+    Ok(())
+}

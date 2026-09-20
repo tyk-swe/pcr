@@ -264,6 +264,23 @@ and apply matching edits in order. `pcap::map_frames` normalizes mapped frames i
 one PCAPNG section and checks capture identity, metadata, and declared growth.
 `export` instead uses a stable snapshot and preserves selected source records.
 
+Fixed-width field assignments extend the same `rewrite` workflow through
+`transform::FieldEdits` (`FieldAssignment`, `ChecksumMode`, `FieldEditOutcome`,
+`FieldChange`). `--set <protocol>[#occurrence].<field>=<value>` and
+`packetcraftr.rewrite/v2` documents (`assign` entries as `"field=value"` strings
+or `{"field","value"}` objects) write `ipv4.ttl`, `ipv6.hop_limit`,
+`tcp.sequence`, `tcp.acknowledgment`, TCP/UDP ports, and `dns.id` in place over
+original bytes; compressed names, opaque payload, and unrelated checksums are
+retained. `--checksum-mode repair` (default) recomputes only covering IPv4
+header and TCP/UDP pseudo-header checksums, refusing fragmented,
+AH/ESP-protected, quoted, or uncomputable coverage; `preserve` keeps checksum
+bytes exactly. `--dry-run` reports per-frame `changes` (field, `range`,
+`old`/`new`, `origin`) bounded at `MAX_REPORTED_CHANGES` with a
+`changes_omitted` count, and never creates the destination. `--set` conflicts
+with `--rules-file`; when combined with header flags the header rewrite applies
+first. Rules evaluate the original frame and apply in order, atomically per
+frame.
+
 DHCP codecs live at `protocol::application::dhcp` and bind standard UDP ports.
 `Dhcpv4`, `Dhcpv6`, `Option4`, and `Option6` construct fixtures with named option
 values. `Limits` bounds complete message bytes, aggregate option nodes, and nesting.

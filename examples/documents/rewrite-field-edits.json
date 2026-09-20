@@ -1,0 +1,18 @@
+{
+  "schema": "packetcraftr.rewrite/v2",
+  "rules": [
+    {
+      "filter": "ipv4.ttl == 64",
+      "assign": [
+        "ipv4.ttl=63",
+        {"field": "udp.destination_port", "value": 5353}
+      ]
+    },
+    {
+      "filter": "udp.source_port == 53",
+      "assign": [
+        {"field": "dns#1.id", "value": 48879}
+      ]
+    }
+  ]
+}

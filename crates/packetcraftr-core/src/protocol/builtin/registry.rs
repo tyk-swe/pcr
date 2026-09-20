@@ -51,6 +51,9 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 matcher::EchoMatcher::v6(),
             )?;
         };
+        ($variant:ident, dns) => {
+            builder.register_matcher(BuiltinProtocol::$variant.as_str(), matcher::DnsMatcher)?;
+        };
     }
 
     macro_rules! register_protocols {

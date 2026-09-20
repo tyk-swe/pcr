@@ -53,6 +53,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   finite repeated passes under shared budgets over a validated capture snapshot.
 - Rolling raw-packet scan windows share ready capture sources, pacing, deadlines,
   and evidence bounds; per-port UDP profiles add DNS and masked-byte validation.
+- Generic exchange correlation attributes structured DNS-over-UDP replies by
+  application identity: the registered `dns` matcher verifies the reversed
+  UDP flow, response direction, transaction identifier, opcode, and the
+  complete ordered question section (ASCII case-insensitive wire names), so
+  concurrent requests sharing one tuple stay distinct while wrong-ID,
+  wrong-question, malformed, or undecodable replies can no longer succeed
+  through the weaker UDP tuple match. Identical outstanding requests stay
+  ambiguous, and non-DNS UDP plus quoted-ICMP error evidence are unchanged.
 - Multi-interface capture shares queue/operation budgets, readiness, and cleanup,
   with per-source evidence and bounded PCAPNG size/time rotation and stop/ring retention.
 - Native capture settings: `capture` accepts `--capture-buffer-bytes`,
@@ -67,6 +75,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   fields, relay messages, DUIDs, address associations, and retained unknown wire.
 - Bounded capture header rewriting and ordered JSON rules with checksum repair,
   VLAN replacement, preserved interface identity, and atomic compressed output.
+- `rewrite` field assignments patch fixed-width decoded fields in place over
+  original capture bytes through `--set <protocol>[#occurrence].<field>=<value>`
+  or `packetcraftr.rewrite/v2` rule documents (`assign`). Supported fields are
+  `ipv4.ttl`, `ipv6.hop_limit`, `tcp.sequence`, `tcp.acknowledgment`, TCP/UDP
+  ports, and `dns.id`. `--checksum-mode repair|preserve` selects recomputed or
+  retained covering checksums, and `--dry-run` emits a bounded requested/derived
+  change report without publishing the destination.
 - Dependency-preserving `export` selects complete streams and reconstructed or
   incomplete IP groups, then atomically copies their original capture records.
 - Cleartext HTTP/1 headers and sourced TCP message inspection through `http`,
@@ -357,6 +372,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   when opening the Npcap transmit handle.
 - Timestamp-type discovery safely handles empty lists from libpcap and Npcap
   when only the default timestamp type is supported.
+- Rewrite v2 rule loading rejects unknown assignment properties instead of
+  silently ignoring them, matching the published schema.
+- Repair inner checksums before enclosing transport checksums when editing
+  tunneled packet fields, preserving valid outer UDP checksums in VXLAN.
+- DNS matching preserves sequence-aware TCP correlation, and UDP probes validate
+  inner tunnel endpoints and transport identity before reporting an open port.
+
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the
   unique bytes of a gap fill that overlaps pending data at its middle or

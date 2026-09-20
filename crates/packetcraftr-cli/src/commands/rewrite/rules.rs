@@ -4,22 +4,77 @@ use crate::errors::CliError;
 use packetcraftr_core::{
     analysis::pcap,
     error::Kind,
-    transform::{HeaderRewrite, VlanRewrite},
+    registry::Registry,
+    transform::{ChecksumMode, FieldAssignment, FieldEdits, HeaderRewrite, VlanRewrite},
 };
 use std::{io::Read, path::Path};
+
+/// How field edits treat the checksums covering changed bytes.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum ChecksumArg {
+    /// Recompute every supported checksum covering a changed field.
+    Repair,
+    /// Retain checksum bytes exactly, for deliberately malformed fixtures.
+    Preserve,
+}
+
+impl From<ChecksumArg> for ChecksumMode {
+    fn from(mode: ChecksumArg) -> Self {
+        match mode {
+            ChecksumArg::Repair => Self::Repair,
+            ChecksumArg::Preserve => Self::Preserve,
+        }
+    }
+}
+
+/// One ordered rewrite rule: header edits, field assignments, or both.
+#[derive(Debug)]
+pub(super) struct Rule {
+    pub(super) filter: Option<String>,
+    pub(super) patch: HeaderRewrite,
+    pub(super) edits: Option<FieldEdits>,
+}
+
+impl Rule {
+    pub(super) fn has_edits(&self) -> bool {
+        self.edits.is_some()
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
     schema: String,
-    rules: Vec<Rule>,
+    rules: Vec<PatchRule>,
 }
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Rule {
-    pub(super) filter: Option<String>,
-    pub(super) patch: HeaderRewrite,
+struct PatchRule {
+    filter: Option<String>,
+    patch: HeaderRewrite,
 }
-pub(super) fn load(path: &Path) -> Result<Vec<Rule>, CliError> {
+
+/// `packetcraftr.rewrite/v2` rules assign canonical field paths in place.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssignDocument {
+    schema: String,
+    rules: Vec<AssignRule>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssignRule {
+    filter: Option<String>,
+    assign: Vec<FieldAssignment>,
+}
+
+pub(super) fn load(
+    path: &Path,
+    registry: &Registry,
+    checksum_mode: ChecksumMode,
+) -> Result<Vec<Rule>, CliError> {
     let mut bytes = Vec::new();
     let file = std::fs::File::open(path)
         .map_err(pcap::Error::from)
@@ -36,6 +91,13 @@ pub(super) fn load(path: &Path) -> Result<Vec<Rule>, CliError> {
             },
         ));
     }
+    let schema: String = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value.get("schema")?.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    if schema == "packetcraftr.rewrite/v2" {
+        return load_assignments(&bytes, registry, checksum_mode);
+    }
     let document: Document = serde_json::from_slice(&bytes)
         .map_err(|source| CliError::new(Kind::Cli, format!("invalid rewrite rules: {source}")))?;
     if document.schema != "packetcraftr.rewrite/v1"
@@ -44,10 +106,11 @@ pub(super) fn load(path: &Path) -> Result<Vec<Rule>, CliError> {
     {
         return Err(CliError::new(
             Kind::Cli,
-            "rewrite rules require schema packetcraftr.rewrite/v1 and 1..=64 rules",
+            "rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules",
         ));
     }
-    for rule in &document.rules {
+    let mut rules = Vec::with_capacity(document.rules.len());
+    for rule in document.rules {
         rule.patch.validate().map_err(CliError::classified)?;
         if rule.patch.is_empty() {
             return Err(CliError::new(
@@ -55,9 +118,57 @@ pub(super) fn load(path: &Path) -> Result<Vec<Rule>, CliError> {
                 "rewrite rules cannot contain empty patches",
             ));
         }
+        rules.push(Rule {
+            filter: rule.filter,
+            patch: rule.patch,
+            edits: None,
+        });
     }
-    Ok(document.rules)
+    Ok(rules)
 }
+
+fn load_assignments(
+    bytes: &[u8],
+    registry: &Registry,
+    checksum_mode: ChecksumMode,
+) -> Result<Vec<Rule>, CliError> {
+    let document: AssignDocument = serde_json::from_slice(bytes)
+        .map_err(|source| CliError::new(Kind::Cli, format!("invalid rewrite rules: {source}")))?;
+    if document.schema != "packetcraftr.rewrite/v2"
+        || document.rules.is_empty()
+        || document.rules.len() > 64
+    {
+        return Err(CliError::new(
+            Kind::Cli,
+            "rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules",
+        ));
+    }
+    let mut rules = Vec::with_capacity(document.rules.len());
+    for rule in document.rules {
+        if rule.assign.is_empty() {
+            return Err(CliError::new(
+                Kind::Cli,
+                "rewrite rules cannot contain empty assignments",
+            ));
+        }
+        let edits = FieldEdits::compile(&rule.assign, checksum_mode, registry)
+            .map_err(|error| CliError::caused(Kind::Cli, &error))?;
+        rules.push(Rule {
+            filter: rule.filter,
+            patch: HeaderRewrite::default(),
+            edits: Some(edits),
+        });
+    }
+    Ok(rules)
+}
+
+/// Parses one `--set <field>=<value>` assignment.
+pub(super) fn assignment(value: &str) -> Result<FieldAssignment, CliError> {
+    value
+        .parse()
+        .map_err(|error| CliError::caused(Kind::Cli, &error))
+}
+
 pub(super) fn mac(value: &str) -> Result<[u8; 6], CliError> {
     let parts: Vec<_> = value.split(':').collect();
     if parts.len() != 6 || parts.iter().any(|part| part.len() != 2) {

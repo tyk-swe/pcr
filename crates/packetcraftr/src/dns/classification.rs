@@ -8,8 +8,8 @@ use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::{BuiltinProtocol, transport_tuple_reversed};
 use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, packet::Packet, registry::Registry,
 };
@@ -102,7 +102,7 @@ pub fn classify_response(
             reason: observation.reason.to_owned(),
         });
     }
-    if direct_udp_match(registry, sent, &response.packet) {
+    if direct_udp_match(sent, &response.packet) {
         if response
             .diagnostics
             .iter()
@@ -143,15 +143,11 @@ pub fn classify_response(
     None
 }
 
-fn direct_udp_match(registry: &Registry, request: &Packet, response: &Packet) -> bool {
-    response
-        .iter()
-        .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
-        && request
-            .iter()
-            .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))
-            .and_then(|udp| registry.matcher(udp.protocol_id().as_str()))
-            .is_some_and(|matcher| matcher.matches(request, response).is_some())
+/// The sent packet carries a typed DNS layer, which owns registry-level
+/// matching for the pair; this workflow correlates replies at the UDP tuple
+/// and leaves every application check to [`decode_response`].
+fn direct_udp_match(request: &Packet, response: &Packet) -> bool {
+    transport_tuple_reversed(request, response, BuiltinProtocol::Udp).is_some()
 }
 
 pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {

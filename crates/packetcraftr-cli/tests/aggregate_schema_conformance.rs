@@ -1816,6 +1816,20 @@ fn rewrite_case() -> Value {
             path: "rewritten.pcapng".to_owned(),
             rule_matches: vec![0],
             capture: Default::default(),
+            dry_run: true,
+            changes: vec![packetcraftr_cli::output::rewrite::Change {
+                frame: 1,
+                rule: 0,
+                change: packetcraftr_core::transform::FieldChange {
+                    field: "ipv4#1.ttl".to_owned(),
+                    layer: 0,
+                    range: packetcraftr_core::layout::ByteRange::new(8, 9),
+                    old: 64,
+                    new: 63,
+                    origin: packetcraftr_core::transform::ChangeOrigin::Requested,
+                },
+            }],
+            changes_omitted: 0,
         },
         Vec::new(),
     )

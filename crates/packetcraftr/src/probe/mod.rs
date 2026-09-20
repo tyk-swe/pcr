@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
+    transport_tuple_reversed,
 };
 use packetcraftr_core::{
     budget::{Cancelled, Deadline, Interrupted},
@@ -192,18 +193,30 @@ pub(crate) fn observe(
     {
         return Some(observation);
     }
-    let direct_match = request
-        .iter()
-        .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
-        .filter_map(|matcher| {
-            let matched = matcher.matches(request, &response.packet)?;
-            Some((matcher, matched))
-        })
-        .max_by_key(|(_, matched)| matched.confidence);
-    if let Some((matcher, _)) = direct_match {
-        let responder = matcher
-            .responder(request, &response.packet)
-            .unwrap_or(responder);
+    // UDP probes leave DNS identity to the workflow, but still require the
+    // entire tunnel stack to reverse. Other deepest protocols retain their
+    // registry matcher, including TCP sequence and ICMP echo identity checks.
+    let udp_responder = (transport == Transport::Udp)
+        .then(|| transport_tuple_reversed(request, &response.packet, BuiltinProtocol::Udp))
+        .flatten();
+    let (direct_reply, direct_responder) = if let Some(responder) = udp_responder {
+        (true, Some(responder))
+    } else {
+        match request
+            .iter()
+            .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
+            .filter_map(|matcher| {
+                let matched = matcher.matches(request, &response.packet)?;
+                Some((matcher, matched))
+            })
+            .max_by_key(|(_, matched)| matched.confidence)
+        {
+            Some((matcher, _)) => (true, matcher.responder(request, &response.packet)),
+            None => (false, None),
+        }
+    };
+    if direct_reply {
+        let responder = direct_responder.unwrap_or(responder);
         let observation = match transport {
             Transport::Tcp => {
                 let tcp = response

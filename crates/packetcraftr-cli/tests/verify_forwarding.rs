@@ -492,3 +492,65 @@ fn an_unsupported_output_format_is_rejected() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cli.output_format"), "{stderr}");
 }
+
+#[test]
+fn fragment_completion_cannot_supply_physical_udp_evidence() {
+    let whole = decode_hex(UDP_CLIENT);
+    let mut fragments = Vec::new();
+    for (payload, flags) in [(&whole[20..28], 0x2000_u16), (&whole[28..], 1)] {
+        let mut bytes = whole[..20].to_vec();
+        bytes.extend_from_slice(payload);
+        let length = bytes.len() as u16;
+        bytes[2..4].copy_from_slice(&length.to_be_bytes());
+        bytes[6..8].copy_from_slice(&flags.to_be_bytes());
+        bytes[10..12].fill(0);
+        let mut sum: u32 = bytes[..20]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u32::from(u16::from_be_bytes([pair[0], pair[1]])))
+            .sum();
+        while sum >> 16 != 0 {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        bytes[10..12].copy_from_slice(&(!(sum as u16)).to_be_bytes());
+        fragments.push(bytes);
+    }
+    let ingress = write_capture(&[UDP_CLIENT]);
+    let egress = write_capture_bytes(&fragments);
+    let output = run(&[
+        "--output",
+        "json",
+        "verify-forwarding",
+        path_text(ingress.path()),
+        path_text(egress.path()),
+        "--identity",
+        "udp.source_port",
+        "--ingress-filter",
+        "udp",
+        "--egress-filter",
+        "udp",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let document = parse_json(&output);
+    assert_eq!(document["result"]["verdict"], "inconclusive");
+    assert_eq!(document["result"]["summary"]["unique_matches"], 0);
+    assert_eq!(document["result"]["captures"]["egress"]["selected"], 0);
+}
+
+#[test]
+fn compound_expectations_are_rejected_before_reading_input() {
+    let output = run(&[
+        "verify-forwarding",
+        "does-not-exist.pcap",
+        "also-absent.pcap",
+        "--identity",
+        "raw.bytes",
+        "--expect",
+        "ipv4.ttl=63 or udp",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("single literal"), "{stderr}");
+    assert!(!stderr.contains("does-not-exist"), "{stderr}");
+}

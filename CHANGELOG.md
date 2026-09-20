@@ -354,6 +354,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Forwarding verification uses physical-frame evidence, keeps exhausted identities
+  unkeyable, shares the field budget across all observation cells, counts reordered
+  pairs independently of detail limits, and rejects nonliteral expectation values.
+
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the
   unique bytes of a gap fill that overlaps pending data at its middle or

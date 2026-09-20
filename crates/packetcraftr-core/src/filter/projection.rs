@@ -114,21 +114,31 @@ impl Projection {
         context: &Context<'_>,
         max_bytes: usize,
     ) -> Result<Vec<Option<FieldValue>>, ProjectionError> {
+        let mut remaining = max_bytes;
+        self.values_with_budget(context, &mut remaining)
+    }
+
+    /// Projects cells while charging a budget shared with other projections.
+    pub(crate) fn values_with_budget(
+        &self,
+        context: &Context<'_>,
+        remaining: &mut usize,
+    ) -> Result<Vec<Option<FieldValue>>, ProjectionError> {
+        let max_bytes = *remaining;
         let limit = || ProjectionError::Limit {
             field: "cell_bytes",
             limit: max_bytes,
         };
-        let mut remaining = max_bytes;
         let mut row = Vec::new();
         for field in &self.fields {
             let mut values = Vec::new();
             let mut exceeded = false;
             eval::each_value(context, field, |value| {
-                let Some(bytes) = measure(&value, remaining, 0) else {
+                let Some(bytes) = measure(&value, *remaining, 0) else {
                     exceeded = true;
                     return true;
                 };
-                remaining -= bytes;
+                *remaining -= bytes;
                 values.push(value.into_owned());
                 false
             });
@@ -137,12 +147,12 @@ impl Projection {
             }
             row.push(match values.len() {
                 0 => {
-                    remaining = remaining.checked_sub(4).ok_or_else(limit)?;
+                    *remaining = remaining.checked_sub(4).ok_or_else(limit)?;
                     None
                 }
                 1 => values.pop(),
                 _ => {
-                    remaining = remaining.checked_sub(values.len() + 1).ok_or_else(limit)?;
+                    *remaining = remaining.checked_sub(values.len() + 1).ok_or_else(limit)?;
                     Some(FieldValue::List(values))
                 }
             });

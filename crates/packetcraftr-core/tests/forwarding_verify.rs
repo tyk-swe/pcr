@@ -774,3 +774,131 @@ fn malformed_expectations_are_rejected_before_input() {
         assert_eq!(error.classification().kind, Kind::Cli, "{rule}");
     }
 }
+
+#[test]
+fn exhausted_identity_cannot_fabricate_a_match() {
+    let rules =
+        forwarding::Rules::compile(&["raw.bytes".into()], &[], &[], &builtin::registry(), 1)
+            .unwrap();
+    let report = compare(
+        &rules,
+        &[frame(
+            1,
+            common::CLIENT,
+            common::SERVER,
+            (40_000, 9_000),
+            b"one",
+        )],
+        &[frame(
+            1,
+            common::CLIENT,
+            common::SERVER,
+            (40_000, 9_000),
+            b"two",
+        )],
+    );
+    assert_eq!(report.summary.unique_matches, 0);
+    assert_eq!(report.sides.ingress.unkeyed, 1);
+    assert_eq!(report.sides.egress.unkeyed, 1);
+    assert_eq!(report.unkeyed.ingress[0].key, vec![None]);
+    assert_eq!(report.verdict, Verdict::Inconclusive);
+}
+
+#[test]
+fn all_observation_projections_share_one_budget() {
+    let frames = [frame(
+        1,
+        common::CLIENT,
+        common::SERVER,
+        (40_000, 9_000),
+        b"one",
+    )];
+    for (preserve, expect, required) in [
+        (vec!["ipv4.ttl".into()], vec![], 3),
+        (vec![], vec!["ipv4.ttl=64".into(), "ipv4.ttl=64".into()], 5),
+        (vec!["ipv4.ttl".into()], vec!["ipv4.ttl=64".into()], 5),
+    ] {
+        for budget in [required - 1, required] {
+            let rules = forwarding::Rules::compile(
+                &["ipv4.identification".into()],
+                &preserve,
+                &expect,
+                &builtin::registry(),
+                budget,
+            )
+            .unwrap();
+            let report = compare(&rules, &frames, &frames);
+            if budget < required {
+                assert_eq!(report.verdict, Verdict::Inconclusive);
+                assert_eq!(report.sides.egress.incomplete, 1);
+                assert_eq!(report.summary.checks_evaluated, 0);
+                assert_eq!(
+                    report.matches[0].egress.incomplete,
+                    Some(Incomplete::FieldBudget)
+                );
+            } else {
+                assert_eq!(report.verdict, Verdict::Pass);
+            }
+        }
+    }
+}
+
+#[test]
+fn reordering_counts_and_flags_survive_detail_limits() {
+    let a = frame(1, common::CLIENT, common::SERVER, (40_000, 9_000), b"a");
+    let b = frame(2, common::CLIENT, common::SERVER, (40_000, 9_000), b"b");
+    let rules = rules(&["raw.bytes"], &[], &[]);
+    // The lexically first identity is second in ingress, so its retained flag
+    // depends on an earlier pair omitted by a one-detail limit.
+    for limit in [0, 1, 2] {
+        let report = forwarding::verify(
+            &rules,
+            collect(&rules, Side::Ingress, &[b.clone(), a.clone()], None),
+            collect(&rules, Side::Egress, &[a.clone(), b.clone()], None),
+            limit,
+            None,
+        )
+        .unwrap();
+        assert_eq!(report.summary.reordered_pairs, 1);
+        assert_eq!(report.summary.unique_matches, 2);
+        assert_eq!(report.omitted.matches, (2 - limit) as u64);
+        for pair in report.matches {
+            assert_eq!(pair.reordered, pair.ingress.frame == 2);
+        }
+    }
+}
+
+#[test]
+fn expectations_accept_only_one_literal() {
+    for value in ["63 or udp", "63 || udp", "64 and udp", "(64)", "64 == 64"] {
+        assert!(
+            forwarding::Rules::compile(
+                &["raw.bytes".into()],
+                &[],
+                &[format!("ipv4.ttl={value}")],
+                &builtin::registry(),
+                FIELD_BUDGET,
+            )
+            .is_err(),
+            "accepted {value}"
+        );
+    }
+    // Operator text inside a quoted literal remains literal data.
+    rules(&["raw.bytes"], &[], &[r#"raw.bytes="63 or udp""#]);
+}
+
+#[test]
+fn forwarding_observations_ignore_reconstructed_children() {
+    let fragments = common::ip_fragments::ipv4_fragments(&common::registry());
+    let rules = rules(
+        &["udp.source_port"],
+        &["udp.destination_port"],
+        &["udp.destination_port=9999"],
+    );
+    let side = collect(&rules, Side::Egress, &fragments, None);
+    let completion = &side.observations[1];
+    assert!(completion.key().is_none());
+    assert_eq!(completion.preserved, vec![None]);
+    assert_eq!(completion.expectations[0].actual, None);
+    assert!(!completion.expectations[0].satisfied);
+}

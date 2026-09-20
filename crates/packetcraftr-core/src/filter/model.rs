@@ -28,6 +28,29 @@ impl Filter {
         })
     }
 
+    /// Compiles a single field equality for declarations that accept one literal.
+    pub(crate) fn compile_equality(
+        field: &str,
+        value: &str,
+        registry: &Registry,
+    ) -> Result<Self, Error> {
+        let filter = Self::compile(&format!("{field} == {value}"), registry, Options::default())?;
+        let tokens = super::lexer::tokenize(value)?;
+        if !matches!(
+            tokens.as_slice(),
+            [super::lexer::Spanned {
+                token: super::lexer::Token::Word(_) | super::lexer::Token::Text(_),
+                ..
+            }]
+        ) {
+            return Err(Error::Syntax {
+                offset: field.len() + 4,
+                message: "expected a single literal".to_owned(),
+            });
+        }
+        Ok(filter)
+    }
+
     /// What this filter needs from its caller beyond the dissected packet.
     ///
     /// Callers can inspect this before evaluation to prepare exactly the TCP

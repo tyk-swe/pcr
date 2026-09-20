@@ -116,14 +116,18 @@ fn collect(
     max_evidence_bytes: usize,
 ) -> Result<forwarding::SideInput, CliError> {
     let mut reader = open_capture(path, bounds)?;
-    // The comparison performs no stream reassembly; conversation indices
-    // still resolve so `tcp.stream`/`udp.stream` selection filters work.
-    let options = analysis::Options {
-        filter,
-        ..prepared.options(false)
-    };
+    // Select physical packets in the callback: pipeline filters also see
+    // reconstructed datagrams, whose provenance this report cannot represent.
+    let options = prepared.options(false);
     let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
+        if let Some(filter) = filter
+            && !filter
+                .matches(&record.physical_context())
+                .map_err(|error| CliError::classified(error).into_boundary_error())?
+        {
+            return Ok(());
+        }
         collector
             .observe(&record)
             .map_err(|error| CliError::classified(error).into_boundary_error())

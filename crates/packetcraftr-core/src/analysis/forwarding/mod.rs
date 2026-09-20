@@ -221,27 +221,26 @@ impl Rules {
         let frame = &record.decoded.frame;
         let mut incomplete =
             (frame.captured_length() < frame.original_length()).then_some(Incomplete::Truncated);
-        let key_cells = self.project(&self.identity, record, &mut incomplete)?;
+        let mut remaining = self.max_field_bytes;
+        let key_cells = self.project(&self.identity, record, &mut incomplete, &mut remaining)?;
         let preserved = match &self.preserve {
-            Some(preserve) => self.project(preserve, record, &mut incomplete)?,
+            Some(preserve) => self.project(preserve, record, &mut incomplete, &mut remaining)?,
             None => Vec::new(),
         };
         let mut expectations = Vec::with_capacity(self.expectations.len());
         if side == Side::Egress {
             for expectation in &self.expectations {
-                let satisfied = record
-                    .matches(&expectation.predicate)
+                let satisfied = expectation
+                    .predicate
+                    .matches(&record.physical_context())
                     .map_err(Error::Filter)?;
                 // The actual value rides along so a violated rule always
                 // carries the offending value.
-                let actual = match record.project(&expectation.actual, self.max_field_bytes) {
-                    Ok(cells) => cells.into_iter().next().flatten(),
-                    Err(ProjectionError::Limit { .. }) => {
-                        incomplete = Some(Incomplete::FieldBudget);
-                        None
-                    }
-                    Err(source) => return Err(Error::Projection(source)),
-                };
+                let actual = self
+                    .project(&expectation.actual, record, &mut incomplete, &mut remaining)?
+                    .into_iter()
+                    .next()
+                    .flatten();
                 expectations.push(ExpectationOutcome { satisfied, actual });
             }
         }
@@ -275,12 +274,14 @@ impl Rules {
         projection: &Projection,
         record: &crate::analysis::FrameRecord<'_>,
         incomplete: &mut Option<Incomplete>,
+        remaining: &mut usize,
     ) -> Result<Vec<Option<FieldValue>>, Error> {
-        match record.project(projection, self.max_field_bytes) {
+        match projection.values_with_budget(&record.physical_context(), remaining) {
             Ok(cells) => Ok(cells),
             Err(ProjectionError::Limit { .. }) => {
                 *incomplete = Some(Incomplete::FieldBudget);
-                Ok(Vec::new())
+                *remaining = 0;
+                Ok(vec![None; projection.columns().len()])
             }
             Err(source) => Err(Error::Projection(source)),
         }
@@ -360,20 +361,17 @@ impl Expectation {
                 reason: "expected FIELD=VALUE with non-empty sides",
             });
         }
-        let predicate = Filter::compile(
-            &format!("{field} == {value}"),
-            registry,
-            crate::filter::Options::default(),
-        )
-        .map_err(|source| Error::Expectation {
-            rule: rule.to_owned(),
-            source,
-        })?;
         let actual =
             Projection::compile([field], registry).map_err(|source| Error::ExpectationField {
                 rule: rule.to_owned(),
                 source,
             })?;
+        let predicate = Filter::compile_equality(field, value, registry).map_err(|source| {
+            Error::Expectation {
+                rule: rule.to_owned(),
+                source,
+            }
+        })?;
         Ok(Self {
             field: field.to_owned(),
             declared: value.to_owned(),

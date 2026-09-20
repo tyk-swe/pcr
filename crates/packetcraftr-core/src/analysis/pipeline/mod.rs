@@ -138,6 +138,23 @@ impl FrameRecord<'_> {
             .and_then(|datagram| datagram.sources.as_ref())
     }
 
+    /// Filter context containing only this physical frame's packet and indexes.
+    pub fn physical_context(&self) -> crate::filter::Context<'_> {
+        crate::filter::Context {
+            decoded: self.decoded,
+            derived: &[],
+            number: self.number,
+            tcp_stream: self
+                .tcp
+                .filter(|view| std::ptr::eq(view.decoded, self.decoded))
+                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
+            udp_stream: self
+                .udp
+                .filter(|view| std::ptr::eq(view.decoded, self.decoded))
+                .and_then(|view| view.conversation.map(|conversation| conversation.index)),
+        }
+    }
+
     /// Projects physical and newly reconstructed fields using scoped stream indexes.
     pub fn project(
         &self,

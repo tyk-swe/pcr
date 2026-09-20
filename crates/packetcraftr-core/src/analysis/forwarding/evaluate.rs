@@ -338,6 +338,31 @@ pub fn verify(
     let egress_rank = ranks(&egress);
 
     let mut summary = Summary::default();
+    // Compute order over every unique pair, before retaining bounded details.
+    let mut pair_orders = vec![None; ingress.len()];
+    for (key, members) in &ingress_index {
+        cancelled(cancellation)?;
+        if let [member] = members.as_slice()
+            && let Some(egress_members) = egress_index.get(key)
+            && let [egress_member] = egress_members.as_slice()
+        {
+            pair_orders[*member] = Some(egress_rank[*egress_member]);
+        }
+    }
+    let mut max_egress_order = 0;
+    let reordered: Vec<bool> = pair_orders
+        .into_iter()
+        .map(|order| {
+            let Some(order) = order else {
+                return false;
+            };
+            let reordered = order < max_egress_order;
+            max_egress_order = max_egress_order.max(order);
+            summary.reordered_pairs += u64::from(reordered);
+            reordered
+        })
+        .collect();
+
     let mut omitted = Omissions::default();
     let mut matches: Vec<Match> = Vec::new();
     let mut violations: Vec<Violation> = Vec::new();
@@ -353,7 +378,7 @@ pub fn verify(
             (0, 0) => unreachable!("identity keys always index at least one member"),
             (1, 1) => {
                 summary.unique_matches += 1;
-                let pair = evaluate_pair(
+                let mut pair = evaluate_pair(
                     rules,
                     &ingress[ingress_members[0]],
                     &egress[egress_members[0]],
@@ -366,6 +391,7 @@ pub fn verify(
                         max_details,
                     },
                 );
+                pair.reordered = reordered[ingress_members[0]];
                 push_bounded(&mut matches, &mut omitted.matches, max_details, pair);
             }
             (ingress_count, 0) => {
@@ -460,18 +486,8 @@ pub fn verify(
         }
     }
 
-    // Order evidence: a pair is reordered when an earlier-ingress pair matched
-    // a later-egress observation — the only sequence claim identity plus
-    // capture order can support. Matches publish in ingress order.
+    // Matches publish in ingress order, independent of the detail ceiling.
     matches.sort_by_key(|pair| pair.ingress_order);
-    let mut max_egress_order = 0_u64;
-    for pair in &mut matches {
-        if pair.egress_order < max_egress_order {
-            pair.reordered = true;
-            summary.reordered_pairs += 1;
-        }
-        max_egress_order = max_egress_order.max(pair.egress_order);
-    }
 
     let mut unkeyed = Sided::<Vec<UnkeyedObservation>>::default();
     for (observations, list, omitted_count) in [

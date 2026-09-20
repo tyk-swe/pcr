@@ -53,6 +53,7 @@ mod send;
 mod stats;
 mod tls;
 mod traceroute;
+mod verify_forwarding;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
@@ -131,6 +132,9 @@ pub(crate) enum Command {
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
     Routes(routes::Args),
+    /// Compare ingress and egress captures under explicit identity rules.
+    #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
+    VerifyForwarding(verify_forwarding::arguments::Args),
     /// Generate shell completions and man pages under a directory.
     Documentation(documentation::Args),
 }
@@ -165,6 +169,7 @@ impl Command {
             Self::Rewrite(_) => output::contract::Command::Rewrite,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
             Self::Routes(_) => output::contract::Command::Routes,
+            Self::VerifyForwarding(_) => output::contract::Command::VerifyForwarding,
             Self::Documentation(_) => return None,
         })
     }
@@ -177,6 +182,7 @@ impl Command {
             Self::DnsRead(args) => args.limits.max_duration_ms,
             Self::Http(args) => args.limits.max_duration_ms,
             Self::Export(args) => args.limits.max_duration_ms,
+            Self::VerifyForwarding(args) => args.limits.max_duration_ms,
             Self::Rewrite(args) => args.max_duration_ms,
             Self::Replay(args) => args.max_duration_ms,
             Self::Scan(args) => args.max_duration_ms,
@@ -212,6 +218,7 @@ impl Command {
                 | Self::DnsRead(_)
                 | Self::Dns(_)
                 | Self::Fuzz(_)
+                | Self::VerifyForwarding(_)
         )
     }
 
@@ -221,7 +228,11 @@ impl Command {
     /// Each arm narrows the shared [`Format`] into the command's own format
     /// enum, so command code matches exhaustively instead of trusting a
     /// catch-all `unreachable!`.
-    pub(crate) fn run(self, format: Format, stream: &StreamEncoder) -> Result<(), CliError> {
+    pub(crate) fn run(
+        self,
+        format: Format,
+        stream: &StreamEncoder,
+    ) -> Result<CommandExit, CliError> {
         // Documentation generates files outside the output contract, so
         // startup dispatches it before stream setup and never reaches here.
         let kind = self
@@ -237,7 +248,7 @@ impl Command {
                 ))
             });
         let stream = publisher.as_ref().unwrap_or(stream);
-        match self {
+        let result = match self {
             Self::Merge(arguments) => merge::run(arguments, kind.require_format(format)?, stream),
             Self::Fragment(arguments) => {
                 fragment::run(arguments, kind.require_format(format)?, stream)
@@ -277,8 +288,35 @@ impl Command {
             Self::Dns(arguments) => dns::run(arguments, kind.require_format(format)?, stream),
             Self::Fuzz(arguments) => fuzz::run(arguments, kind.require_format(format)?, stream),
             Self::Routes(arguments) => routes::run(arguments, kind.require_format(format)?),
+            Self::VerifyForwarding(arguments) => {
+                return verify_forwarding::run(arguments, kind.require_format(format)?, stream);
+            }
             Self::Documentation(_) => unreachable!("documentation returned before dispatch"),
-        }
+        };
+        result.map(|()| CommandExit::SUCCESS)
+    }
+}
+
+/// The process status of a command that published its output.
+///
+/// Almost every successful command exits [`CommandExit::SUCCESS`]. A command
+/// whose result is a verdict rather than an operation — `verify-forwarding` —
+/// reports the verdict's status through this without emitting a second,
+/// contradictory error record over its completed output.
+pub(crate) struct CommandExit(u8);
+
+impl CommandExit {
+    /// Exit status 0.
+    pub(crate) const SUCCESS: Self = Self(0);
+
+    /// An explicit non-success status for a completed command.
+    pub(crate) const fn status(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The process exit code.
+    pub(crate) const fn get(self) -> u8 {
+        self.0
     }
 }
 

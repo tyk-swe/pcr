@@ -70,6 +70,7 @@ commands! {
         Fuzz = "fuzz",
         Interfaces = "interfaces",
         Routes = "routes",
+        VerifyForwarding = "verify-forwarding",
     }
 }
 
@@ -87,7 +88,8 @@ impl Command {
             | Self::Dns
             | Self::Fuzz
             | Self::Expert
-            | Self::Tls => ToolFormat::FORMATS,
+            | Self::Tls
+            | Self::VerifyForwarding => ToolFormat::FORMATS,
             Self::Build => BuildFormat::FORMATS,
             Self::Fragment | Self::Capture => CaptureFormat::FORMATS,
             Self::Dissect => DissectFormat::FORMATS,

@@ -112,6 +112,11 @@ const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
         false,
         include_str!("../../../examples/documents/output-tls-complete.json"),
     ),
+    (
+        output::contract::Command::VerifyForwarding,
+        false,
+        include_str!("../../../examples/documents/output-verify-forwarding-complete.json"),
+    ),
 ];
 
 fn result(document: &str) -> Value {

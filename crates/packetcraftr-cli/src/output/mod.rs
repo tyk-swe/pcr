@@ -39,6 +39,8 @@ pub mod stream;
 pub mod tls;
 pub mod traceroute;
 
+pub mod forwarding;
+
 pub mod fragment;
 
 pub mod merge;

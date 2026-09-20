@@ -251,7 +251,10 @@ or input (`cli`), 3 for a packet that cannot be built or dissected (`packet`),
 5 for a failed system or network operation (`io`), 6 when the traffic policy
 denies the operation (`policy`), and 70 for an internal invariant failure.
 The name in parentheses is the `error.kind` of the same failure in JSON and
-NDJSON output; `packetcraftr --help` lists the table.
+NDJSON output; `packetcraftr --help` lists the table. `verify-forwarding`
+exits 1 when its comparison completes but the verdict is `fail` or
+`inconclusive`; the published `verdict` field distinguishes them, so a
+completed report never pairs with a contradictory error record.
 
 Offline `stats`, `expert`, `follow`, and `tls` perform bounded, capture-global
 IPv4 and IPv6 fragment reassembly before downstream transport indexing. A

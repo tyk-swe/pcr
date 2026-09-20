@@ -20,6 +20,23 @@
         },
         "link_type": 147,
         "snap_length": 65535,
+        "capture_settings": {
+          "buffer_size": {
+            "requested": 33554432,
+            "applied": 33554432,
+            "effective": null
+          },
+          "timestamp_source": {
+            "requested": "host",
+            "applied": "host",
+            "effective": null
+          },
+          "timestamp_precision": {
+            "requested": "nano",
+            "applied": "nano",
+            "effective": "nano"
+          }
+        },
         "queue_frames": 4096,
         "queue_bytes": 268435456,
         "overflow_policy": "fail",

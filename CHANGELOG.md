@@ -55,6 +55,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   and evidence bounds; per-port UDP profiles add DNS and masked-byte validation.
 - Multi-interface capture shares queue/operation budgets, readiness, and cleanup,
   with per-source evidence and bounded PCAPNG size/time rotation and stop/ring retention.
+- Native capture settings: `capture` accepts `--capture-buffer-bytes`,
+  `--timestamp-source`, and `--timestamp-precision`, applied to the driver per
+  interface before activation and rejected with typed errors when unsupported.
+  The kernel buffer is separate from the PacketcraftR queue budgets. Reports
+  carry per-source `capture_settings` distinguishing requested, applied, and
+  confirmed-effective values (`effective` stays `null` where the backend
+  cannot report one), and `interfaces --timestamp-types` lists the timestamp
+  types an interface advertises, marking clock domains capture cannot select.
 - DHCPv4/DHCPv6 fixture construction and typed options, including overloaded
   fields, relay messages, DUIDs, address associations, and retained unknown wire.
 - Bounded capture header rewriting and ordered JSON rules with checksum repair,

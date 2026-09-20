@@ -20,7 +20,21 @@
         },
         "mtu": 1500,
         "capability": "layer2_and3",
-        "link_type": 1
+        "link_type": 1,
+        "timestamp_types": [
+          {
+            "value": 0,
+            "name": "host",
+            "description": "Host-provided timestamps",
+            "source": "host"
+          },
+          {
+            "value": 4,
+            "name": "adapter_unsynced",
+            "description": "Adapter-provided timestamps not synchronized with the system clock",
+            "source": null
+          }
+        ]
       }
     ]
   },

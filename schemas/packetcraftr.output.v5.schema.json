@@ -5465,9 +5465,202 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4294967295
+        },
+        "timestamp_types": {
+          "description": "Packet timestamp types the capture backend advertises for this interface, present only when timestamp-type discovery was requested and a backend answered. A null source marks a clock domain the capture-time contract cannot represent; such types are discoverable but not selectable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timestampType"
+          }
         }
       },
       "additionalProperties": true
+    },
+    "timestampType": {
+      "type": "object",
+      "required": [
+        "value",
+        "name",
+        "description",
+        "source"
+      ],
+      "properties": {
+        "value": {
+          "description": "The backend's numeric timestamp-type value.",
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "timestampSource": {
+      "enum": [
+        "host",
+        "host_lowprec",
+        "host_hiprec",
+        "adapter"
+      ]
+    },
+    "timestampPrecision": {
+      "enum": [
+        "micro",
+        "nano"
+      ]
+    },
+    "realizedBytes": {
+      "description": "Requested/applied/effective triple for a byte-valued native setting; effective null means the backend cannot report the realized value.",
+      "type": "object",
+      "required": [
+        "requested",
+        "applied",
+        "effective"
+      ],
+      "properties": {
+        "requested": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "applied": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uint64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "realizedTimestampSource": {
+      "type": "object",
+      "required": [
+        "requested",
+        "applied",
+        "effective"
+      ],
+      "properties": {
+        "requested": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "applied": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "realizedTimestampPrecision": {
+      "type": "object",
+      "required": [
+        "requested",
+        "applied",
+        "effective"
+      ],
+      "properties": {
+        "requested": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampPrecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "applied": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampPrecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestampPrecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "materializedRoute": {
       "type": "object",
@@ -9875,6 +10068,27 @@
         },
         "snap_length": {
           "$ref": "#/$defs/uint64"
+        },
+        "capture_settings": {
+          "description": "Native driver-buffer and timestamp settings this source realized; absent when the backend reported none. effective null means unreported, never zero or default.",
+          "type": "object",
+          "required": [
+            "buffer_size",
+            "timestamp_source",
+            "timestamp_precision"
+          ],
+          "properties": {
+            "buffer_size": {
+              "$ref": "#/$defs/realizedBytes"
+            },
+            "timestamp_source": {
+              "$ref": "#/$defs/realizedTimestampSource"
+            },
+            "timestamp_precision": {
+              "$ref": "#/$defs/realizedTimestampPrecision"
+            }
+          },
+          "additionalProperties": false
         },
         "queue_frames": {
           "$ref": "#/$defs/uint64"

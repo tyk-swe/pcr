@@ -288,6 +288,19 @@ files are PCAPNG, use uncompressed byte thresholds, and finalize compression per
 file. Explicit ring retention reuses operation-owned handles and reports retired
 files; neither source count nor rotation increases the configured operation budget.
 
+`capture` accepts `--capture-buffer-bytes`, `--timestamp-source`, and
+`--timestamp-precision` for native driver settings applied per interface before
+activation; the kernel capture buffer is independent of the PacketcraftR queue
+budgets (`--max-queue-frames`/`--max-captured-bytes`). Explicit settings the
+backend cannot honor fail with a typed error rather than silently falling back.
+Each capture source can report `capture_settings`, a requested/applied/effective
+triple per setting where `effective` is `null` when the backend cannot confirm
+the realized value — the pcap-family API offers no post-activation query for the
+allocated buffer or the active timestamp type. `interfaces --timestamp-types`
+adds a `timestamp_types` list to each interface; entries with `source: null`
+describe clock domains capture cannot select. Only timestamp sources
+synchronized with the system clock are selectable.
+
 `capture --dissect` adds an optional `decoded` object to NDJSON `frame` records —
 the same `decodedStack` (`packet`, `layout`, `diagnostics`) `read --dissect`
 publishes — beside the preserved `frame` bytes and metadata. `capture --field`

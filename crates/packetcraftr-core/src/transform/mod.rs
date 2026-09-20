@@ -3,8 +3,13 @@
 
 //! Explicit, bounded transformations of complete packet bytes.
 
+mod fields;
 mod fragment;
 mod rewrite;
+pub use fields::{
+    ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEdit, FieldEditOutcome,
+    FieldEdits, MAX_FIELD_ASSIGNMENTS,
+};
 pub use fragment::{FragmentOptions, fragment};
 pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 
@@ -21,12 +26,17 @@ pub enum Error {
     Limit { field: &'static str, limit: usize },
     #[error(transparent)]
     Frame(#[from] crate::frame::Error),
+    #[error(transparent)]
+    Decode(#[from] crate::decode::Error),
+    #[error("packet transform checksum failed: {0}")]
+    Checksum(#[source] crate::codec::Error),
 }
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Frame(source) => source.classification(),
+            Self::Decode(source) => source.classification(),
             Self::Invalid(_) => Classification::new(
                 "packet.transform_input",
                 Kind::Packet,
@@ -41,6 +51,11 @@ impl Classified for Error {
                 "policy.transform_limit",
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
+            ),
+            Self::Checksum(_) => Classification::new(
+                "packet.transform_checksum",
+                Kind::Packet,
+                Some("supply a complete datagram the checksum can cover"),
             ),
         }
     }

@@ -30,6 +30,7 @@ mod error;
 pub mod expert;
 pub mod export;
 pub mod follow;
+pub mod forwarding;
 pub mod http;
 pub mod pcap;
 mod pipeline;

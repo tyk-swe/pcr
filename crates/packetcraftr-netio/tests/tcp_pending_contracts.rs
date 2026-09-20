@@ -16,6 +16,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Generous bound on the fixture's release wait so a broken test fails the
+/// connection instead of blocking a connect worker forever; far above the
+/// pending deadlines under test.
+const GATE_WATCHDOG: Duration = Duration::from_secs(30);
+
 struct Socket {
     peer: SocketAddr,
     closed: Arc<AtomicUsize>,
@@ -61,7 +66,11 @@ impl Provider for Gate {
     type Stream = Socket;
     fn connect(&self, endpoint: SocketAddr, _timeout: Duration) -> io::Result<Socket> {
         self.entered.send(()).unwrap();
-        self.release.lock().unwrap().recv().unwrap();
+        self.release
+            .lock()
+            .unwrap()
+            .recv_timeout(GATE_WATCHDOG)
+            .map_err(io::Error::other)?;
         Ok(Socket {
             peer: endpoint,
             closed: Arc::clone(&self.closed),

@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 EVIDENCE_VERSION = 1
 TSHARK_VERSION = '4.6.4'
+GIT_TIMEOUT = 30
 
 DECODE_FIELDS = (
     ('ipv4', 'source', 'ip.src', 'address'),
@@ -134,7 +135,10 @@ def digest(path):
 
 def provenance(binary):
     return dict(schema_version=EVIDENCE_VERSION,
-                commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
-                dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT)),
+                commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True,
+                                               timeout=GIT_TIMEOUT).strip(),
+                dirty=bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT,
+                                                   timeout=GIT_TIMEOUT)),
                 binary_sha256=digest(binary),
-                binary_version=subprocess.check_output([str(binary), '--version'], text=True, timeout=10).strip())
+                binary_version=subprocess.check_output([str(binary), '--version'], text=True,
+                                                       timeout=10).strip())

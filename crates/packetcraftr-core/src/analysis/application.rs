@@ -18,10 +18,26 @@ use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
+    /// Distinct application messages the collector may count across all
+    /// streams over the whole run: HTTP counts a message when its first byte
+    /// arrives, DNS when it emits a framed message.
     pub max_messages: usize,
+    /// Distinct transport streams the collector may track at once. HTTP
+    /// counts TCP conversations; DNS counts each UDP flow and TCP stream.
     pub max_streams: usize,
+    /// Bytes held at once across all in-flight message parses: partial heads
+    /// and body-decoder buffers for HTTP, TCP length prefixes and partial
+    /// bodies for DNS.
     pub max_buffer_bytes: usize,
+    /// Cumulative byte charge for retained and emitted evidence over the
+    /// run: parsed heads and flushed message state for HTTP, emitted wire
+    /// bytes plus pending transaction keys for DNS. Charges include a
+    /// conservative multiplier for decoded-object expansion, so this bounds
+    /// result growth rather than live buffers or serialized output.
     pub max_retained_bytes: usize,
+    /// TCP sequence spans retained to attribute reassembled deliveries to
+    /// physical source frames. HTTP additionally bounds the distinct source
+    /// frames one message may carry by this limit.
     pub max_source_spans: usize,
 }
 impl Default for Limits {
@@ -90,6 +106,29 @@ impl Limits {
         }
         Ok(())
     }
+}
+
+/// The distinct service ports one application collector may follow.
+pub(crate) const MAX_SERVICE_PORTS: usize = 256;
+
+/// Collects, sorts, and deduplicates configured service ports, rejecting an
+/// empty normalized list, port zero, and more than [`MAX_SERVICE_PORTS`]
+/// distinct ports. `field` names the caller's protocol-specific limit in the
+/// error; the bound applies to distinct ports, not input elements.
+pub(crate) fn normalize_ports(
+    ports: impl IntoIterator<Item = u16>,
+    field: &'static str,
+) -> Result<Vec<u16>, Error> {
+    let mut ports: Vec<u16> = ports.into_iter().collect();
+    ports.sort_unstable();
+    ports.dedup();
+    if ports.is_empty() || ports.len() > MAX_SERVICE_PORTS || ports.contains(&0) {
+        return Err(Error::Limit {
+            field,
+            limit: MAX_SERVICE_PORTS,
+        });
+    }
+    Ok(ports)
 }
 
 #[derive(Clone, Debug)]

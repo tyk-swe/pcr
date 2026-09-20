@@ -14,6 +14,8 @@ REQUIRED = {
     'decode-oracle-evidence': 'decode-oracle.json',
     'native-isolated-evidence': 'native-isolated.json',
 }
+GH_API_TIMEOUT = 60
+GH_DOWNLOAD_TIMEOUT = 300
 
 
 def validate(report, commit, kind):
@@ -41,9 +43,14 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r'[\w.-]+/[\w.-]+', args.repository) or not re.fullmatch(r'[0-9a-f]{40}', args.commit):
         parser.error('expected owner/repository and a full commit SHA')
-    runs = json.loads(subprocess.check_output(['gh', 'api', '--method', 'GET',
-        f'repos/{args.repository}/actions/workflows/ci.yml/runs', '-f', f'head_sha={args.commit}',
-        '-f', 'status=success', '-f', 'event=push', '-f', 'per_page=100']))['workflow_runs']
+    try:
+        runs = json.loads(subprocess.check_output(
+            ['gh', 'api', '--method', 'GET',
+             f'repos/{args.repository}/actions/workflows/ci.yml/runs', '-f', f'head_sha={args.commit}',
+             '-f', 'status=success', '-f', 'event=push', '-f', 'per_page=100'],
+            timeout=GH_API_TIMEOUT))['workflow_runs']
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f'gh workflow run lookup timed out after {GH_API_TIMEOUT} seconds')
     if not runs:
         raise SystemExit('no successful push CI run for release commit')
     run = max(runs, key=lambda row: row['id'])
@@ -51,8 +58,13 @@ def main():
     evidence = dict(commit=args.commit, ci_run=run['html_url'], reports={})
     for artifact, filename in REQUIRED.items():
         directory = args.output / artifact
-        subprocess.run(['gh', 'run', 'download', str(run['id']), '--repo', args.repository,
-                        '--name', artifact, '--dir', str(directory)], check=True)
+        try:
+            subprocess.run(['gh', 'run', 'download', str(run['id']), '--repo', args.repository,
+                            '--name', artifact, '--dir', str(directory)],
+                           check=True, timeout=GH_DOWNLOAD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise SystemExit(
+                f'gh download of {artifact} timed out after {GH_DOWNLOAD_TIMEOUT} seconds')
         report = json.loads((directory / filename).read_text())
         validate(report, args.commit, artifact)
         evidence['reports'][artifact] = report

@@ -301,6 +301,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   explicitly when a facility is missing. TLS handshake parsing, IP reassembly merge
   planning, and workflow admission/activation paths split along documented
   responsibility boundaries without changing public paths or behavior.
+- The `--max-application-*` limit flags document what each budget counts
+  (messages, streams, in-flight buffers, retained evidence, and source spans),
+  and `--start-epoch`/`--stop-epoch` help states that values are nonnegative;
+  defaults, ranges, and parsing are unchanged. `build-manifest.py` reports
+  malformed or incomplete release metadata with explicit diagnostics instead
+  of tracebacks, and bounds its `rustc`/binary probes.
 
 ### Removed
 

@@ -15,6 +15,14 @@ impl StreamRecord for Data {
     }
 }
 
+fn fixture_error() -> Error {
+    Error::new(
+        Classification::new("io.fixture", Kind::Io, None),
+        "fixture".to_owned(),
+        Vec::new(),
+    )
+}
+
 proptest! {
     #[test]
     fn complete_invocation_traces_have_one_terminal_and_no_post_terminal_data(
@@ -30,19 +38,30 @@ proptest! {
             let result = match action {
                 0 | 1 => stream.emit_data(Data { value: action }, Vec::new()),
                 2 => stream.complete((), Vec::new()),
-                _ => stream.emit_error(Error::new(Classification::new("io.fixture", Kind::Io, None), "fixture".to_owned(), Vec::new())),
+                _ => stream.emit_error(fixture_error()),
             };
-            if terminal { prop_assert!(matches!(result, Err(EncodeError::Terminal))); }
-            else {
+            if terminal {
+                prop_assert!(matches!(result, Err(EncodeError::Terminal)));
+            } else {
                 prop_assert!(result.is_ok());
                 count += 1;
                 terminal = action >= 2;
             }
         }
-        if !terminal { stream.complete((), Vec::new()).unwrap(); count += 1; }
+        if !terminal {
+            stream.complete((), Vec::new()).unwrap();
+            count += 1;
+        }
         let bytes = buffer.0.lock().unwrap();
         prop_assert_eq!(bytes.last(), Some(&b'\n'));
-        let records: Vec<serde_json::Value> = serde_json::Deserializer::from_slice(&bytes).into_iter().collect::<Result<_, _>>().unwrap();
+        // Physical NDJSON framing: one complete JSON value per line. A
+        // streaming deserializer would also accept concatenated values or a
+        // record spread across lines, so parse line-wise instead.
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let records: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
         prop_assert_eq!(records.len(), count);
         for (sequence, record) in records.iter().enumerate() {
             prop_assert_eq!(record["sequence"].as_u64(), Some(sequence as u64));

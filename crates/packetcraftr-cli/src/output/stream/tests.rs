@@ -126,11 +126,13 @@ fn bounded_output_keeps_sequences_contiguous_and_writes_one_terminal() {
         .unwrap();
     assert!(stream.is_terminal());
     assert!(stream.complete((), Vec::new()).is_err());
-    let records: Vec<serde_json::Value> =
-        serde_json::Deserializer::from_slice(&output.0.lock().unwrap())
-            .into_iter()
-            .collect::<Result<_, _>>()
-            .unwrap();
+    let bytes = output.0.lock().unwrap();
+    assert_eq!(bytes.last(), Some(&b'\n'));
+    let records: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
     assert_eq!(records.len(), 4);
     for (sequence, record) in records.iter().enumerate() {
         assert_eq!(record["sequence"], sequence);

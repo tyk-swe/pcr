@@ -3,11 +3,12 @@
 
 //! One module per CLI command, plus the pieces several of them share.
 //!
-//! A command that fits in one screen stays in one file (`interfaces.rs`,
-//! `routes.rs`; `send` keeps its arguments in `command_options`). A command
-//! splits into `arguments.rs`, `rendering.rs`, and sometimes `conversion.rs`
-//! once those parts stop fitting together, which is most of the live and
-//! capture-reading commands. [`Command::run`] validates the global `--output`
+//! Each command owns its `Args`: compact commands keep them beside `run` in a
+//! single file (`interfaces.rs`, `routes.rs`), while larger commands split
+//! into `arguments.rs`, `rendering.rs`, and sometimes `conversion.rs` — most
+//! of the live and capture-reading commands. Clap groups several commands
+//! share live under `command_options` instead (`SendArgs` serves `send` and
+//! `exchange`). [`Command::run`] validates the global `--output`
 //! choice before dispatch; [`execution`] composes the live probe providers, and
 //! [`render_aggregate_rows`] renders the Text/Json match the aggregate
 //! commands share.

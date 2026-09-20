@@ -50,8 +50,9 @@
 //! errors rather than filters that quietly match nothing.
 //!
 //! Compilation is bounded in source length, parenthesis nesting, term count,
-//! and set size. Both the parser and the evaluator use explicit stacks rather
-//! than recursion, so filter text cannot drive stack depth.
+//! and set size. The parser uses explicit stacks and the evaluator follows
+//! precomputed jumps rather than recursion, so filter text cannot drive
+//! stack depth.
 
 mod ast;
 mod comparison;
@@ -62,6 +63,7 @@ mod literal;
 mod model;
 mod parser;
 mod path;
+mod plan;
 mod projection;
 pub use projection::{Projection, ProjectionError};
 

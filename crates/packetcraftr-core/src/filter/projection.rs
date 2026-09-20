@@ -123,13 +123,13 @@ impl Projection {
         for field in &self.fields {
             let mut values = Vec::new();
             let mut exceeded = false;
-            eval::any_value(context, field, |value| {
-                let Some(bytes) = measure(value, remaining, 0) else {
+            eval::each_value(context, field, |value| {
+                let Some(bytes) = measure(&value, remaining, 0) else {
                     exceeded = true;
                     return true;
                 };
                 remaining -= bytes;
-                values.push(value.clone());
+                values.push(value.into_owned());
                 false
             });
             if exceeded {
@@ -160,6 +160,35 @@ fn string_size(value: &str) -> Option<usize> {
         })
     })
 }
+
+/// Decimal digit count of an unsigned value, counted rather than rendered.
+fn unsigned_len(value: u64) -> usize {
+    value
+        .checked_ilog10()
+        .map_or(1, |digits| digits as usize + 1)
+}
+
+/// The exact length of a `Display` rendering, counted without allocating.
+///
+/// The cell budget needs the encoded size, not the string, so address-like
+/// values — IPv6's `::` elision above all — are measured by writing them into
+/// a sink that keeps only the byte count.
+fn display_len(value: impl std::fmt::Display) -> usize {
+    use std::fmt::Write;
+
+    struct Counter(usize);
+    impl std::fmt::Write for Counter {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0 += text.len();
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    // A byte-counting sink cannot fail.
+    let _ = write!(counter, "{value}");
+    counter.0
+}
+
 fn measure(value: &FieldValue, maximum: usize, depth: usize) -> Option<usize> {
     if depth > 64 {
         return None;
@@ -172,11 +201,11 @@ fn measure(value: &FieldValue, maximum: usize, depth: usize) -> Option<usize> {
                 5
             }
         }
-        FieldValue::Unsigned(value) => value.to_string().len(),
-        FieldValue::Signed(value) => value.to_string().len(),
-        FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => {
-            value.to_string().len() + 2
+        FieldValue::Unsigned(value) => unsigned_len(*value),
+        FieldValue::Signed(value) => {
+            unsigned_len(value.unsigned_abs()) + usize::from(value.is_negative())
         }
+        FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => display_len(value) + 2,
         FieldValue::Text(value) => string_size(value)?,
         FieldValue::Bytes(value) => value.len().checked_mul(2)?.checked_add(2)?,
         FieldValue::List(values) => {
@@ -196,4 +225,98 @@ fn measure(value: &FieldValue, maximum: usize, depth: usize) -> Option<usize> {
         }
     };
     (bytes <= maximum).then_some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    /// The cell encoding the budget accounts for: bare scalars, hex bytes and
+    /// `Display` addresses as quoted strings, and serde's escaping for text.
+    fn cell_len(value: &FieldValue) -> usize {
+        match value {
+            FieldValue::Bool(value) => {
+                if *value {
+                    4
+                } else {
+                    5
+                }
+            }
+            FieldValue::Unsigned(value) => value.to_string().len(),
+            FieldValue::Signed(value) => value.to_string().len(),
+            FieldValue::Text(value) => serde_json::to_string(value).expect("text encodes").len(),
+            FieldValue::Bytes(value) => value.len() * 2 + 2,
+            FieldValue::Ipv4(_) | FieldValue::Ipv6(_) | FieldValue::Mac(_) => {
+                value.to_string().len() + 2
+            }
+            FieldValue::List(values) => {
+                2 + values.len().saturating_sub(1) + values.iter().map(cell_len).sum::<usize>()
+            }
+            FieldValue::Object(values) => {
+                2 + values.len().saturating_sub(1)
+                    + values
+                        .iter()
+                        .map(|(key, value)| {
+                            serde_json::to_string(key).expect("key encodes").len()
+                                + 1
+                                + cell_len(value)
+                        })
+                        .sum::<usize>()
+            }
+        }
+    }
+
+    /// The budget's cell accounting must match the encoded rendering exactly,
+    /// at every edge the counted helpers replace a formatted string for.
+    #[test]
+    fn measured_sizes_equal_the_rendered_encoding() {
+        let cases = [
+            FieldValue::Bool(true),
+            FieldValue::Bool(false),
+            FieldValue::Unsigned(0),
+            FieldValue::Unsigned(9),
+            FieldValue::Unsigned(u64::MAX),
+            FieldValue::Signed(0),
+            FieldValue::Signed(-1),
+            FieldValue::Signed(i64::MIN),
+            FieldValue::Signed(i64::MAX),
+            FieldValue::Ipv4(Ipv4Addr::new(0, 0, 0, 0)),
+            FieldValue::Ipv4(Ipv4Addr::new(255, 255, 255, 255)),
+            FieldValue::Ipv6(Ipv6Addr::UNSPECIFIED),
+            FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
+            FieldValue::Ipv6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1234)),
+            // Equal-length zero runs elide the first; a single zero segment
+            // never elides.
+            FieldValue::Ipv6(Ipv6Addr::new(1, 0, 0, 2, 0, 0, 3, 4)),
+            FieldValue::Ipv6(Ipv6Addr::new(1, 2, 3, 4, 5, 0, 7, 8)),
+            FieldValue::Ipv6(Ipv6Addr::new(
+                0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+            )),
+            FieldValue::Mac([0, 0, 0, 0, 0, 0]),
+            FieldValue::Mac([0xff; 6]),
+            FieldValue::Text("plain".to_owned()),
+            FieldValue::Text("esc\"aped\\\n\t\u{7}text".to_owned()),
+            FieldValue::Text("ünïcödé — 日本語".to_owned()),
+            FieldValue::Bytes(bytes::Bytes::from_static(&[0, 0xab, 0xff])),
+            FieldValue::Bytes(bytes::Bytes::new()),
+            FieldValue::List(vec![
+                FieldValue::Unsigned(1),
+                FieldValue::Text("two".to_owned()),
+            ]),
+            FieldValue::List(Vec::new()),
+            FieldValue::Object(
+                [("key".to_owned(), FieldValue::Signed(-7))]
+                    .into_iter()
+                    .collect(),
+            ),
+        ];
+        for value in &cases {
+            assert_eq!(
+                measure(value, usize::MAX, 0),
+                Some(cell_len(value)),
+                "{value:?} measured differently than its encoding"
+            );
+        }
+    }
 }

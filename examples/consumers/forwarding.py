@@ -104,6 +104,7 @@ def validate_report(report: dict[str, Any]) -> str:
             "check counters do not sum")
     require(summary["reordered_pairs"] <= summary["unique_matches"], "invalid reorder count")
     incomplete = False
+    ambiguous_by_side = []
     for side in ("ingress", "egress"):
         capture = report["captures"][side]
         for name in ("read", "selected", "keyed", "unkeyed", "incomplete"):
@@ -111,7 +112,17 @@ def validate_report(report: dict[str, Any]) -> str:
         require(capture["keyed"] + capture["unkeyed"] == capture["selected"] <= capture["read"],
                 "capture counters do not sum")
         require(capture["incomplete"] <= capture["selected"], "invalid incomplete count")
+        accounted = summary["unique_matches"] + summary[side + "_only"]
+        require(accounted <= capture["keyed"], f"{side} matches and unmatched exceed capture census")
+        ambiguous_by_side.append(capture["keyed"] - accounted)
         incomplete |= bool(capture["incomplete"] or capture["unkeyed"])
+    require(sum(ambiguous_by_side) == summary["ambiguous_observations"],
+            "ambiguous observations disagree with capture census")
+    groups = summary["ambiguous_groups"]
+    require((groups == 0) == (summary["ambiguous_observations"] == 0)
+            and all(count >= groups for count in ambiguous_by_side)
+            and summary["ambiguous_observations"] >= 3 * groups,
+            "ambiguous group counts disagree with capture census")
     requested_checks = (
         summary["unique_matches"] * (len(rules["preserve"]) + len(rules["preserve_presence"]))
         + report["captures"]["egress"]["selected"] * (len(rules["expect"]) + len(rules["expect_absent"]))

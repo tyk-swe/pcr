@@ -234,12 +234,14 @@ impl Default for Plan {
 }
 
 impl Plan {
-    /// Physical decoding plus only the conversation indexes requested by the
-    /// compiled filters/projections. IDs, when requested, are still assigned
-    /// over all input before selection; this does not push filters upstream.
+    /// Only the conversation indexes requested by compiled filters/projections,
+    /// retaining IP reconstruction when needed for canonical stream numbering.
+    /// IDs include reconstructed conversations before selection. Consumers use
+    /// [`super::FrameRecord::physical_context`] to select and project only
+    /// physical evidence; this plan does not push filters upstream.
     pub fn physical(requirements: crate::filter::Requirements) -> Self {
         Self {
-            ip_reassembly: false,
+            ip_reassembly: requirements.tcp_stream || requirements.udp_stream,
             tcp_index: requirements.tcp_stream,
             udp_index: requirements.udp_stream,
         }

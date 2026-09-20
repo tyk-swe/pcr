@@ -235,9 +235,10 @@ The [versioned presets](resource-presets.md) provide optional named defaults;
 explicit flags override them and resource diagnostics show the resolved source.
 They do not define a total RSS budget.
 
-Forwarding selects a physical analysis plan and skips unrequested reconstruction
-and stream indexes. Requested stream identities retain capture-global numbering.
-Every physical input still consumes frame and byte budgets before selection.
+Forwarding skips unrequested stream indexes and retains IP reconstruction when
+an index is required, preserving capture-global numbering. Resource diagnostics
+include requirements from both rules and selection filters. Comparison evidence
+remains physical, and every input consumes frame and byte budgets before selection.
 
 Forwarding collection charges, comparison scratch, shared detail retention,
 and terminal publication limits are separate. Detail omission changes retained

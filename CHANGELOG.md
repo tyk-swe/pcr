@@ -402,6 +402,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Forwarding stream indexes retain canonical numbering after fragmented
+  conversations without using reconstructed packets as comparison evidence.
+  Resource diagnostics include indexes and IP reconstruction required by rules
+  as well as filters. The reference consumer rejects comparison counters that
+  contradict the capture census.
 - Capture preparation, metadata reads, repeated analysis, comparison and
   pre-publication checks share an invocation deadline. Reader clock scopes
   restore correctly on errors and callback unwinding; committed files remain

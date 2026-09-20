@@ -77,6 +77,59 @@ class ConsumerTests(unittest.TestCase):
         value["result"]["omitted"]["matches"] = 2
         self.assertEqual(self.consume(value)["verdict"], "pass")
 
+    def test_matches_cannot_exceed_either_capture_census(self):
+        for sides in (("ingress",), ("egress",), ("ingress", "egress")):
+            invalid = copy.deepcopy(FIXTURE)
+            for side in sides:
+                invalid["result"]["captures"][side].update(
+                    read=0, selected=0, keyed=0, unkeyed=0, incomplete=0)
+            with self.subTest(sides=sides), self.assertRaisesRegex(consumer.ContractError, "capture census"):
+                self.consume(invalid)
+
+    def test_comparison_counters_must_account_for_all_keyed_observations(self):
+        for field, count in (("ingress_only", 1), ("egress_only", 1),
+                             ("ambiguous_observations", 1), ("ambiguous_groups", 1)):
+            invalid = copy.deepcopy(FIXTURE)
+            invalid["result"]["summary"][field] = count
+            with self.subTest(field=field), self.assertRaisesRegex(consumer.ContractError, "capture census"):
+                self.consume(invalid)
+        invalid = copy.deepcopy(FIXTURE)
+        for side in ("ingress", "egress"):
+            invalid["result"]["captures"][side].update(read=3, selected=3, keyed=3)
+        with self.assertRaisesRegex(consumer.ContractError, "capture census"):
+            self.consume(invalid)
+
+    def test_mixed_capture_census_with_omitted_details(self):
+        value = copy.deepcopy(FIXTURE)
+        report = value["result"]
+        report["verdict"] = "inconclusive"
+        report["captures"]["ingress"].update(read=8, selected=7, keyed=6, unkeyed=1)
+        report["captures"]["egress"].update(read=7, selected=7, keyed=5, unkeyed=2)
+        report["summary"].update(ingress_only=3, egress_only=1,
+                                 ambiguous_groups=1, ambiguous_observations=3)
+        report["omitted"].update(unmatched_ingress=3, unmatched_egress=1,
+                                 unkeyed_ingress=1, unkeyed_egress=2,
+                                 ambiguous_groups=1, group_members=3)
+        self.assertEqual(self.consume(value, code=1)["verdict"], "inconclusive")
+        for field, count in (("ambiguous_groups", 0), ("ambiguous_groups", 2),
+                             ("ambiguous_observations", 2), ("ambiguous_observations", 4)):
+            invalid = copy.deepcopy(value)
+            invalid["result"]["summary"][field] = count
+            with self.subTest(field=field, count=count), self.assertRaisesRegex(consumer.ContractError, "capture census"):
+                self.consume(invalid, code=1)
+
+    def test_ambiguous_groups_need_both_sides_and_more_than_one_pair(self):
+        for ingress, egress in ((0, 3), (3, 0), (1, 1)):
+            invalid = copy.deepcopy(FIXTURE)
+            report = invalid["result"]
+            report["verdict"] = "inconclusive"
+            for side, extra in (("ingress", ingress), ("egress", egress)):
+                report["captures"][side].update(read=2 + extra, selected=2 + extra, keyed=2 + extra)
+            report["summary"].update(ambiguous_groups=1, ambiguous_observations=ingress + egress)
+            report["omitted"].update(ambiguous_groups=1, group_members=ingress + egress)
+            with self.subTest(ingress=ingress, egress=egress), self.assertRaisesRegex(consumer.ContractError, "capture census"):
+                self.consume(invalid, code=1)
+
     def test_requested_checks_cannot_silently_disappear(self):
         invalid = copy.deepcopy(FIXTURE)
         report = invalid["result"]

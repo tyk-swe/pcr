@@ -695,7 +695,13 @@ fn physical_plan_skips_unrequested_indexes_without_renumbering_requested_streams
     .unwrap();
     assert_eq!(summary.frames_read, 2);
 
-    options.plan.udp_index = true;
+    let filter = packetcraftr_core::filter::Filter::compile(
+        "udp.stream == 0",
+        &registry,
+        Default::default(),
+    )
+    .unwrap();
+    options.plan = packetcraftr_core::analysis::Plan::physical(filter.requirements());
     assert!(run(&mut reader(&frames), registry.clone(), &options, |_| Ok(())).is_err());
     options.limits.max_flows = 2;
     let mut indexes = Vec::new();
@@ -705,4 +711,83 @@ fn physical_plan_skips_unrequested_indexes_without_renumbering_requested_streams
     })
     .unwrap();
     assert_eq!(indexes, [Some(0), Some(1)]);
+}
+
+#[test]
+fn physical_plan_preserves_stream_numbers_after_fragmented_conversations() {
+    use common::ip_fragments::ipv4_protocol_fragment_frame;
+    use packetcraftr_core::analysis::Plan;
+    use packetcraftr_core::filter::Filter;
+
+    let registry = registry();
+    for (protocol, query) in [(6, "tcp.stream == 1"), (17, "udp.stream == 1")] {
+        let transport_frame = |port, seconds| {
+            let timestamp = SystemTime::UNIX_EPOCH + Duration::from_secs(seconds);
+            if protocol == 6 {
+                tcp_frame(
+                    &registry,
+                    timestamp,
+                    TcpSpec {
+                        source_port: port,
+                        ..client_tcp(1, 0, Tcp::ACK, 8192)
+                    },
+                    b"fragmented payload",
+                )
+            } else {
+                udp_frame(&registry, timestamp, CLIENT, SERVER, port, 9000, b"payload")
+            }
+        };
+        let whole = transport_frame(40000, 0);
+        let payload = &whole.bytes()[20..];
+        let frames = [
+            ipv4_protocol_fragment_frame(
+                &registry,
+                SystemTime::UNIX_EPOCH,
+                42,
+                protocol,
+                0,
+                true,
+                &payload[..8],
+            ),
+            ipv4_protocol_fragment_frame(
+                &registry,
+                SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+                42,
+                protocol,
+                1,
+                false,
+                &payload[8..],
+            ),
+            transport_frame(40001, 2),
+            transport_frame(40002, 3),
+        ];
+        let filter = Filter::compile(query, &registry, Default::default()).unwrap();
+        for plan in [Plan::default(), Plan::physical(filter.requirements())] {
+            let mut indexes = Vec::new();
+            let mut selected = Vec::new();
+            let mut completions = 0;
+            let options = Options {
+                plan,
+                ..Default::default()
+            };
+            let summary = run(&mut reader(&frames), registry.clone(), &options, |record| {
+                let context = record.physical_context();
+                indexes.push(if protocol == 6 {
+                    context.tcp_stream
+                } else {
+                    context.udp_stream
+                });
+                if filter.matches(&context).unwrap() {
+                    selected.push(record.number);
+                }
+                completions += record.derived_datagrams().len();
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(summary.frames_read, 4);
+            assert_eq!(completions, 1);
+            assert_eq!(indexes, [None, None, Some(1), Some(2)], "{query}");
+            assert_eq!(selected, [3], "{query}");
+        }
+    }
 }

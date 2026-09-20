@@ -78,14 +78,18 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
             settings.insert(
                 name.clone(),
                 Setting {
-                    enabled: if forwarding
+                    enabled: if forwarding && id == "max_provenance_bytes" {
+                        false
+                    } else if forwarding
                         && (id.starts_with("max_ip_")
                             || matches!(
                                 id,
-                                "ip_idle_expiry_ms" | "ip_overlap" | "max_provenance_bytes"
-                            )) {
-                        false
-                    } else if forwarding && matches!(id, "max_flows" | "max_scope_bytes") {
+                                "ip_idle_expiry_ms"
+                                    | "ip_overlap"
+                                    | "max_flows"
+                                    | "max_scope_bytes"
+                            ))
+                    {
                         indexed_forwarding
                     } else {
                         !(id.starts_with("max_tcp_") || id == "tcp_idle_expiry_ms") || tcp_enabled
@@ -171,19 +175,42 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
 }
 
 fn forwarding_needs_index(values: &ArgMatches) -> bool {
+    use packetcraftr_core::analysis::forwarding::{Declarations, Rules};
+
     let registry = packetcraftr_core::protocol::builtin::registry();
-    ["ingress_filter", "egress_filter"].into_iter().any(|id| {
-        values.get_one::<String>(id).is_some_and(|source| {
-            crate::filtering::compile(
-                source,
-                &registry,
-                crate::filtering::Capabilities::stream_capable(),
-            )
-            // Invalid input will fail before analysis; conservatively avoid
-            // claiming the index is disabled on an uncompiled query.
-            .map_or(true, |filter| filter.requirements().stream_index)
+    let fields = |id| {
+        values
+            .get_many::<String>(id)
+            .map(|fields| fields.cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    let rules = Rules::compile_declarations(
+        Declarations {
+            identity: &fields("identity"),
+            preserve: &fields("preserve"),
+            preserve_presence: &fields("preserve_presence"),
+            expect: &fields("expect"),
+            expect_absent: &fields("expect_absent"),
+        },
+        &registry,
+        *values
+            .get_one::<usize>("max_field_bytes")
+            .expect("forwarding field budget has a default"),
+    );
+    // Collection combines the compiled rules' requirements with each side's
+    // filter. Diagnostics are enabled if either capture needs the stage.
+    // Invalid input fails before analysis; conservatively keep stages enabled.
+    rules.map_or(true, |rules| rules.requirements().stream_index)
+        || ["ingress_filter", "egress_filter"].into_iter().any(|id| {
+            values.get_one::<String>(id).is_some_and(|source| {
+                crate::filtering::compile(
+                    source,
+                    &registry,
+                    crate::filtering::Capabilities::stream_capable(),
+                )
+                .map_or(true, |filter| filter.requirements().stream_index)
+            })
         })
-    })
 }
 
 fn stage(id: &str, command: Command) -> Option<&'static str> {

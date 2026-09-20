@@ -52,10 +52,11 @@ An already demonstrated violation remains fail when other evidence is missing.
 
 ## Analysis and accounting
 
-`analysis::Plan::physical(requirements)` skips IP reconstruction and unrequested
-TCP/UDP indexes. Forwarding derives the plan from the compiled rules and each
-side's filter. Requested indexes still number all input before filtering; a
-display filter does not redefine capture-global stream numbers.
+`analysis::Plan::physical(requirements)` skips unrequested TCP/UDP indexes and
+retains IP reconstruction when either index is required. Forwarding derives
+the plan from the compiled rules and each side's filter. Requested indexes
+include reconstructed conversations before filtering, preserving capture-global
+stream numbers. Selection and comparison use only physical-frame evidence.
 
 Input frame, payload byte, encoded/decoded source-byte, and interface bounds
 still count rejected input. Physical comparison continues to require usable

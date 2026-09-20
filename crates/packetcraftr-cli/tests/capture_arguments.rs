@@ -57,6 +57,68 @@ fn storage_limits_are_checked_before_interface_lookup_or_activation() {
 }
 
 #[test]
+fn native_capture_settings_are_checked_before_interface_lookup_or_activation() {
+    for extra in [
+        vec!["--capture-buffer-bytes", "0"],
+        // Smaller than one configured snapshot cannot hold a frame.
+        vec!["--capture-buffer-bytes", "1024"],
+        // Above the native int range both pcap-family backends take.
+        vec!["--capture-buffer-bytes", "99999999999"],
+    ] {
+        let mut args = vec![
+            "--output",
+            "text",
+            "capture",
+            "--interface",
+            "does-not-exist",
+        ];
+        let label = format!("{extra:?}");
+        args.extend(extra);
+        let output = run(&args);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("cli.capture_setting"), "{label}: {stderr}");
+    }
+    for extra in [
+        vec!["--timestamp-source", "unsynchronized"],
+        vec!["--timestamp-precision", "pico"],
+    ] {
+        let mut args = vec![
+            "--output",
+            "text",
+            "capture",
+            "--interface",
+            "does-not-exist",
+        ];
+        let label = format!("{extra:?}");
+        args.extend(extra);
+        let output = run(&args);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("invalid value"), "{label}: {stderr}");
+    }
+    // Valid explicit settings proceed past validation to interface resolution,
+    // which reports the unknown interface rather than a setting rejection.
+    let output = run(&[
+        "--output",
+        "text",
+        "capture",
+        "--interface",
+        "does-not-exist",
+        "--capture-buffer-bytes",
+        "33554432",
+        "--timestamp-source",
+        "host",
+        "--timestamp-precision",
+        "nano",
+    ]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("does-not-exist"), "{stderr}");
+    assert!(!stderr.contains("cli.capture_setting"), "{stderr}");
+}
+
+#[test]
 fn decoded_output_options_are_checked_before_interface_lookup() {
     // --dissect/--field only apply to text and NDJSON; the rejection names the
     // accepted formats before any native interface work runs.

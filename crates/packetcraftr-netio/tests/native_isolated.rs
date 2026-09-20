@@ -181,6 +181,86 @@ fn bounded_queue_reports_real_capture_loss() {
 
 #[test]
 #[ignore = "requires the isolated Linux launcher"]
+fn native_settings_apply_before_activation_and_report_realized_values() {
+    isolated();
+    // Discovery runs on an unactivated handle and admits nothing.
+    let interface = Id {
+        name: "lo".to_owned(),
+        index: 1,
+    };
+    let types = capture::SystemProvider.timestamp_types(&interface).unwrap();
+    assert!(
+        types
+            .iter()
+            .any(|kind| kind.source == Some(capture::TimestampSource::Host)),
+        "{types:?}"
+    );
+    assert_eq!(native_snapshot().active, 0);
+
+    // Loopback advertises only the host clock, so an adapter-synchronized
+    // request must be rejected typed before any activation.
+    let mut unsupported = request();
+    unsupported.native.timestamp_source = Some(capture::TimestampSource::Adapter);
+    let error = match capture::SystemProvider.arm_capture(&unsupported) {
+        Ok(_) => panic!("an unadvertised timestamp source was silently ignored"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, Error::UnsupportedCaptureSetting { .. }),
+        "{error:?}"
+    );
+    assert_eq!(native_snapshot().active, 0);
+
+    let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut request = request();
+    request.filter = Some(format!(
+        "udp dst port {}",
+        receiver.local_addr().unwrap().port()
+    ));
+    request.native = capture::NativeSettings {
+        buffer_size: Some(4 * 1024 * 1024),
+        timestamp_source: Some(capture::TimestampSource::Host),
+        timestamp_precision: Some(capture::TimestampPrecision::Nano),
+    };
+    let mut capture = ready(&request);
+    let native = &capture.metadata().native;
+    assert_eq!(native.buffer_size.requested, Some(4 * 1024 * 1024));
+    assert_eq!(native.buffer_size.applied, Some(4 * 1024 * 1024));
+    // The pcap API has no post-activation buffer-size query.
+    assert_eq!(native.buffer_size.effective, None);
+    assert_eq!(
+        native.timestamp_source.applied,
+        Some(capture::TimestampSource::Host)
+    );
+    assert_eq!(
+        native.timestamp_precision.effective,
+        Some(capture::TimestampPrecision::Nano)
+    );
+    sender
+        .send_to(b"isolated-native-settings", receiver.local_addr().unwrap())
+        .unwrap();
+    let frame = capture
+        .next_captured_frame(Duration::from_secs(2))
+        .unwrap()
+        .unwrap();
+    // A nanosecond fraction misread as microseconds either fails the fraction
+    // bound or lands 1000x off; a sane timestamp proves the delivered unit.
+    let stamp = frame
+        .frame
+        .timestamp
+        .expect("captured frames are timestamped");
+    let age = std::time::SystemTime::now()
+        .duration_since(stamp)
+        .unwrap_or(Duration::ZERO);
+    assert!(age < Duration::from_secs(60), "{stamp:?}");
+    capture.shutdown().unwrap();
+    drop(capture);
+    released();
+}
+
+#[test]
+#[ignore = "requires the isolated Linux launcher"]
 fn native_filter_error_preserves_diagnostic_and_releases_admission() {
     isolated();
     let mut request = request();

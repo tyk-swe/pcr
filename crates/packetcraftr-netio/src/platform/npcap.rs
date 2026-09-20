@@ -10,5 +10,5 @@ mod handles;
 mod loader;
 mod transmit;
 
-pub(super) use capture::open_capture;
+pub(super) use capture::{open_capture, timestamp_types};
 pub(super) use transmit::send_layer2;

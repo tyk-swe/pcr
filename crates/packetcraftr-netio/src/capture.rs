@@ -608,6 +608,10 @@ impl Provider for SystemProvider {
     fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
         super::platform::system_capture(request)
     }
+
+    fn timestamp_types(&self, interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
+        super::platform::capture_timestamp_types(interface)
+    }
 }
 
 impl<S, C> Provider for crate::PacketIo<S, C>

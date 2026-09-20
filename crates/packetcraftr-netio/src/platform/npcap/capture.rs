@@ -6,7 +6,7 @@
 #![allow(unsafe_code)]
 
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString, c_int},
     ptr::{NonNull, null_mut},
     sync::Arc,
     time::{Instant, SystemTime},
@@ -14,17 +14,22 @@ use std::{
 
 use super::{
     abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},
-    handles::{NpcapHandle, PromiscuousMode, open_handle},
+    handles::{NpcapHandle, PromiscuousMode, create_handle, open_handle, reported_precision},
 };
 use crate::{
     Error,
-    capture::{Limits, Metadata},
+    capture::{
+        Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
+    },
     interface::Id as InterfaceId,
     platform::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
-    platform::pcap_common::{canonical_link_type, validate_effective_snapshot_length},
+    platform::pcap_common::{
+        canonical_link_type, realize_settings, timestamp_source_of_value,
+        validate_effective_snapshot_length,
+    },
 };
 use bytes::Bytes;
 
@@ -34,6 +39,7 @@ pub(crate) fn open_capture(
     capture_filter: Option<&str>,
     netmask: Option<u32>,
     promiscuous: bool,
+    native: &NativeSettings,
 ) -> Result<NativeCaptureParts, Error> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| Error::InvalidCaptureQueueLimit {
@@ -46,7 +52,7 @@ pub(crate) fn open_capture(
     } else {
         PromiscuousMode::Disabled
     };
-    let handle = open_handle(interface, snap_length, promiscuous_mode)?;
+    let handle = open_handle(interface, snap_length, promiscuous_mode, native)?;
     if let Some(filter) = capture_filter {
         install_capture_filter(
             &handle,
@@ -77,20 +83,108 @@ pub(crate) fn open_capture(
         limits.snap_length,
         reported_snap_length,
     )?;
+    let (native, timestamp_precision) =
+        realize_settings("Npcap", interface, native, reported_precision(&handle))?;
     let interrupt = Arc::new(NpcapInterrupt(Arc::clone(&handle)));
     Ok(NativeCaptureParts {
         source: Box::new(NpcapCaptureSource {
             handle,
             snap_length,
+            timestamp_precision,
         }),
         interrupt,
         metadata: Metadata {
             interface: interface.clone(),
             link_type,
             snap_length,
-            native: Default::default(),
+            native,
         },
     })
+}
+
+/// The timestamp types the loaded Npcap runtime advertises for this
+/// interface, read from a created-but-not-activated handle.
+pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
+    let handle = create_handle(interface)?;
+    let Some(list_types) = handle.api.pcap_list_tstamp_types else {
+        return Err(Error::UnsupportedCaptureSetting {
+            setting: "timestamp_source",
+            interface: interface.name.clone(),
+            message: "the loaded Npcap runtime does not export pcap_list_tstamp_types".into(),
+        });
+    };
+    let mut list: *mut c_int = null_mut();
+    // SAFETY: handle is a live unactivated capture; Npcap fills the writable
+    // out-pointer with an allocation pcap_free_tstamp_types owns.
+    let count = unsafe { list_types(handle.raw.as_ptr(), &mut list) };
+    if count < 0 {
+        return Err(Error::Capture {
+            message: format!(
+                "Npcap could not enumerate timestamp types for {}: {}",
+                interface.name,
+                handle.error_message()
+            ),
+            source: None,
+        });
+    }
+    let count = usize::try_from(count).unwrap_or(0);
+    let free = handle.api.pcap_free_tstamp_types;
+    if count > MAX_TIMESTAMP_TYPES {
+        if let Some(free) = free {
+            // SAFETY: list is a live Npcap allocation released exactly once.
+            unsafe { free(list) };
+        }
+        return Err(Error::Capture {
+            message: format!(
+                "Npcap reported {count} timestamp types for {}, above the {MAX_TIMESTAMP_TYPES} bound",
+                interface.name
+            ),
+            source: None,
+        });
+    }
+    // SAFETY: list points to `count` consecutive c_int values Npcap owns;
+    // they are copied out before the single pcap_free_tstamp_types call.
+    let values = unsafe { std::slice::from_raw_parts(list, count) }.to_vec();
+    if let Some(free) = free {
+        // SAFETY: list is the unchanged Npcap allocation from above.
+        unsafe { free(list) };
+    }
+    Ok(values
+        .into_iter()
+        .map(|value| {
+            let name = handle.api.pcap_tstamp_type_val_to_name.and_then(|name| {
+                // SAFETY: the function returns a static NUL-terminated string
+                // or NULL; any text is copied inside this call.
+                unsafe { tstamp_type_string(name(value)) }
+            });
+            let description = handle
+                .api
+                .pcap_tstamp_type_val_to_description
+                .and_then(|describe| {
+                    // SAFETY: same contract as the name lookup.
+                    unsafe { tstamp_type_string(describe(value)) }
+                });
+            TimestampType {
+                value,
+                name,
+                description,
+                source: timestamp_source_of_value(value),
+            }
+        })
+        .collect())
+}
+
+/// Copies a static Npcap string, returning `None` for a NULL or empty one.
+unsafe fn tstamp_type_string(raw: *const std::ffi::c_char) -> Option<String> {
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: `raw` is NULL-checked above and points to a NUL-terminated
+    // string Npcap owns statically; the copy happens inside this call.
+    let value = unsafe { CStr::from_ptr(raw) }
+        .to_string_lossy()
+        .into_owned();
+    (!value.is_empty()).then_some(value)
 }
 
 fn install_capture_filter(
@@ -147,6 +241,9 @@ fn install_capture_filter(
 struct NpcapCaptureSource {
     handle: Arc<NpcapHandle>,
     snap_length: usize,
+    /// The fraction unit the backend delivers in `timestamp.tv_usec`; never
+    /// assumed.
+    timestamp_precision: TimestampPrecision,
 }
 
 impl NativeCaptureSource for NpcapCaptureSource {
@@ -174,6 +271,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                 let timestamp = system_time(
                     header.timestamp.tv_sec as i64,
                     header.timestamp.tv_usec as i64,
+                    self.timestamp_precision,
                 )?;
                 let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
                 let captured_length = header.captured_length as usize;

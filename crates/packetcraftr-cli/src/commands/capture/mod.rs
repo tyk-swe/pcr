@@ -86,6 +86,12 @@ pub(super) fn run(
     }
     let limits = args.limits.into_limits();
     limits.validate().map_err(CliError::classified)?;
+    let native = net::capture::NativeSettings {
+        buffer_size: args.capture_buffer_bytes,
+        timestamp_source: args.timestamp_source.map(Into::into),
+        timestamp_precision: args.timestamp_precision.map(Into::into),
+    };
+    native.validate(&limits).map_err(CliError::classified)?;
     let registry = args.decode.registry()?;
     let projector = if args.fields.is_empty() {
         None
@@ -157,7 +163,7 @@ pub(super) fn run(
         limits,
         filter: args.capture_filter,
         promiscuous: args.promiscuous,
-        native: Default::default(),
+        native,
     };
     rendering::run(
         &net::capture::SystemProvider,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::command_options::{CaptureLimitsArgs, Captured, DecodeArgs, TrafficBudgetArgs};
+use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
 
@@ -19,6 +20,15 @@ readiness before delivery; shutdown and loss are reported per interface. Output
 frame.interface values are zero-based capture IDs in selected-interface order;
 the completion report maps them to native names/indexes. Frames retain capture
 timestamps and fair delivery order; cross-interface timestamp ordering is not promised.
+
+--capture-buffer-bytes sizes the kernel/driver capture buffer per interface,
+which is separate from the PacketcraftR queue that --max-queue-frames and
+--max-captured-bytes bound. --timestamp-source selects a timestamp type the
+interface advertises (`interfaces --timestamp-types` lists them); only types
+synchronized with the system clock are selectable. --timestamp-precision asks
+for microsecond or nanosecond timestamp fractions. Every explicit setting is
+applied before the backend activates or the capture fails with a typed error;
+reports distinguish requested, applied, and confirmed-effective values.
 
 --write saves PCAPNG while text/JSON/NDJSON report progress and completion. JSON
 requires --write. --rotate-bytes counts uncompressed capture bytes including all
@@ -81,6 +91,19 @@ pub(crate) struct Args {
     /// Enable promiscuous capture mode.
     #[arg(long)]
     pub(crate) promiscuous: bool,
+    /// Kernel/driver capture-buffer size in bytes, applied per interface before
+    /// activation. Unset keeps the backend default; this is not the PacketcraftR
+    /// capture queue, which --max-queue-frames/--max-captured-bytes bound.
+    #[arg(long, value_name = "BYTES")]
+    pub(crate) capture_buffer_bytes: Option<usize>,
+    /// Packet timestamp source, applied per interface before activation; the
+    /// interfaces command lists the types an interface advertises. Only sources
+    /// synchronized with the system clock are selectable.
+    #[arg(long, value_enum)]
+    pub(crate) timestamp_source: Option<TimestampSourceArg>,
+    /// Packet timestamp fraction precision delivered by the backend.
+    #[arg(long, value_enum)]
+    pub(crate) timestamp_precision: Option<TimestampPrecisionArg>,
     /// Overall capture window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
     pub(crate) timeout_ms: u64,
@@ -105,4 +128,54 @@ pub(crate) struct Args {
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
     pub(crate) budgets: TrafficBudgetArgs<Captured>,
+}
+
+/// The timestamp sources the capture contract can represent, spelled the same
+/// as the libpcap type names discovery reports.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum TimestampSourceArg {
+    /// Host-provided timestamps of unspecified characteristics (the default).
+    #[value(name = "host", alias = "host-default")]
+    Host,
+    /// Low-precision host timestamps synchronized with the system clock.
+    #[value(name = "host_lowprec", alias = "host-lowprec")]
+    HostLowPrec,
+    /// High-precision host timestamps synchronized with the system clock.
+    #[value(name = "host_hiprec", alias = "host-hiprec")]
+    HostHighPrec,
+    /// Adapter-provided high-precision timestamps synchronized with the
+    /// system clock.
+    #[value(name = "adapter")]
+    Adapter,
+}
+
+impl From<TimestampSourceArg> for TimestampSource {
+    fn from(value: TimestampSourceArg) -> Self {
+        match value {
+            TimestampSourceArg::Host => Self::Host,
+            TimestampSourceArg::HostLowPrec => Self::HostLowPrec,
+            TimestampSourceArg::HostHighPrec => Self::HostHighPrec,
+            TimestampSourceArg::Adapter => Self::Adapter,
+        }
+    }
+}
+
+/// The timestamp fraction precisions a backend can deliver.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum TimestampPrecisionArg {
+    /// Microsecond fractions (the default).
+    #[value(name = "micro")]
+    Micro,
+    /// Nanosecond fractions.
+    #[value(name = "nano")]
+    Nano,
+}
+
+impl From<TimestampPrecisionArg> for TimestampPrecision {
+    fn from(value: TimestampPrecisionArg) -> Self {
+        match value {
+            TimestampPrecisionArg::Micro => Self::Micro,
+            TimestampPrecisionArg::Nano => Self::Nano,
+        }
+    }
 }

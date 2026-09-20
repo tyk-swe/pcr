@@ -75,6 +75,10 @@ struct Provider {
     requests: Mutex<Vec<capture::Request>>,
     shutdowns: Vec<Arc<AtomicUsize>>,
     fail_arm: Option<usize>,
+    /// When set, the fixture reports an all-default realization even when the
+    /// request asked for native settings — the behavior of a provider that
+    /// silently drops them.
+    ignores_native: bool,
 }
 impl Provider {
     fn new(scripts: Vec<Script>) -> Self {
@@ -84,7 +88,24 @@ impl Provider {
             requests: Mutex::new(Vec::new()),
             shutdowns: (0..n).map(|_| Arc::new(AtomicUsize::new(0))).collect(),
             fail_arm: None,
+            ignores_native: false,
         }
+    }
+}
+/// The honest fixture answer: each request is echoed as requested and applied
+/// while the unqueryable effective value stays unknown.
+fn realized(native: &capture::NativeSettings) -> capture::RealizedSettings {
+    fn realized<T: Copy>(value: Option<T>) -> capture::Realized<T> {
+        capture::Realized {
+            requested: value,
+            applied: value,
+            effective: None,
+        }
+    }
+    capture::RealizedSettings {
+        buffer_size: realized(native.buffer_size),
+        timestamp_source: realized(native.timestamp_source),
+        timestamp_precision: realized(native.timestamp_precision),
     }
 }
 impl capture::Provider for Provider {
@@ -104,7 +125,11 @@ impl capture::Provider for Provider {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
                 snap_length: request.limits.snap_length,
-                native: Default::default(),
+                native: if self.ignores_native {
+                    Default::default()
+                } else {
+                    realized(&request.native)
+                },
             },
             script: self.scripts.lock().unwrap().pop_front().unwrap(),
             shutdowns: self.shutdowns[index].clone(),
@@ -238,6 +263,64 @@ fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
             .iter()
             .all(|count| count.load(Ordering::SeqCst) == 1)
     );
+}
+#[test]
+fn native_settings_reach_every_partitioned_request_and_report_per_source() {
+    let provider = Provider::new(vec![Script::default(), Script::default()]);
+    let mut request = request(2);
+    request.native = capture::NativeSettings {
+        buffer_size: Some(2 * 1024 * 1024),
+        timestamp_source: Some(capture::TimestampSource::Host),
+        timestamp_precision: Some(capture::TimestampPrecision::Nano),
+    };
+    let mut group = Group::arm(&provider, &request, None).unwrap();
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|r| r.native == request.native));
+    }
+    group.wait_ready(Duration::from_secs(1)).unwrap();
+    let sources = group.shutdown().unwrap();
+    for source in &sources {
+        let native = &source.metadata.native;
+        assert!(source.metadata_valid);
+        assert_eq!(native.buffer_size.requested, Some(2 * 1024 * 1024));
+        assert_eq!(native.buffer_size.applied, Some(2 * 1024 * 1024));
+        assert_eq!(native.buffer_size.effective, None);
+        assert_eq!(
+            native.timestamp_source.applied,
+            Some(capture::TimestampSource::Host)
+        );
+        assert_eq!(
+            native.timestamp_precision.applied,
+            Some(capture::TimestampPrecision::Nano)
+        );
+    }
+}
+#[test]
+fn a_provider_that_ignores_native_settings_fails_activation_metadata() {
+    let mut provider = Provider::new(vec![Script::default()]);
+    provider.ignores_native = true;
+    let mut request = request(1);
+    request.native.buffer_size = Some(2 * 1024 * 1024);
+    let error = match Group::arm(&provider, &request, None) {
+        Err(error) => error,
+        Ok(_) => panic!("an ignored native setting must fail the contract check"),
+    };
+    assert!(matches!(*error.cause, Cause::Contract { index: 0, .. }));
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+}
+#[test]
+fn invalid_native_settings_are_rejected_before_arming() {
+    let provider = Provider::new(vec![]);
+    let mut invalid = request(1);
+    invalid.native.buffer_size = Some(0);
+    assert!(Group::arm(&provider, &invalid, None).is_err());
+    let mut invalid = request(1);
+    // Smaller than one configured snapshot cannot hold a frame.
+    invalid.native.buffer_size = Some(16);
+    assert!(Group::arm(&provider, &invalid, None).is_err());
+    assert!(provider.requests.lock().unwrap().is_empty());
 }
 #[test]
 fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_readiness() {

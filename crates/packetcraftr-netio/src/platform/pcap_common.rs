@@ -2,11 +2,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Rules shared by the libpcap and Npcap backends: portable link-type
-//! canonicalization, snapshot-length validation, and error phrasing.
+//! canonicalization, snapshot-length validation, timestamp-source value
+//! mapping, and error phrasing.
+
+use std::ffi::c_int;
 
 use packetcraftr_core::frame::LinkType;
 
-use crate::{Error, interface::Id as InterfaceId};
+use crate::{
+    Error,
+    capture::{NativeSettings, Realized, RealizedSettings, TimestampPrecision, TimestampSource},
+    interface::Id as InterfaceId,
+};
+
+// PCAP_TSTAMP_* values every pcap-API backend shares.
+pub(crate) const PCAP_TSTAMP_HOST: c_int = 0;
+pub(crate) const PCAP_TSTAMP_HOST_LOWPREC: c_int = 1;
+pub(crate) const PCAP_TSTAMP_HOST_HIPREC: c_int = 2;
+pub(crate) const PCAP_TSTAMP_ADAPTER: c_int = 3;
+pub(crate) const PCAP_TSTAMP_PRECISION_MICRO: c_int = 0;
+pub(crate) const PCAP_TSTAMP_PRECISION_NANO: c_int = 1;
+
+// Setter results that mean "the requested value cannot be applied": the
+// activation-status PCAP_ERROR_* codes plus the warning pcap_set_tstamp_type
+// returns when the device refuses the type and keeps its default.
+pub(crate) const PCAP_WARNING_TSTAMP_TYPE_NOTSUP: c_int = 3;
+pub(crate) const PCAP_ERROR_CANTSET_TSTAMP_TYPE: c_int = -10;
+pub(crate) const PCAP_ERROR_TSTAMP_PRECISION_NOTSUP: c_int = -12;
 
 const DLT_ATM_RFC1483: u32 = 11;
 const LINKTYPE_ATM_RFC1483: LinkType = LinkType(100);
@@ -40,6 +62,151 @@ pub(crate) fn canonical_link_type(datalink: u32) -> LinkType {
         DLT_PKTAP => LINKTYPE_PKTAP,
         _ => LinkType(datalink),
     }
+}
+
+/// The pcap API value selecting a timestamp source.
+pub(crate) const fn timestamp_source_value(source: TimestampSource) -> c_int {
+    match source {
+        TimestampSource::Host => PCAP_TSTAMP_HOST,
+        TimestampSource::HostLowPrec => PCAP_TSTAMP_HOST_LOWPREC,
+        TimestampSource::HostHighPrec => PCAP_TSTAMP_HOST_HIPREC,
+        TimestampSource::Adapter => PCAP_TSTAMP_ADAPTER,
+    }
+}
+
+/// The pcap API value selecting a timestamp fraction precision.
+pub(crate) const fn timestamp_precision_value(precision: TimestampPrecision) -> c_int {
+    match precision {
+        TimestampPrecision::Micro => PCAP_TSTAMP_PRECISION_MICRO,
+        TimestampPrecision::Nano => PCAP_TSTAMP_PRECISION_NANO,
+    }
+}
+
+/// Maps an advertised timestamp-type value to the source enum; `None` for
+/// types the frame-time contract cannot represent, including every
+/// unsynchronized clock domain.
+pub(crate) const fn timestamp_source_of_value(value: c_int) -> Option<TimestampSource> {
+    match value {
+        PCAP_TSTAMP_HOST => Some(TimestampSource::Host),
+        PCAP_TSTAMP_HOST_LOWPREC => Some(TimestampSource::HostLowPrec),
+        PCAP_TSTAMP_HOST_HIPREC => Some(TimestampSource::HostHighPrec),
+        PCAP_TSTAMP_ADAPTER => Some(TimestampSource::Adapter),
+        _ => None,
+    }
+}
+
+/// Maps a confirmed precision value; `None` for anything outside the two
+/// precisions the API defines.
+pub(crate) const fn timestamp_precision_of_value(value: c_int) -> Option<TimestampPrecision> {
+    match value {
+        PCAP_TSTAMP_PRECISION_MICRO => Some(TimestampPrecision::Micro),
+        PCAP_TSTAMP_PRECISION_NANO => Some(TimestampPrecision::Nano),
+        _ => None,
+    }
+}
+
+/// Classifies a `pcap_set_*` status from before activation. Known
+/// "unsupported" results become [`Error::UnsupportedCaptureSetting`]; every
+/// other non-zero status — including unexpected warnings, which never confirm
+/// the request was honored — becomes a backend failure carrying the
+/// diagnostic.
+pub(crate) fn check_setting_status(
+    backend: &str,
+    interface: &InterfaceId,
+    operation: &'static str,
+    setting: &'static str,
+    requested: &str,
+    status: c_int,
+    diagnostic: &str,
+) -> Result<(), Error> {
+    if status == 0 {
+        return Ok(());
+    }
+    if matches!(
+        status,
+        PCAP_WARNING_TSTAMP_TYPE_NOTSUP
+            | PCAP_ERROR_CANTSET_TSTAMP_TYPE
+            | PCAP_ERROR_TSTAMP_PRECISION_NOTSUP
+    ) {
+        return Err(Error::UnsupportedCaptureSetting {
+            setting,
+            interface: interface.name.clone(),
+            message: format!(
+                "{backend} rejected {requested} through {operation} (status {status}): {diagnostic}"
+            )
+            .into(),
+        });
+    }
+    Err(Error::Capture {
+        message: format!(
+            "{backend} {operation} failed for {} with status {status}: {diagnostic}",
+            interface.name
+        ),
+        source: None,
+    })
+}
+
+/// Assembles a session's [`RealizedSettings`] after activation: every request
+/// that reached this point was applied during configuration, and the
+/// reported precision — when the backend can produce one — becomes the
+/// confirmed effective value and the fraction unit the read path must use.
+/// The pcap API offers no post-activation query for the buffer size or the
+/// timestamp type, so those stay unconfirmed. Returns the realized metadata
+/// plus the delivered precision.
+pub(crate) fn realize_settings(
+    backend: &str,
+    interface: &InterfaceId,
+    settings: &NativeSettings,
+    reported_precision: Option<c_int>,
+) -> Result<(RealizedSettings, TimestampPrecision), Error> {
+    let confirmed = reported_precision
+        .map(|value| {
+            timestamp_precision_of_value(value).ok_or_else(|| Error::Capture {
+                message: format!(
+                    "{backend} reported unknown timestamp precision {value} for {}",
+                    interface.name
+                ),
+                source: None,
+            })
+        })
+        .transpose()?;
+    if let (Some(applied), Some(actual)) = (settings.timestamp_precision, confirmed)
+        && applied != actual
+    {
+        return Err(Error::Capture {
+            message: format!(
+                "{backend} confirmed {actual} timestamp precision after accepting {applied} for {}",
+                interface.name
+            ),
+            source: None,
+        });
+    }
+    // The backend delivers fractions in the confirmed precision when it can
+    // report one; an applied request is authoritative otherwise, and the API
+    // default is microseconds.
+    let delivered = confirmed
+        .or(settings.timestamp_precision)
+        .unwrap_or_default();
+    Ok((
+        RealizedSettings {
+            buffer_size: Realized {
+                requested: settings.buffer_size,
+                applied: settings.buffer_size,
+                effective: None,
+            },
+            timestamp_source: Realized {
+                requested: settings.timestamp_source,
+                applied: settings.timestamp_source,
+                effective: None,
+            },
+            timestamp_precision: Realized {
+                requested: settings.timestamp_precision,
+                applied: settings.timestamp_precision,
+                effective: confirmed,
+            },
+        },
+        delivered,
+    ))
 }
 
 pub(crate) fn validate_effective_snapshot_length(
@@ -147,6 +314,126 @@ mod tests {
         ] {
             assert!(!is_permission_denied(message), "{message}");
         }
+    }
+
+    #[test]
+    fn timestamp_values_round_trip_through_the_pcap_abi() {
+        for source in [
+            TimestampSource::Host,
+            TimestampSource::HostLowPrec,
+            TimestampSource::HostHighPrec,
+            TimestampSource::Adapter,
+        ] {
+            assert_eq!(
+                timestamp_source_of_value(timestamp_source_value(source)),
+                Some(source)
+            );
+        }
+        // Unsynchronized and unknown types cannot be selected.
+        for value in [4, 5, -1, 99] {
+            assert_eq!(timestamp_source_of_value(value), None);
+        }
+        for precision in [TimestampPrecision::Micro, TimestampPrecision::Nano] {
+            assert_eq!(
+                timestamp_precision_of_value(timestamp_precision_value(precision)),
+                Some(precision)
+            );
+        }
+        for value in [-1, 2, 99] {
+            assert_eq!(timestamp_precision_of_value(value), None);
+        }
+    }
+
+    #[test]
+    fn setting_statuses_classify_unsupported_values() {
+        assert!(
+            check_setting_status("fixture", &interface(), "pcap_set_x", "setting", "v", 0, "")
+                .is_ok()
+        );
+        for status in [
+            PCAP_WARNING_TSTAMP_TYPE_NOTSUP,
+            PCAP_ERROR_CANTSET_TSTAMP_TYPE,
+            PCAP_ERROR_TSTAMP_PRECISION_NOTSUP,
+        ] {
+            let error = check_setting_status(
+                "fixture",
+                &interface(),
+                "pcap_set_x",
+                "setting",
+                "v",
+                status,
+                "no",
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, Error::UnsupportedCaptureSetting { .. }),
+                "status {status}"
+            );
+        }
+        for status in [1, -1, -99] {
+            let error = check_setting_status(
+                "fixture",
+                &interface(),
+                "pcap_set_x",
+                "setting",
+                "v",
+                status,
+                "no",
+            )
+            .unwrap_err();
+            assert!(matches!(error, Error::Capture { .. }), "status {status}");
+        }
+    }
+
+    #[test]
+    fn realized_settings_separate_requested_applied_and_confirmed() {
+        let settings = NativeSettings {
+            buffer_size: Some(4 * 1024 * 1024),
+            timestamp_source: Some(TimestampSource::HostLowPrec),
+            timestamp_precision: Some(TimestampPrecision::Nano),
+        };
+        let (realized, delivered) =
+            realize_settings("fixture", &interface(), &settings, Some(1)).unwrap();
+        assert_eq!(realized.buffer_size.requested, Some(4 * 1024 * 1024));
+        assert_eq!(realized.buffer_size.applied, Some(4 * 1024 * 1024));
+        // Neither pcap-family backend can query the allocated buffer.
+        assert_eq!(realized.buffer_size.effective, None);
+        assert_eq!(
+            realized.timestamp_source.applied,
+            Some(TimestampSource::HostLowPrec)
+        );
+        assert_eq!(realized.timestamp_source.effective, None);
+        assert_eq!(
+            realized.timestamp_precision.effective,
+            Some(TimestampPrecision::Nano)
+        );
+        assert_eq!(delivered, TimestampPrecision::Nano);
+    }
+
+    #[test]
+    fn realized_settings_reject_a_confirmed_precision_mismatch() {
+        let settings = NativeSettings {
+            timestamp_precision: Some(TimestampPrecision::Nano),
+            ..Default::default()
+        };
+        assert!(matches!(
+            realize_settings("fixture", &interface(), &settings, Some(0)),
+            Err(Error::Capture { .. })
+        ));
+        // An unreported or unknown precision cannot confirm anything.
+        let (_, delivered) = realize_settings("fixture", &interface(), &settings, None).unwrap();
+        assert_eq!(delivered, TimestampPrecision::Nano);
+        let (realized, delivered) =
+            realize_settings("fixture", &interface(), &NativeSettings::default(), Some(0)).unwrap();
+        assert_eq!(delivered, TimestampPrecision::Micro);
+        assert_eq!(
+            realized.timestamp_precision.effective,
+            Some(TimestampPrecision::Micro)
+        );
+        assert!(matches!(
+            realize_settings("fixture", &interface(), &NativeSettings::default(), Some(7)),
+            Err(Error::Capture { .. })
+        ));
     }
 
     #[test]

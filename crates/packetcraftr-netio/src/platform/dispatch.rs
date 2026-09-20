@@ -128,7 +128,10 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
 pub(crate) fn system_capture(
     request: &capture::Request,
 ) -> Result<Box<dyn capture::Session>, Error> {
-    request.limits.validate()?;
+    request
+        .limits
+        .validate()
+        .and_then(|()| request.native.validate(&request.limits))?;
     let validated_limits = request.limits;
     if let Some(filter) = request.filter.as_deref() {
         super::capture_filter::validate(&request.interface, filter)?;
@@ -142,6 +145,7 @@ pub(crate) fn system_capture(
         request.filter.as_deref(),
         netmask,
         request.promiscuous,
+        &request.native,
     )?;
     Ok(Box::new(super::live_capture::NativeCaptureSession::spawn(
         parts,
@@ -157,6 +161,25 @@ pub(crate) fn system_capture(
         cfg!(feature = "native-layer2"),
         "native-layer2",
         "packet capture",
+    ))
+}
+
+#[cfg(native_layer2)]
+pub(crate) fn capture_timestamp_types(
+    interface: &InterfaceId,
+) -> Result<Vec<capture::TimestampType>, Error> {
+    let interface = super::interface_identity::validate_current_interface_identity(interface)?;
+    layer2_backend::timestamp_types(&interface.id)
+}
+
+#[cfg(not(native_layer2))]
+pub(crate) fn capture_timestamp_types(
+    _interface: &InterfaceId,
+) -> Result<Vec<capture::TimestampType>, Error> {
+    Err(unsupported(
+        cfg!(feature = "native-layer2"),
+        "native-layer2",
+        "timestamp type discovery",
     ))
 }
 

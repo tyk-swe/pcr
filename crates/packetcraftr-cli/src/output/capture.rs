@@ -93,6 +93,12 @@ pub struct Source {
     pub native_interface: packetcraftr_netio::interface::Id,
     pub link_type: u32,
     pub snap_length: usize,
+    /// The native driver-buffer/timestamp settings this source realized:
+    /// requested values the backend applied, and — only where the backend can
+    /// confirm — the effective value. `effective` null means unreported, never
+    /// zero or default. Absent when the backend reported nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capture_settings: Option<packetcraftr_netio::capture::RealizedSettings>,
     pub queue_frames: usize,
     pub queue_bytes: usize,
     pub overflow_policy: String,
@@ -116,6 +122,11 @@ impl From<&packetcraftr::capture::Source> for Source {
             native_interface: native.metadata.interface.clone(),
             link_type: native.metadata.link_type.0,
             snap_length: native.metadata.snap_length,
+            capture_settings: native
+                .metadata
+                .native
+                .reported()
+                .then_some(native.metadata.native),
             queue_frames: native.limits.max_frames,
             queue_bytes: native.limits.max_bytes,
             overflow_policy: native.limits.overflow_policy.to_string(),

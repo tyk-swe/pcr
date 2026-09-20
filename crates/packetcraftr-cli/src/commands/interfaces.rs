@@ -7,6 +7,8 @@ use packetcraftr_netio as net;
 
 use packetcraftr_cli::output;
 
+use packetcraftr_netio::capture::Provider as _;
+
 use crate::errors::CliError;
 use crate::rendering::optional_display;
 use crate::system::{InterfaceSelector, select_interfaces};
@@ -21,12 +23,30 @@ pub(crate) struct Args {
     /// Only list the interface with this name or numeric index.
     #[arg(long, value_name = "NAME_OR_INDEX")]
     pub(crate) interface: Option<String>,
+    /// List the packet timestamp types the capture backend advertises for each
+    /// interface; types without a source are not selectable for capture.
+    #[arg(long)]
+    pub(crate) timestamp_types: bool,
 }
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let selector = InterfaceSelector::parse_optional(arguments.interface.as_deref())?;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
-    let result = output::interfaces::Report::new(interfaces);
+    let mut result = output::interfaces::Report::new(interfaces);
+    if arguments.timestamp_types {
+        let provider = net::capture::SystemProvider;
+        for interface in &mut result.interfaces {
+            let id = net::interface::Id {
+                name: interface.name.clone(),
+                index: interface.index,
+            };
+            interface.timestamp_types = Some(
+                provider
+                    .timestamp_types(&id)
+                    .map_err(CliError::classified)?,
+            );
+        }
+    }
     super::render_aggregate_rows(
         output::contract::Command::Interfaces,
         format,
@@ -38,8 +58,30 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
 
 /// One text row per interface, spelling every field the JSON document carries.
 fn interface_line(interface: &output::network::Interface) -> String {
+    let timestamp_types = interface.timestamp_types.as_deref().map(|types| {
+        if types.is_empty() {
+            return "none".to_owned();
+        }
+        types
+            .iter()
+            .map(|timestamp_type| {
+                let name = timestamp_type.name.as_deref().unwrap_or("<unnamed>");
+                // Types outside the representable clock domains cannot be
+                // selected for capture.
+                if timestamp_type.source.is_some() {
+                    name.to_owned()
+                } else {
+                    format!("{name}(unselectable)")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    let types_field = timestamp_types
+        .map(|types| format!(" timestamp_types={types}"))
+        .unwrap_or_default();
     format!(
-        "{} (index {}): {} mtu={} capability={} link_type={} mac={} flags={} description={}",
+        "{} (index {}): {} mtu={} capability={} link_type={} mac={} flags={} description={}{}",
         interface.name,
         interface.index,
         interface.addresses.join(", "),
@@ -49,6 +91,7 @@ fn interface_line(interface: &output::network::Interface) -> String {
         optional_display(interface.mac.as_deref()),
         interface_flags(&interface.flags),
         optional_display(interface.description.as_deref()),
+        types_field,
     )
 }
 

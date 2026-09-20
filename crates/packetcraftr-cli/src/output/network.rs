@@ -37,6 +37,10 @@ pub struct Interface {
     pub mtu: Option<u32>,
     pub capability: Capability,
     pub link_type: u32,
+    /// Timestamp types the capture backend advertises for this interface;
+    /// present only when `interfaces --timestamp-types` enumerated them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp_types: Option<Vec<packetcraftr_netio::capture::TimestampType>>,
 }
 
 impl From<packetcraftr_netio::interface::Info> for Interface {
@@ -55,6 +59,7 @@ impl From<packetcraftr_netio::interface::Info> for Interface {
             mtu: interface.mtu,
             capability: interface.capability,
             link_type: interface.link_type.0,
+            timestamp_types: None,
         }
     }
 }

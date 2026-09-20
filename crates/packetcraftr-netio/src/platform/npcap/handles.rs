@@ -18,7 +18,14 @@ use super::{
     error::{error_buffer_message, map_activation_error, map_open_message},
     loader::{NpcapApi, npcap_api, npcap_device_name},
 };
-use crate::{Error, interface::Id as InterfaceId};
+use crate::{
+    Error,
+    capture::NativeSettings,
+    interface::Id as InterfaceId,
+    platform::pcap_common::{
+        check_setting_status, timestamp_precision_value, timestamp_source_value,
+    },
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum PromiscuousMode {
@@ -73,11 +80,9 @@ impl Drop for NpcapHandle {
     }
 }
 
-pub(super) fn open_handle(
-    interface: &InterfaceId,
-    snap_length: c_int,
-    promiscuous_mode: PromiscuousMode,
-) -> Result<Arc<NpcapHandle>, Error> {
+/// Creates an unactivated handle for interface metadata queries; the `Drop`
+/// impl releases it through `pcap_close` like an activated one.
+pub(super) fn create_handle(interface: &InterfaceId) -> Result<Arc<NpcapHandle>, Error> {
     let api = npcap_api()?;
     let device_name = npcap_device_name(interface)?;
     let device_name = CString::new(device_name).map_err(|_| Error::Device {
@@ -91,7 +96,16 @@ pub(super) fn open_handle(
     let raw = unsafe { (api.pcap_create)(device_name.as_ptr(), error_buffer.as_mut_ptr()) };
     let raw = NonNull::new(raw)
         .ok_or_else(|| map_open_message(interface, error_buffer_message(&error_buffer)))?;
-    let handle = Arc::new(NpcapHandle { api, raw });
+    Ok(Arc::new(NpcapHandle { api, raw }))
+}
+
+pub(super) fn open_handle(
+    interface: &InterfaceId,
+    snap_length: c_int,
+    promiscuous_mode: PromiscuousMode,
+    native: &NativeSettings,
+) -> Result<Arc<NpcapHandle>, Error> {
+    let handle = create_handle(interface)?;
 
     set_integer_option(
         &handle,
@@ -121,6 +135,46 @@ pub(super) fn open_handle(
         handle.api.pcap_set_immediate_mode,
         1,
     )?;
+    if let Some(buffer_size) = native.buffer_size {
+        let size = c_int::try_from(buffer_size).map_err(|_| Error::InvalidCaptureSetting {
+            field: "buffer_size",
+            message: format!(
+                "exceeds the native maximum of {} bytes",
+                crate::capture::MAX_NATIVE_BUFFER_SIZE
+            ),
+        })?;
+        set_native_option(
+            &handle,
+            interface,
+            "pcap_set_buffer_size",
+            "buffer_size",
+            &buffer_size.to_string(),
+            handle.api.pcap_set_buffer_size,
+            size,
+        )?;
+    }
+    if let Some(source) = native.timestamp_source {
+        set_native_option(
+            &handle,
+            interface,
+            "pcap_set_tstamp_type",
+            "timestamp_source",
+            source.as_str(),
+            handle.api.pcap_set_tstamp_type,
+            timestamp_source_value(source),
+        )?;
+    }
+    if let Some(precision) = native.timestamp_precision {
+        set_native_option(
+            &handle,
+            interface,
+            "pcap_set_tstamp_precision",
+            "timestamp_precision",
+            precision.as_str(),
+            handle.api.pcap_set_tstamp_precision,
+            timestamp_precision_value(precision),
+        )?;
+    }
     // SAFETY: all pre-activation options are complete and this handle has not
     // previously been activated.
     let activation = unsafe { (handle.api.pcap_activate)(handle.raw.as_ptr()) };
@@ -162,6 +216,51 @@ fn set_integer_option(
             source: None,
         })
     }
+}
+
+/// An optional configuration export: a runtime without the symbol rejects the
+/// explicit request typed, and a loaded symbol's status is classified the same
+/// way the libpcap backend classifies it.
+fn set_native_option(
+    handle: &NpcapHandle,
+    interface: &InterfaceId,
+    operation: &'static str,
+    setting: &'static str,
+    requested: &str,
+    function: Option<PcapSetInteger>,
+    value: c_int,
+) -> Result<(), Error> {
+    let Some(function) = function else {
+        return Err(Error::UnsupportedCaptureSetting {
+            setting,
+            interface: interface.name.clone(),
+            message: format!("the loaded Npcap runtime does not export {operation}").into(),
+        });
+    };
+    // SAFETY: function is a pcap_set_* operation with this exact ABI and the
+    // handle has not yet been activated.
+    let status = unsafe { function(handle.raw.as_ptr(), value) };
+    check_setting_status(
+        "Npcap",
+        interface,
+        operation,
+        setting,
+        requested,
+        status,
+        &handle.error_message(),
+    )
+}
+
+/// The timestamp precision an activated handle delivers, when the runtime can
+/// report one.
+pub(super) fn reported_precision(handle: &NpcapHandle) -> Option<c_int> {
+    // SAFETY: handle is activated and live; pcap_get_tstamp_precision only
+    // reads the negotiated precision.
+    handle
+        .api
+        .pcap_get_tstamp_precision
+        .map(|function| unsafe { function(handle.raw.as_ptr()) })
+        .filter(|value| *value >= 0)
 }
 
 #[cfg(test)]

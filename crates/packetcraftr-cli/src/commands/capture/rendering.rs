@@ -357,6 +357,18 @@ fn render_complete(
                 summary.sources.len(),
                 summary.stop_reason
             ))?;
+            for source in &summary.sources {
+                if let Some(settings) = &source.capture_settings {
+                    write_plain_line(format_args!(
+                        "  source {} ({}): buffer_size {} timestamp_source {} timestamp_precision {}",
+                        source.capture_id,
+                        source.native_interface.name,
+                        realized_text(&settings.buffer_size),
+                        realized_text(&settings.timestamp_source),
+                        realized_text(&settings.timestamp_precision),
+                    ))?;
+                }
+            }
             if let Some(files) = &summary.files {
                 for file in &files.files {
                     write_plain_line(format_args!(
@@ -373,6 +385,25 @@ fn render_complete(
         }
         _ => render_diagnostics_stderr(&diagnostics),
     }
+}
+
+/// `requested/applied/effective` in one parenthesized triplet; `default` marks
+/// an unset request, `-` a setting never applied, and `unknown` a value the
+/// backend cannot confirm.
+fn realized_text<T: std::fmt::Display>(
+    realized: &packetcraftr_netio::capture::Realized<T>,
+) -> String {
+    fn field<T: std::fmt::Display>(value: &Option<T>, none: &str) -> String {
+        value
+            .as_ref()
+            .map_or_else(|| none.to_owned(), ToString::to_string)
+    }
+    format!(
+        "(requested={} applied={} effective={})",
+        field(&realized.requested, "default"),
+        field(&realized.applied, "-"),
+        field(&realized.effective, "unknown"),
+    )
 }
 
 #[cfg(test)]

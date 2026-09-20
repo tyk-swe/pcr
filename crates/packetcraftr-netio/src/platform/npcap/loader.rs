@@ -30,8 +30,9 @@ use windows::{
 use super::{
     abi::{
         NPCAP_DEPENDENCY, PCAP_CHAR_ENC_UTF_8, PCAP_ERROR_BUFFER_SIZE, PcapActivate, PcapBreakLoop,
-        PcapClose, PcapCompile, PcapCreate, PcapDatalink, PcapFreeCode, PcapGetError, PcapInit,
-        PcapNextEx, PcapSendPacket, PcapSetFilter, PcapSetInteger, PcapSnapshot, PcapStats,
+        PcapClose, PcapCompile, PcapCreate, PcapDatalink, PcapFreeCode, PcapFreeTstampTypes,
+        PcapGetError, PcapGetInteger, PcapInit, PcapListTstampTypes, PcapNextEx, PcapSendPacket,
+        PcapSetFilter, PcapSetInteger, PcapSnapshot, PcapStats, PcapTstampTypeToStr,
     },
     error::{error_buffer_message, interface_conversion_error},
 };
@@ -45,6 +46,16 @@ pub(super) struct NpcapApi {
     pub(super) pcap_set_promisc: PcapSetInteger,
     pub(super) pcap_set_timeout: PcapSetInteger,
     pub(super) pcap_set_immediate_mode: PcapSetInteger,
+    // Optional capture-configuration exports: a runtime without them still
+    // captures with defaults, while explicit requests fail typed.
+    pub(super) pcap_set_buffer_size: Option<PcapSetInteger>,
+    pub(super) pcap_set_tstamp_type: Option<PcapSetInteger>,
+    pub(super) pcap_set_tstamp_precision: Option<PcapSetInteger>,
+    pub(super) pcap_get_tstamp_precision: Option<PcapGetInteger>,
+    pub(super) pcap_list_tstamp_types: Option<PcapListTstampTypes>,
+    pub(super) pcap_free_tstamp_types: Option<PcapFreeTstampTypes>,
+    pub(super) pcap_tstamp_type_val_to_name: Option<PcapTstampTypeToStr>,
+    pub(super) pcap_tstamp_type_val_to_description: Option<PcapTstampTypeToStr>,
     pub(super) pcap_activate: PcapActivate,
     pub(super) pcap_datalink: PcapDatalink,
     pub(super) pcap_snapshot: PcapSnapshot,
@@ -100,6 +111,16 @@ impl NpcapApi {
             pcap_geterr: PcapGetError,
             pcap_close: PcapClose,
         });
+        load_optional_symbols!(&library, {
+            pcap_set_buffer_size: PcapSetInteger,
+            pcap_set_tstamp_type: PcapSetInteger,
+            pcap_set_tstamp_precision: PcapSetInteger,
+            pcap_get_tstamp_precision: PcapGetInteger,
+            pcap_list_tstamp_types: PcapListTstampTypes,
+            pcap_free_tstamp_types: PcapFreeTstampTypes,
+            pcap_tstamp_type_val_to_name: PcapTstampTypeToStr,
+            pcap_tstamp_type_val_to_description: PcapTstampTypeToStr,
+        });
 
         let mut error_buffer = [0 as c_char; PCAP_ERROR_BUFFER_SIZE];
         // SAFETY: the function pointer came from the pinned DLL and the
@@ -123,6 +144,14 @@ impl NpcapApi {
             pcap_set_promisc,
             pcap_set_timeout,
             pcap_set_immediate_mode,
+            pcap_set_buffer_size,
+            pcap_set_tstamp_type,
+            pcap_set_tstamp_precision,
+            pcap_get_tstamp_precision,
+            pcap_list_tstamp_types,
+            pcap_free_tstamp_types,
+            pcap_tstamp_type_val_to_name,
+            pcap_tstamp_type_val_to_description,
             pcap_activate,
             pcap_datalink,
             pcap_snapshot,
@@ -223,6 +252,22 @@ macro_rules! load_symbols {
     };
 }
 use load_symbols;
+
+/// Binds optional exports the same way, keeping `None` where the loaded
+/// runtime does not export a symbol so callers degrade to typed rejection.
+macro_rules! load_optional_symbols {
+    ($library:expr, { $($symbol:ident : $signature:ty),* $(,)? }) => {
+        $(
+            // SAFETY: the pinned SDK signature applies; an absent export only
+            // means this runtime cannot honor the capability it names.
+            let $symbol = unsafe {
+                load_symbol::<$signature>($library, concat!(stringify!($symbol), "\0").as_bytes())
+                    .ok()
+            };
+        )*
+    };
+}
+use load_optional_symbols;
 
 unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result<T, Error> {
     // SAFETY: the caller supplies the exact SDK signature associated with this

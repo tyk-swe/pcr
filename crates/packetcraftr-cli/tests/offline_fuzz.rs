@@ -73,14 +73,12 @@ fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {
         "2",
     ]);
     assert!(permissive.status.success(), "{:?}", permissive.stderr);
-    let lines: Vec<&str> = std::str::from_utf8(&permissive.stdout)
-        .expect("NDJSON must be UTF-8")
-        .lines()
-        .collect();
-    assert_eq!(lines.len(), 9);
-    let terminal: Value = serde_json::from_str(lines.last().expect("terminal record"))
-        .expect("terminal record must parse");
-    assert_eq!(terminal["event"], "complete");
+    let records = parse_ndjson(&permissive);
+    assert_eq!(records.len(), 9);
+    assert_eq!(
+        records.last().expect("terminal record")["event"],
+        "complete"
+    );
 }
 
 #[test]

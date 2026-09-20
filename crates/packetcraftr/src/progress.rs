@@ -307,6 +307,11 @@ const fn output_classification() -> Classification {
     )
 }
 
+/// Generous bound on fixture release waits so a broken test fails instead of
+/// blocking a worker forever; far above the deadlines under test.
+#[cfg(test)]
+const FIXTURE_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,7 +345,7 @@ mod tests {
         let (started, entered) = mpsc::channel();
         let sink = Sink::new_in(&runtime, move |(): ()| {
             started.send(()).unwrap();
-            wait.recv().unwrap();
+            wait.recv_timeout(FIXTURE_WATCHDOG).unwrap();
             Ok(())
         })
         .unwrap();
@@ -418,7 +423,7 @@ mod tests {
         impl Drop for Captured {
             fn drop(&mut self) {
                 self.started.send(()).unwrap();
-                self.release.recv().unwrap();
+                self.release.recv_timeout(FIXTURE_WATCHDOG).unwrap();
             }
         }
         let runtime = Runtime::new(1);
@@ -456,7 +461,7 @@ mod cancellation_tests {
         let (release, wait) = mpsc::channel();
         let sink = Sink::new_in(&runtime, move |()| {
             entered.send(()).unwrap();
-            wait.recv().unwrap();
+            wait.recv_timeout(FIXTURE_WATCHDOG).unwrap();
             Ok(())
         })
         .unwrap();

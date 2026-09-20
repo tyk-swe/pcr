@@ -146,15 +146,7 @@ impl Collector {
     /// Ports are explicit and bounded; use `[53]` for standard DNS.
     pub fn new(limits: Limits, ports: impl IntoIterator<Item = u16>) -> Result<Self, Error> {
         limits.validate()?;
-        let mut ports: Vec<u16> = ports.into_iter().collect();
-        ports.sort_unstable();
-        ports.dedup();
-        if ports.is_empty() || ports.len() > 256 || ports.contains(&0) {
-            return Err(Error::Limit {
-                field: "dns_ports",
-                limit: 256,
-            });
-        }
+        let ports = application::normalize_ports(ports, "dns_ports")?;
         Ok(Self {
             limits,
             tcp: TcpSources::new(ports.clone(), limits),

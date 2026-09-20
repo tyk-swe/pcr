@@ -284,3 +284,36 @@ fn out_of_order_body_reassembles_once_and_protocol_fields_are_registered() {
     );
     assert!(projection.is_ok());
 }
+
+#[test]
+fn service_ports_normalize_and_bound_distinct_values() {
+    for ports in [
+        Vec::<u16>::new(),
+        vec![0],
+        vec![80, 0],
+        (1..=257u16).collect(),
+    ] {
+        let error = Collector::new(Limits::default(), ports, 1024)
+            .err()
+            .expect("invalid port list must be rejected");
+        assert!(
+            matches!(
+                error,
+                analysis::application::Error::Limit {
+                    field: "http_ports",
+                    limit: 256
+                }
+            ),
+            "{error:?}"
+        );
+    }
+    // Unsorted duplicates collapse before the distinct-port bound, port 65535
+    // is valid, and more than 256 inputs may still normalize within the limit.
+    for ports in [
+        vec![443, 80, 443, 65535],
+        (1..=256u16).collect(),
+        vec![80; 512],
+    ] {
+        assert!(Collector::new(Limits::default(), ports, 1024).is_ok());
+    }
+}

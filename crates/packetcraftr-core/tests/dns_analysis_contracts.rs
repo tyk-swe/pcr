@@ -390,3 +390,53 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
     assert_eq!(summary.unanswered_transactions, 1);
     assert_eq!(summary.orphan_responses, 1);
 }
+
+#[test]
+fn service_ports_normalize_and_bound_distinct_values() {
+    for ports in [
+        Vec::<u16>::new(),
+        vec![0],
+        vec![53, 0],
+        (1..=257u16).collect(),
+    ] {
+        let error = Collector::new(Limits::default(), ports)
+            .err()
+            .expect("invalid port list must be rejected");
+        assert!(
+            matches!(
+                error,
+                analysis::application::Error::Limit {
+                    field: "dns_ports",
+                    limit: 256
+                }
+            ),
+            "{error:?}"
+        );
+    }
+    // Unsorted duplicates collapse before the distinct-port bound, port 65535
+    // is valid, and more than 256 inputs may still normalize within the limit.
+    for ports in [
+        vec![5353, 53, 5353, 65535],
+        (1..=256u16).collect(),
+        vec![53; 512],
+    ] {
+        assert!(Collector::new(Limits::default(), ports).is_ok());
+    }
+    // Limit validation runs before port normalization.
+    let error = Collector::new(
+        Limits {
+            max_messages: 0,
+            ..Limits::default()
+        },
+        vec![0],
+    )
+    .err()
+    .expect("invalid limits must be rejected");
+    assert!(matches!(
+        error,
+        analysis::application::Error::Limit {
+            field: "max_messages",
+            ..
+        }
+    ));
+}

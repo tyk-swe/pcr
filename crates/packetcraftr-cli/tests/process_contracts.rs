@@ -381,7 +381,7 @@ fn root_help_publishes_every_documented_exit_code() {
                 .to_owned()
         })
         .collect::<Vec<_>>();
-    assert_eq!(codes, ["0", "2", "3", "4", "5", "6", "70", "130"]);
+    assert_eq!(codes, ["0", "1", "2", "3", "4", "5", "6", "70", "130"]);
 }
 
 #[test]

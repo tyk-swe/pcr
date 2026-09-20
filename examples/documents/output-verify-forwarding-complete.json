@@ -1,0 +1,179 @@
+{
+  "schema": "packetcraftr.output/v5",
+  "command": "verify-forwarding",
+  "mode": "stream",
+  "sequence": 0,
+  "event": "complete",
+  "status": "success",
+  "result": {
+    "verdict": "pass",
+    "rules": {
+      "identity": [
+        "raw.bytes"
+      ],
+      "preserve": [
+        "ipv4.ttl"
+      ],
+      "expect": []
+    },
+    "assumptions": [
+      "identity is exact equality of the declared decoded field values; a field absent from an observation makes it unkeyable",
+      "timestamps are per-capture evidence only; no clock relationship between the two captures is assumed, and no cross-capture difference is a latency measurement",
+      "correspondence is observational evidence, not proof of device forwarding, loss, duplication, or reordering",
+      "no NAT inference, tunnel reconstruction, stream reassembly, or fragment correspondence is performed"
+    ],
+    "captures": {
+      "ingress": {
+        "path": "pre-forwarding.pcap",
+        "read": 2,
+        "selected": 2,
+        "keyed": 2,
+        "unkeyed": 0,
+        "incomplete": 0
+      },
+      "egress": {
+        "path": "post-forwarding.pcap",
+        "read": 2,
+        "selected": 2,
+        "keyed": 2,
+        "unkeyed": 0,
+        "incomplete": 0
+      }
+    },
+    "summary": {
+      "unique_matches": 2,
+      "reordered_pairs": 0,
+      "ingress_only": 0,
+      "egress_only": 0,
+      "ambiguous_groups": 0,
+      "ambiguous_observations": 0,
+      "checks_evaluated": 2,
+      "checks_satisfied": 2,
+      "checks_violated": 0,
+      "checks_unevaluable": 0
+    },
+    "matches": [
+      {
+        "key": [
+          {
+            "type": "bytes",
+            "value": [
+              104,
+              101,
+              108,
+              108,
+              111
+            ]
+          }
+        ],
+        "ingress": {
+          "frame": 1,
+          "timestamp": {
+            "unix_seconds": 1,
+            "nanoseconds": 250000000
+          },
+          "link_type": 228
+        },
+        "egress": {
+          "frame": 1,
+          "timestamp": {
+            "unix_seconds": 1,
+            "nanoseconds": 250000000
+          },
+          "link_type": 228
+        },
+        "ingress_order": 0,
+        "egress_order": 0,
+        "reordered": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "preserve",
+              "field": "ipv4.ttl"
+            },
+            "outcome": "satisfied",
+            "expected": {
+              "type": "unsigned",
+              "value": 64
+            },
+            "actual": {
+              "type": "unsigned",
+              "value": 64
+            }
+          }
+        ]
+      },
+      {
+        "key": [
+          {
+            "type": "bytes",
+            "value": [
+              119,
+              111,
+              114,
+              108,
+              100
+            ]
+          }
+        ],
+        "ingress": {
+          "frame": 2,
+          "timestamp": {
+            "unix_seconds": 2,
+            "nanoseconds": 250000000
+          },
+          "link_type": 228
+        },
+        "egress": {
+          "frame": 2,
+          "timestamp": {
+            "unix_seconds": 2,
+            "nanoseconds": 250000000
+          },
+          "link_type": 228
+        },
+        "ingress_order": 1,
+        "egress_order": 1,
+        "reordered": false,
+        "checks": [
+          {
+            "check": {
+              "kind": "preserve",
+              "field": "ipv4.ttl"
+            },
+            "outcome": "satisfied",
+            "expected": {
+              "type": "unsigned",
+              "value": 64
+            },
+            "actual": {
+              "type": "unsigned",
+              "value": 64
+            }
+          }
+        ]
+      }
+    ],
+    "violations": [],
+    "unmatched": {
+      "ingress": [],
+      "egress": []
+    },
+    "unkeyed": {
+      "ingress": [],
+      "egress": []
+    },
+    "ambiguous": [],
+    "omitted": {
+      "matches": 0,
+      "violations": 0,
+      "unmatched_ingress": 0,
+      "unmatched_egress": 0,
+      "unkeyed_ingress": 0,
+      "unkeyed_egress": 0,
+      "ambiguous_groups": 0,
+      "group_members": 0
+    }
+  },
+  "diagnostics": []
+}

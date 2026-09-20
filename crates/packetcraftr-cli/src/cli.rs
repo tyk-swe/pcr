@@ -35,7 +35,9 @@ Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";
 /// The root help trailer, with the exit-code table rendered from the same
 /// mapping the process exits with.
 fn root_after_help() -> String {
-    let mut help = format!("{ROOT_HELP_FORMATS}\n\nExit codes:\n  0   Success.\n");
+    let mut help = format!(
+        "{ROOT_HELP_FORMATS}\n\nExit codes:\n  0   Success.\n  1   verdict: a completed verify-forwarding comparison returned fail or inconclusive.\n"
+    );
     for kind in KINDS {
         let _ = writeln!(
             help,

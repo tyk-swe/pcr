@@ -211,6 +211,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Capture encoding avoids redundant preparation and small writes while preserving
+  validation and wire output; neighbor-cache hits avoid scanning unrelated entries.
 - Workflow and netio errors retain their original typed sources instead of
   flattened display strings: probe `ErrorKind` implements `std::error::Error`
   with `#[source]` fields, `source()` chains reach the underlying `io::Error`

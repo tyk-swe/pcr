@@ -141,6 +141,7 @@ impl capture::Provider for SilentCaptureProvider {
                 interface: request().interface,
                 link_type: LinkType::ETHERNET,
                 snap_length: 128,
+                native: Default::default(),
             },
         })
     }
@@ -211,6 +212,7 @@ impl FixtureCapture {
                 interface: request().interface,
                 link_type: LinkType::ETHERNET,
                 snap_length: 128,
+                native: Default::default(),
             },
             readiness: Ok(()),
             pre_request: VecDeque::new(),
@@ -781,6 +783,7 @@ fn slow_send_consumes_attempt_timeout_before_capture_wait() {
             interface: request.interface.clone(),
             link_type: request.link_type,
             snap_length,
+            native: Default::default(),
         },
         timeouts: Arc::clone(&timeouts),
     };

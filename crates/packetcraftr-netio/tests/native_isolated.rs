@@ -60,6 +60,7 @@ fn request() -> capture::Request {
         },
         filter: Some("udp".to_owned()),
         promiscuous: false,
+        native: Default::default(),
     }
 }
 fn ready(request: &capture::Request) -> capture::SystemSession {

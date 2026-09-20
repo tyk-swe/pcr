@@ -93,6 +93,7 @@ mod tests {
                     },
                     link_type: LinkType::ETHERNET,
                     snap_length: 1_500,
+                    native: Default::default(),
                 },
                 shutdown_calls,
                 outcome,

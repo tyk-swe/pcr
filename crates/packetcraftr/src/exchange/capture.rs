@@ -352,6 +352,7 @@ mod tests {
                 },
                 link_type: LinkType::RAW,
                 snap_length,
+                native: Default::default(),
             },
         };
         let prepared = Prepared {

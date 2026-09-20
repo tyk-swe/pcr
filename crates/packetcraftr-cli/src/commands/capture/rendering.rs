@@ -461,6 +461,7 @@ mod tests {
                     interface: interface.clone(),
                     link_type,
                     snap_length: 64,
+                    native: Default::default(),
                 },
                 frames: VecDeque::from([native::Captured::without_ingress_time(frame)]),
                 stopped: counter,
@@ -481,6 +482,7 @@ mod tests {
                 },
                 filter: None,
                 promiscuous: false,
+                native: Default::default(),
             },
             stopped,
         )
@@ -603,6 +605,7 @@ mod tests {
                 interface: interface.clone(),
                 link_type,
                 snap_length: 256,
+                native: Default::default(),
             },
             frames: frames
                 .into_iter()
@@ -629,6 +632,7 @@ mod tests {
                 },
                 filter: None,
                 promiscuous: false,
+                native: Default::default(),
             },
             vec![counter],
         )

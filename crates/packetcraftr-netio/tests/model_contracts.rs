@@ -302,6 +302,7 @@ fn cancellable_capture_backs_off_after_early_empty_polls() {
                     interface: interface(),
                     link_type: LinkType::IPV4,
                     snap_length: 128,
+                    native: Default::default(),
                 },
                 polls: polls.clone(),
             },

@@ -104,6 +104,7 @@ where
             limits: self.options.capture_limits(),
             filter: None,
             promiscuous: false,
+            native: Default::default(),
         };
         let mut capture = self
             .capture

@@ -487,6 +487,7 @@ mod tests {
                 },
                 link_type: LinkType::RAW,
                 snap_length: 64,
+                native: Default::default(),
             },
             limits: Limits {
                 snap_length: 64,

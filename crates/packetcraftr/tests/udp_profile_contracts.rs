@@ -272,6 +272,7 @@ impl capture::Provider for Io {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
                 snap_length: request.limits.snap_length,
+                native: Default::default(),
             },
         })
     }

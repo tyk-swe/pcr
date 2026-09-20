@@ -83,6 +83,7 @@ impl native::Provider for Provider {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
                 snap_length: request.limits.snap_length,
+                native: Default::default(),
             },
             frames: self.frames.lock().unwrap().pop_front().unwrap(),
             stats: self.stats[index],
@@ -110,6 +111,7 @@ fn request() -> Request {
         },
         filter: None,
         promiscuous: false,
+        native: Default::default(),
     }
 }
 fn options(frames: u64, bytes: u64) -> Options {

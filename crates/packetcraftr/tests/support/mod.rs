@@ -89,6 +89,7 @@ impl capture::Provider for NeverTransmit {
             interface: request.interface.clone(),
             link_type: LinkType::ETHERNET,
             snap_length: request.limits.snap_length,
+            native: Default::default(),
         }))
     }
 }

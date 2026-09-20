@@ -157,6 +157,7 @@ pub(super) fn run(
         limits,
         filter: args.capture_filter,
         promiscuous: args.promiscuous,
+        native: Default::default(),
     };
     rendering::run(
         &net::capture::SystemProvider,

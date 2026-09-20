@@ -190,6 +190,7 @@ where
         limits: executor.options.capture,
         filter: None,
         promiscuous: false,
+        native: Default::default(),
     };
     request.validate().map_err(BoundaryError::from_error)?;
     let mut group = group::Group::arm(

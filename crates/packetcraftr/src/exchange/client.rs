@@ -132,6 +132,7 @@ where
             limits: prepared.options.capture,
             filter: None,
             promiscuous: false,
+            native: Default::default(),
         })?;
         Ok(Transaction::new(
             Arc::clone(&self.registry),

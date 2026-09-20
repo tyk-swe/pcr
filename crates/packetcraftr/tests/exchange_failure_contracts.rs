@@ -82,6 +82,7 @@ impl capture::Provider for Io {
                 interface: request.interface.clone(),
                 link_type: packetcraftr_core::frame::LinkType::IPV4,
                 snap_length: request.limits.snap_length,
+                native: Default::default(),
             },
         })
     }

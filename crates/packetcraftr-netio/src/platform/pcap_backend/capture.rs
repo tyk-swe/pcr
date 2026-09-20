@@ -95,6 +95,7 @@ pub(in crate::platform) fn open_capture(
             interface: interface.clone(),
             link_type,
             snap_length,
+            native: Default::default(),
         },
     })
 }

@@ -378,6 +378,7 @@ mod tests {
             },
             link_type: LinkType::ETHERNET,
             snap_length: 64,
+            native: Default::default(),
         }
     }
 

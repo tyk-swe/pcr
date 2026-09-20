@@ -104,6 +104,7 @@ impl capture::Provider for Provider {
                 interface: request.interface.clone(),
                 link_type: LinkType::RAW,
                 snap_length: request.limits.snap_length,
+                native: Default::default(),
             },
             script: self.scripts.lock().unwrap().pop_front().unwrap(),
             shutdowns: self.shutdowns[index].clone(),
@@ -126,6 +127,7 @@ fn request(count: usize) -> Request {
         },
         filter: None,
         promiscuous: false,
+        native: Default::default(),
     }
 }
 fn frames(count: usize) -> VecDeque<capture::Captured> {

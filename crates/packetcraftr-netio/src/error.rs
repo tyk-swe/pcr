@@ -132,6 +132,19 @@ pub enum Error {
         value: usize,
         reason: &'static str,
     },
+    #[error("invalid native capture setting {field}: {message}")]
+    InvalidCaptureSetting {
+        field: &'static str,
+        message: String,
+    },
+    /// `message` is boxed so this variant stays no larger than the other
+    /// two-`String` variants the `Error` enum is sized for.
+    #[error("capture setting {setting} is not supported on {interface}: {message}")]
+    UnsupportedCaptureSetting {
+        setting: &'static str,
+        interface: String,
+        message: Box<str>,
+    },
     #[error(
         "capture queue overflowed {overflow_events} time(s), dropping {dropped_frames} frame(s) / {dropped_bytes} byte(s)"
     )]
@@ -228,6 +241,15 @@ impl Classified for Error {
             Self::InvalidCaptureQueueLimit { .. } => classified_cli(
                 "cli.capture_limit",
                 "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
+            ),
+            Self::InvalidCaptureSetting { .. } => classified_cli(
+                "cli.capture_setting",
+                "use a finite in-range value or drop the explicit native capture setting",
+            ),
+            Self::UnsupportedCaptureSetting { .. } => classified(
+                "capability.capture_setting",
+                Kind::Capability,
+                "remove the setting or select a value the interface supports; the interfaces command lists advertised timestamp types",
             ),
             Self::InvalidCaptureTimeout { .. } => classified_cli(
                 "cli.capture_timeout",

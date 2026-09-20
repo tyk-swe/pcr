@@ -88,6 +88,7 @@ pub(crate) fn open_capture(
             interface: interface.clone(),
             link_type,
             snap_length,
+            native: Default::default(),
         },
     })
 }

@@ -5,7 +5,7 @@
 //! Queue limits are partitioned across sources; each session keeps its native
 //! metadata and records. Workflow/file layers choose capture-global output IDs.
 
-use super::{Captured, Limits, Metadata, Provider, Session, Statistics};
+use super::{Captured, Limits, Metadata, NativeSettings, Provider, Session, Statistics};
 use crate::interface::Id;
 use packetcraftr_core::{
     budget::Cancellation,
@@ -25,6 +25,9 @@ pub struct Request {
     pub limits: Limits,
     pub filter: Option<String>,
     pub promiscuous: bool,
+    /// Optional native-driver settings applied to every source; each session
+    /// reports its own realized values.
+    pub native: NativeSettings,
 }
 impl Request {
     /// Validate the complete set before arming anything, then split both queue
@@ -45,6 +48,7 @@ impl Request {
         }
         self.limits
             .validate()
+            .and_then(|()| self.native.validate(&self.limits))
             .map_err(|source| Error::new(Cause::Configuration(source)))?;
         let mut identities = HashSet::new();
         for interface in &self.interfaces {
@@ -80,6 +84,7 @@ impl Request {
                 },
                 filter: self.filter.clone(),
                 promiscuous: self.promiscuous,
+                native: self.native.clone(),
             })
             .collect())
     }
@@ -227,9 +232,19 @@ impl<C: Session> Group<C> {
                 }
             };
             let metadata = capture.metadata();
+            let native = &metadata.native;
             let valid = metadata.interface == request.interface
                 && metadata.snap_length > 0
-                && metadata.snap_length <= request.limits.snap_length;
+                && metadata.snap_length <= request.limits.snap_length
+                && native
+                    .buffer_size
+                    .consistent_with(request.native.buffer_size)
+                && native
+                    .timestamp_source
+                    .consistent_with(request.native.timestamp_source)
+                && native
+                    .timestamp_precision
+                    .consistent_with(request.native.timestamp_precision);
             // Keep reported identity even on a contract failure, while bounding
             // an injected provider's invalid name before copying it.
             let reported_name = if metadata.interface.name.len() > 4096 {
@@ -252,6 +267,7 @@ impl<C: Session> Group<C> {
                 },
                 link_type: metadata.link_type,
                 snap_length: metadata.snap_length,
+                native: metadata.native,
             };
             group.sources.push(Owned {
                 capture,

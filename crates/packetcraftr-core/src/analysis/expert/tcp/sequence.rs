@@ -25,6 +25,7 @@ pub(super) fn reconcile_events(
             sequence,
             bytes,
             conflicting,
+            ..
         } = event
         else {
             continue;

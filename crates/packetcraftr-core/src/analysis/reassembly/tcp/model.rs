@@ -4,6 +4,7 @@
 //! Public types and events for TCP stream reassembly.
 
 use std::net::IpAddr;
+use std::ops::Range;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -73,6 +74,11 @@ pub enum Event {
         sequence: u32,
         bytes: usize,
         conflicting: bool,
+        /// The arriving segment's wire-sequence spans that repeat data the
+        /// flow already holds, in stream order; their combined length is
+        /// `bytes`. Spans covering pending out-of-order data can sit anywhere
+        /// after `sequence`, so each `end` may wrap at 2^32.
+        ranges: Vec<Range<u32>>,
     },
     Gap {
         flow: ScopedFlowKey,

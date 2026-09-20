@@ -105,6 +105,16 @@ fn commit_flow_push(
         history_replacement,
         ..
     } = plan;
+    // The delivered prefix is contiguous; pending overlaps may sit anywhere
+    // after it, so the event reports each repeated span rather than a count.
+    let mut ranges = Vec::with_capacity(merge.overlapping_ranges.len() + 1);
+    if retransmitted != 0 {
+        ranges.push(payload_sequence..payload_sequence.wrapping_add(retransmitted as u32));
+    }
+    ranges.extend(merge.overlapping_ranges.iter().map(|range| {
+        state.base_sequence.wrapping_add(range.start as u32)
+            ..state.base_sequence.wrapping_add(range.end as u32)
+    }));
     retransmitted = retransmitted.saturating_add(merge.overlapping_bytes);
     conflicting |= merge.has_conflicting_overlap;
 
@@ -126,6 +136,7 @@ fn commit_flow_push(
             sequence: payload_sequence,
             bytes: retransmitted,
             conflicting,
+            ranges,
         });
     }
 

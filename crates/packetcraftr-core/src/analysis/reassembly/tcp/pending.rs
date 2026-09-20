@@ -377,6 +377,9 @@ pub(super) struct PushPlan {
 struct PendingMergePlan {
     added_bytes: usize,
     overlapping_bytes: usize,
+    /// Each pending interval's overlap with the incoming payload, in stream
+    /// offsets. They need not form a prefix of the segment.
+    overlapping_ranges: Vec<Range<u64>>,
     has_conflicting_overlap: bool,
     segment_count: usize,
     emitted_segment_bytes: usize,
@@ -402,6 +405,7 @@ fn plan_pending_merge(
     let mut plan = PendingMergePlan {
         added_bytes: payload.len(),
         overlapping_bytes: 0,
+        overlapping_ranges: Vec::new(),
         has_conflicting_overlap: false,
         segment_count: existing.len(),
         emitted_segment_bytes: 0,
@@ -432,6 +436,7 @@ fn plan_pending_merge(
             let length = usize::try_from(overlap_end - overlap_start).ok()?;
             let first = usize::try_from(overlap_start - offset).ok()?;
             plan.overlapping_bytes = plan.overlapping_bytes.checked_add(length)?;
+            plan.overlapping_ranges.push(overlap_start..overlap_end);
             plan.has_conflicting_overlap |=
                 !pages::equals(&state.pages, overlap_start, &payload[first..first + length]);
         }

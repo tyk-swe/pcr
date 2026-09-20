@@ -385,17 +385,18 @@ impl TcpSources {
                 self.subtract(flow, *sequence, length, None)?;
             }
             TcpEvent::Retransmission {
-                sequence,
-                bytes,
+                ranges,
                 conflicting,
                 ..
             } => {
-                self.subtract(
-                    flow,
-                    *sequence,
-                    u32::try_from(*bytes).map_err(|_| Error::Sources { number })?,
-                    Some(number),
-                )?;
+                for range in ranges {
+                    self.subtract(
+                        flow,
+                        range.start,
+                        range.end.wrapping_sub(range.start),
+                        Some(number),
+                    )?;
+                }
                 if *conflicting {
                     output.push(Event::Conflict {
                         flow: flow.clone(),

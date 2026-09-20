@@ -104,13 +104,7 @@ impl Head {
         if !encodings.is_empty() {
             let mut codings = Vec::new();
             for value in encodings {
-                for item in value.split(|b| *b == b',') {
-                    let coding = trim(item).split(|b| *b == b';').next().unwrap_or_default();
-                    if coding.is_empty() || !coding.iter().all(|b| token(*b)) {
-                        return Err(Error::Invalid("has an invalid transfer coding"));
-                    }
-                    codings.push(coding.to_ascii_lowercase());
-                }
+                transfer_codings(value, &mut codings)?;
             }
             let chunks = codings
                 .iter()
@@ -289,6 +283,69 @@ fn version(input: &[u8]) -> Result<String, Error> {
         b"HTTP/1.1" => Ok("HTTP/1.1".to_owned()),
         _ => Err(Error::Invalid("version is not HTTP/1.0 or HTTP/1.1")),
     }
+}
+/// Parses one `Transfer-Encoding` field value (`1#transfer-coding`),
+/// pushing each coding name lowercased. Commas and semicolons inside a
+/// parameter's quoted-string separate nothing.
+fn transfer_codings(mut input: &[u8], codings: &mut Vec<Vec<u8>>) -> Result<(), Error> {
+    loop {
+        input = ows(input);
+        let name = take_token(&mut input);
+        if name.is_empty() {
+            return Err(Error::Invalid("has an invalid transfer coding"));
+        }
+        codings.push(name.to_ascii_lowercase());
+        input = ows(input);
+        while input.first() == Some(&b';') {
+            input = ows(&input[1..]);
+            if take_token(&mut input).is_empty() {
+                return Err(Error::Invalid("has an invalid transfer coding parameter"));
+            }
+            input = ows(input);
+            if input.first() != Some(&b'=') {
+                return Err(Error::Invalid("has an invalid transfer coding parameter"));
+            }
+            input = ows(&input[1..]);
+            if input.first() == Some(&b'"') {
+                input = quoted_string(input)?;
+            } else if take_token(&mut input).is_empty() {
+                return Err(Error::Invalid("has an invalid transfer coding parameter"));
+            }
+            input = ows(input);
+        }
+        match input.first() {
+            None => return Ok(()),
+            Some(b',') => input = &input[1..],
+            Some(_) => return Err(Error::Invalid("has an invalid transfer coding")),
+        }
+    }
+}
+/// Consumes a `quoted-string` that opens at `input[0]`, returning the bytes
+/// after its closing quote. A quoted-pair skips its escaped byte.
+fn quoted_string(input: &[u8]) -> Result<&[u8], Error> {
+    let mut index = 1;
+    while index < input.len() {
+        match input[index] {
+            b'\\' => index += 2,
+            b'"' => return Ok(&input[index + 1..]),
+            _ => index += 1,
+        }
+    }
+    Err(Error::Invalid(
+        "has an unterminated transfer coding parameter",
+    ))
+}
+fn take_token<'a>(input: &mut &'a [u8]) -> &'a [u8] {
+    let end = input.iter().position(|b| !token(*b)).unwrap_or(input.len());
+    let (name, rest) = input.split_at(end);
+    *input = rest;
+    name
+}
+fn ows(mut input: &[u8]) -> &[u8] {
+    while input.first().is_some_and(|b| matches!(b, b' ' | b'\t')) {
+        input = &input[1..];
+    }
+    input
 }
 pub(crate) fn token(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)

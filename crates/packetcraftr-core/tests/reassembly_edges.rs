@@ -296,6 +296,128 @@ fn tcp_direct_delivery_and_retransmission_history_are_byte_exact() {
 }
 
 #[test]
+fn tcp_retransmission_ranges_report_each_actual_overlap() {
+    let now = Instant::now();
+    let key = flow(10_004);
+    let mut reassembler = TcpReassembler::new(Limits::default());
+    open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
+
+    // A clean gap fill overlapping nothing reports no retransmission.
+    assert!(
+        reassembler
+            .push(segment(key.clone(), 104, b"efgh", false, false, false), now)
+            .expect("tail buffers")
+            .is_empty()
+    );
+    let events = reassembler
+        .push(segment(key.clone(), 100, b"abcd", false, false, false), now)
+        .expect("adjacent fill delivers");
+    assert!(matches!(
+        events.as_slice(),
+        [TcpEvent::Data {
+            sequence: 100,
+            bytes,
+            ..
+        }] if bytes.as_ref() == b"abcdefgh"
+    ));
+
+    // A fill whose suffix repeats pending data reports only the shared span.
+    let key = flow(10_104);
+    let mut reassembler = TcpReassembler::new(Limits::default());
+    open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
+    reassembler
+        .push(segment(key.clone(), 104, b"efgh", false, false, false), now)
+        .expect("tail buffers");
+    let events = reassembler
+        .push(
+            segment(key.clone(), 100, b"abcdefgh", false, false, false),
+            now,
+        )
+        .expect("overlapping fill merges");
+    assert!(matches!(
+        events.as_slice(),
+        [TcpEvent::Retransmission {
+            sequence: 100,
+            bytes: 4,
+            conflicting: false,
+            ranges,
+            ..
+        }, TcpEvent::Data {
+            sequence: 100,
+            bytes,
+            ..
+        }] if ranges.as_slice() == std::slice::from_ref(&(104..108))
+            && bytes.as_ref() == b"abcdefgh"
+    ));
+
+    // Two pending intervals overlapped by one fill produce two ranges, and
+    // conflicting pending content wins the emitted stream.
+    let key = flow(10_204);
+    let mut reassembler = TcpReassembler::new(Limits::default());
+    open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
+    reassembler
+        .push(segment(key.clone(), 102, b"CD", false, false, false), now)
+        .expect("first interval buffers");
+    reassembler
+        .push(segment(key.clone(), 106, b"GH", false, false, false), now)
+        .expect("second interval buffers");
+    let events = reassembler
+        .push(
+            segment(key.clone(), 100, b"abcdefgh", false, false, false),
+            now,
+        )
+        .expect("fill overlaps both intervals");
+    assert!(matches!(
+        events.as_slice(),
+        [TcpEvent::Retransmission {
+            sequence: 100,
+            bytes: 4,
+            conflicting: true,
+            ranges,
+            ..
+        }, TcpEvent::Data {
+            sequence: 100,
+            bytes,
+            ..
+        }] if ranges.as_slice() == [102..104, 106..108] && bytes.as_ref() == b"abCDefGH"
+    ));
+}
+
+#[test]
+fn tcp_retransmission_ranges_wrap_the_sequence_space() {
+    let now = Instant::now();
+    let key = flow(10_304);
+    let mut reassembler = TcpReassembler::new(Limits::default());
+    open(&mut reassembler, key.clone(), u32::MAX - 1, now).expect("flow opens");
+    reassembler
+        .push(segment(key.clone(), 2, b"efgh", false, false, false), now)
+        .expect("wrapped tail buffers");
+    let events = reassembler
+        .push(
+            segment(key.clone(), u32::MAX - 1, b"abcdefgh", false, false, false),
+            now,
+        )
+        .expect("wrapped fill merges");
+    assert!(matches!(
+        events.as_slice(),
+        [TcpEvent::Retransmission {
+            sequence,
+            bytes: 4,
+            conflicting: false,
+            ranges,
+            ..
+        }, TcpEvent::Data {
+            sequence: data_sequence,
+            bytes,
+            ..
+        }] if *sequence == u32::MAX - 1
+            && *data_sequence == u32::MAX - 1
+            && ranges.as_slice() == std::slice::from_ref(&(2..6))
+            && bytes.as_ref() == b"abcdefgh"
+    ));
+}
+
+#[test]
 fn tcp_out_of_order_merging_keeps_first_and_delivers_one_contiguous_stream() {
     let now = Instant::now();
     let key = flow(10_004);

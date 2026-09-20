@@ -226,6 +226,33 @@ fn fragmented_udp_retains_every_physical_dependency() {
     assert_eq!(transactions[0].status, TransactionStatus::Unanswered);
 }
 #[test]
+fn suffix_overlapping_tcp_gap_fill_keeps_dns_message_sources() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40000);
+    stream.server_port = 53;
+    capture.open(&mut stream);
+    let query = framed(&message(11, false, "overlap.test"));
+    // The tail arrives first; the gap fill repeats only that suffix.
+    let earlier = capture.client_spec(&stream, 0x10);
+    stream.client_sequence += 4;
+    capture.client(&mut stream, &query[4..]);
+    capture.push(earlier, &query);
+    let (messages, _, summary) = collect(&capture.frames, Limits::default()).unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].status, Status::Complete);
+    assert_eq!(messages[0].wire.as_ref(), &query[2..]);
+    assert_eq!(
+        messages[0]
+            .sources
+            .frames()
+            .iter()
+            .map(|f| f.number)
+            .collect::<Vec<_>>(),
+        [4, 5]
+    );
+    assert_eq!(summary.complete_messages, 1);
+}
+#[test]
 fn retransmissions_do_not_duplicate_dns_and_partial_eof_is_explicit() {
     let mut capture = Capture::new();
     let mut stream = Stream::new(40000);

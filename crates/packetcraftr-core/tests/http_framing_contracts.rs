@@ -36,6 +36,48 @@ fn headers_preserve_octets_and_duplicates_and_choose_unambiguous_boundaries() {
     }
 }
 #[test]
+fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
+    fn body_of(wire: &[u8]) -> Result<Body, http::Error> {
+        http::parse_head(wire).unwrap().unwrap().0.body(None)
+    }
+    // Commas and semicolons inside a quoted parameter separate nothing, so
+    // "chunked" there cannot select chunked framing.
+    for wire in [
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a,chunked;b\"\r\nConnection: close\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a;b\"\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a\",b;q=\"c,d\"\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a\\\",b\"\r\n\r\n".as_slice(),
+    ] {
+        assert_eq!(body_of(wire), Ok(Body::Close), "{wire:?}");
+    }
+    // Whitespace before a parameter is part of the grammar; the actual final
+    // coding still decides framing.
+    for wire in [
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom ;p=token, chunked\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a\\\\\", chunked\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked;p=\"a,b\"\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".as_slice(),
+    ] {
+        assert_eq!(body_of(wire), Ok(Body::Chunked), "{wire:?}");
+    }
+    // Malformed lists and unterminated quoted strings fail deterministically.
+    for wire in [
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"unterminated\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;p=\"a\"x\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom;,chunked\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: custom ;\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: ,chunked\r\n\r\n".as_slice(),
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding:\r\n\r\n".as_slice(),
+    ] {
+        assert!(body_of(wire).is_err(), "{wire:?}");
+    }
+    // A non-chunked final coding on a request remains an error.
+    assert!(
+        body_of(b"POST / HTTP/1.1\r\nTransfer-Encoding: custom;p=\"a,chunked\"\r\n\r\n").is_err()
+    );
+}
+#[test]
 fn bytewise_chunks_include_trailers_and_stop_before_the_next_message() {
     let wire = b"3;ext=\"ok\"\r\nabc\r\n2\r\nde\r\n0\r\nX-Checksum: done\r\n\r\nnext";
     let mut decoder = BodyDecoder::new(Body::Chunked, 10);
@@ -55,6 +97,36 @@ fn bytewise_chunks_include_trailers_and_stop_before_the_next_message() {
     decoder.consume(b"abc").unwrap();
     assert!(!decoder.complete());
     assert!(decoder.close());
+}
+#[test]
+fn chunk_size_tolerates_whitespace_only_before_extensions() {
+    for wire in [
+        b"3 ;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),
+        b"3\t;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),
+        b"3;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),
+        b"3\r\nabc\r\n0\r\n\r\n".as_slice(),
+    ] {
+        let mut decoder = BodyDecoder::new(Body::Chunked, 16);
+        let progress = decoder.consume(wire).unwrap();
+        assert!(
+            progress.complete && progress.consumed == wire.len(),
+            "{wire:?}"
+        );
+        assert_eq!(decoder.body_bytes(), 3);
+    }
+    // Whitespace inside the digits, before them, or ahead of a bare CRLF
+    // remains invalid.
+    for wire in [
+        b"3 4;x=y\r\nabcd\r\n0\r\n\r\n".as_slice(),
+        b" 3;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),
+        b"3 \r\nabc\r\n0\r\n\r\n".as_slice(),
+        b"3 g;x=y\r\nabc\r\n0\r\n\r\n".as_slice(),
+    ] {
+        assert!(
+            BodyDecoder::new(Body::Chunked, 16).consume(wire).is_err(),
+            "{wire:?}"
+        );
+    }
 }
 #[test]
 fn invalid_delimiters_oversized_input_and_body_limits_fail_explicitly() {

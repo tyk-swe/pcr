@@ -34,6 +34,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   rendering.
 - `document::Error::Parse.source` is `Box<dyn Error + Send + Sync>` (was
   `String`), retaining the packet parser's typed error in the chain.
+- `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
+  listing the arriving segment's actual retransmitted sequence spans, which
+  need not form a contiguous prefix.
 
 ### Added
 
@@ -341,6 +344,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr::dns::response_code_name` function.
 
 ### Fixed
+
+- TCP reassembly reports the actual retransmitted sequence spans of an
+  arriving segment, so sourced analysis no longer drops provenance for the
+  unique bytes of a gap fill that overlaps pending data at its middle or
+  end. This corrects `internal.application_sources` failures in HTTP and
+  DNS-over-TCP collection.
+- `Transfer-Encoding` values parse as `1#transfer-coding`: commas and
+  semicolons inside quoted-string parameters no longer split codings, and
+  optional whitespace before parameters is accepted, so a quoted parameter
+  cannot masquerade as a final `chunked` coding.
+- HTTP chunk sizes tolerate whitespace before the chunk-extension delimiter
+  (`3 ;x=y`), while whitespace inside or before the hexadecimal digits stays
+  invalid; a tolerated extension no longer disables the direction's
+  pipelined analysis.
 
 - DNS, DHCPv4, and DHCPv6 borrowed wire conversions reject oversized input
   before allocating a copy.

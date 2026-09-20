@@ -189,10 +189,19 @@ impl BodyDecoder {
     }
 }
 fn parse_size(input: &[u8]) -> Result<u64, Error> {
-    let (size, extension) = input
-        .iter()
-        .position(|b| *b == b';')
-        .map_or((input, &[][..]), |i| (&input[..i], &input[i + 1..]));
+    let (size, extension) = match input.iter().position(|b| *b == b';') {
+        // Whitespace between the size and the extension delimiter is
+        // recipient-tolerated; whitespace inside the digits still fails.
+        Some(i) => {
+            let size = &input[..i];
+            let end = size
+                .iter()
+                .rposition(|b| !matches!(b, b' ' | b'\t'))
+                .map_or(0, |i| i + 1);
+            (&size[..end], &input[i + 1..])
+        }
+        None => (input, &[][..]),
+    };
     if size.is_empty() || size.len() > 16 || !size.iter().all(u8::is_ascii_hexdigit) {
         return Err(Error::Invalid("chunk size is not bounded hexadecimal"));
     }

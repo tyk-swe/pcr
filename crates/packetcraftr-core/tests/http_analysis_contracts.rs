@@ -286,6 +286,101 @@ fn out_of_order_body_reassembles_once_and_protocol_fields_are_registered() {
 }
 
 #[test]
+fn tolerated_chunk_size_whitespace_does_not_disable_the_direction() {
+    let (mut capture, mut stream) = setup();
+    capture.client(
+        &mut stream,
+        b"POST /a HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3 ;x=y\r\nabc\r\n0\r\n\r\nGET /b HTTP/1.1\r\n\r\n",
+    );
+    let (messages, summary) = collect(&capture.frames);
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.status == Status::Complete));
+    assert_eq!(messages[0].body_bytes, 3);
+    assert!(
+        matches!(&messages[1].head.as_ref().unwrap().start, StartLine::Request { target, .. } if target.as_ref() == b"/b")
+    );
+    assert_eq!(summary.complete_messages, 2);
+}
+
+#[test]
+fn suffix_overlapping_gap_fill_preserves_response_provenance() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
+    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc";
+    // The tail arrives before the head, then a gap fill re-covers it: only
+    // the shared suffix is retransmitted, not a prefix of the fill.
+    capture.server_beyond(&mut stream, 4, &response[4..]);
+    let fill = capture.server_spec(&stream, Tcp::ACK);
+    capture.push(fill, response);
+    let (messages, summary) = collect(&capture.frames);
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.status == Status::Complete));
+    assert_eq!(messages[1].body_bytes, 3);
+    assert_eq!(messages[1].request, Some(messages[0].index));
+    assert_eq!(
+        messages[1]
+            .sources
+            .frames()
+            .iter()
+            .map(|f| f.number)
+            .collect::<Vec<_>>(),
+        [5, 6]
+    );
+    assert_eq!(summary.complete_messages, 2);
+}
+
+#[test]
+fn gap_fill_overlapping_two_pending_intervals_keeps_every_source() {
+    let (mut capture, mut stream) = setup();
+    capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
+    let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+    capture.server_beyond(&mut stream, 6, &response[6..8]);
+    capture.server_beyond(&mut stream, 2, &response[2..4]);
+    let fill = capture.server_spec(&stream, Tcp::ACK);
+    capture.push(fill, &response[..8]);
+    stream.server_sequence += 8;
+    capture.server(&mut stream, &response[8..]);
+    let (messages, _) = collect(&capture.frames);
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.status == Status::Complete));
+    assert_eq!(
+        messages[1]
+            .sources
+            .frames()
+            .iter()
+            .map(|f| f.number)
+            .collect::<Vec<_>>(),
+        [5, 6, 7, 8]
+    );
+}
+
+#[test]
+fn gap_fill_overlap_near_sequence_wrap_keeps_sources() {
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    stream.server_port = 80;
+    stream.server_sequence = u32::MAX - 3;
+    capture.open(&mut stream);
+    capture.client(&mut stream, b"GET / HTTP/1.1\r\n\r\n");
+    let response = b"HTTP/1.1 204 No Content\r\n\r\n";
+    capture.server_beyond(&mut stream, 4, &response[4..]);
+    let fill = capture.server_spec(&stream, Tcp::ACK);
+    capture.push(fill, response);
+    let (messages, _) = collect(&capture.frames);
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(|m| m.status == Status::Complete));
+    assert_eq!(
+        messages[1]
+            .sources
+            .frames()
+            .iter()
+            .map(|f| f.number)
+            .collect::<Vec<_>>(),
+        [5, 6]
+    );
+}
+
+#[test]
 fn service_ports_normalize_and_bound_distinct_values() {
     for ports in [
         Vec::<u16>::new(),

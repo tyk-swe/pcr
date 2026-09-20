@@ -211,6 +211,11 @@ pub(in crate::platform) fn timestamp_types(
             source: None,
         });
     }
+    // A zero count means only the default timestamp type is supported;
+    // libpcap returns no allocation, so the null list must not become a slice.
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     let count = usize::try_from(count).unwrap_or(0);
     if count > MAX_TIMESTAMP_TYPES {
         // SAFETY: list is a live libpcap allocation released exactly once.

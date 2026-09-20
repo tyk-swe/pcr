@@ -353,6 +353,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Timestamp-type discovery safely handles empty lists from libpcap and Npcap
+  when only the default timestamp type is supported.
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the
   unique bytes of a gap fill that overlaps pending data at its middle or

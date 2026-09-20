@@ -111,10 +111,11 @@ mod tests {
             system_time(0, 500_000, nano).expect("nano fraction"),
             UNIX_EPOCH + Duration::from_nanos(500_000)
         );
-        // Pre-epoch seconds keep a positive sub-second fraction.
+        // Pre-epoch seconds keep a positive sub-second fraction. Use a
+        // fraction representable by Windows SystemTime's 100 ns ticks.
         assert_eq!(
-            system_time(-1, 999_999_999, nano).expect("pre-epoch nano"),
-            UNIX_EPOCH - Duration::from_nanos(1)
+            system_time(-1, 999_999_900, nano).expect("pre-epoch nano"),
+            UNIX_EPOCH - Duration::from_nanos(100)
         );
         for invalid in [-1, 1_000_000_000, i64::MIN, i64::MAX] {
             assert!(

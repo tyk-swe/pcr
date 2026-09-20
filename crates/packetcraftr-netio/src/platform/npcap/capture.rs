@@ -127,6 +127,11 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
             source: None,
         });
     }
+    // A zero count means only the default timestamp type is supported;
+    // Npcap returns no allocation, so the null list must not become a slice.
+    if count == 0 {
+        return Ok(Vec::new());
+    }
     let count = usize::try_from(count).unwrap_or(0);
     let free = handle.api.pcap_free_tstamp_types;
     if count > MAX_TIMESTAMP_TYPES {

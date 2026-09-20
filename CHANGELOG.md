@@ -353,6 +353,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Restore native Windows Layer 2 builds by passing default native settings
+  when opening the Npcap transmit handle.
 - Timestamp-type discovery safely handles empty lists from libpcap and Npcap
   when only the default timestamp type is supported.
 - TCP reassembly reports the actual retransmitted sequence spans of an

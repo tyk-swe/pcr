@@ -11,6 +11,7 @@ use super::{
 };
 use crate::{
     Error,
+    capture::NativeSettings,
     platform::pcap_common::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
@@ -24,7 +25,12 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Er
         ),
         source: None,
     })?;
-    let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, PromiscuousMode::Disabled)?;
+    let handle = open_handle(
+        interface,
+        SEND_SNAPSHOT_LENGTH,
+        PromiscuousMode::Disabled,
+        &NativeSettings::default(),
+    )?;
     let submission = Submission::start();
     // SAFETY: the byte slice remains valid for the synchronous call and length
     // is its exact checked c_int representation.

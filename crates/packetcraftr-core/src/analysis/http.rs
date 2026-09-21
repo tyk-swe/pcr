@@ -289,172 +289,200 @@ impl Collector {
                 });
             }
             if live.head.is_none() {
-                self.check_buffer(live.buffered().saturating_add(1))?;
-                live.header.push(input[0]);
-                input = &input[1..];
-                if live.header.len() > http::MAX_HEADER_BYTES {
-                    self.flush(
-                        &data.flow,
-                        &mut direction,
-                        Status::Limit,
-                        Some(http::Error::Limit("header bytes")),
-                        output,
-                    )?;
-                    direction.disabled = true;
-                    continue;
-                }
-                let length = live.header.len();
-                if (live.header[length - 1] == b'\n'
-                    && (length < 2 || live.header[length - 2] != b'\r'))
-                    || (length >= 2
-                        && live.header[length - 2] == b'\r'
-                        && live.header[length - 1] != b'\n')
-                {
-                    self.flush(
-                        &data.flow,
-                        &mut direction,
-                        Status::Malformed,
-                        Some(http::Error::Invalid("header uses a bare CR or LF")),
-                        output,
-                    )?;
-                    direction.disabled = true;
-                    continue;
-                }
-                if !live.header.ends_with(b"\r\n\r\n") {
-                    continue;
-                }
-                self.retained = self
-                    .retained
-                    .saturating_add(live.header.len().saturating_mul(32))
-                    .saturating_add(4096);
-                if self.retained > self.limits.max_retained_bytes {
-                    return Err(Error::Limit {
-                        field: "max_retained_bytes",
-                        limit: self.limits.max_retained_bytes,
-                    });
-                }
-                let parsed = http::parse_head(&live.header);
-                let (head, _) = match parsed {
-                    Ok(Some(head)) => head,
-                    Ok(None) => unreachable!("terminator present"),
-                    Err(error) => {
-                        self.flush(
-                            &data.flow,
-                            &mut direction,
-                            Status::Malformed,
-                            Some(error),
-                            output,
-                        )?;
-                        direction.disabled = true;
-                        continue;
-                    }
-                };
-                let mut request_method = None;
-                if head.status().is_some() {
-                    let key = (connection, data.flow.reverse());
-                    if let Some(queue) = self.requests.get_mut(&key) {
-                        if let Some(request) = queue.front() {
-                            live.request = Some(request.index);
-                            request_method = Some(request.method.clone());
-                        }
-                        if head
-                            .status()
-                            .is_some_and(|status| status >= 200 || status == 101)
-                        {
-                            queue.pop_front();
-                        }
-                        if queue.is_empty() {
-                            self.requests.remove(&key);
-                        }
-                    }
-                    if live.request.is_none() {
-                        self.summary.responses_without_request += 1;
-                    }
-                } else if let Some(method) = head.method() {
-                    self.requests
-                        .entry((connection, data.flow.clone()))
-                        .or_default()
-                        .push_back(Pending {
-                            index: live.index,
-                            method: method.to_owned(),
-                        });
-                }
-                let framing = head.body(request_method.as_deref());
-                live.header.clear();
-                live.head = Some(head);
-                let framing = match framing {
-                    Ok(framing) => framing,
-                    Err(error) => {
-                        self.flush(
-                            &data.flow,
-                            &mut direction,
-                            Status::Malformed,
-                            Some(error),
-                            output,
-                        )?;
-                        direction.disabled = true;
-                        continue;
-                    }
-                };
-                live.framing = Some(framing);
-                live.body = Some(BodyDecoder::new(framing, self.max_body_bytes));
-                if let Body::Length(length) = framing
-                    && length > self.max_body_bytes
-                {
-                    self.flush(
-                        &data.flow,
-                        &mut direction,
-                        Status::Limit,
-                        Some(http::Error::Limit("body bytes")),
-                        output,
-                    )?;
-                    direction.disabled = true;
-                    continue;
-                }
-                if live.body.as_ref().is_some_and(BodyDecoder::complete) {
-                    let status = if framing == Body::Tunnel {
-                        self.upgraded.insert(connection);
-                        self.summary.upgraded_connections += 1;
-                        Status::Upgrade
-                    } else {
-                        Status::Complete
-                    };
-                    self.flush(&data.flow, &mut direction, status, None, output)?;
-                }
+                self.head(&data, &mut direction, &mut input, output)?;
             } else {
-                let growth = live
-                    .body
-                    .as_ref()
-                    .expect("head has body state")
-                    .additional_buffer_bound(input.len());
-                self.check_buffer(live.buffered().saturating_add(growth))?;
-                match live
-                    .body
-                    .as_mut()
-                    .expect("head has body state")
-                    .consume(input)
-                {
-                    Ok(progress) => {
-                        input = &input[progress.consumed..];
-                        if progress.complete {
-                            self.flush(&data.flow, &mut direction, Status::Complete, None, output)?;
-                        }
-                    }
-                    Err(error) => {
-                        let status = if matches!(error, http::Error::Limit(_)) {
-                            Status::Limit
-                        } else {
-                            Status::Malformed
-                        };
-                        self.flush(&data.flow, &mut direction, status, Some(error), output)?;
-                        direction.disabled = true;
-                    }
-                }
+                self.body(&data.flow, &mut direction, &mut input, output)?;
             }
         }
         self.check_buffer(direction.live.as_ref().map_or(0, Live::buffered))?;
         self.buffered += direction.live.as_ref().map_or(0, Live::buffered);
         self.directions.insert(data.flow, direction);
+        Ok(())
+    }
+    /// Emits the open message with `status` and marks the direction
+    /// disabled; every terminal failure performs both steps together.
+    fn abandon(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        status: Status,
+        error: Option<http::Error>,
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        self.flush(flow, direction, status, error, output)?;
+        direction.disabled = true;
+        Ok(())
+    }
+    /// Accumulates one header byte into the open message; once the terminator
+    /// arrives, resolves the head, pairs responses with pending requests, and
+    /// installs the body decoder.
+    fn head(
+        &mut self,
+        data: &application::Delivery,
+        direction: &mut Direction,
+        input: &mut &[u8],
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        let connection = (data.stream, data.generation);
+        let live = direction.live.as_mut().expect("initialized live message");
+        self.check_buffer(live.buffered().saturating_add(1))?;
+        live.header.push(input[0]);
+        *input = &input[1..];
+        if live.header.len() > http::MAX_HEADER_BYTES {
+            return self.abandon(
+                &data.flow,
+                direction,
+                Status::Limit,
+                Some(http::Error::Limit("header bytes")),
+                output,
+            );
+        }
+        let length = live.header.len();
+        if (live.header[length - 1] == b'\n' && (length < 2 || live.header[length - 2] != b'\r'))
+            || (length >= 2 && live.header[length - 2] == b'\r' && live.header[length - 1] != b'\n')
+        {
+            return self.abandon(
+                &data.flow,
+                direction,
+                Status::Malformed,
+                Some(http::Error::Invalid("header uses a bare CR or LF")),
+                output,
+            );
+        }
+        if !live.header.ends_with(b"\r\n\r\n") {
+            return Ok(());
+        }
+        self.retained = self
+            .retained
+            .saturating_add(live.header.len().saturating_mul(32))
+            .saturating_add(4096);
+        if self.retained > self.limits.max_retained_bytes {
+            return Err(Error::Limit {
+                field: "max_retained_bytes",
+                limit: self.limits.max_retained_bytes,
+            });
+        }
+        let parsed = http::parse_head(&live.header);
+        let (head, _) = match parsed {
+            Ok(Some(head)) => head,
+            Ok(None) => unreachable!("terminator present"),
+            Err(error) => {
+                return self.abandon(
+                    &data.flow,
+                    direction,
+                    Status::Malformed,
+                    Some(error),
+                    output,
+                );
+            }
+        };
+        let mut request_method = None;
+        if head.status().is_some() {
+            let key = (connection, data.flow.reverse());
+            if let Some(queue) = self.requests.get_mut(&key) {
+                if let Some(request) = queue.front() {
+                    live.request = Some(request.index);
+                    request_method = Some(request.method.clone());
+                }
+                if head
+                    .status()
+                    .is_some_and(|status| status >= 200 || status == 101)
+                {
+                    queue.pop_front();
+                }
+                if queue.is_empty() {
+                    self.requests.remove(&key);
+                }
+            }
+            if live.request.is_none() {
+                self.summary.responses_without_request += 1;
+            }
+        } else if let Some(method) = head.method() {
+            self.requests
+                .entry((connection, data.flow.clone()))
+                .or_default()
+                .push_back(Pending {
+                    index: live.index,
+                    method: method.to_owned(),
+                });
+        }
+        let framing = head.body(request_method.as_deref());
+        live.header.clear();
+        live.head = Some(head);
+        let framing = match framing {
+            Ok(framing) => framing,
+            Err(error) => {
+                return self.abandon(
+                    &data.flow,
+                    direction,
+                    Status::Malformed,
+                    Some(error),
+                    output,
+                );
+            }
+        };
+        live.framing = Some(framing);
+        live.body = Some(BodyDecoder::new(framing, self.max_body_bytes));
+        if let Body::Length(length) = framing
+            && length > self.max_body_bytes
+        {
+            return self.abandon(
+                &data.flow,
+                direction,
+                Status::Limit,
+                Some(http::Error::Limit("body bytes")),
+                output,
+            );
+        }
+        if live.body.as_ref().is_some_and(BodyDecoder::complete) {
+            let status = if framing == Body::Tunnel {
+                self.upgraded.insert(connection);
+                self.summary.upgraded_connections += 1;
+                Status::Upgrade
+            } else {
+                Status::Complete
+            };
+            self.flush(&data.flow, direction, status, None, output)?;
+        }
+        Ok(())
+    }
+    /// Feeds input to the open message's body decoder, emitting the message
+    /// when the body completes.
+    fn body(
+        &mut self,
+        flow: &ScopedFlowKey,
+        direction: &mut Direction,
+        input: &mut &[u8],
+        output: &mut Vec<Event>,
+    ) -> Result<(), Error> {
+        let live = direction.live.as_mut().expect("initialized live message");
+        let growth = live
+            .body
+            .as_ref()
+            .expect("head has body state")
+            .additional_buffer_bound(input.len());
+        self.check_buffer(live.buffered().saturating_add(growth))?;
+        match live
+            .body
+            .as_mut()
+            .expect("head has body state")
+            .consume(input)
+        {
+            Ok(progress) => {
+                *input = &input[progress.consumed..];
+                if progress.complete {
+                    self.flush(flow, direction, Status::Complete, None, output)?;
+                }
+            }
+            Err(error) => {
+                let status = if matches!(error, http::Error::Limit(_)) {
+                    Status::Limit
+                } else {
+                    Status::Malformed
+                };
+                self.abandon(flow, direction, status, Some(error), output)?;
+            }
+        }
         Ok(())
     }
     fn check_buffer(&self, current: usize) -> Result<(), Error> {
@@ -481,14 +509,13 @@ impl Collector {
                     .as_mut()
                     .and_then(|live| live.body.as_mut())
                     .is_some_and(BodyDecoder::close);
-            self.flush(
+            self.abandon(
                 flow,
                 &mut direction,
                 if complete { Status::Complete } else { status },
                 None,
                 output,
             )?;
-            direction.disabled = true;
             self.directions.insert(flow.clone(), direction);
         }
         Ok(())

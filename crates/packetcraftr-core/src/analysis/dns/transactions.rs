@@ -156,12 +156,7 @@ impl Tracker {
                 })
                 .sum::<usize>(),
         );
-        if self.charged > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.limits.check_retained(self.charged)?;
         if !dns.response {
             self.answered.remove(&key);
             if let Some(pending) = self.pending.get_mut(&key) {

@@ -31,9 +31,10 @@ pub struct Limits {
     pub max_buffer_bytes: usize,
     /// Cumulative byte charge for retained and emitted evidence over the
     /// run: parsed heads and flushed message state for HTTP, emitted wire
-    /// bytes plus pending transaction keys for DNS. Charges include a
-    /// conservative multiplier for decoded-object expansion, so this bounds
-    /// result growth rather than live buffers or serialized output.
+    /// bytes plus pending transaction keys for DNS. Charges include
+    /// a conservative multiplier for
+    /// decoded-object expansion, so this bounds result growth rather than
+    /// live buffers or serialized output.
     pub max_retained_bytes: usize,
     /// TCP sequence spans retained to attribute reassembled deliveries to
     /// physical source frames. HTTP additionally bounds the distinct source
@@ -84,7 +85,33 @@ impl Classified for Error {
         }
     }
 }
+/// Multiplier applied to wire bytes when charging a retained or emitted
+/// message against [`Limits::max_retained_bytes`]: decoded objects expand
+/// well beyond their wire form.
+pub(crate) const RETAINED_EXPANSION_MULTIPLIER: usize = 32;
+/// Flat per-message charge added to expanded wire bytes against
+/// [`Limits::max_retained_bytes`].
+pub(crate) const RETAINED_MESSAGE_BASE_CHARGE: usize = 4096;
+
 impl Limits {
+    /// The charged size of one retained or emitted message carrying `bytes`
+    /// of wire data.
+    pub(crate) fn retained_charge(bytes: usize) -> usize {
+        bytes
+            .saturating_mul(RETAINED_EXPANSION_MULTIPLIER)
+            .saturating_add(RETAINED_MESSAGE_BASE_CHARGE)
+    }
+    /// Fails with `max_retained_bytes` when the cumulative charge `current`
+    /// exceeds the limit.
+    pub(crate) fn check_retained(&self, current: usize) -> Result<(), Error> {
+        if current > self.max_retained_bytes {
+            return Err(Error::Limit {
+                field: "max_retained_bytes",
+                limit: self.max_retained_bytes,
+            });
+        }
+        Ok(())
+    }
     pub(crate) fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             ("max_messages", self.max_messages, 100_000),

@@ -360,14 +360,8 @@ impl Collector {
         }
         self.retained = self
             .retained
-            .saturating_add(live.header.len().saturating_mul(32))
-            .saturating_add(4096);
-        if self.retained > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+            .saturating_add(Limits::retained_charge(live.header.len()));
+        self.limits.check_retained(self.retained)?;
         let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
         let (head, _) = match parsed {
             Ok(Some(head)) => head,
@@ -543,24 +537,18 @@ impl Collector {
             Status::Malformed | Status::Limit => self.summary.malformed_messages += 1,
             _ => self.summary.incomplete_messages += 1,
         }
-        let extra = live
-            .body
-            .as_ref()
-            .map_or(0, BodyDecoder::buffered_bytes)
-            .saturating_add(if live.head.is_none() {
-                live.header.len()
-            } else {
-                0
-            })
-            .saturating_mul(32)
-            .saturating_add(4096);
+        let extra = Limits::retained_charge(
+            live.body
+                .as_ref()
+                .map_or(0, BodyDecoder::buffered_bytes)
+                .saturating_add(if live.head.is_none() {
+                    live.header.len()
+                } else {
+                    0
+                }),
+        );
         self.retained = self.retained.saturating_add(extra);
-        if self.retained > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.limits.check_retained(self.retained)?;
         let header_wire = live
             .head
             .as_ref()

@@ -134,7 +134,7 @@ fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemErr
 
 /// `finish_route` consults `local_addresses` only for a local route whose
 /// source is absent from the output interface — and only after the family's
-/// mismatch check — so every other decision skips the host-wide address dump.
+/// mismatch check — so every other decision skips collecting all local addresses.
 fn needs_local_addresses(
     selection_reason: SelectionReason,
     destination: IpAddr,
@@ -173,8 +173,8 @@ pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::I
 }
 
 /// Resolves the one interface a route landed on: a filtered link get answers
-/// with a single reply, and its address dump stays scoped to that interface
-/// instead of enumerating every link and address on the host.
+/// with a single reply. The address iterator filters the host-wide kernel dump
+/// in userspace, retaining only addresses belonging to that interface.
 async fn query_interface(
     handle: &Handle,
     index: u32,

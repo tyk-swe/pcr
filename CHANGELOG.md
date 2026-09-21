@@ -280,6 +280,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Forwarding verification serializes each keyed observation's identity once
   instead of twice, preserving canonical key bytes and charging the scratch
   budget before retaining each serialized chunk.
+- Replay decodes each captured frame with the trusted registry once instead of
+  twice, reusing the pre-route decode for the final route-aware source check.
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving
@@ -411,6 +413,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
+  output in 64 KiB chunks instead of issuing one write syscall per record,
+  removing the syscall bottleneck on large captures. Output bytes are
+  identical.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

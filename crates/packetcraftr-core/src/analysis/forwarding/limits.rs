@@ -139,4 +139,98 @@ impl ScratchBudget {
             .ok_or(super::Error::ScratchBudget { limit: self.limit })?;
         Ok(())
     }
+
+    /// Retains canonical JSON while charging each write before its allocation.
+    pub(super) fn json<T: Serialize + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<Vec<u8>, super::Error> {
+        struct Writer<'a> {
+            budget: &'a mut ScratchBudget,
+            bytes: Vec<u8>,
+        }
+
+        impl Write for Writer<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.budget.reserve(bytes.len()).map_err(io::Error::other)?;
+                self.bytes.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = Writer {
+            budget: self,
+            bytes: Vec::new(),
+        };
+        let result = serde_json::to_writer(&mut writer, value);
+        if result.as_ref().is_err_and(serde_json::Error::is_io) {
+            return Err(super::Error::ScratchBudget {
+                limit: writer.budget.limit,
+            });
+        }
+        result.expect("identity cells encode losslessly");
+        Ok(writer.bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Classified;
+    use serde::ser::SerializeSeq;
+    use std::cell::Cell;
+
+    #[test]
+    fn scratch_json_preserves_canonical_bytes_and_previous_charges() {
+        let value = serde_json::json!([null, "quoted\"\ntext", [0, 255], {"key": true}]);
+        let expected = serde_json::to_vec(&value).unwrap();
+        let mut budget = ScratchBudget::new(128 + expected.len());
+        budget.reserve(128).unwrap();
+        assert_eq!(budget.json(&value).unwrap(), expected);
+        assert!(matches!(
+            budget.reserve(1),
+            Err(super::super::Error::ScratchBudget { .. })
+        ));
+
+        let limit = 128 + expected.len() - 1;
+        let mut budget = ScratchBudget::new(limit);
+        budget.reserve(128).unwrap();
+        let error = budget.json(&value).unwrap_err();
+        assert!(
+            matches!(error, super::super::Error::ScratchBudget { limit: actual } if actual == limit)
+        );
+        assert_eq!(error.classification().code, "policy.verify_scratch_limit");
+    }
+
+    #[test]
+    fn scratch_json_stops_serialization_when_the_remaining_budget_is_exhausted() {
+        struct LargeIdentity(Cell<usize>);
+
+        impl Serialize for LargeIdentity {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let mut sequence = serializer.serialize_seq(Some(1_000_000))?;
+                for _ in 0..1_000_000 {
+                    self.0.set(self.0.get() + 1);
+                    sequence.serialize_element(&255_u8)?;
+                }
+                sequence.end()
+            }
+        }
+
+        let value = LargeIdentity(Cell::new(0));
+        let mut budget = ScratchBudget::new(144);
+        budget.reserve(128).unwrap();
+        assert!(matches!(
+            budget.json(&value),
+            Err(super::super::Error::ScratchBudget { limit: 144 })
+        ));
+        assert!(
+            value.0.get() < 10,
+            "oversized identity must stop encoding early"
+        );
+    }
 }

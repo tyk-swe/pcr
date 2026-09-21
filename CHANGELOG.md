@@ -278,8 +278,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
 - Forwarding verification serializes each keyed observation's identity once
-  instead of twice, preserving canonical key bytes and scratch-budget
-  accounting.
+  instead of twice, preserving canonical key bytes and charging the scratch
+  budget before retaining each serialized chunk.
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving

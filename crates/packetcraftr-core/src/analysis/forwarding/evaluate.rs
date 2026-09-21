@@ -687,9 +687,8 @@ fn index(
     for (position, observation) in observations.iter().enumerate() {
         check()?;
         if observation.is_keyed() {
-            let key = serde_json::to_vec(&observation.key_cells)
-                .expect("identity cells encode losslessly");
-            budget.reserve(key.len().saturating_add(128))?;
+            budget.reserve(128)?;
+            let key = budget.json(&observation.key_cells)?;
             index.entry(key).or_default().push(position);
         }
     }

@@ -434,15 +434,10 @@ impl Collector {
                 limit: self.limits.max_messages,
             });
         }
-        // The decoder's bounded object expansion is conservatively charged along with wire.
-        let charge = message.wire.len().saturating_mul(32).saturating_add(4096);
-        self.emitted_bytes = self.emitted_bytes.saturating_add(charge);
-        if self.emitted_bytes > self.limits.max_retained_bytes {
-            return Err(Error::Limit {
-                field: "max_retained_bytes",
-                limit: self.limits.max_retained_bytes,
-            });
-        }
+        self.emitted_bytes = self
+            .emitted_bytes
+            .saturating_add(Limits::retained_charge(message.wire.len()));
+        self.limits.check_retained(self.emitted_bytes)?;
         self.summary.messages += 1;
         message.index = self.summary.messages;
         if message.status == Status::Complete {

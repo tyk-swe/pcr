@@ -149,14 +149,19 @@ fn restart_worker(generation: u64) -> Result<(), SystemError> {
         return Ok(());
     }
     if let Some(dead) = slot.take() {
-        // The disconnected inbox means this worker already exited; joining is
-        // only to keep the handle owned rather than detached.
-        if let JoinAttempt::TimedOut(_) = join_with_deadline(
+        // The disconnected inbox means this worker already exited; joining
+        // reaps its thread instead of detaching it. A worker that somehow
+        // outlives its inbox keeps its permit until it exits.
+        match join_with_deadline(
             dead.worker,
             NETLINK_OPERATION_TIMEOUT,
             Duration::from_millis(10),
         ) {
-            dead.retention.mark_retained();
+            JoinAttempt::Finished(joined) => drop(joined),
+            JoinAttempt::TimedOut(worker) => {
+                dead.retention.mark_retained();
+                drop(worker);
+            }
         }
     }
     *slot = Some(start_worker()?);
@@ -189,12 +194,15 @@ fn start_worker() -> Result<WorkerSlot, SystemError> {
             worker,
         }),
         Ok(Err(error)) => {
-            // The worker reported its own setup failure and exited; joining
-            // keeps the handle owned rather than detached.
-            let _ = join_with_deadline(worker, Duration::ZERO, Duration::from_millis(10));
+            // The worker reported its own setup failure and returned, so its
+            // thread is already at exit; join reaps it rather than detaching.
+            let _ = worker.join();
             Err(error)
         }
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(netlink_worker_panicked()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            Err(netlink_worker_panicked())
+        }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             // The worker may still be initializing. Dropping `requests` and
             // `initialized` makes it report to nobody and exit on its own,

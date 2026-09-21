@@ -3,21 +3,14 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use packetcraftr_core::analysis::pcap::Error as CaptureError;
-use packetcraftr_core::analysis::pcap::Format;
-use packetcraftr_core::analysis::pcap::Writer;
-use packetcraftr_core::error::Classification;
-use packetcraftr_core::error::Kind;
+use packetcraftr_core::analysis::pcap::{Error as CaptureError, Format, Writer};
+use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 
 use super::LinkCaptureWriter;
 use crate::errors::CliError;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
-
-trait Spool: Read + Write + Seek {}
-
-impl<T: Read + Write + Seek> Spool for T {}
 
 pub(crate) fn write_capture_file(
     format: Format,
@@ -26,20 +19,15 @@ pub(crate) fn write_capture_file(
 ) -> Result<(), CliError> {
     let stdout = io::stdout();
     let mut stdout = compression.writer(stdout.lock())?;
-    write_capture_file_with(
-        format,
-        frames,
-        || tempfile::tempfile().map(|file| Box::new(file) as Box<dyn Spool>),
-        &mut stdout,
-    )?;
+    write_capture_file_with(format, frames, tempfile::tempfile, &mut stdout)?;
     drop(stdout.finish().map_err(CliError::classified)?);
     Ok(())
 }
 
-fn write_capture_file_with(
+fn write_capture_file_with<S: Read + Write + Seek>(
     format: Format,
     frames: impl IntoIterator<Item = Frame>,
-    create_spool: impl FnOnce() -> io::Result<Box<dyn Spool>>,
+    create_spool: impl FnOnce() -> io::Result<S>,
     destination: &mut dyn Write,
 ) -> Result<(), CliError> {
     let mut frames = frames.into_iter();
@@ -66,7 +54,7 @@ fn write_capture_file_with(
     spool
         .seek(SeekFrom::Start(0))
         .map_err(|source| capture_io_error("rewind temporary capture output failed", source))?;
-    copy_spool(&mut *spool, destination)
+    copy_spool(&mut spool, destination)
 }
 
 fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), CliError> {

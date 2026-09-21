@@ -1,18 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Public report models for aggregate capture statistics.
-
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use crate::analysis::{IpReassemblyReport, StreamTransport};
 
-/// One protocol's presence across the matched frames.
-///
-/// A frame counts once per protocol it contains, however many times the
-/// protocol occurs in its stack, and contributes its whole captured length,
-/// so a tunnelled frame is visible in full under both its encapsulations.
+/// Counts each protocol once per matched frame and charges the full captured
+/// length, including for each encapsulation in a tunnel.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ProtocolStat {
     pub protocol: String,
@@ -20,11 +15,8 @@ pub struct ProtocolStat {
     pub bytes: u64,
 }
 
-/// One conversation with per-direction tallies.
-///
-/// Endpoint A is the canonically smaller endpoint, so the same conversation
-/// renders identically whichever direction was captured first; `stream` is
-/// the index the analysis pipeline assigned, shared with display filters.
+/// Per-direction conversation tallies. Endpoint A sorts before B; `stream` is
+/// the pipeline-assigned index shared with display filters.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConversationStat {
     pub transport: StreamTransport,
@@ -77,7 +69,6 @@ pub struct IoBucketStat {
     pub bytes: u64,
 }
 
-/// Everything one statistics pass computed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub clock: crate::analysis::ClockReport,
@@ -116,13 +107,9 @@ pub struct Report {
 }
 
 impl Report {
-    /// Span between the earliest and latest matched timestamps.
-    ///
-    /// Both bounds are the observed extremes, so a frame arriving
-    /// out-of-order or carrying a regressed timestamp cannot make the
-    /// duration negative. `None` when no frame matched — every matched
-    /// frame carries a timestamp because the pipeline refuses frames
-    /// without one.
+    /// Span between the earliest and latest matched timestamps, regardless of
+    /// arrival order. `None` if no frame matched; matched frames always have
+    /// timestamps.
     pub fn duration(&self) -> Option<Duration> {
         let (first, last) = self.first_timestamp.zip(self.last_timestamp)?;
         Some(last.duration_since(first).unwrap_or(Duration::ZERO))

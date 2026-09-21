@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Public exchange entry points and the prepare/arm/execute handoff.
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -68,12 +66,9 @@ where
         })
     }
 
-    /// One collected exchange with the two optional workflow hooks: the
-    /// matcher that gets a second chance at frames the registry matchers could
-    /// not uniquely attribute, and the predicate that stops capture early.
-    ///
-    /// This is the only entry point workflow executors use; `exchange` is the
-    /// same call with both hooks absent.
+    /// Exchange with optional fallback matching and early capture termination.
+    /// Workflow executors use this entry point; `exchange` supplies neither
+    /// hook.
     pub(crate) fn exchange_hooked(
         &self,
         template: &packetcraftr_core::template::Template,

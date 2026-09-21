@@ -83,7 +83,6 @@ pub struct Definition {
     pub encapsulation: Arc<[EncapsulationIdentifier]>,
 }
 
-/// Failure to allocate another compact scope identity.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {

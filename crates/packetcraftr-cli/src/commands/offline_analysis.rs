@@ -119,7 +119,6 @@ impl<T> Retained<T> {
         self.items.push(convert());
     }
 
-    /// How many items the ceiling kept out of the document.
     pub(super) const fn omitted(&self) -> u64 {
         self.omitted
     }

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Conversation indexing for packet flows.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 
@@ -42,12 +40,8 @@ impl CanonicalFlow {
     }
 }
 
-/// First-seen conversation numbering, stable for a given input.
-///
-/// Indices are assigned in the order conversations first appear in the
-/// capture, before any display filter is applied, so `tcp.stream 7` names the
-/// same conversation whether or not the run was filtered — which is what lets
-/// one command report an index and another extract it.
+/// First-seen conversation indices assigned before filtering, so indices remain
+/// stable across commands on the same capture.
 #[derive(Debug, Default)]
 pub(super) struct StreamIndex {
     assignments: HashMap<CanonicalFlow, u64>,

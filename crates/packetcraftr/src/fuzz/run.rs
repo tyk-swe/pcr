@@ -104,8 +104,6 @@ where
     packet_fuzz::run_observed(request, packet, registry, observe)
 }
 
-/// The validated campaign request together with the packet, registry, and
-/// live options every execution path needs.
 pub struct RunInput<'a> {
     /// The offline campaign definition.
     pub request: &'a packet_fuzz::Request,
@@ -113,7 +111,6 @@ pub struct RunInput<'a> {
     pub live: LiveOptions,
     /// The template packet every case mutates.
     pub packet: Packet,
-    /// The registry used to build and decode cases.
     pub registry: Arc<Registry>,
 }
 

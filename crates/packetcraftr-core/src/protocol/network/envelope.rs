@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pseudo-header construction shared by the transport and ICMPv6 codecs.
-
 use std::net::IpAddr;
 
 use crate::{

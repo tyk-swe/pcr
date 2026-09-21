@@ -41,9 +41,7 @@ use super::model::{ClientHello, ServerHello, extension};
 
 /// Hash length, in hex characters, of the JA4 `b` and `c` components.
 const JA4_HASH_LEN: usize = 12;
-/// The value both JA4 hash components take when their list is empty.
 const JA4_EMPTY_HASH: &str = "000000000000";
-/// Largest count JA4 can express in its two-digit fields.
 const JA4_MAX_COUNT: usize = 99;
 
 /// The transport a hello was carried over, which selects JA4's first character.
@@ -57,7 +55,6 @@ pub enum Transport {
 }
 
 impl Transport {
-    /// Returns the JA4 transport character.
     #[must_use]
     pub fn code(self) -> char {
         match self {
@@ -237,7 +234,6 @@ fn ja4_alpn(hello: &ClientHello) -> String {
     code
 }
 
-/// Renders one nibble as a lowercase hexadecimal character.
 fn hex_digit(nibble: u8) -> char {
     char::from_digit(u32::from(nibble & 0x0f), 16).unwrap_or('0')
 }

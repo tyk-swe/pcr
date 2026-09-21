@@ -1,24 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Direction and payload deduplication shared by TCP conversation collectors.
-//!
-//! The reassembler delivers each byte once per generation, but it forgets a
-//! cleanly closed flow, so a collector that spans generations — one
-//! [`Deduplicator`] per followed conversation or per TLS session — needs its
-//! own delivery edges to stay exactly-once.
+//! Direction and payload deduplication across TCP reassembly generations. A
+//! retransmitted closing segment can start a new generation; collectors retain
+//! delivery edges to avoid emitting its bytes twice.
 
 use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 
-/// Who sent a chunk, relative to the conversation's first captured frame.
-///
-/// A capture cannot always see the true initiator, so the client is defined
-/// as the endpoint that sent the first frame this capture holds for the
-/// conversation — which for a capture that includes the handshake is the
-/// endpoint that sent the SYN.
+/// Sender relative to the first captured frame, whose sender is the client.
+/// This identifies the initiator only when the capture includes the handshake.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum PeerDirection {
     #[serde(rename = "client")]
@@ -30,11 +23,8 @@ pub enum PeerDirection {
 /// Tracks delivery edges per direction to deduplicate retransmitted TCP segments.
 #[derive(Debug, Default)]
 pub(crate) struct Deduplicator {
-    /// Sequence one past the last byte delivered per direction. The
-    /// reassembler delivers exactly once within a generation, but it forgets
-    /// a cleanly closed flow, so a retransmitted closing segment re-delivers
-    /// from a fresh generation; this edge is what keeps extraction
-    /// exactly-once across that seam.
+    /// Sequence after the last delivered byte in each direction, retained
+    /// across clean closes to deduplicate retransmissions.
     client_generation: u64,
     server_generation: u64,
     client_delivered: Option<u32>,
@@ -121,12 +111,8 @@ impl Deduplicator {
         }
     }
 
-    /// Trims a delivery against the direction's delivered edge.
-    ///
-    /// Within one reassembler generation deliveries never overlap, but a
-    /// segment retransmitted after its flow closed cleanly re-delivers from
-    /// a fresh generation; bytes at or before the edge are dropped and the
-    /// edge advances over what remains.
+    /// Drops previously delivered bytes and advances the direction's delivery
+    /// edge.
     pub(crate) fn deduplicate(
         &mut self,
         direction: PeerDirection,

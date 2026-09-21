@@ -1,13 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IANA registry names for the TLS code points this crate reports.
-//!
-//! Every table is a sorted `const` slice looked up by binary search, so a
-//! lookup allocates nothing and the tables cost nothing at run time. Numeric
-//! values stay authoritative: JSON output carries the number and, where a name
-//! is known, a `*_name` companion. An unknown code point returns `None` and is
-//! rendered as hex.
+//! IANA TLS names in sorted, allocation-free lookup tables. Numeric values
+//! remain authoritative; unknown codes return `None` and render as hex. JSON
+//! adds known names as `*_name` companions.
 
 /// Cipher suites from the IANA TLS Cipher Suite registry, limited to the
 /// suites clients and servers still negotiate in practice.
@@ -147,25 +143,21 @@ const ALERT_DESCRIPTIONS: &[(u8, &str)] = &[
     (120, "no_application_protocol"),
 ];
 
-/// Returns the registered name of a cipher suite, if it is a known one.
 #[must_use]
 pub fn cipher_suite_name(value: u16) -> Option<&'static str> {
     lookup(CIPHER_SUITES, value)
 }
 
-/// Returns the registered name of a named group, if it is a known one.
 #[must_use]
 pub fn named_group_name(value: u16) -> Option<&'static str> {
     lookup(NAMED_GROUPS, value)
 }
 
-/// Returns the display name of a protocol version, if it is a known one.
 #[must_use]
 pub fn version_name(value: u16) -> Option<&'static str> {
     lookup(VERSIONS, value)
 }
 
-/// Returns the registered name of an alert description, if it is a known one.
 #[must_use]
 pub fn alert_description_name(value: u8) -> Option<&'static str> {
     lookup(ALERT_DESCRIPTIONS, value)

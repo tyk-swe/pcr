@@ -47,7 +47,6 @@ where
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
-    /// Drives the run, handing each transmitted frame to `record`.
     fn drive(
         self,
         record: impl FnMut(
@@ -278,7 +277,6 @@ fn classic_writer<R: Read + std::io::Seek, W: Write>(
     .map_err(|source| stream_capture_error("initialize capture output failed", source))
 }
 
-/// The replay budget's aggregate ceilings, in the capture writer's own terms.
 const fn stream_limits(limits: packetcraftr::replay::Limits) -> Limits {
     Limits {
         max_frames: limits.max_source_frames,

@@ -55,8 +55,7 @@ impl Capability {
 packetcraftr_core::display_via_as_str!(Capability);
 
 impl Mode {
-    /// The serialized spelling, so a text renderer and the JSON document never
-    /// name the same mode two ways.
+    /// Serialized spelling shared by text and JSON output.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

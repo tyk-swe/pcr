@@ -37,8 +37,6 @@ impl Classification {
         }
     }
 
-    /// Replaces `self` when `candidate` outranks it, so every per-endpoint
-    /// winner is chosen by the same rule.
     pub(in crate::scan) fn promote(&mut self, candidate: Self) {
         if candidate.rank() > self.rank() {
             *self = candidate;
@@ -129,7 +127,6 @@ pub struct Rtt {
     pub max: Option<Duration>,
 }
 
-/// Accumulates per-probe verdicts into the published [`Rtt`] totals.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RttAccumulator {
     sent: u64,
@@ -140,12 +137,10 @@ pub(crate) struct RttAccumulator {
 }
 
 impl RttAccumulator {
-    /// Counts one probe whose transmission the provider confirmed.
     pub(crate) fn note_sent(&mut self) {
         self.sent = self.sent.saturating_add(1);
     }
 
-    /// Counts one received verdict and folds its round-trip sample in.
     pub(crate) fn note_received(&mut self, sample: Duration) {
         self.received = self.received.saturating_add(1);
         self.total = self.total.saturating_add(sample);
@@ -153,7 +148,6 @@ impl RttAccumulator {
         self.max = Some(self.max.map_or(sample, |max| max.max(sample)));
     }
 
-    /// Freezes the accumulated counts and samples into the reported form.
     pub(crate) fn finish(&self) -> Rtt {
         // received is bounded by the operation probe budget, far below u32::MAX;
         // checked_div guards the narrowing anyway.

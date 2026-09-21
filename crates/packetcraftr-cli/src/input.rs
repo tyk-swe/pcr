@@ -177,10 +177,9 @@ fn resolve_recipe(
     }
 }
 
-/// Sets a bytes-typed recipe field from file contents. The field must exist,
-/// hold bytes, and be empty in the recipe so an embedded value is never
-/// silently replaced; the file reads under the packet input ceiling so saved
-/// documents stay self-contained once the value lands in the packet.
+/// Loads a file into an existing, empty bytes-typed recipe field under the
+/// packet input ceiling. Saved documents retain the bytes, independent of the
+/// file.
 fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let syntax = || {
         CliError::new(

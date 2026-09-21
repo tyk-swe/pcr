@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ethernet envelope and bounded VLAN-stack handling for neighbor traffic.
-
 use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanKind, VlanTag};
 
 pub(super) const HEADER_LENGTH: usize = 14;
@@ -43,7 +41,6 @@ pub(super) fn prefix(
             | (if tag.drop_eligible { 1 << 12 } else { 0 })
             | tag.vlan_id;
         frame.extend_from_slice(&tci.to_be_bytes());
-        // index is below tags.len() from the enumerate, so index + 1 cannot overflow
         let next = tags
             .get(index + 1)
             .map_or(payload_type, |next| next.kind.ether_type());

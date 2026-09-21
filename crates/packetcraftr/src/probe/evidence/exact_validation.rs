@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact-frame, deadline, statistics, and exchange-contract validation.
-
 use std::time::Duration;
 
 use crate::SentPacket;

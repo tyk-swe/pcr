@@ -29,7 +29,6 @@ impl Workflow {
         }
     }
 
-    /// The diagnostic codes the workflow emits when evidence is truncated.
     pub(crate) const fn evidence_diagnostics(self) -> EvidenceDiagnosticDescriptor {
         match self {
             Self::Scan => EvidenceDiagnosticDescriptor::new(
@@ -90,7 +89,6 @@ impl Workflow {
 
 packetcraftr_core::display_via_as_str!(Workflow);
 
-/// The published codes and remediations one workflow attaches to its errors.
 struct Codes {
     limit: &'static str,
     limit_remediation: &'static str,
@@ -117,10 +115,8 @@ pub enum ErrorKind {
         value: u64,
         reason: String,
     },
-    /// The requested port selection cannot be probed.
     #[error("invalid port selection: {message}")]
     InvalidPort { message: String },
-    /// The requested source port is zero or unsupported by the strategy.
     #[error("invalid source port: must be non-zero and is only supported for UDP/TCP")]
     InvalidSourcePort,
     #[error("timeout {value:?} is invalid; maximum is {maximum:?}")]

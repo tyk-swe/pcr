@@ -94,25 +94,19 @@ impl Statistics {
     }
 }
 
-/// One owned live-capture session.
-///
-/// The lifecycle is fixed: a [`Provider`] returns an armed session,
-/// [`Session::wait_ready`] is the barrier that must pass before any exchange
-/// frame is transmitted, [`Session::next_captured_frame`] then delivers records
-/// until the caller stops, and [`Session::shutdown`] joins the backend exactly
-/// once. [`Session::statistics`] is only final after a successful shutdown.
+/// Owned capture session: arm through [`Provider`], pass
+/// [`Session::wait_ready`] before transmission, read records, then call
+/// [`Session::shutdown`] to join the backend exactly once. Statistics are final
+/// only after successful shutdown.
 pub trait Session: Send {
     /// Returns the backend-confirmed properties fixed when the session was activated.
     fn metadata(&self) -> &Metadata;
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
-    /// Waits up to `timeout` for the next record.
-    ///
-    /// `Ok(None)` means only "no record within this wait": the queue was empty,
-    /// the timeout expired, or the backend stopped delivering. It is never
-    /// evidence that nothing was captured, and it never ends the session — only
-    /// [`Session::shutdown`] does. Loss is reported through
-    /// [`Session::statistics`], not here.
+    /// Waits up to `timeout` for a record. `Ok(None)` means no record was
+    /// delivered during this wait, not that none was captured or that the
+    /// session ended. Only [`Session::shutdown`] ends the session;
+    /// [`Session::statistics`] reports loss.
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
@@ -221,7 +215,6 @@ pub enum TimestampPrecision {
     /// Microsecond fractions; the libpcap and Npcap default.
     #[default]
     Micro,
-    /// Nanosecond fractions.
     Nano,
 }
 
@@ -239,17 +232,11 @@ impl TimestampPrecision {
 
 packetcraftr_core::display_via_as_str!(TimestampPrecision);
 
-/// A packet timestamp source the frame-time contract can represent.
+/// Timestamp sources synchronized with the host system clock. Unsynchronized
+/// sources cannot be converted to host monotonic or Unix time; discovery
+/// reports them with [`TimestampType::source`] set to `None`.
 ///
-/// Only sources whose stamps are synchronized with the host system clock are
-/// representable: an unsynchronized adapter or host clock cannot be projected
-/// into host monotonic time or labeled Unix time without inventing a
-/// conversion. libpcap's `adapter_unsynced` and `host_hiprec_unsynced` values
-/// therefore have no variant here; timestamp-type discovery still reports
-/// them with [`TimestampType::source`] set to `None`.
-///
-/// The serialized spellings match libpcap's canonical type names so the same
-/// value names a type in `--timestamp-source`, reports, and discovery output.
+/// Serialized names match libpcap and `--timestamp-source` spellings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum TimestampSource {
     /// Host-provided timestamps of unspecified characteristics
@@ -303,11 +290,9 @@ pub struct TimestampType {
 /// enumerate a handful of types; a larger answer is a broken backend.
 pub const MAX_TIMESTAMP_TYPES: usize = 64;
 
-/// Optional native-driver capture settings applied before backend activation.
-///
-/// Every `None` keeps the backend's own default. These settings configure the
-/// driver's capture buffer and timestamp generation per interface; they are
-/// distinct from the PacketcraftR capture-queue budgets in [`Limits`].
+/// Per-interface driver settings applied before activation; `None` keeps
+/// backend defaults. These are independent of PacketcraftR's capture-queue
+/// [`Limits`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NativeSettings {
     /// Kernel/driver capture-buffer size in bytes (`pcap_set_buffer_size`).
@@ -354,13 +339,9 @@ impl NativeSettings {
     }
 }
 
-/// What an activated session made of one optional [`NativeSettings`] field.
-///
-/// The three values stay deliberately distinct: a request the backend
-/// accepted during configuration is not proof the driver realized exactly
-/// that value, and an effective value is reported only when the backend can
-/// confirm one after activation. `effective = None` means the backend cannot
-/// report the realized value — never a claim of zero or default.
+/// Requested, applied, and confirmed values of a [`NativeSettings`] field.
+/// Configuration acceptance alone does not confirm the effective value.
+/// `effective = None` means unknown, not zero or default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Realized<T> {
     /// The explicit request echoed back; `None` when the caller asked for the
@@ -385,11 +366,8 @@ impl<T> Default for Realized<T> {
 }
 
 impl<T: PartialEq> Realized<T> {
-    /// Whether this realization faithfully describes the request it answers:
-    /// the backend echoes the request and reports that same value as applied.
-    /// `effective` stays unconstrained; a backend that confirms a different
-    /// value than requested must reject the session rather than report the
-    /// mismatch.
+    /// Checks that requested and applied values match the request. Backends
+    /// must reject a confirmed effective mismatch before reporting a session.
     pub(crate) fn consistent_with(&self, request: Option<T>) -> bool {
         self.requested == request && self.applied == request
     }

@@ -27,9 +27,7 @@ const ERSPAN_III_LEN: usize = 12;
 const SUBHEADER_LEN: usize = 8;
 /// The O bit of the Type III flag word: an optional subheader follows.
 const SUBHEADER_FLAG: u16 = 0x0001;
-/// GRE protocol type carrying a Type II header.
 const TYPE_II_PROTOCOL: u64 = 0x88be;
-/// GRE protocol type carrying a Type III header.
 const TYPE_III_PROTOCOL: u64 = 0x22eb;
 
 /// ERSPAN mirrored-frame header, Type II (version 1) or Type III (version 2).
@@ -60,7 +58,6 @@ pub struct Erspan {
 /// The Type III fields between the session word and the mirrored frame.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ErspanType3 {
-    /// Wire-format timestamp.
     pub timestamp: u32,
     /// Security group tag.
     pub sgt: u16,

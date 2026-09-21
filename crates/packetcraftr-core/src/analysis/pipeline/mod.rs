@@ -239,26 +239,20 @@ pub struct Summary {
     /// event sink also observes. Additional outcomes increment
     /// `outcomes_omitted`.
     pub ip_reassembly: IpReassemblyReport,
-    /// Interface descriptions the capture source declared, in the global
-    /// interface-ID order [`crate::frame::Frame::interface`] references.
-    /// Classic PCAP always contributes exactly one entry; a PCAPNG source
-    /// with no interface-description blocks yields an empty list rather
-    /// than invented values.
+    /// Source interfaces in global [`crate::frame::Frame::interface`] order.
+    /// Classic PCAP has one entry; PCAPNG without interface-description blocks
+    /// has none.
     pub interfaces: Vec<crate::analysis::pcap::Interface>,
 }
 
-/// Runs the shared analysis loop, dispatching each matched frame to `sink`.
+/// Dispatches matched frames to `sink`: dissects under
+/// `limits.max_frame_bytes`, updates capture-global IP state and conversation
+/// indices, filters, then drives TCP reassembly. Enforces aggregate frame,
+/// byte, flow, and processing-duration budgets; reader options bound individual
+/// frames and interfaces.
 ///
-/// The reader arrives configured with its own per-frame and interface
-/// bounds; this loop enforces the aggregate frame, byte, flow, and duration
-/// budgets, dissects under `limits.max_frame_bytes`, advances capture-global
-/// IP reassembly, assigns conversation indices to physical or derived
-/// transports, applies the filter, and drives TCP reassembly for frames the
-/// filter keeps.
-///
-/// Reassembly follows capture time, not wall-clock time: idle expiry is
-/// measured between frame timestamps, so analyzing an old capture behaves
-/// the same today as it did the day it was recorded.
+/// Reassembly idle expiry follows capture timestamps, independent of wall-clock
+/// time.
 pub fn run<R, F>(
     reader: &mut Reader<R>,
     registry: Arc<Registry>,
@@ -561,14 +555,12 @@ where
     })
 }
 
-/// Loop-invariant state the per-frame stages share.
 struct FrameStage<'a> {
     decoder: &'a Dissector,
     deadline: &'a Deadline,
     max_ip_reassembly_bytes: usize,
 }
 
-/// One physical frame, as the stages downstream of the reader see it.
 struct PhysicalFrame<'a> {
     decoded: &'a DecodedPacket,
     number: u64,
@@ -684,12 +676,8 @@ struct TransportViews<'a> {
     udp: Option<ElectedTransport<'a, UdpTransport>>,
 }
 
-/// Elects the innermost transport of each kind across the physical frame and
-/// its derived datagram views.
-///
-/// A tunnelled frame legitimately belongs to both a UDP conversation and a
-/// TCP conversation, and the innermost occurrence of each kind is the one an
-/// operator means.
+/// Selects the innermost transport of each kind across physical and derived
+/// views. A tunneled frame can belong to both UDP and TCP conversations.
 fn elect_transport_views<'a>(
     decoded: &'a DecodedPacket,
     derived: &'a [DerivedDatagram],
@@ -814,7 +802,6 @@ fn next_frame<R: Read>(
     Ok(Some((number, frame)))
 }
 
-/// Refuses to continue once the run's own processing budget is spent.
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
     deadline.enforce().map_err(Error::from)
 }

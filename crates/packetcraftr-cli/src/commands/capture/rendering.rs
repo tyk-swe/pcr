@@ -621,7 +621,6 @@ mod tests {
         assert!(reader.next_frame().unwrap().is_none());
     }
 
-    /// A single-source session delivering caller-chosen frame bytes.
     fn single_session(
         link_type: LinkType,
         frames: Vec<Vec<u8>>,

@@ -20,8 +20,6 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 
-/// Executes one DNS query through the client's capture-ready exchange
-/// lifecycle.
 impl<R, N, I> Executor<Exchange> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,

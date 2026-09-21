@@ -22,7 +22,6 @@ pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 /// A terminal error may use this separate cleanup allowance.
 const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Opens the process-wide NDJSON stream on stdout.
 pub(crate) fn stdout_stream(
     command: output::contract::Command,
     timeout: Duration,

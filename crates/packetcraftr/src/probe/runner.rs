@@ -121,7 +121,6 @@ where
     )
 }
 
-/// A probe that knows its operation-local sequence number.
 pub(crate) trait Sequenced {
     fn sequence(&self) -> u64;
 }
@@ -196,7 +195,6 @@ where
         deadline
             .start_accounting(Duration::ZERO)
             .map_err(exceeded)?;
-        // The child boundary may only spend what the operation has left.
         let timeout = batch.timeout_mut();
         *timeout = deadline.bounded_timeout(*timeout).map_err(exceeded)?;
         let batch = &*batch;

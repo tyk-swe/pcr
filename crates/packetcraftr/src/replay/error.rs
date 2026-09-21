@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Failure from a bounded replay operation.
 use std::time::Duration;
 
 use packetcraftr_core::analysis::pcap::Error as CaptureError;

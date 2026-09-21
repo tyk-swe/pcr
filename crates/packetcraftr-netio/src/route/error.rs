@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Route-planning failures and their stable classifications.
-
 use std::error::Error as StdError;
 use std::net::IpAddr;
 

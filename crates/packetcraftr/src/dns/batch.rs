@@ -19,7 +19,6 @@ use super::plan::batch_budget;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
 
-/// The largest question count one DNS batch may declare.
 pub const MAX_QUESTIONS: usize = 256;
 
 /// How one batch question ended, in the request's declared order.
@@ -92,18 +91,14 @@ impl BatchReport {
     }
 }
 
-/// Runs every request in input order under one operation deadline and returns
-/// each question's deterministic outcome.
+/// Runs requests in input order under the minimum `limits.max_duration` in the
+/// batch.
 ///
-/// All requests are prepared and their combined worst-case traffic budget is
-/// authorized before discovery or transmission, so invalid or over-budget
-/// batches fail without traffic. The shared
-/// deadline is the minimum `limits.max_duration` across the batch: a question
-/// that cannot start before the deadline — or that follows a cancellation or
-/// deadline-exhaustion failure — is reported
-/// [`QuestionStatus::Unattempted`] rather than silently dropped. Other
-/// per-question failures are reported [`QuestionStatus::Failed`] and the batch
-/// continues in input order. Output failures terminate execution immediately.
+/// Prepares and authorizes the combined worst-case traffic budget before
+/// discovery. Cancellation or deadline exhaustion leaves remaining questions
+/// [`QuestionStatus::Unattempted`]; other question failures are
+/// [`QuestionStatus::Failed`] and allow the batch to continue. Output failures
+/// stop execution immediately.
 pub fn run_batch<A, E, C>(
     requests: &[Request],
     authorizer: &mut A,

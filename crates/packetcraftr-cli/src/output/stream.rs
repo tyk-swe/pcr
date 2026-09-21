@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Streaming NDJSON encoder and the unattributed error record.
-
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -46,7 +44,6 @@ pub fn write_unattributed_error(
         })
 }
 
-/// Whether the stream may still be written to, and why not when it may not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EncoderState {
     Open,

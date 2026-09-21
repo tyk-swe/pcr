@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! PCAPNG block encoding and interface planning.
-
 use std::io::Write;
 
 use crate::frame::{Direction, Frame, LinkType};

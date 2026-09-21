@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured scan output.
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -65,7 +63,6 @@ pub struct Endpoint {
     pub probes: Vec<Probe>,
 }
 
-/// Aggregate result of `scan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub planned_duration: Duration,
@@ -162,7 +159,6 @@ impl Sent {
     }
 }
 
-/// One independently useful event in structured scan streaming output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {

@@ -1,15 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Portable, streaming PCAP and PCAPNG support.
-//!
-//! Format I/O uses [`std::io`], with optional gzip/Zstd adapters. Native
-//! libpcap/Npcap is not required for capture-file access.
-//!
-//! [`rewrite`](fn@rewrite) is the fidelity-preserving path: it validates and
-//! copies every bounded source record without changing formats. [`Writer`]
-//! creates a new capture from frames and therefore is not a source-structure
-//! rewrite API.
+//! Portable streaming PCAP/PCAPNG I/O with optional gzip/Zstd support; no
+//! native libpcap/Npcap dependency. [`rewrite`](fn@rewrite) preserves validated
+//! source records and format; [`Writer`] creates new captures from frames.
 
 mod classic;
 pub mod compression;

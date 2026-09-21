@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded live fuzz pacing and worst-case duration planning.
-
 use std::time::Duration;
 
 use super::LiveOptions;

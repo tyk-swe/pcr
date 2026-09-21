@@ -275,6 +275,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Trim redundant source comments and Rustdoc while retaining API contracts,
+  safety explanations, examples, and CLI help text.
+
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving

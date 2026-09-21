@@ -17,12 +17,8 @@ use super::{Policy, authorize_permissive_live};
 use crate::Error;
 use crate::target::{Authorized, Resolver, Target};
 
-/// The packet and wire-byte budget every live operation must declare before
-/// it can produce traffic.
-///
-/// Both counts are mandatory: there is no default and no constructor that
-/// supplies one for the caller, so a workflow that cannot state its budget
-/// cannot build a request.
+/// Mandatory packet-count and conservative wire-byte budgets for a live
+/// operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WireBudget {
     packets: u64,
@@ -43,32 +39,23 @@ impl WireBudget {
         }
     }
 
-    /// Prospective count of packets that reach the wire.
     #[must_use]
     pub const fn packets(&self) -> u64 {
         self.packets
     }
 
-    /// Prospective wire bytes, counted conservatively.
     #[must_use]
     pub const fn wire_bytes(&self) -> u64 {
         self.wire_bytes
     }
 }
 
-/// Finite application-level authorization for kernel-managed socket traffic.
+/// Authorization limits for socket connections, framed messages, and
+/// application bytes. Kernel-managed TCP packets cannot be counted as an exact
+/// [`WireBudget`]. The workflow enforces its own deadline.
 ///
-/// Operating systems control TCP handshake, acknowledgement, teardown, and
-/// retransmission packets, so those cannot honestly be represented as an
-/// exact [`WireBudget`]. This shape instead states the three quantities an
-/// authorizer can actually charge against a traffic policy before a socket is
-/// opened: connections, framed messages, and application bytes. Wall-clock
-/// duration is not one of them — the workflow that opens the socket owns its
-/// own deadline and enforces it there.
-///
-/// [`SocketBudget::none`] is the honest statement that an operation opens no
-/// socket at all; it is not a default, and a workflow that may open one must
-/// still state all three counts.
+/// [`SocketBudget::none`] declares no socket use; otherwise all three counts
+/// are required.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SocketBudget {
     connections: u64,
@@ -86,7 +73,6 @@ impl SocketBudget {
         }
     }
 
-    /// The budget of an operation that will not open a socket.
     #[must_use]
     pub const fn none() -> Self {
         Self::new(0, 0, 0)
@@ -108,7 +94,6 @@ impl SocketBudget {
     }
 }
 
-/// The combined traffic charge cannot be represented within the policy range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("operation traffic budget overflowed")]
 pub struct BudgetOverflow;
@@ -200,26 +185,18 @@ impl DnsOperation {
     }
 }
 
-/// Whether an operation would put permissively built or malformed bytes on
-/// the wire, and if so whether the caller passed the per-operation opt-in.
-///
-/// A workflow must say one or the other; the permissive case cannot be
-/// reached by leaving a flag unset.
+/// Declares whether transmitted bytes need the permissive-live opt-in and
+/// whether the caller supplied it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissiveLive {
     /// Every packet builds strictly; no opt-in is involved.
     NotRequired,
-    /// At least one packet needs the permissive-live opt-in, which the caller
-    /// did (`allowed: true`) or did not (`allowed: false`) pass for this run.
-    Required {
-        /// The caller passed the per-operation opt-in for those bytes.
-        allowed: bool,
-    },
+    /// At least one packet requires the per-operation opt-in.
+    Required { allowed: bool },
 }
 
-/// A declared-packet operation: the fuzz workflow, which knows every packet it
-/// may transmit, the route destination it chose, and whether any case builds
-/// permissively.
+/// Fuzz authorization: all candidate packets, the route destination, and the
+/// permissive-live opt-in.
 #[derive(Clone, Copy, Debug)]
 pub struct DeclaredPackets<'a> {
     budget: WireBudget,
@@ -229,9 +206,8 @@ pub struct DeclaredPackets<'a> {
 }
 
 impl<'a> DeclaredPackets<'a> {
-    /// Every argument is required. `destination` is the route destination
-    /// chosen outside the packets themselves, or `None` when the workflow
-    /// routes from the packets alone; the caller states that explicitly.
+    /// `destination` is a route destination supplied outside the packets, or
+    /// `None` to route from the packets alone.
     #[must_use]
     pub const fn new(
         budget: WireBudget,
@@ -295,13 +271,11 @@ impl<'a> ReplayFrame<'a> {
         self.budget
     }
 
-    /// The exact frame that would reach the wire.
     #[must_use]
     pub const fn frame(&self) -> &'a Frame {
         self.frame
     }
 
-    /// The link mode the frame would be transmitted in.
     #[must_use]
     pub const fn mode(&self) -> LinkMode {
         self.mode
@@ -345,21 +319,15 @@ pub enum Operation<'a> {
     /// [`Authorizer::resolve_and_authorize`]; only the budget remains to be
     /// approved.
     Budgeted(WireBudget),
-    /// DNS, with exact raw-UDP bounds and a separate finite socket budget for
-    /// a possible TCP continuation. DNS states this shape for every query,
-    /// with a [`SocketBudget::none`] when no continuation is configured, so
-    /// the same overrun is always charged and reported the same way. Unlike
-    /// [`Operation::Budgeted`], the destination is *not* authorized yet: DNS
-    /// deliberately buys its budget before it resolves a server.
+    /// DNS raw-UDP and socket budgets, using [`SocketBudget::none`] without TCP
+    /// continuation. Unlike [`Operation::Budgeted`], destination authorization
+    /// follows budget approval and server resolution.
     Dns(DnsOperation),
-    /// A workflow that declares the exact packets it may transmit.
     Declared(DeclaredPackets<'a>),
-    /// A replay of one exact captured frame.
     Replay(ReplayFrame<'a>),
 }
 
 impl Operation<'_> {
-    /// The budget every shape carries.
     #[must_use]
     pub const fn budget(&self) -> WireBudget {
         match self {
@@ -384,11 +352,8 @@ impl Operation<'_> {
     }
 }
 
-/// The refusal an authorizer returns for a request shape it does not handle.
-///
-/// Every authorizer matches [`Operation`] exhaustively; the variants it cannot
-/// judge are rejected through this classified internal error rather than
-/// approved by ignoring what they carry.
+/// Classified internal error for an operation shape the authorizer cannot
+/// approve.
 #[must_use]
 pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) -> BoundaryError {
     BoundaryError::from_error(Error::UnsupportedOperation {
@@ -397,21 +362,14 @@ pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) 
     })
 }
 
-/// Policy and resolution seam shared by every live workflow.
-///
-/// Workflows hold an `Authorizer` rather than a policy so that resolution and
-/// approval can be substituted in tests without substituting the traffic rules.
+/// Injectable operation authorization and target resolution for live workflows.
 pub trait Authorizer {
     /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
 
-    /// Applies policy that depends on the passively selected final route.
-    ///
-    /// Replay uses this after destination and budget authorization, but before
-    /// intentional delay or transmission, so captured sources are checked
-    /// against the interface and route that will actually be used. The
-    /// default is deliberately fail-closed for injected authorizers that do
-    /// not make that route-aware decision.
+    /// Applies source policy to the final route after destination/budget
+    /// authorization and before replay delay or transmission. Defaults to
+    /// denial for authorizers without route-aware validation.
     fn authorize_final_wire(
         &mut self,
         _frame: &Frame,
@@ -438,12 +396,7 @@ pub trait Authorizer {
     }
 }
 
-/// The refusal an authorizer without a resolver reports.
-///
-/// It is deliberately neither a policy denial nor an I/O failure: the policy is
-/// not the reason and there is no resolver configuration to inspect. Something
-/// asked a packet-oriented authorizer to resolve a name, which is a wiring
-/// fault in the caller.
+/// Missing resolver is a caller wiring fault, not a policy or I/O failure.
 fn no_resolver() -> BoundaryError {
     BoundaryError::new(
         "this authorizer does not resolve declared targets",
@@ -456,12 +409,9 @@ fn no_resolver() -> BoundaryError {
     )
 }
 
-/// Applies a client traffic policy, and an optional hostname resolver, to an
-/// operation without exposing either concern to workflow engines.
-///
-/// A workflow that authorizes packets rather than names has no resolver, so
-/// [`Authorizer::resolve_and_authorize`] reports that wiring fault instead of
-/// a policy denial for a policy that was never asked.
+/// Applies client policy and an optional resolver to workflow operations.
+/// [`Authorizer::resolve_and_authorize`] reports a wiring fault if no resolver
+/// exists.
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,
     resolver: Option<&'a dyn Resolver>,
@@ -559,8 +509,6 @@ mod tests {
 
     use super::*;
 
-    /// A workflow authorizer that only approves operations, so the trait's
-    /// fail-closed resolution default is what answers a declared target.
     struct OperationOnlyAuthorizer;
 
     impl Authorizer for OperationOnlyAuthorizer {

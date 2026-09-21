@@ -127,10 +127,9 @@ mod tests {
 
     #[test]
     fn representability_edges_are_exact_or_rejected_never_clamped() {
-        // The conversion is checked, never clamped: a 64-bit-timespec host
-        // represents every i64 second exactly, while a narrower SystemTime
-        // (Windows FILETIME ticks) must reject instead of wrapping. Either
-        // way the result agrees with the checked arithmetic itself.
+        // Conversion must match checked arithmetic: 64-bit timespec supports
+        // every i64 second; narrower SystemTime implementations reject overflow
+        // without clamping.
         for (seconds, fraction, precision, fractional) in [
             (
                 i64::MAX,

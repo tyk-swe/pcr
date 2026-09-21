@@ -1,17 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared request-limit checks for bounded workflow evidence budgets.
-
 use std::time::Duration;
 
 use crate::probe::{Error, ErrorKind, Workflow};
 
-/// Rejects, in order, the first `(field, value, maximum)` limit that is zero or
-/// above its maximum and then the first `(field, value, maximum, reason)` limit
-/// that exceeds another limit. Each workflow keeps its own error type, so the
-/// offending triple is handed to `invalid`, which keeps every message and
-/// classification code local to the workflow that owns it.
+/// Rejects the first zero or excessive range limit, then the first cross-limit
+/// violation. `invalid` constructs the owning workflow's error and
+/// classification.
 pub(crate) fn check_limits<E>(
     ranges: &[(&'static str, usize, usize)],
     bounded_by: &[(&'static str, usize, usize, &str)],
@@ -88,7 +84,6 @@ pub(crate) const fn duration_violation(value: Duration, maximum: Duration) -> bo
     value.is_zero() || value.as_nanos() > maximum.as_nanos()
 }
 
-/// Rejects a probe plan that exceeds its finite probe budget.
 pub(crate) fn check_probe_count(
     workflow: Workflow,
     total_probes: usize,
@@ -107,7 +102,6 @@ pub(crate) fn check_probe_count(
     Ok(())
 }
 
-/// Rejects a probe plan whose worst-case duration exceeds its finite limit.
 pub(crate) fn check_probe_duration(
     workflow: Workflow,
     worst_case: Duration,

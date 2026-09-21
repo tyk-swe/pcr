@@ -446,7 +446,6 @@ impl<C: Session> Group<C> {
             captured,
         }))
     }
-    /// Whether shutdown has already been attempted for the group's sessions.
     pub fn shutdown_attempted(&self) -> bool {
         self.closed
     }

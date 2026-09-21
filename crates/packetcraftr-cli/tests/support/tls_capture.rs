@@ -41,7 +41,6 @@ const TLS_1_3: u16 = 0x0304;
 const TLS_AES_128_GCM_SHA256: u16 = 0x1301;
 const X25519: u16 = 0x001d;
 
-/// What one conversation carries.
 pub(crate) struct Handshake {
     pub(crate) client_port: u16,
     pub(crate) server_port: u16,
@@ -222,7 +221,6 @@ fn udp_443_frame(registry: &Arc<Registry>, timestamp: SystemTime, index: u16) ->
         .expect("fixture frame must be valid")
 }
 
-/// Serializes one packet with the built-in registry.
 fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
     core::build::Builder::new(Arc::clone(registry))
         .build(
@@ -235,7 +233,6 @@ fn build(registry: &Arc<Registry>, packet: Packet) -> Vec<u8> {
         .to_vec()
 }
 
-/// One TCP segment's header fields.
 #[derive(Clone, Copy)]
 struct Segment {
     from_client: bool,

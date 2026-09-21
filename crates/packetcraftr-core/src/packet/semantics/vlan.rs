@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Directly transmitted VLAN tag interpretation.
-
 use super::error::Error;
 use super::path::{outer_scope_len, required_u8_field};
 use crate::field::FieldValue;

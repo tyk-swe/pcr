@@ -85,10 +85,9 @@ impl ReaperClient {
         self.permits.reserve()
     }
 
-    /// Transfers `task` without blocking. If the bounded service cannot accept
-    /// it, the complete closure and every resource it owns are deliberately
-    /// retained. This catastrophic fallback leaks a bounded reservation rather
-    /// than partially dropping native state that a worker may still access.
+    /// Transfers `task` without blocking. If admission fails, retains the
+    /// entire closure and its resources, leaking a bounded reservation to keep
+    /// native state alive for workers that may still access it.
     pub(super) fn transfer(&self, task: ReapTask) {
         if let Err(TrySendError::Full(task) | TrySendError::Disconnected(task)) =
             self.tasks.try_send(task)

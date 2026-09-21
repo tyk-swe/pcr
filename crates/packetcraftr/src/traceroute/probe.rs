@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact traceroute probe construction and sent-packet identity validation.
-
 use std::net::IpAddr;
 
 use bytes::Bytes;

@@ -291,7 +291,6 @@ const fn crc32c_table() -> [u32; 256] {
     let mut table = [0_u32; 256];
     let mut index = 0_usize;
     while index < table.len() {
-        // the loop condition bounds index by table.len(), which is 256
         let mut remainder = index as u32;
         let mut bit = 0_u32;
         while bit < 8 {
@@ -302,7 +301,6 @@ const fn crc32c_table() -> [u32; 256] {
             };
             bit = bit.saturating_add(1);
         }
-        // the while condition bounds index below table.len()
         {
             table[index] = remainder;
         }

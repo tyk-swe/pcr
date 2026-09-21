@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Output contracts for the `exchange` command.
-
 use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
 use std::time::Duration;
@@ -75,7 +73,6 @@ impl Report {
     }
 }
 
-/// One NDJSON event produced by `exchange`.
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Event {

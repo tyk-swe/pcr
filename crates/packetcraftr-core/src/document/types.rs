@@ -39,26 +39,20 @@ pub enum Format {
 pub struct DocumentLimits {
     /// Maximum UTF-8 input bytes, checked before any parsing.
     pub max_input_bytes: usize,
-    /// Maximum layers in the document.
     pub max_layers: usize,
     /// Maximum recursive `FieldValue::List` nesting; at most
     /// [`MAX_DOCUMENT_NESTING`].
     pub max_nesting: usize,
-    /// Maximum reflective fields in one layer.
     pub max_fields_per_layer: usize,
     /// Maximum field-value nodes (scalars and lists) across the document.
     pub max_total_nodes: usize,
-    /// Maximum items in one list value.
     pub max_list_items: usize,
     /// Maximum list items summed across every list in the document.
     pub max_total_list_items: usize,
-    /// Maximum bytes in one protocol name.
     pub max_protocol_name_bytes: usize,
-    /// Maximum bytes in one field name.
     pub max_field_name_bytes: usize,
     /// Maximum bytes in one text value (or the schema string).
     pub max_text_bytes: usize,
-    /// Maximum bytes in one byte value.
     pub max_byte_value_bytes: usize,
     /// Maximum retained payload bytes summed across every value.
     pub max_total_payload_bytes: usize,
@@ -93,7 +87,6 @@ impl DocumentLimits {
         Ok(())
     }
 
-    /// The configured maximum for `limit`.
     #[must_use]
     pub const fn maximum(&self, limit: Limit) -> usize {
         match limit {

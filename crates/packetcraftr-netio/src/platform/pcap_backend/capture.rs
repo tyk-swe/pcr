@@ -265,7 +265,6 @@ unsafe fn tstamp_type_string(raw: *const c_char) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-/// The inactive handle's diagnostic string after a rejected configuration.
 fn inactive_error_message(handle: *mut c_void) -> String {
     // SAFETY: handle is a live inactive capture whose error buffer is a
     // NUL-terminated string copied out before returning.

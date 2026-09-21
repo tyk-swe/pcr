@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! PCAPNG block decoding and section/interface state.
-
 use std::io::Read;
 
 use super::section::{SectionHeader, read_pcapng_block_header, read_section_header_with_length};

@@ -1,15 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured `dissect` output.
-
 use serde::Serialize;
 
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout};
 
 use super::frame::Wire;
 
-/// Structured result of `dissect`.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     /// Publishes the `bytes_hex` and `length` keys the contract declares,

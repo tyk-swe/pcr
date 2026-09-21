@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Probe vocabulary shared by the scan and traceroute workflows.
-
 use serde::{Deserialize, Serialize};
 
 /// The wire protocol a probe is sent over, as a request names it.
@@ -29,12 +27,7 @@ impl Transport {
 
 packetcraftr_core::display_via_as_str!(Transport);
 
-/// The transport-specific destination one probe addresses.
-///
-/// Pairing each transport with exactly the addressing it needs makes a
-/// portless TCP or UDP probe — and a ported ICMP probe — unrepresentable, so
-/// probe construction never has to unwrap a port that a different module
-/// validated.
+/// Transport-specific addressing: TCP and UDP require ports; ICMP has none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeEndpoint {
     Tcp { port: u16 },

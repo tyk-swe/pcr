@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS resource-record, RDATA, and EDNS decoding.
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -141,7 +139,6 @@ impl Rdata<'_> {
                     limit: self.limits.max_txt_strings,
                 });
             }
-            // cursor is below bytes.len() from the loop condition
             let length = usize::from(self.bytes[cursor]);
             cursor = cursor.saturating_add(1);
             let string = self
@@ -278,7 +275,6 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
                 .ok_or_else(|| WireError::InvalidEdns {
                     message: format!("option header is truncated at RDATA byte {cursor}"),
                 })?;
-        // header is the four-byte slice returned by the get above
         let (code, length) = (
             u16::from_be_bytes([header[0], header[1]]),
             usize::from(u16::from_be_bytes([header[2], header[3]])),

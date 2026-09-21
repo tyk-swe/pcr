@@ -204,12 +204,9 @@ const CAPTURE_LOCAL_FIELDS: &[(&str, &str)] = &[
     ("udp.stream", "a per-capture conversation index"),
 ];
 
-/// The compiled comparison rules shared by both captures.
-///
-/// Rules are the complete contract [`verify`] evaluates: identity fields
-/// select which observations correspond, preserved fields must compare equal
-/// on a matched pair, and expectations constrain egress field values
-/// directly.
+/// Shared comparison rules: identity selects corresponding observations,
+/// preservation compares matched fields, and expectations constrain egress
+/// values.
 #[derive(Debug)]
 pub struct Rules {
     identity: Projection,
@@ -549,7 +546,6 @@ fn cell_state(
     }
 }
 
-/// Cap on decode diagnostic codes retained per observation.
 const MAX_OBSERVATION_DIAGNOSTICS: usize = 8;
 
 /// Conservative per-observation structural charge on top of encoded cells.
@@ -697,17 +693,13 @@ impl<'a> Collector<'a> {
     }
 }
 
-/// A rule-compilation or observation-extraction failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// A field projection failed to compile or evaluate.
     #[error(transparent)]
     Projection(#[from] ProjectionError),
-    /// An expectation predicate failed during evaluation.
     #[error(transparent)]
     Filter(#[from] crate::filter::Error),
-    /// Verification was cancelled.
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
     /// The field describes a position inside one capture, so it cannot serve
@@ -720,17 +712,14 @@ pub enum Error {
         field: String,
         why: &'static str,
     },
-    /// An expectation could not be parsed into `FIELD=VALUE`.
     #[error("invalid expectation {rule:?}: {reason}")]
     ExpectationSyntax { rule: String, reason: &'static str },
-    /// An expectation's compiled predicate was rejected.
     #[error("invalid expectation {rule:?}: {source}")]
     Expectation {
         rule: String,
         #[source]
         source: crate::filter::Error,
     },
-    /// An expectation's field failed to compile as a projection.
     #[error("invalid expectation {rule:?}: {source}")]
     ExpectationField {
         rule: String,

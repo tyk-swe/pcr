@@ -1,15 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured `build` output.
-
 use serde::Serialize;
 
 use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, layout::PacketLayout};
 
 use super::frame::Wire;
 
-/// Structured result of `build`.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     /// Publishes the `bytes_hex` and `length` keys the contract declares,

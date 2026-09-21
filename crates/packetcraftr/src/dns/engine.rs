@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS retry orchestration across authorization, execution, and outcomes.
-
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -132,7 +130,6 @@ where
     )
 }
 
-/// [`run_observed`] under a caller-owned deadline.
 pub(super) fn run_observed_with_deadline<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
@@ -248,8 +245,6 @@ impl<'a> PreparedOperation<'a> {
     }
 }
 
-/// Everything one running DNS operation accumulates, kept apart from the
-/// [`Summary`] it publishes.
 #[derive(Default)]
 struct DnsState {
     evidence_budget: Budget,
@@ -340,8 +335,6 @@ where
                 self.record_failure_outcome(udp_status);
                 false
             }
-            // A truncated response continues over TCP when — and only when —
-            // a continuation was configured.
             Some(_)
                 if udp_status == Outcome::Truncated
                     && self.request.transport == TransportMode::UdpThenTcp =>
@@ -653,7 +646,6 @@ fn select_response<'a>(
     Ok(best)
 }
 
-/// The DNS workflow's names for the shared policy-gate failures.
 pub(super) struct Gates;
 
 impl crate::target::GateErrors for Gates {

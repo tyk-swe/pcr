@@ -305,7 +305,6 @@ fn decode_options(input: &[u8], flags: u16) -> Result<DecodedOptions, crate::cod
     Ok((header_len, checksum_value, key, sequence))
 }
 
-/// Reads the four-byte GRE option that starts at `cursor`.
 fn gre_option(input: &[u8], cursor: usize) -> Result<[u8; GRE_OPTION_LEN], crate::codec::Error> {
     input
         .get(cursor..)

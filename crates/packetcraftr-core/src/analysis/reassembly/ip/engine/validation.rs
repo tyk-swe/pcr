@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Normalization and pure pre-commit validation for one incoming fragment.
-//!
-//! Fragment normalization, header validation, retained-state consistency,
-//! final-length planning, wire-extent checks, and ECN combination are pure:
-//! they never mutate retained state, so a rejected fragment leaves every
-//! retained datagram exactly as it was.
+//! Pure pre-commit fragment normalization and validation. Checks headers,
+//! retained state, final length, wire extent, and ECN without mutating any
+//! datagram.
 
 use super::super::{Ipv4Fragment, Ipv6Fragment};
 use super::{

@@ -80,7 +80,6 @@ impl FromStr for Target {
     }
 }
 
-/// Why a `LAYER.FIELD` fuzz target text did not parse.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TargetParseError {
@@ -220,7 +219,6 @@ impl Request {
         }) {
             return Err(Error::InvalidStrategies);
         }
-        // the `cases == 0` check above has already returned
         let final_case_offset =
             u64::try_from(self.cases - 1).map_err(|_| Error::CaseIndexOverflow)?;
         self.first_case

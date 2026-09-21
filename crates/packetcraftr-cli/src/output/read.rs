@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Stream output for the `read` command.
-
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame as CaptureFrame;
 use serde::Serialize;
@@ -30,7 +28,6 @@ impl Frame {
         })
     }
 
-    /// Builds a record that also carries the frame's dissected layer stack.
     pub fn try_from_decoded(
         source_frame: u64,
         frame: CaptureFrame,
@@ -44,7 +41,6 @@ impl Frame {
     }
 }
 
-/// One NDJSON event produced by `read`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {

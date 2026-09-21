@@ -16,7 +16,6 @@ use crate::field::{FieldValue, parse_mac};
 use crate::registry::Registry;
 
 const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
-/// Absolute recursive list nesting accepted by the expression parser.
 const MAX_EXPRESSION_NESTING: usize = 64;
 
 #[derive(Debug, Error)]
@@ -553,7 +552,6 @@ impl<'a> TopLevelScanner<'a> {
     }
 }
 
-/// A structural failure found by [`TopLevelScanner`].
 enum ScanFailure {
     /// A closing bracket appeared without a matching opener.
     Unbalanced { offset: usize, character: char },

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! MTU validation for exact built packets.
-
 use packetcraftr_core::{build::BuiltPacket, layer::Padding, protocol::BuiltinProtocol};
 
 use crate::Error;

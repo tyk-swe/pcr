@@ -37,8 +37,6 @@ use packetcraftr_core::{
 
 /// Maps an operation-local sequence to an IPv4 identification that native
 /// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
-// `u16::MAX` is a non-zero divisor and the remainder is strictly below it, so the increment neither
-// divides by zero nor overflows u16
 pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }
@@ -85,7 +83,6 @@ pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Resul
     })
 }
 
-/// The error a workflow reports when `actual` elapsed time passed `limit`.
 pub(crate) fn duration_limit(workflow: Workflow, actual: Duration, limit: Duration) -> Error {
     Error::new(workflow, ErrorKind::DurationLimit { actual, limit })
 }
@@ -313,8 +310,6 @@ mod tests {
 
     use super::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port};
 
-    /// Previous `scan_udp_source_port` and CLI `source_port` behaviour: an
-    /// offset counted from the base wraps at the top of the dynamic range.
     #[test]
     fn dynamic_range_offsets_wrap_at_the_top_of_the_range() {
         let width = u64::from(u16::MAX) - u64::from(EPHEMERAL_SOURCE_PORT_BASE) + 1;
@@ -327,8 +322,6 @@ mod tests {
         }
     }
 
-    /// Previous `dns_source_port` behaviour: a base inside the dynamic range
-    /// rotates within that range and never leaves it.
     #[test]
     fn a_dynamic_base_rotates_inside_the_dynamic_range() {
         let width = u32::from(u16::MAX) - u32::from(EPHEMERAL_SOURCE_PORT_BASE) + 1;

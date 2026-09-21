@@ -129,16 +129,13 @@ pub struct SentFrame {
     pub pass: u32,
     /// Zero-based index of the packet within one expansion pass.
     pub index: u64,
-    /// The provider-confirmed transmission.
     pub packet: crate::SentPacket,
 }
 
-/// Aggregate result of a set send.
 #[derive(Clone, Debug)]
 pub struct SetReport {
     /// Every confirmed transmission, in send order.
     pub sent: Vec<SentFrame>,
-    /// Passes over the set completed in full.
     pub passes_completed: u32,
     pub stats: Stats,
 }

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deterministic, bounded DNS message encoding.
-
 use super::{Dns, NAME, Name, Record, RecordValue};
 use crate::codec::{Error, Mode};
 use crate::diagnostic::Diagnostic;

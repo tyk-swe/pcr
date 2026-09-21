@@ -5,9 +5,7 @@
 
 use serde::Serialize;
 
-/// Default maximum encoded or decoded packet size (16 MiB).
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
-/// Default maximum number of layers in one packet.
 pub const DEFAULT_MAX_LAYERS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]

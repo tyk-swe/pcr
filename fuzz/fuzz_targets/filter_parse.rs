@@ -9,10 +9,9 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::protocol::builtin;
 use std::time::SystemTime;
 
-// The input is `<filter text> NUL <ethernet frame bytes>`. Without the
-// separator the whole input is filter text and the frame is empty, so the
-// text-only seed corpus still exercises the compiler; with it, the compiled
-// predicate runs against real decoded layers instead of an empty packet.
+// Input: `<filter text> NUL <ethernet frame bytes>`. Without NUL, treat all
+// input as filter text and use an empty frame, preserving text-only corpus
+// coverage.
 fuzz_target!(|data: &[u8]| {
     let (text, frame_bytes) = match data.iter().position(|byte| *byte == 0) {
         Some(split) => (&data[..split], &data[split + 1..]),

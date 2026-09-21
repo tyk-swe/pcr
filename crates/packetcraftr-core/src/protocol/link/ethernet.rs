@@ -28,7 +28,6 @@ const ETHERNET_LEN: usize = 14;
 const MAC_LEN: usize = 6;
 const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
 
-/// Reads the fixed-size chunk of `input` that starts at `offset`.
 fn ethernet_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
     input
         .get(offset..)

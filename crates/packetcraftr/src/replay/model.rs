@@ -18,7 +18,6 @@ use super::error::Error;
 
 pub const MAX_REPLAY_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
-/// Timing policy used when replaying captured frames.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -135,13 +134,9 @@ fn required_times(
     }
 }
 
-/// Finite resource ceilings applied before authorizing or transmitting a frame.
-///
-/// `max_source_frames` bounds frames *read* from the capture, including the ones
-/// a selector skips before they are authorized; `max_transmitted_bytes` bounds
-/// only the bytes that reach the wire. The engine bound is independent of the
-/// authorizer's own budget: it still bounds the operation when an injected
-/// authorizer approves everything.
+/// Engine limits enforced independently of authorization. `max_source_frames`
+/// counts all frames read, including skipped frames; `max_transmitted_bytes`
+/// counts only bytes sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub max_source_frames: u64,
@@ -162,11 +157,8 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// The engine ceilings a traffic policy's per-operation budget implies.
-    ///
-    /// The policy bounds what may be *transmitted*; this bound is applied to
-    /// what is *read*, which is at least as many frames, so the operation
-    /// cannot outlive the policy budget even when every frame is selected.
+    /// Applies the policy's transmission ceiling to frames read, including
+    /// skipped frames.
     #[must_use]
     pub fn from_policy(
         policy: &crate::policy::Policy,
@@ -306,12 +298,9 @@ pub trait Selector {
     }
 }
 
-/// Exact-frame transmitter seam used by native and injected adapters.
-///
-/// The two methods are one handoff: [`plan_frame`](Transmitter::plan_frame)
-/// produces the exact route the engine then authorizes, and that same route is
-/// handed back to [`transmit`](Transmitter::transmit), so the bytes on the wire
-/// are routed by the authorized plan.
+/// Exact-frame transmission. The engine authorizes the route returned by
+/// [`plan_frame`](Transmitter::plan_frame) and passes that same route to
+/// [`transmit`](Transmitter::transmit).
 pub trait Transmitter {
     /// Resolve and validate the concrete interface, then passively select and
     /// materialize the final route, before any intentional delay.

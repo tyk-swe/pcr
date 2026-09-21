@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::limits::{DetailBudget, DetailCharge, ScratchBudget, json_bytes};
+use super::limits::{DetailBudget, DetailCharge, ScratchBudget};
 use super::{Error, ExpectationOutcome, Observation, Rules, Side, ValueState, VerifyLimits};
 use crate::budget::{Cancellation, Deadline};
 use crate::field::FieldValue;
@@ -346,10 +346,8 @@ fn index(
     for (position, observation) in observations.iter().enumerate() {
         check()?;
         if observation.is_keyed() {
-            let bytes = json_bytes(&observation.key_cells);
-            budget.reserve(bytes.saturating_add(128))?;
-            let key = serde_json::to_vec(&observation.key_cells)
-                .expect("identity cells encode losslessly");
+            budget.reserve(128)?;
+            let key = budget.json(&observation.key_cells)?;
             index.entry(key).or_default().push(position);
         }
     }

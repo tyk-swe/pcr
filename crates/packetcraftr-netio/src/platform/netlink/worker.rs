@@ -1,26 +1,73 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded route-netlink execution on a caller-namespace worker thread.
+//! Bounded route-netlink execution on a shared worker thread.
+//!
+//! One worker thread owns its Tokio runtime and route-netlink socket for the
+//! process lifetime and holds one shared-budget permit; callers submit
+//! operations over a bounded channel and wait on a per-request reply channel
+//! instead of paying a thread spawn, a runtime, and a socket per lookup. A
+//! planning pass over T targets issues its T requests on a single connection
+//! rather than T workers.
 
 use std::{
+    any::Any,
     future::Future,
-    sync::mpsc::{self, SyncSender},
-    thread,
-    time::Duration,
+    panic::{AssertUnwindSafe, catch_unwind},
+    pin::Pin,
+    sync::{
+        Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, SyncSender, TrySendError},
+    },
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
+
+use futures_util::future::{Either, select};
+use packetcraftr_core::budget::remaining_before;
+use rtnetlink::{Handle, new_connection};
 
 use crate::{
     platform::{
         os_error,
-        workers::{JoinAttempt, join_with_deadline, shared_budget},
+        workers::{JoinAttempt, RetentionMarker, WorkerPermit, join_with_deadline, shared_budget},
     },
     route::SystemError,
 };
-use rtnetlink::{Handle, new_connection};
 
 const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
 const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Queued operations are bounded at the native worker capacity, so submission
+/// pressure stays coupled to the shared budget the worker draws on.
+const NETLINK_QUEUE_DEPTH: usize = crate::platform::workers::CAPACITY;
+
+/// The channel boundary erases each operation's result type behind `Any`; the
+/// caller's downcast restores it and can only fail if the worker answered a
+/// different call's request.
+type OperationResult = Result<Box<dyn Any + Send>, SystemError>;
+type OperationFuture = Pin<Box<dyn Future<Output = OperationResult> + Send>>;
+type Operation = Box<dyn FnOnce(Handle) -> OperationFuture + Send>;
+
+struct NetlinkRequest {
+    operation: Operation,
+    respond: SyncSender<OperationResult>,
+}
+
+/// The installed worker. `generation` lets a caller that found a dead worker
+/// tell "still dead" from "another caller already installed a replacement".
+struct WorkerSlot {
+    generation: u64,
+    requests: SyncSender<NetlinkRequest>,
+    retention: RetentionMarker,
+    worker: JoinHandle<()>,
+}
+
+// One worker serves every lookup in the process. The slot stays empty until
+// the first lookup starts it and after a failed start, and is replaced
+// wholesale when a worker dies so a dead worker never wedges later lookups.
+static SHARED_WORKER: Mutex<Option<WorkerSlot>> = Mutex::new(None);
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
 where
@@ -28,6 +75,101 @@ where
     Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
+    let (respond, finished) = mpsc::sync_channel(1);
+    let mut request = NetlinkRequest {
+        operation: Box::new(move |handle| {
+            Box::pin(async move {
+                operation(handle)
+                    .await
+                    .map(|value| Box::new(value) as Box<dyn Any + Send>)
+            })
+        }),
+        respond,
+    };
+    let deadline = Instant::now() + NETLINK_RESPONSE_TIMEOUT;
+    let mut restarted = false;
+    loop {
+        let (generation, requests) = worker_requests()?;
+        match requests.try_send(request) {
+            Ok(()) => break,
+            Err(TrySendError::Full(returned)) => {
+                request = returned;
+                let Some(remaining) = remaining_before(deadline) else {
+                    return Err(netlink_timeout("submit netlink request"));
+                };
+                thread::park_timeout(remaining.min(Duration::from_millis(10)));
+            }
+            // A disconnected inbox means the worker died; the request came
+            // back undelivered, so it is safe to resubmit to a replacement.
+            Err(TrySendError::Disconnected(returned)) => {
+                request = returned;
+                if restarted {
+                    return Err(netlink_worker_panicked());
+                }
+                restarted = true;
+                restart_worker(generation)?;
+            }
+        }
+    }
+    let result = match finished.recv_timeout(remaining_before(deadline).unwrap_or_default()) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Disconnected) => return Err(netlink_worker_panicked()),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            return Err(netlink_timeout("wait for netlink response"));
+        }
+    };
+    result.and_then(|value| {
+        value
+            .downcast::<T>()
+            .map(|value| *value)
+            .map_err(|_| SystemError::InvalidResponse {
+                message: "Linux netlink worker returned a mismatched result type".to_owned(),
+            })
+    })
+}
+
+fn shared_worker() -> MutexGuard<'static, Option<WorkerSlot>> {
+    SHARED_WORKER.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn worker_requests() -> Result<(u64, SyncSender<NetlinkRequest>), SystemError> {
+    let mut slot = shared_worker();
+    if slot.is_none() {
+        *slot = Some(start_worker()?);
+    }
+    let worker = slot.as_ref().expect("the worker slot was just initialized");
+    Ok((worker.generation, worker.requests.clone()))
+}
+
+fn restart_worker(generation: u64) -> Result<(), SystemError> {
+    let mut slot = shared_worker();
+    if let Some(worker) = slot.as_ref()
+        && worker.generation != generation
+    {
+        // Another caller already swapped in a live worker.
+        return Ok(());
+    }
+    if let Some(dead) = slot.take() {
+        // The disconnected inbox means this worker already exited; joining
+        // reaps its thread instead of detaching it. A worker that somehow
+        // outlives its inbox keeps its permit until it exits.
+        match join_with_deadline(
+            dead.worker,
+            NETLINK_OPERATION_TIMEOUT,
+            Duration::from_millis(10),
+        ) {
+            JoinAttempt::Finished(joined) => drop(joined),
+            JoinAttempt::TimedOut(worker) => {
+                dead.retention.mark_retained();
+                drop(worker);
+            }
+        }
+    }
+    *slot = Some(start_worker()?);
+    Ok(())
+}
+
+fn start_worker() -> Result<WorkerSlot, SystemError> {
     let permit = shared_budget()
         .reserve()
         .map_err(|error| SystemError::OperatingSystem {
@@ -37,91 +179,120 @@ where
         })?;
     let retention = permit.retention_marker();
     let (setup, initialized) = mpsc::sync_channel(1);
-    let (response, finished) = mpsc::sync_channel(1);
-    // The new thread inherits the caller's network namespace. It owns the
-    // runtime and socket; response publication follows their destruction.
-    // A caller timeout releases its wait, while the worker retains its permit.
+    let (requests, inbox) = mpsc::sync_channel(NETLINK_QUEUE_DEPTH);
+    // The worker inherits the first caller's network namespace and keeps it:
+    // every later lookup shares that one socket. It owns its permit for its
+    // whole lifetime; a caller timing out never takes the worker's resources.
     let worker = thread::Builder::new()
         .name("packetcraftr-netlink".to_owned())
-        .spawn(move || {
-            let _permit = permit;
-            let result = netlink_worker(operation, setup);
-            let _ = response.send(result);
-        })
+        .spawn(move || run_worker(setup, inbox, permit))
         .map_err(|error| os_error("spawn netlink worker", error))?;
     match initialized.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
-        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            retention.mark_retained();
-            return Err(netlink_timeout("initialize netlink"));
+        Ok(Ok(())) => Ok(WorkerSlot {
+            generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+            requests,
+            retention,
+            worker,
+        }),
+        Ok(Err(error)) => {
+            // The worker reported its own setup failure and returned, so its
+            // thread is already at exit; join reaps it rather than detaching.
+            let _ = worker.join();
+            Err(error)
         }
-    }
-    let result = match finished.recv_timeout(NETLINK_RESPONSE_TIMEOUT) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(netlink_worker_panicked()),
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            retention.mark_retained();
-            return Err(netlink_timeout("wait for netlink response"));
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            Err(netlink_worker_panicked())
         }
-    };
-    match join_with_deadline(worker, NETLINK_RESPONSE_TIMEOUT, Duration::from_millis(10)) {
-        JoinAttempt::Finished(Ok(())) => result,
-        JoinAttempt::Finished(Err(_)) => Err(netlink_worker_panicked()),
-        JoinAttempt::TimedOut(worker) => {
-            // The worker, including its permit, still owns its resources.
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // The worker may still be initializing. Dropping `requests` and
+            // `initialized` makes it report to nobody and exit on its own,
+            // releasing the permit when its thread finishes.
             retention.mark_retained();
-            drop(worker);
-            Err(netlink_timeout("shut down netlink worker"))
+            Err(netlink_timeout("initialize netlink"))
         }
     }
 }
 
-fn netlink_worker<F, Fut, T>(operation: F, setup: SyncSender<()>) -> Result<T, SystemError>
-where
-    F: FnOnce(Handle) -> Fut,
-    Fut: Future<Output = Result<T, SystemError>>,
-{
-    let runtime = tokio::runtime::Builder::new_current_thread()
+fn run_worker(
+    setup: SyncSender<Result<(), SystemError>>,
+    requests: mpsc::Receiver<NetlinkRequest>,
+    permit: WorkerPermit,
+) {
+    let _permit = permit;
+    let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
         .build()
-        .map_err(|error| os_error("create Tokio netlink runtime", error))?;
-    let (connection, handle, _) = runtime
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = setup.send(Err(os_error("create Tokio netlink runtime", error)));
+            return;
+        }
+    };
+    let (connection, handle) = match runtime
         .block_on(async { new_connection() })
-        .map_err(|error| os_error("open route netlink socket", error))?;
-    let connection = runtime.spawn(connection);
-    if setup.send(()).is_err() {
+        .map_err(|error| os_error("open route netlink socket", error))
+    {
+        Ok((connection, handle, _)) => (connection, handle),
+        Err(error) => {
+            let _ = setup.send(Err(error));
+            return;
+        }
+    };
+    let mut connection = runtime.spawn(connection);
+    if setup.send(Ok(())).is_err() {
         connection.abort();
-        return Err(netlink_channel_error(
-            "caller stopped waiting during initialization",
-        ));
+        return;
     }
-    let result = runtime.block_on(await_netlink_operation(
-        operation(handle),
-        NETLINK_OPERATION_TIMEOUT,
-    ));
+    while let Ok(request) = requests.recv() {
+        let NetlinkRequest { operation, respond } = request;
+        // A panicking operation must not strand every later request behind a
+        // dead worker.
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            runtime.block_on(await_netlink_operation(
+                operation(handle.clone()),
+                &mut connection,
+                NETLINK_OPERATION_TIMEOUT,
+            ))
+        }))
+        .unwrap_or_else(|_| Err(netlink_worker_panicked()));
+        let _ = respond.send(result);
+        if connection.is_finished() {
+            break;
+        }
+    }
     connection.abort();
-    result
 }
 
-async fn await_netlink_operation<F, T>(operation: F, timeout: Duration) -> Result<T, SystemError>
+async fn await_netlink_operation<F, T>(
+    operation: F,
+    connection: &mut tokio::task::JoinHandle<()>,
+    timeout: Duration,
+) -> Result<T, SystemError>
 where
     F: Future<Output = Result<T, SystemError>>,
 {
-    tokio::time::timeout(timeout, operation)
-        .await
-        .map_err(|_| netlink_timeout("execute netlink operation"))?
+    let operation = std::pin::pin!(tokio::time::timeout(timeout, operation));
+    match select(connection, operation).await {
+        Either::Left((joined, _)) => {
+            joined.map_err(|error| os_error("drive netlink connection", error))?;
+            Err(SystemError::OperatingSystem {
+                operation: "drive netlink connection",
+                message: "route netlink connection stopped".to_owned(),
+                source: None,
+            })
+        }
+        Either::Right((result, _)) => {
+            result.map_err(|_| netlink_timeout("execute netlink operation"))?
+        }
+    }
 }
 
 fn netlink_worker_panicked() -> SystemError {
     SystemError::InvalidResponse {
         message: "Linux netlink worker panicked".to_owned(),
-    }
-}
-
-fn netlink_channel_error(message: &'static str) -> SystemError {
-    SystemError::InvalidResponse {
-        message: format!("Linux netlink worker {message}"),
     }
 }
 
@@ -143,9 +314,11 @@ mod tests {
             .enable_time()
             .build()
             .unwrap();
+        let mut connection = runtime.spawn(std::future::pending());
         assert!(matches!(
             runtime.block_on(await_netlink_operation(
                 std::future::pending::<Result<(), SystemError>>(),
+                &mut connection,
                 Duration::ZERO,
             )),
             Err(SystemError::OperatingSystem {
@@ -153,5 +326,52 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_stopped_connection_releases_pending_queries_for_worker_replacement() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let mut connection = runtime.spawn(async {});
+        let result = runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                await_netlink_operation(
+                    std::future::pending::<Result<(), SystemError>>(),
+                    &mut connection,
+                    Duration::from_secs(60),
+                ),
+            )
+            .await
+            .expect("connection failure must not wait for the operation deadline")
+        });
+        assert!(matches!(
+            result,
+            Err(SystemError::OperatingSystem {
+                operation: "drive netlink connection",
+                ..
+            })
+        ));
+        assert!(connection.is_finished());
+    }
+
+    #[test]
+    fn a_reused_worker_answers_typed_results_for_sequential_operations() {
+        // A host that refuses the socket cannot exercise the worker; that is
+        // an environment limit, not a submission-plumbing failure.
+        let first: Result<u32, SystemError> = match with_netlink(|_handle| async move { Ok(7_u32) })
+        {
+            Err(error @ SystemError::OperatingSystem { .. }) => {
+                eprintln!("skipping shared-worker round trip: {error}");
+                return;
+            }
+            first => first,
+        };
+        assert!(matches!(first, Ok(7)));
+        let second: Result<String, SystemError> =
+            with_netlink(|_handle| async move { Ok("route".to_owned()) });
+        assert!(matches!(second, Ok(ref value) if value == "route"));
     }
 }

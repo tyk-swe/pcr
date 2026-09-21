@@ -145,7 +145,7 @@ impl TryFrom<&[u8]> for Tls {
 
     /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
-        let parsed = Self::from_records(&Bytes::copy_from_slice(wire))
+        let parsed = Self::parse_records(wire, |end| Bytes::copy_from_slice(&wire[..end]))
             .ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
         if parsed.remainder != 0 {
             return Err(invalid(NAME, "TLS records have an incomplete tail"));
@@ -168,6 +168,10 @@ impl Tls {
     /// Returns `None` when no complete record is present, which is how a
     /// coincidental record header inside opaque bytes stays `raw`.
     fn from_records(wire: &Bytes) -> Option<Dissection> {
+        Self::parse_records(wire, |end| wire.slice(..end))
+    }
+
+    fn parse_records(wire: &[u8], retain_wire: impl FnOnce(usize) -> Bytes) -> Option<Dissection> {
         let mut records = Vec::new();
         let mut consumed = 0_usize;
         let mut diagnostics = Vec::new();
@@ -235,7 +239,7 @@ impl Tls {
             supported_versions: Vec::new(),
             supported_groups: Vec::new(),
             hello: None,
-            wire: crate::byte_slice::checked_slice(wire, 0, consumed)?,
+            wire: retain_wire(consumed),
         };
         layer.apply_handshake(&records, &mut diagnostics);
         Some(Dissection {
@@ -547,6 +551,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![RECORDS_CAPPED]
         );
+    }
+
+    #[test]
+    fn malformed_borrowed_records_do_not_retain_input() {
+        let wire = vec![0; 1 << 20];
+        assert!(
+            Tls::parse_records(&wire, |_| panic!("invalid input must not be copied")).is_none()
+        );
+    }
+
+    #[test]
+    fn borrowed_records_retain_only_the_consumed_prefix() {
+        let mut wire = record(23, TLS_1_2, b"encrypted");
+        let complete = wire.len();
+        wire.resize(1 << 20, 0);
+        let parsed = Tls::parse_records(&wire, |end| {
+            assert_eq!(end, complete);
+            Bytes::copy_from_slice(&wire[..end])
+        })
+        .unwrap();
+        assert_eq!(parsed.remainder, wire.len() - complete);
     }
 
     #[test]

@@ -29,7 +29,8 @@ impl TryFrom<&[u8]> for Http {
     type Error = crate::codec::Error;
 
     fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
-        let (head, length) = parse_head(&Bytes::copy_from_slice(input))
+        let bounded = &input[..input.len().min(super::MAX_HEADER_BYTES)];
+        let (head, length) = parse_head(&Bytes::copy_from_slice(bounded))
             .map_err(|e| invalid(NAME, e.to_string()))?
             .ok_or_else(|| invalid(NAME, "incomplete HTTP/1 headers"))?;
         if length != input.len() {

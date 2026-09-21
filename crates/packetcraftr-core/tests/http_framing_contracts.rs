@@ -4,6 +4,18 @@ use bytes::Bytes;
 use packetcraftr_core::protocol::application::http::{self, Body, BodyDecoder, StartLine};
 
 #[test]
+fn borrowed_headers_preserve_limit_and_trailing_byte_errors() {
+    let oversized = vec![b'a'; http::MAX_HEADER_BYTES * 2];
+    let error = http::Http::try_from(oversized.as_slice()).unwrap_err();
+    assert!(error.to_string().contains("header bytes"));
+
+    let mut trailing = b"GET / HTTP/1.1\r\n\r\n".to_vec();
+    trailing.resize(http::MAX_HEADER_BYTES * 2, b'a');
+    let error = http::Http::try_from(trailing.as_slice()).unwrap_err();
+    assert!(error.to_string().contains("body or trailing bytes"));
+}
+
+#[test]
 fn headers_preserve_octets_and_duplicates_and_choose_unambiguous_boundaries() {
     let wire =
         b"GET /a%20b HTTP/1.1\r\nHost: example.test\r\nX-Test: one\r\nX-Test: \xff\r\n\r\ntrailing";

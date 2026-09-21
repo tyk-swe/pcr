@@ -22,8 +22,10 @@ pub(in crate::analysis::pcap) const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0
 pub(in crate::analysis::pcap) const PCAPNG_CUSTOM_BLOCK: u32 = 0x0000_0bad;
 pub(in crate::analysis::pcap) const PCAPNG_CUSTOM_BLOCK_NO_COPY: u32 = 0x4000_0bad;
 pub(in crate::analysis::pcap) const PCAPNG_OPTION_END: u16 = 0;
+pub(in crate::analysis::pcap) const PCAPNG_OPTION_COMMENT: u16 = 1;
 pub(in crate::analysis::pcap) const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
 pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
+pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_FCSLEN: u16 = 13;
 pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
 pub(in crate::analysis::pcap) const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution =
     TimestampResolution::Decimal(6);

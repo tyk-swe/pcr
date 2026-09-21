@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Finite resource and expiry bounds for IP fragment reassembly.
-
 use std::time::Duration;
 
 const DEFAULT_MAX_DATAGRAMS: usize = 8_192;

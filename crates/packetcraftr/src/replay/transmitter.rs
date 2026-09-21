@@ -25,12 +25,9 @@ use crate::policy::decode_wire;
 use crate::replay::model::{Transmission, Transmitter};
 use crate::replay::wire::{map_replay_route_error, replay_network_envelope};
 
-/// Production replay transmitter backed by the system interface, route, and
-/// Layer 2/Layer 3 providers.
-///
-/// The only retained state is the selected interface, a cache of an
-/// operating-system enumeration; the engine hands the authorized plan straight
-/// back to [`Transmitter::transmit`], so no route is remembered.
+/// System interface, route, and packet-I/O providers for replay. Caches only
+/// the validated interface; each transmission uses the plan returned by the
+/// engine.
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
     packet_io: ModeSender<SystemLayer2Io, SystemLayer3Io>,

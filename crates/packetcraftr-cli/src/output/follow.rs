@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured conversation-following output.
-
 use packetcraftr_core::analysis::follow::PeerDirection;
 
 use std::net::IpAddr;
@@ -45,7 +43,6 @@ pub struct WrittenFile {
     pub bytes: u64,
 }
 
-/// Aggregate result of `follow`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub clock: packetcraftr_core::analysis::ClockReport,

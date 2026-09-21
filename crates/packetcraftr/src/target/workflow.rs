@@ -58,12 +58,8 @@ where
     })
 }
 
-/// Obtains complete operation approval before batch construction or execution
-/// can produce live side effects, checking the same absolute deadline on both
-/// sides of the authorization boundary.
-///
-/// Every packet-oriented workflow states its own shape here; the bracket is
-/// shared so no caller has to open-code it.
+/// Authorizes the complete operation before live side effects, checking the
+/// absolute deadline before and after authorization.
 pub(crate) fn approve_operation<A, G>(
     authorizer: &mut A,
     operation: Operation<'_>,
@@ -81,7 +77,6 @@ where
     approval.map_err(|source| gates.authorization(source))
 }
 
-/// The packet-and-byte budget shape scan and traceroute state.
 pub(crate) const fn budgeted(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {
     Operation::Budgeted(WireBudget::new(packets, maximum_wire_bytes))
 }

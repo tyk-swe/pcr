@@ -1,10 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! CLI machine output. Domain values stay with their owning crate; these
-//! representations handle hex encoding, timestamps, flattened reports, and
-//! the versioned envelope. The stream encoder owns ordering and termination.
-//! Every output-v5 NDJSON record declares its kind in the envelope's `event`.
+//! CLI machine output: hex, timestamps, reports, and versioned envelopes. The
+//! stream encoder owns ordering/termination; each NDJSON envelope names its
+//! `event`.
 
 pub mod build;
 pub mod capture;

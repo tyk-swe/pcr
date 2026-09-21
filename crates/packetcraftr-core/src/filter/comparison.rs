@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Runtime comparison, prefix-membership, and byte-containment semantics.
-
 use std::cmp::Ordering;
 
 use memchr::memmem::Finder;
@@ -74,7 +72,6 @@ fn prefix_mask_u128(prefix: u8) -> u128 {
     }
 }
 
-/// Orders a field value against a literal of a comparable type.
 fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
     match (value, literal) {
         (FieldValue::Bool(left), Literal::Bool(right)) => Some(left.cmp(right)),
@@ -142,7 +139,6 @@ impl Needle {
     }
 }
 
-/// Whether a field value contains the needle as a subsequence.
 pub(super) fn contains(value: &FieldValue, needle: &Needle) -> bool {
     if let FieldValue::List(values) = value {
         return values.iter().any(|element| contains(element, needle));

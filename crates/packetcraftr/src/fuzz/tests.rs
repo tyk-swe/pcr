@@ -685,10 +685,8 @@ fn live_fuzz_authorizes_a_campaign_where_no_case_built() {
     assert_eq!(error.classification().code, "policy.public_destination");
 }
 
-/// A campaign that would put permissively built bytes on the wire needs two
-/// independent approvals — the per-operation opt-in and the policy's standing
-/// allowance — and the authorizer, not the workflow, is where both are
-/// applied. Nothing may be transmitted before both pass.
+/// Permissive live traffic requires both the operation opt-in and policy
+/// allowance to pass authorization before transmission.
 #[test]
 fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmission() {
     let registry = packetcraftr_core::protocol::builtin::registry();

@@ -8,10 +8,8 @@ use packetcraftr_core::protocol::application::tls::parse::{
 };
 
 fuzz_target!(|data: &[u8]| {
-    // 1. Record parsing
     let _ = parse_record(data);
 
-    // 2. Handshake parsing
     if let Outcome::Complete {
         value: handshake, ..
     } = parse_handshake(data)

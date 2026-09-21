@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Stable Npcap error classification and diagnostics.
-
 use std::ffi::{c_char, c_int};
 use std::sync::Arc;
 

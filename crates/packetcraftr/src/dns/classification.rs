@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Protocol-aware DNS response classification, and the attempt evidence each
-//! classification produces.
-
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
 
@@ -70,7 +67,6 @@ pub enum ResponseClassification {
 }
 
 impl ResponseClassification {
-    /// The attempt outcome this classification records.
     pub(crate) const fn outcome(&self) -> Outcome {
         match self {
             Self::Response(response) if response.metadata.truncated => Outcome::Truncated,
@@ -197,7 +193,6 @@ enum AttemptClassification {
     },
 }
 
-/// One classified attempt together with the response it accepted, if any.
 pub(super) struct ClassifiedAttempt {
     pub(super) evidence: AttemptEvidence,
     pub(super) response: Option<ValidatedResponse>,

@@ -117,13 +117,8 @@ pub enum PortSpec {
     RangeInclusive { start: u16, end: u16 },
 }
 
-/// Expands port selections into the stable, de-duplicated destination-port
-/// list a [`Request`] carries, enforcing `max_ports` as it goes.
-///
-/// Ports keep their first-seen order; a repeated port or an overlapping range
-/// collapses and does not consume the budget. Expansion stops at the first
-/// distinct port that would exceed `max_ports`, so an oversized range is never
-/// materialized.
+/// Expands selections in first-seen order, deduplicating without charging
+/// repeats. Stops before adding a distinct port beyond `max_ports`.
 pub fn select_ports(
     specs: impl IntoIterator<Item = PortSpec>,
     max_ports: usize,

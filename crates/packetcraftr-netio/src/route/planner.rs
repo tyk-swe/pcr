@@ -260,7 +260,6 @@ fn select_link_mode(
         Mode::Layer3 => Mode::Layer3,
         Mode::Auto if intent.has_link_layer => Mode::Layer2,
         Mode::Auto if intent.ip_root && route.capability.supports(Mode::Layer3) => Mode::Layer3,
-        // Explicit Layer2 and the automatic fallback agree.
         Mode::Layer2 | Mode::Auto => Mode::Layer2,
     };
     if mode == Mode::Layer2 && !route.capability.supports(Mode::Layer2) {

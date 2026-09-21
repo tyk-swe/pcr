@@ -11,12 +11,9 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 
-    // The process contracts rely on facilities of the Linux target: procfs
-    // process inspection and POSIX signal delivery for cancellation, the
-    // util-linux `script` pty allocator for terminal-stdin cases, and the
-    // /dev/full sink for write-failure cases. A target that provides one of
-    // these facilities enables it here; the gated test then asserts the
-    // facility at run time rather than silently passing.
+    // Process tests require target facilities: procfs/signals for cancellation,
+    // util-linux `script` for PTYs, and `/dev/full` for write failures. Enable
+    // capability cfgs here; enabled tests require the facility at runtime.
     let linux = os == "linux";
     let capabilities = [
         ("packetcraftr_test_procfs", linux),

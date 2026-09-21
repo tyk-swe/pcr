@@ -586,7 +586,6 @@ fn mutated_handshake_bytes_never_panic() {
         ),
     ]);
     let framed = record(CONTENT_TYPE_HANDSHAKE, 0x0303, &seed);
-    // Deterministic: a failure reproduces from this seed.
     let mut random = SplitMix64::new(0x5eed_1234_abcd_0001);
 
     for iteration in 0..2_000u32 {

@@ -9,7 +9,6 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 
 type Decision = packetcraftr_netio::route::Decision;
 
-/// The arguments that identify one preference-driven route lookup.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct PreferenceKey {
     destination: IpAddr,
@@ -17,11 +16,8 @@ struct PreferenceKey {
     preferred_source: Option<IpAddr>,
 }
 
-/// Memoizes passive route decisions for one exchange without retaining an
-/// operating-system route snapshot beyond that operation.
-///
-/// The two lookups have different answers — one always yields a decision, the
-/// other may legitimately find none — so each has its own map.
+/// Caches passive route decisions for one exchange. Interface lookups may
+/// return no decision, unlike preference lookups.
 pub(super) struct CachedProvider<'a, R> {
     inner: &'a R,
     by_preference: Mutex<HashMap<PreferenceKey, Decision>>,

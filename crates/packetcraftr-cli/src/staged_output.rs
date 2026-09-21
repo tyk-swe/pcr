@@ -10,7 +10,6 @@ use packetcraftr_core::error::{Classification, Kind};
 
 use crate::errors::CliError;
 
-/// One classification for every staged-output failure.
 const CLASSIFICATION: Classification = Classification::new(
     "io.output_file",
     Kind::Io,

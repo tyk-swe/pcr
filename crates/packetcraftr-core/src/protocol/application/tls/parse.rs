@@ -1,15 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded, allocation-capped TLS record and handshake parsing.
-//!
-//! The parser is pure: it knows nothing about TCP, segments, or streams. It
-//! reads one record or one handshake message from a byte slice and reports
-//! [`Outcome::NeedMore`] with the total input length required for the next
-//! [`Outcome::Complete`], so a caller that owns the stream (the per-frame
-//! codec, or the session collector) decides when to buffer and when to give
-//! up. Every read goes through checked slicing, so malformed input yields
-//! [`Outcome::Malformed`] and never a panic.
+//! Bounded TLS parsing from byte slices, independent of TCP buffering.
+//! [`Outcome::NeedMore`] gives the total input length required; malformed input
+//! returns [`Outcome::Malformed`] without panicking.
 
 use bytes::Bytes;
 
@@ -35,7 +29,6 @@ pub enum Outcome<T> {
     Complete {
         /// Bytes consumed from the front of the input.
         consumed: usize,
-        /// The parsed item.
         value: T,
     },
     /// The input is a plausible prefix; `minimum` is the total input length
@@ -49,14 +42,10 @@ pub enum Outcome<T> {
     Malformed(crate::codec::Error),
 }
 
-/// Reports whether `input` starts with a plausible TLS record header.
-///
-/// This is the dissection gate: content type in `20..=23`, legacy version in
-/// `0x0300..=0x0304`, and a declared body length in `1..=MAX_RECORD_BODY`. It
-/// accepts exactly the headers [`parse_record`] accepts, so a gate pass
-/// followed by a `Malformed` from [`parse_record`] is impossible for the same
-/// first record. Fewer than [`RECORD_HEADER_LEN`] bytes cannot be gated and
-/// report `false`.
+/// TLS dissection gate: requires a full [`RECORD_HEADER_LEN`], content type
+/// `20..=23`, version `0x0300..=0x0304`, and body length `1..=MAX_RECORD_BODY`.
+/// Accepts the same headers as [`parse_record`], so a passing record cannot
+/// then parse as malformed.
 #[must_use]
 pub fn looks_like_record_start(input: &[u8]) -> bool {
     input
@@ -64,7 +53,6 @@ pub fn looks_like_record_start(input: &[u8]) -> bool {
         .is_some_and(|header| record_header(header).is_ok())
 }
 
-/// Reads one TLS record from the front of `input`.
 pub fn parse_record(input: &[u8]) -> Outcome<Record> {
     let Some(header) = input.first_chunk::<RECORD_HEADER_LEN>() else {
         return Outcome::NeedMore {

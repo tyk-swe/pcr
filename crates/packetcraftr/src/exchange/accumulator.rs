@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded response/result state for one armed exchange.
-
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use packetcraftr_core::{
@@ -62,8 +60,6 @@ pub(crate) struct ProcessContext<'a> {
 pub(crate) struct DuplicateRecord;
 
 impl DuplicateRecord {
-    /// The single wording both the blocking collection loop and the zero-time
-    /// drain report for this failure.
     pub(crate) fn into_error(self) -> packetcraftr_netio::Error {
         packetcraftr_netio::Error::Capture {
             message: "capture provider returned the same ingress record more than once".to_owned(),
@@ -150,11 +146,9 @@ impl Accumulator {
         false
     }
 
-    /// The one retention gate every unattributed capture record passes: the
-    /// unsolicited/undecoded frame ceiling, then the aggregate evidence budget.
-    ///
-    /// Both retention paths reach the ceiling under the same condition, so both
-    /// report it with the same words; `push_once` deduplicates by code.
+    /// Checks the unattributed-frame ceiling, then the aggregate evidence
+    /// budget. Both retention paths share the diagnostic code for `push_once`
+    /// deduplication.
     fn reserve_unattributed(
         &mut self,
         identity: RecordIdentity,

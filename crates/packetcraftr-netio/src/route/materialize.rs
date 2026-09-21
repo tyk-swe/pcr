@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Neighbor resolution materialization for planned routes.
-
 use std::time::Instant;
 
 use packetcraftr_core::frame::LinkType;
@@ -14,11 +12,8 @@ use crate::neighbor::{Request as NeighborRequest, Resolution as NeighborResoluti
 use super::error::Error;
 use super::models::{Decision, Plan, Scope, SelectionReason};
 
-/// Materialize a planned route, invoking neighbor resolution when required.
-///
-/// Neighbor discovery is the one step here that waits on the network, so
-/// `deadline` is handed to the resolver rather than checked afterwards: the
-/// calling operation's budget bounds every attempt, not only the result.
+/// Materializes a route, passing `deadline` to neighbor resolution so the
+/// operation budget bounds every discovery attempt.
 pub fn materialize<N: crate::neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
@@ -73,13 +68,8 @@ pub struct Materialized {
 }
 
 impl Materialized {
-    /// Route for a complete Layer 2 frame whose interface and link-layer
-    /// envelope the caller already fixed, so no lookup or neighbor resolution
-    /// can change them.
-    ///
-    /// Only the interface identity and the Layer 2 mode reach the transmission
-    /// boundary; every field a route lookup would have decided stays empty
-    /// rather than being invented.
+    /// Uses the caller's fixed Layer 2 interface and envelope without route
+    /// lookup or neighbor resolution. Route-derived fields remain empty.
     pub fn for_prepared_layer2_frame(
         interface: InterfaceId,
         source_mac: MacAddress,

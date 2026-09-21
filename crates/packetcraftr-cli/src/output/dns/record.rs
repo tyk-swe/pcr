@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS record, EDNS, and section output contracts.
-
 use packetcraftr_core::protocol::application::dns as dns_wire;
 
 use std::net::{Ipv4Addr, Ipv6Addr};

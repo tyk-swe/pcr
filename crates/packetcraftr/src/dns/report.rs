@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Published DNS report models and the event-to-report [`Collector`] both
-//! individual and batch queries share.
-
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;

@@ -50,19 +50,15 @@ pub(in crate::platform) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
-    /// Present exactly while a native worker is still owned by this session.
-    ///
-    /// The three parts are acquired together and released together: the
-    /// cleanup permit is reserved before the worker exists, and the interrupt
-    /// stays alive until the worker has stopped. Keeping them in one value is
-    /// what makes "worker without a permit" unrepresentable.
+    /// Worker, reserved cleanup permit, and interrupt handle share one
+    /// lifetime. The permit precedes worker creation; the interrupt outlives
+    /// the worker.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
     shutdown_timeout: Duration,
     shutdown: Shutdown,
 }
 
-/// How often a shutdown re-checks a worker it is waiting on.
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 struct RunningCapture {

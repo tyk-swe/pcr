@@ -11,11 +11,8 @@ use crate::address::is_public;
 use crate::target::{Authorized, Error as TargetError, Hostname, Resolver, Target};
 
 impl Policy {
-    /// Validates policy configuration before resolver, route, capture, or
-    /// transmission providers are invoked.
-    ///
-    /// This is a pure policy check, so it is reachable from callers that never
-    /// resolve a target at all — replay is one.
+    /// Validates policy configuration without invoking resolver, route,
+    /// capture, or transmission providers.
     pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
             return Err(Error::InvalidAddressLimit {

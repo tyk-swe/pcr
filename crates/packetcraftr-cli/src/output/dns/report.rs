@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Aggregate and streaming DNS command result contracts.
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -52,7 +50,6 @@ impl From<packetcraftr::dns::ResponseMetadata> for ResponseSummary {
     }
 }
 
-/// Aggregate result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub server: String,
@@ -233,7 +230,6 @@ pub struct QuestionResult {
     pub result: Option<Box<Report>>,
 }
 
-/// The per-question status summary a streamed batch-complete record carries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct QuestionComplete {
     pub query_name: String,
@@ -298,7 +294,6 @@ impl BatchResult {
         ))
     }
 
-    /// The streamed terminal record's per-question summaries.
     pub fn question_completions(batch: &packetcraftr::dns::BatchReport) -> Vec<QuestionComplete> {
         batch
             .questions

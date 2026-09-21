@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured traceroute output.
-
 use std::net::IpAddr;
 use std::time::Duration;
 
@@ -53,7 +51,6 @@ pub struct Undecoded {
     pub frame: Captured,
 }
 
-/// Aggregate result of `traceroute`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub target: String,

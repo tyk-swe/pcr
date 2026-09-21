@@ -202,7 +202,6 @@ mod tests {
                 color: "auto",
                 command: Some(output::contract::Command::Build),
             },
-            // The renamed variant is recognized under clap's name for it.
             Case {
                 arguments: &["packetcraftr", "--output=json", "--output=pcapng", "build"],
                 format: None,

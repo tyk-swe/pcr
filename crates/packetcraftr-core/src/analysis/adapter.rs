@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Protocol-specific decoded-layer inspection and reassembly input adapters.
-
 use std::net::IpAddr;
 
 use crate::byte_slice::checked_slice;
@@ -27,23 +25,16 @@ use crate::analysis::reassembly::ip::{
 use crate::analysis::reassembly::tcp::{FlowKey, ScopedFlowKey, Segment};
 use crate::analysis::scope::{EncapsulationIdentifier, Error as ScopeError, Interner, ScopeId};
 
-/// Fragment observations extracted from one physical decoded frame.
-///
-/// A non-atomic outer fragment makes the rest of its payload opaque, so at
-/// most one non-atomic fragment can occur. Atomic IPv6 Fragment headers are
-/// transparent to dissection and may precede an inner non-atomic fragment.
+/// At most one non-atomic fragment is visible per physical frame: its payload
+/// is opaque. Atomic IPv6 Fragment headers remain transparent and may precede
+/// it.
 pub(crate) struct IpFragments {
     pub(crate) atomic: Vec<IpFamily>,
     pub(crate) non_atomic: Option<ReassemblyFragment>,
 }
 
-/// The innermost transport of each kind in a decoded stack.
-///
-/// The innermost occurrence is the one an operator means: in a tunnelled
-/// stack the outer encapsulation carries the inner conversation, and the
-/// inner endpoints are the conversation's endpoints. The kinds are tracked
-/// separately because an encapsulated frame legitimately belongs to both a
-/// UDP conversation (the tunnel) and a TCP conversation (the payload).
+/// Innermost transport of each kind. A tunneled frame can contribute both an
+/// outer UDP conversation and an inner TCP conversation.
 pub(crate) struct Transports<'a> {
     pub(crate) tcp: Option<TcpTransport<'a>>,
     pub(crate) udp: Option<UdpTransport>,
@@ -428,14 +419,9 @@ fn fragment_scope(
     }
 }
 
-/// The exact wire bytes of the TCP payload at `transport_index`.
-///
-/// The payload is reconstructed from the decode layout rather than from a
-/// trailing raw layer, so it stays exact when a registry decodes the payload
-/// into typed layers. Padding that a layer at or above the TCP layer already
-/// excluded — link padding beyond the IP total length — is not stream data
-/// and is left out; padding first excluded by a layer inside the payload is
-/// stream data the inner protocol merely declined, and stays in.
+/// Exact TCP payload from the decode layout, including typed child layers.
+/// Excludes padding identified at or above TCP (such as link padding), but
+/// retains bytes a protocol inside the payload treated as padding.
 pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize) -> Bytes {
     let Some(tcp_layout) = decoded.layout.layer(transport_index) else {
         return Bytes::new();
@@ -466,14 +452,10 @@ pub(crate) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
     }
 }
 
-/// Maps an already-located TCP transport onto a reassembly segment.
-///
-/// A pure control segment has an empty payload rather than no segment,
-/// because an empty SYN, FIN, or RST still carries stream state. [`None`]
-/// means the transport is the visible carrier of a fragmented same-transport
-/// child, which the eventual completion will index instead. A derived
-/// datagram view passes its fragment source and base scope in `base` to
-/// preserve the physical fragments' already-interned capture scope.
+/// Maps a located TCP transport to a reassembly segment, retaining empty
+/// control segments. Returns [`None`] for a fragmented same-transport carrier
+/// whose child will be indexed on completion. `base` preserves the fragments'
+/// source and scope.
 pub(crate) fn tcp_segment(
     decoded: &DecodedPacket,
     transport: TcpTransport<'_>,

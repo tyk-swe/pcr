@@ -65,7 +65,6 @@ fn reversed_protocol_layers<'request, 'response>(
     (deepest_protocol == Some(protocol) && !reversed.is_empty()).then_some(reversed)
 }
 
-/// Whether the packets' outer network envelopes reverse.
 fn outer_envelopes_reversed(request: &Packet, response: &Packet) -> bool {
     let (Some(request_outer), Some(response_outer)) = (
         outer_network_endpoints(request),

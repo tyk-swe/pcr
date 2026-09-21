@@ -20,7 +20,7 @@ fn empty_capture_is_rejected_before_spool_creation() {
         Vec::new(),
         || {
             created = true;
-            Ok(Box::new(Cursor::new(Vec::new())))
+            Ok(Cursor::new(Vec::new()))
         },
         &mut Vec::new(),
     )
@@ -39,7 +39,7 @@ fn encoding_failure_emits_no_stdout_bytes() {
     let error = write_capture_file_with(
         Format::Pcap,
         frames,
-        || Ok(Box::new(Cursor::new(Vec::new()))),
+        || Ok(Cursor::new(Vec::new())),
         &mut destination,
     )
     .expect_err("mixed classic pcap");
@@ -90,22 +90,17 @@ impl Seek for ScriptedSpool {
     }
 }
 
-fn scripted(
-    fail_write: bool,
-    fail_flush: bool,
-    fail_seek: bool,
-    fail_read: bool,
-) -> Box<dyn Spool> {
-    Box::new(ScriptedSpool {
+fn scripted(fail_write: bool, fail_flush: bool, fail_seek: bool, fail_read: bool) -> ScriptedSpool {
+    ScriptedSpool {
         inner: Cursor::new(Vec::new()),
         fail_write,
         fail_flush,
         fail_seek,
         fail_read,
-    })
+    }
 }
 
-fn assert_spool_failure(operation: &str, create: impl FnOnce() -> io::Result<Box<dyn Spool>>) {
+fn assert_spool_failure(operation: &str, create: impl FnOnce() -> io::Result<ScriptedSpool>) {
     let error = write_capture_file_with(
         Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
@@ -149,7 +144,7 @@ fn stdout_write_failure_is_classified() {
     let error = write_capture_file_with(
         Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
-        || Ok(Box::new(Cursor::new(Vec::new()))),
+        || Ok(Cursor::new(Vec::new())),
         &mut FailingDestination,
     )
     .expect_err("stdout fails");
@@ -179,13 +174,7 @@ fn large_capture_is_spooled_and_copied_in_bounded_chunks() {
         total: 0,
         largest_write: 0,
     };
-    write_capture_file_with(
-        Format::Pcap,
-        frames,
-        || tempfile::tempfile().map(|file| Box::new(file) as Box<dyn Spool>),
-        &mut destination,
-    )
-    .unwrap();
+    write_capture_file_with(Format::Pcap, frames, tempfile::tempfile, &mut destination).unwrap();
     assert!(destination.total > COPY_BUFFER_BYTES);
     assert!(destination.largest_write <= COPY_BUFFER_BYTES);
     assert!(destination.largest_write < destination.total);

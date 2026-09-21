@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Public inputs, outcomes, and errors for IP fragment reassembly.
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
@@ -12,7 +10,6 @@ use thiserror::Error;
 
 use crate::analysis::scope::ScopeId;
 
-/// Internet Protocol family of a physical fragment or derived datagram.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Family {
@@ -258,7 +255,6 @@ pub enum MalformedError {
     ReconstructedLength { family: Family },
 }
 
-/// Typed IP reassembly failure category.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -266,12 +262,8 @@ pub enum Error {
     Resource(#[from] ResourceError),
     #[error(transparent)]
     Malformed(#[from] MalformedError),
-    /// The engine's own retained state contradicted itself — a family that
-    /// its key makes impossible, or completion evidence missing from a
-    /// datagram already found complete.
-    ///
-    /// This is a defect in reassembly, never a property of the capture, so
-    /// it is classified as an internal failure.
+    /// Contradictory retained state: mismatched family or missing completion
+    /// evidence. Classified as an internal defect, not malformed capture input.
     #[error("IP reassembly state is inconsistent: {reason}")]
     Inconsistent { reason: &'static str },
 }

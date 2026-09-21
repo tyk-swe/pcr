@@ -14,8 +14,6 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use one correlated probe per scan batch and retain at least one response",
 );
 
-/// Executes single-probe scan batches through the client's capture-ready
-/// exchange lifecycle.
 impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,

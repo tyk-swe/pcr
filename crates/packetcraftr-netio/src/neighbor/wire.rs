@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Private neighbor-wire facade over Ethernet, ARP, and IPv6 NDP owners.
-
 use std::net::IpAddr;
 #[cfg(test)]
 use std::net::{Ipv4Addr, Ipv6Addr};

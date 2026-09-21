@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Checked immutable accounting plans for a TCP push.
-
 use crate::analysis::reassembly::tcp::{
     Error, Limits, ResourceError,
     state::{

@@ -36,7 +36,6 @@ pub struct IpFamilyCounters {
     pub derived_payload_bytes: u64,
 }
 
-/// Capture-global IPv4 and IPv6 fragment counters.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IpCounters {
     pub ipv4: IpFamilyCounters,

@@ -14,12 +14,10 @@ mod support;
 
 use support::output_schema;
 
-/// The published examples directory.
 fn documents_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents")
 }
 
-/// Every file name in `examples/documents`.
 fn published_example_names() -> BTreeSet<String> {
     let directory = documents_directory();
     fs::read_dir(&directory)

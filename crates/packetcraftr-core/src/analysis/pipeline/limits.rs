@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Analysis limits and options.
-
 use std::time::{Duration, Instant};
 
 use crate::analysis::pcap::{DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as CaptureLimits};
@@ -17,13 +15,8 @@ use crate::analysis::Error;
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
 
-/// Finite resource ceilings for one analysis run.
-///
-/// Every ceiling either reassembly engine enforces is named here, so a
-/// caller can bound the memory a run retains without reaching past this type
-/// into the engines. The frame and byte budgets count every frame the
-/// capture yields, matched or not, so a display filter can never raise how
-/// much input one run reads. The duration budget bounds the run's own
+/// Complete per-run resource limits, including both reassembly engines. Frame
+/// and byte budgets count all input, including filtered frames; duration bounds
 /// processing time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -181,7 +174,6 @@ impl Limits {
         Ok(())
     }
 
-    /// The aggregate stream bounds the capture reader enforces.
     pub(super) fn capture(&self) -> CaptureLimits {
         CaptureLimits {
             max_frames: self.max_frames,
@@ -189,7 +181,6 @@ impl Limits {
         }
     }
 
-    /// The IP reassembler's complete budget set.
     pub(super) fn ip_reassembly(&self) -> IpReassemblyLimits {
         IpReassemblyLimits {
             max_datagrams: self.max_ip_datagrams,

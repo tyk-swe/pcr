@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pre-encoding packet, binding, and padding-boundary validation.
-
 use crate::{
     diagnostic::Diagnostic,
     field::FieldValue,
@@ -129,7 +127,6 @@ fn validate_padding(
         .unwrap_or(declared_child.as_str());
     let link_declares_length = || match outside.field("ether_type") {
         Some(FieldValue::Unsigned(value)) => value <= 1500,
-        // the guard admits this arm only when `value.len() == 2`
         Some(FieldValue::Bytes(value)) if value.len() == 2 => {
             u16::from_be_bytes([value[0], value[1]]) <= 1500
         }

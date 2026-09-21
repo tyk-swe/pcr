@@ -48,7 +48,6 @@ impl OperationError {
     }
 }
 
-/// Mutable live-operation state, created after capture is armed.
 pub(crate) struct Transaction<C: Session> {
     pub(super) registry: Arc<Registry>,
     pub(super) capture: CaptureGuard<C>,

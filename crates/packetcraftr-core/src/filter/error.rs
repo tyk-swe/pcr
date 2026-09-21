@@ -5,7 +5,6 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-/// Why a display filter could not be compiled or evaluated.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {

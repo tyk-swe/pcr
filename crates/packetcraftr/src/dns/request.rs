@@ -84,7 +84,6 @@ impl fmt::Display for QueryType {
     }
 }
 
-/// Invalid bounded DNS query-type text.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum QueryTypeParseError {
@@ -127,12 +126,8 @@ impl std::str::FromStr for QueryType {
     }
 }
 
-/// Bounds every decision the DNS message codec makes about hostile input.
-///
-/// These are separate from the workflow's [`Limits`]: decoding one message has
-/// nothing to say about capture-queue frames or an operation deadline, so a
-/// caller of [`decode_response`](crate::dns::decode_response) is not asked for
-/// them.
+/// DNS message decoding limits, independent of workflow capture and deadline
+/// limits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageLimits {
     pub max_message_bytes: usize,

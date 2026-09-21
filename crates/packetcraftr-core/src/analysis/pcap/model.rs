@@ -38,12 +38,8 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Admits one more frame, returning the new frame and captured-byte
-    /// totals, or the ceiling it would have crossed.
-    ///
-    /// Every path that streams frames under an aggregate budget — the rewrite
-    /// copy, the analysis loop, and the CLI's per-frame reader — charges
-    /// through here.
+    /// Charges one frame, returning updated frame/byte totals or the exceeded
+    /// ceiling.
     pub fn advance(
         self,
         frames: u64,
@@ -101,13 +97,9 @@ impl Limits {
 pub struct ReaderOptions {
     /// Maximum packet or PCAPNG block size, in bytes.
     pub max_size: usize,
-    /// Maximum interface descriptions retained from one PCAPNG section.
     pub max_interfaces_per_section: usize,
-    /// Maximum interface descriptions retained across all PCAPNG sections.
     pub max_total_interfaces: usize,
-    /// Maximum metadata blocks consumed while seeking the next frame.
     pub max_metadata_blocks_per_frame: usize,
-    /// Maximum metadata bytes consumed while seeking the next frame.
     pub max_metadata_bytes_per_frame: usize,
 }
 
@@ -186,7 +178,6 @@ pub struct PcapNgOptions {
     pub endianness: Endianness,
     /// Maximum block and captured packet size, in bytes.
     pub max_size: usize,
-    /// Maximum number of interface descriptions in the section.
     pub max_interfaces: usize,
     /// Aggregate frame and captured-payload ceilings for the whole stream.
     /// Fixed at construction, so a writer's budget cannot be retuned once it
@@ -205,13 +196,10 @@ impl Default for PcapNgOptions {
     }
 }
 
-/// Capture container format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Format {
-    /// The classic libpcap file format.
     Pcap,
-    /// The extensible pcapng file format.
     PcapNg,
 }
 
@@ -228,7 +216,6 @@ impl Format {
 
 display_via_as_str!(Format);
 
-/// Byte order used by a capture file.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Endianness {
@@ -397,7 +384,6 @@ pub struct SelectionReport {
     pub metadata_records: u64,
 }
 
-/// Result of a bounded streaming capture rewrite.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RewriteReport {
     pub format: Format,

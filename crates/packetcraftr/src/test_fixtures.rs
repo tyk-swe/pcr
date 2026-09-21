@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Seam doubles shared by the workflow unit tests.
-
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::IpAddr;
@@ -23,7 +21,6 @@ use crate::target::Hostname;
 use crate::target::Resolver;
 use crate::target::Target;
 
-/// A clock that never actually waits.
 #[derive(Default)]
 pub(crate) struct NoopClock;
 
@@ -35,7 +32,6 @@ impl Clock for NoopClock {
     }
 }
 
-/// A clock that records the delays it was asked to wait for.
 #[derive(Default)]
 pub(crate) struct RecordingClock {
     pub(crate) delays: Vec<Duration>,

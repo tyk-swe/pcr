@@ -13,11 +13,9 @@ use serde::{Deserialize, Serialize};
 mod path;
 pub use path::{Path, PathError};
 
-/// A value whose wire representation may be derived, exact, or deliberately raw.
-///
-/// Fresh protocol layers normally use [`WireValue::Auto`] for checksums, lengths,
-/// offsets, and discriminators. Decoders use [`WireValue::Exact`] so an untouched
-/// decoded packet can be rebuilt byte-for-byte.
+/// Derived, exact, or raw wire value. Fresh layers normally use
+/// [`WireValue::Auto`] for computed fields; decoders use [`WireValue::Exact`]
+/// for byte-faithful rebuilds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "mode", content = "value", rename_all = "snake_case")]
 pub enum WireValue<T> {
@@ -31,7 +29,6 @@ pub enum WireValue<T> {
 }
 
 impl<T> WireValue<T> {
-    /// Returns the exact value, if this is [`WireValue::Exact`].
     pub fn exact(&self) -> Option<&T> {
         match self {
             Self::Exact(value) => Some(value),

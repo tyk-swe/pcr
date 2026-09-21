@@ -19,7 +19,6 @@ pub struct Filter {
 }
 
 impl Filter {
-    /// Compiles a display filter against a protocol registry.
     pub fn compile(source: &str, registry: &Registry, options: Options) -> Result<Self, Error> {
         let compiled = parser::compile(source, registry, &options)?;
         Ok(Self {
@@ -51,16 +50,12 @@ impl Filter {
         Ok(filter)
     }
 
-    /// What this filter needs from its caller beyond the dissected packet.
-    ///
-    /// Callers can inspect this before evaluation to prepare exactly the TCP
-    /// and UDP conversation indexes the filter reads. Timestamp availability
-    /// is also checked by [`matches`](Self::matches) for every frame.
+    /// Required caller context, including TCP/UDP conversation indices.
+    /// [`matches`](Self::matches) also checks timestamp availability per frame.
     pub fn requirements(&self) -> Requirements {
         self.requirements
     }
 
-    /// Whether one packet satisfies this filter.
     pub fn matches(&self, context: &Context<'_>) -> Result<bool, Error> {
         if self.requirements.timestamp && context.decoded.frame.timestamp.is_none() {
             return Err(Error::TimestampUnavailable);

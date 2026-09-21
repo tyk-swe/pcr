@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured packet-fuzzing output.
-
 use serde::Serialize;
 
 use packetcraftr::fuzz as live_fuzz;
@@ -34,7 +32,6 @@ fn live_stats(value: &live_fuzz::Stats) -> Stats {
     }
 }
 
-/// Output fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -56,7 +53,6 @@ impl Mode {
 use packet_fuzz::Strategy;
 use packetcraftr::fuzz::CaseOutcome as Outcome;
 
-/// Output description of one deterministic field mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Mutation {
     pub layer: usize,
@@ -80,7 +76,6 @@ impl From<packet_fuzz::Mutation> for Mutation {
     }
 }
 
-/// Output deterministic reproduction coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct Reproduction {
     pub operation_seed: u64,
@@ -113,7 +108,6 @@ pub struct Case {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Aggregate or streamed result of `fuzz`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub seed: u64,

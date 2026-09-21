@@ -13,7 +13,6 @@ use packetcraftr_core::{diagnostic::Diagnostic, packet::Packet};
 pub struct ExecutionCase {
     pub(crate) permit: crate::evidence::ExecutionPermit,
     pub(crate) packet: Packet,
-    /// How long the executor may wait for responses to this one case.
     pub(crate) timeout: Duration,
 }
 

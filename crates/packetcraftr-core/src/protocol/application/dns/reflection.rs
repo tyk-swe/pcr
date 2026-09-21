@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Named DNS recipe values and their validated conversions.
-
 use super::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue, dns_schema};
 use crate::field::{FieldKind, FieldValue};
 use crate::layer::{FieldError, FieldSchema, reflect_set};

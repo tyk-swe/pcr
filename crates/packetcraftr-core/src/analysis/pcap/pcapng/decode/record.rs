@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Interpretation of validated PCAPNG block bodies.
-
 use crate::frame::Frame;
 use bytes::Bytes;
 

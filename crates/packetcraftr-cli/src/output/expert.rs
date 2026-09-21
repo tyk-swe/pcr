@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured expert-analysis output.
-
 use packetcraftr_core::analysis::StreamTransport;
 
 use serde::Serialize;
@@ -38,7 +36,6 @@ impl From<AnalysisFinding> for Finding {
     }
 }
 
-/// Total findings under one code.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CodeCount {
     pub code: &'static str,

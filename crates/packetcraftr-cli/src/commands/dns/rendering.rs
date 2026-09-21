@@ -192,7 +192,6 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
     )
 }
 
-/// Converts and writes one final workflow event at its publication boundary.
 pub(super) fn emit_event(
     event: packetcraftr::dns::Event,
     stream: &StreamEncoder,
@@ -210,7 +209,6 @@ pub(super) fn emit_complete(
     Ok(stream.complete_with_stats(record, diagnostics, stats)?)
 }
 
-/// The terminal record for a batch: one status entry per declared question.
 pub(super) fn emit_batch_complete(
     batch: packetcraftr::dns::BatchReport,
     stream: &StreamEncoder,

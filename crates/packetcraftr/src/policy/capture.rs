@@ -3,13 +3,9 @@
 
 use super::model::{Error, Policy};
 
-/// Frame and byte accounting for one live capture.
-///
-/// A capture cannot know its totals up front the way a send or a scan can, so
-/// it charges the policy's operation budgets one frame at a time. Callers stop
-/// pulling frames once [`CaptureBudget::is_exhausted`] reports the frame budget
-/// spent; [`CaptureBudget::account`] is the enforcement that rejects a frame the
-/// budget cannot pay for.
+/// Charges live capture one frame at a time. Stop reading when
+/// [`CaptureBudget::is_exhausted`] reports the frame ceiling;
+/// [`CaptureBudget::account`] rejects frames that exceed either budget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureBudget {
     max_frames: u64,
@@ -30,25 +26,21 @@ impl CaptureBudget {
         }
     }
 
-    /// The frame ceiling this budget was built with.
     #[must_use]
     pub const fn max_frames(&self) -> u64 {
         self.max_frames
     }
 
-    /// The byte ceiling this budget was built with.
     #[must_use]
     pub const fn max_bytes(&self) -> u64 {
         self.max_bytes
     }
 
-    /// Frames charged so far.
     #[must_use]
     pub const fn frames(&self) -> u64 {
         self.frames
     }
 
-    /// Bytes charged so far.
     #[must_use]
     pub const fn bytes(&self) -> u64 {
         self.bytes

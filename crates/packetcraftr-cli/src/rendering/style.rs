@@ -48,10 +48,8 @@ fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
     safe
 }
 
-/// Colours a diagnostic line by the severity it opens with.
-///
-/// The tokens are [`Severity::as_str`][severity] spellings, the same three the
-/// JSON documents carry, so text and machine output name a severity one way.
+/// Colors the leading [`Severity::as_str`][severity] token shared with JSON
+/// output.
 ///
 /// [severity]: packetcraftr_core::diagnostic::Severity::as_str
 pub(crate) fn style_human_line(value: &str) -> String {

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Built-in protocol discovery output.
-
 use serde::Serialize;
 
 use packetcraftr_core::field::FieldKind;
@@ -10,7 +8,6 @@ use packetcraftr_core::layer::FieldSchema;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::registry::{FilterFieldBinding, Registry};
 
-/// Capability summary for one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub protocol: String,
@@ -40,7 +37,6 @@ impl From<BuiltinProtocol> for Summary {
     }
 }
 
-/// One ordered reflective field exposed by a built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Field {
     pub name: String,
@@ -227,13 +223,11 @@ impl Detail {
     }
 }
 
-/// Aggregate result of listing built-in protocols.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ListResult {
     pub protocols: Vec<Summary>,
 }
 
-/// Aggregate result of describing one built-in protocol.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DetailResult {
     pub protocol: Detail,

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Traceroute orchestration across authorization, hop execution, and results.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::ops::ControlFlow;

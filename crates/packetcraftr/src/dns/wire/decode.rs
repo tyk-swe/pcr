@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ordered DNS response validation and decoding orchestration.
-
 use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name, read_u16};
 
 use super::name::canonical_query_name;
@@ -142,7 +140,6 @@ struct ResponseSections {
     edns: Option<Edns>,
 }
 
-/// Advances a message offset, reporting truncation instead of wrapping.
 fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
     offset
         .checked_add(delta)

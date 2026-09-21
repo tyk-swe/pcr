@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded diagnostic and capture-evidence retention for client operations.
-
 use packetcraftr_core::{
     build::BuiltPacket,
     diagnostic::Diagnostic,
@@ -26,13 +24,8 @@ impl ExecutionPermit {
     }
 }
 
-/// One operation's append-only diagnostic log, together with the cursor that
-/// says how much of it the caller has already published.
-///
-/// Every long-running workflow raises diagnostics from several places and then
-/// has to hand out exactly the ones raised since it last looked. Owning the
-/// cursor here is what keeps callers from snapshotting `len()` and slicing
-/// with it afterwards.
+/// Append-only diagnostics with a publication cursor, so callers receive only
+/// entries added since their last read.
 #[derive(Debug, Default)]
 pub(crate) struct DiagnosticLog {
     entries: Vec<Diagnostic>,
@@ -40,7 +33,6 @@ pub(crate) struct DiagnosticLog {
 }
 
 impl DiagnosticLog {
-    /// Records `diagnostic` unless an identical one is already logged.
     pub(crate) fn push_once(&mut self, diagnostic: Diagnostic) {
         packetcraftr_core::diagnostic::push_once(&mut self.entries, diagnostic);
     }
@@ -300,8 +292,6 @@ mod tests {
         assert_eq!(log.as_slice().len(), 2);
     }
 
-    /// A publication failure must not consume the entry it failed on, so a
-    /// later retry still reports it.
     #[test]
     fn a_failed_publication_leaves_its_entry_unpublished() {
         let mut log = DiagnosticLog::default();

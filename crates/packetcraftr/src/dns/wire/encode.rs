@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Canonical DNS query encoding.
-
 use bytes::Bytes;
 
 use super::name::canonical_query_name;

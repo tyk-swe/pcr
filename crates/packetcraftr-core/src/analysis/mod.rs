@@ -1,25 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded offline capture analysis.
+//! Bounded offline capture analysis. [`pcap`] handles files; [`run`] dissects,
+//! indexes, filters, and dispatches to collectors. [`reassembly`] is also
+//! available as a standalone algorithm API. Core has no native I/O or
+//! live-workflow dependencies.
 //!
-//! [`pcap`] handles capture files; [`run`] drives the shared read → dissect →
-//! index → filter → dispatch loop; and [`expert`], [`follow`], [`stats`], and
-//! [`tls`] consume it. [`reassembly`] is a standalone algorithm API fed by
-//! explicit decoded-layer adapters.
-//!
-//! There is no resolver, route lookup, live-capture, or transmission seam.
-//! `packetcraftr-core` depends on neither `packetcraftr-netio` nor
-//! `packetcraftr`, so the crate graph enforces this boundary and offline
-//! analysis needs no live-traffic authorization gate.
-//!
-//! Conversation indices are assigned over the whole capture before filtering,
-//! so they remain stable across commands. IP fragments update capture-global
-//! bounded state before filtering. On a completing physical frame, display
-//! filters retain that frame's decoded layers and facts while also seeing the
-//! reconstructed datagram's child layers and derived transport index. TCP
-//! reassembly still consumes only matched frames, keeping its stream buffers
-//! scoped to the filter.
+//! Conversation indices and IP fragment state cover all frames before
+//! filtering. A completing frame exposes both its physical layers and
+//! reconstructed child layers/transport index to filters. TCP reassembly
+//! consumes only matched frames.
 
 mod adapter;
 pub mod application;

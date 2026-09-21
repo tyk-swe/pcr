@@ -96,13 +96,11 @@ impl ScriptedStream {
 /// delivers bytes.
 #[derive(Clone, Copy, Debug)]
 enum Pacing {
-    /// Deliver immediately.
     Prompt,
     /// Advance virtual time past the timeout installed for this read.
     PastDeadline,
 }
 
-/// How far past the caller's budget virtual time advances.
 const OVERRUN_MARGIN: Duration = Duration::from_millis(1);
 
 impl Read for ScriptedStream {

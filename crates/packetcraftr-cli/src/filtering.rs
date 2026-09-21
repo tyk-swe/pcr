@@ -37,7 +37,6 @@ impl Capabilities {
     }
 }
 
-/// Compiles a display filter for a command, or reports why it cannot run there.
 pub(crate) fn compile(
     source: &str,
     registry: &Registry,
@@ -89,7 +88,6 @@ impl FrameDecoder {
         }
     }
 
-    /// Compiles `source` (if any) with `Capabilities::frames_only()`.
     pub(crate) fn compile(
         registry: &Arc<Registry>,
         source: Option<&str>,
@@ -155,7 +153,6 @@ impl FrameSelector {
         Self(FrameDecoder::new(registry, Some(filter), max_frame_bytes))
     }
 
-    /// Compiles an optional display filter into a [`FrameSelector`].
     pub(crate) fn compile_optional(
         source: Option<&str>,
         registry: &Arc<Registry>,

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded scan batch and duration planning before live execution.
-
 use std::net::IpAddr;
 use std::time::Duration;
 

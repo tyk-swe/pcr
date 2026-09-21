@@ -5,13 +5,8 @@
 
 use std::io::Write;
 
-use packetcraftr_core::analysis::pcap::Error;
-use packetcraftr_core::analysis::pcap::Format;
-use packetcraftr_core::analysis::pcap::Interface;
-use packetcraftr_core::analysis::pcap::Writer;
-use packetcraftr_core::analysis::pcap::compression;
-use packetcraftr_core::frame::Frame;
-use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::analysis::pcap::{Error, Format, Interface, Writer, compression};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 use crate::errors::CliError;
 
@@ -97,7 +92,6 @@ impl<W: Write> LinkCaptureWriter<W> {
 }
 
 impl<W: Write> SourceCaptureWriter<W> {
-    /// Registers one declared interface and returns its output ID.
     pub(crate) fn add_source_interface(
         &mut self,
         source_id: Option<u32>,
@@ -108,7 +102,6 @@ impl<W: Write> SourceCaptureWriter<W> {
         })
     }
 
-    /// Writes evidence using a declared interface description.
     pub(crate) fn write_source_frame(
         &mut self,
         source_id: Option<u32>,

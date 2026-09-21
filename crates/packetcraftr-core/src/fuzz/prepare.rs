@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Mutation preparation, accounting, and reflected-field resolution.
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

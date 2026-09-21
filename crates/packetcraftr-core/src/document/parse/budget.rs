@@ -1,12 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The shared charging policy for one packet-document parse.
-//!
-//! Counts and byte widths are charged here before the bounded item is
-//! allocated, pushed, or inserted, and the first breach records which [`Limit`]
-//! tripped so the parser can report it as a classified error instead of a
-//! format message.
+//! Charges bounded items before allocation and records the first [`Limit`]
+//! breach for classified error reporting.
 
 use std::cell::Cell;
 

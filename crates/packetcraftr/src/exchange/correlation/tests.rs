@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Tests for timestamped response correlation and workflow promotion.
-
 use bytes::Bytes;
 use packetcraftr_core::decode::Dissector;
 use packetcraftr_core::frame::{Frame, LinkType};

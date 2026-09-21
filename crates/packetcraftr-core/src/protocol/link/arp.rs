@@ -28,7 +28,6 @@ const ARP_ETHERNET_IPV4_LEN: usize = 28;
 /// The fixed head that names the address families and their lengths.
 const ARP_HEAD_LEN: usize = 8;
 
-/// Reads the fixed-size chunk of `input` that starts at `offset`.
 fn arp_chunk<const N: usize>(input: &[u8], offset: usize) -> Option<[u8; N]> {
     input
         .get(offset..)

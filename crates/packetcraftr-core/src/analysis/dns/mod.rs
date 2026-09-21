@@ -26,7 +26,6 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 pub use transactions::{Latency, Transaction, TransactionStatus};
 
-/// The transport carrying a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Transport {
@@ -47,9 +46,7 @@ pub enum Status {
     Gap,
     /// The same stream position carried conflicting bytes.
     Conflict,
-    /// The stream was reset mid-message.
     Reset,
-    /// Resource limits evicted the stream's retained state.
     Evicted,
 }
 /// One framed DNS message on a UDP flow or TCP stream.

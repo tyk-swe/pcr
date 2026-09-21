@@ -11,12 +11,8 @@ use crate::interface::Id as InterfaceId;
 
 use super::models::{Decision, Provider};
 
-/// Errors emitted by the current target's passive route/interface adapter.
-///
-/// A native refusal is retained as a [`SystemFault`](crate::SystemFault)
-/// rather than formatted into `message`, so the operating-system diagnostic
-/// survives to the render boundary. That source is not comparable, so these
-/// failures are matched on rather than equated.
+/// Native route/interface errors, retaining typed
+/// [`SystemFault`](crate::SystemFault) sources through rendering.
 #[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum SystemError {

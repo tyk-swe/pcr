@@ -127,11 +127,9 @@ pub trait Classified: std::error::Error {
         None
     }
 
-    /// Ordered source diagnostics retained for structured renderers. The main
-    /// error remains authoritative. The default walks the retained `#[source]`
-    /// chain with [`source_chain`]; the only overrides are dual
-    /// operation/cleanup failures, value types that carry a captured snapshot,
-    /// and wrappers whose source is one of those.
+    /// Ordered source diagnostics for structured rendering; the main error
+    /// remains authoritative. Defaults to [`source_chain`]; overrides handle
+    /// paired failures, captured snapshots, and their wrappers.
     fn causes(&self) -> Vec<String> {
         source_chain(self)
     }

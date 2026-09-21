@@ -1,21 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The executable form of a compiled filter.
-//!
-//! The parser emits postfix, which evaluates correctly but eagerly: every
-//! leaf runs and a per-packet boolean stack combines them. [`Plan`] lowers
-//! that program, once at compile time, into jump-threaded predicate steps so
-//! a decisive `&&` or `||` operand skips the other side's field reads. The
-//! boolean stack the interpreter would have rebuilt per packet is encoded in
-//! the jumps themselves, so matching allocates nothing.
+//! Lowers postfix filters to jump-threaded predicates once at compile time.
+//! Jumps encode boolean-stack state and short-circuit `&&`/`||`, so matching
+//! allocates nothing and skips unnecessary field reads.
 
 use super::ast::{Op, Predicate};
 use super::eval::{self, Context};
 
-/// The jump target that accepts the packet.
 const MATCH: u32 = u32::MAX;
-/// The jump target that rejects it.
 const MISS: u32 = u32::MAX - 1;
 
 /// One executable predicate and the next step each outcome selects.

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Native source event loop.
-
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{

@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded IPv4 and IPv6 fragment reassembly.
-//!
-//! This standalone algorithm accepts exact decoded fragment metadata. It does
-//! not alter physical frames or single-frame dissection. Complete outcomes are
-//! raw network-layer datagrams that a caller may decode as a separate derived
-//! view.
+//! Bounded IPv4/IPv6 reassembly from decoded fragment metadata. Physical frames
+//! remain unchanged; completed raw datagrams can be decoded as separate derived
+//! views.
 
 use std::collections::HashMap;
 use std::time::Instant;

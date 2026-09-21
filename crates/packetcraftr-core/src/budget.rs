@@ -1,11 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Finite time budgets shared by every bounded PacketcraftR workflow.
-//!
-//! This module sits at the bottom of the dependency graph, so both the offline
-//! analysis pipeline and the live probing workflows can bound themselves
-//! without either one having to depend on the other.
+//! Finite time budgets shared by offline analysis and live workflows.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -88,14 +84,13 @@ impl Deadline {
             .map_or(Ok(()), Cancellation::check)
     }
 
-    /// Cooperative gate at a work boundary: cancellation is reported before
-    /// the elapsed budget so a stop request is never reported as fabricated
+    /// Cooperative work-boundary gate; cancellation takes precedence over
     /// elapsed time.
     ///
     /// # Errors
     ///
-    /// Returns [`Interrupted::Cancelled`] when the shared signal fired, else
-    /// [`Interrupted::Exceeded`] once accounted time passes the limit.
+    /// Returns [`Interrupted::Cancelled`] if signaled, otherwise
+    /// [`Interrupted::Exceeded`] when accounted time passes the limit.
     pub fn enforce(&self) -> Result<(), Interrupted> {
         self.check_cancelled()?;
         self.check()?;
@@ -235,12 +230,8 @@ impl Deadline {
     }
 }
 
-/// Wall-clock time left before `deadline`, or `None` once it has arrived.
-///
-/// The boundary instant itself counts as arrived. Blocking providers reject a
-/// timeout of exactly zero as invalid input, and a zero wait would otherwise
-/// be reported as an I/O failure, so callers feeding a socket or condvar
-/// timeout must treat `None` as the deadline expiring.
+/// Wall-clock time remaining, or `None` at or after `deadline`. Treat `None` as
+/// expiry before calling providers that reject a zero timeout.
 #[must_use]
 pub fn remaining_before(deadline: Instant) -> Option<Duration> {
     deadline
@@ -248,7 +239,6 @@ pub fn remaining_before(deadline: Instant) -> Option<Duration> {
         .filter(|remaining| !remaining.is_zero())
 }
 
-/// Reports the accounted time that passed a [`Deadline`] and the limit it broke.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("operation took {actual:?}, exceeding its {limit:?} budget")]
 pub struct DeadlineExceeded {

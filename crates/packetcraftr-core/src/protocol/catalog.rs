@@ -5,16 +5,12 @@
 
 use crate::layer::{Id, Layer};
 
-/// Authoritative built-in protocol identity and capability catalog.
+/// Built-in protocol identities and capabilities. `codec`/`matcher` tokens are
+/// interpreted by consumers, keeping this catalog independent of
+/// implementations.
 ///
-/// Implementation hooks are neutral tokens: this packet-domain module never
-/// depends on codec or matcher implementations. Protocol consumers interpret
-/// the `codec` and `matcher` tokens locally.
-///
-/// `exact_round_trip` states whether encoding a decoded layer reproduces the
-/// bytes it was decoded from. It is false only for a codec that cannot encode
-/// at all — `raw_ip` is a decode-only version dispatcher whose `encode`
-/// always fails, so build IPv4 or IPv6 directly instead.
+/// `exact_round_trip` means decoded bytes can be reproduced. Only decode-only
+/// `raw_ip` lacks it; construct IPv4 or IPv6 directly instead.
 macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
@@ -77,12 +73,9 @@ macro_rules! define_builtin_protocol {
             codec: $codec:ident
         }
     )*) => {
-        /// A protocol the default registry binds, and the per-protocol
-        /// facts every consumer reads instead of matching on name strings.
-        ///
-        /// [`Self::from_name`] accepts only canonical names;
-        /// [`Self::from_name_or_alias`] also accepts the alias spellings
-        /// [`Self::aliases`] lists.
+        /// Built-in protocol capabilities. [`Self::from_name`] accepts
+        /// canonical names; [`Self::from_name_or_alias`] also accepts
+        /// [`Self::aliases`].
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub enum BuiltinProtocol {
             $($variant),*
@@ -143,7 +136,6 @@ macro_rules! define_builtin_protocol {
                 Self::from_id(layer.schema().protocol)
             }
 
-            /// Whether `layer` is an instance of this built-in protocol.
             pub fn identifies(self, layer: &dyn Layer) -> bool {
                 Self::of(layer) == Some(self)
             }
@@ -200,7 +192,6 @@ macro_rules! define_builtin_protocol {
     (@matcher dns) => { true };
 }
 
-/// A name that is not a built-in protocol's canonical name or alias.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("unknown protocol {0:?}")]
 pub struct UnknownProtocolName(pub String);

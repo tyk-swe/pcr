@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Finite ceilings for TLS session assembly.
-
 use crate::analysis::Error;
 
-/// Logical bytes buffered in one direction while its handshake is still
-/// incomplete: one maximum handshake message plus the record framing around
-/// it. A direction that would grow past this stops buffering and the session
-/// is reported [`malformed`](super::Status::Malformed) rather than growing.
+/// Per-direction handshake-buffer ceiling: one maximum message plus record
+/// framing. Exceeding it stops buffering and marks the session
+/// [`malformed`](super::Status::Malformed).
 pub const MAX_DIRECTION_BUFFER: usize = 132 * 1024;
 
 const DEFAULT_MAX_SESSIONS: usize = 8_192;

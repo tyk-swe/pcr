@@ -33,12 +33,8 @@ const fn udp_stream_ref(index: u64) -> StreamRef {
     }
 }
 
-/// One expert finding, attributed to the frame that revealed it.
-///
-/// Findings are cross-frame observations — a retransmission only exists
-/// relative to an earlier segment — so they carry their own model rather
-/// than the per-frame, layer-scoped decode diagnostics; decode diagnostics
-/// are folded in as findings of their own code and severity.
+/// Cross-frame finding attributed to the revealing frame. Layer-scoped decode
+/// diagnostics are also included with their own codes and severities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     pub severity: Severity,
@@ -47,7 +43,6 @@ pub struct Finding {
     pub code: &'static str,
     /// 1-based capture frame number that revealed the condition.
     pub number: u64,
-    /// The conversation concerned, when there is one.
     pub stream: Option<StreamRef>,
     pub message: String,
 }
@@ -77,13 +72,9 @@ impl Summary {
     }
 }
 
-/// Detects cross-frame TCP conditions from dissected headers.
-///
-/// Retransmission and gap evidence comes from the reassembly engine's
-/// sequence tracking, delivered through the pipeline's TCP events; the
-/// header-derived conditions here — duplicate acknowledgment, zero window,
-/// window full, keep-alive, reset — need acknowledgment and window fields
-/// reassembly deliberately does not carry.
+/// Detects TCP conditions from headers. Reassembly events supply retransmission
+/// and gap evidence; acknowledgment and window fields supply duplicate ACK,
+/// zero window, window-full, keep-alive, and reset findings.
 #[derive(Debug, Default)]
 pub struct Collector {
     flows: HashMap<ScopedFlowKey, DirectionState>,

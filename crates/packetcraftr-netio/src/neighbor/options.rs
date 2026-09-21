@@ -39,8 +39,6 @@ impl Default for Options {
 }
 
 impl Options {
-    /// Validates every finite bound; returns nothing, so a caller keeps the
-    /// options it already owns.
     pub fn validate(&self) -> Result<(), crate::neighbor::Error> {
         if !(1..=MAX_CONFIGURED_ATTEMPTS).contains(&self.max_attempts) {
             return Err(invalid_options(format!(

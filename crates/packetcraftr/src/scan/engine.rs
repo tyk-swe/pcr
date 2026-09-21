@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Scan orchestration across authorization, planning, execution, and results.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::ops::ControlFlow;
@@ -432,7 +430,6 @@ fn approve_scan<A: Authorizer>(
     })
 }
 
-/// Expands the authorized port selection into probe endpoints for `transport`.
 fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> {
     match transport {
         Transport::Icmp => vec![ProbeEndpoint::Icmp],
@@ -536,7 +533,6 @@ struct Processor<'a, F> {
     /// The winning classification per endpoint, so the summary reports counts
     /// without a collector.
     winners: &'a mut HashMap<(IpAddr, Option<u16>), Classification>,
-    /// Operation-level round-trip accounting across every probe event.
     rtt: &'a mut super::report::RttAccumulator,
     emit: &'a mut F,
 }

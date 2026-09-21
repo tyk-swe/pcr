@@ -201,10 +201,9 @@ fn prepare_requests(
     } else {
         packetcraftr::dns::TransportMode::UdpThenTcp
     };
-    // An explicit --source-port pins every question, and the TCP path lets the
-    // stack choose. Otherwise each question draws its own port below, so one
-    // observed query does not narrow the anti-spoofing entropy of the rest —
-    // the same reason a shared --transaction-id is rejected for a batch.
+    // Use independent random ports per question to retain anti-spoofing
+    // entropy, unless `--source-port` pins them or TCP delegates selection to
+    // the stack.
     let pinned_source_port = arguments.source_port.or(arguments.tcp.then_some(0));
     let limits = packetcraftr::dns::Limits {
         message: packetcraftr::dns::MessageLimits {

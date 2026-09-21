@@ -6,7 +6,6 @@ use super::lexer::CompareOperator;
 use super::literal::Literal;
 use super::path::FieldRef;
 
-/// One test against a single packet.
 #[derive(Clone, Debug)]
 pub(super) enum Predicate {
     /// A bare protocol name: does the packet carry such a layer at all?

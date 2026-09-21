@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Route-driven materialization of link and network layer fields.
-
 use std::net::IpAddr;
 
 use packetcraftr_core::build::BuiltPacket;

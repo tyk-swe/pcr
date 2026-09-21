@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact live fuzz executor-evidence validation, accounting, and retention.
-
 use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;

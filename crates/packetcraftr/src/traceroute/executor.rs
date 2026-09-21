@@ -15,8 +15,6 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-/// Executes homogeneous traceroute hop batches through the client's
-/// capture-ready exchange lifecycle.
 impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,

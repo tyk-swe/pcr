@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deterministic field-value mutation strategies and shrinking.
-
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::field::{FieldKind, FieldValue};

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Checked shared-storage slicing for packet-derived byte ranges.
-
 use bytes::Bytes;
 
 pub(crate) fn checked_slice(bytes: &Bytes, start: usize, end: usize) -> Option<Bytes> {

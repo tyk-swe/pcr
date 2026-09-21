@@ -24,7 +24,6 @@ use super::options::Options;
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
 
-/// What one discovery session established, with the evidence it kept.
 struct ExchangeOutcome {
     mac_address: Option<MacAddress>,
     attempts: u32,

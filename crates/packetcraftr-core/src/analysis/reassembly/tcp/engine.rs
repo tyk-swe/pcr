@@ -101,12 +101,8 @@ impl Reassembler {
         self.remove_flows(keys)
     }
 
-    /// Removes one flow immediately, returning its eviction evidence.
-    ///
-    /// This is how a caller that knows a connection is over — for example
-    /// because a new SYN reuses the four-tuple — retires state that would
-    /// otherwise misinterpret the next generation's segments against the old
-    /// sequence base. Evicting an unknown flow is a no-op.
+    /// Immediately evicts a flow, allowing four-tuple reuse with a new sequence
+    /// base. Returns eviction evidence; unknown flows are a no-op.
     pub fn evict_flow(&mut self, flow: &ScopedFlowKey) -> Vec<Event> {
         self.remove_flows(vec![flow.clone()])
     }

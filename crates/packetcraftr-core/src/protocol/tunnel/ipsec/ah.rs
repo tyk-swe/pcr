@@ -54,7 +54,6 @@ pub struct Ah {
     pub next_header: WireValue<u8>,
     /// Header length in 4-byte units minus two; derived from the ICV.
     pub payload_length: WireValue<u8>,
-    /// Reserved 16 bits.
     pub reserved: u16,
     /// Security parameters index.
     pub spi: u32,

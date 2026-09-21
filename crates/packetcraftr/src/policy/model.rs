@@ -33,18 +33,11 @@ pub struct Policy {
 pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
 pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
 
-/// The destination-constraint list is bounded so a policy cannot allocate
-/// unbounded memory for the caller's own configuration.
+/// Maximum destination constraints accepted in a policy.
 pub const MAX_DESTINATION_CONSTRAINTS: usize = 1_024;
 
-/// One destination constraint: an exact address, or a CIDR network whose
-/// prefix masks the address before comparison.
-///
-/// Matching is exact on the masked bits and never crosses address families:
-/// an IPv4 network matches only IPv4 destinations, an IPv6 network only IPv6.
-/// `ADDR/PREFIX` input must already name the canonical network — a spelled
-/// host part is rejected instead of silently masked — while a bare `ADDR` is
-/// an exact host constraint.
+/// An exact address or same-family CIDR constraint. `ADDR/PREFIX` must be a
+/// canonical network (host bits are rejected); bare `ADDR` matches one host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DestinationConstraint {
     Exact(IpAddr),

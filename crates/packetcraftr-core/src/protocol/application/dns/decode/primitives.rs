@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Fixed-width bounded reads used by DNS decoding stages.
-
 /// Reads the big-endian `u16` at `offset`.
 ///
 /// Fails with [`DecodeError::TruncatedField`] naming `field` when the message

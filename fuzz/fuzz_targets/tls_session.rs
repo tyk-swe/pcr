@@ -7,10 +7,8 @@ use packetcraftr_core::analysis::tls::{Collector, Limits};
 use packetcraftr_core::protocol::builtin;
 use std::io::Cursor;
 
-// Runs a capture through the analysis pipeline with TCP reassembly on and
-// folds every frame into the TLS session collector, the same path the `tls`
-// command takes. The collector, not the parsers, is under test here: the
-// record and handshake parsers have their own target.
+// Exercises TLS collection through TCP reassembly and the analysis pipeline.
+// Record and handshake parsers have separate fuzz targets.
 fuzz_target!(|data: &[u8]| {
     let mut reader_options = ReaderOptions::default();
     reader_options.max_size = 64 * 1024;

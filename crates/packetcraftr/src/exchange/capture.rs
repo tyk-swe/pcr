@@ -14,11 +14,7 @@ use super::transaction::OperationError;
 use super::transaction::Transaction;
 use super::{ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
 
-/// Whether a zero-time drain has to finish inside the exchange deadline.
-///
-/// The two cases are not the same failure: a drain that runs while requests
-/// are still unsent must not overrun the deadline, while the final drain after
-/// the last send simply stops when correlation does.
+/// Deadline handling for drains before and after the last send.
 #[derive(Clone, Copy)]
 pub(super) enum DrainPolicy {
     /// Requests remain to be sent, so crossing `deadline` aborts the operation.

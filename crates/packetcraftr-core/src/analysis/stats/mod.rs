@@ -66,13 +66,8 @@ struct EndpointTally {
     rx: Tally,
 }
 
-/// Accumulates statistics from analysis frame records.
-///
-/// Every physical table is keyed by values a frame carries, so retained state
-/// grows with distinct keys and never faster than the pipeline's frame budget;
-/// conversations are additionally bounded by the pipeline's flow budget,
-/// which fails closed before this collector would see a new index. Bounded,
-/// capture-global fragment accounting is attached only when the pass finishes.
+/// Aggregates physical-frame statistics under the pipeline's frame and flow
+/// budgets. Capture-global fragment accounting is attached at completion.
 #[derive(Debug)]
 pub struct Collector {
     table: Table,
@@ -91,7 +86,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Creates a collector with the given I/O bucket width.
     pub fn new(interval: Duration) -> Result<Self, Error> {
         Self::for_table(interval, Table::All)
     }
@@ -150,7 +144,6 @@ impl Collector {
             }
         }
 
-        // Count innermost-network endpoints as sender and receiver.
         if self.collects(Table::Endpoints)
             && let Some((source, destination)) = innermost_network(record)
         {
@@ -210,7 +203,6 @@ impl Collector {
         }
         // Bucket timestamps before the capture origin at zero and report clamping.
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
-        // the divisor is forced to at least 1 by `max(1)`
         let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
         self.io
             .entry(u64::try_from(bucket).unwrap_or(u64::MAX))
@@ -374,7 +366,6 @@ fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {
     Duration::new(seconds, subsecond)
 }
 
-/// The innermost IP layer's addresses, when the frame has any.
 fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
     let mut network = None;
     for layer in record.decoded.packet.iter() {

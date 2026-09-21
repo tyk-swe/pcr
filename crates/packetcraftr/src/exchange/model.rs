@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Public exchange options and results.
-
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -107,7 +105,6 @@ pub struct Collector {
 }
 
 impl Collector {
-    /// Adds one progressive event to the aggregate result under construction.
     pub fn observe(&mut self, event: Event) {
         match event {
             Event::Sent {
@@ -122,7 +119,6 @@ impl Collector {
         }
     }
 
-    /// Combines collected events with final diagnostics and statistics.
     pub fn finish(mut self, summary: Summary) -> Result<Report, crate::Error> {
         self.validate(&summary)?;
         self.diagnostics.extend(summary.diagnostics);

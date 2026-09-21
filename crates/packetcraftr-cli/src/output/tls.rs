@@ -1,16 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured TLS session output.
-//!
-//! Every code point stays numeric and authoritative. Where the IANA registry
-//! knows a name for one, a `*_name` companion carries it, and that companion
-//! is `null` rather than absent when the code point is unregistered — so a
-//! consumer can read `.server.cipher_suite_name` without probing for the key
-//! first.
-//!
-//! Fingerprints are advisory. Every byte JA3, JA3S and JA4 are computed from
-//! is chosen by the peer, so a match is a hint about software identity, never
+//! TLS session output. Numeric code points are authoritative; `*_name`
+//! companions are present but null for unknown codes. JA3/JA3S/JA4 use
+//! peer-controlled bytes and indicate possible software identity, not
 //! authentication.
 
 use serde::Serialize;
@@ -27,7 +20,6 @@ use super::hex::compact_hex;
 
 use packetcraftr_core::analysis::tls::Status;
 
-/// One side of a session; the same endpoint shape `follow` publishes.
 use packetcraftr_core::analysis::Endpoint;
 
 /// One alert record observed in the clear.
@@ -103,7 +95,6 @@ impl From<ClientSummary> for Client {
     }
 }
 
-/// What one server decided.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Server {
     /// `supported_versions` when the server sent it, otherwise the record's
@@ -234,7 +225,6 @@ impl StatusCounts {
     }
 }
 
-/// Terminal counters for one assembly pass.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
     pub clock: packetcraftr_core::analysis::ClockReport,
@@ -265,8 +255,6 @@ pub struct Summary {
 }
 
 impl Summary {
-    /// Folds one assembly pass and the selector's own tallies into the
-    /// reported summary.
     #[must_use]
     pub fn from_analysis(
         analysis: AnalysisSummary,
@@ -303,14 +291,12 @@ pub struct SelectionCounts {
     pub omitted: u64,
 }
 
-/// Aggregate result of `tls`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub sessions: Vec<Session>,
     pub summary: Summary,
 }
 
-/// One NDJSON event produced by `tls`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Event {
@@ -325,7 +311,6 @@ pub enum Event {
 }
 
 impl Event {
-    /// Wraps one assembled session as a stream event.
     #[must_use]
     pub fn session(session: Session) -> Self {
         Self::Session {
@@ -333,7 +318,6 @@ impl Event {
         }
     }
 
-    /// Wraps the terminal counters as the stream's last event.
     #[must_use]
     pub fn complete(summary: Summary) -> Self {
         Self::Complete {

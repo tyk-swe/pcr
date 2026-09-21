@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded parsing and postfix-program compilation for display filters.
-
 use super::ast::{Op, Predicate};
 use super::comparison::Needle;
 use super::error::Error;
@@ -13,11 +11,8 @@ use crate::field::FieldKind;
 use crate::registry::Registry;
 
 pub const DEFAULT_MAX_FILTER_BYTES: usize = 64 * 1024;
-/// Absolute parenthesis nesting accepted by the display-filter parser.
 pub const MAX_FILTER_NESTING: usize = 64;
-/// Absolute number of comparisons accepted in one display filter.
 pub const MAX_FILTER_TERMS: usize = 1024;
-/// Absolute number of members accepted in one `in { .. }` set.
 pub const MAX_FILTER_SET_MEMBERS: usize = 1024;
 
 /// Bounds applied while compiling a display filter.
@@ -100,7 +95,6 @@ impl Operator {
     }
 }
 
-/// One entry on the operator stack.
 enum Pending {
     Operator(Operator),
     LeftParen,

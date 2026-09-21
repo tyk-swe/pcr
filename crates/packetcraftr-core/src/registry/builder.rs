@@ -26,12 +26,9 @@ impl Builder {
         Self::default()
     }
 
-    /// Registers a codec under its canonical protocol identifier plus the
-    /// alias spellings the caller supplies.
-    ///
-    /// The caller owns the alias list: a codec advertises no aliases of its
-    /// own, so the built-in path passes [`crate::protocol::BuiltinProtocol::aliases`]
-    /// and an external registration passes whatever it wants resolvable.
+    /// Registers a codec with its canonical name and caller-owned aliases.
+    /// Codecs do not advertise aliases; built-ins use
+    /// [`crate::protocol::BuiltinProtocol::aliases`].
     pub fn register_codec<C>(&mut self, codec: C, aliases: &[&str]) -> Result<&mut Self, Error>
     where
         C: LayerCodec + 'static,
@@ -123,12 +120,9 @@ impl Builder {
         Ok(self)
     }
 
-    /// Publishes an additional display-filter spelling for a protocol field.
-    ///
-    /// Canonical `<protocol>.<field>` paths always resolve without a binding;
-    /// this registers the conventional operator-facing names on top of them.
-    /// Paths are matched case-insensitively and every path is unique across the
-    /// registry, so one spelling can never resolve to two protocols.
+    /// Registers an additional case-insensitive, registry-unique filter path.
+    /// Canonical `<protocol>.<field>` paths already resolve without
+    /// registration.
     pub fn bind_filter_field(
         &mut self,
         path: &'static str,
@@ -141,7 +135,6 @@ impl Builder {
                 existing: *existing.protocol(),
             });
         }
-        // Reject structural binding defects at registration.
         let invalid = |reason: String| Error::InvalidFilterField {
             path: normalized.clone(),
             reason,

@@ -24,7 +24,6 @@ pub trait Clock {
     }
 }
 
-/// Production wall-clock implementation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemClock;
 
@@ -42,7 +41,7 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         return Some(Duration::ZERO);
     };
     let rate = u128::from(rate);
-    // `rate` cannot be zero here: `rate.checked_sub(1)` short-circuits with `?`                   when it is
+    // `checked_sub(1)?` rejects a zero rate before division.
     let nanos = u128::try_from(items)
         .unwrap_or(u128::MAX)
         .checked_mul(1_000_000_000)?

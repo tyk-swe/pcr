@@ -84,22 +84,19 @@ pub(super) async fn query_route(
         .ok_or_else(|| SystemError::InvalidResponse {
             message: "Linux route response omitted its output interface".to_owned(),
         })?;
-    let interfaces = query_interfaces(&handle).await?;
-    let local_addresses = interfaces
-        .iter()
-        .flat_map(|interface| interface.addresses.iter().map(|assigned| assigned.address))
-        .collect();
-    let interface = interfaces
-        .into_iter()
-        .find(|interface| interface.id.index == output_index)
-        .ok_or_else(|| SystemError::InterfaceNotFound {
-            name: interface_hint
-                .as_ref()
-                .map_or_else(|| format!("index-{output_index}"), |hint| hint.name.clone()),
-            index: output_index,
-        })?;
+    let interface = query_interface(&handle, output_index, interface_hint.as_ref()).await?;
     let selection_reason = route_selection_reason(&reply.header.kind, next_hop.is_some())
         .ok_or(SystemError::RouteNotFound { destination })?;
+    let local_addresses = if needs_local_addresses(
+        selection_reason,
+        destination,
+        preferred_source.or(selected_source),
+        &interface,
+    ) {
+        query_local_addresses(&handle).await?
+    } else {
+        Vec::new()
+    };
     finish_route(
         destination,
         interface_hint.as_ref(),
@@ -135,6 +132,25 @@ fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemErr
     os_error("RTM_GETROUTE", error)
 }
 
+/// `finish_route` consults `local_addresses` only for a local route whose
+/// source is absent from the output interface — and only after the family's
+/// mismatch check — so every other decision skips the host-wide address dump.
+fn needs_local_addresses(
+    selection_reason: SelectionReason,
+    destination: IpAddr,
+    resolved_source: Option<IpAddr>,
+    interface: &interface::Info,
+) -> bool {
+    selection_reason == SelectionReason::Local
+        && resolved_source.is_some_and(|source| {
+            source.is_ipv4() == destination.is_ipv4()
+                && !interface
+                    .addresses
+                    .iter()
+                    .any(|assigned| assigned.address == source)
+        })
+}
+
 fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<SelectionReason> {
     match kind {
         RouteType::Local => Some(SelectionReason::Local),
@@ -151,18 +167,61 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
 }
 
 pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, SystemError> {
-    let mut interfaces = query_links(handle).await?;
-    query_addresses(handle, &mut interfaces).await?;
+    let mut interfaces = query_links(handle, None).await?;
+    query_addresses(handle, None, &mut interfaces).await?;
     Ok(interfaces.into_values().collect())
 }
 
-async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, interface::Info>, SystemError> {
-    let mut links = handle.link().get().execute();
+/// Resolves the one interface a route landed on: a filtered link get answers
+/// with a single reply, and its address dump stays scoped to that interface
+/// instead of enumerating every link and address on the host.
+async fn query_interface(
+    handle: &Handle,
+    index: u32,
+    interface_hint: Option<&InterfaceId>,
+) -> Result<interface::Info, SystemError> {
+    let not_found = || SystemError::InterfaceNotFound {
+        name: interface_hint.map_or_else(|| format!("index-{index}"), |hint| hint.name.clone()),
+        index,
+    };
+    let mut interfaces = query_links(handle, Some(index))
+        .await
+        .map_err(|error| match error {
+            // Attach the hinted name to the ENODEV translation.
+            SystemError::InterfaceNotFound { .. } => not_found(),
+            error => error,
+        })?;
+    query_addresses(handle, Some(index), &mut interfaces).await?;
+    interfaces.remove(&index).ok_or_else(not_found)
+}
+
+async fn query_local_addresses(handle: &Handle) -> Result<Vec<IpAddr>, SystemError> {
+    Ok(query_interfaces(handle)
+        .await?
+        .into_iter()
+        .flat_map(|interface| {
+            interface
+                .addresses
+                .into_iter()
+                .map(|assigned| assigned.address)
+        })
+        .collect())
+}
+
+async fn query_links(
+    handle: &Handle,
+    index_filter: Option<u32>,
+) -> Result<BTreeMap<u32, interface::Info>, SystemError> {
+    let request = handle.link().get();
+    let mut links = match index_filter {
+        Some(index) => request.match_index(index).execute(),
+        None => request.execute(),
+    };
     let mut interfaces = BTreeMap::new();
     while let Some(message) = links
         .try_next()
         .await
-        .map_err(|error| os_error("RTM_GETLINK", error))?
+        .map_err(|error| link_lookup_error(index_filter, error))?
     {
         let mut name = None;
         let mut description = None;
@@ -221,11 +280,31 @@ async fn query_links(handle: &Handle) -> Result<BTreeMap<u32, interface::Info>, 
     Ok(interfaces)
 }
 
+/// A filtered link get reports an interface that vanished since the route
+/// lookup as ENODEV, matching the full dump that would have omitted it.
+fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> SystemError {
+    if let Some(index) = index_filter
+        && let rtnetlink::Error::NetlinkError(reply) = &error
+        && reply.raw_code().checked_abs() == Some(libc::ENODEV)
+    {
+        return SystemError::InterfaceNotFound {
+            name: format!("index-{index}"),
+            index,
+        };
+    }
+    os_error("RTM_GETLINK", error)
+}
+
 async fn query_addresses(
     handle: &Handle,
+    index_filter: Option<u32>,
     interfaces: &mut BTreeMap<u32, interface::Info>,
 ) -> Result<(), SystemError> {
-    let mut addresses = handle.address().get().execute();
+    let request = handle.address().get();
+    let mut addresses = match index_filter {
+        Some(index) => request.set_link_index_filter(index).execute(),
+        None => request.execute(),
+    };
     while let Some(message) = addresses
         .try_next()
         .await
@@ -346,6 +425,85 @@ mod tests {
                 operation: "RTM_GETROUTE",
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn a_filtered_link_get_maps_a_missing_interface_to_not_found() {
+        assert!(matches!(
+            link_lookup_error(Some(4), netlink_error(-libc::ENODEV)),
+            SystemError::InterfaceNotFound { index: 4, .. }
+        ));
+        assert!(matches!(
+            link_lookup_error(None, netlink_error(-libc::ENODEV)),
+            SystemError::OperatingSystem {
+                operation: "RTM_GETLINK",
+                ..
+            }
+        ));
+        assert!(matches!(
+            link_lookup_error(Some(4), netlink_error(-libc::EPERM)),
+            SystemError::OperatingSystem {
+                operation: "RTM_GETLINK",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn local_address_dump_only_serves_an_off_interface_local_source() {
+        let interface = interface::Info {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: vec![interface::Address {
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                prefix_length: 24,
+            }],
+            flags: interface::Flags::default(),
+            mtu: Some(1_500),
+            capability: Capability::Layer3,
+            link_type: LinkType::RAW,
+        };
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+        let on_interface = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let off_interface = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+
+        assert!(needs_local_addresses(
+            SelectionReason::Local,
+            destination,
+            Some(off_interface),
+            &interface
+        ));
+        // On-interface sources resolve as `assigned_to_output` first.
+        assert!(!needs_local_addresses(
+            SelectionReason::Local,
+            destination,
+            Some(on_interface),
+            &interface
+        ));
+        // A fallback-resolved source is always on the output interface.
+        assert!(!needs_local_addresses(
+            SelectionReason::Local,
+            destination,
+            None,
+            &interface
+        ));
+        assert!(!needs_local_addresses(
+            SelectionReason::Gateway,
+            destination,
+            Some(off_interface),
+            &interface
+        ));
+        // A family mismatch fails before `local_addresses` is consulted.
+        assert!(!needs_local_addresses(
+            SelectionReason::Local,
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            Some(off_interface),
+            &interface
         ));
     }
 

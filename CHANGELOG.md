@@ -371,6 +371,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   explicitly when a facility is missing. TLS handshake parsing, IP reassembly merge
   planning, and workflow admission/activation paths split along documented
   responsibility boundaries without changing public paths or behavior.
+- Linux route selection resolves the kernel's output interface with a filtered
+  link get and an address dump scoped to that interface instead of enumerating
+  every link and address on the host; the host-wide address dump now only runs
+  for local routes whose selected source lives on another interface.
 - The `--max-application-*` limit flags document what each budget counts
   (messages, streams, in-flight buffers, retained evidence, and source spans),
   and `--start-epoch`/`--stop-epoch` help states that values are nonnegative;

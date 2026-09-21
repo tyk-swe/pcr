@@ -4,7 +4,7 @@
 //! Shared bounds and sourced TCP deliveries for offline application collectors.
 
 use super::{
-    FrameRecord,
+    FrameRecord, TcpView,
     provenance::SourceSet,
     reassembly::tcp::{Event as TcpEvent, ScopedFlowKey},
     scope::Definition,
@@ -224,15 +224,8 @@ impl TcpSources {
                 }
                 let syn = view.header.flags & Tcp::SYN != 0;
                 let initial_syn = syn && view.header.flags & Tcp::ACK == 0;
-                // Reassembly can prove tuple reuse from sequence state even
-                // when this collector sees only the new connection's SYN-ACK.
-                let reassembly_reused = syn && last_stream_eviction.is_some();
-                let observed_reused = initial_syn
-                    && (self
-                        .syns
-                        .get(flow)
-                        .is_some_and(|sequence| *sequence != view.header.sequence)
-                        || (self.closed.contains(flow) && self.closed.contains(&flow.reverse())));
+                let (reassembly_reused, observed_reused) =
+                    self.detect_reuse(&view, flow, syn, initial_syn, last_stream_eviction);
                 if reassembly_reused || observed_reused {
                     self.reset_stream(conversation.index);
                     if !reassembly_reused {
@@ -246,29 +239,8 @@ impl TcpSources {
                     self.syns.insert(flow.clone(), view.header.sequence);
                     self.closed.remove(flow);
                 }
-                if !view.payload.is_empty() {
-                    let sources = record
-                        .tcp_sources()
-                        .ok_or(Error::Sources {
-                            number: record.number,
-                        })?
-                        .clone();
-                    incoming = Some((
-                        flow.clone(),
-                        Span {
-                            sequence: view
-                                .header
-                                .sequence
-                                .wrapping_add(u32::from(view.header.flags & Tcp::SYN != 0)),
-                            length: u32::try_from(view.payload.len()).map_err(|_| {
-                                Error::Sources {
-                                    number: record.number,
-                                }
-                            })?,
-                            number: record.number,
-                            sources,
-                        },
-                    ));
+                incoming = Self::build_incoming_span(record, &view, flow)?;
+                if incoming.is_some() {
                     insert_after = last_stream_eviction;
                 }
             }
@@ -287,6 +259,60 @@ impl TcpSources {
             }
         }
         Ok(output)
+    }
+    /// Detects tuple reuse: reassembly proves it from sequence state when the
+    /// stream was just evicted, while the collector's own SYN and closed
+    /// bookkeeping catch reuse it observed directly.
+    fn detect_reuse(
+        &self,
+        view: &TcpView<'_>,
+        flow: &ScopedFlowKey,
+        syn: bool,
+        initial_syn: bool,
+        last_stream_eviction: Option<usize>,
+    ) -> (bool, bool) {
+        // Reassembly can prove tuple reuse from sequence state even
+        // when this collector sees only the new connection's SYN-ACK.
+        let reassembly_reused = syn && last_stream_eviction.is_some();
+        let observed_reused = initial_syn
+            && (self
+                .syns
+                .get(flow)
+                .is_some_and(|sequence| *sequence != view.header.sequence)
+                || (self.closed.contains(flow) && self.closed.contains(&flow.reverse())));
+        (reassembly_reused, observed_reused)
+    }
+    /// Builds the payload span for this frame, or `None` when it carries no
+    /// payload. The span is sequenced past the SYN bit so data accounting
+    /// stays on payload bytes only.
+    fn build_incoming_span(
+        record: &FrameRecord<'_>,
+        view: &TcpView<'_>,
+        flow: &ScopedFlowKey,
+    ) -> Result<Option<(ScopedFlowKey, Span)>, Error> {
+        if view.payload.is_empty() {
+            return Ok(None);
+        }
+        let sources = record
+            .tcp_sources()
+            .ok_or(Error::Sources {
+                number: record.number,
+            })?
+            .clone();
+        Ok(Some((
+            flow.clone(),
+            Span {
+                sequence: view
+                    .header
+                    .sequence
+                    .wrapping_add(u32::from(view.header.flags & Tcp::SYN != 0)),
+                length: u32::try_from(view.payload.len()).map_err(|_| Error::Sources {
+                    number: record.number,
+                })?,
+                number: record.number,
+                sources,
+            },
+        )))
     }
     pub(crate) fn trailing(
         &mut self,

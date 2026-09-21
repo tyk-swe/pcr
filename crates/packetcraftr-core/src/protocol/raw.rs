@@ -90,13 +90,10 @@ impl LayerCodec for RawCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        let mut decoded = DecodedLayer::terminal(
-            Box::new(Raw::new(Bytes::copy_from_slice(input))),
-            input.len(),
-        );
+        let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
         decoded.fields = crate::layer::raw_layout(input.len());
         Ok(decoded)
     }
@@ -140,13 +137,13 @@ impl LayerCodec for MalformedCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let mut decoded = DecodedLayer::terminal(
             Box::new(Malformed::new(
                 None,
-                Bytes::copy_from_slice(input),
+                input.clone(),
                 "explicit malformed root",
             )),
             input.len(),
@@ -188,13 +185,11 @@ impl LayerCodec for PaddingCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        let mut decoded = DecodedLayer::terminal(
-            Box::new(Padding::new(Bytes::copy_from_slice(input))),
-            input.len(),
-        );
+        let mut decoded =
+            DecodedLayer::terminal(Box::new(Padding::new(input.clone())), input.len());
         decoded.fields = crate::layer::padding_layout(input.len());
         Ok(decoded)
     }

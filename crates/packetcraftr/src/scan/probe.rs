@@ -168,7 +168,7 @@ fn decode_tunnel_header(
     registry
         .codec(protocol)?
         .decode(
-            payload,
+            Bytes::copy_from_slice(payload),
             &LayerDecodeContext {
                 parent: None,
                 registry,

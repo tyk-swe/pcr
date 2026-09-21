@@ -130,8 +130,9 @@ impl<'registry> DecodeSession<'registry> {
         allow_link_padding: bool,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         // cursor byte ranges are derived from the original buffer's own length and validated by
-        // validate_layer before the traversal advances
-        let input = &self.original[cursor.bytes.clone()];
+        // validate_layer before the traversal advances; slicing the shared handle lets
+        // byte-retaining codecs keep their input with a refcount bump instead of a memcpy
+        let input = self.original.slice(cursor.bytes.clone());
         codec.decode(
             input,
             &LayerDecodeContext {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::head::{self, Body, Error, Header, MAX_HEADER_BYTES, MAX_START_LINE};
+use bytes::Bytes;
 
 #[derive(Clone, Debug)]
 enum State {
@@ -151,7 +152,8 @@ impl BodyDecoder {
                                 return Err(Error::Limit("body bytes"));
                             }
                         } else if self.line.len() == 2 {
-                            self.trailers = head::parse_headers(&self.trailer_lines)?;
+                            self.trailers =
+                                head::parse_headers(&Bytes::copy_from_slice(&self.trailer_lines))?;
                             if self.trailers.iter().any(|h| {
                                 ["content-length", "transfer-encoding", "host"]
                                     .iter()

@@ -15,7 +15,7 @@ use super::super::{DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record
 use super::decode_name;
 
 pub(super) fn decode_records(
-    message: &[u8],
+    message: &Bytes,
     mut offset: usize,
     count: usize,
     limits: MessageLimits,
@@ -62,7 +62,7 @@ pub(super) fn decode_records(
 }
 
 struct Rdata<'a> {
-    message: &'a [u8],
+    message: &'a Bytes,
     bytes: &'a [u8],
     type_code: u16,
     offset: usize,
@@ -156,7 +156,7 @@ impl Rdata<'_> {
                     limit: self.limits.max_txt_bytes,
                 });
             }
-            strings.push(Bytes::copy_from_slice(string));
+            strings.push(self.message.slice_ref(string));
             cursor = cursor.saturating_add(length);
         }
         Ok(RecordValue::Txt(strings))
@@ -205,14 +205,14 @@ impl Rdata<'_> {
         }
         Ok(RecordValue::Caa {
             flags: *flags,
-            tag: Bytes::copy_from_slice(tag),
-            value: Bytes::copy_from_slice(value),
+            tag: self.message.slice_ref(tag),
+            value: self.message.slice_ref(value),
         })
     }
 }
 
 fn decode_rdata(
-    message: &[u8],
+    message: &Bytes,
     type_code: u16,
     class: u16,
     ttl: u32,
@@ -256,15 +256,15 @@ fn decode_rdata(
         }
         (33, 1) => rdata.decode_srv(),
         (257, 1) => rdata.decode_caa(),
-        (TYPE_OPT, _) => decode_edns(class, ttl, bytes).map(RecordValue::Opt),
+        (TYPE_OPT, _) => decode_edns(class, ttl, message.slice_ref(bytes)).map(RecordValue::Opt),
         _ => Ok(RecordValue::Unknown {
             type_code,
-            rdata: Bytes::copy_from_slice(bytes),
+            rdata: message.slice_ref(bytes),
         }),
     }
 }
 
-fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
+fn decode_edns(class: u16, ttl: u32, rdata: Bytes) -> Result<Edns, WireError> {
     let ttl_bytes = ttl.to_be_bytes();
     let extended_response_code = ttl_bytes[0];
     let version = ttl_bytes[1];
@@ -291,7 +291,7 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<Edns, WireError> {
             })?;
         options.push(EdnsOption {
             code,
-            data: Bytes::copy_from_slice(data),
+            data: rdata.slice_ref(data),
         });
         cursor = cursor.saturating_add(length);
     }

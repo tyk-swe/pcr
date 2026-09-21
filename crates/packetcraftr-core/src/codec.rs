@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
 
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -185,7 +186,10 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, Error>;
 
-    fn decode(&self, input: &[u8], context: &LayerDecodeContext<'_>)
+    /// Decodes one layer from `input`, a refcounted view the codec may retain
+    /// (whole or via `Bytes::slice`) without copying. Callers that only hold a
+    /// borrowed slice copy it once into `Bytes` before calling.
+    fn decode(&self, input: Bytes, context: &LayerDecodeContext<'_>)
     -> Result<DecodedLayer, Error>;
 
     /// Constructs one layer from caller-supplied reflective fields.

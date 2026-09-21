@@ -257,7 +257,7 @@ impl LayerCodec for NtpCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         // Unsupported modes, other versions, and truncated headers stay
@@ -266,17 +266,15 @@ impl LayerCodec for NtpCodec {
             .first_chunk::<NTP_HEADER_LEN>()
             .is_some_and(|header| is_supported(header[0] >> 3 & 0x07, header[0] & 0x07));
         if !supported {
-            let mut raw = DecodedLayer::terminal(
-                Box::new(Raw::new(Bytes::copy_from_slice(input))),
-                input.len(),
-            );
+            let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
             raw.fields = raw_layout(input.len());
             return Ok(raw);
         }
         let header: &[u8; NTP_HEADER_LEN] = input
             .first_chunk::<NTP_HEADER_LEN>()
             .expect("the supported check above requires a full base header");
-        let extensions = input.get(NTP_HEADER_LEN..).unwrap_or_default();
+        let extensions = input.slice(NTP_HEADER_LEN..);
+        let extension_len = extensions.len();
         Ok(DecodedLayer {
             layer: Box::new(Ntp {
                 leap: header[0] >> 6,
@@ -287,7 +285,7 @@ impl LayerCodec for NtpCodec {
                 precision: header[3] as i8,
                 root_delay: u32::from_be_bytes(header[4..8].try_into().unwrap_or_default()),
                 root_dispersion: u32::from_be_bytes(header[8..12].try_into().unwrap_or_default()),
-                reference_id: Bytes::copy_from_slice(&header[12..16]),
+                reference_id: input.slice_ref(&header[12..16]),
                 reference_timestamp: u64::from_be_bytes(
                     header[16..24].try_into().unwrap_or_default(),
                 ),
@@ -298,12 +296,12 @@ impl LayerCodec for NtpCodec {
                 transmit_timestamp: u64::from_be_bytes(
                     header[40..48].try_into().unwrap_or_default(),
                 ),
-                extensions: Bytes::copy_from_slice(extensions),
+                extensions,
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: ntp_layout(extensions.len()),
+            fields: ntp_layout(extension_len),
             diagnostics: Vec::new(),
             stop: true,
             network: None,
@@ -351,7 +349,7 @@ mod tests {
         let mut wire = fixture().to_vec();
         wire.extend_from_slice(&[0xaa, 0xbb, 0xcc, 0xdd]);
         let decoded = NtpCodec
-            .decode(&wire, &context(&registry))
+            .decode(Bytes::from(wire), &context(&registry))
             .expect("supported header decodes");
         let layer = decoded.layer;
         assert_eq!(layer.field("version"), Some(FieldValue::Unsigned(4)));
@@ -398,7 +396,7 @@ mod tests {
             },
         ] {
             let decoded = NtpCodec
-                .decode(&wire, &context(&registry))
+                .decode(Bytes::copy_from_slice(&wire), &context(&registry))
                 .expect("unsupported input falls back");
             assert_eq!(decoded.layer.protocol_id().as_str(), "raw");
             assert_eq!(decoded.layer.field("bytes"), Some(wire.into()));

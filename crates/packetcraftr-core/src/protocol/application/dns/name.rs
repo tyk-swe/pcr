@@ -99,18 +99,19 @@ pub enum Error {
 ///
 /// // "a" then a pointer back to the root label at offset 0.
 /// let message = [0x00, 0x01, b'a', 0xc0, 0x00];
-/// let expanded = name::decompress(&message, 1, 32).expect("bounded name");
+/// let expanded = name::decompress(&bytes::Bytes::copy_from_slice(&message), 1, 32)
+///     .expect("bounded name");
 /// assert_eq!(expanded.labels, vec![bytes::Bytes::from_static(b"a")]);
 /// assert_eq!(expanded.resume, 5);
 ///
 /// // A pointer that does not move backward cannot terminate.
 /// assert_eq!(
-///     name::decompress(&[0xc0, 0x00], 0, 32),
+///     name::decompress(&bytes::Bytes::from_static(&[0xc0, 0x00]), 0, 32),
 ///     Err(name::Error::SelfPointer { offset: 0 }),
 /// );
 /// ```
 pub fn decompress(
-    message: &[u8],
+    message: &Bytes,
     offset: usize,
     max_pointers: usize,
 ) -> Result<Decompressed, Error> {
@@ -190,7 +191,7 @@ pub fn decompress(
                 if wire_length > MAX_NAME_LEN {
                     return Err(Error::NameTooLong);
                 }
-                labels.push(Bytes::copy_from_slice(label));
+                labels.push(message.slice_ref(label));
                 cursor = end;
             }
             _ => return Err(Error::ReservedLabelLength { offset: cursor }),
@@ -210,14 +211,14 @@ mod tests {
     #[test]
     fn an_uncompressed_name_resumes_after_its_root_label() {
         let message = [1, b'a', 3, b'b', b'c', b'd', 0, 0xff];
-        let expanded = decompress(&message, 0, 32).expect("bounded name");
+        let expanded = decompress(&Bytes::copy_from_slice(&message), 0, 32).expect("bounded name");
         assert_eq!(labels(&expanded), vec![b"a".as_slice(), b"bcd".as_slice()]);
         assert_eq!(expanded.resume, 7);
     }
 
     #[test]
     fn a_root_name_expands_to_no_labels() {
-        let expanded = decompress(&[0], 0, 32).expect("bounded name");
+        let expanded = decompress(&Bytes::from_static(&[0]), 0, 32).expect("bounded name");
         assert!(expanded.labels.is_empty());
         assert_eq!(expanded.resume, 1);
     }
@@ -225,7 +226,7 @@ mod tests {
     #[test]
     fn a_compressed_name_resumes_past_its_first_pointer() {
         let message = [1, b'a', 0, 1, b'b', 0xc0, 0x00, 0xff];
-        let expanded = decompress(&message, 3, 32).expect("bounded name");
+        let expanded = decompress(&Bytes::copy_from_slice(&message), 3, 32).expect("bounded name");
         assert_eq!(labels(&expanded), vec![b"b".as_slice(), b"a".as_slice()]);
         assert_eq!(expanded.resume, 7);
     }
@@ -233,25 +234,25 @@ mod tests {
     #[test]
     fn label_octets_are_preserved_exactly() {
         let message = [3, b'a', 0x20, 0xff, 0];
-        let expanded = decompress(&message, 0, 32).expect("bounded name");
+        let expanded = decompress(&Bytes::copy_from_slice(&message), 0, 32).expect("bounded name");
         assert_eq!(labels(&expanded), vec![[b'a', 0x20, 0xff].as_slice()]);
     }
 
     #[test]
     fn pointers_must_address_a_strictly_earlier_offset() {
         assert_eq!(
-            decompress(&[0xc0, 0x00], 0, 32),
+            decompress(&Bytes::from_static(&[0xc0, 0x00]), 0, 32),
             Err(Error::SelfPointer { offset: 0 })
         );
         assert_eq!(
-            decompress(&[0xc0, 0x02, 0x00], 0, 32),
+            decompress(&Bytes::from_static(&[0xc0, 0x02, 0x00]), 0, 32),
             Err(Error::ForwardPointer {
                 offset: 0,
                 pointer: 2
             })
         );
         assert_eq!(
-            decompress(&[0xc0, 0x09], 0, 32),
+            decompress(&Bytes::from_static(&[0xc0, 0x09]), 0, 32),
             Err(Error::PointerOutOfBounds {
                 pointer: 9,
                 length: 2
@@ -264,7 +265,7 @@ mod tests {
         // Enter at 5, hop to 1, read "a", then hop to 1 again.
         let message = [0, 1, b'a', 0xc0, 0x01, 0xc0, 0x01];
         assert_eq!(
-            decompress(&message, 5, 32),
+            decompress(&Bytes::copy_from_slice(&message), 5, 32),
             Err(Error::PointerLoop { offset: 1 })
         );
     }
@@ -281,15 +282,17 @@ mod tests {
             previous = offset;
         }
         assert_eq!(
-            decompress(&message, previous, 32),
+            decompress(&Bytes::copy_from_slice(&message), previous, 32),
             Err(Error::PointerLimit { limit: 32 })
         );
-        assert!(decompress(&message, previous, 33).is_ok());
+        assert!(decompress(&Bytes::copy_from_slice(&message), previous, 33).is_ok());
         // Entering one trampoline earlier is exactly 32 hops, which fits, and
         // resumes two bytes past the pointer it started on.
         let entry = previous - 2;
         assert_eq!(
-            decompress(&message, entry, 32).expect("32 hops fit").resume,
+            decompress(&Bytes::copy_from_slice(&message), entry, 32)
+                .expect("32 hops fit")
+                .resume,
             entry + 2
         );
     }
@@ -301,29 +304,32 @@ mod tests {
             message.extend_from_slice(&[3, b'a', b'b', b'c']);
         }
         message.push(0);
-        assert_eq!(decompress(&message, 0, 32), Err(Error::NameTooLong));
+        assert_eq!(
+            decompress(&Bytes::copy_from_slice(&message), 0, 32),
+            Err(Error::NameTooLong)
+        );
     }
 
     #[test]
     fn reserved_and_truncated_encodings_are_refused() {
         assert_eq!(
-            decompress(&[0x40, 0], 0, 32),
+            decompress(&Bytes::from_static(&[0x40, 0]), 0, 32),
             Err(Error::ReservedLabelLength { offset: 0 })
         );
         assert_eq!(
-            decompress(&[0x80, 0], 0, 32),
+            decompress(&Bytes::from_static(&[0x80, 0]), 0, 32),
             Err(Error::ReservedLabelLength { offset: 0 })
         );
         assert_eq!(
-            decompress(&[], 0, 32),
+            decompress(&Bytes::from_static(&[]), 0, 32),
             Err(Error::TruncatedLabelLength { offset: 0 })
         );
         assert_eq!(
-            decompress(&[0xc0], 0, 32),
+            decompress(&Bytes::from_static(&[0xc0]), 0, 32),
             Err(Error::TruncatedPointer { offset: 0 })
         );
         assert_eq!(
-            decompress(&[3, b'a'], 0, 32),
+            decompress(&Bytes::from_static(&[3, b'a']), 0, 32),
             Err(Error::TruncatedLabel { offset: 1, end: 4 })
         );
     }

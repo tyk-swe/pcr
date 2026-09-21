@@ -51,6 +51,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   ProbeEndpoint, ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`,
   and `fuzz` aliases are removed without compatibility aliases. See
   `docs/migration-unreleased.md`.
+- `LayerCodec::decode` takes a refcounted `Bytes` view of the layer input
+  instead of `&[u8]`; `dns::decode_name`, `dns::name::decompress`, and
+  `http::parse_head` take `&Bytes` for the same reason. Byte-retaining codecs
+  now slice the shared frame buffer instead of copying each retained range,
+  eliminating a per-packet memcpy in the DHCP, ICMP, IGMP, raw, DNS, NTP, HTTP,
+  and TLS decode paths. Callers holding borrowed bytes wrap them once with
+  `Bytes::copy_from_slice`/`Bytes::from`.
 
 ### Added
 

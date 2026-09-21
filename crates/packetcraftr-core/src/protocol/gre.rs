@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, GRE_CHECKSUM},
@@ -164,7 +166,7 @@ impl LayerCodec for GreCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GRE_BASE_LEN>() else {
@@ -195,7 +197,7 @@ impl LayerCodec for GreCodec {
         }
 
         let protocol_type = u16::from_be_bytes([header[2], header[3]]);
-        let (header_len, checksum_value, key, sequence) = decode_options(input, flags)?;
+        let (header_len, checksum_value, key, sequence) = decode_options(&input, flags)?;
 
         let mut diagnostics = Vec::new();
         let reserved_bits = ((flags & IGNORED_RESERVED_FLAGS) >> 3) as u8;
@@ -208,7 +210,7 @@ impl LayerCodec for GreCodec {
                 .at_field("reserved_bits"),
             );
         }
-        if checksum_value.is_some() && checksum(input) != 0 {
+        if checksum_value.is_some() && checksum(&input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(GRE_CHECKSUM, "GRE checksum mismatch").at_field("checksum"),
             );

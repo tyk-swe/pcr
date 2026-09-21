@@ -23,7 +23,7 @@ pub(super) fn advance(
 
 /// Decompresses one bounded, lossless name and returns its wire resume offset.
 pub fn decode_name(
-    message: &[u8],
+    message: &Bytes,
     offset: usize,
     limits: DecodeLimits,
 ) -> Result<(Name, usize), DecodeError> {
@@ -74,7 +74,7 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
     let mut questions = Vec::with_capacity(usize::from(question_count));
     let mut offset = 12;
     for _ in 0..question_count {
-        let (name, next) = decode_name(message, offset, limits)?;
+        let (name, next) = decode_name(&wire, offset, limits)?;
         questions.push(Question {
             name,
             query_type: read_u16(message, next, "question type")?,
@@ -92,11 +92,11 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
         ..limits
     };
     let (answers, next) =
-        records::decode_records(message, offset, usize::from(answer_count), limits)?;
+        records::decode_records(&wire, offset, usize::from(answer_count), limits)?;
     let (authorities, next) =
-        records::decode_records(message, next, usize::from(authority_count), limits)?;
+        records::decode_records(&wire, next, usize::from(authority_count), limits)?;
     let (additionals, next) =
-        records::decode_records(message, next, usize::from(additional_count), limits)?;
+        records::decode_records(&wire, next, usize::from(additional_count), limits)?;
     if next != message.len() {
         return Err(DecodeError::TrailingBytes {
             remaining: message.len() - next,

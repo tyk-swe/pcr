@@ -81,14 +81,17 @@ pub fn decode_response(
     )?;
     validate_message_bounds(message, limits)?;
     let header = decode_header(message, transaction_id)?;
-    decode_question(message, &query_name, &expected_name, query_type, limits)?;
+    // One owned handle serves both the question check and the full decode below;
+    // label and record retention inside it is refcounted rather than copied.
+    let wire = bytes::Bytes::copy_from_slice(message);
+    decode_question(&wire, &query_name, &expected_name, query_type, limits)?;
 
     if header.flags & FLAG_TRUNCATED != 0 {
         return Ok(truncated_response(header.flags));
     }
 
     let decoded = packetcraftr_core::protocol::application::dns::Dns::from_wire_with_limits(
-        bytes::Bytes::copy_from_slice(message),
+        wire,
         limits.into(),
     )?;
     let sections = validate_sections(decoded.answers, decoded.authorities, decoded.additionals)?;
@@ -198,7 +201,7 @@ fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, 
 }
 
 fn decode_question(
-    message: &[u8],
+    message: &bytes::Bytes,
     query_name: &str,
     expected_name: &Name,
     query_type: QueryType,

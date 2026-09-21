@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
@@ -51,7 +53,7 @@ impl LayerCodec for RawIpCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(version) = input.first().map(|byte| byte >> 4) else {

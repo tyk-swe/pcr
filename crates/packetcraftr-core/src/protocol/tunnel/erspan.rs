@@ -148,7 +148,7 @@ impl LayerCodec for ErspanCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(base) = input.first_chunk::<ERSPAN_II_LEN>() else {
@@ -211,7 +211,7 @@ impl LayerCodec for ErspanCodec {
                     subheader: if header_len > ERSPAN_III_LEN {
                         input
                             .get(ERSPAN_III_LEN..header_len)
-                            .map(Bytes::copy_from_slice)
+                            .map(|bytes| input.slice_ref(bytes))
                     } else {
                         None
                     },
@@ -437,7 +437,7 @@ mod tests {
             network: None,
             discriminator: discriminator.map(Discriminator),
         };
-        ErspanCodec.decode(input, &context)
+        ErspanCodec.decode(Bytes::copy_from_slice(input), &context)
     }
 
     fn decode_error(input: &[u8]) -> crate::codec::Error {

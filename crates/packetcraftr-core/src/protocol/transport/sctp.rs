@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, SCTP_CHECKSUM},
@@ -130,7 +132,7 @@ impl LayerCodec for SctpCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SCTP_HEADER_LEN>() else {

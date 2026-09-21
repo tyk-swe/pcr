@@ -29,7 +29,7 @@ impl TryFrom<&[u8]> for Http {
     type Error = crate::codec::Error;
 
     fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
-        let (head, length) = parse_head(input)
+        let (head, length) = parse_head(&Bytes::copy_from_slice(input))
             .map_err(|e| invalid(NAME, e.to_string()))?
             .ok_or_else(|| invalid(NAME, "incomplete HTTP/1 headers"))?;
         if length != input.len() {
@@ -81,14 +81,11 @@ impl LayerCodec for HttpCodec {
     }
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        let Ok(Some((head, consumed))) = parse_head(input) else {
-            let mut raw = DecodedLayer::terminal(
-                Box::new(Raw::new(Bytes::copy_from_slice(input))),
-                input.len(),
-            );
+        let Ok(Some((head, consumed))) = parse_head(&input) else {
+            let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
             raw.fields = raw_layout(input.len());
             return Ok(raw);
         };

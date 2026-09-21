@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
@@ -220,13 +222,13 @@ impl LayerCodec for EthernetCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let (Some(destination), Some(source), Some(ether_type)) = (
-            ethernet_chunk::<MAC_LEN>(input, 0),
-            ethernet_chunk::<MAC_LEN>(input, MAC_LEN),
-            ethernet_chunk::<2>(input, 12),
+            ethernet_chunk::<MAC_LEN>(&input, 0),
+            ethernet_chunk::<MAC_LEN>(&input, MAC_LEN),
+            ethernet_chunk::<2>(&input, 12),
         ) else {
             return Err(truncated(NAME, ETHERNET_LEN, input.len()));
         };

@@ -80,6 +80,35 @@ pub(crate) fn decode_wire(
         .map_err(WireAuthorizationError::Decode)
 }
 
+/// Decodes exact wire bytes with the trusted registry and applies destination
+/// policy, returning the trusted decode so a later route-aware source check
+/// can reuse it instead of decoding again.
+/// Caller registries remain outside this policy trust boundary. Callers
+/// classify decode failures in their own vocabulary.
+pub(crate) fn authorize_wire_destinations(
+    policy: &crate::policy::Policy,
+    link_type: LinkType,
+    bytes: &Bytes,
+) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
+    let decoded = decode_wire(link_type, bytes)?;
+    policy
+        .authorize_packet_destinations(&decoded.packet)
+        .map_err(WireAuthorizationError::Policy)?;
+    Ok(decoded)
+}
+
+/// Applies route-dependent source policy to a packet the trusted registry
+/// already decoded from the wire bytes.
+pub(crate) fn authorize_wire_sources(
+    policy: &crate::policy::Policy,
+    decoded: &packetcraftr_core::decode::DecodedPacket,
+    route: &packetcraftr_netio::route::Plan,
+) -> Result<(), WireAuthorizationError> {
+    policy
+        .authorize_packet_sources(&decoded.packet, route)
+        .map_err(WireAuthorizationError::Policy)
+}
+
 /// Applies destination (and, given a route, source) policy to the packet the
 /// trusted registry decodes from the bytes that will actually reach the wire.
 /// Caller registries remain outside this policy trust boundary. Callers
@@ -90,14 +119,9 @@ pub(crate) fn authorize_wire(
     bytes: &Bytes,
     route: Option<&packetcraftr_netio::route::Plan>,
 ) -> Result<(), WireAuthorizationError> {
-    let decoded = decode_wire(link_type, bytes)?;
-    policy
-        .authorize_packet_destinations(&decoded.packet)
-        .map_err(WireAuthorizationError::Policy)?;
+    let decoded = authorize_wire_destinations(policy, link_type, bytes)?;
     if let Some(route) = route {
-        policy
-            .authorize_packet_sources(&decoded.packet, route)
-            .map_err(WireAuthorizationError::Policy)?;
+        authorize_wire_sources(policy, &decoded, route)?;
     }
     Ok(())
 }

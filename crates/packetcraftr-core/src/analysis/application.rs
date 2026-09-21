@@ -8,6 +8,7 @@ use super::{
     provenance::SourceSet,
     reassembly::tcp::{Event as TcpEvent, ScopedFlowKey},
     scope::Definition,
+    serial::serial_offset,
 };
 use crate::{
     error::{Classification, Classified, Kind},
@@ -464,7 +465,7 @@ impl TcpSources {
 // TCP windows are smaller than the serial half-space; signed wrapping distance
 // therefore orders any retained span relative to the delivered range.
 fn intersection(base: u32, length: u32, other: u32, other_length: u32) -> Option<(usize, usize)> {
-    let offset = i64::from(other.wrapping_sub(base) as i32);
+    let offset = serial_offset(other, base);
     let lo = offset.max(0);
     let hi = (offset + i64::from(other_length)).min(i64::from(length));
     (lo < hi).then_some((lo as usize, hi as usize))

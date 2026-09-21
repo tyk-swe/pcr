@@ -9,6 +9,7 @@ use crate::protocol::transport::Tcp;
 use bytes::Bytes;
 
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::analysis::serial::{serial_ge, serial_gt};
 
 /// Sender relative to the first captured frame, whose sender is the client.
 /// This identifies the initiator only when the capture includes the handshake.
@@ -127,10 +128,10 @@ impl Deduplicator {
         let bytes = match *delivered {
             Some(edge) => {
                 let overlap = edge.wrapping_sub(sequence);
-                if overlap == 0 || overlap >= 0x8000_0000 {
+                if !serial_gt(edge, sequence) {
                     // Starts at or past the edge: nothing already delivered.
                     bytes.clone()
-                } else if end.wrapping_sub(edge) >= 0x8000_0000 || end == edge {
+                } else if !serial_gt(end, edge) {
                     // Ends at or before the edge: wholly re-delivered.
                     return None;
                 } else {
@@ -143,7 +144,7 @@ impl Deduplicator {
         // The edge only advances; serial arithmetic keeps it meaningful
         // across the 32-bit wrap.
         *delivered = Some(match *delivered {
-            Some(edge) if end.wrapping_sub(edge) >= 0x8000_0000 => edge,
+            Some(edge) if !serial_ge(end, edge) => edge,
             _ => end,
         });
         Some(bytes)

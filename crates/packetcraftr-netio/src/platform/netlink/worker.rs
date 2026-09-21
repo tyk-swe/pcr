@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded route-netlink execution on a shared worker thread.
+//! Bounded route-netlink execution on namespace-local shared worker threads.
 //!
-//! One worker thread owns its Tokio runtime and route-netlink socket for the
-//! process lifetime and holds one shared-budget permit; callers submit
+//! Each network namespace has one worker owning its Tokio runtime and socket
+//! for the process lifetime, charged to the shared native worker budget; callers submit
 //! operations over a bounded channel and wait on a per-request reply channel
 //! instead of paying a thread spawn, a runtime, and a socket per lookup. A
 //! planning pass over T targets issues its T requests on a single connection
@@ -12,11 +12,14 @@
 
 use std::{
     any::Any,
+    collections::BTreeMap,
+    fs::File,
     future::Future,
+    os::unix::fs::MetadataExt,
     panic::{AssertUnwindSafe, catch_unwind},
     pin::Pin,
     sync::{
-        Mutex, MutexGuard, PoisonError,
+        Mutex, MutexGuard, TryLockError,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, SyncSender, TrySendError},
     },
@@ -52,6 +55,7 @@ type Operation = Box<dyn FnOnce(Handle) -> OperationFuture + Send>;
 struct NetlinkRequest {
     operation: Operation,
     respond: SyncSender<OperationResult>,
+    deadline: Instant,
 }
 
 /// The installed worker. `generation` lets a caller that found a dead worker
@@ -61,12 +65,33 @@ struct WorkerSlot {
     requests: SyncSender<NetlinkRequest>,
     retention: RetentionMarker,
     worker: JoinHandle<()>,
+    // Pin the namespace identity even after its original callers leave.
+    _namespace: File,
 }
 
-// One worker serves every lookup in the process. The slot stays empty until
-// the first lookup starts it and after a failed start, and is replaced
-// wholesale when a worker dies so a dead worker never wedges later lookups.
-static SHARED_WORKER: Mutex<Option<WorkerSlot>> = Mutex::new(None);
+type NamespaceId = (u64, u64);
+
+struct Namespace {
+    id: NamespaceId,
+    file: File,
+}
+
+impl Namespace {
+    fn current() -> Result<Self, SystemError> {
+        let file = File::open("/proc/thread-self/ns/net")
+            .map_err(|error| os_error("open caller network namespace", error))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| os_error("identify caller network namespace", error))?;
+        Ok(Self {
+            id: (metadata.dev(), metadata.ino()),
+            file,
+        })
+    }
+}
+
+// Both the registry and its live workers are bounded by native capacity.
+static SHARED_WORKERS: Mutex<BTreeMap<NamespaceId, WorkerSlot>> = Mutex::new(BTreeMap::new());
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, SystemError>
@@ -75,6 +100,8 @@ where
     Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
     T: Send + 'static,
 {
+    let deadline = Instant::now() + NETLINK_RESPONSE_TIMEOUT;
+    let namespace = Namespace::current()?;
     let (respond, finished) = mpsc::sync_channel(1);
     let mut request = NetlinkRequest {
         operation: Box::new(move |handle| {
@@ -85,11 +112,12 @@ where
             })
         }),
         respond,
+        deadline,
     };
-    let deadline = Instant::now() + NETLINK_RESPONSE_TIMEOUT;
     let mut restarted = false;
     loop {
-        let (generation, requests) = worker_requests()?;
+        remaining_before(deadline).ok_or_else(|| netlink_timeout("submit netlink request"))?;
+        let (generation, requests) = worker_requests(&namespace, deadline)?;
         match requests.try_send(request) {
             Ok(()) => break,
             Err(TrySendError::Full(returned)) => {
@@ -107,7 +135,7 @@ where
                     return Err(netlink_worker_panicked());
                 }
                 restarted = true;
-                restart_worker(generation)?;
+                restart_worker(&namespace, generation, deadline)?;
             }
         }
     }
@@ -128,34 +156,76 @@ where
     })
 }
 
-fn shared_worker() -> MutexGuard<'static, Option<WorkerSlot>> {
-    SHARED_WORKER.lock().unwrap_or_else(PoisonError::into_inner)
+fn shared_workers(
+    deadline: Instant,
+) -> Result<MutexGuard<'static, BTreeMap<NamespaceId, WorkerSlot>>, SystemError> {
+    loop {
+        match SHARED_WORKERS.try_lock() {
+            Ok(workers) => return Ok(workers),
+            Err(TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+            Err(TryLockError::WouldBlock) => {
+                let remaining = remaining_before(deadline)
+                    .ok_or_else(|| netlink_timeout("wait for netlink worker admission"))?;
+                thread::park_timeout(remaining.min(Duration::from_millis(10)));
+            }
+        }
+    }
 }
 
-fn worker_requests() -> Result<(u64, SyncSender<NetlinkRequest>), SystemError> {
-    let mut slot = shared_worker();
-    if slot.is_none() {
-        *slot = Some(start_worker()?);
+fn worker_requests(
+    namespace: &Namespace,
+    deadline: Instant,
+) -> Result<(u64, SyncSender<NetlinkRequest>), SystemError> {
+    let mut workers = shared_workers(deadline)?;
+    let finished: Vec<_> = workers
+        .iter()
+        .filter(|(_, worker)| worker.worker.is_finished())
+        .map(|(id, _)| *id)
+        .collect();
+    for id in finished {
+        if let Some(worker) = workers.remove(&id) {
+            let _ = worker.worker.join();
+        }
     }
-    let worker = slot.as_ref().expect("the worker slot was just initialized");
+    if !workers.contains_key(&namespace.id) {
+        check_namespace_capacity(workers.len())?;
+        workers.insert(namespace.id, start_worker(namespace, deadline)?);
+    }
+    let worker = workers
+        .get(&namespace.id)
+        .expect("the namespace worker was initialized");
     Ok((worker.generation, worker.requests.clone()))
 }
 
-fn restart_worker(generation: u64) -> Result<(), SystemError> {
-    let mut slot = shared_worker();
-    if let Some(worker) = slot.as_ref()
-        && worker.generation != generation
+fn check_namespace_capacity(count: usize) -> Result<(), SystemError> {
+    if count >= crate::platform::workers::CAPACITY {
+        return Err(SystemError::OperatingSystem {
+            operation: "reserve netlink namespace worker",
+            message: "network namespace worker capacity is exhausted".to_owned(),
+            source: None,
+        });
+    }
+    Ok(())
+}
+
+fn restart_worker(
+    namespace: &Namespace,
+    generation: u64,
+    deadline: Instant,
+) -> Result<(), SystemError> {
+    let mut workers = shared_workers(deadline)?;
+    if workers
+        .get(&namespace.id)
+        .is_some_and(|worker| worker.generation != generation)
     {
-        // Another caller already swapped in a live worker.
         return Ok(());
     }
-    if let Some(dead) = slot.take() {
-        // The disconnected inbox means this worker already exited; joining
-        // reaps its thread instead of detaching it. A worker that somehow
-        // outlives its inbox keeps its permit until it exits.
+    if let Some(dead) = workers.remove(&namespace.id) {
         match join_with_deadline(
             dead.worker,
-            NETLINK_OPERATION_TIMEOUT,
+            remaining_before(deadline)
+                .unwrap_or_default()
+                .min(NETLINK_OPERATION_TIMEOUT),
             Duration::from_millis(10),
         ) {
             JoinAttempt::Finished(joined) => drop(joined),
@@ -165,11 +235,17 @@ fn restart_worker(generation: u64) -> Result<(), SystemError> {
             }
         }
     }
-    *slot = Some(start_worker()?);
+    check_namespace_capacity(workers.len())?;
+    workers.insert(namespace.id, start_worker(namespace, deadline)?);
     Ok(())
 }
 
-fn start_worker() -> Result<WorkerSlot, SystemError> {
+fn start_worker(namespace: &Namespace, deadline: Instant) -> Result<WorkerSlot, SystemError> {
+    remaining_before(deadline).ok_or_else(|| netlink_timeout("initialize netlink"))?;
+    let namespace = namespace
+        .file
+        .try_clone()
+        .map_err(|error| os_error("retain caller network namespace", error))?;
     let permit = shared_budget()
         .reserve()
         .map_err(|error| SystemError::OperatingSystem {
@@ -180,19 +256,23 @@ fn start_worker() -> Result<WorkerSlot, SystemError> {
     let retention = permit.retention_marker();
     let (setup, initialized) = mpsc::sync_channel(1);
     let (requests, inbox) = mpsc::sync_channel(NETLINK_QUEUE_DEPTH);
-    // The worker inherits the first caller's network namespace and keeps it:
-    // every later lookup shares that one socket. It owns its permit for its
-    // whole lifetime; a caller timing out never takes the worker's resources.
+    // Spawn directly from the caller so this worker and every replacement
+    // socket inherit the namespace identified by the retained descriptor.
     let worker = thread::Builder::new()
         .name("packetcraftr-netlink".to_owned())
         .spawn(move || run_worker(setup, inbox, permit))
         .map_err(|error| os_error("spawn netlink worker", error))?;
-    match initialized.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
+    match initialized.recv_timeout(
+        remaining_before(deadline)
+            .unwrap_or_default()
+            .min(NETLINK_OPERATION_TIMEOUT),
+    ) {
         Ok(Ok(())) => Ok(WorkerSlot {
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
             requests,
             retention,
             worker,
+            _namespace: namespace,
         }),
         Ok(Err(error)) => {
             // The worker reported its own setup failure and returned, so its
@@ -231,37 +311,91 @@ fn run_worker(
             return;
         }
     };
-    let (connection, handle) = match runtime
-        .block_on(async { new_connection() })
-        .map_err(|error| os_error("open route netlink socket", error))
-    {
-        Ok((connection, handle, _)) => (connection, handle),
+    let (handle, connection) = match open_connection(&runtime) {
+        Ok(connection) => connection,
         Err(error) => {
             let _ = setup.send(Err(error));
             return;
         }
     };
-    let mut connection = runtime.spawn(connection);
     if setup.send(Ok(())).is_err() {
         connection.abort();
         return;
     }
-    while let Ok(request) = requests.recv() {
-        let NetlinkRequest { operation, respond } = request;
-        // A panicking operation must not strand every later request behind a
-        // dead worker.
-        let result = catch_unwind(AssertUnwindSafe(|| {
+    serve_requests(&runtime, handle, connection, requests);
+}
+
+fn open_connection(
+    runtime: &tokio::runtime::Runtime,
+) -> Result<(Handle, tokio::task::JoinHandle<()>), SystemError> {
+    let (connection, handle, _) = runtime
+        .block_on(async { new_connection() })
+        .map_err(|error| os_error("open route netlink socket", error))?;
+    Ok((handle, runtime.spawn(connection)))
+}
+
+fn serve_requests(
+    runtime: &tokio::runtime::Runtime,
+    mut handle: Handle,
+    mut connection: tokio::task::JoinHandle<()>,
+    requests: mpsc::Receiver<NetlinkRequest>,
+) {
+    while let Ok(NetlinkRequest {
+        operation,
+        respond,
+        deadline,
+    }) = requests.recv()
+    {
+        if remaining_before(deadline).is_none() {
+            let _ = respond.send(Err(netlink_timeout("start netlink operation")));
+            continue;
+        }
+        // Keep unstarted requests in this inbox when a socket fails. The
+        // operation already invoked receives its error and is never replayed.
+        if connection.is_finished() {
+            match open_connection(runtime) {
+                Ok((replacement_handle, replacement_connection)) => {
+                    handle = replacement_handle;
+                    connection = replacement_connection;
+                }
+                Err(error) => {
+                    let _ = respond.send(Err(error));
+                    continue;
+                }
+            }
+        }
+        let Some(remaining) = remaining_before(deadline) else {
+            let _ = respond.send(Err(netlink_timeout("start netlink operation")));
+            continue;
+        };
+        let (result, discard_connection) = match catch_unwind(AssertUnwindSafe(|| {
             runtime.block_on(await_netlink_operation(
                 operation(handle.clone()),
                 &mut connection,
-                NETLINK_OPERATION_TIMEOUT,
+                remaining.min(NETLINK_OPERATION_TIMEOUT),
             ))
-        }))
-        .unwrap_or_else(|_| Err(netlink_worker_panicked()));
-        let _ = respond.send(result);
-        if connection.is_finished() {
-            break;
+        })) {
+            Ok(result) => {
+                let timed_out = matches!(
+                    &result,
+                    Err(SystemError::OperatingSystem {
+                        operation: "execute netlink operation",
+                        ..
+                    })
+                );
+                (result, timed_out)
+            }
+            Err(_) => (Err(netlink_worker_panicked()), true),
+        };
+        if discard_connection {
+            // Dropping a request future does not clear netlink-proto's pending
+            // reply map. Retire its socket before accepting further work.
+            connection.abort();
+            if !connection.is_finished() {
+                let _ = runtime.block_on(&mut connection);
+            }
         }
+        let _ = respond.send(result);
     }
     connection.abort();
 }
@@ -329,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_connection_releases_pending_queries_for_worker_replacement() {
+    fn a_stopped_connection_releases_pending_queries_for_reconnection() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -355,6 +489,166 @@ mod tests {
             })
         ));
         assert!(connection.is_finished());
+    }
+
+    fn request_with(
+        deadline: Instant,
+        operation: Operation,
+    ) -> (NetlinkRequest, mpsc::Receiver<OperationResult>) {
+        let (respond, result) = mpsc::sync_channel(1);
+        (
+            NetlinkRequest {
+                operation,
+                respond,
+                deadline,
+            },
+            result,
+        )
+    }
+
+    #[test]
+    fn expired_queued_operations_are_never_invoked() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (handle, connection) = open_connection(&runtime).unwrap();
+        let invoked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = invoked.clone();
+        let (request, result) = request_with(
+            Instant::now(),
+            Box::new(move |_| {
+                Box::pin(async move {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(Box::new(7_u32) as Box<dyn Any + Send>)
+                })
+            }),
+        );
+        let (submit, inbox) = mpsc::sync_channel(1);
+        submit.send(request).unwrap();
+        drop(submit);
+        serve_requests(&runtime, handle, connection, inbox);
+        assert!(
+            !invoked.load(Ordering::SeqCst),
+            "expired operation ran after its caller deadline"
+        );
+        assert!(result.recv().unwrap().is_err());
+    }
+
+    #[test]
+    fn queued_operations_survive_a_connection_failure() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (handle, connection) = open_connection(&runtime).unwrap();
+        let abort = connection.abort_handle();
+        let deadline = Instant::now() + NETLINK_RESPONSE_TIMEOUT;
+        let (first, first_result) = request_with(
+            deadline,
+            Box::new(move |_| {
+                Box::pin(async move {
+                    abort.abort();
+                    std::future::pending().await
+                })
+            }),
+        );
+        let (second, second_result) = request_with(
+            deadline,
+            Box::new(|_| Box::pin(async { Ok(Box::new(9_u32) as Box<dyn Any + Send>) })),
+        );
+        let (submit, inbox) = mpsc::sync_channel(2);
+        submit.send(first).unwrap();
+        submit.send(second).unwrap();
+        drop(submit);
+        serve_requests(&runtime, handle, connection, inbox);
+        assert!(first_result.recv().unwrap().is_err());
+        assert_eq!(
+            *second_result
+                .recv()
+                .expect("queued operation must retain its reply")
+                .unwrap()
+                .downcast::<u32>()
+                .unwrap(),
+            9
+        );
+    }
+
+    #[test]
+    fn execution_uses_the_remaining_request_deadline_and_retires_the_socket() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (handle, connection) = open_connection(&runtime).unwrap();
+        let old_connection = connection.abort_handle();
+        let started = Instant::now();
+        let (first, first_result) = request_with(
+            started + Duration::from_millis(20),
+            Box::new(|_| Box::pin(std::future::pending())),
+        );
+        let (second, second_result) = request_with(
+            started + NETLINK_RESPONSE_TIMEOUT,
+            Box::new(move |_| {
+                Box::pin(async move {
+                    assert!(
+                        old_connection.is_finished(),
+                        "timed-out socket must release pending replies"
+                    );
+                    Ok(Box::new(9_u32) as Box<dyn Any + Send>)
+                })
+            }),
+        );
+        let (submit, inbox) = mpsc::sync_channel(2);
+        submit.send(first).unwrap();
+        submit.send(second).unwrap();
+        drop(submit);
+        serve_requests(&runtime, handle, connection, inbox);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(first_result.recv().unwrap().is_err());
+        assert!(second_result.recv().unwrap().is_ok());
+    }
+
+    #[test]
+    #[ignore = "requires an isolated Linux namespace with CAP_SYS_ADMIN"]
+    #[allow(unsafe_code)]
+    fn callers_in_distinct_namespaces_use_their_own_workers() {
+        use std::os::unix::fs::MetadataExt;
+        let parent: u64 = std::env::var("PACKETCRAFTR_PARENT_NETNS")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_ne!(
+            std::fs::metadata("/proc/thread-self/ns/net").unwrap().ino(),
+            parent
+        );
+        let mut namespaces = Vec::new();
+        for _ in 0..2 {
+            namespaces.push(
+                thread::spawn(|| {
+                    // SAFETY: CLONE_NEWNET changes only this dedicated test thread's
+                    // network namespace; unshare takes no pointers, and the thread
+                    // exits without returning to another caller's network context.
+                    let changed = unsafe { libc::unshare(libc::CLONE_NEWNET) };
+                    assert_eq!(changed, 0, "{}", std::io::Error::last_os_error());
+                    let expected = std::fs::metadata("/proc/thread-self/ns/net").unwrap().ino();
+                    let observed = with_netlink(|_| async {
+                        std::fs::metadata("/proc/thread-self/ns/net")
+                            .map(|metadata| metadata.ino())
+                            .map_err(|error| os_error("inspect worker namespace", error))
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        observed, expected,
+                        "worker must inherit its caller's namespace"
+                    );
+                    expected
+                })
+                .join()
+                .unwrap(),
+            );
+        }
+        assert_ne!(namespaces[0], namespaces[1]);
     }
 
     #[test]

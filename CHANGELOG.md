@@ -303,11 +303,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving
   validation and wire output; neighbor-cache hits avoid scanning unrelated entries.
-- Linux route lookups share one netlink worker (thread, Tokio runtime, and
-  socket) for the process lifetime behind the native worker budget, submitting
-  requests over a bounded channel instead of respawning all three per
-  destination; multi-target scan planning pays the setup once. The idle worker
-  retains one admission slot and remains visible in native resource snapshots.
+- Linux route lookups share a netlink worker (thread, Tokio runtime, and socket)
+  per network namespace behind the native worker budget, submitting requests
+  over bounded channels instead of respawning all three per destination.
+  Queued requests honor their original deadlines and survive socket replacement;
+  each idle worker retains one admission slot in native resource snapshots.
 - Packet filters short-circuit decisive boolean operands, and projections avoid
   temporary allocations when retaining field values and accounting for byte budgets.
 - Workflow and netio errors retain their original typed sources instead of

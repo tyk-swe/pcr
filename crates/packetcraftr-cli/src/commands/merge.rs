@@ -45,7 +45,10 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let mut writer = pcap::Writer::pcapng_with_options(
-        args.compression.writer(staged.as_file_mut())?,
+        args.compression.writer(std::io::BufWriter::with_capacity(
+            64 * 1024,
+            staged.as_file_mut(),
+        ))?,
         pcap::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             max_interfaces: args.limits.reader.max_interfaces,

@@ -14,7 +14,8 @@ use crate::BoundaryError;
 
 use crate::policy::{
     Authorizer, Operation, PermissiveLiveDenial, WireAuthorizationError, authorize_wire,
-    check_permissive_live, unsupported_operation,
+    authorize_wire_destinations, authorize_wire_sources, check_permissive_live,
+    unsupported_operation,
 };
 
 use crate::replay::wire::replay_network_envelope;
@@ -25,6 +26,9 @@ pub struct SystemAuthorizer {
     policy: crate::policy::Policy,
     registry: Arc<Registry>,
     allow_malformed_live: bool,
+    /// The trusted decode `authorize_frame` already produced, retained for
+    /// `authorize_final_wire` to reuse when it judges the same wire bytes.
+    wire_decode: Option<decode::DecodedPacket>,
 }
 
 impl SystemAuthorizer {
@@ -39,26 +43,27 @@ impl SystemAuthorizer {
             policy,
             registry,
             allow_malformed_live,
+            wire_decode: None,
         }
     }
 
+    /// Authorizes the frame before route planning and retains the trusted
+    /// decode so the final wire check can reuse it for the same bytes.
     pub(in crate::replay) fn authorize_frame(
-        &self,
+        &mut self,
         frame: &Frame,
         mode: Mode,
     ) -> Result<(), BoundaryError> {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        authorize_wire(&self.policy, frame.link_type, frame.bytes(), None).map_err(|error| {
-            match error {
-                WireAuthorizationError::Decode(source) => decode_error(source),
-                WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
-            }
-        })?;
+        let trusted = authorize_wire_destinations(&self.policy, frame.link_type, frame.bytes())
+            .map_err(wire_error)?;
         let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
-        self.validate_rebuild(frame, &rebuilt)
+        self.validate_rebuild(frame, &rebuilt)?;
+        self.wire_decode = Some(trusted);
+        Ok(())
     }
 
     fn validate_link_type(&self, frame: &Frame) -> Result<(), BoundaryError> {
@@ -134,6 +139,13 @@ impl SystemAuthorizer {
                 .map_err(permissive_live_error)?;
         }
         Ok(())
+    }
+}
+
+fn wire_error(error: WireAuthorizationError) -> BoundaryError {
+    match error {
+        WireAuthorizationError::Decode(source) => decode_error(source),
+        WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
     }
 }
 
@@ -229,17 +241,24 @@ impl Authorizer for SystemAuthorizer {
         }
     }
 
+    /// Reuses the trusted decode retained by `authorize_frame` when the wire
+    /// bytes match, so only the route-aware source check runs again. Frames
+    /// without a retained decode are authorized from scratch.
     fn authorize_final_wire(
         &mut self,
         frame: &Frame,
         route: &packetcraftr_netio::route::Plan,
     ) -> Result<(), BoundaryError> {
-        authorize_wire(&self.policy, frame.link_type, frame.bytes(), Some(route)).map_err(|error| {
-            match error {
-                WireAuthorizationError::Decode(source) => decode_error(source),
-                WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        match self.wire_decode.take() {
+            Some(decoded)
+                if decoded.frame.link_type == frame.link_type
+                    && decoded.original == *frame.bytes() =>
+            {
+                authorize_wire_sources(&self.policy, &decoded, route).map_err(wire_error)
             }
-        })
+            _ => authorize_wire(&self.policy, frame.link_type, frame.bytes(), Some(route))
+                .map_err(wire_error),
+        }
     }
 }
 
@@ -535,6 +554,73 @@ mod tests {
     }
 
     #[test]
+    fn final_wire_reuses_the_trusted_decode_from_frame_authorization() {
+        let frame = raw_frame(&built_ipv4(false));
+        let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 99));
+        let policy = crate::policy::Policy {
+            allow_permissive_packets: true,
+            ..crate::policy::Policy::default()
+        };
+        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        authorizer
+            .authorize_frame(&frame, Mode::Layer3)
+            .expect("the frame authorizes before route planning");
+
+        let error = authorizer
+            .authorize_final_wire(&frame, &route)
+            .expect_err("the retained decode still checks the captured source");
+        assert_eq!(error.classification().code, "policy.source_ownership");
+
+        let policy = crate::policy::Policy {
+            allow_permissive_packets: true,
+            allow_source_spoofing: true,
+            ..crate::policy::Policy::default()
+        };
+        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        authorizer
+            .authorize_frame(&frame, Mode::Layer3)
+            .expect("the frame authorizes before route planning");
+        authorizer
+            .authorize_final_wire(&frame, &route)
+            .expect("the retained decode permits an approved source");
+    }
+
+    #[test]
+    fn final_wire_decodes_fresh_bytes_when_the_authorized_frame_differs() {
+        let frame = raw_frame(&built_ipv4(false));
+        let mut multicast = Packet::new();
+        multicast
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(224, 0, 0, 251),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        let multicast = Builder::new(registry())
+            .build(
+                multicast,
+                codec::Context::default(),
+                build::Options::default(),
+            )
+            .expect("multicast fixture builds");
+        let multicast_frame = raw_frame(&multicast);
+        let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 1));
+        let policy = crate::policy::Policy {
+            allow_permissive_packets: true,
+            ..crate::policy::Policy::default()
+        };
+        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        authorizer
+            .authorize_frame(&frame, Mode::Layer3)
+            .expect("the first frame authorizes before route planning");
+
+        let error = authorizer
+            .authorize_final_wire(&multicast_frame, &route)
+            .expect_err("different wire bytes decode and check fresh destinations");
+        assert_eq!(error.classification().code, "policy.public_destination");
+    }
+
+    #[test]
     fn caller_codec_cannot_hide_a_public_destination_from_replay_policy() {
         let mut packet = Packet::new();
         packet
@@ -552,7 +638,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        let authorizer = SystemAuthorizer::new(opaque_raw_registry(), policy, true);
+        let mut authorizer = SystemAuthorizer::new(opaque_raw_registry(), policy, true);
 
         let caller_decoded = authorizer
             .decode_frame(&frame)
@@ -624,7 +710,8 @@ mod tests {
             vec![0x45_u8],
         )
         .expect("valid truncated capture record");
-        let authorizer = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
+        let mut authorizer =
+            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
         let error = authorizer
             .authorize_frame(&truncated, Mode::Layer3)
             .expect_err("truncated evidence cannot be replayed");

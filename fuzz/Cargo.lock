@@ -247,6 +247,7 @@ dependencies = [
  "bytes",
  "flate2",
  "md-5",
+ "memchr",
  "noyalib",
  "serde",
  "serde_json",

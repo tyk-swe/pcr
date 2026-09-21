@@ -286,6 +286,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF
   rejection, header caps, and boundaries byte-exact.
+- `read` without `--field` rejects JSON, CSV, and TSV output with the shared
+  "this output format requires --field selections" message.
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
 - Forwarding verification serializes each keyed observation's identity once

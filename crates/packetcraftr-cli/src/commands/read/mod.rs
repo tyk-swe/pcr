@@ -58,10 +58,7 @@ pub(super) fn run(
         return super::projection::read(arguments, format.as_format(), stream);
     }
     if matches!(format, ReadFormat::Json | ReadFormat::Csv | ReadFormat::Tsv) {
-        return Err(CliError::new(
-            Kind::Cli,
-            "this read output format requires --field selections",
-        ));
+        return Err(super::projection::missing_fields_error());
     }
     let Args {
         fields: _,

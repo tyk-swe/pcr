@@ -409,6 +409,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
+  output in 64 KiB chunks instead of issuing one write syscall per record,
+  removing the syscall bottleneck on large captures. Output bytes are
+  identical.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

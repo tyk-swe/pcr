@@ -294,6 +294,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   "this output format requires --field selections" message.
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
+- Forwarding verification serializes each keyed observation's identity once
+  instead of twice, preserving canonical key bytes and charging the scratch
+  budget before retaining each serialized chunk.
 - Replay decodes each captured frame with the trusted registry once instead of
   twice, reusing the pre-route decode for the final route-aware source check.
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP

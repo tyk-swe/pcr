@@ -7,7 +7,7 @@ use crate::frame::{Direction, Frame, Lengths};
 
 use super::options::visit_options;
 use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Endianness, Format, Interface};
+use crate::analysis::pcap::model::{Endianness, Format, Interface, PcapNgOption};
 use crate::analysis::pcap::wire::{
     PCAPNG_OPTION_EPB_FLAGS, align_to_usize, copy_bytes_fallibly, decode_u16, decode_u32,
     timestamp_from_ticks, validate_declared_lengths,
@@ -258,4 +258,32 @@ pub(in crate::analysis::pcap) fn parse_packet_direction(
         },
     )?;
     Ok(direction)
+}
+
+/// Rejects `epb_flags` options a packet rewrite cannot retain: only the
+/// inbound/outbound direction bits are carried onto the frame. A value that is
+/// not four bytes is reported with `malformed_reason`.
+pub(in crate::analysis::pcap) fn validate_rewritable_packet_flags(
+    options: &[PcapNgOption],
+    endianness: Endianness,
+    malformed_reason: &'static str,
+) -> Result<(), &'static str> {
+    for option in options
+        .iter()
+        .filter(|option| option.code == PCAPNG_OPTION_EPB_FLAGS)
+    {
+        let bytes: [u8; 4] = option
+            .value
+            .as_ref()
+            .try_into()
+            .map_err(|_| malformed_reason)?;
+        let flags = match endianness {
+            Endianness::Little => u32::from_le_bytes(bytes),
+            Endianness::Big => u32::from_be_bytes(bytes),
+        };
+        if flags & !3 != 0 {
+            return Err("extended packet flags");
+        }
+    }
+    Ok(())
 }

@@ -3,6 +3,8 @@
 
 //! Timestamp-ordered streaming merge with distinct source interface identities.
 
+use super::pcapng::validate_rewritable_packet_flags;
+use super::wire::{PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_IF_FCSLEN};
 use super::{
     CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
     Reader, RecordKind, Writer,
@@ -223,7 +225,7 @@ pub fn merge<R: Read, W: Write>(
             let id = output.add_interface_description_with_options(
                 current.description,
                 &[PcapNgOption {
-                    code: 1,
+                    code: PCAPNG_OPTION_COMMENT,
                     value: provenance.into(),
                 }],
             )?;
@@ -305,7 +307,9 @@ fn advance<R: Read>(
                 match metadata {
                     MetadataBlockKind::Section(section) => state.endianness = section.endianness,
                     MetadataBlockKind::InterfaceDescription { options, .. }
-                        if options.iter().any(|option| option.code == 13) =>
+                        if options
+                            .iter()
+                            .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN) =>
                     {
                         return Err(MergeError::Metadata {
                             input: index,
@@ -317,27 +321,12 @@ fn advance<R: Read>(
                 continue;
             }
         };
-        for option in options.iter().filter(|option| option.code == 2) {
-            let bytes: [u8; 4] =
-                option
-                    .value
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| MergeError::Metadata {
-                        input: index,
-                        field: "packet flags",
-                    })?;
-            let flags = match state.endianness {
-                Endianness::Little => u32::from_le_bytes(bytes),
-                Endianness::Big => u32::from_be_bytes(bytes),
-            };
-            if flags & !3 != 0 {
-                return Err(MergeError::Metadata {
-                    input: index,
-                    field: "extended packet flags",
-                });
-            }
-        }
+        validate_rewritable_packet_flags(&options, state.endianness, "packet flags").map_err(
+            |field| MergeError::Metadata {
+                input: index,
+                field,
+            },
+        )?;
         let frame = record.frame.ok_or(Error::InvalidData {
             format: source.reader.format(),
             reason: "packet record has no frame",

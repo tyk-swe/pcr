@@ -19,8 +19,8 @@ use super::pcapng::{
     write_section_header,
 };
 use super::wire::{
-    PCAP_RECORD_HEADER_LEN, align_to_u32, timestamp_to_ticks, usize_to_u32_limit,
-    validate_frame_size,
+    PCAP_RECORD_HEADER_LEN, PCAPNG_OPTION_END, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
+    align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_size,
 };
 
 pub(super) enum WriterState {
@@ -345,7 +345,11 @@ impl<W: Write> Writer<W> {
         };
         let mut length = base;
         for option in options {
-            if matches!(option.code, 0 | 9 | 14) || option.value.len() > u16::MAX as usize {
+            if matches!(
+                option.code,
+                PCAPNG_OPTION_END | PCAPNG_OPTION_IF_TSRESOL | PCAPNG_OPTION_IF_TSOFFSET
+            ) || option.value.len() > u16::MAX as usize
+            {
                 return Err(Error::InvalidData {
                     format: Format::PcapNg,
                     reason: "custom interface options conflict with generated metadata or exceed wire length",

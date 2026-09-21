@@ -13,7 +13,8 @@ pub struct NativeSnapshot {
     pub supported: bool,
     /// Maximum concurrent native worker reservations.
     pub capacity: usize,
-    /// Reservations still owned by work or cleanup.
+    /// Reservations still owned by work or cleanup, including the persistent
+    /// Linux route workers initialized by route lookup or interface discovery.
     pub active: usize,
     /// Cumulative rejected reservations, saturating at usize::MAX.
     pub rejected_admissions: usize,
@@ -22,6 +23,8 @@ pub struct NativeSnapshot {
 }
 
 /// Inspect native resources without starting workers or performing I/O.
+/// The Linux route service retains one reservation per initialized network
+/// namespace while idle because each thread, runtime, and socket stays alive.
 #[must_use]
 pub fn native_snapshot() -> NativeSnapshot {
     crate::platform::native_resource_snapshot()

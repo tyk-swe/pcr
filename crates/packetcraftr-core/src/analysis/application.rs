@@ -32,9 +32,9 @@ pub struct Limits {
     /// Cumulative byte charge for retained and emitted evidence over the
     /// run: parsed heads and flushed message state for HTTP, emitted wire
     /// bytes plus pending transaction keys for DNS. Charges include
-    /// a conservative multiplier for
-    /// decoded-object expansion, so this bounds result growth rather than
-    /// live buffers or serialized output.
+    /// the `retained_charge` conservative multiplier for decoded-object
+    /// expansion, so this bounds result growth rather than live buffers or
+    /// serialized output.
     pub max_retained_bytes: usize,
     /// TCP sequence spans retained to attribute reassembled deliveries to
     /// physical source frames. HTTP additionally bounds the distinct source

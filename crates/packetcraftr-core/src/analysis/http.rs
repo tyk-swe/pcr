@@ -368,7 +368,7 @@ impl Collector {
                 limit: self.limits.max_retained_bytes,
             });
         }
-        let parsed = http::parse_head(&live.header);
+        let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
         let (head, _) = match parsed {
             Ok(Some(head)) => head,
             Ok(None) => unreachable!("terminator present"),

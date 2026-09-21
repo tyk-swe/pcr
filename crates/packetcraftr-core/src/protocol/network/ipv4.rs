@@ -192,7 +192,7 @@ impl LayerCodec for Ipv4Codec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV4_MIN_LEN>() else {
@@ -265,7 +265,7 @@ impl LayerCodec for Ipv4Codec {
                 checksum: WireValue::Exact(u16::from_be_bytes([header[10], header[11]])),
                 source,
                 destination,
-                options: Bytes::copy_from_slice(options),
+                options: input.slice_ref(options),
             }),
             consumed: header_len,
             payload_len,

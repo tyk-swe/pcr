@@ -179,7 +179,7 @@ impl LayerCodec for AhCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(fixed) = input.first_chunk::<AH_FIXED_LEN>() else {
@@ -243,7 +243,7 @@ impl LayerCodec for AhCodec {
                 reserved,
                 spi: u32::from_be_bytes([fixed[4], fixed[5], fixed[6], fixed[7]]),
                 sequence: u32::from_be_bytes([fixed[8], fixed[9], fixed[10], fixed[11]]),
-                icv: Bytes::copy_from_slice(icv),
+                icv: input.slice_ref(icv),
             }),
             consumed: header_len,
             payload_len,

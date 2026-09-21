@@ -164,7 +164,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<8>() else {
@@ -229,7 +229,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
                 flags: header[5],
                 tag: u16::from_be_bytes([header[6], header[7]]),
                 segments: wire_segments,
-                tlvs: Bytes::copy_from_slice(tlv_bytes),
+                tlvs: input.slice_ref(tlv_bytes),
             }),
             consumed: header_len,
             payload_len: input.len().saturating_sub(header_len),

@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
@@ -157,10 +159,10 @@ impl LayerCodec for BsdNullCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        decode_family(input, FamilyHeader::Null)
+        decode_family(&input, FamilyHeader::Null)
     }
 
     fn make_layer(
@@ -192,10 +194,10 @@ impl LayerCodec for BsdLoopCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        decode_family(input, FamilyHeader::Loop)
+        decode_family(&input, FamilyHeader::Loop)
     }
 
     fn make_layer(

@@ -179,7 +179,7 @@ impl LayerCodec for GeneveCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<GENEVE_BASE_LEN>() else {
@@ -203,7 +203,7 @@ impl LayerCodec for GeneveCodec {
         let protocol_type = u16::from_be_bytes([header[2], header[3]]);
         let vni = u32::from_be_bytes([0, header[4], header[5], header[6]]);
         let reserved2 = header[7];
-        let options = Bytes::copy_from_slice(option_bytes);
+        let options = input.slice_ref(option_bytes);
 
         let mut diagnostics = Vec::new();
         if reserved1 != 0 || reserved2 != 0 {
@@ -395,7 +395,7 @@ mod tests {
             network: None,
             discriminator: None,
         };
-        GeneveCodec.decode(input, &context)
+        GeneveCodec.decode(Bytes::copy_from_slice(input), &context)
     }
 
     fn decode_error(input: &[u8]) -> crate::codec::Error {

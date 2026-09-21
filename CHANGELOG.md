@@ -275,9 +275,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- HTTP analysis accumulates reassembled header bytes in bulk runs ending at
+  each line feed instead of one byte per loop iteration, removing the per-byte
+  upgrade-membership lookup and terminator rescan while keeping bare CR/LF
+  rejection, header caps, and boundaries byte-exact.
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
-
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving

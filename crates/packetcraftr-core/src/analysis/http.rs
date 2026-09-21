@@ -13,6 +13,7 @@ use super::{
 };
 use crate::protocol::application::http::{self, Body, BodyDecoder, Head, Header};
 use bytes::Bytes;
+use memchr::memchr;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -258,7 +259,8 @@ impl Collector {
         // delivery's sources once; a message this delivery opens already
         // starts from its set.
         let mut merged = direction.live.is_none();
-        while !input.is_empty() && !direction.disabled && !self.upgraded.contains(&connection) {
+        let mut upgraded = self.upgraded.contains(&connection);
+        while !input.is_empty() && !direction.disabled && !upgraded {
             if direction.live.is_none() {
                 if self.summary.messages as usize >= self.limits.max_messages {
                     return Err(Error::Limit {
@@ -289,9 +291,18 @@ impl Collector {
                 });
             }
             if live.head.is_none() {
-                self.check_buffer(live.buffered().saturating_add(1))?;
-                live.header.push(input[0]);
-                input = &input[1..];
+                // A run ends at the next LF (or consumes the input):
+                // CR/LF pairing and the CRLFCRLF terminator can only
+                // complete on an LF, so interior bytes append unchecked.
+                let run = &input[..memchr(b'\n', input).map_or(input.len(), |i| i + 1)];
+                let bare = bare_crlf_offset(live.header.last().copied(), run);
+                // The byte that first exceeds MAX_HEADER_BYTES is the last
+                // one appended; inside a run it precedes the other checks.
+                let room = (http::MAX_HEADER_BYTES + 1).saturating_sub(live.header.len());
+                let take = run.len().min(room).min(bare.map_or(usize::MAX, |i| i + 1));
+                self.check_buffer(live.buffered().saturating_add(take))?;
+                live.header.extend_from_slice(&run[..take]);
+                input = &input[take..];
                 if live.header.len() > http::MAX_HEADER_BYTES {
                     self.flush(
                         &data.flow,
@@ -303,13 +314,7 @@ impl Collector {
                     direction.disabled = true;
                     continue;
                 }
-                let length = live.header.len();
-                if (live.header[length - 1] == b'\n'
-                    && (length < 2 || live.header[length - 2] != b'\r'))
-                    || (length >= 2
-                        && live.header[length - 2] == b'\r'
-                        && live.header[length - 1] != b'\n')
-                {
+                if bare.is_some_and(|i| i < take) {
                     self.flush(
                         &data.flow,
                         &mut direction,
@@ -413,6 +418,7 @@ impl Collector {
                 }
                 if live.body.as_ref().is_some_and(BodyDecoder::complete) {
                     let status = if framing == Body::Tunnel {
+                        upgraded = true;
                         self.upgraded.insert(connection);
                         self.summary.upgraded_connections += 1;
                         Status::Upgrade
@@ -457,6 +463,7 @@ impl Collector {
         self.directions.insert(data.flow, direction);
         Ok(())
     }
+
     fn check_buffer(&self, current: usize) -> Result<(), Error> {
         if self.buffered.saturating_add(current) > self.limits.max_buffer_bytes {
             return Err(Error::Limit {
@@ -553,6 +560,35 @@ impl Collector {
         })));
         Ok(())
     }
+}
+/// Offset in `run` of the first byte that breaks header CR/LF pairing, or
+/// `None` when the run is clean. `run` covers the bytes through the next LF
+/// (or the rest of the input), so its last byte is the only possible LF;
+/// `prev` is the last buffered header byte, which may be a CR still
+/// awaiting its LF.
+fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
+    if prev == Some(b'\r') && run.first() != Some(&b'\n') {
+        return Some(0);
+    }
+    if let Some(cr) = memchr(b'\r', run) {
+        // The run's first CR decides: only a following LF pairs it, while
+        // a CR ending the run still awaits its pair.
+        return match run.get(cr + 1) {
+            Some(&b'\n') | None => None,
+            Some(_) => Some(cr + 1),
+        };
+    }
+    if run.last() == Some(&b'\n') {
+        let before = if run.len() >= 2 {
+            Some(run[run.len() - 2])
+        } else {
+            prev
+        };
+        if before != Some(b'\r') {
+            return Some(run.len() - 1);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -729,6 +765,130 @@ mod tests {
                 .collect::<Vec<_>>(),
             [4, 5]
         );
+    }
+
+    #[test]
+    fn bare_cr_and_lf_flush_at_the_offending_byte() {
+        // Interior CR not followed by LF.
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+        collector
+            .data(
+                delivery(&tracker, &flow, 4, b"GET /a HTTP/1.1\rX\r\n\r\n"),
+                &mut output,
+            )
+            .expect("bare CR");
+        let bare_cr = messages(&output);
+        let [message] = bare_cr.as_slice() else {
+            panic!("one malformed message expected, got {}", bare_cr.len());
+        };
+        assert_eq!(message.status, Status::Malformed);
+        assert_eq!(message.header_wire.as_ref(), b"GET /a HTTP/1.1\rX");
+        assert!(matches!(
+            message.error,
+            Some(http::Error::Invalid("header uses a bare CR or LF"))
+        ));
+
+        // Interior LF not preceded by CR.
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        output.clear();
+        collector
+            .data(
+                delivery(&tracker, &flow, 5, b"GET /b HTTP/1.1\nrest\r\n\r\n"),
+                &mut output,
+            )
+            .expect("bare LF");
+        let bare_lf = messages(&output);
+        let [message] = bare_lf.as_slice() else {
+            panic!("one malformed message expected, got {}", bare_lf.len());
+        };
+        assert_eq!(message.status, Status::Malformed);
+        assert_eq!(message.header_wire.as_ref(), b"GET /b HTTP/1.1\n");
+        assert!(matches!(
+            message.error,
+            Some(http::Error::Invalid("header uses a bare CR or LF"))
+        ));
+    }
+
+    #[test]
+    fn cr_pending_across_deliveries_pairs_with_lf_or_fails() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+
+        collector
+            .data(
+                delivery(&tracker, &flow, 4, b"GET /c HTTP/1.1\r"),
+                &mut output,
+            )
+            .expect("pending CR");
+        collector
+            .data(delivery(&tracker, &flow, 5, b"X: y\r\n\r\n"), &mut output)
+            .expect("bare CR at boundary");
+        let boundary = messages(&output);
+        let [message] = boundary.as_slice() else {
+            panic!("one malformed message expected, got {}", boundary.len());
+        };
+        assert_eq!(message.status, Status::Malformed);
+        assert_eq!(message.header_wire.as_ref(), b"GET /c HTTP/1.1\rX");
+
+        // The same boundary completes cleanly when the next byte is LF.
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        output.clear();
+        collector
+            .data(
+                delivery(&tracker, &flow, 6, b"GET /d HTTP/1.1\r"),
+                &mut output,
+            )
+            .expect("pending CR");
+        collector
+            .data(
+                delivery(&tracker, &flow, 7, b"\nHost: h\r\n\r\n"),
+                &mut output,
+            )
+            .expect("CRLF split");
+        let completed = messages(&output);
+        let [message] = completed.as_slice() else {
+            panic!("one complete message expected, got {}", completed.len());
+        };
+        assert_eq!(message.status, Status::Complete);
+        assert_eq!(
+            message.header_wire.as_ref(),
+            b"GET /d HTTP/1.1\r\nHost: h\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn header_cap_flushes_the_first_byte_past_the_limit() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+        let input: &'static [u8] =
+            Box::leak(vec![b'a'; http::MAX_HEADER_BYTES + 2].into_boxed_slice());
+
+        collector
+            .data(delivery(&tracker, &flow, 4, input), &mut output)
+            .expect("oversized header");
+
+        let messages = messages(&output);
+        let [message] = messages.as_slice() else {
+            panic!("one limited message expected, got {}", messages.len());
+        };
+        assert_eq!(message.status, Status::Limit);
+        assert_eq!(message.header_wire.len(), http::MAX_HEADER_BYTES + 1);
+        assert!(matches!(
+            message.error,
+            Some(http::Error::Limit("header bytes"))
+        ));
     }
 
     #[test]

@@ -200,13 +200,12 @@ where
     )
     .map_err(BoundaryError::from_error)?;
     let mut stats = Stats::default();
-    let mut pending = BTreeMap::new();
-    let mut failed_probe = None;
-    let mut evidence = EvidenceUsage::default();
-    let mut undecoded = 0usize;
-    let mut seen = HashSet::new();
-    let mut seen_order = VecDeque::new();
-    let mut diagnostics = HashSet::new();
+    let mut inflight = InFlight {
+        pending: BTreeMap::new(),
+        retained: plan.base_bytes,
+        evidence: EvidenceUsage::default(),
+        failed_probe: None,
+    };
     let result = (|| -> Result<(), BoundaryError> {
         check(executor.client, deadline)?;
         group
@@ -216,9 +215,6 @@ where
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
-        let mut next = 0usize;
-        let mut next_send = Instant::now();
-        let mut retained = plan.base_bytes;
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()
@@ -226,250 +222,45 @@ where
             .max()
             .expect("validated capture group contains a source")
             * source_count;
-        let mut capture_drain_remaining = capture_drain_limit;
-        let mut draining_expired = HashSet::new();
-        while next < batches.len() || !pending.is_empty() {
-            check(executor.client, deadline)?;
-            let now = Instant::now();
-            let expired: Vec<_> = pending
-                .iter()
-                .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
-                .map(|(index, _)| *index)
-                .collect();
-            let cohort_len = draining_expired.len();
-            draining_expired.extend(expired.iter().copied());
-            if draining_expired.len() > cohort_len {
-                capture_drain_remaining = capture_drain_limit;
-            }
-            // A callback can consume the rest of another probe's timeout after
-            // its reply has already entered a capture queue. Give each expired
-            // cohort enough fair rotations to reach every record that could
-            // occupy the partitioned queues, even if newer traffic refills
-            // slots. Correlation below still enforces each ingress deadline.
-            let draining_captures = !expired.is_empty() && capture_drain_remaining > 0;
-            if !draining_captures {
-                if !expired.is_empty() {
-                    for index in expired {
-                        complete(
-                            index,
-                            batches,
-                            &mut pending,
-                            &mut retained,
-                            emit,
-                            &mut failed_probe,
-                            &mut evidence,
-                        )?;
-                    }
-                }
-                draining_expired.clear();
-                capture_drain_remaining = capture_drain_limit;
-            }
-            while !draining_captures
-                && next < batches.len()
-                && pending.len() < options.max_in_flight
-                && Instant::now() >= next_send
-                && retained.saturating_add(plan.costs[next].memory) <= options.max_prepared_bytes
-            {
-                check(executor.client, deadline)?;
-                let batch = &batches[next];
-                failed_probe = Some(batch.probe.clone());
-                let planned = prepare::planned(
-                    executor.client,
-                    batch,
-                    plan.routes[&batch.probe.address].clone(),
-                    &builder,
-                    &executor.options.send,
-                    deadline,
-                )?;
-                if planned.preliminary_build.bytes.len() != plan.costs[next].wire {
-                    return Err(limit("changed preparation size", plan.costs[next].wire));
-                }
-                let mut send = executor.options.send.clone();
-                send.destination = Some(batch.probe.address);
-                let prepared = executor
-                    .client
-                    .materialize_and_authorize(planned, &builder, &send, Some(deadline))
-                    .map_err(BoundaryError::from_error)?;
-                if !super::probe::sent_probe_matches(&batch.probe, &prepared.built.packet) {
-                    return Err(BoundaryError::internal_execution(
-                        "materialized scan packet differs from its probe",
-                        "internal.scan_probe_mismatch",
-                        "preserve the planned endpoint and identity",
-                    ));
-                }
-                check(executor.client, deadline)?;
-                let frame = transmit::Frame::try_new(&prepared.built.bytes, &prepared.route)
-                    .map_err(BoundaryError::from_error)?;
-                stats.packets_attempted += 1;
-                let receipt = executor
-                    .client
-                    .io
-                    .send(frame)
-                    .map_err(BoundaryError::from_error)?;
-                let sent = Arc::new(
-                    SentPacket::try_new(prepared.built, prepared.route, receipt)
-                        .map_err(BoundaryError::from_error)?,
-                );
-                stats.packets_completed += 1;
-                stats.bytes = stats
-                    .bytes
-                    .checked_add(sent.bytes_sent() as u64)
-                    .ok_or_else(|| limit("sent bytes", usize::MAX))?;
-                let end = sent
-                    .timing()
-                    .freshness_marker()
-                    .monotonic()
-                    .checked_add(batch.timeout)
-                    .ok_or_else(|| limit("probe timeout", 3600))?
-                    .min(deadline);
-                pending.insert(
-                    next,
-                    Pending {
-                        sent: sent.clone(),
-                        deadline: end,
-                        best: None,
-                        last_response: None,
-                        rank: 0,
-                        charge: plan.costs[next].memory,
-                    },
-                );
-                retained += plan.costs[next].memory;
-                emit(PipelineEvent::Sent { index: next, sent })?;
-                failed_probe = None;
-                next += 1;
-                next_send = Instant::now()
-                    .checked_add(spacing)
-                    .ok_or_else(|| limit("pacing delay", 3600))?;
-                if !spacing.is_zero() {
-                    break;
-                }
-            }
-            if next == batches.len() && pending.is_empty() {
+        let ctx = Context {
+            executor,
+            batches,
+            plan: &plan,
+            options,
+            deadline,
+            spacing,
+            builder,
+            decoder,
+        };
+        let mut admission = Admission::new();
+        let mut drain = Drain::new(capture_drain_limit);
+        let mut correlation = Correlation::default();
+        while admission.next < ctx.batches.len() || !inflight.pending.is_empty() {
+            check(ctx.executor.client, ctx.deadline)?;
+            let draining = drain.decide(&ctx, Instant::now(), &mut inflight, emit)?;
+            admission.admit(&ctx, draining, &mut inflight, &mut stats, emit)?;
+            if admission.next == ctx.batches.len() && inflight.pending.is_empty() {
                 break;
             }
-            let earliest = pending
-                .values()
-                .map(|entry| entry.deadline)
-                .min()
-                .unwrap_or(deadline)
-                .min(deadline);
-            let wake = if next < batches.len()
-                && pending.len() < options.max_in_flight
-                && retained.saturating_add(plan.costs[next].memory) <= options.max_prepared_bytes
-            {
-                earliest.min(next_send)
-            } else {
-                earliest
-            };
-            let mut wait = wake
+            let mut wait = admission
+                .wake(&ctx, &inflight)
                 .saturating_duration_since(Instant::now())
                 .min(Duration::from_millis(5));
-            if draining_captures {
-                capture_drain_remaining -= 1;
+            if draining {
+                drain.consume();
                 wait = Duration::ZERO;
             }
             let Some(record) = group.next_record(wait).map_err(BoundaryError::from_error)? else {
-                if draining_captures {
-                    capture_drain_remaining = 0;
+                if draining {
+                    drain.exhaust();
                 }
                 continue;
             };
-            if !seen.insert(record.captured.identity()) {
-                continue;
-            }
-            seen_order.push_back(record.captured.identity());
-            if seen_order.len() > options.max_evidence_frames
-                && let Some(old) = seen_order.pop_front()
-            {
-                seen.remove(&old);
-            }
-            let captured = record.captured;
-            let raw = captured.frame.clone();
-            let decoded = match decoder.decode(captured.frame, executor.options.decode.clone()) {
-                Ok(decoded) => decoded,
-                Err(error) => {
-                    if diagnostics.insert("decode") {
-                        emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                            "scan.decode_error",
-                            error.to_string(),
-                        )))?;
-                    }
-                    if undecoded < options.max_undecoded {
-                        emit(PipelineEvent::Undecoded { frame: raw })?;
-                        undecoded += 1;
-                    }
-                    continue;
-                }
-            };
-            if decoded
-                .diagnostics
-                .iter()
-                .any(Diagnostic::is_checksum_failure)
-            {
-                if diagnostics.insert("integrity") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "scan.integrity_rejected",
-                        "checksum-invalid capture was not correlated",
-                    )))?;
-                }
-                continue;
-            }
-            let Some(received) = captured.received_at else {
-                if diagnostics.insert("ingress") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "capture.ingress_time_unavailable",
-                        "capture lacks a monotonic ingress marker and was not correlated",
-                    )))?;
-                }
-                continue;
-            };
-            let candidates = ranked_candidates(
-                &pending,
-                batches,
-                &executor.client.registry,
-                &decoded,
-                &plan.interfaces[record.source],
-                received,
-            );
-            if candidates.len() != 1 {
-                if candidates.len() > 1 && diagnostics.insert("ambiguous") {
-                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
-                        "scan.ambiguous_response",
-                        "capture matched multiple pending probes and was not attributed",
-                    )))?;
-                }
-                continue;
-            }
-            let (index, rank, definitive) = candidates[0];
-            let entry = pending.get_mut(&index).expect("candidate is pending");
-            if entry.best.is_none() || rank > entry.rank {
-                if let Some(previous) = &entry.best {
-                    evidence.frames -= 1;
-                    evidence.bytes -= previous.response.frame.bytes().len();
-                }
-                retain(raw.bytes().len(), &mut evidence, options)?;
-                entry.rank = rank;
-                entry.best = Some(crate::exchange::Response {
-                    request_index: 0,
-                    response: decoded,
-                    latency: received
-                        .duration_since(entry.sent.timing().freshness_marker().monotonic()),
-                });
-            }
-            if definitive {
-                complete(
-                    index,
-                    batches,
-                    &mut pending,
-                    &mut retained,
-                    emit,
-                    &mut failed_probe,
-                    &mut evidence,
-                )?;
-            }
+            correlation.record(record, &ctx, &mut inflight, emit)?;
         }
         Ok(())
     })();
+
     let mut cleanup = None;
     let mut result = result;
     let capture_sources = if group.shutdown_attempted() {
@@ -518,11 +309,370 @@ where
         Err(source) => Err(BoundaryError::from_error(Error {
             source,
             stats,
-            pending: pending_evidence(&pending, batches),
-            failed_probe,
+            pending: pending_evidence(&inflight.pending, batches),
+            failed_probe: inflight.failed_probe,
             capture_sources,
             cleanup,
         })),
+    }
+}
+/// Read-only context the pipeline phases share for one run: the batches and
+/// executor under work, their computed plan, and the options, pacing, and
+/// codecs that bound admission and correlation.
+struct Context<'a, R, N, I> {
+    executor: &'a ExchangeExecutor<'a, R, N, I>,
+    batches: &'a [Batch],
+    plan: &'a prepare::Plan,
+    options: PipelineOptions,
+    deadline: Instant,
+    spacing: Duration,
+    builder: Builder,
+    decoder: Dissector,
+}
+/// The rolling in-flight window the phases share: admitted but incomplete
+/// probes, the prepared bytes they retain, the evidence their best responses
+/// charge, and the probe currently inside a fallible step (reported as the
+/// failure coordinate).
+struct InFlight {
+    pending: BTreeMap<usize, Pending>,
+    retained: usize,
+    evidence: EvidenceUsage,
+    failed_probe: Option<super::Probe>,
+}
+/// Rolling send-admission state: the next batch index and the pacing gate for
+/// the following send.
+struct Admission {
+    next: usize,
+    next_send: Instant,
+}
+impl Admission {
+    fn new() -> Self {
+        Self {
+            next: 0,
+            next_send: Instant::now(),
+        }
+    }
+    /// Window capacity and the retained-byte ceiling admit another batch;
+    /// pacing stays a separate gate so wakeups can wait on it.
+    fn has_capacity<R, N, I>(&self, ctx: &Context<'_, R, N, I>, inflight: &InFlight) -> bool {
+        self.next < ctx.batches.len()
+            && inflight.pending.len() < ctx.options.max_in_flight
+            && inflight
+                .retained
+                .saturating_add(ctx.plan.costs[self.next].memory)
+                <= ctx.options.max_prepared_bytes
+    }
+    /// The next instant the loop must wake: the earliest pending deadline (or
+    /// the operation deadline), pulled earlier to the pacing gate while
+    /// another send could proceed.
+    fn wake<R, N, I>(&self, ctx: &Context<'_, R, N, I>, inflight: &InFlight) -> Instant {
+        let earliest = inflight
+            .pending
+            .values()
+            .map(|entry| entry.deadline)
+            .min()
+            .unwrap_or(ctx.deadline)
+            .min(ctx.deadline);
+        if self.has_capacity(ctx, inflight) {
+            earliest.min(self.next_send)
+        } else {
+            earliest
+        }
+    }
+    /// Sends every batch the window, pacing, and byte budget currently admit.
+    /// A paced admission yields the loop so captured evidence interleaves with
+    /// sending.
+    fn admit<R, N, I>(
+        &mut self,
+        ctx: &Context<'_, R, N, I>,
+        draining: bool,
+        inflight: &mut InFlight,
+        stats: &mut Stats,
+        emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<(), BoundaryError>
+    where
+        R: route::Provider,
+        N: neighbor::Resolver,
+        I: transmit::Sender,
+    {
+        while !draining && self.has_capacity(ctx, inflight) && Instant::now() >= self.next_send {
+            self.send_next(ctx, inflight, stats, emit)?;
+            if !ctx.spacing.is_zero() {
+                break;
+            }
+        }
+        Ok(())
+    }
+    /// Prepares, authorizes, transmits, and records `batches[next]` as pending,
+    /// then advances the pacing gate.
+    fn send_next<R, N, I>(
+        &mut self,
+        ctx: &Context<'_, R, N, I>,
+        inflight: &mut InFlight,
+        stats: &mut Stats,
+        emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<(), BoundaryError>
+    where
+        R: route::Provider,
+        N: neighbor::Resolver,
+        I: transmit::Sender,
+    {
+        check(ctx.executor.client, ctx.deadline)?;
+        let batch = &ctx.batches[self.next];
+        inflight.failed_probe = Some(batch.probe.clone());
+        let planned = prepare::planned(
+            ctx.executor.client,
+            batch,
+            ctx.plan.routes[&batch.probe.address].clone(),
+            &ctx.builder,
+            &ctx.executor.options.send,
+            ctx.deadline,
+        )?;
+        if planned.preliminary_build.bytes.len() != ctx.plan.costs[self.next].wire {
+            return Err(limit(
+                "changed preparation size",
+                ctx.plan.costs[self.next].wire,
+            ));
+        }
+        let mut send = ctx.executor.options.send.clone();
+        send.destination = Some(batch.probe.address);
+        let prepared = ctx
+            .executor
+            .client
+            .materialize_and_authorize(planned, &ctx.builder, &send, Some(ctx.deadline))
+            .map_err(BoundaryError::from_error)?;
+        if !super::probe::sent_probe_matches(&batch.probe, &prepared.built.packet) {
+            return Err(BoundaryError::internal_execution(
+                "materialized scan packet differs from its probe",
+                "internal.scan_probe_mismatch",
+                "preserve the planned endpoint and identity",
+            ));
+        }
+        check(ctx.executor.client, ctx.deadline)?;
+        let frame = transmit::Frame::try_new(&prepared.built.bytes, &prepared.route)
+            .map_err(BoundaryError::from_error)?;
+        stats.packets_attempted += 1;
+        let receipt = ctx
+            .executor
+            .client
+            .io
+            .send(frame)
+            .map_err(BoundaryError::from_error)?;
+        let sent = Arc::new(
+            SentPacket::try_new(prepared.built, prepared.route, receipt)
+                .map_err(BoundaryError::from_error)?,
+        );
+        stats.packets_completed += 1;
+        stats.bytes = stats
+            .bytes
+            .checked_add(sent.bytes_sent() as u64)
+            .ok_or_else(|| limit("sent bytes", usize::MAX))?;
+        let end = sent
+            .timing()
+            .freshness_marker()
+            .monotonic()
+            .checked_add(batch.timeout)
+            .ok_or_else(|| limit("probe timeout", 3600))?
+            .min(ctx.deadline);
+        inflight.pending.insert(
+            self.next,
+            Pending {
+                sent: sent.clone(),
+                deadline: end,
+                best: None,
+                last_response: None,
+                rank: 0,
+                charge: ctx.plan.costs[self.next].memory,
+            },
+        );
+        inflight.retained += ctx.plan.costs[self.next].memory;
+        emit(PipelineEvent::Sent {
+            index: self.next,
+            sent,
+        })?;
+        inflight.failed_probe = None;
+        self.next += 1;
+        self.next_send = Instant::now()
+            .checked_add(ctx.spacing)
+            .ok_or_else(|| limit("pacing delay", 3600))?;
+        Ok(())
+    }
+}
+/// Capture-drain fairness state: the cohort of expired probes whose queued
+/// replies may still arrive, and the rotations that cohort may still consume.
+struct Drain {
+    cohort: HashSet<usize>,
+    remaining: usize,
+    limit: usize,
+}
+impl Drain {
+    fn new(limit: usize) -> Self {
+        Self {
+            cohort: HashSet::new(),
+            remaining: limit,
+            limit,
+        }
+    }
+    /// Splits the iteration's expired pendings: while their cohort still holds
+    /// drain rotations the loop keeps rotating captures for them, otherwise
+    /// they complete now and the cohort resets. Returns whether sending must
+    /// yield to draining.
+    fn decide<R, N, I>(
+        &mut self,
+        ctx: &Context<'_, R, N, I>,
+        now: Instant,
+        inflight: &mut InFlight,
+        emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<bool, BoundaryError> {
+        let expired: Vec<_> = inflight
+            .pending
+            .iter()
+            .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
+            .map(|(index, _)| *index)
+            .collect();
+        let cohort_len = self.cohort.len();
+        self.cohort.extend(expired.iter().copied());
+        if self.cohort.len() > cohort_len {
+            self.remaining = self.limit;
+        }
+        // A callback can consume the rest of another probe's timeout after
+        // its reply has already entered a capture queue. Give each expired
+        // cohort enough fair rotations to reach every record that could
+        // occupy the partitioned queues, even if newer traffic refills
+        // slots. Correlation below still enforces each ingress deadline.
+        let draining = !expired.is_empty() && self.remaining > 0;
+        if !draining {
+            if !expired.is_empty() {
+                for index in expired {
+                    complete(index, ctx.batches, inflight, emit)?;
+                }
+            }
+            self.cohort.clear();
+            self.remaining = self.limit;
+        }
+        Ok(draining)
+    }
+    /// One rotation was spent waiting for the draining cohort's records.
+    fn consume(&mut self) {
+        self.remaining -= 1;
+    }
+    /// The capture group reported no further record for the cohort.
+    fn exhaust(&mut self) {
+        self.remaining = 0;
+    }
+}
+/// Record-correlation state: captured-frame dedup, the undecoded-emission
+/// budget, and one-shot diagnostics shared by the decode verdicts.
+#[derive(Default)]
+struct Correlation {
+    seen: HashSet<capture::RecordIdentity>,
+    seen_order: VecDeque<capture::RecordIdentity>,
+    undecoded: usize,
+    diagnostics: HashSet<&'static str>,
+}
+impl Correlation {
+    /// Attributes one captured record to a pending probe: dedup, decode,
+    /// integrity, and ingress checks, candidate ranking, evidence retention,
+    /// and completion on a definitive verdict.
+    fn record<R, N, I>(
+        &mut self,
+        record: group::Record,
+        ctx: &Context<'_, R, N, I>,
+        inflight: &mut InFlight,
+        emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<(), BoundaryError> {
+        if !self.seen.insert(record.captured.identity()) {
+            return Ok(());
+        }
+        self.seen_order.push_back(record.captured.identity());
+        if self.seen_order.len() > ctx.options.max_evidence_frames
+            && let Some(old) = self.seen_order.pop_front()
+        {
+            self.seen.remove(&old);
+        }
+        let captured = record.captured;
+        let raw = captured.frame.clone();
+        let decoded = match ctx
+            .decoder
+            .decode(captured.frame, ctx.executor.options.decode.clone())
+        {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                if self.diagnostics.insert("decode") {
+                    emit(PipelineEvent::Diagnostic(Diagnostic::warning(
+                        "scan.decode_error",
+                        error.to_string(),
+                    )))?;
+                }
+                if self.undecoded < ctx.options.max_undecoded {
+                    emit(PipelineEvent::Undecoded { frame: raw })?;
+                    self.undecoded += 1;
+                }
+                return Ok(());
+            }
+        };
+        if decoded
+            .diagnostics
+            .iter()
+            .any(Diagnostic::is_checksum_failure)
+        {
+            if self.diagnostics.insert("integrity") {
+                emit(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.integrity_rejected",
+                    "checksum-invalid capture was not correlated",
+                )))?;
+            }
+            return Ok(());
+        }
+        let Some(received) = captured.received_at else {
+            if self.diagnostics.insert("ingress") {
+                emit(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "capture.ingress_time_unavailable",
+                    "capture lacks a monotonic ingress marker and was not correlated",
+                )))?;
+            }
+            return Ok(());
+        };
+        let candidates = ranked_candidates(
+            &inflight.pending,
+            ctx.batches,
+            &ctx.executor.client.registry,
+            &decoded,
+            &ctx.plan.interfaces[record.source],
+            received,
+        );
+        if candidates.len() != 1 {
+            if candidates.len() > 1 && self.diagnostics.insert("ambiguous") {
+                emit(PipelineEvent::Diagnostic(Diagnostic::warning(
+                    "scan.ambiguous_response",
+                    "capture matched multiple pending probes and was not attributed",
+                )))?;
+            }
+            return Ok(());
+        }
+        let (index, rank, definitive) = candidates[0];
+        let entry = inflight
+            .pending
+            .get_mut(&index)
+            .expect("candidate is pending");
+        if entry.best.is_none() || rank > entry.rank {
+            if let Some(previous) = &entry.best {
+                inflight.evidence.frames -= 1;
+                inflight.evidence.bytes -= previous.response.frame.bytes().len();
+            }
+            retain(raw.bytes().len(), &mut inflight.evidence, ctx.options)?;
+            entry.rank = rank;
+            entry.best = Some(crate::exchange::Response {
+                request_index: 0,
+                response: decoded,
+                latency: received
+                    .duration_since(entry.sent.timing().freshness_marker().monotonic()),
+            });
+        }
+        if definitive {
+            complete(index, ctx.batches, inflight, emit)?;
+        }
+        Ok(())
     }
 }
 fn retain(
@@ -545,18 +695,18 @@ fn retain(
 fn complete(
     index: usize,
     batches: &[Batch],
-    pending: &mut BTreeMap<usize, Pending>,
-    retained: &mut usize,
+    inflight: &mut InFlight,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
-    failed: &mut Option<super::Probe>,
-    usage: &mut EvidenceUsage,
 ) -> Result<(), BoundaryError> {
-    let entry = pending.get_mut(&index).expect("completed pending probe");
+    let entry = inflight
+        .pending
+        .get_mut(&index)
+        .expect("completed pending probe");
     entry.last_response = entry
         .best
         .as_ref()
         .map(|response| response.response.frame.clone());
-    *failed = Some(batches[index].probe.clone());
+    inflight.failed_probe = Some(batches[index].probe.clone());
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -574,13 +724,16 @@ fn complete(
         stats,
     };
     emit(PipelineEvent::Completed { index, execution })?;
-    let entry = pending.remove(&index).expect("completed pending probe");
-    *retained -= entry.charge;
+    let entry = inflight
+        .pending
+        .remove(&index)
+        .expect("completed pending probe");
+    inflight.retained -= entry.charge;
     if let Some(response) = entry.last_response {
-        usage.frames -= 1;
-        usage.bytes -= response.bytes().len();
+        inflight.evidence.frames -= 1;
+        inflight.evidence.bytes -= response.bytes().len();
     }
-    *failed = None;
+    inflight.failed_probe = None;
     Ok(())
 }
 fn pending_evidence(pending: &BTreeMap<usize, Pending>, batches: &[Batch]) -> Vec<PendingEvidence> {

@@ -141,6 +141,36 @@ impl From<output::contract::Error> for CliError {
     }
 }
 
+/// The one mapping for a failed write to stdout, whether the renderer is
+/// text, JSON, raw bytes, or the capture copy loop.
+///
+/// The typed `io::Error` stays in the cause chain so a broken pipe or closed
+/// descriptor remains visible to triage.
+pub(crate) fn stdout_error(operation: &str, source: std::io::Error) -> CliError {
+    CliError::from_classification(
+        Classification::new(
+            "io.stdout",
+            Kind::Io,
+            Some("restore the stdout consumer or choose a writable output destination"),
+        ),
+        format!("{operation}: {source}"),
+        vec![source.to_string()],
+    )
+}
+
+/// The stderr sibling of [`stdout_error`], for the diagnostic channel.
+pub(crate) fn stderr_error(operation: &str, source: std::io::Error) -> CliError {
+    CliError::from_classification(
+        Classification::new(
+            "io.stderr",
+            Kind::Io,
+            Some("restore the stderr consumer or redirect diagnostics to a writable destination"),
+        ),
+        format!("{operation}: {source}"),
+        vec![source.to_string()],
+    )
+}
+
 const fn fallback_code(kind: Kind) -> &'static str {
     match kind {
         Kind::Cli => "cli.error",
@@ -255,6 +285,27 @@ mod tests {
         let terminated = CliError::from(output::stream::EncodeError::Terminal);
         assert_eq!(terminated.exit_code(), 70);
         assert_eq!(terminated.classification.code, "internal.ndjson_stream");
+    }
+
+    #[test]
+    fn standard_stream_failures_share_the_sink_classification() {
+        for (code, build) in [
+            (
+                "io.stdout",
+                stdout_error as fn(&str, std::io::Error) -> CliError,
+            ),
+            (
+                "io.stderr",
+                stderr_error as fn(&str, std::io::Error) -> CliError,
+            ),
+        ] {
+            let error = build("write output failed", std::io::Error::other("sink closed"));
+            assert_eq!(error.exit_code(), 5, "{code}");
+            assert_eq!(error.classification.code, code);
+            assert!(error.classification.remediation.is_some(), "{code}");
+            assert_eq!(error.message, "write output failed: sink closed");
+            assert_eq!(error.causes, ["sink closed"]);
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@ use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 
 use super::LinkCaptureWriter;
-use crate::errors::CliError;
+use crate::errors::{CliError, stdout_error};
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
@@ -120,24 +120,12 @@ pub(crate) fn stream_capture_error(operation: &str, source: CaptureError) -> Cli
     }
 }
 
-pub(crate) fn stdout_error(operation: &str, source: io::Error) -> CliError {
-    CliError::from_classification(
-        Classification::new(
-            "io.stdout",
-            Kind::Io,
-            Some("restore the stdout consumer or choose a writable output destination"),
-        ),
-        format!("{operation}: {source}"),
-        vec![source.to_string()],
-    )
-}
-
 pub(crate) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(bytes)
         .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+        .map_err(|source| stdout_error("write stdout failed", source))
 }
 
 #[cfg(test)]

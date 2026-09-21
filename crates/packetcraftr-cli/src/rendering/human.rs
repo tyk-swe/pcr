@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::error::Kind;
-
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
@@ -14,7 +12,7 @@ use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
     terminal_safe,
 };
-use crate::errors::CliError;
+use crate::errors::{CliError, stderr_error, stdout_error};
 
 /// One diagnostic line, severity spelled exactly as the JSON document spells it.
 fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
@@ -146,7 +144,7 @@ pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliE
         .write_fmt(arguments)
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+        .map_err(|source| stdout_error("write stdout failed", source))
 }
 
 pub(crate) fn emit_stdout_document(message: &str) -> Result<(), CliError> {
@@ -198,14 +196,14 @@ fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliErr
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
     write_terminated(&mut stdout, rendered, append_newline)
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+        .map_err(|source| stdout_error("write stdout failed", source))
 }
 
 fn write_human_stderr(rendered: &str, append_newline: bool) -> Result<(), CliError> {
     let stderr = anstream::stderr();
     let mut stderr = stderr.lock();
     write_terminated(&mut stderr, rendered, append_newline)
-        .map_err(|source| CliError::new(Kind::Io, format!("write stderr failed: {source}")))
+        .map_err(|source| stderr_error("write stderr failed", source))
 }
 
 fn write_terminated(

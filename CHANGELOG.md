@@ -21,6 +21,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   report `io.runtime` with the failing path instead of `io.capture_file` and
   its capture-stream remediation; an oversized rules document reports
   `cli.error` instead of `policy.transform_limit`.
+- stdout write failures on the text, JSON, and raw output paths now report
+  `io.stdout` with its remediation instead of the generic `io.runtime`, and
+  stderr write failures report `io.stderr`; both retain the underlying I/O
+  error as a cause.
 
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
   `packetcraftr.output/v6`. Schemas and published examples migrate together.

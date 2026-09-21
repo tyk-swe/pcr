@@ -10,7 +10,7 @@ use packetcraftr_core as core;
 use packetcraftr_cli::output;
 use serde::Serialize;
 
-use crate::errors::CliError;
+use crate::errors::{CliError, stdout_error};
 
 #[derive(Debug)]
 pub(crate) enum BoundedJsonError {
@@ -90,12 +90,12 @@ pub(crate) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     writer
         .write_all(b"\n")
         .and_then(|()| writer.flush())
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+        .map_err(|source| stdout_error("write stdout failed", source))
 }
 
 fn json_error(source: serde_json::Error) -> CliError {
     if source.is_io() {
-        CliError::new(Kind::Io, format!("write stdout failed: {source}"))
+        stdout_error("write stdout failed", io::Error::from(source))
     } else {
         CliError::new(Kind::Internal, format!("serialize output failed: {source}"))
     }

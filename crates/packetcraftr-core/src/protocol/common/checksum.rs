@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Internet checksum accumulation and transport pseudo-header checksums.
-
 use std::net::IpAddr;
 
 use crate::codec::NetworkEnvelope;

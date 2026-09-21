@@ -171,7 +171,10 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         max_bytes: args.limits.max_bytes,
     };
     let inner: Box<dyn std::io::Write> = match staged.as_mut() {
-        Some(staged) => Box::new(staged.as_file_mut()),
+        Some(staged) => Box::new(std::io::BufWriter::with_capacity(
+            64 * 1024,
+            staged.as_file_mut(),
+        )),
         None => Box::new(std::io::sink()),
     };
     let mut writer = pcap::Writer::pcapng_with_options(

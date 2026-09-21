@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The `stats` text report.
-
 use std::net::SocketAddr;
 
 use packetcraftr_core as core;

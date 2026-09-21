@@ -10,12 +10,9 @@ impl From<u64> for Discriminator {
     }
 }
 
-/// How one display-filter path resolves onto reflective layer fields.
-///
-/// Canonical `<protocol>.<field>` paths need no binding: the filter compiler
-/// resolves them directly against [`crate::registry::Registry::schema`]. Bindings exist
-/// so a protocol can additionally publish the conventional spellings operators
-/// already type, and so a packed field can be addressed one flag at a time.
+/// Additional display-filter aliases and packed-field selectors. Canonical
+/// `<protocol>.<field>` paths resolve directly through
+/// [`crate::registry::Registry::schema`] and need no binding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FilterFieldBinding {

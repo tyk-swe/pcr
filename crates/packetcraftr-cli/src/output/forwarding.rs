@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured `verify-forwarding` comparison output.
-//!
-//! The wire model keeps the core report's semantics — capture-local frame
-//! numbers, per-capture evidence, and a verdict that never claims device
-//! behavior — while converting timestamps and source references into the
-//! shared output representations.
+//! Forwarding output with capture-local numbering and per-capture evidence.
+//! Uses shared timestamps/source references and makes no claims about device
+//! behavior.
 
 use serde::Serialize;
 
@@ -67,13 +64,11 @@ pub struct Evidence {
     /// The capture-global interface identity, when the source declared one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
-    /// The capture record's link-layer type.
     pub link_type: LinkType,
     /// Present when the observation's evidence was truncated by the capture
     /// snap length or limited by the field-projection budget.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incomplete: Option<analysis::Incomplete>,
-    /// Dissection diagnostic codes the decoder attached to this frame.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<&'static str>,
 }
@@ -232,7 +227,6 @@ pub struct Report {
     pub summary: analysis::Summary,
     /// Uniquely paired observations, in ingress observation order.
     pub matches: Vec<Match>,
-    /// Attributable rule violations, each carrying the offending value.
     pub violations: Vec<Violation>,
     /// Keyed observations with no keyed counterpart on the other side. An
     /// unmatched ingress observation is not evidence of device loss; an

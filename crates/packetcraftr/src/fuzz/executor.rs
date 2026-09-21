@@ -14,8 +14,6 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
 
-/// Executes one generated fuzz case through the client's capture-ready
-/// exchange lifecycle.
 impl<R, N, I> Executor<ExecutionCase> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,

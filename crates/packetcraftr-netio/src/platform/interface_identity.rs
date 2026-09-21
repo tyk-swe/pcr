@@ -1,15 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Interface identity validation for native I/O boundaries.
-//!
-//! Both entry points check the same property: the selected interface name
-//! still resolves to the selected index at the moment native I/O begins, so a
-//! renamed, removed, or re-created interface cannot silently receive traffic
-//! planned for a different one. They differ only in cost. Capture needs the
-//! interface's addresses to derive a BPF netmask and therefore pays for a full
-//! enumeration once per session; transmission needs nothing but the answer and
-//! runs once per frame, so it asks the operating system about that one name.
+//! Validates the interface name/index pair at native I/O boundaries to detect
+//! renamed, removed, or recreated interfaces. Capture enumerates once for
+//! addresses and a BPF netmask; per-frame transmission queries only the
+//! selected name.
 
 #![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
 
@@ -38,20 +33,13 @@ pub(super) fn validate_current_interface_identity(
     Err(identity_changed(expected, actual.as_deref()))
 }
 
-/// Confirms the selected interface is still current without enumerating every
-/// interface on the host.
-///
-/// This sits on the per-frame transmit path, so it must not perform a native
-/// snapshot: on Linux a full enumeration costs a worker thread, a Tokio
-/// runtime, a route-netlink socket, and a complete link plus address dump.
+/// Checks the current name/index pair without a full native enumeration on each
+/// send.
 pub(super) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        // A name is unique among the interfaces the kernel currently owns, so
-        // `if_nametoindex` answers the identity question exactly: the pair
-        // (name, index) is current if and only if the name resolves to the
-        // index. `if_indextoname` then names whichever interface holds the
-        // planned index, reproducing the enumeration's diagnostic.
+        // `if_nametoindex` verifies the pair; `if_indextoname` supplies the
+        // current name for mismatch diagnostics.
         if current_index(&expected.name) == Some(expected.index) {
             return Ok(());
         }
@@ -81,7 +69,6 @@ fn identity_changed(expected: &InterfaceId, actual: Option<&str>) -> Error {
     }
 }
 
-/// Resolves the index an interface name currently holds, if any.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn current_index(name: &str) -> Option<u32> {
     let name = std::ffi::CString::new(name).ok()?;
@@ -92,7 +79,6 @@ fn current_index(name: &str) -> Option<u32> {
     (index != 0).then_some(index)
 }
 
-/// Resolves the name an interface index currently holds, if any.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn current_name(index: u32) -> Option<String> {
     let mut buffer = [0 as std::ffi::c_char; libc::IF_NAMESIZE];

@@ -11,7 +11,6 @@ use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-/// Default maximum size of a captured frame (16 MiB).
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 
 /// Capture-wide interface identifier normalized across PCAPNG sections.
@@ -41,11 +40,7 @@ impl std::fmt::Display for LinkType {
     }
 }
 
-/// Captured and on-wire frame lengths carried by a capture record.
-///
-/// Both values travel in one named struct so the two `u32` lengths cannot be
-/// transposed at a call site: a swap is only detectable at runtime when
-/// `captured > original`, which a fully captured frame never exhibits.
+/// Captured and on-wire lengths, named to prevent accidental transposition.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Lengths {
     /// Bytes retained in the capture record.
@@ -62,7 +57,6 @@ pub enum Direction {
     Unknown,
 }
 
-/// A frame construction or metadata invariant failure.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
@@ -198,13 +192,8 @@ impl Frame {
     }
 }
 
-/// Inclusive capture-time bounds selecting which frames a command keeps.
-///
-/// Bounds compare against frame timestamps at full [`SystemTime`] precision;
-/// fractional endpoints are never rounded. Both endpoints are inclusive, and
-/// either side may be left open. A frame whose record carries no timestamp
-/// never satisfies bounds, so commands that keep timestamp-less frames must
-/// not apply bounds.
+/// Inclusive, optionally open capture-time bounds at full [`SystemTime`]
+/// precision. Records without timestamps never match.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TimeBounds {
     start: Option<SystemTime>,

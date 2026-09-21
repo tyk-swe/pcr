@@ -1,18 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Deterministic, bounded comparison of two collected observation sets.
-//!
-//! [`verify`] indexes keyed observations by the exact encoded identity cells,
-//! then resolves each key group once: 1:1 groups become matches with evaluated
-//! checks, one-sided groups become unmatched observations, and many-to-many
-//! groups stay ambiguous — members are listed, never greedily paired, and never
-//! disambiguated by capture position or timestamp proximity.
-//!
-//! Everything reported derives from declared identity plus observation order:
-//! reordering is flagged only when the egress order rank contradicts the
-//! ingress order rank of uniquely matched pairs. Timestamps travel as
-//! evidence only.
+//! Bounded comparison by declared identity. [`verify`] pairs only 1:1 groups;
+//! one-sided groups are unmatched and non-1:1 groups remain ambiguous. Neither
+//! position nor timestamps disambiguate members. Reordering compares uniquely
+//! matched pairs' ingress/egress ranks; timestamps are evidence only.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,12 +19,9 @@ use super::report::{
     Verdict, Violation,
 };
 
-/// Compares the two collected observation sets under `rules`.
-///
-/// `max_details` bounds every report list; dropped entries are counted in
-/// [`Report::omitted`] so a bounded document never looks complete. The
-/// counters are always computed over the full evidence before any detail
-/// bound applies.
+/// Compares observations under `rules`. Counters cover all evidence;
+/// `max_details` bounds each report list, with exclusions counted in
+/// [`Report::omitted`].
 pub fn verify(
     rules: &Rules,
     ingress: SideInput,
@@ -325,7 +314,6 @@ pub fn verify_with_limits(
     })
 }
 
-/// Counts one capture's observations into keyed/unkeyed/incomplete buckets.
 fn census(
     observations: &[Observation],
     frames_read: u64,
@@ -410,7 +398,6 @@ fn indistinguishable(
     Ok(true)
 }
 
-/// The bounded violation list check outcomes record into.
 struct ViolationSink<'a> {
     violations: &'a mut Vec<Violation>,
     omitted: &'a mut u64,
@@ -452,7 +439,6 @@ impl ViolationSink<'_> {
     }
 }
 
-/// Evaluates one unique pairing and its declared checks.
 fn evaluate_pair(
     rules: &Rules,
     ingress: &Observation,

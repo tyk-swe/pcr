@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded TCP stream reassembly algorithm.
-
 use std::collections::HashMap;
 
 use super::expiry::ExpiryIndex;

@@ -20,7 +20,6 @@ pub struct BoundaryError {
 }
 
 impl BoundaryError {
-    /// Builds a boundary error from a message and its classification.
     #[must_use]
     pub fn new(
         message: impl Into<String>,

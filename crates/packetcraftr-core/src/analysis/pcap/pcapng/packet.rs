@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet-block parsing.
-
 use bytes::Bytes;
 
 use crate::frame::{Direction, Frame, Lengths};
@@ -15,7 +13,6 @@ use crate::analysis::pcap::wire::{
     timestamp_from_ticks, validate_declared_lengths,
 };
 
-/// One parsed packet block.
 pub(in crate::analysis::pcap) struct ParsedPacket<'a> {
     pub(in crate::analysis::pcap) frame: Frame,
     pub(in crate::analysis::pcap) interface_id: u32,

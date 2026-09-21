@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Conversation names and transport endpoints.
-
 use serde::Serialize;
 use std::net::{IpAddr, SocketAddr};
 

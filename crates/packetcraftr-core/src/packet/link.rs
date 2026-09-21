@@ -17,7 +17,6 @@ impl fmt::Display for MacAddress {
     }
 }
 
-/// The tagging standard of one VLAN header.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VlanKind {

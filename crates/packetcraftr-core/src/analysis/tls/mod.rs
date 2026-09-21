@@ -71,7 +71,6 @@ use session::{Live, Verdict};
 /// being silently dropped.
 const QUIC_UDP_PORT: u16 = 443;
 
-/// Reason strings the collector attaches to non-`complete` sessions.
 const REASON_REASSEMBLY_GAP: &str = "TCP reassembly reported missing handshake bytes";
 const REASON_FLOW_EVICTED: &str = "the TCP flow was evicted before the handshake finished";
 const REASON_SESSION_LIMIT: &str = "the session table reached its ceiling";
@@ -113,7 +112,6 @@ pub struct Summary {
     pub udp_443_frames: u64,
 }
 
-/// A tracked conversation.
 #[derive(Debug)]
 struct Entry {
     /// Insertion rank, used to retire the oldest conversation first.
@@ -129,19 +127,15 @@ struct Entry {
 // current data is deferred until that data is folded. EOF retires all remaining
 // Live entries and releases all charges. Never reopen from stale buffered bytes.
 enum Tracked {
-    /// A handshake still being assembled.
     Live(Box<Live>),
     /// Terminal: whatever it had to say has been emitted, and new bytes on
     /// the four-tuple are ignored until a SYN retires the entry.
     Closed,
 }
 
-/// Assembles TLS sessions from the analysis pipeline's TCP reassembly events.
-///
-/// Feed every matched frame to [`Collector::observe`] from a run configured
-/// with [`Options::tcp_events`](crate::analysis::Options::tcp_events), then
-/// close the pass with [`Collector::finish`] and the run summary's trailing
-/// events.
+/// Assembles sessions from TCP reassembly events. Feed matched frames from a
+/// run with [`Options::tcp_events`](crate::analysis::Options::tcp_events), then
+/// call [`Collector::finish`] with the run's trailing events.
 #[derive(Debug)]
 pub struct Collector {
     limits: Limits,
@@ -265,12 +259,9 @@ impl Collector {
         events
     }
 
-    /// Finishes the pass, folding in the run's trailing flush.
-    ///
-    /// The flush evicts every flow the capture left open, so an eviction here
-    /// is the capture ending rather than data loss: sessions still in flight
-    /// are [`truncated`](Status::Truncated), and only a trailing gap — bytes
-    /// that were captured but never deliverable — is a [`gap`](Status::Gap).
+    /// Folds the trailing flush. Open handshakes become
+    /// [`truncated`](Status::Truncated); undeliverable captured bytes remain a
+    /// [`gap`](Status::Gap), rather than treating EOF eviction as data loss.
     #[must_use]
     pub fn finish(mut self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
         let mut events = Vec::new();
@@ -308,13 +299,9 @@ impl Collector {
         (events, self.summary)
     }
 
-    /// Folds the verdicts reassembly reached about tracked flows.
-    ///
-    /// These ride any frame's expiry sweep, not just the frames of the flow
-    /// they concern, so they are folded in before the frame is matched to a
-    /// conversation. A gap outranks a close on the same frame — missing bytes
-    /// are the stronger statement — and a close outranks an eviction, because
-    /// a reset arrives as both and the close is the one that says why.
+    /// Folds reassembly outcomes before matching the current frame, since
+    /// expiry can concern other flows. Gap outranks close, which outranks
+    /// eviction; a reset produces both close and eviction.
     fn fold_reassembly_events(
         &mut self,
         tcp_events: &[TcpEvent],
@@ -376,7 +363,6 @@ impl Collector {
         }
     }
 
-    /// Folds this frame's in-order deliveries into the tracked conversation.
     fn fold_deliveries(
         &mut self,
         record: &FrameRecord<'_>,
@@ -475,7 +461,6 @@ impl Collector {
         }
     }
 
-    /// Starts tracking a conversation, making room for it first.
     fn track(
         &mut self,
         key: &CanonicalFlow,
@@ -538,14 +523,9 @@ impl Collector {
         true
     }
 
-    /// Ends a tracked handshake, emitting it when it assembled anything.
-    ///
-    /// A handshake that assembled something leaves the entry behind as closed,
-    /// so late bytes on the four-tuple do not manufacture a second session.
-    /// One that assembled nothing has nothing to protect and the entry is
-    /// dropped instead, so a conversation whose gap arrived before its hello
-    /// is tracked again from the next frame. Returns whether a session was
-    /// emitted.
+    /// Ends a handshake and reports whether a session was emitted. Retains
+    /// emitted entries as closed to suppress late bytes; drops empty entries
+    /// so a gap before the hello does not prevent later tracking.
     fn retire(
         &mut self,
         key: &CanonicalFlow,
@@ -569,7 +549,6 @@ impl Collector {
         true
     }
 
-    /// Drops an entry and its insertion rank, whatever state it is in.
     fn forget(&mut self, key: &CanonicalFlow) {
         if let Some(entry) = self.entries.remove(key) {
             self.order.remove(&entry.order);

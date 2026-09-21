@@ -2107,7 +2107,6 @@ fn batch_completes_every_question_in_input_order() {
             .collect::<Vec<_>>(),
         ["first.test", "1.2.0.192.in-addr.arpa", "third.test"]
     );
-    // Every question ran with its own transaction id and timed-out evidence.
     assert_eq!(batch.stats.packets_attempted, 3);
     for (question, id) in batch.questions.iter().zip([1_u16, 2, 3]) {
         assert_eq!(question.transaction_id, id);

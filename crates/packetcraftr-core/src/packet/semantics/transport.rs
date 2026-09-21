@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! All-or-nothing transport tuple interpretation.
-
 use super::path::{DESTINATION_PORT, SOURCE_PORT};
 use crate::layer::Layer;
 use crate::protocol::BuiltinProtocol;

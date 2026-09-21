@@ -152,7 +152,6 @@ impl Report {
         report: packetcraftr_core::analysis::stats::Report,
         frames_read: u64,
     ) -> Result<Self, Error> {
-        // Derive before the table match consumes report fields.
         let duration = report.duration();
         let average_packet_size = report.average_packet_size();
         let packets_per_second = report.packet_rate();

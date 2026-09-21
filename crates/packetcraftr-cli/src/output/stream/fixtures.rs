@@ -8,7 +8,6 @@ use serde::Serialize;
 
 use super::StreamRecord;
 
-/// Shared in-memory sink for encoder tests.
 #[derive(Clone, Default)]
 pub(super) struct Buffer(pub(super) Arc<Mutex<Vec<u8>>>);
 impl Write for Buffer {
@@ -21,7 +20,6 @@ impl Write for Buffer {
     }
 }
 
-/// Minimal nonterminal record.
 #[derive(Serialize)]
 pub(super) struct Data;
 impl StreamRecord for Data {

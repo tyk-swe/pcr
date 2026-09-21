@@ -41,7 +41,6 @@ use crate::registry::Registry;
 
 use super::{Error, RewriteLimits};
 
-/// Bound on assignments in one ordered edit list.
 pub const MAX_FIELD_ASSIGNMENTS: usize = 64;
 
 /// How an applied edit treats the checksums covering the changed bytes.
@@ -108,7 +107,6 @@ impl<'de> Deserialize<'de> for FieldAssignment {
     }
 }
 
-/// Whether a byte-range change was requested directly or derived from one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeOrigin {
@@ -123,7 +121,6 @@ pub enum ChangeOrigin {
 pub struct FieldChange {
     /// Canonical `protocol#occurrence.field` path of the changed field.
     pub field: String,
-    /// Decoded layer index the change belongs to.
     pub layer: usize,
     /// Absolute changed byte range in the frame.
     pub range: ByteRange,
@@ -131,7 +128,6 @@ pub struct FieldChange {
     pub old: u64,
     /// Written big-endian value at `range`.
     pub new: u64,
-    /// Requested or derived.
     pub origin: ChangeOrigin,
 }
 
@@ -165,20 +161,16 @@ pub struct FieldEdit {
     protocol: crate::layer::Id,
     /// 1-based layer occurrence, outermost first.
     occurrence: usize,
-    /// Canonical field name on the layer.
     field: &'static str,
-    /// Expected byte width from [`EDITABLE`].
     width: usize,
     value: u64,
 }
 
 impl FieldEdit {
-    /// The caller-spelled field path.
     pub fn requested(&self) -> &str {
         &self.requested
     }
 
-    /// The canonical `protocol#occurrence.field` path this resolves to.
     pub fn canonical(&self) -> &str {
         &self.canonical
     }
@@ -254,7 +246,6 @@ impl FieldEdit {
         })
     }
 
-    /// Resolves this edit to a layer index and absolute byte range.
     fn resolve(&self, layout: &PacketLayout, frame_len: usize) -> Result<Resolved, Error> {
         let mut matched = 0_usize;
         let mut layer_index = None;
@@ -327,7 +318,6 @@ impl FieldEdits {
         Ok(Self { edits, checksums })
     }
 
-    /// Compiles a bounded ordered assignment list in one step.
     pub fn compile(
         assignments: &[FieldAssignment],
         checksums: ChecksumMode,
@@ -431,7 +421,6 @@ impl FieldEdits {
     }
 }
 
-/// An assignment resolved to one layer index and absolute byte range.
 struct Resolved {
     layer: usize,
     range: ByteRange,
@@ -688,12 +677,9 @@ fn ensure_transport_computable(
     }
 }
 
-/// A checksum repair planned after all field writes.
 #[derive(Clone, Copy, Debug)]
 enum Repair {
-    /// The IPv4 layer's own header checksum.
     Ipv4Header(usize),
-    /// A TCP/UDP layer's pseudo-header checksum.
     Transport(usize),
 }
 

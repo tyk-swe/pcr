@@ -60,13 +60,9 @@ const NAME: &str = BuiltinProtocol::Tls.as_str();
 /// small constant.
 pub(crate) const MAX_RECORDS_PER_SEGMENT: usize = 64;
 
-/// A record continues past the end of this segment.
 pub(crate) const RECORD_CONTINUES: &str = "tls.record_continues";
-/// Bytes after the last complete record are not a parsable record.
 pub(crate) const RECORD_UNPARSED: &str = "tls.record_unparsed";
-/// The segment holds more records than one frame publishes.
 pub(crate) const RECORDS_CAPPED: &str = "tls.records_capped";
-/// A server name was offered but is not a usable host name.
 pub(crate) const SNI_INVALID: &str = "tls.sni_invalid";
 
 /// The complete TLS records carried by one TCP segment.
@@ -117,7 +113,6 @@ pub struct Tls {
     wire: Bytes,
 }
 
-/// One segment's worth of dissection: a layer plus its unconsumed tail.
 struct Dissection {
     layer: Tls,
     /// Bytes after the last complete record.

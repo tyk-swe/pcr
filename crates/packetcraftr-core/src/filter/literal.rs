@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Filter-literal parsing and compile-time field compatibility.
-
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -67,11 +65,8 @@ impl fmt::Display for Literal {
     }
 }
 
-/// Parses an unquoted word into a literal, or reports that it is not one.
-///
-/// Shapes are tried most specific first so a spelling can never be claimed by
-/// a broader form: `2001:db8::1` is an address before it is a MAC, and
-/// `47:45:54:20` is a byte string because it is neither.
+/// Tries literal forms from most to least specific: `2001:db8::1` is IPv6
+/// before it is a MAC; `47:45:54:20` is bytes because it is neither.
 pub(super) fn parse(word: &str) -> Option<Literal> {
     match word {
         "true" => return Some(Literal::Bool(true)),
@@ -136,13 +131,11 @@ fn hex_groups(word: &str) -> Option<Vec<u8>> {
 }
 
 impl Literal {
-    /// Whether this literal describes a set of addresses rather than one.
     pub(super) fn is_prefix(&self) -> bool {
         matches!(self, Self::Ipv4Net(..) | Self::Ipv6Net(..))
     }
 }
 
-/// Human-readable name of a reflective field kind, for compile-time diagnostics.
 pub(super) fn kind_name(kind: FieldKind) -> &'static str {
     match kind {
         FieldKind::Bool => "a boolean",
@@ -158,12 +151,8 @@ pub(super) fn kind_name(kind: FieldKind) -> &'static str {
     }
 }
 
-/// Whether a literal could ever compare true against a field of this kind.
-///
-/// Rejecting the impossible pairings at compile time turns a filter that would
-/// silently match nothing into an error naming the field and the literal.
-/// Derived fields additionally reflect as `"auto"` text, so text is accepted
-/// wherever a derived wire value may appear.
+/// Rejects incompatible field/literal pairings at compile time. Derived fields
+/// also accept `"auto"` text.
 pub(super) fn compatible(spec: FieldSpec, literal: &Literal) -> bool {
     match spec.kind {
         FieldKind::Bool => matches!(literal, Literal::Bool(_) | Literal::Unsigned(0 | 1)),

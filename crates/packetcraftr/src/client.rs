@@ -85,7 +85,6 @@ impl<R, N, I> Client<R, N, I> {
         self
     }
 
-    /// The callback budget used by this client's progressive operations.
     pub fn progress_runtime(&self) -> &Runtime {
         &self.runtime
     }
@@ -108,14 +107,11 @@ where
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
-    /// Shared send/exchange preparation: materialize route-dependent fields,
-    /// build the exact
-    /// bytes, and authorize them against the selected route. Nothing here may
-    /// emit traffic — neighbor discovery is deliberately still ahead.
+    /// Materializes route-dependent fields and authorizes built bytes without
+    /// traffic.
     ///
-    /// `deadline` is checked between the steps that can allocate, and is
-    /// `None` for the single-packet path that has no bounded preparation
-    /// window.
+    /// Checks `deadline` between allocating steps; the single-packet path uses
+    /// `None`.
     pub(crate) fn plan_and_authorize(
         &self,
         mut packet: Packet,
@@ -124,7 +120,6 @@ where
         options: &crate::send::Options,
         deadline: Option<Instant>,
     ) -> Result<PlannedPacket, Error> {
-        // Route selection precedes all route-dependent materialization.
         materialize_network_fields(&mut packet, &plan)?;
         materialize_link_structure(&mut packet, &plan)?;
         self.check_cancelled()?;
@@ -147,13 +142,9 @@ where
         })
     }
 
-    /// Materializes the route — the only step that resolves link
-    /// fields, and the first that may emit traffic — rebuild if that changed
-    /// the packet, require the planned frame width, then re-authorize the
-    /// exact final bytes against the final route.
-    ///
-    /// The re-authorization is unconditional: it is the last gate before
-    /// transmission can observe these bytes.
+    /// Resolves link fields (which may emit discovery traffic), rebuilds
+    /// changed packets, and checks the planned frame width. Always reauthorizes
+    /// final bytes and route before transmission.
     pub(crate) fn materialize_and_authorize(
         &self,
         planned: PlannedPacket,
@@ -192,8 +183,6 @@ where
         ensure_deadline(deadline)?;
         self.policy
             .authorize_built_packet(&built, options.allow_permissive_live)?;
-        // Every final materialized destination is authorized immediately
-        // before capture arming and transmission can observe it.
         self.policy.authorize_built_wire(&built, &route.plan)?;
         Ok(PreparedPacket { built, route })
     }

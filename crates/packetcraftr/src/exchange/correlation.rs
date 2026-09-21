@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Timestamped response correlation and workflow promotion.
-
 use std::time::Instant;
 
 use packetcraftr_core::{
@@ -384,10 +382,8 @@ impl Accumulator {
                     continue;
                 }
             };
-            // `request_index` is a winner from an enumerate over `prepared` truncated by
-            // `.take(freshness.eligible_requests)`, and `eligible_requests` is a partition point in
-            // `sent`, so it is below `sent.len()` and `response_counts.len()`; both counters stay
-            // under `max_responses`, which is checked before the candidate is accepted
+            // `request_index` is within the sent prefix of `prepared`; both
+            // counters were checked against `max_responses` before acceptance.
             {
                 self.response_counts[request_index] += 1;
                 self.response_count += 1;

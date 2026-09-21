@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded contiguous storage for the reverse encoder walk.
-
 use bytes::Bytes;
 
 use super::Error;
@@ -56,18 +54,14 @@ impl PacketBuffer {
             return Ok(());
         }
 
-        // the branch above returns unless `self.start >= prefix.len()`
         let start = self.start - prefix.len();
-        // `start <= self.start <= storage.len()` from the subtraction above
         {
             self.storage[start..self.start].copy_from_slice(prefix);
         }
-        // the branch above returns unless `storage.len() - self.end >= suffix.len()`
         {
             self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
         }
         self.start = start;
-        // the branch above returns unless `storage.len() - self.end >= suffix.len()`
         {
             self.end += suffix.len();
         }
@@ -124,7 +118,6 @@ impl PacketBuffer {
         }
 
         let mut storage = allocate_zeroed(capacity)?;
-        // the branch above returns unless `capacity >= total`
         let spare = capacity - total;
         let start = match (prefix.is_empty(), suffix.is_empty()) {
             (false, true) => spare,

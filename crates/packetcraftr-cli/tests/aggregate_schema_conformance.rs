@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Serializes a real Rust aggregate payload for every command that publishes
-//! one and validates the emitted envelope against the published v5 schema.
-//!
-//! The published-example tests validate hand-written JSON, so they cannot see
-//! a Rust type drifting away from the contract. These tests check declared
-//! fields and frozen vocabularies while allowing additive payload fields.
+//! Validates real Rust aggregate payloads against the published schema,
+//! catching type drift that handwritten examples cannot. Checks required fields
+//! and frozen vocabularies while allowing additive payload fields.
 
 use packetcraftr_core::protocol::application::dns as dns_wire;
 
@@ -157,8 +154,6 @@ fn the_case_table_covers_every_command_that_publishes_an_aggregate() {
     );
 }
 
-// envelopes
-
 fn envelope<T: serde::Serialize>(
     command: Command,
     payload: T,
@@ -177,8 +172,6 @@ fn envelope_with_stats<T: serde::Serialize>(
     serde_json::to_value(Envelope::success(command, payload, diagnostics).with_stats(stats))
         .expect("aggregate envelope serializes")
 }
-
-// fixtures
 
 fn diagnostic() -> Diagnostic {
     let mut diagnostic = Diagnostic::warning("fixture.conformance", "representative warning");
@@ -321,8 +314,6 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
         Some(48),
     )
 }
-
-// cases
 
 fn fragment_case() -> Value {
     let frame =
@@ -1524,8 +1515,6 @@ fn unknown_envelope_fields_and_invalid_known_payload_fields_are_rejected() {
     document["result"]["packet"]["undeclared"] = Value::from(1);
     assert!(schema_validator().validate(&document).is_err());
 }
-
-// frozen vocabulary
 
 /// One enum whose serialized names the schema pins: where its vocabulary lives
 /// in the schema, and every variant the Rust type can produce.

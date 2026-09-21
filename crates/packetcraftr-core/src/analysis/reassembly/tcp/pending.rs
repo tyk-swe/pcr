@@ -155,7 +155,6 @@ fn normalize_payload<'a>(
     } else {
         0
     };
-    // before_base is clamped to segment.payload.len() just above
     let mut payload = &segment.payload[before_base..];
     let mut payload_start = before_base;
     let mut retransmitted = before_base;

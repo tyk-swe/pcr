@@ -1,15 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Output contract for the `interfaces` command.
-
 use serde::Serialize;
 
 use packetcraftr_netio::interface::Info;
 
 use crate::output::network::Interface;
 
-/// Aggregate result of `interfaces`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub interfaces: Vec<Interface>,

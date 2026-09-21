@@ -25,12 +25,9 @@ pub(super) enum ReaderState {
     PcapNg(PcapNgState),
 }
 
-/// A streaming capture reader over any [`Read`] implementation.
-///
-/// Construction consumes only the container header. Use
-/// [`next_record`](Self::next_record) when source structure matters;
-/// [`next_frame`](Self::next_frame) is a packet-only adapter that consumes and
-/// omits intervening metadata records from its return value.
+/// Streaming capture reader; construction consumes only the container header.
+/// [`next_record`](Self::next_record) preserves source structure, while
+/// [`next_frame`](Self::next_frame) skips metadata records.
 pub struct Reader<R> {
     inner: R,
     state: ReaderState,
@@ -50,12 +47,10 @@ fn wrap_pcap_header(
 }
 
 impl<R: Read> Reader<R> {
-    /// Opens a capture with the default resource limits.
     pub fn new(inner: R) -> Result<Self, Error> {
         Self::with_options(inner, ReaderOptions::default())
     }
 
-    /// Opens a capture with explicit resource limits.
     pub fn with_options(mut inner: R, options: ReaderOptions) -> Result<Self, Error> {
         let max_size = options.max_size;
         let max_total_interfaces = options.max_total_interfaces;
@@ -187,7 +182,6 @@ impl<R: Read> Reader<R> {
         Ok(())
     }
 
-    /// Returns the detected capture format.
     pub fn format(&self) -> Format {
         self.header.format()
     }
@@ -212,7 +206,6 @@ impl<R: Read> Reader<R> {
         &self.interfaces
     }
 
-    /// Returns the validated source header.
     pub fn header(&self) -> &CaptureHeader {
         &self.header
     }

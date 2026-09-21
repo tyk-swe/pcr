@@ -6,10 +6,9 @@ use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::application::dns::name::{self, MAX_LABEL_LEN, MAX_NAME_LEN};
 
 fuzz_target!(|data: &[u8]| {
-    // The first two bytes choose the entry offset and the pointer ceiling, so
-    // one input explores both the message shape and the caller's budget. The
-    // rest is the message, which is also fed to the DNS dissector so the
-    // question loop above the decompressor gets the same hostile bytes.
+    // The first two bytes select entry offset and pointer budget; the remainder
+    // is the DNS message. Also feed it to the dissector to exercise the
+    // question loop.
     let split = data.len().min(2);
     let (control, message) = data.split_at(split);
     let start = usize::from(control.first().copied().unwrap_or(0));

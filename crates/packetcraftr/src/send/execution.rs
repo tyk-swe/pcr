@@ -180,8 +180,6 @@ where
         }
         let bytes = crate::evidence::total_bytes_sent(sent.iter().map(|frame| &frame.packet))
             .unwrap_or(u64::MAX);
-        // Every failure path above returns early, so reaching here means each
-        // pass ran and every recorded frame reached the wire.
         let packets = u64::try_from(sent.len()).unwrap_or(u64::MAX);
         Ok(SetReport {
             stats: Stats {

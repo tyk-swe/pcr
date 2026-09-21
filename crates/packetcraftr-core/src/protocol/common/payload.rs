@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Link-padding-aware payload narrowing.
-
 use crate::{codec::LayerEncodeContext, layer::Padding};
 
 use super::errors::invalid;
@@ -36,7 +34,6 @@ pub(crate) fn payload_without_padding<'a>(
         .len()
         .checked_sub(trailing)
         .ok_or_else(|| invalid(name, "trailing padding exceeds encoded payload"))?;
-    // covered comes from payload.len().checked_sub, so it is at most payload.len()
     let covered_payload = &payload[..covered];
     Ok(covered_payload)
 }

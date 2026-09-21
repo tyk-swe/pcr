@@ -139,11 +139,8 @@ fn reject_canonical_filter_path(
     Ok(())
 }
 
-/// Rejects a filter binding that names an unregistered protocol, a field the
-/// protocol does not expose, or a bit selection that cannot address anything.
-///
-/// Validating here means a mistyped built-in catalog entry fails when the
-/// registry is built rather than silently never matching a packet.
+/// Rejects unregistered protocols, absent fields, and unusable bit selections
+/// at registry construction, before they can silently fail to match.
 fn validate_filter_field(
     path: &str,
     binding: &FilterFieldBinding,

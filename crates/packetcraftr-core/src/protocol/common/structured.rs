@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Small bounded building blocks for structured application fields.
-
 use crate::field::{FieldKind, FieldValue};
 use crate::layer::{FieldError, FieldSchema, ReflectiveField, Schema};
 use std::collections::BTreeMap;

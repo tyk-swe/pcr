@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Field resolution, layer construction, and declared-value expectations.
-
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -196,7 +194,6 @@ pub(crate) fn text_list(values: &[String]) -> FieldValue {
     FieldValue::List(values.iter().cloned().map(FieldValue::Text).collect())
 }
 
-/// A `List` field value over decoded 16-bit code points.
 pub(crate) fn unsigned_list(values: &[u16]) -> FieldValue {
     FieldValue::List(values.iter().copied().map(FieldValue::from).collect())
 }

@@ -101,25 +101,19 @@ impl Statistics {
     }
 }
 
-/// One owned live-capture session.
-///
-/// The lifecycle is fixed: a [`Provider`] returns an armed session,
-/// [`Session::wait_ready`] is the barrier that must pass before any exchange
-/// frame is transmitted, [`Session::next_captured_frame`] then delivers records
-/// until the caller stops, and [`Session::shutdown`] joins the backend exactly
-/// once. [`Session::statistics`] is only final after a successful shutdown.
+/// Owned capture session: arm through [`Provider`], pass
+/// [`Session::wait_ready`] before transmission, read records, then call
+/// [`Session::shutdown`] to join the backend exactly once. Statistics are final
+/// only after successful shutdown.
 pub trait Session: Send {
     /// Returns the backend-confirmed properties fixed when the session was activated.
     fn metadata(&self) -> &Metadata;
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
-    /// Waits up to `timeout` for the next record.
-    ///
-    /// `Ok(None)` means only "no record within this wait": the queue was empty,
-    /// the timeout expired, or the backend stopped delivering. It is never
-    /// evidence that nothing was captured, and it never ends the session — only
-    /// [`Session::shutdown`] does. Loss is reported through
-    /// [`Session::statistics`], not here.
+    /// Waits up to `timeout` for a record. `Ok(None)` means no record was
+    /// delivered during this wait, not that none was captured or that the
+    /// session ended. Only [`Session::shutdown`] ends the session;
+    /// [`Session::statistics`] reports loss.
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;

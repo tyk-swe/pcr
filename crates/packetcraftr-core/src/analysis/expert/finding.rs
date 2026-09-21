@@ -21,10 +21,8 @@ struct DiagnosticStreams {
     outermost: Option<usize>,
 }
 
-/// Findings the capture source itself reveals about a matched frame: a frame
-/// cut short by the snapshot length, and a timestamp that moved backwards
-/// against the capture's high-water mark. Both reuse evidence the reader and
-/// pipeline clock already produced — nothing here re-detects them.
+/// Reports snapshot truncation and timestamp regression from reader and
+/// pipeline evidence, without detecting them again.
 pub(super) fn from_capture_evidence(record: &FrameRecord<'_>) -> Vec<Finding> {
     let mut findings = Vec::new();
     let frame = &record.decoded.frame;

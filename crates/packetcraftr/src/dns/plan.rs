@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS operation budget and worst-case duration planning.
-
 use std::time::Duration;
 
 use crate::policy::{BudgetOverflow, DnsOperation, SocketBudget, WireBudget};

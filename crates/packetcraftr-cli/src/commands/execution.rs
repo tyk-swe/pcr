@@ -100,8 +100,6 @@ impl packetcraftr::dns::TcpExecutor for Executor {
     }
 }
 
-/// The providers the three commands compose identically once their request is
-/// built.
 pub(super) struct Providers {
     pub(super) policy: Arc<packetcraftr::policy::Policy>,
     pub(super) registry: Arc<core::registry::Registry>,
@@ -164,7 +162,6 @@ mod tests {
     use super::*;
     use crate::system::client;
 
-    /// Fails the first enumeration, then reports one interface.
     #[derive(Default)]
     struct FlakyProvider {
         calls: std::sync::atomic::AtomicUsize,

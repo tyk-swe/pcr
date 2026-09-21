@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Network-envelope and link-padding scope for decode traversal.
-
 use crate::{codec::NetworkEnvelope, protocol::BuiltinProtocol};
 
 pub(super) struct TraversalScope {

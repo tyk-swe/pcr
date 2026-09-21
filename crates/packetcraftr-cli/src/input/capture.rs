@@ -64,7 +64,15 @@ pub(crate) fn snapshot_capture<R: Read>(
     let snapshot = tempfile::tempfile()
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;
-    let (mut snapshot, _) = pcap::rewrite(input, snapshot, limits).map_err(CliError::classified)?;
+    let (snapshot, _) = pcap::rewrite(
+        input,
+        io::BufWriter::with_capacity(64 * 1024, snapshot),
+        limits,
+    )
+    .map_err(CliError::classified)?;
+    let mut snapshot = snapshot
+        .into_inner()
+        .map_err(|error| CliError::classified(pcap::Error::from(error.into_error())))?;
     std::io::Seek::rewind(&mut snapshot)
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;

@@ -1,16 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Reverse-mapping DNS owner names (`in-addr.arpa`, `ip6.arpa`).
-
 use std::fmt::Write as _;
 use std::net::IpAddr;
 
-/// The PTR question name for `address`: reversed octets under `in-addr.arpa`
-/// for IPv4 and reversed nibbles under `ip6.arpa` for IPv6.
-///
-/// The derivation is exact and purely textual — IPv6 nibbles always expand
-/// the full 128-bit address so `::` compression never changes the result.
+/// PTR name: reversed IPv4 octets under `in-addr.arpa`, or all 32 IPv6 nibbles
+/// reversed under `ip6.arpa`.
 pub fn reverse_name(address: IpAddr) -> String {
     match address {
         IpAddr::V4(address) => {
@@ -18,7 +13,6 @@ pub fn reverse_name(address: IpAddr) -> String {
             format!("{d}.{c}.{b}.{a}.in-addr.arpa")
         }
         IpAddr::V6(address) => {
-            // 32 nibbles, least significant first.
             let mut name = String::with_capacity(32 * 2 + "ip6.arpa".len());
             for byte in address.octets().iter().rev() {
                 for nibble in [byte & 0x0f, byte >> 4] {

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact DNS executor-evidence validation and accounting errors.
-
 use std::time::Duration;
 
 use packetcraftr_core::{codec::NetworkEnvelope, packet::Packet, protocol::BuiltinProtocol};

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Neighbor resolution cache key, entry, and state management.
-
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;

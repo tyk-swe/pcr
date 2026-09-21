@@ -1,13 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How one admitted fragment merges into the ranges a datagram retains.
-//!
-//! `plan_merge` classifies the update and accounts for overlap before anything
-//! changes, `merge_affected` builds the replacement range without touching
-//! retained state, and `apply_range_update` commits the prepared result. The
-//! reassembler runs them in that order so a failure at any step leaves the
-//! retained bytes exactly as they were.
+//! Transactional fragment merging: plan overlap/accounting, build a
+//! replacement, then commit. Planning and allocation failures leave retained
+//! bytes unchanged.
 
 use super::super::RANGE_METADATA_CHARGE;
 use super::{Error, Incoming, MalformedError, OverlapPolicy, ResourceError, RetainedRange};

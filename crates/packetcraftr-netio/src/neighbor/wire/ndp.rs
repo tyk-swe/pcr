@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IPv6 Neighbor Discovery construction, extension walking, and validation.
-
 use std::net::Ipv6Addr;
 
 use bytes::Bytes;

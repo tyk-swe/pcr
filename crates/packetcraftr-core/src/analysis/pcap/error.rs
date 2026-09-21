@@ -8,7 +8,6 @@ use thiserror::Error;
 use super::model::Format;
 use crate::error::{Classification, Classified, Kind};
 
-/// An error while reading or writing an offline capture.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {

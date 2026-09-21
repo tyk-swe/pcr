@@ -147,11 +147,9 @@ pub struct Writer<W> {
 }
 
 impl<W: Write> Writer<W> {
-    /// Creates a writer with the default format configuration.
-    ///
-    /// A PCAPNG writer created this way starts with interface zero. Use
-    /// [`pcapng`](Self::pcapng) followed by [`add_interface`](Self::add_interface)
-    /// when all interface descriptions need to be declared explicitly.
+    /// Creates a writer with default settings and, for PCAPNG, interface zero.
+    /// Use [`pcapng`](Self::pcapng) and [`add_interface`](Self::add_interface)
+    /// to declare all interfaces explicitly.
     pub fn new(inner: W, format: Format, link_type: LinkType) -> Result<Self, Error> {
         match format {
             Format::Pcap => Self::pcap(inner, link_type),
@@ -311,7 +309,6 @@ impl<W: Write> Writer<W> {
         self.frames_written
     }
 
-    /// Captured payload bytes committed to the output so far.
     pub fn captured_bytes_written(&self) -> u64 {
         self.captured_bytes_written
     }

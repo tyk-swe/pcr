@@ -354,7 +354,6 @@ fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
     }
 }
 
-/// Copies one field into the encoded structure, refusing if it does not fit.
 fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result<(), SystemError> {
     offset
         .checked_add(value.len())

@@ -1,19 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS name decompression.
+//! Bounded DNS name decompression shared by offline and live DNS codecs.
+//! Returns exact label bytes and the resume offset; callers own presentation
+//! and errors.
 //!
-//! One decompressor serves every DNS reader in the workspace: the built-in
-//! DNS-over-UDP dissector in this module's parent, and the DNS workflow's
-//! message codec in `packetcraftr`. It answers only the structural question —
-//! which label octets a name expands to, and where the reader resumes — so a
-//! caller keeps its own presentation escaping and its own error taxonomy while
-//! sharing the one place where a decompression bomb has to be refused.
-//!
-//! The bounds are RFC 1035's: labels of at most [`MAX_LABEL_LEN`] octets, an
-//! expanded name of at most [`MAX_NAME_LEN`] wire octets, and a caller-supplied
-//! ceiling on how many compression pointers one name may follow. Pointers must
-//! address a strictly earlier offset, so a name always terminates.
+//! RFC 1035 bounds labels by [`MAX_LABEL_LEN`] and expanded names by
+//! [`MAX_NAME_LEN`]. Callers also cap compression-pointer hops; pointers must
+//! address earlier offsets.
 
 use bytes::Bytes;
 
@@ -38,7 +32,6 @@ pub struct Decompressed {
     pub resume: usize,
 }
 
-/// Why a DNS name could not be decompressed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -53,19 +46,15 @@ pub enum Error {
     /// the message does not have.
     #[error("DNS name label at byte {offset} is truncated before byte {end}")]
     TruncatedLabel { offset: usize, end: usize },
-    /// A compression pointer addresses an offset outside the message.
     #[error("DNS name compression pointer {pointer} is outside the {length}-byte message")]
     PointerOutOfBounds { pointer: usize, length: usize },
-    /// A compression pointer addresses itself.
     #[error("DNS name compression pointer at byte {offset} addresses itself")]
     SelfPointer { offset: usize },
     /// A compression pointer addresses a later offset, which cannot terminate.
     #[error("DNS name compression pointer at byte {offset} points forward to byte {pointer}")]
     ForwardPointer { offset: usize, pointer: usize },
-    /// A compression pointer returns to an offset this name already expanded.
     #[error("DNS name compression pointer loop was detected at byte {offset}")]
     PointerLoop { offset: usize },
-    /// The name follows more compression pointers than the caller allows.
     #[error("DNS name uses more than {limit} compression pointers")]
     PointerLimit { limit: usize },
     /// A label length byte uses one of the two reserved tag values.

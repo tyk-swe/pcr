@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Stateful decode traversal and result assembly.
-
 use std::ops::Range;
 
 use bytes::Bytes;

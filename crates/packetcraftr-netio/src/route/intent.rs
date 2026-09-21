@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Packet and link-layer intent extraction helpers for route planning.
-
 use std::net::IpAddr;
 
 use packetcraftr_core::{

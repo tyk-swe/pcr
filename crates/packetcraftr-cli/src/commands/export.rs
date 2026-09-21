@@ -69,7 +69,10 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     reader.rewind().map_err(CliError::classified)?;
     let (writer, report) = pcap::select(
         &mut reader,
-        args.compression.writer(staged.as_file_mut())?,
+        args.compression.writer(std::io::BufWriter::with_capacity(
+            64 * 1024,
+            staged.as_file_mut(),
+        ))?,
         limits,
         |number, _| Ok(plan.source_frames.contains(&number)),
     )

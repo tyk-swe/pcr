@@ -71,8 +71,6 @@ impl Error {
     }
 }
 
-/// The one `skip_serializing_if` predicate for counters the contract omits
-/// when they are zero.
 pub(super) const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
@@ -107,7 +105,6 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    /// One aggregate JSON success.
     pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
         Self {
             schema: SCHEMA_V6,
@@ -122,7 +119,6 @@ impl<T> Envelope<T> {
         }
     }
 
-    /// One NDJSON success record at `sequence`.
     pub(super) fn record(
         command: Command,
         sequence: u64,
@@ -174,7 +170,6 @@ impl Envelope<()> {
         }
     }
 
-    /// One terminal NDJSON error record at `sequence`.
     pub(super) fn error_record(command: Option<Command>, sequence: u64, error: Error) -> Self {
         Self {
             schema: SCHEMA_V6,

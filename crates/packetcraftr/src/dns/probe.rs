@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact DNS probe construction and ephemeral source-port rotation.
-
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use std::net::IpAddr;
 
@@ -117,7 +115,6 @@ mod tests {
         );
     }
 
-    /// Retries walk one step at a time and never leave the dynamic range.
     #[test]
     fn retries_rotate_the_source_port_within_the_dynamic_range() {
         let base = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;

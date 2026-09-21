@@ -44,7 +44,6 @@ impl State {
         }
     }
 
-    /// Counts a session the selectors kept, whatever the format does with it.
     fn select(&mut self) {
         self.selected = self.selected.saturating_add(1);
     }

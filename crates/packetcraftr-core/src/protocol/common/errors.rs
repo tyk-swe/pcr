@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared codec error and protocol-identifier constructors.
-
 use crate::layer::{FieldError, Layer, Malformed};
 use crate::protocol::BuiltinProtocol;
 
@@ -20,7 +18,6 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
         .unwrap_or_else(|| layer.protocol_id().as_str())
 }
 
-/// Whether a parent binds this child under `protocol`.
 pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
     BuiltinProtocol::from_name(binding_protocol(layer)) == Some(protocol)
 }

@@ -92,7 +92,6 @@ impl<W: Write> LinkCaptureWriter<W> {
 }
 
 impl<W: Write> SourceCaptureWriter<W> {
-    /// Registers one declared interface and returns its output ID.
     pub(crate) fn add_source_interface(
         &mut self,
         source_id: Option<u32>,
@@ -103,7 +102,6 @@ impl<W: Write> SourceCaptureWriter<W> {
         })
     }
 
-    /// Writes evidence using a declared interface description.
     pub(crate) fn write_source_frame(
         &mut self,
         source_id: Option<u32>,

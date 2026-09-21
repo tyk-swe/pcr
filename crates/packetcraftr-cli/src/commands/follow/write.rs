@@ -15,7 +15,6 @@ use crate::staged_output::StagedFile;
 
 use super::arguments::Direction as Selected;
 
-/// One direction's staged payload and its deterministic destination.
 #[derive(Debug)]
 struct Staged {
     direction: PeerDirection,
@@ -23,7 +22,6 @@ struct Staged {
     bytes: u64,
 }
 
-/// A direction payload this invocation published.
 #[derive(Clone, Debug)]
 pub(super) struct Written {
     pub(super) direction: PeerDirection,
@@ -41,14 +39,10 @@ impl From<Written> for packetcraftr_cli::output::follow::WrittenFile {
     }
 }
 
-/// Per-direction staged payloads under one shared output-byte budget.
-///
-/// Each direction's bytes stream into a temporary file inside the destination
-/// directory and publish atomically at the end. Existing destinations are
-/// never overwritten. There is no multi-file transaction: files publish in a
-/// deterministic order, and a publish failure attempts to remove the files
-/// this invocation already published, reporting any cleanup failures. Unwritten
-/// temporary files clean themselves up on drop.
+/// Stages per-direction files under one output-byte budget. Each publishes
+/// atomically without overwriting, in deterministic order. On failure, attempts
+/// to remove files already published and reports cleanup errors; unpublished
+/// temporary files are removed on drop.
 #[derive(Debug)]
 pub(super) struct DirectionFiles {
     staged: Vec<Staged>,
@@ -118,12 +112,9 @@ impl DirectionFiles {
         Ok(())
     }
 
-    /// Flushes and publishes the staged files in deterministic order.
-    ///
-    /// A publish failure attempts to remove already-published files and
-    /// reports both the failed destination and any cleanup failures; temporary files
-    /// remove themselves. A direction with no payload publishes as an empty
-    /// file.
+    /// Flushes and publishes in deterministic order, including empty
+    /// directions. On failure, removes published files where possible and
+    /// reports cleanup errors.
     pub(super) fn publish(self) -> Result<Vec<Written>, CliError> {
         self.publish_with(StagedFile::sync, |path| std::fs::remove_file(path))
     }
@@ -184,7 +175,6 @@ impl DirectionFiles {
     }
 }
 
-/// The filename suffix each direction publishes under.
 fn direction_name(direction: PeerDirection) -> &'static str {
     match direction {
         PeerDirection::ClientToServer => "client",

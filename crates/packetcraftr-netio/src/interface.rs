@@ -15,14 +15,12 @@ pub struct Id {
     pub index: u32,
 }
 
-/// Portable address assigned to an interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Address {
     pub address: IpAddr,
     pub prefix_length: u8,
 }
 
-/// Portable interface state exposed by every platform adapter.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct Flags {
     pub up: bool,
@@ -32,7 +30,6 @@ pub struct Flags {
     pub multicast: bool,
 }
 
-/// Platform-neutral interface description.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Info {
     pub id: Id,

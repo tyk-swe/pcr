@@ -93,14 +93,12 @@ impl EncodedLayer {
         }
     }
 
-    /// Attaches this header's reflective field layout.
     #[must_use]
     pub fn with_fields(mut self, fields: Vec<FieldLayout>) -> Self {
         self.fields = fields;
         self
     }
 
-    /// Attaches the diagnostics raised while encoding this header.
     #[must_use]
     pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
         self.diagnostics = diagnostics;
@@ -116,10 +114,9 @@ pub struct LayerDecodeContext<'a> {
     pub allow_trailing_padding: bool,
     /// Network pseudo-header context established by an enclosing IP codec.
     pub network: Option<NetworkEnvelope>,
-    /// Discriminator through which the parent binding selected this layer;
-    /// `None` at the capture root. Codecs whose parent registers them under
-    /// more than one discriminator — PPPoE's two stage EtherTypes — read it
-    /// to interpret ambiguous headers the way the enclosing frame declared.
+    /// Parent-binding discriminator; `None` at the root. Distinguishes
+    /// ambiguous headers registered under multiple discriminators, such as
+    /// PPPoE stages.
     pub discriminator: Option<Discriminator>,
 }
 
@@ -188,10 +185,8 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
     fn decode(&self, input: &[u8], context: &LayerDecodeContext<'_>)
     -> Result<DecodedLayer, Error>;
 
-    /// Constructs one layer from caller-supplied reflective fields.
-    ///
-    /// Implementations may fill omitted fields with defaults. The returned
-    /// layer must satisfy [`Layer::validate_required_fields`]; the public
-    /// expression/document paths and the builder enforce that invariant.
+    /// Constructs a layer from reflective fields, optionally defaulting
+    /// omissions. Expression/document parsing and the builder enforce
+    /// [`Layer::validate_required_fields`] on the result.
     fn make_layer(&self, fields: &BTreeMap<String, FieldValue>) -> Result<Box<dyn Layer>, Error>;
 }

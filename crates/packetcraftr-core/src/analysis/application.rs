@@ -108,13 +108,11 @@ impl Limits {
     }
 }
 
-/// The distinct service ports one application collector may follow.
 pub(crate) const MAX_SERVICE_PORTS: usize = 256;
 
-/// Collects, sorts, and deduplicates configured service ports, rejecting an
-/// empty normalized list, port zero, and more than [`MAX_SERVICE_PORTS`]
-/// distinct ports. `field` names the caller's protocol-specific limit in the
-/// error; the bound applies to distinct ports, not input elements.
+/// Sorts and deduplicates service ports; rejects empty lists, zero, and more
+/// than [`MAX_SERVICE_PORTS`] distinct ports. `field` names the limit in
+/// errors.
 pub(crate) fn normalize_ports(
     ports: impl IntoIterator<Item = u16>,
     field: &'static str,

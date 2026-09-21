@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The assembled TLS session record and the per-session state machine.
-
 use std::time::SystemTime;
 
 use bytes::{Buf as _, Bytes, BytesMut};
@@ -32,7 +30,6 @@ pub const MAX_ALERTS: usize = 32;
 /// Bytes one retained alert charges against the aggregate buffer budget.
 const ALERT_CHARGE: usize = size_of::<Alert>();
 
-/// Why a direction stopped: the reasons reported when a ceiling is reached.
 const REASON_RECORD_CEILING: &str = "one direction's record buffer reached its ceiling";
 const REASON_HANDSHAKE_CEILING: &str = "one direction's handshake buffer reached its ceiling";
 
@@ -112,11 +109,8 @@ pub struct Alert {
     pub description: u8,
 }
 
-/// What one client offered, plus the fingerprints computed over that offer.
-///
-/// Every list keeps wire order and includes GREASE code points, so a consumer
-/// can reproduce the offer exactly. The fingerprints are advisory: every byte
-/// they are computed from is chosen by the client.
+/// Client offer and advisory fingerprints. Lists retain wire order and GREASE;
+/// all fingerprint input is client-controlled.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ClientSummary {
     /// The hello's `legacy_version` field, frozen at 0x0303 by TLS 1.3.
@@ -176,7 +170,6 @@ impl ClientSummary {
     }
 }
 
-/// What one server decided.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ServerSummary {
     /// `supported_versions` when the server sent it, otherwise the record's
@@ -268,9 +261,7 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-/// What one fed chunk did to a session.
 pub(super) enum Verdict {
-    /// The handshake is still in flight.
     Open,
     /// The session reached a terminal status and must be emitted.
     Finished {
@@ -286,7 +277,6 @@ fn finished(status: Status, reason: impl Into<String>) -> Verdict {
     }
 }
 
-/// One direction's record and handshake buffers.
 #[derive(Debug, Default)]
 struct DirectionState {
     /// Bytes of the record currently being framed. Never more than one whole
@@ -308,7 +298,6 @@ impl DirectionState {
         self.partial.len().saturating_add(self.messages.len())
     }
 
-    /// Stops buffering and releases the buffers.
     fn finish(&mut self) {
         self.done = true;
         self.partial = BytesMut::new();
@@ -316,7 +305,6 @@ impl DirectionState {
     }
 }
 
-/// Which side of the handshake a captured direction turned out to be.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
     Client,
@@ -357,14 +345,12 @@ impl Side {
 pub(super) struct Live {
     tcp_stream: u64,
     scope: crate::analysis::scope::Definition,
-    /// Flow of the conversation's first captured frame. [`Side::First`] is
-    /// this flow and [`Side::Reverse`] its reverse, for the whole life of the
-    /// session: deduplication edges stay bound to the captured direction even
-    /// when the client and server roles turn out to be the other way round.
+    /// First captured flow, fixed for the session lifetime. [`Side::First`] and
+    /// [`Side::Reverse`] keep deduplication tied to capture direction even if
+    /// client and server roles swap.
     first_flow: ScopedFlowKey,
     /// Which captured direction turned out to be the client.
     client_side: Side,
-    /// Whether the roles have already been swapped once.
     swapped: bool,
     dedup: Deduplicator,
     first_direction: DirectionState,
@@ -480,7 +466,6 @@ impl Live {
         self.frame_time = time;
     }
 
-    /// Records that this frame delivered stream bytes to the session.
     pub(super) fn note_delivery(&mut self, number: u64) {
         self.first_frame.get_or_insert(number);
         self.last_frame = number;
@@ -787,7 +772,6 @@ impl Live {
         }
     }
 
-    /// Freezes the session into its reported form.
     pub(super) fn into_session(
         self,
         session: u64,

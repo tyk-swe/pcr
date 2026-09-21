@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Neighbor resolution failures and internal error construction.
-
 use std::net::IpAddr;
 
 use packetcraftr_core::{

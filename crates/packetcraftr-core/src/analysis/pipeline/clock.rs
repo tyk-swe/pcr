@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Capture clock and timestamp mapping.
-
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::analysis::Error;
@@ -23,12 +21,9 @@ pub struct ClockReport {
     pub max_forward_step_frame: Option<u64>,
 }
 
-/// Maps capture timestamps onto the monotonic instants reassembly expects.
-///
-/// The first frame anchors the scale and later frames advance by their
-/// distance from it, so idle expiry follows the capture's own clock. A
-/// timestamp that runs backwards clamps to the latest instant already
-/// issued, never rewinding idle accounting.
+/// Maps capture time to monotonic instants anchored at the first frame.
+/// Backward timestamps clamp to the latest instant, so idle expiry never
+/// rewinds.
 pub(super) struct CaptureClock {
     base: Instant,
     origin: Option<SystemTime>,
@@ -38,12 +33,8 @@ pub(super) struct CaptureClock {
     report: ClockReport,
 }
 
-/// How far capture time must advance before a pushless frame sweeps again.
-///
-/// Frames that push into a reassembler always expire first regardless of this
-/// throttle — that is what keeps expiry boundaries exact. The throttle avoids
-/// even an indexed expiry lookup on every pushless frame, where a one-second
-/// lag in releasing idle state is harmless.
+/// Minimum capture-time advance between pushless expiry sweeps. Pushes always
+/// expire first; only idle cleanup on pushless frames may lag by one second.
 const SWEEP_GRANULARITY: Duration = Duration::from_secs(1);
 
 impl CaptureClock {
@@ -59,13 +50,8 @@ impl CaptureClock {
         }
     }
 
-    /// Returns a monotonic instant for `timestamp`: never earlier than any
-    /// instant already returned, so a capture whose timestamps run backwards
-    /// cannot rewind idle accounting and expire still-active state early.
-    ///
-    /// The second return value carries the rollback a regressed timestamp
-    /// observed, so callers can attribute the regression to this frame
-    /// without re-deriving the comparison the clock already performed.
+    /// Returns a nondecreasing monotonic instant and this frame's timestamp
+    /// regression, if any. Backward timestamps cannot rewind idle accounting.
     pub(super) fn at(
         &mut self,
         timestamp: SystemTime,

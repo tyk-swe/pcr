@@ -45,7 +45,6 @@ pub struct Mpls {
     pub traffic_class: u8,
     /// The S bit: this entry is the bottom of the label stack.
     pub bottom_of_stack: bool,
-    /// Time to live.
     pub ttl: u8,
 }
 

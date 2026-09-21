@@ -1,14 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! DNS-over-TCP attempt execution: destination reauthorization, executor
-//! invocation, permit and receipt validation, wall timing, confirmed byte and
-//! statistics charging, shared attempt/global deadline accounting, response
-//! classification, and TCP failure category mapping.
-//!
-//! The parent engine orchestrates retries, fallback, transport selection, and
-//! event sequencing; this module owns everything one TCP attempt verifies and
-//! charges before its evidence is emitted.
+//! DNS-over-TCP attempt authorization, execution, evidence validation, and
+//! accounting. The parent engine owns retries, fallback, transport selection,
+//! and event ordering.
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};

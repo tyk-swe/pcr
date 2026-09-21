@@ -251,7 +251,6 @@ const SACK_EDGE_FIELDS: &[FieldSchema] = &[
     member("right_edge", FieldKind::Unsigned, &[]),
 ];
 
-/// Members of the `options` list element objects, documented for projection.
 pub(crate) const OPTION_FIELDS: &[FieldSchema] = &[
     member("kind", FieldKind::Unsigned, &[]),
     member("mss", FieldKind::Unsigned, &[]),

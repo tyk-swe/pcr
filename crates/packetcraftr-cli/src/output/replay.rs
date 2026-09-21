@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Structured capture-replay output.
-
 use std::time::Duration;
 
 use serde::Serialize;
@@ -61,7 +59,6 @@ impl Report {
     }
 }
 
-/// One frame record produced by streaming `replay` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
     pub pass: u32,

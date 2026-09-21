@@ -1,11 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Hand-built TLS wire bytes for the unit tests in this module.
-//!
-//! `tests/common/tls_frames.rs` builds the same shapes for the integration
-//! tests. A unit test cannot reach a `tests/` file, so the record and vector
-//! framing the parser and codec tests need lives here instead.
+//! TLS wire fixtures for unit tests, which cannot use
+//! `tests/common/tls_frames.rs`.
 
 /// TLS 1.2 on the wire: the record version most tests never vary.
 pub(crate) const TLS_1_2: u16 = 0x0303;

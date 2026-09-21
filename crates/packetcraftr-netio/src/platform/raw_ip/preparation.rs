@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure raw-IP validation and target-specific byte preparation.
-
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -113,7 +111,6 @@ fn validate_ipv4(bytes: &[u8]) -> Result<(Ipv4Addr, Ipv4Addr), Error> {
             "IPv4 identification is zero and would be replaced by the operating system".to_owned(),
         ));
     }
-    // header_length was checked against bytes.len() above
     let header_checksum = checksum(&bytes[..header_length]);
     if header_checksum != 0 {
         return Err(invalid_frame(
@@ -196,7 +193,6 @@ fn validate_windows_restrictions(
     Ok(())
 }
 
-/// Reads the two-byte IPv6 extension-header prefix at `offset`.
 #[cfg(windows)]
 fn extension_header(bytes: &[u8], offset: usize) -> Option<[u8; 2]> {
     bytes.get(offset..)?.first_chunk::<2>().copied()

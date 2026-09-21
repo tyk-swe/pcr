@@ -98,13 +98,9 @@ impl Registry {
             .map(|binding| binding.discriminator)
     }
 
-    /// Every parent binding that selects `child`, as `(parent, discriminator)`
-    /// pairs sorted by parent then discriminator.
-    ///
-    /// This is the reverse of [`Self::child_for`] over the whole registry, and
-    /// answers the question a protocol reference cannot otherwise answer:
-    /// which ports or EtherTypes reach this protocol. Only winning bindings
-    /// appear; a binding another child outranks is not listed.
+    /// Winning `(parent, discriminator)` bindings selecting `child`, sorted by
+    /// parent then discriminator. Reverse lookup for [`Self::child_for`];
+    /// excludes bindings outranked by another child.
     pub fn parent_bindings(&self, child: &str) -> Vec<(crate::layer::Id, Discriminator)> {
         let mut bindings: Vec<_> = self
             .reverse_bindings

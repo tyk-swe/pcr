@@ -3,11 +3,8 @@
 
 //! Bounded DNS-over-TCP framing over an explicitly selected TCP provider.
 //!
-//! This module deliberately exposes a DNS-specific exchange rather than a
-//! general stream-socket abstraction. Higher-level workflows remain
-//! responsible for destination authorization and DNS response validation.
-//! One exchange consumes the first declared response frame and then drops the
-//! connection; later messages on the stream are outside that frame.
+//! Callers authorize destinations and validate DNS responses. Each exchange
+//! reads one declared response frame, then drops the connection.
 
 use packetcraftr_netio::SystemFault;
 use packetcraftr_netio::tcp::{Provider, Stream};
@@ -42,13 +39,11 @@ pub struct Request<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Phase {
-    /// Establishing the TCP connection.
     Connect,
     /// Writing the prefixed DNS query.
     Write,
     /// Reading the two-byte response prefix.
     ReadPrefix,
-    /// Reading the declared response message.
     ReadMessage,
 }
 
@@ -82,17 +77,13 @@ pub enum Category {
     Framing,
 }
 
-/// Typed failures from one DNS-over-TCP exchange.
 #[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
-    /// Native DNS-over-TCP execution is unavailable in this feature profile.
     #[error("DNS-over-TCP system I/O is unavailable: {message}")]
     Unsupported { message: String },
-    /// No time remained for the exchange.
     #[error("DNS-over-TCP timeout {value:?} is invalid; it must be non-zero")]
     InvalidTimeout { value: Duration },
-    /// DNS-over-TCP cannot frame an empty query message.
     #[error("DNS-over-TCP query must not be empty")]
     EmptyQuery,
     /// The local query cannot be represented by the two-byte wire prefix.
@@ -101,10 +92,8 @@ pub enum Error {
     /// The response bound is not representable by DNS-over-TCP framing.
     #[error("DNS-over-TCP message limit {value} is invalid; expected 1..={maximum}")]
     InvalidMessageLimit { value: usize, maximum: usize },
-    /// The monotonic absolute deadline could not be represented.
     #[error("DNS-over-TCP deadline overflowed for timeout {value:?}")]
     DeadlineOverflow { value: Duration },
-    /// The shared absolute deadline expired during a socket phase.
     #[error("DNS-over-TCP deadline expired during {phase} after {transferred} phase byte(s)")]
     Timeout { phase: Phase, transferred: usize },
     /// The TCP connection could not be established.
@@ -119,7 +108,6 @@ pub enum Error {
         #[source]
         source: Option<SystemFault>,
     },
-    /// A per-call socket timeout could not be installed.
     #[error(
         "DNS-over-TCP could not configure the {phase} timeout after {transferred} phase byte(s)"
     )]
@@ -152,16 +140,12 @@ pub enum Error {
         #[source]
         source: Option<SystemFault>,
     },
-    /// The peer closed before the complete two-byte prefix arrived.
     #[error("DNS-over-TCP response prefix ended after {actual} of 2 bytes")]
     IncompletePrefix { actual: usize },
-    /// DNS-over-TCP does not admit an empty DNS message.
     #[error("DNS-over-TCP response declared a zero-length DNS message")]
     ZeroLength,
-    /// The declared response length exceeded the caller's bound.
     #[error("DNS-over-TCP response declared {declared} bytes; maximum is {maximum}")]
     MessageTooLarge { declared: usize, maximum: usize },
-    /// The peer closed before the declared response body arrived.
     #[error("DNS-over-TCP response body ended after {actual} of {declared} declared bytes")]
     IncompleteMessage { declared: usize, actual: usize },
 }

@@ -92,7 +92,6 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
-/// Converts and writes one final workflow event at its publication boundary.
 pub(super) fn emit_event(
     event: packetcraftr::scan::Event,
     stream: &StreamEncoder,

@@ -1,16 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Composes a `Client` over explicitly local providers — a fixed route
-//! decision, a resolver that never sends neighbor traffic, and a sender that
-//! records submissions — gated by an explicit `Policy` carrying a destination
-//! allowlist and finite per-operation budgets. Nothing touches the network.
+//! Composes local route, resolver, and recording-sender providers with an
+//! explicit destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production composition swaps in the `SystemProvider`/`SystemResolver`/
-//! `SystemLayer*`/`PacketIo` adapters behind the `native-*` features; the
-//! policy and budget contract is identical either way.
-//!
-//! Run with scripts/check-external-consumer.py from a checkout.
+//! Production uses the
+//! `SystemProvider`/`SystemResolver`/`SystemLayer*`/`PacketIo` adapters under
+//! the same policy contract. Run with scripts/check-external-consumer.py.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -31,8 +27,7 @@ use packetcraftr_netio::{Error as LiveIoError, neighbor};
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
 
-/// A route provider that puts every destination on-link over one dual
-/// capability Ethernet interface — the shape a host route lookup returns.
+/// On-link route provider with one dual-capability Ethernet interface.
 struct DocumentationRoutes;
 
 impl Provider for DocumentationRoutes {
@@ -75,8 +70,7 @@ impl neighbor::Resolver for NeverNeighbors {
     }
 }
 
-/// A sender that retains each submitted wire so the example can report what
-/// transmission would have emitted.
+/// Retains submitted bytes for inspection without transmitting them.
 #[derive(Clone, Default)]
 struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
@@ -104,9 +98,8 @@ fn packet(destination: Ipv4Addr) -> Result<packetcraftr_core::packet::Packet, ex
 
 #[test]
 fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
-    // Explicit authorization: only the TEST-NET-1 documentation prefix is
-    // permitted, and one operation may spend at most 8 packets / 16 KiB of
-    // wire — the client enforces both before any provider sees a frame.
+    // Allow only TEST-NET-1, with an 8-packet / 16 KiB per-operation budget
+    // enforced before provider calls.
     let policy = Policy {
         allowed_destinations: vec![DestinationConstraint::Network(
             packetcraftr::target::Network::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 0)), 24)?,

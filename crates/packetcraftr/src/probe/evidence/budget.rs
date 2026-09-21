@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Checked evidence accounting and bounded diagnostic emission.
-
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
@@ -29,7 +27,6 @@ impl EvidenceDiagnosticDescriptor {
     }
 }
 
-/// The per-operation evidence bounds a workflow request declares.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EvidenceLimits {
     pub(crate) max_frames: usize,

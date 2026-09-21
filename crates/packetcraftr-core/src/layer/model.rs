@@ -12,13 +12,9 @@ use thiserror::Error;
 use super::reflection::reflective_layer;
 use crate::field::{FieldKind, FieldValue};
 
-/// An open, stable identifier for a protocol layer or codec.
-///
-/// Every codec, built-in layer, and registry entry names itself with a
-/// string literal, so an identifier is a cheap `Copy` handle over a static
-/// name rather than an owned allocation. Protocol names that arrive at run
-/// time (documents, filters, command lines) are resolved against a
-/// [`Registry`](crate::registry::Registry) rather than turned into identifiers.
+/// Static protocol/codec name, cheaply copied. Runtime names from documents,
+/// filters, and command lines resolve through
+/// [`Registry`](crate::registry::Registry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Id(&'static str);
@@ -68,14 +64,10 @@ pub struct FieldSchema {
     pub kind: FieldKind,
     /// Whether the builder may derive this field from packet context.
     pub derived: bool,
-    /// Whether [`Layer::field`] must return a value after codec defaults have
-    /// been applied.
-    ///
-    /// This does not require callers to spell the field in an expression or
-    /// document. Codec factories may supply a default, but constructed,
-    /// materialized, and decoded layers must expose every required field.
+    /// Whether [`Layer::field`] must return a value after defaults. Callers may
+    /// omit the field, but constructed, materialized, and decoded layers must
+    /// expose it.
     pub required: bool,
-    /// Human-readable field purpose.
     pub description: &'static str,
     /// Named members of an object or of each object in a list.
     #[serde(skip_serializing_if = "<[FieldSchema]>::is_empty")]
@@ -86,7 +78,6 @@ pub struct FieldSchema {
 pub struct Schema {
     /// Stable protocol identifier.
     pub protocol: Id,
-    /// Human-readable protocol name.
     pub name: &'static str,
     /// Ordered reflective fields.
     pub fields: &'static [FieldSchema],
@@ -162,7 +153,6 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         Ok(())
     }
 
-    /// Returns the stable protocol identifier stored by this layer's schema.
     fn protocol_id(&self) -> &Id {
         &self.schema().protocol
     }

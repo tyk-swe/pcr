@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Unit-test scaffolding shared by the probe workflows. Integration tests use
-//! `tests/support/` instead.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};
@@ -17,8 +14,6 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::P
 use super::executor::{Executor, Request};
 use crate::BoundaryError;
 
-/// The finite authorization budgets every probe workflow unit test reuses: a
-/// private target with room for small deterministic batches.
 pub(crate) fn private_policy() -> crate::policy::Policy {
     crate::policy::Policy {
         max_packets_per_operation: 1_000,
@@ -46,14 +41,11 @@ pub(crate) fn decoded_packet(
     }
 }
 
-/// Builds one exact evidence frame for test fixtures.
 pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
     Frame::new(timestamp, LinkType::RAW, Bytes::copy_from_slice(bytes))
         .expect("probe test fixture frame carries bytes")
 }
 
-/// Builds the `[0x45]` RAW fixture frame at `UNIX_EPOCH + seconds`, the shape
-/// traceroute's retained-evidence tests already use.
 pub(crate) fn raw_frame(seconds: u64) -> Frame {
     evidence_frame(
         SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Conversation payload extraction over the analysis pipeline.
-
 use bytes::Bytes;
 
 use crate::analysis::adapter::transport_payload;
@@ -51,12 +49,8 @@ pub struct Summary {
     pub undelivered_bytes: u64,
 }
 
-/// Extracts one conversation's payload from the analysis pipeline.
-///
-/// The caller narrows the pipeline to the followed conversation with a
-/// stream filter, so reassembly buffers only that conversation; the
-/// collector still verifies every event's flow, so an unfiltered run stays
-/// correct and merely does more work.
+/// Extracts one conversation's payload. Filtering upstream limits reassembly
+/// state; flow checks keep extraction correct even with an unfiltered pipeline.
 #[derive(Debug)]
 pub struct Collector {
     selector: StreamRef,
@@ -109,12 +103,9 @@ impl Collector {
     }
 
     fn observe_tcp(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {
-        // Evictions of the followed conversation can ride any frame's
-        // expiry sweep, so they are counted before the frame itself is
-        // matched against the conversation. An eviction also ends that
-        // direction's generation, whose delivery edge would otherwise trim
-        // a successor that reuses earlier sequence numbers; a clean close
-        // evicts nothing, so closing-segment deduplication stays armed.
+        // Count evictions before matching this frame: expiry can be triggered
+        // by another flow. Eviction resets delivery edges; clean closes retain
+        // them for deduplication.
         if let Some(client) = self.client_flow.clone() {
             for event in record.tcp_events {
                 match event {

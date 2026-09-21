@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Validated framing for non-section PCAPNG blocks.
-
 use std::io::Read;
 
 use bytes::Bytes;

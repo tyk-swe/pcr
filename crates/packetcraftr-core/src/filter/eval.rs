@@ -21,7 +21,6 @@ use crate::registry::FilterFieldBinding;
 /// per-conversation facts that no layer carries.
 #[derive(Clone, Copy, Debug)]
 pub struct Context<'a> {
-    /// The dissected packet, including its originating frame.
     pub decoded: &'a DecodedPacket,
     /// Completed IP datagrams attached to the same physical frame, ordered
     /// from outermost to innermost; empty for an unfragmented frame. Layer
@@ -107,11 +106,8 @@ fn layers<'a>(
         })
 }
 
-/// Whether any value this path reads satisfies `predicate`.
-///
-/// A path can yield several values: a protocol may appear more than once in a
-/// tunnelled stack, and an `Either` binding names more than one field. Any
-/// single match is enough, which is also how the grammar documents `!=`.
+/// Tests whether any value read by this path satisfies `predicate`, including
+/// repeated layers and `Either` bindings. This also applies to `!=`.
 pub(super) fn any_value<F>(context: &Context<'_>, field: &FieldRef, mut predicate: F) -> bool
 where
     F: FnMut(&FieldValue) -> bool,
@@ -124,13 +120,9 @@ where
     matched
 }
 
-/// Offers each value `field` reads to `consume`, stopping when it returns true.
-///
-/// Layer fields arrive already owned, so a consumer that keeps values — the
-/// projection's output row — can move them instead of cloning. A nested
-/// selection stays borrowed from its owned root: predicates inspect it in
-/// place, and only a consumer that retains it pays for the materializing
-/// clone.
+/// Offers values to `consume` until it returns true. Owned layer fields can be
+/// moved into projections; nested fields stay borrowed until a consumer retains
+/// them.
 pub(super) fn each_value<F>(context: &Context<'_>, field: &FieldRef, mut consume: F)
 where
     F: FnMut(Cow<'_, FieldValue>) -> bool,
@@ -190,7 +182,6 @@ where
     }
 }
 
-/// Whether a flag value counts as set.
 fn is_set(value: &FieldValue) -> bool {
     match value {
         FieldValue::Bool(value) => *value,
@@ -201,11 +192,9 @@ fn is_set(value: &FieldValue) -> bool {
     }
 }
 
-/// Whether [`project`] can read a field of this kind as bytes.
-///
-/// Slicing is rejected at compile time for every other kind. Keeping the two
-/// in step matters: a kind accepted here but unhandled below would make the
-/// filter silently match nothing instead of reporting the mistake.
+/// Whether [`project`] supports byte slicing for this field kind. The compiler
+/// rejects other kinds; keep this list aligned with the projection
+/// implementation.
 pub(super) fn byte_addressable(kind: FieldKind) -> bool {
     matches!(
         kind,
@@ -246,12 +235,9 @@ fn project(
     )?))
 }
 
-/// Applies a path's byte slice to a value borrowed from an owned root.
-///
-/// An unsliced value is passed through untouched, so a predicate inspects the
-/// nested field where it lives instead of testing a clone. A sliced `Bytes`
-/// shares its parent's storage; the remaining byte-addressable kinds copy
-/// only the selected range, which is never larger than the field itself.
+/// Applies a byte slice to a borrowed field. Unsliced values stay borrowed;
+/// sliced `Bytes` shares storage, while other byte-addressable kinds copy the
+/// range.
 fn project_nested<'a>(
     value: &'a FieldValue,
     slice: Option<ByteSlice>,

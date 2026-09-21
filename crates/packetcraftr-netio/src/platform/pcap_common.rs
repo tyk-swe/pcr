@@ -64,7 +64,6 @@ pub(crate) fn canonical_link_type(datalink: u32) -> LinkType {
     }
 }
 
-/// The pcap API value selecting a timestamp source.
 pub(crate) const fn timestamp_source_value(source: TimestampSource) -> c_int {
     match source {
         TimestampSource::Host => PCAP_TSTAMP_HOST,
@@ -74,7 +73,6 @@ pub(crate) const fn timestamp_source_value(source: TimestampSource) -> c_int {
     }
 }
 
-/// The pcap API value selecting a timestamp fraction precision.
 pub(crate) const fn timestamp_precision_value(precision: TimestampPrecision) -> c_int {
     match precision {
         TimestampPrecision::Micro => PCAP_TSTAMP_PRECISION_MICRO,
@@ -105,11 +103,9 @@ pub(crate) const fn timestamp_precision_of_value(value: c_int) -> Option<Timesta
     }
 }
 
-/// Classifies a `pcap_set_*` status from before activation. Known
-/// "unsupported" results become [`Error::UnsupportedCaptureSetting`]; every
-/// other non-zero status — including unexpected warnings, which never confirm
-/// the request was honored — becomes a backend failure carrying the
-/// diagnostic.
+/// Maps known unsupported `pcap_set_*` statuses to
+/// [`Error::UnsupportedCaptureSetting`]. Every other nonzero status, including
+/// unexpected warnings, is a backend failure.
 pub(crate) fn check_setting_status(
     backend: &str,
     interface: &InterfaceId,
@@ -146,13 +142,9 @@ pub(crate) fn check_setting_status(
     })
 }
 
-/// Assembles a session's [`RealizedSettings`] after activation: every request
-/// that reached this point was applied during configuration, and the
-/// reported precision — when the backend can produce one — becomes the
-/// confirmed effective value and the fraction unit the read path must use.
-/// The pcap API offers no post-activation query for the buffer size or the
-/// timestamp type, so those stay unconfirmed. Returns the realized metadata
-/// plus the delivered precision.
+/// Returns activated settings and delivered timestamp precision. Confirmed
+/// precision determines read units; buffer size and timestamp type remain
+/// unconfirmed because pcap cannot query them after activation.
 pub(crate) fn realize_settings(
     backend: &str,
     interface: &InterfaceId,
@@ -251,11 +243,7 @@ pub(crate) fn is_missing_device(message: &str) -> bool {
     PHRASES.iter().any(|phrase| message.contains(phrase))
 }
 
-/// Recognizes the privilege refusals libpcap and Npcap phrase differently.
-///
-/// libpcap reports `Permission denied` or `Operation not permitted`; Npcap
-/// reports `Access is denied` or asks to be run as an administrator. One list
-/// keeps the classification identical on every target.
+/// Recognizes privilege refusals across libpcap and Npcap.
 pub(crate) fn is_permission_denied(message: &str) -> bool {
     const PHRASES: [&str; 4] = [
         "permission denied",

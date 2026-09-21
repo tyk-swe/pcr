@@ -29,7 +29,6 @@ impl Serialize for CompactHex<'_> {
     }
 }
 
-/// Renders `bytes` as contiguous lowercase hex digits.
 #[must_use]
 pub fn compact_hex(bytes: &[u8]) -> String {
     CompactHex(bytes).to_string()

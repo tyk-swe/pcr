@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Field-path models, registry resolution, and byte-slice validation.
-
 use crate::field::FieldKind;
 
 use super::error::Error;
@@ -111,7 +109,6 @@ impl FieldRef {
     }
 }
 
-/// What a bare word resolved to.
 #[derive(Clone, Debug)]
 pub(super) enum Resolved {
     /// A protocol name with no field, testing whether such a layer is present.
@@ -400,7 +397,6 @@ pub(super) fn attach_slice(
         return Err(unsliceable());
     }
     field.slice = Some(slice);
-    // A slice projects the field to bytes.
     field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
     Ok(())
 }

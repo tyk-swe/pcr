@@ -10,13 +10,9 @@ use thiserror::Error as ThisError;
 use super::link::Mode;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
-/// The system or backend failure a live-I/O error retains.
-///
-/// Shared rather than boxed so [`Error`] stays `Clone` — a capture session
-/// stores its terminal failure and hands it to every later caller — while
-/// still retaining `io::Error`, `pcap::Error`, and the platform loader
-/// failures, none of which are `Clone`. `None` means the refusal is
-/// PacketcraftR's own invariant rather than something the platform reported.
+/// Shared native error source. Sharing keeps [`Error`] cloneable so capture
+/// sessions can return terminal failures repeatedly. An absent source on an
+/// error means a PacketcraftR invariant failed rather than a platform call.
 pub type SystemFault = Arc<dyn StdError + Send + Sync>;
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
@@ -34,12 +30,8 @@ pub enum SendEvidenceFault {
     UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
 }
 
-/// Errors shared by live interface, transmission, and capture providers.
-///
-/// The variants a native adapter raises retain the platform failure they were
-/// given as a [`SystemFault`] rather than formatting it into `message`, so the
-/// typed refusal survives to the render boundary. That source is not
-/// comparable, so these failures are matched on rather than equated.
+/// Live interface, transmission, and capture failures. Native errors retain
+/// their typed [`SystemFault`] through rendering.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
@@ -285,17 +277,13 @@ fn classified_cli(code: &'static str, remediation: &'static str) -> Classificati
 pub(crate) mod testing {
     use super::Error;
 
-    /// Whether two failures are the same failure, field by field.
-    ///
-    /// A retained [`SystemFault`](super::SystemFault) is not comparable, so
-    /// `Error` derives no `PartialEq`. `Debug` renders every field, the source
-    /// included, which compares strictly more than a derived `==` did.
+    /// Compares every field through `Debug`, including the non-comparable
+    /// [`SystemFault`](super::SystemFault) source.
     #[must_use]
     pub(crate) fn same_failure(left: &Error, right: &Error) -> bool {
         format!("{left:?}") == format!("{right:?}")
     }
 
-    /// [`same_failure`] as an assertion, reporting both renderings on failure.
     #[track_caller]
     pub(crate) fn assert_same_failure(actual: &Error, expected: &Error) {
         assert_eq!(format!("{actual:?}"), format!("{expected:?}"));

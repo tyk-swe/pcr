@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! ARP request construction and exact response correlation.
-
 use std::net::Ipv4Addr;
 
 use bytes::Bytes;

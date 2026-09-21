@@ -17,6 +17,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Analysis duration exhaustion reports `policy.duration_limit` consistently
   across packet processing and capture reads, replacing the generic
   `policy.analysis_resource_limit` classification for processing deadlines.
+- `rewrite --rules-file` and `scan --udp-profiles` document load failures
+  report `io.runtime` with the failing path instead of `io.capture_file` and
+  its capture-stream remediation; an oversized rules document reports
+  `cli.error` instead of `policy.transform_limit`.
 
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
   `packetcraftr.output/v6`. Schemas and published examples migrate together.

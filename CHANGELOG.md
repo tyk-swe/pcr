@@ -413,6 +413,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   searcher once at filter-compile time instead of sliding a window over the
   field bytes per frame, making the scan linear-time (~84× faster on a
   64 KiB payload in the perf fixture).
+- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
+  output in 64 KiB chunks instead of issuing one write syscall per record,
+  removing the syscall bottleneck on large captures. Output bytes are
+  identical.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

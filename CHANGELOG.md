@@ -17,6 +17,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Analysis duration exhaustion reports `policy.duration_limit` consistently
   across packet processing and capture reads, replacing the generic
   `policy.analysis_resource_limit` classification for processing deadlines.
+- `rewrite --rules-file` and `scan --udp-profiles` document load failures
+  report `io.runtime` with the failing path instead of `io.capture_file` and
+  its capture-stream remediation; an oversized rules document reports
+  `cli.error` instead of `policy.transform_limit`.
 
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
   `packetcraftr.output/v6`. Schemas and published examples migrate together.
@@ -51,6 +55,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   ProbeEndpoint, ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`,
   and `fuzz` aliases are removed without compatibility aliases. See
   `docs/migration-unreleased.md`.
+- `LayerCodec::decode` takes a refcounted `Bytes` view of the layer input
+  instead of `&[u8]`; `dns::decode_name`, `dns::name::decompress`, and
+  `http::parse_head` take `&Bytes` for the same reason. Byte-retaining codecs
+  now slice the shared frame buffer instead of copying each retained range,
+  eliminating a per-packet memcpy in the DHCP, ICMP, IGMP, raw, DNS, NTP, HTTP,
+  and TLS decode paths. Callers holding borrowed bytes wrap them once with
+  `Bytes::copy_from_slice`/`Bytes::from`.
 
 ### Added
 
@@ -277,7 +288,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
-
+- Replay decodes each captured frame with the trusted registry once instead of
+  twice, reusing the pre-route decode for the final route-aware source check.
 - Offline analysis avoids repeated source-provenance unions and unnecessary IP
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving
@@ -374,6 +386,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   explicitly when a facility is missing. TLS handshake parsing, IP reassembly merge
   planning, and workflow admission/activation paths split along documented
   responsibility boundaries without changing public paths or behavior.
+- Linux route selection resolves the kernel's output interface with a filtered
+  link get and retains only that interface's addresses from the address dump.
+  Collecting all local addresses now only runs for local routes whose selected
+  source lives on another interface; the kernel address dump remains host-wide.
 - The `--max-application-*` limit flags document what each budget counts
   (messages, streams, in-flight buffers, retained evidence, and source spans),
   and `--start-epoch`/`--stop-epoch` help states that values are nonnegative;
@@ -409,6 +425,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Display-filter `contains` compiles its needle into a `memchr::memmem`
+  searcher once at filter-compile time instead of sliding a window over the
+  field bytes per frame, making the scan linear-time (~84× faster on a
+  64 KiB payload in the perf fixture).
+- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
+  output in 64 KiB chunks instead of issuing one write syscall per record,
+  removing the syscall bottleneck on large captures. Output bytes are
+  identical.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

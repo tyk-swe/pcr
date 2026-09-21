@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use crate::errors::CliError;
 use packetcraftr::scan::profile::{Config, MAX_PROFILE_BYTES, MAX_PROFILE_PORTS, UdpProfile};
-use packetcraftr_core::{analysis::pcap, error::Kind};
-use std::{collections::BTreeMap, io::Read, path::Path, sync::Arc};
+use packetcraftr_core::error::Kind;
+use std::{collections::BTreeMap, path::Path, sync::Arc};
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
@@ -29,17 +29,7 @@ pub(super) fn load(
             "--udp-profiles requires --transport udp",
         ));
     }
-    let file = std::fs::File::open(path)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    let mut bytes = Vec::new();
-    file.take(MAX_PROFILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    if bytes.len() > MAX_PROFILE_BYTES {
-        return Err(CliError::new(Kind::Cli, "UDP profile file exceeds 1 MiB"));
-    }
+    let bytes = crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?;
     let document: Document = serde_json::from_slice(&bytes)
         .map_err(|error| CliError::new(Kind::Cli, format!("invalid UDP profiles: {error}")))?;
     if document.schema != "packetcraftr.udp-profiles/v1"

@@ -168,7 +168,9 @@ impl Projection {
                     return true;
                 };
                 *remaining -= bytes;
-                values.push(value.into_owned());
+                let mut value = value.into_owned();
+                detach_bytes(&mut value);
+                values.push(value);
                 false
             });
             if exceeded {
@@ -187,6 +189,17 @@ impl Projection {
             });
         }
         Ok(row)
+    }
+}
+
+// Retained cells are charged by their visible bytes. A small decoded slice
+// must not keep an entire source frame alive behind that charge.
+fn detach_bytes(value: &mut FieldValue) {
+    match value {
+        FieldValue::Bytes(bytes) => *bytes = bytes::Bytes::copy_from_slice(bytes),
+        FieldValue::List(values) => values.iter_mut().for_each(detach_bytes),
+        FieldValue::Object(values) => values.values_mut().for_each(detach_bytes),
+        _ => {}
     }
 }
 

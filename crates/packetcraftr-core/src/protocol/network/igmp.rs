@@ -128,14 +128,14 @@ impl LayerCodec for IgmpCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IGMP_MIN_LEN>() else {
             return Err(truncated(NAME, IGMP_MIN_LEN, input.len()));
         };
         let mut diagnostics = Vec::new();
-        if checksum(input) != 0 {
+        if checksum(&input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(IGMP_CHECKSUM, "IGMP checksum mismatch").at_field("checksum"),
             );
@@ -148,7 +148,7 @@ impl LayerCodec for IgmpCodec {
                 igmp_type: header[0],
                 code: header[1],
                 checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
-                body: Bytes::copy_from_slice(body),
+                body: input.slice_ref(body),
             }),
             consumed: input.len(),
             payload_len: 0,

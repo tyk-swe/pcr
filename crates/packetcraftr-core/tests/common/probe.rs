@@ -174,7 +174,7 @@ impl LayerCodec for ProbeCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
         let Some(value) = input.first().copied() else {
@@ -242,7 +242,7 @@ impl LayerCodec for ChildCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
         let value =

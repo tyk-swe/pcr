@@ -10,6 +10,7 @@ use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey, TcpEvent, tcp_stream_ref};
+use crate::analysis::serial::{serial_ge, serial_gt};
 
 pub(super) fn reconcile_events(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
@@ -86,7 +87,7 @@ fn retransmission_overlap(
     // Bytes before the capture base were never observed, including across wraparound.
     let length = u32::try_from(payload_len).unwrap_or(u32::MAX);
     let base_delta = capture_base.wrapping_sub(sequence);
-    let before_base = if base_delta < 0x8000_0000 {
+    let before_base = if serial_ge(capture_base, sequence) {
         base_delta.min(length)
     } else {
         0
@@ -158,13 +159,13 @@ pub(super) fn observe(
         && payload_len > 0
         && !syn
         && let (Some(base), Some(payload_next)) = (sent.reassembly_base, sent.payload_next)
-        && tcp.sequence.wrapping_sub(base) < 0x8000_0000
+        && serial_ge(tcp.sequence, base)
         && !reassembly_retransmission
     {
         let end = tcp
             .sequence
             .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
-        if payload_next.wrapping_sub(end) < 0x8000_0000 {
+        if serial_ge(payload_next, end) {
             findings.push(new_finding(
                 Severity::Warning,
                 "tcp.retransmission",
@@ -182,8 +183,7 @@ pub(super) fn observe(
         && (payload_len > 0 || fin)
         && !syn
         && let Some(next) = sent.next_sequence
-        && tcp.sequence != next
-        && tcp.sequence.wrapping_sub(next) < 0x8000_0000
+        && serial_gt(tcp.sequence, next)
     {
         findings.push(new_finding(
             Severity::Warning,
@@ -218,7 +218,7 @@ fn update_next_sequences(
         .saturating_add(u32::from(fin));
     let end = tcp.sequence.wrapping_add(advance);
     sent.next_sequence = Some(match sent.next_sequence {
-        Some(next) if end.wrapping_sub(next) >= 0x8000_0000 => next,
+        Some(next) if !serial_ge(end, next) => next,
         _ => end,
     });
     if payload_len > 0 {
@@ -227,7 +227,7 @@ fn update_next_sequences(
             .wrapping_add(u32::from(syn))
             .wrapping_add(u32::try_from(payload_len).unwrap_or(u32::MAX));
         sent.payload_next = Some(match sent.payload_next {
-            Some(next) if payload_end.wrapping_sub(next) >= 0x8000_0000 => next,
+            Some(next) if !serial_ge(payload_end, next) => next,
             _ => payload_end,
         });
     }

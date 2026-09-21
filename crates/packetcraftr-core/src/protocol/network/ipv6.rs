@@ -6,6 +6,8 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
@@ -135,7 +137,7 @@ impl LayerCodec for Ipv6Codec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<IPV6_LEN>() else {

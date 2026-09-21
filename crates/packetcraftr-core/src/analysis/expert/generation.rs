@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use super::tcp::{DirectionState, window_scale};
 use super::{ScopedFlowKey, observation::TcpObservation};
+use crate::analysis::serial::serial_range_contains;
 
 pub(super) struct GenerationTransition {
     pub(super) reverse: ScopedFlowKey,
@@ -27,16 +28,9 @@ pub(super) fn apply(
     let mut syn_renews = false;
     if *syn {
         let first = tcp.sequence.wrapping_add(1);
-        let reverse_range_verdict =
-            flows
-                .get(&reverse)
-                .and_then(|peer| match (peer.reassembly_base, peer.next_sequence) {
-                    (Some(base), Some(next)) => Some(
-                        tcp.acknowledgment.wrapping_sub(base) < 0x8000_0000
-                            && next.wrapping_sub(tcp.acknowledgment) < 0x8000_0000,
-                    ),
-                    _ => None,
-                });
+        let reverse_range_verdict = flows.get(&reverse).and_then(|peer| {
+            serial_range_contains(peer.reassembly_base, peer.next_sequence, tcp.acknowledgment)
+        });
         let peer_acknowledged = !*ack || reverse_range_verdict != Some(false);
         let sent = flows.entry((*flow).clone()).or_default();
         let renews = sent.reassembly_base == Some(first)

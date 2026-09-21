@@ -327,7 +327,7 @@ impl Collector {
                     .retained
                     .saturating_add(Limits::retained_charge(live.header.len()));
                 self.limits.check_retained(self.retained)?;
-                let parsed = http::parse_head(&live.header);
+                let parsed = http::parse_head(&Bytes::copy_from_slice(&live.header));
                 let (head, _) = match parsed {
                     Ok(Some(head)) => head,
                     Ok(None) => unreachable!("terminator present"),

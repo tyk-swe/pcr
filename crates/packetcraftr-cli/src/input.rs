@@ -293,6 +293,54 @@ fn open_file(path: &Path) -> Result<File, CliError> {
     })
 }
 
+/// A file operation on a document path, retaining the I/O source so the
+/// published error names the file and keeps its cause chain.
+#[derive(Debug, thiserror::Error)]
+#[error("{operation} {} failed: {source}", .path.display())]
+struct DocumentIo {
+    operation: &'static str,
+    path: PathBuf,
+    #[source]
+    source: io::Error,
+}
+
+/// Reads a complete JSON document file (`--rules-file`, `--udp-profiles`)
+/// under `max_bytes`. These are plain documents, not capture streams, so
+/// open/read failures are ordinary `io.runtime` errors and an oversized
+/// document is a CLI input failure.
+pub(crate) fn read_bounded_json_document(
+    path: &Path,
+    max_bytes: usize,
+) -> Result<Vec<u8>, CliError> {
+    let document_io = |operation: &'static str| {
+        move |source: io::Error| {
+            CliError::caused(
+                Kind::Io,
+                &DocumentIo {
+                    operation,
+                    path: path.to_owned(),
+                    source,
+                },
+            )
+        }
+    };
+    let file = File::open(path).map_err(document_io("open"))?;
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut bytes = Vec::new();
+    file.take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(document_io("read"))?;
+    if bytes.len() > max_bytes {
+        return Err(CliError::new(
+            Kind::Cli,
+            format!("document {} exceeds {max_bytes} byte limit", path.display()),
+        ));
+    }
+    Ok(bytes)
+}
+
 pub(crate) fn read_stdin_bounded(max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
     let stdin = io::stdin();
     require_redirected_stdin(kind, stdin.is_terminal())?;
@@ -354,7 +402,15 @@ pub(crate) fn snapshot_capture<R: Read>(
     let snapshot = tempfile::tempfile()
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;
-    let (mut snapshot, _) = pcap::rewrite(input, snapshot, limits).map_err(CliError::classified)?;
+    let (snapshot, _) = pcap::rewrite(
+        input,
+        io::BufWriter::with_capacity(64 * 1024, snapshot),
+        limits,
+    )
+    .map_err(CliError::classified)?;
+    let mut snapshot = snapshot
+        .into_inner()
+        .map_err(|error| CliError::classified(pcap::Error::from(error.into_error())))?;
     std::io::Seek::rewind(&mut snapshot)
         .map_err(pcap::Error::from)
         .map_err(CliError::classified)?;

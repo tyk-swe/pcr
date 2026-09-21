@@ -9,6 +9,7 @@ use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey};
+use crate::analysis::serial::{serial_ge, serial_gt};
 use crate::protocol::transport::TcpOption;
 
 pub(super) fn report_zero(observation: &TcpObservation<'_>, findings: &mut Vec<Finding>) {
@@ -35,10 +36,9 @@ pub(super) fn update_advertisement(
     // SND.WL1/WL2 compare sequence and acknowledgment with serial arithmetic.
     let window_update = match (sent.window_sequence, sent.window_acknowledgment) {
         (Some(update_sequence), Some(update_acknowledgment)) => {
-            let sequence_delta = tcp.sequence.wrapping_sub(update_sequence);
-            (sequence_delta > 0 && sequence_delta < 0x8000_0000)
+            serial_gt(tcp.sequence, update_sequence)
                 || (tcp.sequence == update_sequence
-                    && tcp.acknowledgment.wrapping_sub(update_acknowledgment) < 0x8000_0000)
+                    && serial_ge(tcp.acknowledgment, update_acknowledgment))
         }
         _ => true,
     };
@@ -94,7 +94,7 @@ pub(super) fn analyze_sender(
         _ => 0,
     };
     let advertised = u64::from(peer_window) << shift;
-    if in_flight >= 0x8000_0000 {
+    if !serial_ge(end, peer_ack) {
         return;
     }
 

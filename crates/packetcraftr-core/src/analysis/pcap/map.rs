@@ -1,9 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::pcapng::validate_rewritable_packet_flags;
+use super::wire::{
+    PCAPNG_OPTION_END, PCAPNG_OPTION_IF_FCSLEN, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
+};
 use super::{
-    CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
-    Reader, RecordKind, Writer,
+    CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption, Reader,
+    RecordKind, Writer,
 };
 use crate::{
     error::{BoundaryError, Classification, Classified, Kind},
@@ -101,7 +105,10 @@ where
                         options,
                         ..
                     } => {
-                        if options.iter().any(|option| option.code == 13) {
+                        if options
+                            .iter()
+                            .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN)
+                        {
                             return Err(MapError::Metadata("interface FCS length"));
                         }
                         let id = add_interface(output, interface, &options, maximum_growth)?;
@@ -114,20 +121,8 @@ where
                 }
             }
             RecordKind::Packet { options, .. } => {
-                for option in options.iter().filter(|option| option.code == 2) {
-                    let bytes: [u8; 4] = option
-                        .value
-                        .as_ref()
-                        .try_into()
-                        .map_err(|_| MapError::Metadata("malformed packet flags"))?;
-                    let flags = match endianness {
-                        Endianness::Little => u32::from_le_bytes(bytes),
-                        Endianness::Big => u32::from_be_bytes(bytes),
-                    };
-                    if flags & !3 != 0 {
-                        return Err(MapError::Metadata("extended packet flags"));
-                    }
-                }
+                validate_rewritable_packet_flags(&options, endianness, "malformed packet flags")
+                    .map_err(MapError::Metadata)?;
                 let frame = record
                     .frame
                     .ok_or(MapError::Metadata("packet record without frame"))?;
@@ -190,7 +185,12 @@ fn add_interface<W: Write>(
     }
     let retained: Vec<_> = options
         .iter()
-        .filter(|option| !matches!(option.code, 0 | 9 | 14))
+        .filter(|option| {
+            !matches!(
+                option.code,
+                PCAPNG_OPTION_END | PCAPNG_OPTION_IF_TSRESOL | PCAPNG_OPTION_IF_TSOFFSET
+            )
+        })
         .cloned()
         .collect();
     output.add_interface_description_with_options(interface, &retained)

@@ -143,7 +143,7 @@ where
 
 fn decode_options<L>(
     name: &'static str,
-    input: &[u8],
+    input: Bytes,
     make: impl FnOnce(u8, Bytes) -> L,
     layout: fn(usize) -> Vec<crate::layout::FieldLayout>,
 ) -> Result<DecodedLayer, crate::codec::Error>
@@ -164,7 +164,7 @@ where
         .get(2..header_len)
         .ok_or_else(|| truncated(name, header_len, input.len()))?;
     Ok(DecodedLayer {
-        layer: Box::new(make(header[0], Bytes::copy_from_slice(options))),
+        layer: Box::new(make(header[0], input.slice_ref(options))),
         consumed: header_len,
         payload_len: input.len().saturating_sub(header_len),
         next: vec![Discriminator(u64::from(header[0]))],
@@ -199,7 +199,7 @@ impl LayerCodec for HopByHopCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_options(
@@ -245,7 +245,7 @@ impl LayerCodec for DestinationOptionsCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_options(

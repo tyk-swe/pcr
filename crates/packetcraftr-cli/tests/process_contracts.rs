@@ -827,13 +827,36 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
     let absent = tempfile::TempDir::new().expect("temporary directory must open");
     let missing = absent.path().join("packetcraftr-does-not-exist.pcap");
     let missing = missing.to_str().expect("temp path is UTF-8");
-    let commands: [&[&str]; 6] = [
+    let commands: [&[&str]; 8] = [
         &["--output", "json", "expert", missing],
         &["--output", "json", "follow", missing, "--stream", "tcp:0"],
         &["--output", "json", "stats", missing],
         &["--output", "json", "tls", missing],
         &["--output", "json", "build", "--packet-file", missing],
         &["--output", "json", "dissect", "--file", missing],
+        // Rules files load before the source capture is opened.
+        &[
+            "--output",
+            "json",
+            "rewrite",
+            missing,
+            "--rules-file",
+            missing,
+            "--write",
+            "unused.pcapng",
+        ],
+        &[
+            "--output",
+            "json",
+            "scan",
+            "no-resolution.example.test",
+            "--transport",
+            "udp",
+            "--ports",
+            "53",
+            "--udp-profiles",
+            missing,
+        ],
     ];
     for arguments in commands {
         let output = run(arguments);

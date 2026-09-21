@@ -15,6 +15,7 @@ use crate::analysis::reassembly::tcp::{
     Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler,
     ResourceError as TcpResourceError, ScopedFlowKey, Segment,
 };
+use crate::analysis::serial::serial_range_contains;
 
 /// A conversation occupies one reassembly flow, and one half-open SYN slot,
 /// per direction.
@@ -152,16 +153,11 @@ fn evict_reused_generation(
     let first = segment.sequence.wrapping_add(1);
     let reverse = segment.flow.reverse();
     let reverse_verdict = acknowledgment.and_then(|acknowledgment| {
-        match (
+        serial_range_contains(
             reassembler.flow_base_sequence(&reverse),
             reassembler.flow_next_sequence(&reverse),
-        ) {
-            (Some(base), Some(next)) => Some(
-                acknowledgment.wrapping_sub(base) < 0x8000_0000
-                    && next.wrapping_sub(acknowledgment) < 0x8000_0000,
-            ),
-            _ => None,
-        }
+            acknowledgment,
+        )
     });
     let acknowledgment_disagrees = reverse_verdict == Some(false);
     let own_base = reassembler.flow_base_sequence(&segment.flow);

@@ -1,12 +1,27 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use bytes::Bytes;
 use packetcraftr_core::protocol::application::http::{self, Body, BodyDecoder, StartLine};
+
+#[test]
+fn borrowed_headers_preserve_limit_and_trailing_byte_errors() {
+    let oversized = vec![b'a'; http::MAX_HEADER_BYTES * 2];
+    let error = http::Http::try_from(oversized.as_slice()).unwrap_err();
+    assert!(error.to_string().contains("header bytes"));
+
+    let mut trailing = b"GET / HTTP/1.1\r\n\r\n".to_vec();
+    trailing.resize(http::MAX_HEADER_BYTES * 2, b'a');
+    let error = http::Http::try_from(trailing.as_slice()).unwrap_err();
+    assert!(error.to_string().contains("body or trailing bytes"));
+}
 
 #[test]
 fn headers_preserve_octets_and_duplicates_and_choose_unambiguous_boundaries() {
     let wire =
         b"GET /a%20b HTTP/1.1\r\nHost: example.test\r\nX-Test: one\r\nX-Test: \xff\r\n\r\ntrailing";
-    let (head, n) = http::parse_head(wire).unwrap().unwrap();
+    let (head, n) = http::parse_head(&Bytes::from_static(wire))
+        .unwrap()
+        .unwrap();
     assert_eq!(&wire[n..], b"trailing");
     assert_eq!(head.wire().as_ref(), &wire[..n]);
     assert_eq!(
@@ -17,10 +32,11 @@ fn headers_preserve_octets_and_duplicates_and_choose_unambiguous_boundaries() {
     assert!(
         matches!(&head.start,StartLine::Request {method,target,..} if method=="GET"&&target.as_ref()==b"/a%20b")
     );
-    let (head, _) =
-        http::parse_head(b"HTTP/1.1 200 OK\r\nContent-Length: 3, 3\r\nContent-Length: 3\r\n\r\n")
-            .unwrap()
-            .unwrap();
+    let (head, _) = http::parse_head(&Bytes::from_static(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 3, 3\r\nContent-Length: 3\r\n\r\n",
+    ))
+    .unwrap()
+    .unwrap();
     assert_eq!(head.body(None).unwrap(), Body::Length(3));
     assert_eq!(head.body(Some("HEAD")).unwrap(), Body::None);
     assert_eq!(head.body(Some("CONNECT")).unwrap(), Body::Tunnel);
@@ -31,14 +47,20 @@ fn headers_preserve_octets_and_duplicates_and_choose_unambiguous_boundaries() {
         "Transfer-Encoding: chunked, chunked\r\n",
     ] {
         let wire = format!("POST / HTTP/1.1\r\n{fields}\r\n");
-        let (head, _) = http::parse_head(wire.as_bytes()).unwrap().unwrap();
+        let (head, _) = http::parse_head(&Bytes::from(wire.clone()))
+            .unwrap()
+            .unwrap();
         assert!(head.body(None).is_err());
     }
 }
 #[test]
 fn transfer_codings_parse_parameters_without_splitting_quoted_strings() {
     fn body_of(wire: &[u8]) -> Result<Body, http::Error> {
-        http::parse_head(wire).unwrap().unwrap().0.body(None)
+        http::parse_head(&Bytes::copy_from_slice(wire))
+            .unwrap()
+            .unwrap()
+            .0
+            .body(None)
     }
     // Commas and semicolons inside a quoted parameter separate nothing, so
     // "chunked" there cannot select chunked framing.
@@ -135,11 +157,11 @@ fn invalid_delimiters_oversized_input_and_body_limits_fail_explicitly() {
         b"GET / HTTP/1.1\r\n Folded: bad\r\n\r\n",
         b"PRI * HTTP/2.0\r\n\r\n",
     ] {
-        assert!(http::parse_head(wire).is_err());
+        assert!(http::parse_head(&Bytes::copy_from_slice(wire)).is_err());
     }
-    assert!(http::parse_head(&vec![b'a'; http::MAX_HEADER_BYTES]).is_err());
+    assert!(http::parse_head(&Bytes::from(vec![b'a'; http::MAX_HEADER_BYTES])).is_err());
     assert!(
-        http::parse_head(b"GET / HTTP/1.1\r\nHost: x\r\n")
+        http::parse_head(&Bytes::from_static(b"GET / HTTP/1.1\r\nHost: x\r\n"))
             .unwrap()
             .is_none()
     );

@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use crate::errors::CliError;
 use packetcraftr_core::{
-    analysis::pcap,
     error::Kind,
     registry::Registry,
     transform::{ChecksumMode, FieldAssignment, FieldEdits, HeaderRewrite, VlanRewrite},
 };
-use std::{io::Read, path::Path};
+use std::path::Path;
 
 /// How field edits treat the checksums covering changed bytes.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -75,22 +74,7 @@ pub(super) fn load(
     registry: &Registry,
     checksum_mode: ChecksumMode,
 ) -> Result<Vec<Rule>, CliError> {
-    let mut bytes = Vec::new();
-    let file = std::fs::File::open(path)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    file.take(1_048_577)
-        .read_to_end(&mut bytes)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    if bytes.len() > 1_048_576 {
-        return Err(CliError::classified(
-            packetcraftr_core::transform::Error::Limit {
-                field: "rewrite rule bytes",
-                limit: 1_048_576,
-            },
-        ));
-    }
+    let bytes = crate::input::read_bounded_json_document(path, 1_048_576)?;
     let schema: String = serde_json::from_slice::<serde_json::Value>(&bytes)
         .ok()
         .and_then(|value| value.get("schema")?.as_str().map(str::to_owned))

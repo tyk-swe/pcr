@@ -306,7 +306,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Linux route lookups share one netlink worker (thread, Tokio runtime, and
   socket) for the process lifetime behind the native worker budget, submitting
   requests over a bounded channel instead of respawning all three per
-  destination; multi-target scan planning pays the setup once.
+  destination; multi-target scan planning pays the setup once. The idle worker
+  retains one admission slot and remains visible in native resource snapshots.
 - Packet filters short-circuit decisive boolean operands, and projections avoid
   temporary allocations when retaining field values and accounting for byte budgets.
 - Workflow and netio errors retain their original typed sources instead of

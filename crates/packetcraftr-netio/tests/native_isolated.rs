@@ -15,9 +15,11 @@ use packetcraftr_core::budget::Cancellation;
 use packetcraftr_netio::{
     Error,
     capture::{self, Provider, Session},
-    interface::Id,
+    interface::{self, Id, Provider as _},
     resources::native_snapshot,
 };
+
+const SHARED_ROUTE_WORKERS: usize = 1;
 
 fn isolated() {
     let parent: u64 = std::env::var("PACKETCRAFTR_PARENT_NETNS")
@@ -36,6 +38,10 @@ fn isolated() {
     );
     assert!(interfaces.contains(": lo:"));
     assert_eq!(native_snapshot().active, 0);
+    // Warm the persistent route service before measuring capture admission.
+    // Its thread and socket remain owned while every capture must be released.
+    interface::SystemProvider.interfaces().unwrap();
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 }
 fn ip(args: &[&str]) -> String {
     let result = Command::new("ip").args(args).output().unwrap();
@@ -66,15 +72,15 @@ fn request() -> capture::Request {
 fn ready(request: &capture::Request) -> capture::SystemSession {
     let mut session = capture::SystemProvider.arm_capture(request).unwrap();
     session.wait_ready(Duration::from_secs(2)).unwrap();
-    assert_eq!(native_snapshot().active, 1);
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS + 1);
     session
 }
 fn released() {
     let deadline = Instant::now() + Duration::from_secs(3);
-    while native_snapshot().active != 0 && Instant::now() < deadline {
+    while native_snapshot().active != SHARED_ROUTE_WORKERS && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert_eq!(native_snapshot().active, 0);
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
     assert_eq!(native_snapshot().cleanup_retaining_capacity, 0);
 }
 
@@ -183,7 +189,7 @@ fn bounded_queue_reports_real_capture_loss() {
 #[ignore = "requires the isolated Linux launcher"]
 fn native_settings_apply_before_activation_and_report_realized_values() {
     isolated();
-    // Discovery runs on an unactivated handle and admits nothing.
+    // Timestamp discovery runs on an unactivated handle and admits no capture.
     let interface = Id {
         name: "lo".to_owned(),
         index: 1,
@@ -195,7 +201,7 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
             .any(|kind| kind.source == Some(capture::TimestampSource::Host)),
         "{types:?}"
     );
-    assert_eq!(native_snapshot().active, 0);
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 
     // Loopback advertises only the host clock, so an adapter-synchronized
     // request must be rejected typed before any activation.
@@ -209,7 +215,7 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
         matches!(error, Error::UnsupportedCaptureSetting { .. }),
         "{error:?}"
     );
-    assert_eq!(native_snapshot().active, 0);
+    assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 
     let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
     let sender = UdpSocket::bind("127.0.0.1:0").unwrap();

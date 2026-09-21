@@ -1,5 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use crate::probe::index_or_push;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -228,5 +230,62 @@ impl ClassificationCounts {
             Classification::Timeout => &mut self.timeout,
         };
         *counter = counter.saturating_add(1);
+    }
+}
+
+#[derive(Default)]
+pub(super) struct Collector {
+    endpoints: Vec<Endpoint>,
+    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
+    undecoded: Vec<Frame>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl Collector {
+    pub(super) fn observe(&mut self, event: Event) {
+        match event {
+            Event::Sent(_) => {}
+            Event::Probe { target: _, probe } => self.observe_probe(probe),
+            Event::Undecoded { frame } => self.undecoded.push(frame),
+            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
+        }
+    }
+
+    fn observe_probe(&mut self, evidence: ProbeEvidence) {
+        let address = evidence.address;
+        let transport = evidence.transport;
+        let port = evidence.port;
+        let endpoint = index_or_push(
+            &mut self.endpoints,
+            &mut self.endpoint_indices,
+            (address, port),
+            || Endpoint {
+                address,
+                transport,
+                port,
+                classification: Classification::Timeout,
+                probes: Vec::new(),
+            },
+        );
+        endpoint.classification.promote(evidence.classification);
+        endpoint.probes.push(evidence);
+    }
+
+    pub(super) fn finish(mut self, summary: Summary) -> Report {
+        for endpoint in &mut self.endpoints {
+            endpoint.probes.sort_by_key(|probe| probe.sequence);
+        }
+        self.endpoints
+            .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
+        Report {
+            planned_duration: summary.planned_duration,
+            target: summary.target,
+            resolved_addresses: summary.resolved_addresses,
+            endpoints: self.endpoints,
+            undecoded: self.undecoded,
+            diagnostics: self.diagnostics,
+            stats: summary.stats,
+            rtt: summary.rtt,
+        }
     }
 }

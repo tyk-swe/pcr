@@ -1,21 +1,26 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Shared bounded input reads and command-specific source diagnostics.
+
+mod capture;
 mod fingerprint;
+mod recipe;
+pub(crate) use capture::{
+    open_capture, open_capture_file, open_capture_hashed, snapshot_capture,
+    validate_capture_stream_limits,
+};
 pub(crate) use fingerprint::Fingerprint;
+pub(crate) use recipe::read_recipe;
 
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::ReaderOptions;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
-use packetcraftr_core::packet::Packet;
 
-use super::command_options::{CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, RecipeArgs};
 use super::errors::CliError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,196 +90,12 @@ fn require_redirected_stdin(kind: InputKind, stdin_is_terminal: bool) -> Result<
     }
 }
 
-pub(crate) fn read_recipe(
-    arguments: RecipeArgs,
-    registry: &core::registry::Registry,
-    max_layers: usize,
-) -> Result<Packet, CliError> {
-    let RecipeArgs {
-        packet,
-        packet_file,
-        payload_file,
-    } = arguments;
-
-    let mut packet = resolve_recipe(packet, packet_file, registry, max_layers)?;
-    if let Some(spec) = payload_file {
-        apply_payload_file(&mut packet, &spec)?;
-    }
-    Ok(packet)
-}
-
-fn resolve_recipe(
-    packet: Option<String>,
-    packet_file: Option<PathBuf>,
-    registry: &core::registry::Registry,
-    max_layers: usize,
-) -> Result<Packet, CliError> {
-    let (input, path) = match (packet, packet_file) {
-        (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
-        (None, Some(path)) => {
-            let bytes = read_bounded_file(
-                &path,
-                core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-                InputKind::Recipe,
-            )?;
-            let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(Kind::Cli, format!("packet document is not UTF-8: {source}"))
-            })?;
-            (input, Some(path))
-        }
-        (None, None) => {
-            let bytes = read_stdin_bounded(
-                core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-                InputKind::Recipe,
-            )?;
-            let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(Kind::Cli, format!("stdin recipe is not UTF-8: {source}"))
-            })?;
-            (input, None)
-        }
-        (Some(_), Some(_)) => unreachable!("clap enforces recipe source conflicts"),
-    };
-    let trimmed = input.trim_start();
-    let format = path
-        .as_deref()
-        .and_then(document_format_from_path)
-        .or_else(|| {
-            trimmed
-                .starts_with('{')
-                .then_some(core::document::Format::Json)
-        })
-        .or_else(|| {
-            (trimmed.starts_with("schema:") || trimmed.starts_with("---"))
-                .then_some(core::document::Format::Yaml)
-        });
-    let parse_document = |format| {
-        core::document::Packet::parse_with_limits(
-            &input,
-            format,
-            &core::document::DocumentLimits {
-                max_layers,
-                ..core::document::DocumentLimits::DEFAULT
-            },
-        )
-    };
-    if let Some(format) = format {
-        return parse_document(format)
-            .and_then(|document| document.to_packet(registry, max_layers))
-            .map_err(CliError::classified);
-    }
-    let mut expression_error = match parse_expression(&input, registry, max_layers) {
-        Ok(packet) => return Ok(packet),
-        Err(error) => error,
-    };
-    match parse_document(core::document::Format::Yaml) {
-        Ok(document) => document
-            .to_packet(registry, max_layers)
-            .map_err(CliError::classified),
-        Err(error) => {
-            expression_error.causes.push(error.to_string());
-            Err(expression_error)
-        }
-    }
-}
-
-/// Sets a bytes-typed recipe field from file contents. The field must exist,
-/// hold bytes, and be empty in the recipe so an embedded value is never
-/// silently replaced; the file reads under the packet input ceiling so saved
-/// documents stay self-contained once the value lands in the packet.
-fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
-    let syntax = || {
-        CliError::new(
-            Kind::Cli,
-            "--payload-file requires LAYER.FIELD=PATH with a zero-based layer index",
-        )
-    };
-    let (selector, path) = spec.split_once('=').ok_or_else(syntax)?;
-    let (layer, field) = selector.trim().split_once('.').ok_or_else(syntax)?;
-    let layer_index = layer.parse::<usize>().map_err(|_| syntax())?;
-    let field = field.trim().to_ascii_lowercase();
-    if field.is_empty() {
-        return Err(syntax());
-    }
-    let packet_len = packet.len();
-    let layer = packet.layer_mut(layer_index).ok_or_else(|| {
-        CliError::new(
-            Kind::Cli,
-            format!(
-                "--payload-file layer index {layer_index} is outside the recipe's {packet_len} layers"
-            ),
-        )
-    })?;
-    let current = layer.field_path(&field).ok_or_else(|| {
-        CliError::new(
-            Kind::Cli,
-            format!("--payload-file field {field} is unknown on layer {layer_index}"),
-        )
-    })?;
-    let core::field::FieldValue::Bytes(current) = current else {
-        return Err(CliError::new(
-            Kind::Cli,
-            format!("--payload-file field {field} on layer {layer_index} is not bytes-typed"),
-        ));
-    };
-    if !current.is_empty() {
-        return Err(CliError::new(
-            Kind::Cli,
-            format!(
-                "--payload-file field {field} on layer {layer_index} already holds recipe bytes"
-            ),
-        ));
-    }
-    let bytes = read_bounded_file_allow_empty(
-        Path::new(path),
-        core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-        InputKind::Recipe,
-    )?;
-    layer
-        .set_field_path(&field, core::field::FieldValue::Bytes(bytes.into()))
-        .map_err(|source| {
-            CliError::new(
-                Kind::Cli,
-                format!(
-                    "could not set --payload-file field {field} on layer {layer_index}: {source}"
-                ),
-            )
-        })
-}
-
-fn parse_expression(
-    input: &str,
-    registry: &core::registry::Registry,
-    max_layers: usize,
-) -> Result<Packet, CliError> {
-    core::expression::parse(
-        input,
-        registry,
-        core::expression::Options {
-            max_layers,
-            ..core::expression::Options::default()
-        },
-    )
-    .map_err(CliError::classified)
-}
-
-fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
-    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "json" => Some(core::document::Format::Json),
-        "yaml" | "yml" => Some(core::document::Format::Yaml),
-        _ => None,
-    }
-}
-
 pub(crate) fn read_bounded_file(
     path: &Path,
     max_bytes: usize,
     kind: InputKind,
 ) -> Result<Vec<u8>, CliError> {
-    let bytes = read_bounded_file_allow_empty(path, max_bytes, kind)?;
-    if bytes.is_empty() {
-        return Err(missing_input_error(kind));
-    }
-    Ok(bytes)
+    read_bounded(open_file(path)?, max_bytes, kind)
 }
 
 pub(crate) fn read_bounded_file_allow_empty(
@@ -304,105 +125,6 @@ pub(crate) fn parse_target(target: String) -> Result<packetcraftr::target::Targe
     target
         .parse::<packetcraftr::target::Target>()
         .map_err(CliError::classified)
-}
-
-/// Opens a capture reader under its per-item bounds; the aggregate frame and
-/// byte ceilings are charged per frame while streaming, not while opening.
-fn capture_source(path: &Path) -> Result<Box<dyn Read>, CliError> {
-    crate::cancellation::check()?;
-    if path == Path::new("-") {
-        let stdin = io::stdin();
-        require_redirected_stdin(InputKind::Capture, stdin.is_terminal())?;
-        Ok(Box::new(stdin.lock()))
-    } else {
-        Ok(Box::new(open_file(path)?))
-    }
-}
-
-pub(crate) fn open_capture(
-    path: &Path,
-    bounds: CaptureReaderBoundsArgs,
-) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(capture_source(path)?, bounds)
-}
-
-/// The fingerprint covers the same read stream as the comparison, including
-/// compression/container bytes. Publish it only after a successful EOF.
-pub(crate) fn open_capture_hashed(
-    path: &Path,
-    bounds: CaptureReaderBoundsArgs,
-) -> Result<(Reader<Box<dyn Read>>, Fingerprint), CliError> {
-    let (source, fingerprint) = fingerprint::Hashed::new(capture_source(path)?);
-    Ok((capture_reader(source, bounds)?, fingerprint))
-}
-
-pub(crate) fn open_capture_file(
-    path: &Path,
-    bounds: CaptureReaderBoundsArgs,
-) -> Result<Reader<Box<dyn Read>>, CliError> {
-    capture_reader(open_file(path)?, bounds)
-}
-
-/// Validate and preserve a bounded source in an anonymous seekable snapshot.
-/// Callers can analyze and copy identical records, including redirected stdin.
-pub(crate) fn snapshot_capture<R: Read>(
-    input: &mut Reader<R>,
-    bounds: CaptureReaderBoundsArgs,
-    limits: core::analysis::pcap::Limits,
-) -> Result<Reader<File>, CliError> {
-    use core::analysis::pcap;
-    crate::cancellation::check()?;
-    let snapshot = tempfile::tempfile()
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    let (mut snapshot, _) = pcap::rewrite(input, snapshot, limits).map_err(CliError::classified)?;
-    std::io::Seek::rewind(&mut snapshot)
-        .map_err(pcap::Error::from)
-        .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
-    Reader::with_options(
-        snapshot,
-        ReaderOptions {
-            max_size: bounds.max_frame_bytes,
-            max_interfaces_per_section: bounds.max_interfaces,
-            ..Default::default()
-        },
-    )
-    .map(|reader| {
-        crate::invocation::reader(reader.with_cancellation(crate::cancellation::signal().clone()))
-    })
-    .map_err(CliError::classified)
-}
-
-fn capture_reader<R: Read + 'static>(
-    source: R,
-    bounds: CaptureReaderBoundsArgs,
-) -> Result<Reader<Box<dyn Read>>, CliError> {
-    crate::cancellation::check()?;
-    let source: Box<dyn Read> = Box::new(
-        core::analysis::pcap::compression::Input::new(
-            source,
-            core::analysis::pcap::compression::Limits {
-                max_decoded_bytes: bounds.max_decoded_bytes,
-                max_encoded_bytes: bounds.max_encoded_bytes,
-                ..Default::default()
-            },
-        )
-        .map_err(CliError::classified)?,
-    );
-    let reader = Reader::with_options(
-        source,
-        ReaderOptions {
-            max_size: bounds.max_frame_bytes,
-            max_interfaces_per_section: bounds.max_interfaces,
-            ..ReaderOptions::default()
-        },
-    )
-    .map_err(CliError::classified)?;
-    crate::cancellation::check()?;
-    Ok(crate::invocation::reader(
-        reader.with_cancellation(crate::cancellation::signal().clone()),
-    ))
 }
 
 fn read_bounded(reader: impl Read, max_bytes: usize, kind: InputKind) -> Result<Vec<u8>, CliError> {
@@ -435,45 +157,6 @@ fn read_bounded_allow_empty(
         return Err(kind.oversized_error(bytes.len(), max_bytes));
     }
     Ok(bytes)
-}
-
-pub(crate) fn validate_capture_stream_limits(
-    limits: OfflineCaptureLimitsArgs,
-) -> Result<(), CliError> {
-    let OfflineCaptureLimitsArgs {
-        max_frames,
-        max_bytes,
-        reader:
-            CaptureReaderBoundsArgs {
-                max_decoded_bytes: _,
-                max_encoded_bytes: _,
-                max_frame_bytes,
-                max_interfaces,
-            },
-    } = limits;
-    if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
-                Some("use finite non-zero capture frame, byte, packet, and interface limits"),
-            ),
-            "capture stream limits must be non-zero",
-            Vec::new(),
-        ));
-    }
-    if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
-                Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
-            ),
-            format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
-            Vec::new(),
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -603,53 +286,5 @@ mod tests {
             .expect("redirected frame input must remain available");
         require_redirected_stdin(InputKind::Capture, false)
             .expect("redirected capture input must remain available");
-    }
-
-    #[test]
-    fn capture_stream_limits_reject_each_zero_and_cross_limit_case() {
-        let bounds =
-            |max_frames, max_bytes, max_frame_bytes, max_interfaces| OfflineCaptureLimitsArgs {
-                max_frames,
-                max_bytes,
-                reader: CaptureReaderBoundsArgs {
-                    max_encoded_bytes: 256 * 1024 * 1024,
-                    max_decoded_bytes: 256 * 1024 * 1024,
-                    max_frame_bytes,
-                    max_interfaces,
-                },
-            };
-
-        for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
-            let error =
-                validate_capture_stream_limits(bounds(limits.0, limits.1, limits.2, limits.3))
-                    .expect_err("every capture bound must be non-zero");
-            assert_eq!(error.exit_code(), 2, "limits={limits:?}");
-            assert_eq!(error.classification.code, "cli.capture_limit");
-        }
-
-        let error = validate_capture_stream_limits(bounds(1, 7, 8, 1))
-            .expect_err("one frame cannot exceed the aggregate byte budget");
-        assert_eq!(error.message, "max-frame-bytes 8 exceeds max-bytes 7");
-        validate_capture_stream_limits(bounds(1, 8, 8, 1)).expect("equal byte bounds are valid");
-    }
-
-    #[test]
-    fn document_extensions_are_case_insensitive_and_explicit() {
-        use packetcraftr_core::document::Format;
-
-        for (path, expected) in [
-            ("packet.json", Some(Format::Json)),
-            ("packet.JSON", Some(Format::Json)),
-            ("packet.yaml", Some(Format::Yaml)),
-            ("packet.yml", Some(Format::Yaml)),
-            ("packet.txt", None),
-            ("packet", None),
-        ] {
-            assert_eq!(
-                document_format_from_path(Path::new(path)),
-                expected,
-                "{path}"
-            );
-        }
     }
 }

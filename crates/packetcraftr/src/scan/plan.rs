@@ -8,7 +8,12 @@ use std::time::Duration;
 
 use super::WORKFLOW;
 use super::{Batch, Probe, Request};
-use crate::probe::{Error, ErrorKind, ProbeEndpoint};
+use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
+use crate::policy::Authorizer;
+use crate::probe::evidence::{check_probe_count, check_probe_duration};
+use crate::probe::{Error, ErrorKind, ProbeEndpoint, Transport};
+use crate::target::{approve_operation, budgeted};
+use packetcraftr_core::budget::Deadline;
 
 pub(super) fn build_batches<'a>(
     request: &'a Request,
@@ -107,6 +112,144 @@ fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
             reason: "rate-delay arithmetic overflowed".to_owned(),
         },
     ))
+}
+
+pub(super) struct ApprovedScan {
+    pub(super) planned_duration: std::time::Duration,
+    pub(super) declared_target: String,
+    pub(super) addresses: Vec<IpAddr>,
+    pub(super) endpoints: Vec<ProbeEndpoint>,
+}
+
+pub(super) fn approve_scan<A: Authorizer>(
+    request: &Request,
+    authorizer: &mut A,
+    deadline: &Deadline,
+) -> Result<ApprovedScan, Error> {
+    let ports = request.selected_ports()?;
+    // Implementations must authorize the declared target before DNS and every
+    // answer before anything below constructs a probe.
+    let addresses = super::targets::resolve(request, authorizer, deadline)?;
+    if addresses.is_empty() {
+        return Err(Error::new(
+            WORKFLOW,
+            ErrorKind::Family {
+                family: request.address_family.label(),
+            },
+        ));
+    }
+
+    let endpoints_per_address = if request.transport == Transport::Icmp {
+        1
+    } else {
+        ports.len()
+    };
+    let total_probes = probe_count(addresses.len(), endpoints_per_address, request.attempts)?;
+    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
+    let maximum_bytes = maximum_wire_bytes(&addresses, &ports, request)?;
+    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)?;
+    check_probe_duration(WORKFLOW, worst_case, request.limits.max_duration)?;
+    approve_operation(
+        authorizer,
+        budgeted(
+            u64::try_from(total_probes).unwrap_or(u64::MAX),
+            maximum_bytes,
+        ),
+        deadline,
+        &WORKFLOW,
+    )?;
+
+    let endpoints = probe_endpoints(request.transport, ports);
+    Ok(ApprovedScan {
+        planned_duration: worst_case,
+        declared_target: request.targets.to_string(),
+        addresses,
+        endpoints,
+    })
+}
+
+/// Expands the authorized port selection into probe endpoints for `transport`.
+fn probe_endpoints(transport: Transport, ports: Vec<u16>) -> Vec<ProbeEndpoint> {
+    match transport {
+        Transport::Icmp => vec![ProbeEndpoint::Icmp],
+        Transport::Tcp => ports
+            .into_iter()
+            .map(|port| ProbeEndpoint::Tcp { port })
+            .collect(),
+        Transport::Udp => ports
+            .into_iter()
+            .map(|port| ProbeEndpoint::Udp { port })
+            .collect(),
+    }
+}
+
+fn probe_count(
+    address_count: usize,
+    endpoints_per_address: usize,
+    attempts: u32,
+) -> Result<usize, Error> {
+    address_count
+        .checked_mul(endpoints_per_address)
+        .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
+        .ok_or(Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "probes",
+                value: u64::MAX,
+                reason: "probe-count arithmetic overflowed".to_owned(),
+            },
+        ))
+}
+
+fn maximum_wire_bytes(
+    addresses: &[IpAddr],
+    ports: &[u16],
+    request: &Request,
+) -> Result<u64, Error> {
+    let overflow = || {
+        Error::new(
+            WORKFLOW,
+            ErrorKind::InvalidLimit {
+                field: "wire_bytes",
+                value: u64::MAX,
+                reason: "scan payload accounting overflowed".to_owned(),
+            },
+        )
+    };
+    let endpoints = if request.transport == Transport::Icmp {
+        1
+    } else {
+        ports.len() as u64
+    };
+    let payload = if request.transport == Transport::Udp {
+        ports.iter().try_fold(0u64, |total, port| {
+            total
+                .checked_add(
+                    request
+                        .udp_profiles
+                        .get(port)
+                        .map_or(request.udp_payload.len(), |profile| {
+                            profile.payload_length()
+                        }) as u64,
+                )
+                .ok_or_else(overflow)
+        })?
+    } else {
+        0
+    };
+    addresses.iter().try_fold(0u64, |total, address| {
+        let header = if address.is_ipv4() {
+            IPV4_PROBE_BYTES
+        } else {
+            IPV6_PROBE_BYTES
+        };
+        let bytes = header
+            .checked_mul(endpoints)
+            .and_then(|bytes| bytes.checked_add(payload))
+            .and_then(|bytes| bytes.checked_mul(u64::from(request.attempts)))
+            .ok_or_else(overflow)?;
+        total.checked_add(bytes).ok_or_else(overflow)
+    })
 }
 
 #[cfg(test)]

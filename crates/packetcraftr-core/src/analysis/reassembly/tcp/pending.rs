@@ -14,6 +14,7 @@ use super::state::{
     retained_bytes,
 };
 use super::{Error, Limits, MalformedError, ResourceError, Segment};
+use crate::analysis::serial::serial_offset;
 
 use accounting::{PushAccountingInput, plan_push_accounting};
 
@@ -132,7 +133,6 @@ struct IncomingPayload<'a> {
 
 // validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so next_offset
 // never reaches 2^32
-// reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping step
 fn normalize_payload<'a>(
     limits: &Limits,
     state: &TcpFlowState,
@@ -140,7 +140,7 @@ fn normalize_payload<'a>(
 ) -> Result<IncomingPayload<'a>, Error> {
     let sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
     let expected = state.base_sequence.wrapping_add(state.next_offset as u32);
-    let delta = i64::from(sequence.wrapping_sub(expected) as i32);
+    let delta = serial_offset(sequence, expected);
     let absolute = i128::from(state.next_offset).saturating_add(i128::from(delta));
     let fin_offset = if segment.fin {
         absolute

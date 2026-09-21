@@ -17,6 +17,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Analysis duration exhaustion reports `policy.duration_limit` consistently
   across packet processing and capture reads, replacing the generic
   `policy.analysis_resource_limit` classification for processing deadlines.
+- `rewrite --rules-file` and `scan --udp-profiles` document load failures
+  report `io.runtime` with the failing path instead of `io.capture_file` and
+  its capture-stream remediation; an oversized rules document reports
+  `cli.error` instead of `policy.transform_limit`.
 
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
   `packetcraftr.output/v6`. Schemas and published examples migrate together.
@@ -386,6 +390,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   explicitly when a facility is missing. TLS handshake parsing, IP reassembly merge
   planning, and workflow admission/activation paths split along documented
   responsibility boundaries without changing public paths or behavior.
+- Linux route selection resolves the kernel's output interface with a filtered
+  link get and retains only that interface's addresses from the address dump.
+  Collecting all local addresses now only runs for local routes whose selected
+  source lives on another interface; the kernel address dump remains host-wide.
 - The `--max-application-*` limit flags document what each budget counts
   (messages, streams, in-flight buffers, retained evidence, and source spans),
   and `--start-epoch`/`--stop-epoch` help states that values are nonnegative;

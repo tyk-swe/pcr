@@ -23,20 +23,20 @@ fn endpoint(address: IpAddr, responded: bool) -> scan::Endpoint {
     };
     scan::Endpoint {
         address,
-        transport: packetcraftr::scan::Transport::Icmp,
+        transport: packetcraftr::probe::Transport::Icmp,
         port: None,
         classification,
         probes: vec![scan::ProbeEvidence {
             application: None,
             sequence: 0,
             address,
-            transport: packetcraftr::scan::Transport::Icmp,
+            transport: packetcraftr::probe::Transport::Icmp,
             port: None,
             attempt: 1,
             status: if responded {
-                packetcraftr::scan::ProbeStatus::Response
+                packetcraftr::probe::ProbeStatus::Response
             } else {
-                packetcraftr::scan::ProbeStatus::Timeout
+                packetcraftr::probe::ProbeStatus::Timeout
             },
             classification,
             responder: responded.then_some(address),
@@ -55,7 +55,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
     let ipv6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
     let evidence_free = scan::Endpoint {
         address: ipv4,
-        transport: packetcraftr::scan::Transport::Tcp,
+        transport: packetcraftr::probe::Transport::Tcp,
         port: Some(443),
         classification: packetcraftr::scan::Classification::Unknown,
         probes: Vec::new(),

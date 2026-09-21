@@ -4,13 +4,13 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 
-pub use crate::probe::ProbeEndpoint as ProbeTarget;
+use crate::probe::ProbeEndpoint;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Probe {
     pub sequence: u64,
     pub address: IpAddr,
-    pub target: ProbeTarget,
+    pub target: ProbeEndpoint,
     pub hop_limit: u8,
     pub attempt: u32,
     pub source_port: u16,
@@ -32,4 +32,3 @@ impl crate::probe::runner::Sequenced for Probe {
 }
 
 pub type Batch = crate::probe::Batch<Probe>;
-pub use crate::probe::{Execution, Executor};

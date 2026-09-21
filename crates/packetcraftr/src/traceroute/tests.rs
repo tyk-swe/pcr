@@ -24,13 +24,11 @@ use super::DEFAULT_UDP_PORT;
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::probe::probe_packet;
-use super::{
-    Batch, Completion, Event, Execution, Executor, Limits, Probe, ProbeStatus, ProbeTarget,
-    Request, ResponseKind, Strategy,
-};
+use super::{Batch, Completion, Event, Limits, Probe, Request, ResponseKind};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::policy::PolicyAuthorizer;
+use crate::probe::{Execution, Executor, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
 use crate::target::Target;
 use crate::test_fixtures::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
@@ -39,7 +37,7 @@ use crate::{BoundaryError, Stats, target::Family};
 fn udp_traceroute_request(target: Target) -> Request {
     Request {
         target,
-        strategy: Strategy::Udp,
+        strategy: Transport::Udp,
         address_family: Family::Any,
         destination_port: Some(DEFAULT_UDP_PORT),
         source_port: None,
@@ -391,7 +389,7 @@ fn traceroute_zero_source_port_is_rejected_before_authorization_or_execution() {
 fn traceroute_icmp_source_port_is_rejected_before_authorization_or_execution() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let mut request = udp_traceroute_request(Target::Address(destination));
-    request.strategy = Strategy::Icmp;
+    request.strategy = Transport::Icmp;
     request.destination_port = None;
     request.source_port = Some(53_333);
     let mut authorizer = FixedAuthorizer {
@@ -448,7 +446,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     let mut probe = Probe {
         sequence: 0,
         address: IpAddr::V4(remote),
-        target: ProbeTarget::Udp {
+        target: ProbeEndpoint::Udp {
             port: DEFAULT_UDP_PORT,
         },
         hop_limit: 1,
@@ -462,7 +460,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     assert_eq!(
         classify_response(
             &registry,
-            Strategy::Udp,
+            Transport::Udp,
             &probe,
             &icmpv4_error(router, local, 11, 0, quote.clone(), 2, Vec::new()),
         )
@@ -473,7 +471,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     assert_eq!(
         classify_response(
             &registry,
-            Strategy::Udp,
+            Transport::Udp,
             &probe,
             &icmpv4_error(remote, local, 3, 3, quote.clone(), 2, Vec::new()),
         )
@@ -484,7 +482,7 @@ fn traceroute_ipv4_classification_distinguishes_intermediate_terminal_and_unreac
     assert_eq!(
         classify_response(
             &registry,
-            Strategy::Udp,
+            Transport::Udp,
             &probe,
             &icmpv4_error(router, local, 3, 1, quote, 2, Vec::new()),
         )
@@ -503,7 +501,7 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
     let mut probe = Probe {
         sequence: 9,
         address: IpAddr::V6(remote),
-        target: ProbeTarget::Udp {
+        target: ProbeEndpoint::Udp {
             port: DEFAULT_UDP_PORT + 9,
         },
         hop_limit: 4,
@@ -515,7 +513,7 @@ fn traceroute_ipv6_classification_correlates_intermediate_quote() {
     let response = icmpv6_error(router, local, 3, 0, ipv6_udp_quote(&probe));
 
     assert_eq!(
-        classify_response(&registry, Strategy::Udp, &probe, &response,)
+        classify_response(&registry, Transport::Udp, &probe, &response,)
             .unwrap()
             .kind,
         ResponseKind::Intermediate

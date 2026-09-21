@@ -47,6 +47,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
   listing the arriving segment's actual retransmitted sequence spans, which
   need not form a contiguous prefix.
+- Shared probe APIs have canonical paths: `probe::{Executor, Execution, Error,
+  ProbeEndpoint, ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`,
+  and `fuzz` aliases are removed without compatibility aliases. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

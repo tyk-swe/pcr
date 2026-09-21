@@ -27,7 +27,8 @@ use crate::probe::{
     EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, nonzero_ipv4_identification,
 };
 
-use super::{Probe, ProbeEndpoint};
+use super::Probe;
+use crate::probe::ProbeEndpoint;
 
 fn scan_udp_source_port(attempt: u32) -> u16 {
     ephemeral_source_port(
@@ -304,7 +305,7 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
 // is symmetric on both sides of the comparison
 pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     if probe.udp_profile.as_ref().is_some_and(|profile| {
-        probe.endpoint.transport() != super::Transport::Udp
+        probe.endpoint.transport() != crate::probe::Transport::Udp
             || profile.payload(probe.sequence) != probe.udp_payload
     }) {
         return false;
@@ -460,7 +461,7 @@ mod tests {
             assert_eq!(
                 crate::scan::classify_response(
                     &registry,
-                    crate::scan::Transport::Udp,
+                    crate::probe::Transport::Udp,
                     &built.packet,
                     &response
                 )

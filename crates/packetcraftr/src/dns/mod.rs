@@ -68,7 +68,6 @@ pub mod tcp;
 mod tests;
 mod wire;
 
-pub use crate::probe::Executor;
 pub use batch::{
     BatchReport, MAX_QUESTIONS, QuestionOutcome, QuestionStatus, run_batch, run_batch_with_events,
 };

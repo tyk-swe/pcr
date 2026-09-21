@@ -14,9 +14,9 @@ use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
-use super::engine::{Collector, Gates, PreparedOperation, duration_error};
+use super::engine::{Gates, PreparedOperation, duration_error};
 use super::plan::batch_budget;
-use super::report::Report;
+use super::report::{Collector, Report};
 use super::{Error, Event, Request};
 
 /// The largest question count one DNS batch may declare.

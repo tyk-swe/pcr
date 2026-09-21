@@ -15,7 +15,8 @@ use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{nonzero_ipv4_identification, packet_shape_matches};
 
-use super::{Probe, ProbeTarget};
+use super::Probe;
+use crate::probe::ProbeEndpoint;
 
 // the operation-local sequence is reduced to the 32-bit wire field the probe carries;
 // sent_probe_matches applies the same reduction when comparing, so even a wrapped counter still
@@ -43,19 +44,19 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
         }
     }
     match probe.target {
-        ProbeTarget::Udp { port } => packet.push(Udp {
+        ProbeEndpoint::Udp { port } => packet.push(Udp {
             source_port: probe.source_port,
             destination_port: port,
             ..Udp::default()
         }),
-        ProbeTarget::Tcp { port } => packet.push(Tcp {
+        ProbeEndpoint::Tcp { port } => packet.push(Tcp {
             source_port: probe.source_port,
             destination_port: port,
             sequence: probe.sequence as u32,
             flags: Tcp::SYN,
             ..Tcp::default()
         }),
-        ProbeTarget::Icmp => match probe.address {
+        ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
                 body: icmp_identity(probe.sequence),
                 ..Icmpv4::default()
@@ -85,10 +86,10 @@ pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
         BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.target {
-        ProbeTarget::Tcp { .. } => BuiltinProtocol::Tcp,
-        ProbeTarget::Udp { .. } => BuiltinProtocol::Udp,
-        ProbeTarget::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
-        ProbeTarget::Icmp => BuiltinProtocol::Icmpv6,
+        ProbeEndpoint::Tcp { .. } => BuiltinProtocol::Tcp,
+        ProbeEndpoint::Udp { .. } => BuiltinProtocol::Udp,
+        ProbeEndpoint::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        ProbeEndpoint::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
@@ -124,16 +125,16 @@ pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
         return false;
     }
     match probe.target {
-        ProbeTarget::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
+        ProbeEndpoint::Udp { port } => sent.get::<Udp>().is_some_and(|udp| {
             udp.source_port == probe.source_port && udp.destination_port == port
         }),
-        ProbeTarget::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
+        ProbeEndpoint::Tcp { port } => sent.get::<Tcp>().is_some_and(|tcp| {
             tcp.source_port == probe.source_port
                 && tcp.destination_port == port
                 && tcp.sequence == probe.sequence as u32
                 && tcp.flags == Tcp::SYN
         }),
-        ProbeTarget::Icmp => match probe.address {
+        ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
             }),

@@ -7,9 +7,9 @@ use packetcraftr_core::packet::semantics;
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::{decode::DecodedPacket, packet::Packet, registry::Registry};
 
-use crate::probe::{self, Correlation};
+use crate::probe::{self, Correlation, Transport};
 
-use super::{ResponseKind, Strategy};
+use super::ResponseKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseClassification {
@@ -22,7 +22,7 @@ pub struct ResponseClassification {
 /// protocol-inconsistent traffic returns `None` and cannot advance the trace.
 pub fn classify_response(
     registry: &Registry,
-    strategy: Strategy,
+    strategy: Transport,
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<ResponseClassification> {
@@ -37,7 +37,7 @@ pub fn classify_response(
             ResponseKind::DestinationReached
         }
         Correlation::PortUnreachable
-            if strategy == Strategy::Udp && observation.responder == destination =>
+            if strategy == Transport::Udp && observation.responder == destination =>
         {
             ResponseKind::DestinationReached
         }
@@ -50,11 +50,11 @@ pub fn classify_response(
     })
 }
 
-fn packet_destination(packet: &Packet, strategy: Strategy) -> Option<IpAddr> {
+fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
     let transport = match strategy {
-        Strategy::Tcp => Some(BuiltinProtocol::Tcp),
-        Strategy::Udp => Some(BuiltinProtocol::Udp),
-        Strategy::Icmp => None,
+        Transport::Tcp => Some(BuiltinProtocol::Tcp),
+        Transport::Udp => Some(BuiltinProtocol::Udp),
+        Transport::Icmp => None,
     };
     let transport_index = packet.iter().position(|layer| match transport {
         Some(transport) => BuiltinProtocol::of(layer) == Some(transport),

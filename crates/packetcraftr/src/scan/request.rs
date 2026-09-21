@@ -12,14 +12,12 @@ use crate::probe::evidence::{EvidenceLimits, check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Selection;
 
-use crate::probe::{Error, ErrorKind};
+use crate::probe::{Error, ErrorKind, Transport};
 use crate::scan::WORKFLOW;
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_DURATION, MAX_PROBES,
     MAX_RATE,
 };
-
-pub use crate::probe::Transport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {

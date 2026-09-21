@@ -37,8 +37,8 @@ pub(super) fn render_text(
         // ICMP has no port, so it names itself; the port-bearing transports
         // name the endpoint they probed.
         let endpoint_name = match endpoint.transport {
-            packetcraftr::scan::Transport::Icmp => endpoint.transport.to_string(),
-            packetcraftr::scan::Transport::Tcp | packetcraftr::scan::Transport::Udp => {
+            packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
+            packetcraftr::probe::Transport::Tcp | packetcraftr::probe::Transport::Udp => {
                 format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
             }
         };
@@ -110,7 +110,7 @@ pub(super) fn emit_complete(
     Ok(stream.complete_with_stats(record, diagnostics, stats)?)
 }
 
-pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
+pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {
     use packetcraftr_core::error::Classified;
     let mut cli =
         CliError::from_classification(error.classification(), error.to_string(), error.causes())

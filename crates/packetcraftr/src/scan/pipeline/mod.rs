@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
-use super::{Batch, Classification, Execution, SentProbe, classify_response};
+use super::{Batch, Classification, SentProbe, classify_response};
 use crate::{
     Client, SentPacket, Stats,
-    probe::{ExchangeExecutor, PipelineEvent, PipelineOptions},
+    probe::{ExchangeExecutor, Execution, PipelineEvent, PipelineOptions},
 };
 use packetcraftr_core::{
     build::Builder,

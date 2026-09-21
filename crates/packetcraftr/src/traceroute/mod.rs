@@ -37,12 +37,10 @@ mod request;
 #[cfg(test)]
 mod tests;
 
-pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use execution::{Batch, Execution, Executor, Probe, ProbeTarget};
+pub use execution::{Batch, Probe};
 pub use report::{
-    Completion, Event, Hop, ProbeEvidence, ProbeStatus, Report, ResponseKind, Summary,
-    UndecodedEvidence,
+    Completion, Event, Hop, ProbeEvidence, Report, ResponseKind, Summary, UndecodedEvidence,
 };
-pub use request::{Limits, Request, Strategy};
+pub use request::{Limits, Request};

@@ -14,9 +14,10 @@ use super::contract::Error;
 use super::frame::{Captured, Timestamp};
 use packetcraftr::Stats;
 
-use packetcraftr::scan::{Classification, ClassificationCounts, ProbeStatus, Transport};
+use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::scan::{Classification, ClassificationCounts};
 
-/// The wire protocol one probe was sent over. `packetcraftr::scan::Transport::Icmp` splits by
+/// The wire protocol one probe was sent over. `packetcraftr::probe::Transport::Icmp` splits by
 /// address family here because the output contract names the two ICMP protocols
 /// separately; this enum is the only declaration of that vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

@@ -4,7 +4,7 @@ use packetcraftr::{
     Client,
     clock::SystemClock,
     policy::{Policy, PolicyAuthorizer},
-    probe::ExchangeExecutor,
+    probe::{ExchangeExecutor, Transport},
     scan::{self, Classification, Request},
     target::Target,
 };
@@ -193,7 +193,7 @@ fn request() -> Request {
     Request {
         max_in_flight: 2,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
-        transport: scan::Transport::Tcp,
+        transport: Transport::Tcp,
         address_family: packetcraftr::target::Family::Any,
         ports: vec![80, 81, 82, 83],
         attempts: 1,
@@ -207,7 +207,10 @@ fn request() -> Request {
         },
     }
 }
-fn execute(request: &Request, state: Arc<Mutex<State>>) -> Result<scan::Report, scan::Error> {
+fn execute(
+    request: &Request,
+    state: Arc<Mutex<State>>,
+) -> Result<scan::Report, packetcraftr::probe::Error> {
     let policy = Policy {
         max_packets_per_operation: 32,
         max_bytes_per_operation: 32 * 1500,

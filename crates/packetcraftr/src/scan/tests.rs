@@ -22,11 +22,9 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::P
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::probe::probe_packet;
-use super::{
-    Batch, Classification, Event, Execution, Executor, Limits, PortSpec, ProbeStatus, Request,
-    Transport, select_ports,
-};
+use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_ports};
 use crate::policy::PolicyAuthorizer;
+use crate::probe::{Execution, Executor, ProbeStatus, Transport};
 use crate::target::Target;
 use crate::test_fixtures::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
@@ -898,7 +896,7 @@ struct EchoReplyExecutor {
 impl Executor<Batch> for EchoReplyExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probe.address, batch.probe.endpoint)
         else {
             return Ok(execution);
@@ -991,7 +989,7 @@ impl Executor<Batch> for EveryOtherEchoExecutor {
             return Ok(execution);
         }
         let latency = Duration::from_micros(250 + 250 * (batch.probe.sequence / 2));
-        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probe.address, batch.probe.endpoint)
         else {
             return Ok(execution);
@@ -1087,7 +1085,7 @@ struct StaleEchoExecutor {
 impl Executor<Batch> for StaleEchoExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        let (IpAddr::V4(remote), super::ProbeEndpoint::Icmp) =
+        let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probe.address, batch.probe.endpoint)
         else {
             return Ok(execution);

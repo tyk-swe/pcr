@@ -5,7 +5,7 @@ use packetcraftr::{
     Client,
     clock::SystemClock,
     policy::{Policy, PolicyAuthorizer},
-    probe::ExchangeExecutor,
+    probe::{ExchangeExecutor, Transport},
     scan::{
         self,
         profile::{ByteCheck, Config, Payload, ResponseCheck, Status, UdpProfile},
@@ -302,7 +302,7 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
     let request = scan::Request {
         max_in_flight: window,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
-        transport: scan::Transport::Udp,
+        transport: Transport::Udp,
         address_family: packetcraftr::target::Family::Any,
         ports: vec![5353, 67],
         attempts: 1,

@@ -7,8 +7,8 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::WORKFLOW;
-use super::{Batch, Probe, ProbeTarget, Request, Strategy};
-use crate::probe::{Error, ErrorKind};
+use super::{Batch, Probe, Request};
+use crate::probe::{Error, ErrorKind, ProbeEndpoint, Transport};
 
 pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
     let mut batches = Vec::with_capacity(request.hop_count());
@@ -59,7 +59,7 @@ pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Ve
 /// Resolves the request's strategy and declared port into the target the probe
 /// at `sequence` addresses. UDP walks one unique destination port per probe, so
 /// the walk is guarded to stay inside `u16`.
-fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> {
+fn probe_target(request: &Request, sequence: u64) -> Result<ProbeEndpoint, Error> {
     let declared_port = || {
         request.destination_port.ok_or_else(|| {
             Error::new(
@@ -74,7 +74,7 @@ fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> 
         })
     };
     match request.strategy {
-        Strategy::Udp => {
+        Transport::Udp => {
             let base = declared_port()?;
             let port = u16::try_from(sequence)
                 .ok()
@@ -90,12 +90,12 @@ fn probe_target(request: &Request, sequence: u64) -> Result<ProbeTarget, Error> 
                         },
                     )
                 })?;
-            Ok(ProbeTarget::Udp { port })
+            Ok(ProbeEndpoint::Udp { port })
         }
-        Strategy::Tcp => Ok(ProbeTarget::Tcp {
+        Transport::Tcp => Ok(ProbeEndpoint::Tcp {
             port: declared_port()?,
         }),
-        Strategy::Icmp => Ok(ProbeTarget::Icmp),
+        Transport::Icmp => Ok(ProbeEndpoint::Icmp),
     }
 }
 

@@ -11,9 +11,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
 
-use super::request::Strategy;
-
-pub use crate::probe::ProbeStatus;
+use crate::probe::{ProbeStatus, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -73,7 +71,7 @@ pub struct ProbeEvidence {
     pub hop_limit: u8,
     pub attempt: u32,
     pub destination: IpAddr,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     pub destination_port: Option<u16>,
     pub status: ProbeStatus,
     pub response_kind: Option<ResponseKind>,
@@ -102,7 +100,7 @@ pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     pub destination_port: Option<u16>,
     pub hops: Vec<Hop>,
     pub undecoded: Vec<UndecodedEvidence>,
@@ -129,7 +127,7 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     pub destination_port: Option<u16>,
     pub completion: Completion,
     pub stats: Stats,

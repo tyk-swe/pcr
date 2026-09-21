@@ -1,5 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+
+//! Published DNS report models and the event-to-report [`Collector`] both
+//! individual and batch queries share.
+
 use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -12,6 +16,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
 
+use super::error::Error;
 use super::request::QueryType;
 use super::{Edns, Record};
 
@@ -405,4 +410,55 @@ pub struct Summary {
     pub transaction_id: u16,
     pub completion: Completion,
     pub stats: Stats,
+}
+
+#[derive(Default)]
+pub(super) struct Collector {
+    attempts: Vec<AttemptEvidence>,
+    answers: Vec<Record>,
+    authorities: Vec<Record>,
+    additionals: Vec<Record>,
+    rejected: Vec<RejectedRecord>,
+    undecoded: Vec<UndecodedEvidence>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl Collector {
+    pub(super) fn observe(&mut self, event: Event) {
+        match event {
+            Event::Attempt { evidence, .. } => self.attempts.push(evidence),
+            Event::Record {
+                section, record, ..
+            } => match section {
+                Section::Answer => self.answers.push(record),
+                Section::Authority => self.authorities.push(record),
+                Section::Additional => self.additionals.push(record),
+            },
+            Event::Rejected { record, .. } => self.rejected.push(record),
+            Event::Undecoded(evidence) => self.undecoded.push(evidence),
+            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
+        }
+    }
+
+    pub(super) fn finish(self, summary: Summary) -> Result<Report, Error> {
+        let response = summary
+            .completion
+            .response
+            .clone()
+            .map(|metadata| ValidatedResponse {
+                metadata,
+                answers: self.answers,
+                authorities: self.authorities,
+                additionals: self.additionals,
+                rejected_records: self.rejected,
+            });
+        Report::new(
+            summary,
+            response,
+            self.attempts,
+            self.undecoded,
+            self.diagnostics,
+        )
+        .map_err(Into::into)
+    }
 }

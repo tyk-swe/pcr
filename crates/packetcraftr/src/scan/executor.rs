@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
-use crate::probe::ExchangeExecutor;
 use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
+use crate::probe::{ExchangeExecutor, Execution, Executor};
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
+use super::Batch;
 use super::classification::classify_response;
-use super::{Batch, Execution, Executor};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",

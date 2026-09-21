@@ -7,8 +7,8 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::WORKFLOW;
-use super::{Batch, Probe, ProbeEndpoint, Request};
-use crate::probe::{Error, ErrorKind};
+use super::{Batch, Probe, Request};
+use crate::probe::{Error, ErrorKind, ProbeEndpoint};
 
 pub(super) fn build_batches<'a>(
     request: &'a Request,
@@ -120,7 +120,7 @@ mod tests {
         let mut request = Request {
             max_in_flight: 1,
             targets: Target::Address("192.0.2.1".parse().expect("documentation address")).into(),
-            transport: crate::scan::Transport::Tcp,
+            transport: crate::probe::Transport::Tcp,
             address_family: Family::Any,
             ports: vec![80],
             attempts: 1,

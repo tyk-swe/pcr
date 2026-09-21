@@ -1,10 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Exact network-header reconstruction after a complete payload is admitted.
+//! Retained-header sizing and materialization for admitted fragments, and
+//! exact network-header reconstruction after a complete payload is admitted.
 
+use super::validation::{FAMILY_MISMATCH, IPV6_HEADER_LENGTH, Incoming, IncomingReconstruction};
 use super::{
-    Bytes, Ecn, Error, Family, IPV6_HEADER_LENGTH, MalformedError, Reconstruction, ResourceError,
+    Bytes, DatagramState, Ecn, Error, Family, MalformedError, Reconstruction, ResourceError,
 };
 
 /// A complete IPv4 datagram covers offset zero, so the fragment that filled
@@ -54,6 +56,122 @@ pub(super) fn reconstruct_bytes(
             payload,
         ),
     }
+}
+
+pub(super) fn reconstruction_retained_bytes(
+    existing: Option<&DatagramState>,
+    incoming: &Incoming,
+) -> Result<usize, Error> {
+    let established = existing.map(|state| &state.reconstruction);
+    match &incoming.reconstruction {
+        IncomingReconstruction::Ipv4 { header } => match established {
+            Some(Reconstruction::Ipv4 {
+                first_header: Some(first_header),
+                ..
+            }) => Ok(first_header.len()),
+            Some(Reconstruction::Ipv4 {
+                first_header: None, ..
+            })
+            | None => Ok(if incoming.offset == 0 {
+                header.len()
+            } else {
+                0
+            }),
+            Some(Reconstruction::Ipv6 { .. }) => Err(FAMILY_MISMATCH),
+        },
+        IncomingReconstruction::Ipv6 { prefix, .. } => match established {
+            // The offset-zero fragment's prefix replaces a provisional one, so
+            // admission must account for the prefix the datagram will retain.
+            Some(Reconstruction::Ipv6 {
+                prefix: _,
+                from_offset_zero,
+                ..
+            }) if !*from_offset_zero && incoming.offset == 0 => Ok(prefix.len()),
+            Some(Reconstruction::Ipv6 {
+                prefix: established_prefix,
+                ..
+            }) => Ok(established_prefix.len()),
+            None => Ok(prefix.len()),
+            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
+        },
+    }
+}
+
+pub(super) fn materialize_reconstruction(
+    existing: Option<&DatagramState>,
+    incoming: &Incoming,
+    ecn: Ecn,
+) -> Result<Reconstruction, Error> {
+    let established = existing.map(|state| &state.reconstruction);
+    match &incoming.reconstruction {
+        IncomingReconstruction::Ipv4 { header } => {
+            let established_first = match established {
+                Some(Reconstruction::Ipv4 { first_header, .. }) => first_header.clone(),
+                None => None,
+                Some(Reconstruction::Ipv6 { .. }) => return Err(FAMILY_MISMATCH),
+            };
+            Ok(Reconstruction::Ipv4 {
+                first_header: match established_first {
+                    Some(first_header) => Some(first_header),
+                    None if incoming.offset == 0 => Some(copy_bytes(header)?),
+                    None => None,
+                },
+                ecn,
+            })
+        }
+        IncomingReconstruction::Ipv6 {
+            prefix,
+            predecessor_next_header_offset,
+            next_header,
+        } => match established {
+            Some(Reconstruction::Ipv6 {
+                prefix: established_prefix,
+                predecessor_next_header_offset: established_predecessor,
+                next_header: established_next,
+                from_offset_zero,
+                ..
+            }) => {
+                if !from_offset_zero && incoming.offset == 0 {
+                    // RFC 8200 §4.5: only the offset-zero fragment's
+                    // unfragmentable header and Fragment Next Header are
+                    // retained, even when later-offset fragments arrived first.
+                    Ok(Reconstruction::Ipv6 {
+                        prefix: copy_bytes(prefix)?,
+                        predecessor_next_header_offset: *predecessor_next_header_offset,
+                        next_header: *next_header,
+                        ecn,
+                        from_offset_zero: true,
+                    })
+                } else {
+                    Ok(Reconstruction::Ipv6 {
+                        prefix: established_prefix.clone(),
+                        predecessor_next_header_offset: *established_predecessor,
+                        next_header: *established_next,
+                        ecn,
+                        from_offset_zero: *from_offset_zero,
+                    })
+                }
+            }
+            None => Ok(Reconstruction::Ipv6 {
+                prefix: copy_bytes(prefix)?,
+                predecessor_next_header_offset: *predecessor_next_header_offset,
+                next_header: *next_header,
+                ecn,
+                from_offset_zero: incoming.offset == 0,
+            }),
+            Some(Reconstruction::Ipv4 { .. }) => Err(FAMILY_MISMATCH),
+        },
+    }
+}
+
+fn copy_bytes(source: &[u8]) -> Result<Bytes, Error> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(source.len())
+        .map_err(|_| ResourceError::AllocationFailed {
+            requested: source.len(),
+        })?;
+    copy.extend_from_slice(source);
+    Ok(Bytes::from(copy))
 }
 
 fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {

@@ -91,19 +91,19 @@ fn prepare_request(
     arguments: &Args,
     queue_limits: net::capture::Limits,
 ) -> Result<packetcraftr::traceroute::Request, CliError> {
-    let strategy: packetcraftr::traceroute::Strategy = arguments.strategy.into();
+    let strategy: packetcraftr::probe::Transport = arguments.strategy.into();
     let destination_port = match strategy {
-        packetcraftr::traceroute::Strategy::Udp => Some(
+        packetcraftr::probe::Transport::Udp => Some(
             arguments
                 .port
                 .unwrap_or(packetcraftr::traceroute::DEFAULT_UDP_PORT),
         ),
-        packetcraftr::traceroute::Strategy::Tcp => Some(
+        packetcraftr::probe::Transport::Tcp => Some(
             arguments
                 .port
                 .unwrap_or(packetcraftr::traceroute::DEFAULT_TCP_PORT),
         ),
-        packetcraftr::traceroute::Strategy::Icmp => arguments.port,
+        packetcraftr::probe::Transport::Icmp => arguments.port,
     };
     let trace_limits = packetcraftr::traceroute::Limits {
         max_probes: arguments.max_probes,

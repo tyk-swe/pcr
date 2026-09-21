@@ -30,11 +30,14 @@ use super::classification::classify_response;
 use super::plan::{build_batches, worst_case_duration};
 use super::probe::sent_probe_matches;
 use super::{
-    Batch, Classification, ClassificationCounts, Endpoint, Event, Execution, Executor, Limits,
-    Probe, ProbeEndpoint, ProbeEvidence, ProbeStatus, Report, Request, Summary, Transport,
+    Batch, Classification, ClassificationCounts, Endpoint, Event, Limits, Probe, ProbeEvidence,
+    Report, Request, Summary,
 };
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
-use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
+use crate::probe::{
+    Error, ErrorKind, Execution, Executor, ProbeEndpoint, ProbeStatus, Transport, duration_limit,
+    enforce_deadline, index_or_push,
+};
 use crate::probe::{PipelineEvent, PipelineOptions};
 
 /// Validates the request, authorizes every resolved target and the complete

@@ -550,3 +550,22 @@ to one of the per-command proof enums (`AggregateFormat`, `ToolFormat`,
 `as_format()`, `From` into `Format`, `TryFrom<Format, Error = Format>`, and
 `Display`. Shared helpers accept `impl Into<Format>`, and dead rendering arms
 surface typed `internal` errors instead of panicking.
+
+## Canonical probe APIs
+
+Shared probe types now live only at `packetcraftr::probe`. There are no
+compatibility aliases; update imports directly:
+
+| Existing paths | Canonical path |
+|---|---|
+| `scan::Executor`, `traceroute::Executor`, `dns::Executor`, `fuzz::Executor` | `probe::Executor` |
+| `scan::Execution`, `traceroute::Execution` | `probe::Execution` |
+| `scan::Error`, `traceroute::Error` | `probe::Error` |
+| `scan::ProbeEndpoint`, `traceroute::ProbeTarget` | `probe::ProbeEndpoint` |
+| `scan::ProbeStatus`, `traceroute::ProbeStatus` | `probe::ProbeStatus` |
+| `scan::Transport`, `traceroute::Strategy` | `probe::Transport` |
+
+Workflow-specific types keep their module homes: `dns::Error`,
+`dns::Execution`, `dns::Transport`, DNS execution receipts, `fuzz::Error`,
+`fuzz::Execution`, and the specialized `traceroute::Batch` alias are
+unchanged.

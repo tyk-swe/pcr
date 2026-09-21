@@ -11,7 +11,7 @@ use packetcraftr_core::frame::Frame;
 
 use crate::Stats;
 
-use super::request::Transport;
+use crate::probe::{ProbeStatus, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,8 +58,6 @@ impl Classification {
 }
 
 packetcraftr_core::display_via_as_str!(Classification);
-
-pub use crate::probe::ProbeStatus;
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {

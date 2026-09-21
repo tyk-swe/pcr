@@ -3,12 +3,12 @@
 
 //! Explicit kernel TCP scanning with socket evidence and bounded rolling admission.
 
-use super::{Classification, Request, Transport, WORKFLOW};
+use super::{Classification, Request, WORKFLOW};
 use crate::{
     BoundaryError,
     clock::Clock,
     policy::{Authorizer, Operation, SocketBudget, SocketOperation},
-    probe::{Error, ErrorKind, enforce_deadline},
+    probe::{Error, ErrorKind, Transport, enforce_deadline},
     target::approve_operation,
 };
 use packetcraftr_core::budget::Deadline;

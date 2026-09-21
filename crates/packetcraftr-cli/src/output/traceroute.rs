@@ -14,14 +14,15 @@ use super::contract::Error;
 use super::frame::{Captured, Timestamp};
 use packetcraftr::Stats;
 
-use packetcraftr::traceroute::{Completion, ProbeStatus, ResponseKind, Strategy};
+use packetcraftr::probe::{ProbeStatus, Transport};
+use packetcraftr::traceroute::{Completion, ResponseKind};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
     pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
@@ -58,7 +59,7 @@ pub struct Report {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub destination: IpAddr,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
     pub hops: Vec<Hop>,
@@ -138,7 +139,7 @@ pub enum Event {
         target: String,
         resolved_addresses: Vec<IpAddr>,
         destination: IpAddr,
-        strategy: Strategy,
+        strategy: Transport,
         #[serde(skip_serializing_if = "Option::is_none")]
         destination_port: Option<u16>,
         completion: Completion,

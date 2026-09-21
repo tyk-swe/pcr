@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
-use crate::probe::ExchangeExecutor;
 use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
+use crate::probe::{ExchangeExecutor, Execution, Executor, Transport};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
 
 use super::classification::classify_response;
-use super::{Batch, Execution, Executor, Probe, Strategy};
+use super::{Batch, Probe};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
@@ -34,9 +34,9 @@ where
         }
 
         let varying_field = match first.target.transport() {
-            Strategy::Udp => "destination_port",
-            Strategy::Tcp => "sequence",
-            Strategy::Icmp => "body",
+            Transport::Udp => "destination_port",
+            Transport::Tcp => "sequence",
+            Transport::Icmp => "body",
         };
         let mut template = packetcraftr_core::template::Template::new(first.packet());
         if batch.probes.len() > 1 {
@@ -105,7 +105,7 @@ fn validate_batch(batch: &Batch) -> Result<&Probe, BoundaryError> {
     if batch
         .probes
         .iter()
-        .any(|probe| probe.target.transport() != Strategy::Icmp && probe.source_port == 0)
+        .any(|probe| probe.target.transport() != Transport::Icmp && probe.source_port == 0)
     {
         return Err(
             EXECUTOR_FAULT.invalid("UDP and TCP traceroute probes require a non-zero source port")
@@ -116,7 +116,7 @@ fn validate_batch(batch: &Batch) -> Result<&Probe, BoundaryError> {
             || probe.target.transport() != first.target.transport()
             || probe.source_port != first.source_port
             || probe.hop_limit != first.hop_limit
-            || (probe.target.transport() == Strategy::Tcp && probe.target != first.target)
+            || (probe.target.transport() == Transport::Tcp && probe.target != first.target)
     }) {
         return Err(EXECUTOR_FAULT.invalid(
             "traceroute batches must share address, strategy, source port, hop limit, and TCP destination port",
@@ -130,11 +130,11 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
 
-    use super::super::ProbeTarget;
     use super::*;
     use crate::evidence::ExecutionPermit;
+    use crate::probe::ProbeEndpoint;
 
-    fn batch(target: ProbeTarget, source_ports: &[u16]) -> Batch {
+    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch {
         Batch {
             probes: source_ports
                 .iter()
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn executor_rejects_heterogeneous_source_ports() {
-        let batch = batch(ProbeTarget::Udp { port: 33_434 }, &[49_152, 49_153]);
+        let batch = batch(ProbeEndpoint::Udp { port: 33_434 }, &[49_152, 49_153]);
 
         assert!(validate_batch(&batch).is_err());
     }
@@ -164,11 +164,11 @@ mod tests {
     #[test]
     fn executor_rejects_zero_transport_source_ports() {
         for target in [
-            ProbeTarget::Udp { port: 33_434 },
-            ProbeTarget::Tcp { port: 80 },
+            ProbeEndpoint::Udp { port: 33_434 },
+            ProbeEndpoint::Tcp { port: 80 },
         ] {
             assert!(validate_batch(&batch(target, &[0])).is_err());
         }
-        assert!(validate_batch(&batch(ProbeTarget::Icmp, &[0])).is_ok());
+        assert!(validate_batch(&batch(ProbeEndpoint::Icmp, &[0])).is_ok());
     }
 }

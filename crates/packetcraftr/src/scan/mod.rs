@@ -43,12 +43,11 @@ mod targets;
 #[cfg(test)]
 mod tests;
 
-pub use crate::probe::Error;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
-pub use execution::{Batch, Execution, Executor, Probe, ProbeEndpoint};
+pub use execution::{Batch, Probe};
 pub use report::{
-    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, ProbeStatus, Report, Rtt,
-    SentProbe, Summary,
+    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, Report, Rtt, SentProbe,
+    Summary,
 };
-pub use request::{Limits, PortSpec, Request, Transport, select_ports};
+pub use request::{Limits, PortSpec, Request, select_ports};

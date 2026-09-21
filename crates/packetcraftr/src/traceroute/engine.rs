@@ -31,10 +31,13 @@ use super::classification::classify_response;
 use super::plan::{build_batches, worst_case_duration};
 use super::probe::sent_probe_matches;
 use super::{
-    Batch, Completion, Event, Execution, Executor, Hop, Limits, Probe, ProbeEvidence, ProbeStatus,
-    Report, Request, ResponseKind, Strategy, Summary, UndecodedEvidence,
+    Batch, Completion, Event, Hop, Limits, Probe, ProbeEvidence, Report, Request, ResponseKind,
+    Summary, UndecodedEvidence,
 };
-use crate::probe::{Error, ErrorKind, duration_limit, enforce_deadline, index_or_push};
+use crate::probe::{
+    Error, ErrorKind, Execution, Executor, ProbeStatus, Transport, duration_limit,
+    enforce_deadline, index_or_push,
+};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -251,7 +254,7 @@ fn approve_traceroute<A: Authorizer>(
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
     check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
-    if let (Strategy::Udp, Some(base)) = (request.strategy, request.destination_port) {
+    if let (Transport::Udp, Some(base)) = (request.strategy, request.destination_port) {
         let last_offset = total_probes.saturating_sub(1);
         if usize::from(base)
             .checked_add(last_offset)

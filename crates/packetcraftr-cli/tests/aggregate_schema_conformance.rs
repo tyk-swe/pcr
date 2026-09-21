@@ -581,13 +581,13 @@ fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
         application: None,
         sequence: 0,
         address,
-        transport: packetcraftr::scan::Transport::Tcp,
+        transport: packetcraftr::probe::Transport::Tcp,
         port: Some(443),
         attempt: 1,
         status: if responded {
-            packetcraftr::scan::ProbeStatus::Response
+            packetcraftr::probe::ProbeStatus::Response
         } else {
-            packetcraftr::scan::ProbeStatus::Timeout
+            packetcraftr::probe::ProbeStatus::Timeout
         },
         classification: if responded {
             packetcraftr::scan::Classification::Open
@@ -612,7 +612,7 @@ fn scan_case() -> Value {
             resolved_addresses: vec![address],
             endpoints: vec![packetcraftr::scan::Endpoint {
                 address,
-                transport: packetcraftr::scan::Transport::Tcp,
+                transport: packetcraftr::probe::Transport::Tcp,
                 port: Some(443),
                 classification: packetcraftr::scan::Classification::Open,
                 probes: vec![scan_probe(true), scan_probe(false)],
@@ -632,10 +632,10 @@ fn scan_icmp_case() -> Value {
         application: None,
         sequence: 1,
         address,
-        transport: packetcraftr::scan::Transport::Icmp,
+        transport: packetcraftr::probe::Transport::Icmp,
         port: None,
         attempt: 1,
-        status: packetcraftr::scan::ProbeStatus::Response,
+        status: packetcraftr::probe::ProbeStatus::Response,
         classification: packetcraftr::scan::Classification::Open,
         responder: Some(address),
         sent_at: UNIX_EPOCH,
@@ -646,7 +646,7 @@ fn scan_icmp_case() -> Value {
     };
     let endpoint = |address: IpAddr| packetcraftr::scan::Endpoint {
         address,
-        transport: packetcraftr::scan::Transport::Icmp,
+        transport: packetcraftr::probe::Transport::Icmp,
         port: None,
         classification: packetcraftr::scan::Classification::Open,
         probes: vec![probe(address)],
@@ -913,12 +913,12 @@ fn trace_probe(responded: bool) -> packetcraftr::traceroute::ProbeEvidence {
         hop_limit: 1,
         attempt: 1,
         destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-        strategy: packetcraftr::traceroute::Strategy::Udp,
+        strategy: packetcraftr::probe::Transport::Udp,
         destination_port: Some(33_434),
         status: if responded {
-            packetcraftr::traceroute::ProbeStatus::Response
+            packetcraftr::probe::ProbeStatus::Response
         } else {
-            packetcraftr::traceroute::ProbeStatus::Timeout
+            packetcraftr::probe::ProbeStatus::Timeout
         },
         response_kind: responded.then_some(packetcraftr::traceroute::ResponseKind::Intermediate),
         responder: responded.then_some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 254))),
@@ -941,7 +941,7 @@ fn traceroute_case() -> Value {
             target: "host.example".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))],
             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-            strategy: packetcraftr::traceroute::Strategy::Udp,
+            strategy: packetcraftr::probe::Transport::Udp,
             destination_port: Some(33_434),
             hops: vec![packetcraftr::traceroute::Hop {
                 hop_limit: 1,
@@ -1557,12 +1557,12 @@ fn vocabulary<T: serde::Serialize>(
 fn frozen_vocabularies() -> Vec<Vocabulary> {
     use packetcraftr::dns::{Outcome as DnsOutcome, Section, Transport as DnsTransport};
     use packetcraftr::fuzz::CaseOutcome;
-    use packetcraftr::scan::{
-        Classification, ProbeStatus as ScanStatus, Transport as ScanTransport,
+    use packetcraftr::probe::{
+        ProbeStatus as ScanStatus, ProbeStatus as TraceStatus, Transport as ScanTransport,
+        Transport as TraceStrategy,
     };
-    use packetcraftr::traceroute::{
-        Completion, ProbeStatus as TraceStatus, ResponseKind, Strategy as TraceStrategy,
-    };
+    use packetcraftr::scan::Classification;
+    use packetcraftr::traceroute::{Completion, ResponseKind};
     use packetcraftr_core::diagnostic::Severity;
     use packetcraftr_core::frame::Direction;
     use packetcraftr_core::fuzz::Strategy as FuzzStrategy;
@@ -1641,7 +1641,7 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::scan::ProbeStatus",
+            "packetcraftr::probe::ProbeStatus",
             "/$defs/scanProbe/properties/status/enum",
             [ScanStatus::Response, ScanStatus::Timeout],
         ),
@@ -1656,12 +1656,12 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::scan::Transport",
+            "packetcraftr::probe::Transport",
             "/$defs/scanEndpoint/properties/transport/enum",
             [ScanTransport::Tcp, ScanTransport::Udp, ScanTransport::Icmp],
         ),
         vocabulary(
-            "packetcraftr::traceroute::ProbeStatus",
+            "packetcraftr::probe::ProbeStatus",
             "/$defs/traceProbe/properties/status/enum",
             [TraceStatus::Response, TraceStatus::Timeout],
         ),
@@ -1675,7 +1675,7 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::traceroute::Strategy",
+            "packetcraftr::probe::Transport",
             "/$defs/traceProbe/properties/strategy/enum",
             [TraceStrategy::Udp, TraceStrategy::Icmp, TraceStrategy::Tcp],
         ),

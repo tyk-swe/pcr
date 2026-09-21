@@ -104,7 +104,7 @@ pub(crate) enum Transport {
     Icmp,
 }
 
-impl From<Transport> for packetcraftr::scan::Transport {
+impl From<Transport> for packetcraftr::probe::Transport {
     fn from(value: Transport) -> Self {
         match value {
             Transport::Tcp => Self::Tcp,

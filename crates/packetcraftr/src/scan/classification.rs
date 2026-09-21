@@ -5,9 +5,9 @@ use std::net::IpAddr;
 
 use packetcraftr_core::{decode::DecodedPacket, packet::Packet, registry::Registry};
 
-use crate::probe::Correlation;
+use crate::probe::{Correlation, Transport};
 
-use super::{Classification, Transport};
+use super::Classification;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResponseClassification {

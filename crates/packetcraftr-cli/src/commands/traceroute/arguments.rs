@@ -22,7 +22,7 @@ pub(crate) enum Strategy {
     Tcp,
 }
 
-impl From<Strategy> for packetcraftr::traceroute::Strategy {
+impl From<Strategy> for packetcraftr::probe::Transport {
     fn from(value: Strategy) -> Self {
         match value {
             Strategy::Udp => Self::Udp,

@@ -12,13 +12,11 @@ use crate::probe::evidence::{
 use crate::target::Family;
 use crate::target::Target;
 
-use crate::probe::{Error, ErrorKind};
+use crate::probe::{Error, ErrorKind, Transport};
 use crate::traceroute::WORKFLOW;
 use crate::traceroute::{
     DEFAULT_MAX_UNDECODED_FRAMES, MAX_DURATION, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE,
 };
-
-pub use crate::probe::Transport as Strategy;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -98,7 +96,7 @@ impl Limits {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Request {
     pub target: Target,
-    pub strategy: Strategy,
+    pub strategy: Transport,
     pub address_family: Family,
     /// UDP base destination port or fixed TCP destination port. ICMP requires
     /// this to be absent.
@@ -184,7 +182,7 @@ impl Request {
             ));
         }
         match (self.strategy, self.destination_port) {
-            (Strategy::Udp | Strategy::Tcp, None) => {
+            (Transport::Udp | Transport::Tcp, None) => {
                 return Err(Error::new(
                     WORKFLOW,
                     ErrorKind::InvalidPort {
@@ -192,7 +190,7 @@ impl Request {
                     },
                 ));
             }
-            (Strategy::Udp | Strategy::Tcp, Some(0)) => {
+            (Transport::Udp | Transport::Tcp, Some(0)) => {
                 return Err(Error::new(
                     WORKFLOW,
                     ErrorKind::InvalidPort {
@@ -201,7 +199,7 @@ impl Request {
                     },
                 ));
             }
-            (Strategy::Icmp, Some(_)) => {
+            (Transport::Icmp, Some(_)) => {
                 return Err(Error::new(
                     WORKFLOW,
                     ErrorKind::InvalidPort {
@@ -212,7 +210,7 @@ impl Request {
             _ => {}
         }
         if self.source_port == Some(0)
-            || (self.strategy == Strategy::Icmp && self.source_port.is_some())
+            || (self.strategy == Transport::Icmp && self.source_port.is_some())
         {
             return Err(Error::new(WORKFLOW, ErrorKind::InvalidSourcePort));
         }

@@ -4,7 +4,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 
-pub use crate::probe::ProbeEndpoint;
+use crate::probe::{Execution, ProbeEndpoint};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -56,4 +56,3 @@ impl crate::probe::runner::BatchPlan for Batch {
         &mut self.timeout
     }
 }
-pub use crate::probe::{Execution, Executor};

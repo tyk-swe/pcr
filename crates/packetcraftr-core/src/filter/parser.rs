@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::ast::{Op, Predicate};
+use super::comparison::Needle;
 use super::error::Error;
 use super::lexer::{CompareOperator, Spanned, Token, tokenize};
 use super::literal::{self, Literal};
@@ -477,6 +478,10 @@ fn parse_field_predicate(
         }) => {
             let (needle, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
             check_searchable(&field, &needle, *operator_offset)?;
+            let needle = match Needle::new(needle) {
+                Ok(needle) => needle,
+                Err(literal) => return Err(incompatible(&field, &literal, *operator_offset)),
+            };
             Ok((Predicate::Contains { field, needle }, next))
         }
         Some(Spanned {

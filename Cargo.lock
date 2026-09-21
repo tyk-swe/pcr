@@ -1084,6 +1084,7 @@ dependencies = [
  "criterion",
  "flate2",
  "md-5",
+ "memchr",
  "noyalib",
  "proptest",
  "serde",

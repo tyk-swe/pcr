@@ -21,6 +21,7 @@ bytes.workspace = true
 flate2.workspace = true
 zstd.workspace = true
 md5.workspace = true
+memchr.workspace = true
 noyalib.workspace = true
 serde.workspace = true
 serde_json.workspace = true

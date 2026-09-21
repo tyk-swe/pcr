@@ -12,22 +12,23 @@ fuzz_target!(|data: &[u8]| {
     // question loop above the decompressor gets the same hostile bytes.
     let split = data.len().min(2);
     let (control, message) = data.split_at(split);
+    let message = Bytes::copy_from_slice(message);
     let start = usize::from(control.first().copied().unwrap_or(0));
     let max_pointers = usize::from(control.get(1).copied().unwrap_or(32));
 
-    let expanded = name::decompress(message, start, max_pointers);
+    let expanded = name::decompress(&message, start, max_pointers);
 
     // Decompression is a pure function of its three inputs.
     assert_eq!(
         expanded,
-        name::decompress(message, start, max_pointers),
+        name::decompress(&message, start, max_pointers),
         "decompression must be deterministic"
     );
 
     // Raising the pointer ceiling can only admit more names, never fewer.
     if expanded.is_ok() {
         assert!(
-            name::decompress(message, start, max_pointers.saturating_add(1)).is_ok(),
+            name::decompress(&message, start, max_pointers.saturating_add(1)).is_ok(),
             "a larger pointer budget must still accept an accepted name"
         );
     }
@@ -57,5 +58,5 @@ fuzz_target!(|data: &[u8]| {
         );
     }
 
-    let _ = Dns::try_from(Bytes::copy_from_slice(message));
+    let _ = Dns::try_from(message);
 });

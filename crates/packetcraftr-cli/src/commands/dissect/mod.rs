@@ -30,6 +30,14 @@ pub(super) fn run(
     stream: &crate::rendering::StreamEncoder,
 ) -> Result<(), CliError> {
     let registry = arguments.decode.registry()?;
+    if arguments.fields.is_empty()
+        && matches!(
+            format,
+            DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv
+        )
+    {
+        return Err(super::projection::missing_fields_error());
+    }
     let projector = super::projection::Projector::prepare(
         &arguments.fields,
         arguments.max_projection_bytes,

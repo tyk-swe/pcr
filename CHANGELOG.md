@@ -275,6 +275,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `read` without `--field` rejects JSON, CSV, and TSV output with the shared
+  "this output format requires --field selections" message.
 - Trim redundant source comments and Rustdoc while retaining API contracts,
   safety explanations, examples, and CLI help text.
 

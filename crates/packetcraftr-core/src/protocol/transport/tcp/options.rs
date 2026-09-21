@@ -179,7 +179,7 @@ pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, codec::Error> 
 
 /// Parses the option area, preserving order and every byte. Input is already
 /// bounded by the 40-byte TCP maximum, so parsing cannot allocate beyond it.
-pub(super) fn parse(bytes: &[u8]) -> Vec<TcpOption> {
+pub(super) fn parse(bytes: &Bytes) -> Vec<TcpOption> {
     let mut options = Vec::new();
     let mut cursor = 0;
     while cursor < bytes.len() {
@@ -188,9 +188,7 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<TcpOption> {
             KIND_END => {
                 options.push(TcpOption::End);
                 if cursor + 1 < bytes.len() {
-                    options.push(TcpOption::Trailing(Bytes::copy_from_slice(
-                        &bytes[cursor + 1..],
-                    )));
+                    options.push(TcpOption::Trailing(bytes.slice(cursor + 1..)));
                 }
                 break;
             }
@@ -199,7 +197,7 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<TcpOption> {
                 cursor += 1;
             }
             _ => {
-                let malformed = || TcpOption::Trailing(Bytes::copy_from_slice(&bytes[cursor..]));
+                let malformed = || TcpOption::Trailing(bytes.slice(cursor..));
                 let Some(&length) = bytes.get(cursor + 1) else {
                     options.push(malformed());
                     break;
@@ -212,7 +210,7 @@ pub(super) fn parse(bytes: &[u8]) -> Vec<TcpOption> {
                     options.push(malformed());
                     break;
                 };
-                options.push(typed(kind, Bytes::copy_from_slice(body)));
+                options.push(typed(kind, bytes.slice_ref(body)));
                 cursor += length;
             }
         }
@@ -416,7 +414,7 @@ mod tests {
                 0x1e
             ]
         );
-        assert_eq!(parse(&bytes), options);
+        assert_eq!(parse(&Bytes::copy_from_slice(&bytes)), options);
     }
 
     #[test]
@@ -430,7 +428,7 @@ mod tests {
             vec![2, 8, 0x05, 0xb4],
             vec![30, 4, 9, 9],
         ] {
-            let parsed = parse(&bytes);
+            let parsed = parse(&Bytes::copy_from_slice(&bytes));
             assert!(matches!(
                 parsed.last(),
                 Some(TcpOption::Trailing(_)) | Some(TcpOption::Raw { .. })
@@ -438,13 +436,13 @@ mod tests {
             assert_eq!(wire(&parsed), bytes, "{bytes:?} must round-trip");
         }
         // The unparseable tail keeps the full malformed remainder.
-        match parse(&[2, 8, 0x05, 0xb4]).as_slice() {
+        match parse(&Bytes::from_static(&[2, 8, 0x05, 0xb4])).as_slice() {
             [TcpOption::Trailing(bytes)] => assert_eq!(bytes.as_ref(), &[2, 8, 0x05, 0xb4]),
             other => panic!("expected trailing bytes, got {other:?}"),
         }
         // Padding after EOL is opaque, not additional options.
         assert_eq!(
-            parse(&[0, 0, 0]),
+            parse(&Bytes::from_static(&[0, 0, 0])),
             vec![
                 TcpOption::End,
                 TcpOption::Trailing(Bytes::from_static(&[0, 0])),
@@ -455,7 +453,7 @@ mod tests {
     #[test]
     fn eol_hides_tlv_shaped_padding_without_losing_bytes() {
         let bytes = [0, 2, 4, 0x05, 0xb4, 3, 3, 7];
-        let parsed = parse(&bytes);
+        let parsed = parse(&Bytes::copy_from_slice(&bytes));
         assert_eq!(
             parsed,
             vec![
@@ -493,7 +491,7 @@ mod tests {
         }
         assert_eq!(wire(&vec![TcpOption::Nop; 40]), vec![1; 40]);
         // A malformed zero-block SACK remains representable as raw wire data.
-        let raw = parse(&[5, 2]);
+        let raw = parse(&Bytes::from_static(&[5, 2]));
         assert_eq!(wire(&raw), [5, 2]);
     }
 }

@@ -269,6 +269,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::UNIX_EPOCH;
 
+    use bytes::Bytes;
     use packetcraftr_core::build::{Builder, BuiltPacket};
     use packetcraftr_core::codec::{
         DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext,
@@ -321,11 +322,11 @@ mod tests {
 
         fn decode(
             &self,
-            input: &[u8],
+            input: Bytes,
             _context: &LayerDecodeContext<'_>,
         ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
             let mut decoded =
-                DecodedLayer::terminal(Box::new(Raw::new(input.to_vec())), input.len());
+                DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
             decoded.fields = raw_layout(input.len());
             Ok(decoded)
         }

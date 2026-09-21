@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
@@ -228,12 +230,12 @@ impl LayerCodec for VlanCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_vlan(
             VLAN_NAME,
-            input,
+            &input,
             vlan_layout,
             |priority, drop_eligible, vlan_id, ether_type| {
                 Box::new(Vlan {
@@ -286,12 +288,12 @@ impl LayerCodec for Vlan8021adCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         decode_vlan(
             SERVICE_NAME,
-            input,
+            &input,
             vlan_ad_layout,
             |priority, drop_eligible, vlan_id, ether_type| {
                 Box::new(Vlan8021ad {

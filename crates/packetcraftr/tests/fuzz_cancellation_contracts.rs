@@ -9,6 +9,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use bytes::Bytes;
 use packetcraftr::clock::CancellableClock;
 use packetcraftr::fuzz::{self, Execution, ExecutionCase, LiveOptions, RunInput};
 use packetcraftr::policy::{Authorizer, Operation};
@@ -139,7 +140,7 @@ impl LayerCodec for CancellingCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &codec::LayerDecodeContext<'_>,
     ) -> Result<codec::DecodedLayer, codec::Error> {
         self.inner.decode(input, context)

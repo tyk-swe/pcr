@@ -9,6 +9,8 @@ pub use options::{SackBlock, TcpOption};
 
 use std::collections::BTreeMap;
 
+use bytes::Bytes;
+
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, TCP_CHECKSUM},
@@ -175,7 +177,7 @@ impl LayerCodec for TcpCodec {
         }
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
-        materialized.options = options::parse(&options);
+        materialized.options = options::parse(&Bytes::copy_from_slice(&options));
         Ok(EncodedLayer::header(prefix, Box::new(materialized))
             .with_fields(tcp_layout(header_len))
             .with_diagnostics(diagnostics))
@@ -183,7 +185,7 @@ impl LayerCodec for TcpCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
@@ -215,7 +217,7 @@ impl LayerCodec for TcpCodec {
             );
         }
         if let Some(network) = context.network
-            && transport_checksum(NAME, network, ip_protocol::TCP, input)? != 0
+            && transport_checksum(NAME, network, ip_protocol::TCP, &input)? != 0
         {
             diagnostics.push(
                 Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
@@ -235,7 +237,7 @@ impl LayerCodec for TcpCodec {
                 window: u16::from_be_bytes([header[14], header[15]]),
                 checksum: WireValue::Exact(checksum_value),
                 urgent_pointer: u16::from_be_bytes([header[18], header[19]]),
-                options: options::parse(options),
+                options: options::parse(&input.slice_ref(options)),
             }),
             consumed: header_len,
             payload_len,

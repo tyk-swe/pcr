@@ -855,6 +855,33 @@ fn projection_preserves_values_ordering_and_missing_columns() {
 }
 
 #[test]
+fn retained_projection_cells_release_large_source_allocations() {
+    let backing = Bytes::from(vec![0x11; 65_536]);
+    let mut dns = Dns::default();
+    dns.edit(|dns| {
+        dns.answers.push(Record {
+            owner: "example.test.".parse().unwrap(),
+            class: 1,
+            ttl: 60,
+            value: RecordValue::Txt(vec![backing.slice(4..8)]),
+        });
+    });
+    let packet = layered(vec![Box::new(Raw::new(backing.slice(..4))), Box::new(dns)]);
+    let projection = Projection::compile(["raw.bytes", "dns.answers"], &registry()).unwrap();
+    let row = projection.values(&context(&packet), 4096).unwrap();
+    drop(packet);
+    assert_eq!(
+        row[0],
+        Some(FieldValue::Bytes(Bytes::from_static(&[0x11; 4])))
+    );
+    assert!(matches!(&row[1], Some(FieldValue::List(values)) if values.len() == 1));
+    assert!(
+        backing.is_unique(),
+        "retained scalar and nested cells must release their backing frame"
+    );
+}
+
+#[test]
 fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     let tunnelled = tunnelled();
     // `frame.number` = 7 renders as `7`: one byte. `ip.src` renders as two

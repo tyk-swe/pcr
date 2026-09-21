@@ -421,15 +421,16 @@ impl LayerCodec for Icmpv4Codec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V4_NAME, ICMP_MIN_LEN, input.len()));
         };
-        let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
+        let body = input.slice(ICMP_MIN_LEN..);
+        let body_len = body.len();
         let mut diagnostics = Vec::new();
-        if checksum(input) != 0 {
+        if checksum(&input) != 0 {
             diagnostics.push(
                 Diagnostic::warning(ICMPV4_CHECKSUM, "ICMPv4 checksum mismatch")
                     .at_field("checksum"),
@@ -440,12 +441,12 @@ impl LayerCodec for Icmpv4Codec {
                 icmp_type: header[0],
                 code: header[1],
                 checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
-                body: Bytes::copy_from_slice(body),
+                body,
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmpv4_layout(body.len()),
+            fields: icmpv4_layout(body_len),
             diagnostics,
             stop: true,
             network: None,
@@ -511,16 +512,17 @@ impl LayerCodec for Icmpv6Codec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<ICMP_MIN_LEN>() else {
             return Err(truncated(V6_NAME, ICMP_MIN_LEN, input.len()));
         };
-        let body = input.get(ICMP_MIN_LEN..).unwrap_or_default();
+        let body = input.slice(ICMP_MIN_LEN..);
+        let body_len = body.len();
         let mut diagnostics = Vec::new();
         if let Some(network) = context.network
-            && transport_checksum(V6_NAME, network, 58, input)? != 0
+            && transport_checksum(V6_NAME, network, 58, &input)? != 0
         {
             diagnostics.push(
                 Diagnostic::warning(ICMPV6_CHECKSUM, "ICMPv6 checksum mismatch")
@@ -532,12 +534,12 @@ impl LayerCodec for Icmpv6Codec {
                 icmp_type: header[0],
                 code: header[1],
                 checksum: WireValue::Exact(u16::from_be_bytes([header[2], header[3]])),
-                body: Bytes::copy_from_slice(body),
+                body,
             }),
             consumed: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmpv6_layout(body.len()),
+            fields: icmpv6_layout(body_len),
             diagnostics,
             stop: true,
             network: None,

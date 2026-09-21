@@ -156,7 +156,9 @@ impl Head {
 }
 /// Parses a complete header block. `None` means more bytes are required.
 /// Limits apply even while the terminator is absent; binary body bytes are untouched.
-pub fn parse_head(input: &[u8]) -> Result<Option<(Head, usize)>, Error> {
+/// `input` is a refcounted handle so the retained wire and header values slice
+/// rather than copy.
+pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
     let end = input[..input.len().min(MAX_HEADER_BYTES)]
         .windows(4)
         .position(|bytes| bytes == b"\r\n\r\n")
@@ -182,18 +184,18 @@ pub fn parse_head(input: &[u8]) -> Result<Option<(Head, usize)>, Error> {
     if first > MAX_START_LINE {
         return Err(Error::Limit("start line"));
     }
-    let start = parse_start(&input[..first])?;
-    let headers = parse_headers(&input[first + 2..end - 2])?;
+    let start = parse_start(&input.slice(..first))?;
+    let headers = parse_headers(&input.slice(first + 2..end - 2))?;
     Ok(Some((
         Head {
             start,
             headers,
-            wire: Bytes::copy_from_slice(&input[..end]),
+            wire: input.slice(..end),
         },
         end,
     )))
 }
-pub(crate) fn parse_headers(input: &[u8]) -> Result<Vec<Header>, Error> {
+pub(crate) fn parse_headers(input: &Bytes) -> Result<Vec<Header>, Error> {
     let mut headers = Vec::new();
     let mut offset = 0;
     while offset < input.len() {
@@ -228,13 +230,13 @@ pub(crate) fn parse_headers(input: &[u8]) -> Result<Vec<Header>, Error> {
         }
         headers.push(Header {
             name: String::from_utf8(name.to_vec()).expect("ASCII token"),
-            value: Bytes::copy_from_slice(value),
+            value: input.slice_ref(value),
         });
         offset = end + 2;
     }
     Ok(headers)
 }
-fn parse_start(input: &[u8]) -> Result<StartLine, Error> {
+fn parse_start(input: &Bytes) -> Result<StartLine, Error> {
     if input.starts_with(b"HTTP/") {
         let mut parts = input.splitn(3, |b| *b == b' ');
         let version = version(parts.next().unwrap_or_default())?;
@@ -258,7 +260,7 @@ fn parse_start(input: &[u8]) -> Result<StartLine, Error> {
         Ok(StartLine::Response {
             version,
             status,
-            reason: Bytes::copy_from_slice(reason),
+            reason: input.slice_ref(reason),
         })
     } else {
         let parts: Vec<_> = input.split(|b| *b == b' ').collect();
@@ -272,7 +274,7 @@ fn parse_start(input: &[u8]) -> Result<StartLine, Error> {
         }
         Ok(StartLine::Request {
             method: String::from_utf8(parts[0].to_vec()).expect("ASCII token"),
-            target: Bytes::copy_from_slice(parts[1]),
+            target: input.slice_ref(parts[1]),
             version: version(parts[2])?,
         })
     }

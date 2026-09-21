@@ -140,8 +140,8 @@ impl TryFrom<&[u8]> for Tls {
 
     /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
-        let parsed =
-            Self::from_records(wire).ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
+        let parsed = Self::parse_records(wire, |end| Bytes::copy_from_slice(&wire[..end]))
+            .ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
         if parsed.remainder != 0 {
             return Err(invalid(NAME, "TLS records have an incomplete tail"));
         }
@@ -162,7 +162,11 @@ impl Tls {
     ///
     /// Returns `None` when no complete record is present, which is how a
     /// coincidental record header inside opaque bytes stays `raw`.
-    fn from_records(wire: &[u8]) -> Option<Dissection> {
+    fn from_records(wire: &Bytes) -> Option<Dissection> {
+        Self::parse_records(wire, |end| wire.slice(..end))
+    }
+
+    fn parse_records(wire: &[u8], retain_wire: impl FnOnce(usize) -> Bytes) -> Option<Dissection> {
         let mut records = Vec::new();
         let mut consumed = 0_usize;
         let mut diagnostics = Vec::new();
@@ -230,7 +234,7 @@ impl Tls {
             supported_versions: Vec::new(),
             supported_groups: Vec::new(),
             hello: None,
-            wire: Bytes::copy_from_slice(wire.get(..consumed)?),
+            wire: retain_wire(consumed),
         };
         layer.apply_handshake(&records, &mut diagnostics);
         Some(Dissection {
@@ -425,11 +429,11 @@ impl LayerCodec for TlsCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
-        let dissection = looks_like_record_start(input)
-            .then(|| Tls::from_records(input))
+        let dissection = looks_like_record_start(&input)
+            .then(|| Tls::from_records(&input))
             .flatten();
         let Some(Dissection {
             layer,
@@ -437,7 +441,7 @@ impl LayerCodec for TlsCodec {
             diagnostics,
         }) = dissection
         else {
-            return raw_segment(input);
+            return raw_segment(input.clone());
         };
         Ok(DecodedLayer {
             layer: Box::new(layer),
@@ -477,11 +481,8 @@ impl LayerCodec for TlsCodec {
 /// Preserves a segment that is not TLS as opaque bytes, with no diagnostics:
 /// a bound port carrying something else, or the middle of a split record, is
 /// not a defect.
-fn raw_segment(input: &[u8]) -> Result<DecodedLayer, crate::codec::Error> {
-    let mut decoded = DecodedLayer::terminal(
-        Box::new(Raw::new(Bytes::copy_from_slice(input))),
-        input.len(),
-    );
+fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
+    let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
     decoded.fields = raw_layout(input.len());
     Ok(decoded)
 }
@@ -494,21 +495,22 @@ mod tests {
 
     #[test]
     fn a_segment_without_a_record_header_has_no_dissection() {
-        assert!(Tls::from_records(b"GET / HTTP/1.1\r\n").is_none());
+        assert!(Tls::from_records(&Bytes::from_static(b"GET / HTTP/1.1\r\n")).is_none());
     }
 
     #[test]
     fn a_truncated_first_record_yields_no_layer() {
         let mut bytes = record(23, TLS_1_2, &[0; 40]);
         bytes.truncate(20);
-        assert!(Tls::from_records(&bytes).is_none());
+        assert!(Tls::from_records(&Bytes::copy_from_slice(&bytes)).is_none());
     }
 
     #[test]
     fn a_trailing_partial_record_marks_the_layer_incomplete() {
         let mut bytes = record(23, TLS_1_2, b"first");
         bytes.extend_from_slice(&record(23, TLS_1_2, b"second-record")[..6]);
-        let dissection = Tls::from_records(&bytes).expect("one complete record");
+        let dissection =
+            Tls::from_records(&Bytes::copy_from_slice(&bytes)).expect("one complete record");
         assert!(dissection.layer.incomplete);
         assert_eq!(dissection.layer.record_count, 1);
         assert_eq!(dissection.remainder, 6);
@@ -528,7 +530,8 @@ mod tests {
         for _ in 0..MAX_RECORDS_PER_SEGMENT + 1 {
             bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
         }
-        let dissection = Tls::from_records(&bytes).expect("capped records still dissect");
+        let dissection = Tls::from_records(&Bytes::copy_from_slice(&bytes))
+            .expect("capped records still dissect");
         assert_eq!(
             usize::from(dissection.layer.record_count),
             MAX_RECORDS_PER_SEGMENT
@@ -546,12 +549,34 @@ mod tests {
     }
 
     #[test]
+    fn malformed_borrowed_records_do_not_retain_input() {
+        let wire = vec![0; 1 << 20];
+        assert!(
+            Tls::parse_records(&wire, |_| panic!("invalid input must not be copied")).is_none()
+        );
+    }
+
+    #[test]
+    fn borrowed_records_retain_only_the_consumed_prefix() {
+        let mut wire = record(23, TLS_1_2, b"encrypted");
+        let complete = wire.len();
+        wire.resize(1 << 20, 0);
+        let parsed = Tls::parse_records(&wire, |end| {
+            assert_eq!(end, complete);
+            Bytes::copy_from_slice(&wire[..end])
+        })
+        .unwrap();
+        assert_eq!(parsed.remainder, wire.len() - complete);
+    }
+
+    #[test]
     fn exactly_the_cap_reports_nothing() {
         let mut bytes = Vec::new();
         for _ in 0..MAX_RECORDS_PER_SEGMENT {
             bytes.extend_from_slice(&record(23, TLS_1_2, b"x"));
         }
-        let dissection = Tls::from_records(&bytes).expect("capped records still dissect");
+        let dissection = Tls::from_records(&Bytes::copy_from_slice(&bytes))
+            .expect("capped records still dissect");
         assert_eq!(dissection.remainder, 0);
         assert!(dissection.diagnostics.is_empty());
     }
@@ -585,7 +610,7 @@ mod tests {
     #[test]
     fn a_dissected_layer_encodes_back_to_the_bytes_it_covered() {
         let bytes = record(23, TLS_1_2, b"encrypted");
-        let layer = Tls::from_records(&bytes)
+        let layer = Tls::from_records(&Bytes::copy_from_slice(&bytes))
             .expect("one complete record")
             .layer;
         let encoded = encode(&layer).expect("an unmodified layer encodes");
@@ -596,7 +621,7 @@ mod tests {
     #[test]
     fn changing_a_published_field_makes_the_layer_disagree_with_its_wire() {
         let bytes = record(23, TLS_1_2, b"encrypted");
-        let mut layer = Tls::from_records(&bytes)
+        let mut layer = Tls::from_records(&Bytes::copy_from_slice(&bytes))
             .expect("one complete record")
             .layer;
         layer.record_count = 7;

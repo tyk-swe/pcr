@@ -281,7 +281,7 @@ impl LayerCodec for DnsCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         if context.parent == Some(protocol("tcp")) {
@@ -291,7 +291,7 @@ impl LayerCodec for DnsCodec {
                 .filter(|length| *length >= HEADER_LEN)
                 .and_then(|length| input.get(2..length + 2).map(|body| (length, body)))
                 .and_then(|(length, body)| {
-                    Dns::try_from(Bytes::copy_from_slice(body))
+                    Dns::try_from(input.slice_ref(body))
                         .ok()
                         .map(|layer| (length, layer))
                 });
@@ -319,7 +319,7 @@ impl LayerCodec for DnsCodec {
                 });
             }
             return Ok(DecodedLayer {
-                layer: Box::new(crate::layer::Raw::new(Bytes::copy_from_slice(input))),
+                layer: Box::new(crate::layer::Raw::new(input.clone())),
                 consumed: input.len(),
                 payload_len: 0,
                 next: Vec::new(),
@@ -340,7 +340,7 @@ impl LayerCodec for DnsCodec {
                 .to_string(),
             ));
         }
-        let layer = Dns::try_from(Bytes::copy_from_slice(input))?;
+        let layer = Dns::try_from(input.clone())?;
         Ok(DecodedLayer {
             layer: Box::new(layer),
             consumed: input.len(),

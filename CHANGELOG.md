@@ -406,6 +406,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Display-filter `contains` compiles its needle into a `memchr::memmem`
+  searcher once at filter-compile time instead of sliding a window over the
+  field bytes per frame, making the scan linear-time (~84× faster on a
+  64 KiB payload in the perf fixture).
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

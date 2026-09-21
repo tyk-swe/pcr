@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::comparison::Needle;
 use super::lexer::CompareOperator;
 use super::literal::Literal;
 use super::path::FieldRef;
@@ -30,7 +31,7 @@ pub(super) enum Predicate {
     },
     Contains {
         field: FieldRef,
-        needle: Literal,
+        needle: Needle,
     },
 }
 

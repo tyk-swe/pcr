@@ -5,6 +5,8 @@
 
 use std::cmp::Ordering;
 
+use memchr::memmem::Finder;
+
 use super::lexer::CompareOperator;
 use super::literal::Literal;
 use crate::field::FieldValue;
@@ -104,8 +106,44 @@ fn compare(value: &FieldValue, literal: &Literal) -> Option<Ordering> {
     }
 }
 
-/// Whether a field value contains the literal as a subsequence.
-pub(super) fn contains(value: &FieldValue, needle: &Literal) -> bool {
+/// A `contains` needle with its substring searcher already built.
+///
+/// Compiling the [`Finder`] once, alongside the literal at filter-compile
+/// time, makes the per-frame scan a linear-time `memmem` search instead of
+/// a naive sliding-window compare per candidate value.
+#[derive(Clone, Debug)]
+pub(super) struct Needle {
+    // The searcher's precomputed table is large, so it lives boxed rather
+    // than inflating every `Predicate` variant.
+    finder: Box<Finder<'static>>,
+}
+
+impl Needle {
+    /// Builds the searcher over the literal's bytes, or returns the literal
+    /// unchanged when it is not a byte sequence. `check_searchable` rejects
+    /// such needles first, so a returned literal stays reportable rather than
+    /// silently unreachable.
+    pub(super) fn new(literal: Literal) -> Result<Self, Literal> {
+        let bytes: &[u8] = match &literal {
+            Literal::Bytes(bytes) => bytes.as_ref(),
+            Literal::Text(text) => text.as_bytes(),
+            Literal::Mac(mac) => mac.as_slice(),
+            _ => return Err(literal),
+        };
+        Ok(Self {
+            finder: Box::new(Finder::new(bytes).into_owned()),
+        })
+    }
+
+    /// Whether `haystack` contains the needle.
+    fn find(&self, haystack: &[u8]) -> bool {
+        // An empty needle is contained by every haystack.
+        self.finder.needle().is_empty() || self.finder.find(haystack).is_some()
+    }
+}
+
+/// Whether a field value contains the needle as a subsequence.
+pub(super) fn contains(value: &FieldValue, needle: &Needle) -> bool {
     if let FieldValue::List(values) = value {
         return values.iter().any(|element| contains(element, needle));
     }
@@ -115,16 +153,5 @@ pub(super) fn contains(value: &FieldValue, needle: &Literal) -> bool {
         FieldValue::Mac(mac) => mac.as_slice(),
         _ => return false,
     };
-    let needle: &[u8] = match needle {
-        Literal::Bytes(bytes) => bytes.as_ref(),
-        Literal::Text(text) => text.as_bytes(),
-        Literal::Mac(mac) => mac.as_slice(),
-        _ => return false,
-    };
-    if needle.is_empty() {
-        return true;
-    }
-    haystack
-        .windows(needle.len())
-        .any(|window| window == needle)
+    needle.find(haystack)
 }

@@ -24,6 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use futures_util::future::{Either, select};
 use packetcraftr_core::budget::remaining_before;
 use rtnetlink::{Handle, new_connection};
 
@@ -240,7 +241,7 @@ fn run_worker(
             return;
         }
     };
-    let connection = runtime.spawn(connection);
+    let mut connection = runtime.spawn(connection);
     if setup.send(Ok(())).is_err() {
         connection.abort();
         return;
@@ -252,22 +253,41 @@ fn run_worker(
         let result = catch_unwind(AssertUnwindSafe(|| {
             runtime.block_on(await_netlink_operation(
                 operation(handle.clone()),
+                &mut connection,
                 NETLINK_OPERATION_TIMEOUT,
             ))
         }))
         .unwrap_or_else(|_| Err(netlink_worker_panicked()));
         let _ = respond.send(result);
+        if connection.is_finished() {
+            break;
+        }
     }
     connection.abort();
 }
 
-async fn await_netlink_operation<F, T>(operation: F, timeout: Duration) -> Result<T, SystemError>
+async fn await_netlink_operation<F, T>(
+    operation: F,
+    connection: &mut tokio::task::JoinHandle<()>,
+    timeout: Duration,
+) -> Result<T, SystemError>
 where
     F: Future<Output = Result<T, SystemError>>,
 {
-    tokio::time::timeout(timeout, operation)
-        .await
-        .map_err(|_| netlink_timeout("execute netlink operation"))?
+    let operation = std::pin::pin!(tokio::time::timeout(timeout, operation));
+    match select(connection, operation).await {
+        Either::Left((joined, _)) => {
+            joined.map_err(|error| os_error("drive netlink connection", error))?;
+            Err(SystemError::OperatingSystem {
+                operation: "drive netlink connection",
+                message: "route netlink connection stopped".to_owned(),
+                source: None,
+            })
+        }
+        Either::Right((result, _)) => {
+            result.map_err(|_| netlink_timeout("execute netlink operation"))?
+        }
+    }
 }
 
 fn netlink_worker_panicked() -> SystemError {
@@ -294,9 +314,11 @@ mod tests {
             .enable_time()
             .build()
             .unwrap();
+        let mut connection = runtime.spawn(std::future::pending());
         assert!(matches!(
             runtime.block_on(await_netlink_operation(
                 std::future::pending::<Result<(), SystemError>>(),
+                &mut connection,
                 Duration::ZERO,
             )),
             Err(SystemError::OperatingSystem {
@@ -304,6 +326,35 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn a_stopped_connection_releases_pending_queries_for_worker_replacement() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let mut connection = runtime.spawn(async {});
+        let result = runtime.block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                await_netlink_operation(
+                    std::future::pending::<Result<(), SystemError>>(),
+                    &mut connection,
+                    Duration::from_secs(60),
+                ),
+            )
+            .await
+            .expect("connection failure must not wait for the operation deadline")
+        });
+        assert!(matches!(
+            result,
+            Err(SystemError::OperatingSystem {
+                operation: "drive netlink connection",
+                ..
+            })
+        ));
+        assert!(connection.is_finished());
     }
 
     #[test]

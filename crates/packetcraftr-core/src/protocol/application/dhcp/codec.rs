@@ -46,20 +46,18 @@ macro_rules! codec {
             }
             fn decode(
                 &self,
-                input: &[u8],
+                input: Bytes,
                 _context: &LayerDecodeContext<'_>,
             ) -> Result<DecodedLayer, crate::codec::Error> {
                 if ($name == "dhcpv4" && input.get(236..240) != Some(b"\x63\x82\x53\x63"))
                     || ($name == "dhcpv6" && input.len() < 4)
                 {
-                    let mut raw = DecodedLayer::terminal(
-                        Box::new(Raw::new(Bytes::copy_from_slice(input))),
-                        input.len(),
-                    );
+                    let mut raw =
+                        DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
                     raw.fields = raw_layout(input.len());
                     return Ok(raw);
                 }
-                let layer = $ty::try_from(Bytes::copy_from_slice(input))
+                let layer = $ty::try_from(input.clone())
                     .map_err(|error| invalid($name, error.to_string()))?;
                 let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
                 decoded.fields = $module::layout();

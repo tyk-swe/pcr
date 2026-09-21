@@ -153,7 +153,7 @@ impl LayerCodec for LlcCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(head) = input.first_chunk::<LLC_MIN_LEN>() else {
@@ -186,7 +186,7 @@ impl LayerCodec for LlcCodec {
             layer: Box::new(Llc {
                 dsap,
                 ssap,
-                control: Bytes::copy_from_slice(control),
+                control: input.slice_ref(control),
             }),
             consumed: header_len,
             payload_len,
@@ -336,7 +336,7 @@ impl LayerCodec for SnapCodec {
 
     fn decode(
         &self,
-        input: &[u8],
+        input: Bytes,
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Some(header) = input.first_chunk::<SNAP_LEN>() else {

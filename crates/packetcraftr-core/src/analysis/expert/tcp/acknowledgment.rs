@@ -9,6 +9,7 @@ use super::DirectionState;
 use crate::analysis::expert::finding::new as new_finding;
 use crate::analysis::expert::observation::TcpObservation;
 use crate::analysis::expert::{Finding, ScopedFlowKey};
+use crate::analysis::serial::{serial_ge, serial_gt};
 
 pub(super) fn observe_duplicate(
     flows: &mut HashMap<ScopedFlowKey, DirectionState>,
@@ -31,10 +32,8 @@ pub(super) fn observe_duplicate(
 
     if ack && payload_len == 0 && !keep_alive && !syn && !fin && !rst {
         let outstanding = flows.get(reverse).is_some_and(|peer| {
-            peer.payload_next.is_some_and(|next| {
-                let delta = next.wrapping_sub(tcp.acknowledgment);
-                delta > 0 && delta < 0x8000_0000
-            })
+            peer.payload_next
+                .is_some_and(|next| serial_gt(next, tcp.acknowledgment))
         });
         let sent = flows.entry(flow.clone()).or_default();
         if outstanding
@@ -80,7 +79,7 @@ pub(super) fn update(
     let backward = ack
         && sent
             .acknowledgment
-            .is_some_and(|previous| tcp.acknowledgment.wrapping_sub(previous) >= 0x8000_0000);
+            .is_some_and(|previous| !serial_ge(tcp.acknowledgment, previous));
     if backward || (syn_renews && sent.acknowledgment.is_some()) {
         return false;
     }

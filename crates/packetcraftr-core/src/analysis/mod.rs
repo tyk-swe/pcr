@@ -27,6 +27,7 @@ mod pipeline;
 pub mod provenance;
 pub mod reassembly;
 pub mod scope;
+mod serial;
 pub mod stats;
 mod stream;
 pub mod tls;

@@ -3,6 +3,7 @@
 mod rules;
 use crate::{
     command_options::{Compression, DecodeArgs, OfflineCaptureLimitsArgs},
+    commands::offline_analysis::Retained,
     errors::CliError,
     filtering::FrameSelector,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
@@ -189,8 +190,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     .map_err(CliError::classified)?;
     let dissector = Dissector::new(registry.clone());
     let mut counts = vec![0u64; rules.len()];
-    let mut changes: Vec<output::rewrite::Change> = Vec::new();
-    let mut changes_omitted = 0_u64;
+    let mut changes = Retained::new(MAX_REPORTED_CHANGES);
     let report = pcap::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
         check_deadline(&deadline)?;
         let mut changed = frame.clone();
@@ -223,15 +223,11 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
                         )
                         .map_err(BoundaryError::from_error)?;
                     for change in outcome.changes {
-                        if changes.len() < MAX_REPORTED_CHANGES {
-                            changes.push(output::rewrite::Change {
-                                frame: number,
-                                rule: index as u64,
-                                change,
-                            });
-                        } else {
-                            changes_omitted += 1;
-                        }
+                        changes.push(|| output::rewrite::Change {
+                            frame: number,
+                            rule: index as u64,
+                            change,
+                        });
                     }
                     changed = outcome.frame;
                 }
@@ -248,12 +244,13 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         check_deadline(&deadline).map_err(CliError::classified)?;
         staged.persist()?;
     }
+    let changes_omitted = changes.omitted();
     let report = output::rewrite::Report {
         path: args.write.display().to_string(),
         rule_matches: counts,
         capture: report,
         dry_run: args.dry_run,
-        changes,
+        changes: changes.into_items(),
         changes_omitted,
     };
     match format {

@@ -87,9 +87,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let outcome = session
         .run(
             &mut reader,
-            super::offline_analysis::ip_event_sink(
-                (format == ToolFormat::Ndjson).then(|| stream.clone()),
-            ),
+            super::offline_analysis::ip_event_sink(format, stream),
             |event| emit(event).map_err(CliError::into_boundary_error),
         )
         .map_err(CliError::classified)?;

@@ -171,10 +171,16 @@ pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
 
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream
 /// carries. The other formats fold the same information into their terminal
-/// `ip_reassembly` report, so they pass `None` and the events are dropped.
-pub(super) fn ip_event_sink(
-    stream: Option<StreamEncoder>,
-) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError> {
+/// `ip_reassembly` report, so a non-NDJSON `format` drops every event.
+pub(super) fn ip_event_sink<F>(
+    format: F,
+    stream: &StreamEncoder,
+) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
+where
+    F: Into<packetcraftr_cli::output::contract::Format>,
+{
+    let stream = (format.into() == packetcraftr_cli::output::contract::Format::Ndjson)
+        .then(|| stream.clone());
     move |event| {
         if let Some(stream) = &stream {
             stream

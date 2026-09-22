@@ -162,9 +162,7 @@ pub(super) fn run(
     let outcome = session
         .run(
             &mut reader,
-            super::offline_analysis::ip_event_sink(
-                (format == ToolFormat::Ndjson).then(|| stream.clone()),
-            ),
+            super::offline_analysis::ip_event_sink(format, stream),
             |event| {
                 if selector.matches(&event.session) {
                     rendering::render_session(format, event.session, &mut state, stream)

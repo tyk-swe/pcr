@@ -81,9 +81,7 @@ pub(super) fn run(
     let pass = session
         .observe(
             &mut reader,
-            super::offline_analysis::ip_event_sink(
-                (format == FollowFormat::Ndjson).then(|| stream.clone()),
-            ),
+            super::offline_analysis::ip_event_sink(format, stream),
             &mut sink,
         )
         .map_err(CliError::classified)?;

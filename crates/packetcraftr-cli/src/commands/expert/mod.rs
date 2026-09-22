@@ -55,9 +55,7 @@ pub(super) fn run(
     let outcome = session
         .run(
             &mut reader,
-            super::offline_analysis::ip_event_sink(
-                (format == ToolFormat::Ndjson).then(|| stream.clone()),
-            ),
+            super::offline_analysis::ip_event_sink(format, stream),
             |finding| {
                 if matches_selector(&finding, min_severity, codes) {
                     state.count(&finding);

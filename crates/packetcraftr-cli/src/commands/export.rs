@@ -47,7 +47,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let selection = analysis::export::Selection {
         streams,
         datagram_frames: args.datagram_frames,
-        filter: setup.filter.as_ref(),
+        filter: setup.filter(),
         max_selected_frames: args.max_selected_frames,
     };
     selection.validate().map_err(CliError::classified)?;
@@ -61,7 +61,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         crate::input::snapshot_capture(&mut source, args.limits.capture.reader, limits)?;
     let plan = analysis::export::plan(
         &mut reader,
-        setup.registry.clone(),
+        setup.shared_registry(),
         &setup.options(),
         &selection,
     )

@@ -54,7 +54,7 @@ pub(super) fn run(
             expect: &arguments.expect,
             expect_absent: &arguments.expect_absent,
         },
-        &prepared.registry,
+        prepared.registry(),
         arguments.max_field_bytes,
     )
     .map_err(CliError::classified)?;
@@ -119,7 +119,7 @@ fn compile_selection(
 ) -> Result<Option<Filter>, CliError> {
     source
         .map(|source| {
-            filtering::compile(source, &prepared.registry, Capabilities::stream_capable())
+            filtering::compile(source, prepared.registry(), Capabilities::stream_capable())
         })
         .transpose()
 }
@@ -149,18 +149,23 @@ fn collect(
     }
     options.plan = analysis::Plan::physical(requirements);
     let mut collector = forwarding::Collector::new(rules, side, max_evidence_bytes);
-    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
-        if let Some(filter) = filter
-            && !filter
-                .matches(&record.physical_context())
-                .map_err(|error| CliError::classified(error).into_boundary_error())?
-        {
-            return Ok(());
-        }
-        collector
-            .observe(&record)
-            .map_err(|error| CliError::classified(error).into_boundary_error())
-    })
+    let summary = analysis::run(
+        &mut reader,
+        prepared.shared_registry(),
+        &options,
+        |record| {
+            if let Some(filter) = filter
+                && !filter
+                    .matches(&record.physical_context())
+                    .map_err(|error| CliError::classified(error).into_boundary_error())?
+            {
+                return Ok(());
+            }
+            collector
+                .observe(&record)
+                .map_err(|error| CliError::classified(error).into_boundary_error())
+        },
+    )
     .map_err(CliError::classified)?;
     crate::cancellation::check()?;
     Ok((

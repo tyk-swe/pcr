@@ -5,6 +5,8 @@
 
 use packetcraftr_core::error::Kind;
 
+use std::io::Read;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,22 +17,58 @@ use packetcraftr_core::registry::Registry;
 
 use analysis::{StreamRef, StreamTransport};
 
-use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
+use crate::command_options::{CaptureReaderBoundsArgs, DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
-use crate::input::validate_capture_stream_limits;
+use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::StreamEncoder;
+
+/// A prepared session and the capture it observes.
+type OpenSession<'a, C> = (
+    analysis::pcap::Reader<Box<dyn Read>>,
+    analysis::Session<'a, C>,
+);
 
 /// Validated, I/O-free analysis state.
 pub(super) struct AnalysisSetup {
-    pub(super) registry: Arc<Registry>,
-    pub(super) filter: Option<Filter>,
-    pub(super) time_bounds: Option<packetcraftr_core::frame::TimeBounds>,
-    pub(super) ip_overlap: analysis::reassembly::ip::OverlapPolicy,
-    pub(super) limits: analysis::Limits,
+    registry: Arc<Registry>,
+    filter: Option<Filter>,
+    time_bounds: Option<packetcraftr_core::frame::TimeBounds>,
+    ip_overlap: analysis::reassembly::ip::OverlapPolicy,
+    limits: analysis::Limits,
 }
 
 impl AnalysisSetup {
+    /// Opens the bounded capture and builds its session from this preparation.
+    /// The prepared filter stays borrowed until the pass completes.
+    pub(super) fn open_session<C: analysis::Collector>(
+        &self,
+        path: &Path,
+        reader_bounds: CaptureReaderBoundsArgs,
+        collector: C,
+        selector: Option<StreamRef>,
+    ) -> Result<OpenSession<'_, C>, CliError> {
+        let session =
+            analysis::Session::new(self.registry.clone(), self.options(), collector, selector);
+        let reader = open_capture(path, reader_bounds)?;
+        Ok((reader, session))
+    }
+
+    /// The prepared protocol registry for consumers such as TLS rendering.
+    pub(super) fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    /// Non-session analysis operations also use the prepared registry.
+    pub(super) fn shared_registry(&self) -> Arc<Registry> {
+        self.registry.clone()
+    }
+
+    /// The prepared frame filter used by export's multi-selector planner.
+    pub(super) fn filter(&self) -> Option<&Filter> {
+        self.filter.as_ref()
+    }
+
     /// Analysis options from every prepared analysis-wide setting, with every
     /// optional stage at its base setting. Commands that drive a collector
     /// through [`analysis::Session`] declare their needs there instead; the
@@ -167,6 +205,24 @@ pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
     };
     let index = index.parse::<u64>().map_err(|_| invalid())?;
     Ok(StreamRef { transport, index })
+}
+
+/// Maps the session's typed absence to the one offline-analysis CLI error.
+/// Call after the terminal drain, except for follow, whose verdict must
+/// precede collector finish and publication of any staged output files.
+pub(super) fn require_selected_stream(
+    selection: Option<analysis::StreamSelection>,
+) -> Result<(), CliError> {
+    if let Some(analysis::StreamSelection::Absent(stream)) = selection {
+        return Err(CliError::new(
+            Kind::Cli,
+            format!(
+                "--stream {}:{} is not present",
+                stream.transport, stream.index
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream

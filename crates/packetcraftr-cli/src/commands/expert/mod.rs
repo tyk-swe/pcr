@@ -11,7 +11,6 @@ use packetcraftr_core::analysis;
 use self::arguments::{Args, Severity};
 use super::offline_analysis::prepare;
 use crate::errors::CliError;
-use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
 fn matches_selector(
@@ -38,17 +37,12 @@ pub(super) fn run(
         arguments.filter.as_deref(),
         &arguments.decode,
     )?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
-
-    // The collector declares what expert reads: transport indexes, the
-    // reassembler's byte-exact retransmission evidence, and reconstructed-
-    // datagram diagnostics.
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        prepared.options(),
+    let (mut reader, session) = prepared.open_session(
+        &arguments.path,
+        arguments.limits.capture.reader,
         analysis::expert::Collector::new(),
         None,
-    );
+    )?;
     let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
     let min_severity = arguments.min_severity;
     let codes = &arguments.codes;

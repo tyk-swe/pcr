@@ -543,40 +543,55 @@ fn follow_write_publishes_direction_files_atomically_under_one_byte_budget() {
 }
 
 #[test]
-fn follow_rejects_absent_tcp_and_udp_streams_in_every_output_format() {
-    for capture in [write_capture(), write_capture_frames(&[])] {
+fn offline_analysis_rejects_absent_streams_in_every_output_format() {
+    for (capture, tcp, udp) in [
+        (write_capture(), "tcp:999", "udp:999"),
+        (write_capture_frames(&[]), "tcp:0", "udp:0"),
+    ] {
         let path = path_text(capture.path());
-        for selector in ["tcp:999", "udp:999"] {
-            let expected = format!("--stream {selector} is not present");
-            for format in ["text", "hex", "raw", "json", "ndjson"] {
-                let output = run(&[
-                    "--output",
-                    format,
-                    "follow",
-                    path,
-                    "--stream",
-                    selector,
-                    "--direction",
-                    "client",
-                ]);
-                assert_eq!(output.status.code(), Some(2), "{format}: {output:?}");
-                if matches!(format, "text" | "hex" | "raw") {
-                    assert!(output.stdout.is_empty(), "no success payload: {output:?}");
-                    assert!(String::from_utf8_lossy(&output.stderr).contains(&expected));
-                    continue;
+        for command in ["http", "dns-read", "tls", "follow"] {
+            let selectors: &[&str] = if matches!(command, "http" | "tls") {
+                &[tcp]
+            } else {
+                &[tcp, udp]
+            };
+            let formats: &[&str] = if command == "follow" {
+                &["text", "hex", "raw", "json", "ndjson"]
+            } else {
+                &["text", "json", "ndjson"]
+            };
+            for &selector in selectors {
+                let expected = format!("--stream {selector} is not present");
+                for &format in formats {
+                    let mut args = vec!["--output", format, command, path, "--stream", selector];
+                    if command == "follow" {
+                        args.extend(["--direction", "client"]);
+                    }
+                    let output = run(&args);
+                    assert_eq!(
+                        output.status.code(),
+                        Some(2),
+                        "{command}/{format}: {output:?}"
+                    );
+                    if matches!(format, "text" | "hex" | "raw") {
+                        assert!(output.stdout.is_empty(), "no success payload: {output:?}");
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        assert_eq!(stderr.matches(&expected).count(), 1, "{command}: {stderr}");
+                        continue;
+                    }
+                    let error = if format == "ndjson" {
+                        let records = parse_ndjson(&output);
+                        assert_contiguous(&records);
+                        assert_eq!(records.len(), 1, "only one terminal error: {command}");
+                        records[0].clone()
+                    } else {
+                        parse_json(&output)
+                    };
+                    assert_eq!(error["status"], "error");
+                    assert_eq!(error["error"]["code"], "cli.error");
+                    assert_eq!(error["error"]["message"], expected);
+                    assert!(error.get("result").is_none());
                 }
-                let error = if format == "ndjson" {
-                    let records = parse_ndjson(&output);
-                    assert_contiguous(&records);
-                    assert_eq!(records.len(), 1, "only one terminal error");
-                    records[0].clone()
-                } else {
-                    parse_json(&output)
-                };
-                assert_eq!(error["status"], "error");
-                assert_eq!(error["error"]["code"], "cli.error");
-                assert_eq!(error["error"]["message"], expected);
-                assert!(error.get("result").is_none());
             }
         }
     }

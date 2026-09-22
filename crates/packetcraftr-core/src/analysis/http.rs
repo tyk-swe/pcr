@@ -10,7 +10,9 @@ use super::{
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
+    session::{self, Needs},
 };
+use crate::error::BoundaryError;
 use crate::protocol::application::http::{self, Body, BodyDecoder, Head, Header};
 use bytes::Bytes;
 use memchr::memchr;
@@ -559,6 +561,33 @@ impl Collector {
             sources: live.sources,
         })));
         Ok(())
+    }
+}
+
+impl session::Collector for Collector {
+    type Event = Event;
+    type Summary = Summary;
+
+    /// Sourced messages over reassembled TCP deliveries.
+    fn needs(&self) -> Needs {
+        Needs {
+            tcp_stream: true,
+            tcp_events: true,
+            track_sources: true,
+            ..Needs::default()
+        }
+    }
+
+    fn scopes(&self) -> Vec<Definition> {
+        Self::scopes(self).cloned().collect()
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
+        Self::observe(self, record).map_err(BoundaryError::from_error)
+    }
+
+    fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
+        Self::finish(self, run).map_err(BoundaryError::from_error)
     }
 }
 /// Offset in `run` of the first byte that breaks header CR/LF pairing, or

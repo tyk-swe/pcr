@@ -139,46 +139,46 @@ pub(super) fn run(
     if arguments.max_tls_buffer_bytes < analysis::tls::MAX_DIRECTION_BUFFER {
         return Err(buffer_floor_error(arguments.max_tls_buffer_bytes));
     }
-    let mut collector = Collector::new(tls_limits).map_err(CliError::classified)?;
+    let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
     // The stream filter narrows reassembly to one conversation while indices
     // stay capture-global, so the index reported is the one asked for.
     let source = selected_stream.map(|index| format!("tcp.stream == {index}"));
     let prepared = prepare(arguments.limits, source.as_deref(), &arguments.decode)?;
+    // Assembly consumes the reassembler's in-order deliveries; the session
+    // raises the pipeline flags from the collector's declared needs.
+    let session = analysis::Session::new(
+        prepared.registry.clone(),
+        prepared.options(),
+        collector,
+        selected_stream.map(|index| analysis::StreamRef {
+            transport: StreamTransport::Tcp,
+            index,
+        }),
+    );
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
-    // Assembly consumes the reassembler's in-order deliveries.
-    let options = prepared.options(true);
     let mut state = State::new(arguments.max_output_sessions);
-    let run_summary = analysis::run_with_ip_events(
-        &mut reader,
-        prepared.registry.clone(),
-        &options,
-        super::offline_analysis::ip_event_sink(
-            (format == ToolFormat::Ndjson).then(|| stream.clone()),
-        ),
-        |record| {
-            for event in collector.observe(&record) {
+    let outcome = session
+        .run(
+            &mut reader,
+            super::offline_analysis::ip_event_sink(
+                (format == ToolFormat::Ndjson).then(|| stream.clone()),
+            ),
+            |event| {
                 if selector.matches(&event.session) {
                     rendering::render_session(format, event.session, &mut state, stream)
                         .map_err(CliError::into_boundary_error)?;
                 }
-            }
-            Ok(())
-        },
-    )
-    .map_err(CliError::classified)?;
-    let (trailing, summary) = collector.finish(&run_summary);
-    for event in trailing {
-        if selector.matches(&event.session) {
-            rendering::render_session(format, event.session, &mut state, stream)?;
-        }
-    }
+                Ok(())
+            },
+        )
+        .map_err(CliError::classified)?;
 
     // Stream indices are assigned before filtering, so no matched frame
     // means the requested conversation is absent.
     if let Some(index) = selected_stream
-        && run_summary.frames_matched == 0
+        && outcome.selected_absent()
     {
         return Err(CliError::new(
             Kind::Cli,
@@ -186,8 +186,9 @@ pub(super) fn run(
         ));
     }
 
+    let run_summary = outcome.run;
     let summary = output::tls::Summary::from_analysis(
-        summary,
+        outcome.summary,
         run_summary.frames_read,
         run_summary.frames_matched,
         state.counts(),

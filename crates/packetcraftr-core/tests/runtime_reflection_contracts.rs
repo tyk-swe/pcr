@@ -9,9 +9,7 @@ use bytes::Bytes;
 use common::probe::{Child, Probe, probe_layout, structure};
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::field::FieldValue;
-use packetcraftr_core::layer::{
-    FieldError, Layer, Malformed, Padding, Raw, malformed_layout, padding_layout, raw_layout,
-};
+use packetcraftr_core::layer::{FieldError, Layer, Malformed, Padding, Raw, raw_layout};
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::packet::Packet;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -234,8 +232,6 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
         }]
     );
     assert_eq!(raw_layout(3)[0].range, ByteRange::new(0, 3));
-    assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
-    assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
 }
 
 #[test]

@@ -613,3 +613,6 @@ canonical path:
 | `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireBudget}` |
 | `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag}` |
 | `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `packetcraftr::dns::response_code_name(code)` |
+
+The undocumented `packetcraftr_core::layer::{malformed_layout, padding_layout}`
+exports are removed; `raw_layout` remains for codecs that emit `Raw` layers.

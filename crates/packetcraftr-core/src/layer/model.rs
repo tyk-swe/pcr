@@ -248,7 +248,7 @@ reflective_layer! {
             }
         }
     }
-    layout pub fn padding_layout(length: usize);
+    layout pub(crate) fn padding_layout(length: usize);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,5 +296,17 @@ reflective_layer! {
             reflect: reason
         }
     }
-    layout pub fn malformed_layout(length: usize);
+    layout pub(crate) fn malformed_layout(length: usize);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::ByteRange;
+
+    #[test]
+    fn opaque_layouts_cover_the_whole_input() {
+        assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
+        assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
+    }
 }

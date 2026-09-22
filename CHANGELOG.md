@@ -457,6 +457,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   re-exports; import them from `packetcraftr::policy`.
 - **Breaking:** the `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}`
   re-exports; import them from `packetcraftr_core::packet::link`.
+- The `#[doc(hidden)]` `packetcraftr_core::layer::{malformed_layout,
+  padding_layout}` exports. `raw_layout` remains available to codecs outside
+  core that emit `Raw` layers.
 - **Breaking:** `packetcraftr::dns::ResponseMetadata::response_code_name` and
   `ValidatedResponse::response_code_name`; use the canonical
   `packetcraftr::dns::response_code_name` function.

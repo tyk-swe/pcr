@@ -16,6 +16,8 @@ mod arp;
 mod ethernet;
 mod ndp;
 
+pub(super) use ethernet::is_unicast_mac;
+
 #[cfg(test)]
 use self::{
     arp::PAYLOAD_LENGTH as ARP_PAYLOAD_LENGTH,
@@ -98,10 +100,6 @@ pub(super) fn match_neighbor_response(
         }
         _ => None,
     }
-}
-
-pub(super) fn is_unicast_mac(address: MacAddress) -> bool {
-    ethernet::is_unicast_mac(address)
 }
 
 #[cfg(test)]

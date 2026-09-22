@@ -49,7 +49,7 @@ pub(super) fn run(
             run_with_events: Box::new(|session, emit| {
                 let runtime = crate::resources::runtime(
                     "scan_connect",
-                    packetcraftr::progress::Runtime::default().capacity(),
+                    packetcraftr::progress::MAX_WORKER_CAPACITY,
                 );
                 packetcraftr::scan::connect::run_with_events(
                     request,

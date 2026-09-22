@@ -237,6 +237,19 @@ impl Plan {
             udp_index: requirements.udp_stream,
         }
     }
+
+    /// Every stage either plan requires. Indexing keeps IP reconstruction, so
+    /// the union can never produce a plan that renumbers streams.
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        let tcp_index = self.tcp_index || other.tcp_index;
+        let udp_index = self.udp_index || other.udp_index;
+        Self {
+            ip_reassembly: self.ip_reassembly || other.ip_reassembly || tcp_index || udp_index,
+            tcp_index,
+            udp_index,
+        }
+    }
 }
 
 /// What one analysis run computes beyond dispatching matched frames.

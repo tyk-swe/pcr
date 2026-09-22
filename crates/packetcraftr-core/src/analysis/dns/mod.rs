@@ -13,8 +13,10 @@ use super::{
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
+    session::{self, Needs},
 };
 use crate::{
+    error::BoundaryError,
     field::WireValue,
     protocol::{
         application::dns::{DecodeError, DecodeLimits, Dns},
@@ -473,5 +475,34 @@ impl Collector {
             TransactionStatus::DuplicateResponse => self.summary.duplicate_responses += 1,
         }
         events.push(Event::Transaction(transaction));
+    }
+}
+
+impl session::Collector for Collector {
+    type Event = Event;
+    type Summary = Summary;
+
+    /// Sourced messages and transactions over reassembled TCP and indexed
+    /// UDP flows.
+    fn needs(&self) -> Needs {
+        Needs {
+            tcp_stream: true,
+            udp_stream: true,
+            tcp_events: true,
+            track_sources: true,
+            ..Needs::default()
+        }
+    }
+
+    fn scopes(&self) -> Vec<Definition> {
+        Self::scopes(self).cloned().collect()
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Event>, BoundaryError> {
+        Self::observe(self, record).map_err(BoundaryError::from_error)
+    }
+
+    fn finish(self, run: &RunSummary) -> Result<(Vec<Event>, Summary), BoundaryError> {
+        Self::finish(self, run).map_err(BoundaryError::from_error)
     }
 }

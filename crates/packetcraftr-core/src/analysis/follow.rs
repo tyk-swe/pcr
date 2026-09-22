@@ -7,7 +7,9 @@ use crate::analysis::adapter::transport_payload;
 use crate::analysis::dedup::Deduplicator;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
+use crate::analysis::session::{self, Needs};
 use crate::analysis::{StreamRef, StreamTransport};
+use crate::error::BoundaryError;
 
 /// Direction lives with the deduplicator every TCP conversation collector
 /// shares; this is its public path.
@@ -226,5 +228,36 @@ impl Collector {
             PeerDirection::ServerToClient => &mut self.summary.server_bytes,
         };
         *counter = counter.saturating_add(length as u64);
+    }
+}
+
+impl session::Collector for Collector {
+    type Event = Chunk;
+    type Summary = Summary;
+
+    /// Only TCP chunks need reassembly events; UDP chunks come straight
+    /// from the indexed datagrams.
+    fn needs(&self) -> Needs {
+        match self.selector.transport {
+            StreamTransport::Tcp => Needs {
+                tcp_stream: true,
+                tcp_events: true,
+                ..Needs::default()
+            },
+            StreamTransport::Udp => Needs {
+                udp_stream: true,
+                ..Needs::default()
+            },
+        }
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Chunk>, BoundaryError> {
+        Ok(Self::observe(self, record))
+    }
+
+    /// Payload arrives only while frames are observed, so `finish` has no
+    /// trailing events to drain.
+    fn finish(self, run: &RunSummary) -> Result<(Vec<Chunk>, Summary), BoundaryError> {
+        Ok((Vec::new(), Self::finish(self, run)))
     }
 }

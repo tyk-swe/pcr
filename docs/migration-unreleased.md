@@ -25,8 +25,8 @@ and do not change verdicts. Consumed input SHA-256/byte counts and decode contex
 are published by the CLI. Evidence charges account for typed JSON serialization.
 
 See [verification semantics](verification-contract.md), [consumer compatibility](consumer-compatibility.md),
-and [resource presets](resource-presets.md). The frozen v5 schema is retained;
-old consumers must reject or explicitly migrate v6 rather than infer semantics.
+and [resource presets](resource-presets.md). Consumers of earlier output
+contracts must reject or explicitly migrate v6 rather than infer semantics.
 
 ## Named packet fields and output/v6
 
@@ -58,7 +58,8 @@ Output/v6 includes streamed `build` packet/completion events and replay
 `fallback_attempted=false`: this represents a direct TCP query. Consumers
 must inspect the actual attempt transport rather than infer it from fallback.
 Fallback attempts retain a preceding truncated UDP phase with the same attempt
-number. These changes supersede the earlier unreleased output/v3 and output/v4 contracts.
+number. These changes supersede the earlier unreleased output/v3, output/v4, and
+output/v5 contracts.
 
 DNS `query_type` is an integer in `0..=65535` wherever it appears in aggregate
 summaries and NDJSON DNS events. For example, `"query_type": "aaaa"` becomes

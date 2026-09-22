@@ -32,10 +32,11 @@ class ConsumerTests(unittest.TestCase):
         value["future_metadata"] = {"opaque": True}
         self.assertEqual(self.consume(value)["verdict"], "pass")
 
-    def test_frozen_v5_requires_explicit_migration(self):
-        with (ROOT / "examples/consumers/fixtures/v5-forwarding.json").open("rb") as source:
-            with self.assertRaisesRegex(consumer.ContractError, "unsupported schema"):
-                consumer.consume(source, "json", 0)
+    def test_prior_schema_requires_explicit_migration(self):
+        value = copy.deepcopy(FIXTURE)
+        value["schema"] = "packetcraftr.output/v5"
+        with self.assertRaisesRegex(consumer.ContractError, "unsupported schema"):
+            self.consume(value)
 
     def test_truncated_missing_and_repeated_terminal_rejected(self):
         data = encoded(FIXTURE)

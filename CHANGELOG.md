@@ -70,7 +70,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   diagnostics, and demand-driven physical comparison analysis.
 - Versioned `ci-v1` / `workstation-v1` offline resource presets with explicit
   override precedence and resolved resource diagnostics.
-- A strict bounded downstream forwarding consumer, frozen v5/v6 fixtures,
+- A strict bounded downstream forwarding consumer, a frozen v6 fixture,
   mutation tests, and a checksummed reproducible offline regression harness.
 - Composed compression/capture, capture transformation, forwarding-semantic,
   and HTTP segmentation fuzz targets; forwarding/HTTP measurement workloads.
@@ -370,7 +370,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   returns a checked result. DNS `Request::transport: TransportMode` replaces
   `tcp_fallback`; unknown serialized request fields are rejected. Scan requests
   and probes gain `udp_payload`, and `scan::Probe` is no longer `Copy`.
-- Output/v5 supersedes the earlier unreleased v3/v4 schemas, adding build streams,
+- Output/v6 supersedes the earlier unreleased v3–v5 schemas, adding build streams,
   bit-rate timing, and successful direct TCP DNS with `fallback_attempted=false`.
   Schemas, examples, release assets, and migration notes follow the new contract.
 - `packetcraftr --help` lists exit code 130 for interrupted operations next to

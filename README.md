@@ -244,7 +244,7 @@ Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, `pcapng`, `csv`, and `tsv`; invalid
-combinations fail explicitly. Every output-v5 NDJSON envelope has an `event`
+combinations fail explicitly. Every output/v6 NDJSON envelope has an `event`
 discriminator; the schema enumerates the per-command event names, and
 `complete` and `error` are the terminal records. The payload is in `result` or
 `error`; consumers never need to

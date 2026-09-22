@@ -13,7 +13,6 @@ mod tests;
 mod transmitter;
 mod wire;
 
-pub use crate::policy::{Authorizer, Operation};
 pub use authorizer::SystemAuthorizer;
 pub use engine::{run_repeated_with_selector, run_with_selector};
 pub use error::Error;

@@ -43,7 +43,7 @@ pub(super) struct Run<'a, R, A, T, C> {
 impl<R, A, T, C> Run<'_, R, A, T, C>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -72,7 +72,7 @@ pub(super) fn render_text<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -99,7 +99,7 @@ pub(super) fn render_aggregate<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -122,7 +122,7 @@ pub(super) fn render_stream<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -141,7 +141,7 @@ pub(super) fn render_capture<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -156,7 +156,7 @@ fn render_capture_to<R, A, T, C, W>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
     W: Write,
@@ -327,10 +327,10 @@ mod tests {
         deny_on: Option<usize>,
     }
 
-    impl packetcraftr::replay::Authorizer for FakeAuthorizer {
+    impl packetcraftr::policy::Authorizer for FakeAuthorizer {
         fn authorize_operation(
             &mut self,
-            _request: packetcraftr::replay::Operation<'_>,
+            _request: packetcraftr::policy::Operation<'_>,
         ) -> Result<(), packetcraftr_core::error::BoundaryError> {
             self.calls += 1;
             if self.deny_on == Some(self.calls) {

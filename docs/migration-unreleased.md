@@ -610,5 +610,5 @@ canonical path:
 | `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
 | `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_netio::SystemFault` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
-| `packetcraftr::replay::{ReplayFrame, WireBudget}` | `packetcraftr::policy::{ReplayFrame, WireBudget}` |
+| `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireBudget}` |
 | `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `packetcraftr::dns::response_code_name(code)` |

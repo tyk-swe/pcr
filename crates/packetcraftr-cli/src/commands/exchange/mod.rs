@@ -14,6 +14,7 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
+use super::execution;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
@@ -81,35 +82,46 @@ pub(super) fn run(
         allow_permissive_live: send.allow_permissive_live,
     };
     let client = crate::system::client(registry, prepared.policy);
-    if format == ExchangeFormat::Ndjson {
-        let event_stream = stream.clone();
-        let summary = client
-            .exchange_with_events(&template, options, move |event| {
-                output::exchange::Event::try_from_exchange(event)
+    // Exchange drives the composed client itself — authorization,
+    // cancellation, and the callback runtime live inside it — so the driver
+    // vends no session state.
+    execution::run_workflow(
+        &mut (),
+        format,
+        stream,
+        crate::cancellation::signal(),
+        execution::Hooks {
+            command: output::contract::Command::Exchange,
+            run: Box::new(|_| {
+                client
+                    .exchange(&template, options.clone())
                     .map_err(CliError::classified)
-                    .and_then(
-                        |(event, diagnostics)| Ok(event_stream.emit_data(event, diagnostics)?),
-                    )
-                    .map_err(CliError::into_boundary_error)
-            })
-            .map_err(CliError::classified)?;
-        return rendering::render_complete(summary, stream);
-    }
-    let result = client
-        .exchange(&template, options)
-        .map_err(CliError::classified)?;
-    match format {
-        ExchangeFormat::Text => rendering::render_text(&result),
-        ExchangeFormat::Json => rendering::render_aggregate(result),
-        ExchangeFormat::Pcap => {
-            rendering::render_capture(&result, capture::Format::Pcap, compression)
-        }
-        ExchangeFormat::PcapNg => {
-            rendering::render_capture(&result, capture::Format::PcapNg, compression)
-        }
-        ExchangeFormat::Ndjson => Err(CliError::new(
-            Kind::Internal,
-            "NDJSON exchange streaming returned before aggregate rendering",
-        )),
-    }
+            }),
+            run_with_events: Box::new(|_, emit| {
+                client
+                    .exchange_with_events(&template, options.clone(), emit)
+                    .map_err(CliError::classified)
+            }),
+            on_event: rendering::emit_event,
+            into_result: Box::new(|report| {
+                output::exchange::Report::try_from_exchange(report)
+                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                    .map_err(CliError::classified)
+            }),
+            render_text: Box::new(move |report, format| match format {
+                ExchangeFormat::Text => rendering::render_text(&report),
+                ExchangeFormat::Pcap => {
+                    rendering::render_capture(&report, capture::Format::Pcap, compression)
+                }
+                ExchangeFormat::PcapNg => {
+                    rendering::render_capture(&report, capture::Format::PcapNg, compression)
+                }
+                ExchangeFormat::Json | ExchangeFormat::Ndjson => Err(CliError::new(
+                    Kind::Internal,
+                    "exchange machine formats dispatch before text rendering",
+                )),
+            }),
+            complete: rendering::render_complete,
+        },
+    )
 }

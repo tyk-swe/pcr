@@ -64,20 +64,7 @@ fn ip_offset(frame: &Frame) -> Result<usize, Error> {
         LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6 => Ok(0),
         LinkType::ETHERNET => {
             let bytes = frame.bytes();
-            let mut offset = 14;
-            let mut kind = u16_at(bytes, 12)?;
-            let mut vlans = 0;
-            while matches!(kind, 0x8100 | 0x88a8) {
-                if vlans >= 64 {
-                    return Err(Error::Limit {
-                        field: "VLAN depth",
-                        limit: 64,
-                    });
-                }
-                kind = u16_at(bytes, offset + 2)?;
-                offset += 4;
-                vlans += 1;
-            }
+            let (offset, kind) = super::ethernet_payload(bytes, u16_at)?;
             if !matches!(kind, 0x0800 | 0x86dd) {
                 return Err(Error::Unsupported("Ethernet payload is not IPv4/IPv6"));
             }

@@ -129,7 +129,7 @@ pub fn rewrite(
         return Err(Error::Unsupported("MAC/VLAN edits require Ethernet"));
     }
     let (old_offset, kind) = if ethernet {
-        ethernet_payload(frame.bytes())?
+        super::ethernet_payload(frame.bytes(), u16_at)?
     } else if matches!(
         frame.link_type,
         LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6
@@ -212,23 +212,6 @@ pub fn rewrite(
     output.interface = frame.interface;
     output.direction = frame.direction;
     Ok(output)
-}
-fn ethernet_payload(bytes: &[u8]) -> Result<(usize, u16), Error> {
-    let mut offset = 14;
-    let mut kind = u16_at(bytes, 12)?;
-    let mut count = 0;
-    while matches!(kind, 0x8100 | 0x88a8) {
-        if count >= 64 {
-            return Err(Error::Limit {
-                field: "VLAN depth",
-                limit: 64,
-            });
-        }
-        kind = u16_at(bytes, offset + 2)?;
-        offset += 4;
-        count += 1;
-    }
-    Ok((offset, kind))
 }
 fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, Error> {
     let value = bytes

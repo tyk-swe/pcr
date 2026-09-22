@@ -60,3 +60,27 @@ impl Classified for Error {
         }
     }
 }
+
+/// Skips 802.1Q/802.1ad tags after the Ethernet addresses, returning the
+/// payload offset and its EtherType. `u16_at` bounds-checks each read, so every
+/// caller keeps its own truncation error.
+fn ethernet_payload(
+    bytes: &[u8],
+    u16_at: fn(&[u8], usize) -> Result<u16, Error>,
+) -> Result<(usize, u16), Error> {
+    let mut offset = 14;
+    let mut kind = u16_at(bytes, 12)?;
+    let mut vlans = 0;
+    while matches!(kind, 0x8100 | 0x88a8) {
+        if vlans >= 64 {
+            return Err(Error::Limit {
+                field: "VLAN depth",
+                limit: 64,
+            });
+        }
+        kind = u16_at(bytes, offset + 2)?;
+        offset += 4;
+        vlans += 1;
+    }
+    Ok((offset, kind))
+}

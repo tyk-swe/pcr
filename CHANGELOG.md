@@ -286,7 +286,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `analysis::Session` in `packetcraftr-core` owns the offline-analysis
   lifecycle over a capture reader: it narrows `analysis::Options::plan` to the
   union of the compiled filter's `filter::Requirements` and the collector's
-  declared `analysis::Needs` (keeping conversation indexing capture-global so
+  declared `analysis::CollectorNeeds` (keeping conversation indexing capture-global so
   `max_flows` accounting stays per-transport), forwards IP events ahead of the
   records that reveal them, delivers each collector event to a caller-supplied
   sink in capture order, captures `scopes` before `finish`, drains the
@@ -422,6 +422,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   defaults, ranges, and parsing are unchanged. `build-manifest.py` reports
   malformed or incomplete release metadata with explicit diagnostics instead
   of tracebacks, and bounds its `rustc`/binary probes.
+- `scan` (including `--connect`), `dns`, `traceroute`, `exchange`, and `fuzz`
+  now run through one shared workflow driver that chooses between the
+  streaming and collecting engine entry points under the negotiated output
+  format. The driver checks the interrupt token and the installed invocation
+  deadline before every NDJSON event emission — previously only `fuzz`
+  checked — and once more after a collecting run completes, before the
+  report renders: an interrupt landing in that window now exits cancelled
+  instead of printing the report.
 
 ### Removed
 

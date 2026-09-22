@@ -40,7 +40,7 @@ pub(crate) struct Args {
 }
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
-    let mut collector =
+    let collector =
         Collector::new(args.application.core(), args.dns_ports).map_err(CliError::classified)?;
     let selector = args
         .stream
@@ -58,9 +58,11 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         )
     });
     let setup = super::offline_analysis::prepare(args.limits, filter.as_deref(), &args.decode)?;
+    // The session narrows the plan and raises the TCP/source-tracking flags
+    // from the collector's declared needs.
+    let session =
+        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
     let mut reader = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
-    let mut options = setup.options(true);
-    options.track_sources = true;
     let (mut messages, mut transactions, mut issues) = (Vec::new(), Vec::new(), Vec::new());
     let mut output = EventOutput::new(
         format,
@@ -82,32 +84,21 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             Event::Issue(value) => output.emit(wire::Issue(value), &mut issues, render_issue),
         }
     };
-    let run = analysis::run_with_ip_events(
-        &mut reader,
-        setup.registry.clone(),
-        &options,
-        super::offline_analysis::ip_event_sink(
-            (format == ToolFormat::Ndjson).then(|| stream.clone()),
-        ),
-        |record| {
-            for event in collector
-                .observe(&record)
-                .map_err(packetcraftr_core::error::BoundaryError::from_error)?
-            {
-                emit(event).map_err(CliError::into_boundary_error)?;
-            }
-            Ok(())
-        },
-    )
-    .map_err(CliError::classified)?;
-    let scopes = collector.scopes().cloned().collect();
-    let (trailing, summary) = collector.finish(&run).map_err(CliError::classified)?;
-    for event in trailing {
-        emit(event)?;
-    }
-    if selector.is_some() && run.frames_matched == 0 {
+    let outcome = session
+        .run(
+            &mut reader,
+            super::offline_analysis::ip_event_sink(
+                (format == ToolFormat::Ndjson).then(|| stream.clone()),
+            ),
+            |event| emit(event).map_err(CliError::into_boundary_error),
+        )
+        .map_err(CliError::classified)?;
+    if outcome.selected_absent() {
         return Err(CliError::new(Kind::Cli, "selected stream is not present"));
     }
+    let run = outcome.run;
+    let scopes = outcome.scopes;
+    let summary = outcome.summary;
     let complete = wire::Complete {
         frames_read: run.frames_read,
         frames_matched: run.frames_matched,

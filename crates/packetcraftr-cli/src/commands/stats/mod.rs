@@ -36,7 +36,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
 
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
-    let options = prepared.options(false);
+    let options = prepared.options();
     let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
         collector.observe(&record);
         Ok(())

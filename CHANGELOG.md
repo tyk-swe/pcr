@@ -283,6 +283,18 @@ All notable changes to PacketcraftR are documented here. The format follows
   and `packetcraftr`'s `client_composition` (explicit destination allowlist,
   finite operation budgets, and local providers — no live traffic). CI runs
   them under the portable profile.
+- `analysis::Session` in `packetcraftr-core` owns the offline-analysis
+  lifecycle over a capture reader: it narrows `analysis::Options::plan` to the
+  union of the compiled filter's `filter::Requirements` and the collector's
+  declared `analysis::Needs` (keeping conversation indexing capture-global so
+  `max_flows` accounting stays per-transport), forwards IP events ahead of the
+  records that reveal them, delivers each collector event to a caller-supplied
+  sink in capture order, captures `scopes` before `finish`, drains the
+  trailing events `finish` returns through the same sink, and reports the
+  empty-selector verdict from `frames_matched`. `http`, `dns-read`, `expert`,
+  `follow`, and `tls` now supply only a collector and an event sink; `follow`
+  uses the split observe/finish phases so its missing-selector verdict still
+  precedes collection teardown.
 
 ### Changed
 

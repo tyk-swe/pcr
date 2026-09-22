@@ -435,6 +435,61 @@ impl crate::output::stream::StreamRecord for Event {
     }
 }
 
+pub struct Offline;
+pub struct Live;
+
+impl crate::output::workflow::Conversion for Offline {
+    type EngineEvent = packet_fuzz::Case;
+    type EngineSummary = packet_fuzz::Summary;
+    type EngineReport = packet_fuzz::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), ContractError> {
+        Ok((Event::try_from_offline(event)?, Vec::new()))
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), ContractError> {
+        let (event, diagnostics, stats) = Event::complete_from_offline(summary)?;
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(
+        report: Self::EngineReport,
+    ) -> Result<crate::output::workflow::Converted<Report>, ContractError> {
+        Report::try_from_offline(report).map(crate::output::workflow::Converted::with_stats)
+    }
+}
+
+impl crate::output::workflow::Conversion for Live {
+    type EngineEvent = live_fuzz::Case;
+    type EngineSummary = live_fuzz::Summary;
+    type EngineReport = live_fuzz::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), ContractError> {
+        Ok((Event::try_from_live(event)?, Vec::new()))
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), ContractError> {
+        let (event, diagnostics, stats) = Event::complete_from_live(summary)?;
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(
+        report: Self::EngineReport,
+    ) -> Result<crate::output::workflow::Converted<Report>, ContractError> {
+        Report::try_from_live(report).map(crate::output::workflow::Converted::with_stats)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

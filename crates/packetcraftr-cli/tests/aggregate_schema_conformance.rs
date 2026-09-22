@@ -16,6 +16,7 @@ use bytes::Bytes;
 use packetcraftr::Stats;
 use packetcraftr_cli::output::contract::{Command, Format};
 use packetcraftr_cli::output::envelope::Envelope;
+use packetcraftr_cli::output::workflow::{Conversion, Converted};
 use packetcraftr_cli::output::{
     build as build_output, dissect as dissect_output, dns as dns_output,
     exchange as exchange_output, expert as expert_output, follow as follow_output,
@@ -91,6 +92,7 @@ const CASES: &[(Command, &str, Case)] = &[
     (Command::Exchange, "nothing sent", exchange_empty_case),
     (Command::Replay, "transmitted frames", replay_case),
     (Command::Scan, "endpoints", scan_case),
+    (Command::Scan, "socket connect", connect_case),
     (Command::Scan, "icmp sweep", scan_icmp_case),
     (Command::Stats, "conversations", stats_conversations_case),
     (Command::Stats, "endpoints", stats_endpoints_case),
@@ -169,6 +171,18 @@ fn envelope_with_stats<T: serde::Serialize>(
 ) -> Value {
     serde_json::to_value(Envelope::success(command, payload, diagnostics).with_stats(stats))
         .expect("aggregate envelope serializes")
+}
+
+fn workflow_envelope<C: Conversion>(command: Command, report: C::EngineReport) -> Value {
+    let Converted {
+        result,
+        diagnostics,
+        stats,
+    } = C::report(report).expect("workflow conversion succeeds");
+    match stats {
+        Some(stats) => envelope_with_stats(command, result, diagnostics, stats),
+        None => envelope(command, result, diagnostics),
+    }
 }
 
 fn diagnostic() -> Diagnostic {
@@ -493,8 +507,9 @@ fn send_without_neighbor_case() -> Value {
 }
 
 fn exchange_case() -> Value {
-    let (report, diagnostics, stats) =
-        exchange_output::Report::try_from_exchange(packetcraftr::exchange::Report {
+    workflow_envelope::<exchange_output::Conversion>(
+        Command::Exchange,
+        packetcraftr::exchange::Report {
             sent: vec![Arc::new(sent_packet())],
             responses: vec![packetcraftr::exchange::Response {
                 request_index: 0,
@@ -506,14 +521,14 @@ fn exchange_case() -> Value {
             undecoded: vec![evidence_frame()],
             diagnostics: vec![diagnostic()],
             stats: workflow_stats(),
-        })
-        .expect("in-range exchange evidence converts");
-    envelope_with_stats(Command::Exchange, report, diagnostics, stats)
+        },
+    )
 }
 
 fn exchange_empty_case() -> Value {
-    let (report, diagnostics, stats) =
-        exchange_output::Report::try_from_exchange(packetcraftr::exchange::Report {
+    workflow_envelope::<exchange_output::Conversion>(
+        Command::Exchange,
+        packetcraftr::exchange::Report {
             sent: Vec::new(),
             responses: Vec::new(),
             unanswered: Vec::new(),
@@ -521,9 +536,8 @@ fn exchange_empty_case() -> Value {
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
             stats: packetcraftr::Stats::default(),
-        })
-        .expect("an empty exchange converts");
-    envelope_with_stats(Command::Exchange, report, diagnostics, stats)
+        },
+    )
 }
 
 fn replay_case() -> Value {
@@ -592,10 +606,56 @@ fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
     }
 }
 
+fn connect_case() -> Value {
+    let address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let probe = packetcraftr::scan::connect::Probe {
+        sequence: 0,
+        endpoint: std::net::SocketAddr::new(address, 443),
+        attempt: 1,
+        attempted: true,
+        connect_succeeded: Some(false),
+        outcome: packetcraftr::scan::connect::Outcome::Refused,
+        scheduled_at: UNIX_EPOCH,
+        finished_at: Some(UNIX_EPOCH + Duration::from_millis(2)),
+        elapsed: Duration::from_millis(2),
+        local: None,
+        error: Some(Arc::new(std::io::Error::from(
+            std::io::ErrorKind::ConnectionRefused,
+        ))),
+    };
+    let document = workflow_envelope::<packetcraftr_cli::output::scan_connect::Conversion>(
+        Command::Scan,
+        packetcraftr::scan::connect::Report {
+            summary: packetcraftr::scan::connect::Summary {
+                target: "127.0.0.1".to_owned(),
+                resolved_addresses: vec![address],
+                planned_duration: Duration::from_secs(1),
+                stats: packetcraftr::scan::connect::Statistics {
+                    connections_scheduled: 1,
+                    connections_attempted: 1,
+                    ..Default::default()
+                },
+            },
+            endpoints: vec![packetcraftr::scan::connect::Endpoint {
+                address,
+                port: 443,
+                classification: packetcraftr::scan::Classification::Closed,
+                probes: vec![probe],
+            }],
+        },
+    );
+    assert!(
+        document.get("stats").is_none(),
+        "connect has no packet statistics"
+    );
+    document
+}
+
 fn scan_case() -> Value {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let (report, diagnostics, stats) =
-        scan_output::Report::try_from_scan(packetcraftr::scan::Report {
+    workflow_envelope::<scan_output::Conversion>(
+        Command::Scan,
+        packetcraftr::scan::Report {
             planned_duration: std::time::Duration::ZERO,
             target: "host.example".to_owned(),
             resolved_addresses: vec![address],
@@ -610,9 +670,8 @@ fn scan_case() -> Value {
             diagnostics: vec![diagnostic()],
             stats: workflow_stats(),
             rtt: packetcraftr::scan::Rtt::default(),
-        })
-        .expect("in-range scan evidence converts");
-    envelope_with_stats(Command::Scan, report, diagnostics, stats)
+        },
+    )
 }
 
 fn scan_icmp_case() -> Value {
@@ -641,8 +700,9 @@ fn scan_icmp_case() -> Value {
         probes: vec![probe(address)],
     };
     let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let (report, diagnostics, stats) =
-        scan_output::Report::try_from_scan(packetcraftr::scan::Report {
+    workflow_envelope::<scan_output::Conversion>(
+        Command::Scan,
+        packetcraftr::scan::Report {
             planned_duration: std::time::Duration::ZERO,
             target: "host.example".to_owned(),
             resolved_addresses: vec![ipv4, ipv6],
@@ -651,9 +711,8 @@ fn scan_icmp_case() -> Value {
             diagnostics: Vec::new(),
             stats: workflow_stats(),
             rtt: packetcraftr::scan::Rtt::default(),
-        })
-        .expect("in-range scan evidence converts");
-    envelope_with_stats(Command::Scan, report, diagnostics, stats)
+        },
+    )
 }
 
 fn stats_case(table: stats_output::Table) -> Value {
@@ -925,8 +984,9 @@ fn trace_probe(responded: bool) -> packetcraftr::traceroute::ProbeEvidence {
 }
 
 fn traceroute_case() -> Value {
-    let (report, diagnostics, stats) =
-        traceroute_output::Report::try_from_traceroute(packetcraftr::traceroute::Report {
+    workflow_envelope::<traceroute_output::Conversion>(
+        Command::Traceroute,
+        packetcraftr::traceroute::Report {
             target: "host.example".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))],
             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
@@ -943,14 +1003,13 @@ fn traceroute_case() -> Value {
             completion: packetcraftr::traceroute::Completion::DestinationReached,
             diagnostics: vec![diagnostic()],
             stats: workflow_stats(),
-        })
-        .expect("in-range traceroute evidence converts");
-    envelope_with_stats(Command::Traceroute, report, diagnostics, stats)
+        },
+    )
 }
 
 fn dns_timeout_case() -> Value {
     let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-    let (report, diagnostics, stats) = dns_output::Report::try_from_dns({
+    workflow_envelope::<dns_output::Single>(Command::Dns, {
         let response: Option<packetcraftr::dns::ValidatedResponse> = None;
         packetcraftr::dns::Report::new(
             packetcraftr::dns::Summary {
@@ -992,8 +1051,6 @@ fn dns_timeout_case() -> Value {
         )
         .unwrap()
     })
-    .expect("in-range DNS evidence converts");
-    envelope_with_stats(Command::Dns, report, diagnostics, stats)
 }
 
 /// A batch result exercises the `questions` shape: one completed question with
@@ -1069,9 +1126,7 @@ fn dns_batch_case() -> Value {
             },
         ],
     };
-    let (result, diagnostics, stats) =
-        dns_output::BatchResult::try_from_batch(batch).expect("batch result converts");
-    envelope_with_stats(Command::Dns, result, diagnostics, stats)
+    workflow_envelope::<dns_output::Batch>(Command::Dns, batch)
 }
 
 fn dns_name(value: &str) -> dns_wire::Name {
@@ -1203,7 +1258,7 @@ fn dns_response_case() -> Value {
             },
         },
     };
-    let (report, diagnostics, stats) = dns_output::Report::try_from_dns({
+    workflow_envelope::<dns_output::Single>(Command::Dns, {
         let response: Option<packetcraftr::dns::ValidatedResponse> = Some(response);
         packetcraftr::dns::Report::new(
             packetcraftr::dns::Summary {
@@ -1243,8 +1298,6 @@ fn dns_response_case() -> Value {
         )
         .unwrap()
     })
-    .expect("in-range DNS evidence converts");
-    envelope_with_stats(Command::Dns, report, diagnostics, stats)
 }
 
 /// A campaign over the IPv4 fixture: an IPv4 root has a registered capture
@@ -1261,9 +1314,7 @@ fn offline_fuzz_report() -> packet_fuzz::Report {
 }
 
 fn fuzz_offline_case() -> Value {
-    let (report, diagnostics, stats) = fuzz_output::Report::try_from_offline(offline_fuzz_report())
-        .expect("offline fuzz campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+    workflow_envelope::<fuzz_output::Offline>(Command::Fuzz, offline_fuzz_report())
 }
 
 fn fuzz_rejected_case() -> Value {
@@ -1284,9 +1335,7 @@ fn fuzz_rejected_case() -> Value {
     ));
     report.stats.cases_generated = 1;
     report.stats.cases_built = 0;
-    let (report, diagnostics, stats) =
-        fuzz_output::Report::try_from_offline(report).expect("a rejected-only campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+    workflow_envelope::<fuzz_output::Offline>(Command::Fuzz, report)
 }
 
 fn fuzz_live_case() -> Value {
@@ -1315,15 +1364,15 @@ fn fuzz_live_case() -> Value {
             live
         })
         .collect();
-    let (report, diagnostics, stats) =
-        fuzz_output::Report::try_from_live(packetcraftr::fuzz::Report {
+    workflow_envelope::<fuzz_output::Live>(
+        Command::Fuzz,
+        packetcraftr::fuzz::Report {
             seed: offline.seed,
             first_case: offline.first_case,
             cases,
             stats,
-        })
-        .expect("live fuzz campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+        },
+    )
 }
 
 fn interfaces_case() -> Value {

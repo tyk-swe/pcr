@@ -5,5 +5,5 @@ mod record;
 mod report;
 pub use record::{Edns, EdnsOption, Record, RecordData};
 pub use report::{
-    Attempt, BatchResult, Event, QuestionComplete, QuestionResult, Report, Undecoded,
+    Attempt, Batch, BatchResult, Event, QuestionComplete, QuestionResult, Report, Single, Undecoded,
 };

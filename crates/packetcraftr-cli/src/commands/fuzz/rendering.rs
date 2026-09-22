@@ -2,19 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_cli::output;
-use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
+    captured_frame_text, render_diagnostics_text, spaced_hex, write_stdout_line,
 };
 
 pub(super) fn render_text(
-    result: output::fuzz::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    output::workflow::Converted {
+        result,
+        diagnostics,
+        stats,
+    }: output::workflow::Converted<output::fuzz::Report>,
 ) -> Result<(), CliError> {
+    let stats = stats.expect("fuzz conversion includes packet statistics");
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
         result.mode.as_str(),
@@ -72,24 +74,6 @@ pub(super) fn render_text(
         result.cases_generated, stats.packets_completed, stats.bytes
     ))?;
     render_diagnostics_text(&diagnostics)
-}
-
-pub(super) fn render_offline_complete(
-    summary: core::fuzz::Summary,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) =
-        output::fuzz::Event::complete_from_offline(summary).map_err(CliError::classified)?;
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
-}
-
-pub(super) fn render_live_complete(
-    summary: packetcraftr::fuzz::Summary,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) =
-        output::fuzz::Event::complete_from_live(summary).map_err(CliError::classified)?;
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
 }
 
 fn mutation_json<T: serde::Serialize>(value: &T) -> Result<String, CliError> {

@@ -3,11 +3,7 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use crate::rendering::StreamEncoder;
-
 use packetcraftr_core::error::Kind;
-
-use packetcraftr_core as core;
 
 use packetcraftr_cli::output;
 
@@ -20,10 +16,13 @@ use crate::rendering::{
 /// Renders each batch question in input order: a status line first, then the
 /// completed question's ordinary detail block.
 pub(super) fn render_batch_text(
-    result: output::dns::BatchResult,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    output::workflow::Converted {
+        result,
+        diagnostics,
+        stats,
+    }: output::workflow::Converted<output::dns::BatchResult>,
 ) -> Result<(), CliError> {
+    let stats = stats.expect("DNS batch conversion includes packet statistics");
     let total = result.questions.len();
     for (index, question) in result.questions.iter().enumerate() {
         write_stdout_line(format_args!(
@@ -48,14 +47,21 @@ pub(super) fn render_batch_text(
 }
 
 fn render_report_text(result: output::dns::Report) -> Result<(), CliError> {
-    render_text(result, Vec::new(), packetcraftr::Stats::default())
+    render_text(output::workflow::Converted::new(
+        result,
+        Vec::new(),
+        Some(packetcraftr::Stats::default()),
+    ))
 }
 
 pub(super) fn render_text(
-    result: output::dns::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    output::workflow::Converted {
+        result,
+        diagnostics,
+        stats,
+    }: output::workflow::Converted<output::dns::Report>,
 ) -> Result<(), CliError> {
+    let stats = stats.expect("DNS conversion includes packet statistics");
     let server = result.server.parse::<IpAddr>().map_or_else(
         |_| format!("{}:{}", result.server, result.server_port),
         |address| SocketAddr::new(address, result.server_port).to_string(),
@@ -190,37 +196,6 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
     format!(
         "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected} udp_packets_completed={udp_packets_completed} bytes={bytes}"
     )
-}
-
-pub(super) fn emit_event(
-    event: packetcraftr::dns::Event,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
-}
-
-pub(super) fn emit_complete(
-    summary: packetcraftr::dns::Summary,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (record, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
-    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
-}
-
-pub(super) fn emit_batch_complete(
-    batch: packetcraftr::dns::BatchReport,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let stats = batch.stats.clone();
-    let questions = output::dns::BatchResult::question_completions(&batch);
-    let record = output::dns::Event::BatchComplete {
-        server: batch.server,
-        server_port: batch.server_port,
-        questions,
-    };
-    Ok(stream.complete_with_stats(record, Vec::new(), stats)?)
 }
 
 #[cfg(test)]

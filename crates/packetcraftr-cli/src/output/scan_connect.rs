@@ -133,3 +133,41 @@ impl StreamRecord for ProbeEvent {
         "connect_probe"
     }
 }
+
+pub struct Conversion;
+
+impl super::workflow::Conversion for Conversion {
+    type EngineEvent = connect::Probe;
+    type EngineSummary = connect::Summary;
+    type EngineReport = connect::Report;
+    type Event = ProbeEvent;
+    type Terminal = Summary;
+    type Result = Report;
+
+    fn event(
+        event: Self::EngineEvent,
+    ) -> Result<(ProbeEvent, Vec<packetcraftr_core::diagnostic::Diagnostic>), Error> {
+        Ok((event.try_into()?, Vec::new()))
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<
+        (
+            Summary,
+            Vec<packetcraftr_core::diagnostic::Diagnostic>,
+            Option<packetcraftr::Stats>,
+        ),
+        Error,
+    > {
+        Ok((summary.into(), Vec::new(), None))
+    }
+
+    fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
+        Ok(super::workflow::Converted::new(
+            report.try_into()?,
+            Vec::new(),
+            None,
+        ))
+    }
+}

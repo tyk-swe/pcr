@@ -37,6 +37,7 @@ pub mod stats;
 pub mod stream;
 pub mod tls;
 pub mod traceroute;
+pub mod workflow;
 
 pub mod forwarding;
 

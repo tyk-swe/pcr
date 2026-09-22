@@ -493,6 +493,69 @@ impl Event {
     }
 }
 
+pub struct Single;
+pub struct Batch;
+
+impl crate::output::workflow::Conversion for Single {
+    type EngineEvent = packetcraftr::dns::Event;
+    type EngineSummary = packetcraftr::dns::Summary;
+    type EngineReport = packetcraftr::dns::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), Error> {
+        Event::try_from_dns(event)
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), Error> {
+        let (event, diagnostics, stats) = Event::complete_from_dns(summary);
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(
+        report: Self::EngineReport,
+    ) -> Result<crate::output::workflow::Converted<Report>, Error> {
+        Report::try_from_dns(report).map(crate::output::workflow::Converted::with_stats)
+    }
+}
+
+impl crate::output::workflow::Conversion for Batch {
+    type EngineEvent = packetcraftr::dns::Event;
+    type EngineSummary = packetcraftr::dns::BatchReport;
+    type EngineReport = packetcraftr::dns::BatchReport;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = BatchResult;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), Error> {
+        Event::try_from_dns(event)
+    }
+
+    fn summary(
+        batch: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), Error> {
+        let questions = BatchResult::question_completions(&batch);
+        Ok((
+            Event::BatchComplete {
+                server: batch.server,
+                server_port: batch.server_port,
+                questions,
+            },
+            Vec::new(),
+            Some(batch.stats),
+        ))
+    }
+
+    fn report(
+        report: Self::EngineReport,
+    ) -> Result<crate::output::workflow::Converted<BatchResult>, Error> {
+        BatchResult::try_from_batch(report).map(crate::output::workflow::Converted::with_stats)
+    }
+}
+
 impl crate::output::stream::StreamRecord for Event {
     fn event_name(&self) -> &'static str {
         match self {

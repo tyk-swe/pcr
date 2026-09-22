@@ -25,12 +25,36 @@ pub struct Report {
     pub unanswered: Vec<u64>,
     pub unsolicited: Vec<Decoded>,
     pub undecoded: Vec<Captured>,
+    /// Original captured frames for PCAP/PCAPNG, not part of the v6 JSON result.
+    #[serde(skip)]
+    capture_frames: Vec<packetcraftr_core::frame::Frame>,
 }
 
 impl Report {
+    pub fn capture_frames(&self) -> &[packetcraftr_core::frame::Frame] {
+        &self.capture_frames
+    }
+
     pub fn try_from_exchange(
         result: packetcraftr::exchange::Report,
     ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+        // Capture output needs original link types, timestamps and wire bytes,
+        // not the JSON projection. Preserve them during this one conversion.
+        let mut capture_frames = result
+            .sent
+            .iter()
+            .map(|sent| sent.frame())
+            .chain(
+                result
+                    .responses
+                    .iter()
+                    .map(|response| &response.response.frame),
+            )
+            .chain(result.unsolicited.iter().map(|packet| &packet.frame))
+            .chain(result.undecoded.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        capture_frames.sort_by_key(|frame| frame.timestamp);
         let packetcraftr::exchange::Report {
             sent,
             responses,
@@ -66,6 +90,7 @@ impl Report {
                     .into_iter()
                     .map(Captured::try_from_frame)
                     .collect::<Result<Vec<_>, _>>()?,
+                capture_frames,
             },
             diagnostics,
             stats,
@@ -171,6 +196,32 @@ impl Event {
             diagnostics,
             stats,
         )
+    }
+}
+
+pub struct Conversion;
+
+impl super::workflow::Conversion for Conversion {
+    type EngineEvent = packetcraftr::exchange::Event;
+    type EngineSummary = packetcraftr::exchange::Summary;
+    type EngineReport = packetcraftr::exchange::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), Error> {
+        Event::try_from_exchange(event)
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), Error> {
+        let (event, diagnostics, stats) = Event::complete_from_exchange(summary);
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
+        Report::try_from_exchange(report).map(super::workflow::Converted::with_stats)
     }
 }
 

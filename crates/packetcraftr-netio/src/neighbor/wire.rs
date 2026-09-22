@@ -495,6 +495,25 @@ mod tests {
             match_neighbor_response(&request, &capture(extended)),
             Some(sender)
         );
+        for count in [ndp::MAX_NDP_EXTENSIONS, ndp::MAX_NDP_EXTENSIONS + 1] {
+            let mut extended = bytes.clone();
+            let offset = ETHERNET_HEADER_LENGTH;
+            let length = u16::from_be_bytes([extended[offset + 4], extended[offset + 5]]);
+            extended[offset + 4..offset + 6]
+                .copy_from_slice(&(length + (count * 8) as u16).to_be_bytes());
+            extended[offset + 6] = 0;
+            let mut headers = vec![0; count * 8];
+            headers[(count - 1) * 8] = IPV6_NEXT_HEADER_ICMP;
+            extended.splice(
+                offset + IPV6_HEADER_LENGTH..offset + IPV6_HEADER_LENGTH,
+                headers,
+            );
+            assert_eq!(
+                match_neighbor_response(&request, &capture(extended)),
+                (count == ndp::MAX_NDP_EXTENSIONS).then_some(sender),
+                "NDP extension depth {count}"
+            );
+        }
 
         let fragmented = with_ipv6_extension(bytes, 44);
         assert_eq!(
@@ -514,9 +533,31 @@ mod tests {
             Some(&[9][..])
         );
         assert_eq!(
-            upper_layer_icmpv6(51, &[IPV6_NEXT_HEADER_ICMP, 0, 0, 0, 0, 0, 0, 0, 7]),
+            upper_layer_icmpv6(
+                51,
+                &[IPV6_NEXT_HEADER_ICMP, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7]
+            ),
             Some(&[7][..])
         );
+        assert_eq!(
+            upper_layer_icmpv6(51, &[IPV6_NEXT_HEADER_ICMP, 0, 0, 0, 0, 0, 0, 0, 7]),
+            None
+        );
+        for count in [ndp::MAX_NDP_EXTENSIONS, ndp::MAX_NDP_EXTENSIONS + 1] {
+            let mut payload = vec![0; count * 8 + 1];
+            for index in 0..count {
+                payload[index * 8] = if index + 1 == count {
+                    IPV6_NEXT_HEADER_ICMP
+                } else {
+                    0
+                };
+            }
+            payload[count * 8] = 7;
+            assert_eq!(
+                upper_layer_icmpv6(0, &payload),
+                (count == ndp::MAX_NDP_EXTENSIONS).then_some(&[7][..])
+            );
+        }
         assert_eq!(upper_layer_icmpv6(44, &[0; 8]), None);
         assert_eq!(upper_layer_icmpv6(6, &[0; 8]), None);
         assert_eq!(upper_layer_icmpv6(0, &[IPV6_NEXT_HEADER_ICMP]), None);

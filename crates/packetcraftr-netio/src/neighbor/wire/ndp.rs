@@ -7,7 +7,10 @@ use bytes::Bytes;
 
 use super::ethernet::{self, View};
 use crate::{link::MacAddress, neighbor::Request as NeighborRequest};
-use packetcraftr_core::protocol::checksum_parts;
+use packetcraftr_core::protocol::network::envelope::{Ipv6HeaderKind, Ipv6Walk, PseudoHeader};
+
+// Independent of the transform depth limit: bound walks over untrusted NDP replies.
+pub(super) const MAX_NDP_EXTENSIONS: usize = 16;
 
 pub(super) const IPV6_HEADER_LENGTH: usize = 40;
 pub(super) const SOLICITATION_LENGTH: usize = 32;
@@ -122,26 +125,20 @@ pub(super) fn match_advertisement(
     Some(target_mac)
 }
 
-pub(super) fn upper_layer_icmpv6(mut next_header: u8, mut payload: &[u8]) -> Option<&[u8]> {
-    loop {
-        match next_header {
-            NEXT_HEADER_ICMP => return Some(payload),
-            0 | 43 | 60 => {
-                let header = payload.first_chunk::<2>()?;
-                next_header = header[0];
-                let length = (usize::from(header[1]) + 1).checked_mul(8)?;
-                payload = payload.get(length..)?;
-            }
-            51 => {
-                let header = payload.first_chunk::<2>()?;
-                next_header = header[0];
-                let length = (usize::from(header[1]) + 2).checked_mul(4)?;
-                payload = payload.get(length..)?;
-            }
-            // RFC 6980 requires receivers to discard fragmented NDP messages
-            // (header 44); any other header cannot carry an NDP payload either.
-            _ => return None,
+pub(super) fn upper_layer_icmpv6(next_header: u8, payload: &[u8]) -> Option<&[u8]> {
+    let mut walk = Ipv6Walk::new(payload, next_header, MAX_NDP_EXTENSIONS);
+    while let Some(header) = walk.next_header().ok()? {
+        // RFC 6980 requires receivers to discard fragmented NDP messages,
+        // including atomic fragments. Other extension kinds are walkable.
+        if header.kind == Ipv6HeaderKind::Fragment {
+            return None;
         }
+    }
+    let (protocol, offset) = walk.upper_layer();
+    if protocol == NEXT_HEADER_ICMP {
+        payload.get(offset..)
+    } else {
+        None
     }
 }
 
@@ -175,14 +172,12 @@ pub(super) fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
 }
 
 pub(super) fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: &[u8]) -> u16 {
-    let length = u32::try_from(message.len())
-        .unwrap_or(u32::MAX)
-        .to_be_bytes();
-    checksum_parts(&[
-        &source.octets(),
-        &destination.octets(),
-        &length,
-        &[0, 0, 0, NEXT_HEADER_ICMP],
-        message,
-    ])
+    PseudoHeader {
+        source: source.into(),
+        destination: destination.into(),
+        protocol: NEXT_HEADER_ICMP,
+    }
+    .checksum("icmpv6", message, 0)
+    .expect("NDP message length fits the IPv6 payload bound")
+    .expect("ICMPv6 checksums cannot be disabled")
 }

@@ -4,7 +4,13 @@
 use super::Error;
 use crate::{
     frame::{Frame, LinkType},
-    protocol::{checksum, checksum_parts},
+    protocol::{
+        checksum,
+        network::envelope::{
+            ChecksumRefusal, CoverageError, EthernetWalk, PseudoHeader, TransportEnvelope,
+            WalkError, transport_coverage,
+        },
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -129,7 +135,11 @@ pub fn rewrite(
         return Err(Error::Unsupported("MAC/VLAN edits require Ethernet"));
     }
     let (old_offset, kind) = if ethernet {
-        super::ethernet_payload(frame.bytes(), u16_at)?
+        let walk = EthernetWalk::new(frame.bytes(), 64).map_err(|error| match error {
+            WalkError::Truncated(_) => Error::Invalid("truncated rewrite header"),
+            other => other.into(),
+        })?;
+        (walk.payload_offset(), walk.ether_type())
     } else if matches!(
         frame.link_type,
         LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6
@@ -228,33 +238,8 @@ fn ipv4(ip: &mut [u8], patch: &HeaderRewrite) -> Result<usize, Error> {
     if header < 20 || length < header || length > ip.len() {
         return Err(Error::Invalid("invalid IPv4 lengths"));
     }
-    if u16_at(ip, 6)? & 0x3fff != 0 {
-        return Err(Error::Unsupported(
-            "IP address/port edits require reassembly of IPv4 fragments",
-        ));
-    }
-    let mut option = 20;
-    while option < header {
-        match ip[option] {
-            0 => break,
-            1 => option += 1,
-            131 | 137 => {
-                return Err(Error::Unsupported(
-                    "IPv4 source routing changes checksum destinations",
-                ));
-            }
-            _ => {
-                let n = usize::from(
-                    *ip.get(option + 1)
-                        .ok_or(Error::Invalid("truncated IPv4 option"))?,
-                );
-                if n < 2 || option + n > header {
-                    return Err(Error::Invalid("invalid IPv4 option length"));
-                }
-                option += n;
-            }
-        }
-    }
+    transport_coverage(TransportEnvelope::Ipv4(&ip[..header]))
+        .map_err(|error| rewrite_coverage_error(error, false))?;
     for (value, start) in [(patch.source_ip, 12), (patch.destination_ip, 16)] {
         if let Some(value) = value {
             let IpAddr::V4(value) = value else {
@@ -283,60 +268,13 @@ fn ipv6(ip: &mut [u8], patch: &HeaderRewrite) -> Result<usize, Error> {
     if payload == 0 && ip[6] != 59 {
         return Err(Error::Unsupported("IPv6 jumbograms are not rewritten"));
     }
-    let (mut protocol, mut position, mut extensions) = (ip[6], 40, 0);
-    while matches!(protocol, 0 | 43 | 44 | 60) {
-        extensions += 1;
-        if extensions > 64 {
-            return Err(Error::Limit {
-                field: "IPv6 extensions",
-                limit: 64,
-            });
-        }
-        if position + 8 > length {
-            return Err(Error::Invalid("truncated IPv6 extension"));
-        }
-        if protocol == 43 {
-            return Err(Error::Unsupported(
-                "IPv6 routing header changes checksum destinations",
-            ));
-        }
-        let next = ip[position];
-        if protocol == 44 {
-            if u16_at(ip, position + 2)? & 0xfff9 != 0 {
-                return Err(Error::Unsupported(
-                    "IP address/port edits require reassembly of IPv6 fragments",
-                ));
-            }
-            position += 8;
-        } else {
-            let end = position + (usize::from(ip[position + 1]) + 1) * 8;
-            if end > length {
-                return Err(Error::Invalid("invalid IPv6 option-header length"));
-            }
-            let mut option = position + 2;
-            while option < end {
-                if ip[option] == 0 {
-                    option += 1;
-                    continue;
-                }
-                if ip[option] == 201 {
-                    return Err(Error::Unsupported(
-                        "IPv6 Home Address option changes checksum sources",
-                    ));
-                }
-                let n = usize::from(
-                    *ip.get(option + 1)
-                        .ok_or(Error::Invalid("truncated IPv6 option"))?,
-                ) + 2;
-                if option + n > end {
-                    return Err(Error::Invalid("invalid IPv6 option length"));
-                }
-                option += n;
-            }
-            position = end;
-        }
-        protocol = next;
-    }
+    let upper = transport_coverage(TransportEnvelope::Ipv6 {
+        payload: &ip[40..length],
+        next_header: ip[6],
+        max_extensions: 64,
+    })
+    .map_err(|error| rewrite_coverage_error(error, true))?;
+    let (protocol, position) = (upper.protocol, 40 + upper.offset);
     for (value, start) in [(patch.source_ip, 8), (patch.destination_ip, 24)] {
         if let Some(value) = value {
             let IpAddr::V6(value) = value else {
@@ -349,6 +287,29 @@ fn ipv6(ip: &mut [u8], patch: &HeaderRewrite) -> Result<usize, Error> {
     transport(&mut ip[position..length], patch, true, protocol, &addresses)?;
     Ok(length)
 }
+fn rewrite_coverage_error(error: CoverageError, ipv6: bool) -> Error {
+    match error {
+        CoverageError::Refused(ChecksumRefusal::FragmentedDatagram) => {
+            Error::Unsupported(if ipv6 {
+                "IP address/port edits require reassembly of IPv6 fragments"
+            } else {
+                "IP address/port edits require reassembly of IPv4 fragments"
+            })
+        }
+        CoverageError::Refused(ChecksumRefusal::Ipv6RoutingHeader) => {
+            Error::Unsupported("IPv6 routing header changes checksum destinations")
+        }
+        CoverageError::Refused(ChecksumRefusal::AuthenticatedHeader) => {
+            Error::Unsupported("unknown or authenticated upper-layer checksum semantics")
+        }
+        CoverageError::Walk(WalkError::Truncated(_)) => Error::Invalid("truncated IPv6 extension"),
+        CoverageError::Walk(WalkError::InvalidLength(_)) => {
+            Error::Invalid("invalid IPv6 option-header length")
+        }
+        other => other.into(),
+    }
+}
+
 fn transport(
     segment: &mut [u8],
     patch: &HeaderRewrite,
@@ -390,35 +351,42 @@ fn transport(
             ));
         }
     };
-    let disabled_udp = protocol == 17 && !ipv6 && u16_at(segment, 6)? == 0;
+    let previous_checksum = u16_at(segment, checksum_offset)?;
     if let Some(port) = patch.source_port {
         segment[..2].copy_from_slice(&port.to_be_bytes());
     }
     if let Some(port) = patch.destination_port {
         segment[2..4].copy_from_slice(&port.to_be_bytes());
     }
-    if disabled_udp {
-        return Ok(());
-    }
-    segment[checksum_offset..checksum_offset + 2].fill(0);
-    let mut value = if ipv6 {
-        checksum_parts(&[
-            addresses,
-            &(length as u32).to_be_bytes(),
-            &[0, 0, 0, protocol],
-            &segment[..length],
-        ])
+    let (source, destination) = if ipv6 {
+        (
+            IpAddr::from(<[u8; 16]>::try_from(&addresses[..16]).expect("IPv6 source")),
+            IpAddr::from(<[u8; 16]>::try_from(&addresses[16..]).expect("IPv6 destination")),
+        )
     } else {
-        checksum_parts(&[
-            addresses,
-            &[0, protocol],
-            &(length as u16).to_be_bytes(),
-            &segment[..length],
-        ])
+        (
+            IpAddr::from(<[u8; 4]>::try_from(&addresses[..4]).expect("IPv4 source")),
+            IpAddr::from(<[u8; 4]>::try_from(&addresses[4..]).expect("IPv4 destination")),
+        )
     };
-    if protocol == 17 && value == 0 {
-        value = 0xffff;
+    segment[checksum_offset..checksum_offset + 2].fill(0);
+    let value = PseudoHeader {
+        source,
+        destination,
+        protocol,
     }
-    segment[checksum_offset..checksum_offset + 2].copy_from_slice(&value.to_be_bytes());
+    .checksum(
+        match protocol {
+            6 => "tcp",
+            17 => "udp",
+            _ => "icmpv6",
+        },
+        &segment[..length],
+        previous_checksum,
+    )
+    .map_err(Error::Checksum)?;
+    if let Some(value) = value {
+        segment[checksum_offset..checksum_offset + 2].copy_from_slice(&value.to_be_bytes());
+    }
     Ok(())
 }

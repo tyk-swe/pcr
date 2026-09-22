@@ -61,26 +61,43 @@ impl Classified for Error {
     }
 }
 
-/// Skips 802.1Q/802.1ad tags after the Ethernet addresses, returning the
-/// payload offset and its EtherType. `u16_at` bounds-checks each read, so every
-/// caller keeps its own truncation error.
-fn ethernet_payload(
-    bytes: &[u8],
-    u16_at: fn(&[u8], usize) -> Result<u16, Error>,
-) -> Result<(usize, u16), Error> {
-    let mut offset = 14;
-    let mut kind = u16_at(bytes, 12)?;
-    let mut vlans = 0;
-    while matches!(kind, 0x8100 | 0x88a8) {
-        if vlans >= 64 {
-            return Err(Error::Limit {
-                field: "VLAN depth",
-                limit: 64,
-            });
+impl From<crate::protocol::network::envelope::WalkError> for Error {
+    fn from(error: crate::protocol::network::envelope::WalkError) -> Self {
+        use crate::protocol::network::envelope::WalkError;
+        match error {
+            WalkError::DepthExceeded { header, limit } => Self::Limit {
+                field: header,
+                limit,
+            },
+            WalkError::Truncated(_) => Self::Invalid("truncated header walk"),
+            WalkError::InvalidLength(_) => Self::Invalid("invalid header walk length"),
         }
-        kind = u16_at(bytes, offset + 2)?;
-        offset += 4;
-        vlans += 1;
     }
-    Ok((offset, kind))
+}
+
+impl From<crate::protocol::network::envelope::CoverageError> for Error {
+    fn from(error: crate::protocol::network::envelope::CoverageError) -> Self {
+        use crate::protocol::network::envelope::{ChecksumRefusal, CoverageError};
+        match error {
+            CoverageError::Walk(walk) => walk.into(),
+            CoverageError::Invalid(message) => Self::Invalid(message),
+            CoverageError::Refused(refusal) => Self::Unsupported(match refusal {
+                ChecksumRefusal::FragmentedDatagram => {
+                    "transport checksum repair needs a complete datagram"
+                }
+                ChecksumRefusal::Ipv4SourceRoute => {
+                    "IPv4 source routing changes checksum destinations"
+                }
+                ChecksumRefusal::Ipv6RoutingHeader => {
+                    "IPv6 routing headers change checksum destinations"
+                }
+                ChecksumRefusal::Ipv6HomeAddress => {
+                    "IPv6 Home Address option changes checksum sources"
+                }
+                ChecksumRefusal::AuthenticatedHeader => {
+                    "authenticated IPv6 header cannot be repaired"
+                }
+            }),
+        }
+    }
 }

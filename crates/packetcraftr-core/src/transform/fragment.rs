@@ -3,7 +3,10 @@
 
 use super::Error;
 use crate::frame::{Frame, LinkType};
-use crate::protocol::checksum;
+use crate::protocol::{
+    checksum,
+    network::envelope::{EthernetWalk, Ipv6HeaderKind, Ipv6Walk, WalkError},
+};
 
 /// IP MTU excludes the link header. Limits apply before retaining output.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,7 +67,11 @@ fn ip_offset(frame: &Frame) -> Result<usize, Error> {
         LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6 => Ok(0),
         LinkType::ETHERNET => {
             let bytes = frame.bytes();
-            let (offset, kind) = super::ethernet_payload(bytes, u16_at)?;
+            let walk = EthernetWalk::new(bytes, 64).map_err(|error| match error {
+                WalkError::Truncated(_) => Error::Invalid("truncated header"),
+                other => other.into(),
+            })?;
+            let (offset, kind) = (walk.payload_offset(), walk.ether_type());
             if !matches!(kind, 0x0800 | 0x86dd) {
                 return Err(Error::Unsupported("Ethernet payload is not IPv4/IPv6"));
             }
@@ -217,40 +224,38 @@ fn ipv6(
     if length > ip.len() {
         return Err(Error::Invalid("truncated IPv6 payload"));
     }
-    let mut next = ip[6];
-    let mut cursor = 40;
+    let mut walk = Ipv6Walk::new(&ip[40..length], ip[6], 64);
     let mut prefix_len = 40;
     let mut prefix_next = 6;
-    let mut count = 0;
-    while matches!(next, 0 | 43 | 60) {
-        if count >= 64 {
-            return Err(Error::Limit {
+    loop {
+        if matches!(walk.upper_layer().0, 44 | 50 | 51) {
+            return Err(Error::Unsupported("fragment, AH or ESP header"));
+        }
+        let Some(header) = walk.next_header().map_err(|error| match error {
+            WalkError::DepthExceeded { .. } => Error::Limit {
                 field: "IPv6 extension depth",
                 limit: 64,
-            });
-        }
-        let header = ip
-            .get(cursor..cursor + 2)
-            .ok_or(Error::Invalid("truncated IPv6 extension"))?;
-        let size = (usize::from(header[1]) + 1) * 8;
-        if cursor + size > length {
-            return Err(Error::Invalid("truncated IPv6 extension"));
-        }
-        if next == 0 && cursor != 40 {
+            },
+            WalkError::Truncated(_) | WalkError::InvalidLength(_) => {
+                Error::Invalid("truncated IPv6 extension")
+            }
+        })?
+        else {
+            break;
+        };
+        if header.kind == Ipv6HeaderKind::HopByHop && header.offset != 0 {
             return Err(Error::Unsupported("misordered Hop-by-Hop header"));
         }
-        let previous = cursor;
-        cursor += size;
-        if matches!(next, 0 | 43) {
-            prefix_len = cursor;
-            prefix_next = previous;
+        if matches!(
+            header.kind,
+            Ipv6HeaderKind::HopByHop | Ipv6HeaderKind::Routing
+        ) {
+            prefix_len = 40 + header.offset + header.length;
+            prefix_next = 40 + header.offset;
         }
-        next = header[0];
-        count += 1;
     }
-    if matches!(next, 44 | 50 | 51) {
-        return Err(Error::Unsupported("fragment, AH or ESP header"));
-    }
+    let (next, offset_in_payload) = walk.upper_layer();
+    let cursor = 40 + offset_in_payload;
     if length <= options.mtu {
         return unchanged(frame, options);
     }

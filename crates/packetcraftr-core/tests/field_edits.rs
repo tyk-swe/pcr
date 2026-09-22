@@ -547,6 +547,50 @@ fn truncated_fragmented_and_protected_frames_are_rejected() {
 }
 
 #[test]
+fn checksum_repair_refuses_source_route_and_home_address_but_header_only_edits_survive() {
+    for option in [131, 137] {
+        let original = frame(false, false, false, false);
+        let mut bytes = original.bytes().to_vec();
+        bytes[0] = 0x47;
+        let length = u16::from_be_bytes([bytes[2], bytes[3]]) + 8;
+        bytes[2..4].copy_from_slice(&length.to_be_bytes());
+        bytes.splice(20..20, [option, 7, 4, 203, 0, 113, 9, 0]);
+        bytes[10..12].fill(0);
+        let sum = packetcraftr_core::protocol::checksum(&bytes[..28]);
+        bytes[10..12].copy_from_slice(&sum.to_be_bytes());
+        let routed = Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap();
+        assert!(matches!(
+            apply(&routed, &["udp.source_port=4444"], ChecksumMode::Repair),
+            Err(transform::Error::Unsupported(
+                "IPv4 source routing changes checksum destinations"
+            ))
+        ));
+        assert!(apply(&routed, &["ipv4.ttl=33"], ChecksumMode::Repair).is_ok());
+    }
+
+    for extension in [0_u8, 60] {
+        let original = frame(true, false, false, false);
+        let mut bytes = original.bytes().to_vec();
+        bytes[6] = extension;
+        let length = u16::from_be_bytes([bytes[4], bytes[5]]) + 24;
+        bytes[4..6].copy_from_slice(&length.to_be_bytes());
+        let mut options = [0_u8; 24];
+        options[0..4].copy_from_slice(&[17, 2, 201, 16]);
+        options[4..20]
+            .copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9]);
+        bytes.splice(40..40, options);
+        let home = Frame::new(UNIX_EPOCH, LinkType::IPV6, bytes).unwrap();
+        assert!(matches!(
+            apply(&home, &["udp.source_port=4444"], ChecksumMode::Repair),
+            Err(transform::Error::Unsupported(
+                "IPv6 Home Address option changes checksum sources"
+            ))
+        ));
+        assert!(apply(&home, &["ipv6.hop_limit=33"], ChecksumMode::Repair).is_ok());
+    }
+}
+
+#[test]
 fn requested_and_derived_changes_report_exact_ranges() {
     let original = frame(false, true, true, false);
     let outcome = apply(&original, &["ipv4.ttl=100"], ChecksumMode::Repair).unwrap();

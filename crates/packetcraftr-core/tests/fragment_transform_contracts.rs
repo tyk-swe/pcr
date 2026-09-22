@@ -104,6 +104,40 @@ fn both_families_reassemble_exact_transport_bytes_in_reverse_capture_order() {
 }
 
 #[test]
+fn ipv6_fragmentation_keeps_structural_refusals_outside_the_walk() {
+    let original = complete(true, false);
+    let mut misordered = original.bytes().to_vec();
+    misordered[6] = 60;
+    let length = u16::from_be_bytes([misordered[4], misordered[5]]) + 16;
+    misordered[4..6].copy_from_slice(&length.to_be_bytes());
+    misordered.splice(40..40, [0, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0]);
+    let misordered = Frame::new(UNIX_EPOCH, LinkType::IPV6, misordered).unwrap();
+    let options = FragmentOptions {
+        mtu: 128,
+        identification: Some(1),
+        ..Default::default()
+    };
+    assert!(matches!(
+        fragment(&misordered, options),
+        Err(packetcraftr_core::transform::Error::Unsupported(
+            "misordered Hop-by-Hop header"
+        ))
+    ));
+
+    for header in [44, 51, 50] {
+        let mut bytes = original.bytes().to_vec();
+        bytes[6] = header;
+        let protected = Frame::new(UNIX_EPOCH, LinkType::IPV6, bytes).unwrap();
+        assert!(matches!(
+            fragment(&protected, options),
+            Err(packetcraftr_core::transform::Error::Unsupported(
+                "fragment, AH or ESP header"
+            ))
+        ));
+    }
+}
+
+#[test]
 fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
     let original = complete(false, false);
     assert_eq!(

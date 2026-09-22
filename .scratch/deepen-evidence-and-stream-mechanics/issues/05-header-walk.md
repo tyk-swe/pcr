@@ -1,6 +1,6 @@
 # Centralize core header walk and checksum guard
 
-Status: open
+Status: resolved
 Blocked by: none
 Spec: ../spec.md §§ Implementation Decisions 4; Testing Decisions
 

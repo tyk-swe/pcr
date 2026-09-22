@@ -1,6 +1,6 @@
 # Own stream selection in analysis session
 
-Status: open
+Status: resolved
 Blocked by: none
 Spec: ../spec.md §§ Implementation Decisions 6; Testing Decisions
 

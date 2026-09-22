@@ -14,14 +14,13 @@ use crate::probe::evidence::{
 
 use super::error::{Error, duration_limit};
 use super::execution::Execution;
-use super::{Case, LiveLimits, Stats};
+use super::{Case, LiveLimits};
 
 pub(super) fn validate_execution(
     case: &Case,
     execution: &Execution,
     timeout: Duration,
     max_packet_bytes: usize,
-    deadline: &Deadline,
 ) -> Result<(), Error> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(Error::InvalidEvidence {
@@ -53,43 +52,12 @@ pub(super) fn validate_execution(
             case_index: case.prepared.index,
             message: format!("invalid capture statistics: {source}"),
         })?;
-    deadline.check().map_err(duration_limit)?;
     validate_response_frames_and_deadlines(&execution.responses, &[], timeout).map_err(
         |error| Error::InvalidEvidence {
             case_index: case.prepared.index,
             message: format_exchange_evidence_error(error, "case", "fuzz"),
         },
     )?;
-    deadline.check().map_err(duration_limit)?;
-    Ok(())
-}
-
-pub(super) fn add_execution_stats(
-    total: &mut Stats,
-    value: &crate::Stats,
-    case_index: u64,
-) -> Result<(), Error> {
-    let mut sum = total.clone();
-    macro_rules! add {
-        ($field:ident) => {
-            sum.$field = sum
-                .$field
-                .checked_add(value.$field)
-                .ok_or(Error::StatisticsOverflow { case_index })?;
-        };
-    }
-    add!(packets_attempted);
-    add!(packets_completed);
-    add!(bytes);
-    sum.elapsed = sum
-        .elapsed
-        .checked_add(value.elapsed)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
-    sum.capture = sum
-        .capture
-        .checked_add(value.capture)
-        .ok_or(Error::StatisticsOverflow { case_index })?;
-    *total = sum;
     Ok(())
 }
 

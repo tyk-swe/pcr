@@ -11,9 +11,10 @@ pub(crate) use candidate_selection::{
     ResponseCandidate, ResponseSelector, response_within_deadline, update_best_candidate,
 };
 pub(crate) use exact_validation::{
-    ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
-    validate_batch_evidence, validate_capture_statistics_evidence,
-    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
+    ExchangeEvidenceError, format_exchange_evidence_error, validate_batch_evidence,
+    validate_capture_statistics_evidence, validate_captured_evidence_limits,
+    validate_live_batch_evidence, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
 };
 pub(crate) use limits::{
     CaptureEvidenceLimits, check_limits, check_probe_count, check_probe_duration,

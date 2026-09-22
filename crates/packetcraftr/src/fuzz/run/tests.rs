@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use super::*;
 use crate::fuzz::tests::packet;
@@ -96,7 +96,6 @@ fn phase(request: &packet_fuzz::Request, spent: Duration) -> ExecutionPhase<'_> 
         stats: Stats::default(),
         evidence: Budget::default(),
         diagnostics: DiagnosticLog::default(),
-        scheduled_delay: Duration::ZERO,
     }
 }
 
@@ -122,40 +121,4 @@ fn live_cases_share_the_remaining_budget_after_execution_and_pacing() {
     assert_eq!(cases[0].outcome, CaseOutcome::Timeout);
     assert_eq!(cases[1].outcome, CaseOutcome::Response);
     assert_eq!(cases[1].responses.len(), 1);
-}
-
-#[test]
-fn live_case_evidence_beyond_the_clipped_timeout_is_rejected_before_publication() {
-    let request = request();
-    let mut executor = ExecutorFixture {
-        response_latency: Some(Duration::from_millis(250)),
-        ..ExecutorFixture::default()
-    };
-    let mut published = 0;
-    let error = phase(&request, Duration::from_millis(4200))
-        .execute(&mut executor, &mut NoopClock, &mut |_, _| {
-            published += 1;
-            Ok(())
-        })
-        .expect_err("250 ms latency exceeds the clipped 200 ms timeout");
-    assert!(matches!(
-        error,
-        Error::InvalidEvidence { case_index: 1, .. }
-    ));
-    assert_eq!(published, 1);
-}
-
-#[test]
-fn zero_and_exhausted_live_budgets_never_execute_or_publish() {
-    let request = request();
-    for spent in [Duration::from_secs(5), Duration::from_millis(5001)] {
-        let mut executor = ExecutorFixture::default();
-        let error = phase(&request, spent)
-            .execute(&mut executor, &mut NoopClock, &mut |_, _| {
-                panic!("an unexecuted case must not be published")
-            })
-            .expect_err("no remaining execution budget");
-        assert!(matches!(error, Error::DurationLimit { .. }));
-        assert!(executor.timeouts.is_empty());
-    }
 }

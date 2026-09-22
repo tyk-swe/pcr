@@ -3,9 +3,8 @@
 
 use std::fmt::Display;
 use std::sync::Arc;
-use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::{
     build::{Builder, BuiltPacket},
     decode::Dissector,
@@ -21,14 +20,13 @@ use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
 };
+use crate::probe::live_step::{self, EvidenceBounds, Pacer, StepErrors};
 use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{Error, duration_limit};
-use super::evidence::{
-    ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
-};
+use super::evidence::{ExecutionEvidence, retain_evidence, validate_execution};
 use super::execution::{Execution, ExecutionCase};
 use super::plan::{rate_delay, worst_case_duration};
 use super::{Case, CaseOutcome, LiveOptions, Report, Stats, Summary};
@@ -162,7 +160,6 @@ where
         },
         evidence: Budget::default(),
         diagnostics: DiagnosticLog::default(),
-        scheduled_delay: Duration::ZERO,
     }
     .execute(executor, clock, &mut emit)
 }
@@ -287,7 +284,6 @@ struct ExecutionPhase<'a> {
     stats: Stats,
     evidence: Budget,
     diagnostics: DiagnosticLog,
-    scheduled_delay: Duration,
 }
 
 impl ExecutionPhase<'_> {
@@ -334,83 +330,59 @@ impl ExecutionPhase<'_> {
             return Ok(());
         }
         let delay = rate_delay(self.live.cases_per_second)?;
-        let prospective_scheduled_delay =
-            self.scheduled_delay
-                .checked_add(delay)
-                .ok_or(Error::DurationLimit {
-                    actual: Duration::MAX,
-                    limit: self.request.limits.max_duration,
-                })?;
-        self.deadline
-            .start_accounting(delay)
-            .map_err(duration_limit)?;
-        let slept = clock.sleep(delay);
-        self.deadline.check_cancelled()?;
-        slept.map_err(|source| Error::Clock {
-            case_index,
-            source: Box::new(source),
-        })?;
-        self.deadline.account(delay).map_err(duration_limit)?;
-        self.scheduled_delay = prospective_scheduled_delay;
-        Ok(())
+        let errors = FuzzStepErrors(case_index);
+        Pacer::wait(
+            &mut self.deadline,
+            clock,
+            delay,
+            |source| errors.interrupted(source),
+            |source| errors.duration(source),
+            |source| errors.clock(Box::new(source)),
+        )?;
+        live_step::account_pacing(&mut self.stats, delay, &errors)
     }
 
     fn execute_case<E>(&mut self, case: &mut Case, executor: &mut E) -> Result<(), Error>
     where
         E: Executor<ExecutionCase>,
     {
-        self.deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
-        let execution_case = ExecutionCase {
+        let mut execution_case = ExecutionCase {
             permit: crate::evidence::ExecutionPermit::new(),
             packet: case.prepared.recipe.clone(),
-            timeout: self
-                .deadline
-                .bounded_timeout(self.live.timeout)
-                .map_err(duration_limit)?,
+            timeout: self.live.timeout,
         };
-        self.deadline.enforce()?;
-        let execution = executor.execute(&execution_case);
-        self.deadline.enforce()?;
-        let execution = execution.map_err(|source| Error::Execution {
-            case_index: case.prepared.index,
-            source,
-        })?;
-        if execution.permit != execution_case.permit {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
-        }
-        let expected_live_build = expected_live_build(
-            self.request,
-            case.prepared.recipe.clone(),
-            &self.registry,
-            &execution,
-        )
-        .map_err(|message| Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message,
-        })?;
-        if execution.sent.wire_bytes() != &expected_live_build.bytes {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: "executor substituted bytes for the route-materialized case".to_owned(),
-            });
-        }
-        self.deadline.enforce()?;
-        self.deadline
-            .account(execution.stats.elapsed)
-            .map_err(duration_limit)?;
-        validate_execution(
-            case,
-            &execution,
-            execution_case.timeout,
-            self.request.limits.max_packet_bytes,
-            &self.deadline,
+        let errors = FuzzStepErrors(case.prepared.index);
+        let execution = live_step::execute(
+            &mut self.deadline,
+            executor,
+            &mut execution_case,
+            EvidenceBounds {
+                frames: self.live.limits.max_evidence_frames,
+                bytes: self.live.limits.max_evidence_bytes,
+            },
+            &mut self.stats,
+            &errors,
+            |request, receipt| {
+                let expected = expected_live_build(
+                    self.request,
+                    request.packet.clone(),
+                    &self.registry,
+                    receipt,
+                )
+                .map_err(|message| errors.evidence(message))?;
+                if receipt.sent.wire_bytes() != &expected.bytes {
+                    return Err(errors.evidence(
+                        "executor substituted bytes for the route-materialized case".to_owned(),
+                    ));
+                }
+                validate_execution(
+                    case,
+                    receipt,
+                    request.timeout,
+                    self.request.limits.max_packet_bytes,
+                )
+            },
         )?;
-        add_execution_stats(&mut self.stats, &execution.stats, case.prepared.index)?;
         let had_response = !execution.responses.is_empty();
         case.prepared.diagnostics = execution.sent.built().diagnostics.clone();
         case.prepared.decoded = packet_fuzz::dissect_built(
@@ -448,12 +420,7 @@ impl ExecutionPhase<'_> {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<Summary, Error> {
-        self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
-            Error::StatisticsOverflow {
-                case_index: last_case_index(self.request),
-            },
-        )?;
+    fn finish(self) -> Result<Summary, Error> {
         self.deadline.enforce()?;
 
         Ok(Summary {
@@ -461,6 +428,39 @@ impl ExecutionPhase<'_> {
             first_case: self.request.first_case,
             stats: self.stats,
         })
+    }
+}
+
+struct FuzzStepErrors(u64);
+
+impl StepErrors for FuzzStepErrors {
+    type Error = Error;
+    fn interrupted(&self, source: Interrupted) -> Error {
+        source.into()
+    }
+    fn duration(&self, source: DeadlineExceeded) -> Error {
+        source.into()
+    }
+    fn execution(&self, source: crate::BoundaryError) -> Error {
+        Error::Execution {
+            case_index: self.0,
+            source,
+        }
+    }
+    fn clock(&self, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock {
+            case_index: self.0,
+            source,
+        }
+    }
+    fn evidence(&self, message: String) -> Error {
+        Error::InvalidEvidence {
+            case_index: self.0,
+            message,
+        }
+    }
+    fn overflow(&self, _: crate::StatsOverflow) -> Error {
+        Error::StatisticsOverflow { case_index: self.0 }
     }
 }
 

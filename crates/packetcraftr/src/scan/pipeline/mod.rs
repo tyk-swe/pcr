@@ -214,7 +214,9 @@ where
             .map_err(BoundaryError::from_error)?;
         let builder = Builder::new(executor.client.registry.clone());
         let decoder = Dissector::new(executor.client.registry.clone());
-        let spacing = crate::clock::rate_delay(1, options.probes_per_second)
+        // Capture polling owns the wait; share the pacer's rate arithmetic
+        // without sleeping past evidence arriving for another in-flight probe.
+        let spacing = crate::probe::live_step::Pacer::delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
         let mut next = 0usize;
         let mut next_send = Instant::now();

@@ -17,9 +17,10 @@ use crate::clock::Clock;
 use crate::policy::Authorizer;
 use crate::probe::evidence::{
     EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
-    validate_batch_evidence,
+    validate_batch_evidence, validate_live_batch_evidence,
 };
-use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
+use crate::probe::live_step::EvidenceBounds;
+use crate::probe::runner::{BatchRunOptions, ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{DeclaredTargets, GateErrors, admit_selection, budgeted};
 
 use super::WORKFLOW;
@@ -149,15 +150,21 @@ where
     };
     let stats = if request.max_in_flight == 1 {
         let mut lifecycle = Lifecycle {
-            executor,
             processor: &mut processor,
         };
         run_batches(
-            WORKFLOW,
+            BatchRunOptions {
+                workflow: WORKFLOW,
+                probes_per_second: request.probes_per_second,
+                evidence: EvidenceBounds {
+                    frames: request.limits.max_evidence_frames,
+                    bytes: request.limits.max_evidence_bytes,
+                },
+            },
             batches,
-            request.probes_per_second,
             &mut deadline,
             clock,
+            executor,
             &mut lifecycle,
         )
     } else {
@@ -553,27 +560,20 @@ struct Processor<'a, F> {
     rtt: &'a mut super::report::RttAccumulator,
     emit: &'a mut F,
 }
-struct Lifecycle<'a, 'b, E, F> {
-    executor: &'a mut E,
+struct Lifecycle<'a, 'b, F> {
     processor: &'a mut Processor<'b, F>,
 }
 
-impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, '_, E, F>
+impl<F> ProbeLifecycle<Batch> for Lifecycle<'_, '_, F>
 where
-    E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.executor.execute(batch)
-    }
-
     fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
-        validate_batch_evidence(
+        validate_live_batch_evidence(
             WORKFLOW,
             std::slice::from_ref(&batch.probe),
             batch.timeout,
             execution,
-            self.processor.limits.evidence(),
             sent_probe_matches,
         )
     }

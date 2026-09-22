@@ -6,6 +6,7 @@
 mod error;
 pub(crate) mod evidence;
 pub(crate) mod executor;
+pub(crate) mod live_step;
 mod model;
 pub(crate) mod runner;
 #[cfg(test)]

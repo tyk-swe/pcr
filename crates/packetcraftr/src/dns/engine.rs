@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::progress::Runtime;
 use bytes::Bytes;
-use packetcraftr_core::budget::{Deadline, Interrupted};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
@@ -21,6 +21,7 @@ use crate::probe::Executor;
 use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
 };
+use crate::probe::live_step::{self, EvidenceBounds, Pacer, StepErrors};
 use crate::probe::runner::sink_observer;
 use crate::target::{Family, approve_operation, require_family, resolve_selected};
 
@@ -382,24 +383,16 @@ where
 
     fn wait_before_attempt(&mut self, attempt: u32) -> Result<(), Error> {
         if attempt != 1 {
-            self.deadline.enforce()?;
-            self.deadline.start_accounting(self.delay)?;
-            let slept = self.clock.sleep(self.delay);
-            self.deadline.check_cancelled()?;
-            slept.map_err(|source| Error::Clock {
-                attempt,
-                source: Box::new(source),
-            })?;
-            self.summary.stats.elapsed =
-                self.summary
-                    .stats
-                    .elapsed
-                    .checked_add(self.delay)
-                    .ok_or(Error::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: self.request.limits.max_duration,
-                    })?;
-            self.deadline.account(self.delay)?;
+            let errors = DnsStepErrors(attempt);
+            Pacer::wait(
+                self.deadline,
+                self.clock,
+                self.delay,
+                |source| errors.interrupted(source),
+                |source| errors.duration(source),
+                |source| errors.clock(Box::new(source)),
+            )?;
+            live_step::account_pacing(&mut self.summary.stats, self.delay, &errors)?;
         }
         Ok(())
     }
@@ -449,53 +442,33 @@ where
     }
 
     fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
-        self.deadline.start_accounting(Duration::ZERO)?;
-        let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
         let mut attempt_deadline = Deadline::new(self.request.timeout);
-        let execution_request = Exchange {
+        let mut execution_request = Exchange {
             probe: probe.clone(),
-            timeout,
+            timeout: self.request.timeout,
             limits: self.request.limits,
             permit: crate::evidence::ExecutionPermit::new(),
         };
-        self.deadline.enforce()?;
-        let execution = self.executor.execute(&execution_request);
-        let interrupted = self.deadline.enforce();
-        let mut execution = match execution {
-            Ok(execution) => execution,
-            Err(source) => {
-                interrupted?;
-                return Err(Error::Execution {
-                    attempt: probe.attempt,
-                    source,
-                });
-            }
-        };
-        if execution.permit != execution_request.permit {
-            return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
-        }
-        validate_dns_execution(probe, &execution, self.request.limits, timeout)?;
-        // Confirm the receipt before charging it, but retain that traffic even
-        // when cancellation or elapsed time stops this question at the boundary.
-        self.summary
-            .stats
-            .checked_add_assign(&execution.stats)
-            .map_err(|_| Error::StatisticsOverflow {
-                attempt: probe.attempt,
-            })?;
-        interrupted?;
-        self.deadline.account(execution.stats.elapsed)?;
+        let errors = DnsStepErrors(probe.attempt);
+        let mut execution = live_step::execute(
+            self.deadline,
+            self.executor,
+            &mut execution_request,
+            EvidenceBounds {
+                frames: self.request.limits.max_evidence_frames,
+                bytes: self.request.limits.max_evidence_bytes,
+            },
+            &mut self.summary.stats,
+            &errors,
+            |request, receipt| validate_dns_execution(&request.probe, receipt, request.timeout),
+        )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
-        self.deadline.enforce()?;
         for diagnostic in execution.diagnostics.drain(..) {
             self.state.diagnostics.push_once(diagnostic);
         }
         Ok(ProbeExecution {
             execution,
-            timeout,
+            timeout: execution_request.timeout,
             attempt_deadline,
         })
     }
@@ -639,6 +612,39 @@ fn select_response<'a>(
         deadline.enforce()?;
     }
     Ok(best)
+}
+
+struct DnsStepErrors(u32);
+
+impl StepErrors for DnsStepErrors {
+    type Error = Error;
+    fn interrupted(&self, source: Interrupted) -> Error {
+        source.into()
+    }
+    fn duration(&self, source: DeadlineExceeded) -> Error {
+        source.into()
+    }
+    fn execution(&self, source: BoundaryError) -> Error {
+        Error::Execution {
+            attempt: self.0,
+            source,
+        }
+    }
+    fn clock(&self, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock {
+            attempt: self.0,
+            source,
+        }
+    }
+    fn evidence(&self, message: String) -> Error {
+        Error::InvalidEvidence {
+            attempt: self.0,
+            message,
+        }
+    }
+    fn overflow(&self, _: crate::StatsOverflow) -> Error {
+        Error::StatisticsOverflow { attempt: self.0 }
+    }
 }
 
 pub(super) struct Gates;

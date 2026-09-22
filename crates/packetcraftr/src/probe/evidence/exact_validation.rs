@@ -88,9 +88,33 @@ pub(crate) fn validate_aggregate_evidence_limits(
     max_captured_frames: usize,
     max_captured_bytes: usize,
 ) -> Result<(), ExchangeEvidenceError> {
-    let captured_frames =
-        checked_frame_count(&[matched_responses.len(), unsolicited.len(), undecoded.len()])
-            .ok_or(ExchangeEvidenceError::CapturedFrameCountOverflow)?;
+    validate_captured_evidence_limits(
+        matched_responses,
+        unsolicited,
+        &[],
+        undecoded,
+        max_captured_frames,
+        max_captured_bytes,
+    )
+}
+
+/// Counts all executor-returned capture evidence, including fuzz's unmatched
+/// raw frames, before workflow-specific retention can discard anything.
+pub(crate) fn validate_captured_evidence_limits(
+    matched_responses: &[crate::exchange::Response],
+    unsolicited: &[DecodedPacket],
+    unmatched: &[Frame],
+    undecoded: &[Frame],
+    max_captured_frames: usize,
+    max_captured_bytes: usize,
+) -> Result<(), ExchangeEvidenceError> {
+    let captured_frames = checked_frame_count(&[
+        matched_responses.len(),
+        unsolicited.len(),
+        unmatched.len(),
+        undecoded.len(),
+    ])
+    .ok_or(ExchangeEvidenceError::CapturedFrameCountOverflow)?;
     if captured_frames > max_captured_frames {
         return Err(ExchangeEvidenceError::CapturedFrameLimitExceeded {
             actual: captured_frames,
@@ -102,6 +126,7 @@ pub(crate) fn validate_aggregate_evidence_limits(
             .iter()
             .map(|response| &response.response.frame)
             .chain(unsolicited.iter().map(|response| &response.frame))
+            .chain(unmatched)
             .chain(undecoded),
     )
     .ok_or(ExchangeEvidenceError::CapturedByteCountOverflow)?;
@@ -221,11 +246,40 @@ pub(crate) fn validate_batch_exchange_evidence<P, F>(
     execution: &Execution,
     max_captured_frames: usize,
     max_captured_bytes: usize,
-    mut sent_packet_matches: F,
+    sent_packet_matches: F,
 ) -> Result<(), ExchangeEvidenceError>
 where
     F: FnMut(&P, &Packet) -> bool,
 {
+    validate_batch_shape(probes, execution)?;
+    validate_aggregate_evidence_limits(
+        &execution.responses,
+        &execution.unsolicited,
+        &execution.undecoded,
+        max_captured_frames,
+        max_captured_bytes,
+    )?;
+    validate_batch_details(probes, timeout, execution, sent_packet_matches)
+}
+
+/// Sequential batches have already passed the live step's aggregate check.
+pub(crate) fn validate_batch_receipt<P, F>(
+    probes: &[P],
+    timeout: Duration,
+    execution: &Execution,
+    sent_packet_matches: F,
+) -> Result<(), ExchangeEvidenceError>
+where
+    F: FnMut(&P, &Packet) -> bool,
+{
+    validate_batch_shape(probes, execution)?;
+    validate_batch_details(probes, timeout, execution, sent_packet_matches)
+}
+
+fn validate_batch_shape<P>(
+    probes: &[P],
+    execution: &Execution,
+) -> Result<(), ExchangeEvidenceError> {
     if execution.sent.len() != probes.len() {
         return Err(ExchangeEvidenceError::SentCardinality {
             expected: probes.len(),
@@ -239,15 +293,18 @@ where
     {
         return Err(ExchangeEvidenceError::ResponseOutsideBatch);
     }
+    Ok(())
+}
 
-    validate_aggregate_evidence_limits(
-        &execution.responses,
-        &execution.unsolicited,
-        &execution.undecoded,
-        max_captured_frames,
-        max_captured_bytes,
-    )?;
-
+fn validate_batch_details<P, F>(
+    probes: &[P],
+    timeout: Duration,
+    execution: &Execution,
+    mut sent_packet_matches: F,
+) -> Result<(), ExchangeEvidenceError>
+where
+    F: FnMut(&P, &Packet) -> bool,
+{
     for (request_index, (sent, probe)) in execution.sent.iter().zip(probes).enumerate() {
         if !sent_packet_matches(probe, &sent.built().packet) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
@@ -283,22 +340,41 @@ pub(crate) fn validate_batch_evidence<P: Sequenced>(
         limits.max_bytes,
         sent_packet_matches,
     )
-    .map_err(|error| {
-        let sequence = error
-            .request_index()
-            .and_then(|index| probes.get(index))
-            .or_else(|| probes.first())
-            .map_or(0, Sequenced::sequence);
-        Error::new(
-            workflow,
-            ErrorKind::InvalidEvidence {
-                sequence,
-                message: format_exchange_evidence_error(
-                    error,
-                    workflow.batch_noun(),
-                    workflow.as_str(),
-                ),
-            },
-        )
-    })
+    .map_err(|error| map_batch_error(workflow, probes, error))
+}
+
+/// For serial scan/traceroute, the live step checked aggregate capture limits
+/// before calling this workflow-specific exact sent/response validator.
+pub(crate) fn validate_live_batch_evidence<P: Sequenced>(
+    workflow: Workflow,
+    probes: &[P],
+    timeout: Duration,
+    execution: &Execution,
+    sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
+) -> Result<(), Error> {
+    validate_batch_receipt(probes, timeout, execution, sent_packet_matches)
+        .map_err(|error| map_batch_error(workflow, probes, error))
+}
+
+fn map_batch_error<P: Sequenced>(
+    workflow: Workflow,
+    probes: &[P],
+    error: ExchangeEvidenceError,
+) -> Error {
+    let sequence = error
+        .request_index()
+        .and_then(|index| probes.get(index))
+        .or_else(|| probes.first())
+        .map_or(0, Sequenced::sequence);
+    Error::new(
+        workflow,
+        ErrorKind::InvalidEvidence {
+            sequence,
+            message: format_exchange_evidence_error(
+                error,
+                workflow.batch_noun(),
+                workflow.as_str(),
+            ),
+        },
+    )
 }

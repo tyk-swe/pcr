@@ -28,7 +28,7 @@ pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Dur
 }
 
 pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
+    crate::probe::live_step::Pacer::delay(1, rate).ok_or(Error::InvalidLimit {
         field: "cases_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),

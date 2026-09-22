@@ -15,9 +15,10 @@ use crate::clock::Clock;
 use crate::policy::Authorizer;
 use crate::probe::evidence::{
     EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
-    validate_batch_evidence,
+    validate_live_batch_evidence,
 };
-use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
+use crate::probe::live_step::EvidenceBounds;
+use crate::probe::runner::{BatchRunOptions, ProbeLifecycle, run_batches, sink_observer};
 use crate::target::{GateErrors, admit_operation, budgeted};
 use crate::{BoundaryError, SentPacket};
 
@@ -117,7 +118,6 @@ where
     let mut state = TracerouteState::default();
     let stats = {
         let mut lifecycle = Lifecycle {
-            executor,
             registry,
             limits: request.limits,
             target: Arc::from(approved.declared_target.as_str()),
@@ -125,11 +125,18 @@ where
             emit: &mut emit,
         };
         run_batches(
-            WORKFLOW,
+            BatchRunOptions {
+                workflow: WORKFLOW,
+                probes_per_second: request.probes_per_second,
+                evidence: EvidenceBounds {
+                    frames: request.limits.max_evidence_frames,
+                    bytes: request.limits.max_evidence_bytes,
+                },
+            },
             &mut batches,
-            request.probes_per_second,
             &mut deadline,
             clock,
+            executor,
             &mut lifecycle,
         )
     };
@@ -289,8 +296,7 @@ impl TracerouteState {
     }
 }
 
-struct Lifecycle<'a, E, F> {
-    executor: &'a mut E,
+struct Lifecycle<'a, F> {
     registry: &'a Registry,
     limits: Limits,
     target: Arc<str>,
@@ -298,22 +304,16 @@ struct Lifecycle<'a, E, F> {
     emit: &'a mut F,
 }
 
-impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
+impl<F> ProbeLifecycle<Batch> for Lifecycle<'_, F>
 where
-    E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.executor.execute(batch)
-    }
-
     fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
-        validate_batch_evidence(
+        validate_live_batch_evidence(
             WORKFLOW,
             &batch.probes,
             batch.timeout,
             execution,
-            self.limits.evidence(),
             sent_probe_matches,
         )
     }
@@ -328,9 +328,8 @@ where
     }
 }
 
-impl<E, F> Lifecycle<'_, E, F>
+impl<F> Lifecycle<'_, F>
 where
-    E: Executor<Batch>,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     fn process_batch(

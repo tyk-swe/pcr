@@ -8,11 +8,12 @@
 //! output format. The deferred interface resolves once inside [`Executor`],
 //! then delegates to the library exchange.
 
-use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
+use crate::command_options::{FuzzPolicyArgs, HostnamePolicyArgs, RouteSelectionArgs};
 use crate::system::{client, exchange};
 use packetcraftr_cli::output;
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -109,17 +110,18 @@ impl packetcraftr::dns::TcpExecutor for Executor {
     }
 }
 
-pub(super) struct Providers {
-    pub(super) policy: Arc<packetcraftr::policy::Policy>,
+pub(super) struct Providers<P = Executor> {
+    policy: Arc<packetcraftr::policy::Policy>,
     /// The resolver the session authorizer resolves declared targets with.
-    pub(super) resolver: packetcraftr::target::SystemResolver,
-    pub(super) registry: Arc<core::registry::Registry>,
-    pub(super) executor: Executor,
+    resolver: packetcraftr::target::SystemResolver,
+    registry: Arc<core::registry::Registry>,
+    /// Packet exchange executor, or socket provider for connect-only scans.
+    executor: P,
     /// Admits the one callback worker NDJSON streaming publishes through.
-    pub(super) runtime: packetcraftr::progress::Runtime,
+    runtime: packetcraftr::progress::Runtime,
 }
 
-impl Providers {
+impl Providers<Executor> {
     /// Vends the live-run session the workflow commands drive: the authorizer
     /// over the composed policy and the system resolver, the clock sharing
     /// the installed cancellation signal, and the registry, executor, and
@@ -130,6 +132,29 @@ impl Providers {
             clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
             registry: &self.registry,
             executor: &mut self.executor,
+            runtime: &self.runtime,
+        }
+    }
+
+    /// A packet campaign has no hostname to resolve. Keep this authorizer
+    /// distinct so a live fuzz case cannot gain hostname-based admission.
+    fn packet_session(&mut self) -> WorkflowSession<'_> {
+        WorkflowSession {
+            authorizer: packetcraftr::policy::PolicyAuthorizer::for_packets(&self.policy),
+            clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
+            registry: &self.registry,
+            executor: &mut self.executor,
+            runtime: &self.runtime,
+        }
+    }
+}
+
+impl Providers<Arc<net::tcp::SystemProvider>> {
+    pub(super) fn connect_session(&mut self) -> ConnectSession<'_> {
+        ConnectSession {
+            authorizer: packetcraftr::policy::PolicyAuthorizer::new(&self.policy, &self.resolver),
+            clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
+            provider: Arc::clone(&self.executor),
             runtime: &self.runtime,
         }
     }
@@ -151,6 +176,42 @@ pub(super) struct WorkflowSession<'a> {
     pub(super) runtime: &'a packetcraftr::progress::Runtime,
 }
 
+/// Socket-only scan session: authorization still precedes TCP connection and
+/// no packet exchange/interface discovery is needed.
+pub(super) struct ConnectSession<'a> {
+    pub(super) authorizer: packetcraftr::policy::PolicyAuthorizer<'a>,
+    pub(super) clock: packetcraftr::clock::CancellableClock,
+    pub(super) provider: Arc<net::tcp::SystemProvider>,
+    pub(super) runtime: &'a packetcraftr::progress::Runtime,
+}
+
+/// Live fuzz options and the providers that prepare its packet executor.
+pub(super) struct FuzzLive {
+    providers: Providers,
+    pub(super) options: packetcraftr::fuzz::LiveOptions,
+}
+
+impl FuzzLive {
+    pub(super) fn registry(&self) -> Arc<core::registry::Registry> {
+        Arc::clone(&self.providers.registry)
+    }
+
+    pub(super) fn session(&mut self) -> WorkflowSession<'_> {
+        self.providers.packet_session()
+    }
+}
+
+pub(super) struct FuzzSettings {
+    pub(super) route: RouteSelectionArgs,
+    pub(super) policy: FuzzPolicyArgs,
+    pub(super) build: core::build::Options,
+    pub(super) timeout: Duration,
+    pub(super) rate: Option<u32>,
+    pub(super) destination: Option<IpAddr>,
+    pub(super) allow_permissive_live: bool,
+    pub(super) queue_limits: net::capture::Limits,
+}
+
 /// Validates the policy and interface selector, then binds an executor to the
 /// requested route.
 ///
@@ -166,7 +227,6 @@ pub(super) fn prepare(
     let policy = Arc::new(policy.into_policy());
     policy.validate().map_err(CliError::classified)?;
     let interface = InterfaceSelector::parse_optional(route.interface.as_deref())?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: None,
@@ -182,21 +242,99 @@ pub(super) fn prepare(
         max_template_packets,
         queue_limits,
     )?;
+    Ok(compose_packet(
+        policy,
+        exchange,
+        interface,
+        "workflow_progress",
+    ))
+}
+
+/// Connect uses the same authorizer, clock and callback runtime as the other
+/// live workflows, without preparing an unused packet route or binding any
+/// interface before its target is authorized.
+pub(super) fn prepare_connect(
+    policy: HostnamePolicyArgs,
+) -> Result<Providers<Arc<net::tcp::SystemProvider>>, CliError> {
+    let policy = Arc::new(policy.into_policy());
+    policy.validate().map_err(CliError::classified)?;
+    Ok(compose(
+        policy,
+        packetcraftr_core::protocol::builtin::registry(),
+        Arc::new(net::tcp::SystemProvider),
+        "scan_connect",
+    ))
+}
+
+/// Prepare packet-oriented fuzz under the same deferred executor as scan/DNS.
+/// No interface is enumerated until the campaign has authorized its packets.
+pub(super) fn prepare_fuzz_live(settings: FuzzSettings) -> Result<FuzzLive, CliError> {
+    let options = packetcraftr::fuzz::LiveOptions {
+        timeout: settings.timeout,
+        cases_per_second: settings.rate,
+        destination: settings.destination,
+        allow_malformed_live: settings.allow_permissive_live,
+        limits: packetcraftr::fuzz::LiveLimits {
+            max_evidence_frames: settings.queue_limits.max_frames,
+            max_evidence_bytes: settings.queue_limits.max_bytes,
+        },
+    };
+    options.validate().map_err(CliError::classified)?;
+    let policy = Arc::new(settings.policy.into_policy());
+    policy.validate().map_err(CliError::classified)?;
+    let interface = InterfaceSelector::parse_optional(settings.route.interface.as_deref())?;
+    let exchange = exchange::options(
+        packetcraftr::send::Options {
+            destination: settings.destination,
+            plan: net::route::Options {
+                link_mode: settings.route.link_mode.into(),
+                interface: None,
+                preferred_source: settings.route.source,
+            },
+            build: settings.build,
+            allow_permissive_live: settings.allow_permissive_live,
+        },
+        settings.timeout,
+        1,
+        settings.queue_limits,
+    )?;
+    Ok(FuzzLive {
+        providers: compose_packet(policy, exchange, interface, "fuzz_progress"),
+        options,
+    })
+}
+
+fn compose_packet(
+    policy: Arc<packetcraftr::policy::Policy>,
+    exchange: packetcraftr::exchange::Options,
+    interface: Option<InterfaceSelector>,
+    runtime_name: &'static str,
+) -> Providers {
+    let registry = packetcraftr_core::protocol::builtin::registry();
     let executor = Executor {
         client: client(Arc::clone(&registry), policy.clone()),
         exchange,
         interface,
     };
-    Ok(Providers {
+    compose(policy, registry, executor, runtime_name)
+}
+
+fn compose<P>(
+    policy: Arc<packetcraftr::policy::Policy>,
+    registry: Arc<core::registry::Registry>,
+    executor: P,
+    runtime_name: &'static str,
+) -> Providers<P> {
+    Providers {
         policy,
         resolver: packetcraftr::target::SystemResolver,
         registry,
         executor,
         runtime: crate::resources::runtime(
-            "workflow_progress",
+            runtime_name,
             packetcraftr::progress::MAX_WORKER_CAPACITY,
         ),
-    })
+    }
 }
 
 /// The event sink a streaming engine entry point receives. Engines publish
@@ -209,98 +347,95 @@ type Collect<'a, S, R> = Box<dyn FnOnce(&mut S) -> Result<R, CliError> + 'a>;
 /// The streaming engine entry point: publishes each event through the sink.
 type Publish<'a, S, E, U> = Box<dyn FnOnce(&mut S, Emit<E>) -> Result<U, CliError> + 'a>;
 
-/// The (result, diagnostics, stats) triple a collected report converts into
-/// for the `json` envelope.
-type Converted<T> = (
-    T,
-    Vec<core::diagnostic::Diagnostic>,
-    Option<packetcraftr::Stats>,
-);
+/// The render dispatch for text or exchange capture formats. All of these
+/// formats receive the same converted report as the JSON envelope.
+type Render<'a, T, F> =
+    Box<dyn FnOnce(output::workflow::Converted<T>, F) -> Result<(), CliError> + 'a>;
 
-/// The report → wire conversion the driver's `json` arm emits.
-type Convert<'a, R, T> = Box<dyn FnOnce(R) -> Result<Converted<T>, CliError> + 'a>;
-
-/// The render dispatch for a format that is neither `ndjson` nor `json`.
-type Render<'a, R, F> = Box<dyn FnOnce(R, F) -> Result<(), CliError> + 'a>;
-
-/// The adapters a workflow command hands to [`run_workflow`]: the two engine
-/// entry points plus the conversions between engine types and wire records.
-/// `S` is the command's session — the pieces both entry points drive — or
-/// `()` when the workflow drives a self-contained provider.
-pub(super) struct Hooks<'a, S, E, U, R, F, T> {
-    /// The envelope identity machine output carries.
+/// A workflow command supplies only its identity, two engine entry points,
+/// output conversion owner, and renderer over the already converted report.
+/// `S` is the invocation session or `()` for a self-contained provider.
+pub(super) struct Hooks<'a, S, C, F>
+where
+    C: output::workflow::Conversion,
+{
     pub(super) command: output::contract::Command,
-    /// The collecting entry point: runs the engine into a report for the
-    /// aggregate formats.
-    pub(super) run: Collect<'a, S, R>,
-    /// The streaming entry point: publishes each engine event through `emit`
-    /// under `ndjson`.
-    pub(super) run_with_events: Publish<'a, S, E, U>,
-    /// Adapts one engine event into its wire record on the stream.
-    pub(super) on_event: fn(E, &StreamEncoder) -> Result<(), CliError>,
-    /// Converts the collected report into the wire result, diagnostics, and
-    /// optional stats the driver's `json` arm emits.
-    pub(super) into_result: Convert<'a, R, T>,
-    /// Renders the report under a format that is neither `ndjson` streaming
-    /// nor the `json` aggregate: command text and, for `exchange`, the
-    /// capture formats. Commands without extra render formats ignore the
-    /// negotiated format argument.
-    pub(super) render_text: Render<'a, R, F>,
-    /// Emits the terminal record ending a streamed run.
-    pub(super) complete: fn(U, &StreamEncoder) -> Result<(), CliError>,
+    pub(super) conversion: C,
+    pub(super) run: Collect<'a, S, C::EngineReport>,
+    pub(super) run_with_events: Publish<'a, S, C::EngineEvent, C::EngineSummary>,
+    pub(super) render_text: Render<'a, C::Result, F>,
 }
 
 /// Drives one workflow under the negotiated `format`.
 ///
-/// `ndjson` runs `run_with_events`, adapting every engine event through
-/// `on_event` after checking `cancellation` and the installed invocation
-/// deadline, and ends with `complete`. Every other format runs `run`, then
-/// either emits the `json` envelope from `into_result` or hands the report
-/// to `render_text`. Choosing the entry point before rendering means no
-/// renderer carries an `ndjson` arm, and routing every emission through the
-/// shared check makes interrupt handling identical across the workflows.
-pub(super) fn run_workflow<S, E, U, R, F, T>(
+/// NDJSON converts each event and the terminal summary through `C`; all
+/// other formats convert the collected report exactly once before rendering.
+/// Every streamed emission passes the same cancellation/deadline guard.
+pub(super) fn run_workflow<S, C, F>(
     session: &mut S,
     format: F,
     stream: &StreamEncoder,
     cancellation: &core::budget::Cancellation,
-    hooks: Hooks<'_, S, E, U, R, F, T>,
+    hooks: Hooks<'_, S, C, F>,
 ) -> Result<(), CliError>
 where
-    E: 'static,
+    C: output::workflow::Conversion,
+    C::EngineEvent: 'static,
     F: Copy + Into<output::contract::Format>,
-    T: serde::Serialize,
 {
+    let Hooks {
+        command,
+        conversion: _conversion,
+        run,
+        run_with_events,
+        render_text,
+    } = hooks;
     match format.into() {
         output::contract::Format::Ndjson => {
             let events = stream.clone();
-            let on_event = hooks.on_event;
             let cancellation = cancellation.clone();
-            let summary = (hooks.run_with_events)(
+            let summary = run_with_events(
                 session,
                 Box::new(move |event| {
                     emission_check(&cancellation).map_err(CliError::into_boundary_error)?;
-                    on_event(event, &events).map_err(CliError::into_boundary_error)
+                    let (record, diagnostics) = C::event(event)
+                        .map_err(CliError::classified)
+                        .map_err(CliError::into_boundary_error)?;
+                    events
+                        .emit_data(record, diagnostics)
+                        .map_err(CliError::from)
+                        .map_err(CliError::into_boundary_error)
                 }),
             )?;
-            (hooks.complete)(summary, stream)
+            let (record, diagnostics, stats) = C::summary(summary).map_err(CliError::classified)?;
+            match stats {
+                Some(stats) => stream.complete_with_stats(record, diagnostics, stats)?,
+                None => stream.complete(record, diagnostics)?,
+            }
+            Ok(())
         }
         wide => {
-            let report = (hooks.run)(session)?;
+            let report = run(session)?;
             emission_check(cancellation)?;
+            let converted = C::report(report).map_err(CliError::classified)?;
             if wide == output::contract::Format::Json {
-                let (result, diagnostics, stats) = (hooks.into_result)(report)?;
+                let output::workflow::Converted {
+                    result,
+                    diagnostics,
+                    stats,
+                    ..
+                } = converted;
                 match stats {
                     Some(stats) => crate::rendering::emit_aggregate_with_stats(
-                        hooks.command,
+                        command,
                         result,
                         diagnostics,
                         stats,
                     ),
-                    None => crate::rendering::emit_aggregate(hooks.command, result, diagnostics),
+                    None => crate::rendering::emit_aggregate(command, result, diagnostics),
                 }
             } else {
-                (hooks.render_text)(report, format)
+                render_text(converted, format)
             }
         }
     }
@@ -415,14 +550,47 @@ mod tests {
             }
         }
 
-        fn emit_event(event: u64, stream: &StreamEncoder) -> Result<(), CliError> {
-            Ok(stream.emit_data(TestRecord(event), Vec::new())?)
-        }
+        struct Script<'a>(std::marker::PhantomData<&'a ()>);
 
-        fn complete(summary: u64, stream: &StreamEncoder) -> Result<(), CliError> {
-            stream
-                .complete(Complete(summary), Vec::new())
-                .map_err(CliError::from)
+        impl<'a> output::workflow::Conversion for Script<'a> {
+            type EngineEvent = u64;
+            type EngineSummary = u64;
+            type EngineReport = (u64, &'a RefCell<Vec<String>>);
+            type Event = TestRecord<u64>;
+            type Terminal = Complete;
+            type Result = u64;
+
+            fn event(
+                event: u64,
+            ) -> Result<(TestRecord<u64>, Vec<core::diagnostic::Diagnostic>), output::contract::Error>
+            {
+                if event == 99 {
+                    return Err(output::contract::Error::IncoherentFuzzEvents {
+                        message: "adapter refused".to_owned(),
+                    });
+                }
+                Ok((TestRecord(event), Vec::new()))
+            }
+
+            fn summary(
+                summary: u64,
+            ) -> Result<
+                (
+                    Complete,
+                    Vec<core::diagnostic::Diagnostic>,
+                    Option<packetcraftr::Stats>,
+                ),
+                output::contract::Error,
+            > {
+                Ok((Complete(summary), Vec::new(), None))
+            }
+
+            fn report(
+                (report, log): Self::EngineReport,
+            ) -> Result<output::workflow::Converted<u64>, output::contract::Error> {
+                log.borrow_mut().push("converted".to_owned());
+                Ok(output::workflow::Converted::new(report, Vec::new(), None))
+            }
         }
 
         /// Scripted hooks recording the entry points and adapters the driver
@@ -430,25 +598,20 @@ mod tests {
         fn hooks<'a>(
             log: &'a RefCell<Vec<String>>,
             stream_engine: impl FnOnce(&mut (), Emit<u64>) -> Result<u64, CliError> + 'a,
-        ) -> Hooks<'a, (), u64, u64, u64, ToolFormat, u64> {
+        ) -> Hooks<'a, (), Script<'a>, ToolFormat> {
             Hooks {
                 command: output::contract::Command::Scan,
+                conversion: Script(std::marker::PhantomData),
                 run: Box::new(|_| {
                     log.borrow_mut().push("run".to_owned());
-                    Ok(41_u64)
+                    Ok((41_u64, log))
                 }),
                 run_with_events: Box::new(stream_engine),
-                on_event: emit_event,
-                into_result: Box::new(|report| {
-                    log.borrow_mut().push("into_result".to_owned());
-                    Ok((report, Vec::new(), None))
-                }),
-                render_text: Box::new(|report: u64, format| {
+                render_text: Box::new(|converted, format| {
                     log.borrow_mut()
-                        .push(format!("render_text:{report}:{format:?}"));
+                        .push(format!("render_text:{}:{format:?}", converted.result));
                     Ok(())
                 }),
-                complete,
             }
         }
 
@@ -496,7 +659,11 @@ mod tests {
 
             assert_eq!(
                 *log.borrow(),
-                vec!["run".to_owned(), "render_text:41:Text".to_owned()]
+                vec![
+                    "run".to_owned(),
+                    "converted".to_owned(),
+                    "render_text:41:Text".to_owned()
+                ]
             );
             assert!(
                 output.bytes().is_empty(),
@@ -519,7 +686,7 @@ mod tests {
 
             assert_eq!(
                 *log.borrow(),
-                vec!["run".to_owned(), "into_result".to_owned()]
+                vec!["run".to_owned(), "converted".to_owned()]
             );
             assert!(
                 output.bytes().is_empty(),
@@ -533,18 +700,18 @@ mod tests {
             let log = RefCell::new(Vec::new());
             let hooks = Hooks {
                 command: output::contract::Command::Exchange,
-                run: Box::new(|_: &mut ()| Ok(41_u64)),
+                conversion: Script(std::marker::PhantomData),
+                run: Box::new(|_: &mut ()| Ok((41_u64, &log))),
                 run_with_events: Box::new(|_: &mut (), _: Emit<u64>| {
                     unreachable!("aggregate never streams")
                 }),
-                on_event: emit_event,
-                into_result: Box::new(|report| Ok((report, Vec::new(), None))),
-                render_text: Box::new(|report: u64, format: ExchangeFormat| {
-                    log.borrow_mut()
-                        .push(format!("render_text:{report}:{format:?}"));
-                    Ok(())
-                }),
-                complete,
+                render_text: Box::new(
+                    |converted: output::workflow::Converted<u64>, format: ExchangeFormat| {
+                        log.borrow_mut()
+                            .push(format!("render_text:{}:{format:?}", converted.result));
+                        Ok(())
+                    },
+                ),
             };
             run_workflow(
                 &mut (),
@@ -555,7 +722,10 @@ mod tests {
             )
             .expect("the scripted capture run succeeds");
 
-            assert_eq!(*log.borrow(), vec!["render_text:41:PcapNg".to_owned()]);
+            assert_eq!(
+                *log.borrow(),
+                vec!["converted".to_owned(), "render_text:41:PcapNg".to_owned()]
+            );
         }
 
         #[test]
@@ -589,17 +759,11 @@ mod tests {
         fn an_event_adapter_failure_aborts_the_stream() {
             let (stream, output) = stream(output::contract::Command::Scan);
             let log = RefCell::new(Vec::new());
-            let mut hooks = hooks(&log, |_, mut emit| {
+            let hooks = hooks(&log, |_, mut emit| {
                 emit(10).map_err(CliError::classified)?;
-                emit(11).map_err(CliError::classified)?;
+                emit(99).map_err(CliError::classified)?;
                 Ok(0_u64)
             });
-            hooks.on_event = |event, stream| {
-                if event == 11 {
-                    return Err(CliError::new(core::error::Kind::Cli, "adapter refused"));
-                }
-                emit_event(event, stream)
-            };
             let error = run_workflow(
                 &mut (),
                 ToolFormat::Ndjson,
@@ -609,7 +773,7 @@ mod tests {
             )
             .expect_err("the adapter failure propagates");
 
-            assert_eq!(error.exit_code(), 2);
+            assert_eq!(error.exit_code(), 70);
             let records = output.records();
             assert_eq!(records.len(), 1, "only the first event emitted");
             assert!(stream.is_open());

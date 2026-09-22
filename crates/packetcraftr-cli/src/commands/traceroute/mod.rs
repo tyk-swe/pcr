@@ -50,6 +50,7 @@ pub(super) fn run(
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Traceroute,
+            conversion: output::traceroute::Conversion,
             run: Box::new(|session| {
                 packetcraftr::traceroute::run(
                     &request,
@@ -72,19 +73,7 @@ pub(super) fn run(
                 )
                 .map_err(CliError::classified)
             }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|report| {
-                output::traceroute::Report::try_from_traceroute(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                    .map_err(CliError::classified)
-            }),
-            render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::traceroute::Report::try_from_traceroute(report)
-                        .map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
-            }),
-            complete: rendering::emit_complete,
+            render_text: Box::new(|converted, _| rendering::render_text(converted)),
         },
     )
 }

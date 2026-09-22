@@ -1,10 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::rendering::StreamEncoder;
-
-use packetcraftr_core as core;
-
 use packetcraftr_cli::output;
 
 use crate::errors::CliError;
@@ -14,10 +10,14 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
-    result: output::scan::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    output::workflow::Converted {
+        result,
+        diagnostics,
+        stats,
+        ..
+    }: output::workflow::Converted<output::scan::Report>,
 ) -> Result<(), CliError> {
+    let stats = stats.expect("scan conversion includes packet statistics");
     write_stdout_line(format_args!(
         "target={} resolved={}",
         result.target,
@@ -90,23 +90,6 @@ pub(super) fn render_text(
         optional_debug(rtt.max),
     ))?;
     render_diagnostics_text(&diagnostics)
-}
-
-pub(super) fn emit_event(
-    event: packetcraftr::scan::Event,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
-}
-
-pub(super) fn emit_complete(
-    summary: packetcraftr::scan::Summary,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (record, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
-    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
 }
 
 pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {

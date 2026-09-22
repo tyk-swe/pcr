@@ -11,25 +11,14 @@ mod rendering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr_core as core;
-use packetcraftr_netio as net;
-
 use packetcraftr_cli::output;
+use packetcraftr_core as core;
 
 use self::arguments::Args;
+use super::execution;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
-use crate::system::{InterfaceSelector, client, exchange};
-
-use super::execution::{self, Executor};
-
-struct PreparedLive {
-    options: packetcraftr::fuzz::LiveOptions,
-    policy: packetcraftr::policy::Policy,
-    exchange: packetcraftr::exchange::Options,
-    interface: Option<InterfaceSelector>,
-}
 
 pub(super) fn run(
     arguments: Args,
@@ -38,7 +27,10 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
+    let registry = live.as_ref().map_or_else(
+        packetcraftr_core::protocol::builtin::registry,
+        execution::FuzzLive::registry,
+    );
     let packet = read_recipe(arguments.recipe, &registry, request.build.max_layers)?;
     execute_and_render(request, packet, registry, live, format, stream)
 }
@@ -86,58 +78,33 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
 fn prepare_live(
     arguments: &Args,
     request: &core::fuzz::Request,
-) -> Result<Option<PreparedLive>, CliError> {
+) -> Result<Option<execution::FuzzLive>, CliError> {
     if !arguments.live {
         return Ok(None);
     }
-    let queue_limits = arguments.limits.clone().into_limits();
-    let options = packetcraftr::fuzz::LiveOptions {
+    execution::prepare_fuzz_live(execution::FuzzSettings {
+        route: arguments.route.clone(),
+        policy: arguments.policy.clone(),
+        build: request.build.clone(),
         timeout: Duration::from_millis(arguments.timeout_ms),
-        cases_per_second: arguments.rate,
+        rate: arguments.rate,
         destination: arguments.destination,
-        allow_malformed_live: arguments.allow_permissive_live,
-        limits: packetcraftr::fuzz::LiveLimits {
-            max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
-        },
-    };
-    options.validate().map_err(CliError::classified)?;
-    let policy = arguments.policy.clone().into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    let interface = InterfaceSelector::parse_optional(arguments.route.interface.as_deref())?;
-    let exchange = exchange::options(
-        packetcraftr::send::Options {
-            destination: arguments.destination,
-            plan: net::route::Options {
-                link_mode: arguments.route.link_mode.into(),
-                interface: None,
-                preferred_source: arguments.route.source,
-            },
-            build: request.build.clone(),
-            allow_permissive_live: arguments.allow_permissive_live,
-        },
-        Duration::from_millis(arguments.timeout_ms),
-        1,
-        queue_limits,
-    )?;
-    Ok(Some(PreparedLive {
-        options,
-        policy,
-        exchange,
-        interface,
-    }))
+        allow_permissive_live: arguments.allow_permissive_live,
+        queue_limits: arguments.limits.clone().into_limits(),
+    })
+    .map(Some)
 }
 
 fn execute_and_render(
     request: core::fuzz::Request,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
-    live: Option<PreparedLive>,
+    live: Option<execution::FuzzLive>,
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     if let Some(live) = live {
-        execute_live(request, packet, registry, live, format, stream)
+        execute_live(request, packet, live, format, stream)
     } else {
         execute_offline(request, packet, registry, format, stream)
     }
@@ -145,18 +112,6 @@ fn execute_and_render(
 
 /// The shared inputs both offline campaign entry points consume.
 struct OfflineSession {
-    packet: core::packet::Packet,
-    registry: Arc<core::registry::Registry>,
-}
-
-/// The live campaign's session: the packet-level authorizer, the
-/// cancellation-sharing clock, the exchange executor, and the shared inputs
-/// both entry points consume.
-struct LiveSession<'a> {
-    authorizer: packetcraftr::policy::PolicyAuthorizer<'a>,
-    clock: packetcraftr::clock::CancellableClock,
-    executor: Executor,
-    options: packetcraftr::fuzz::LiveOptions,
     packet: core::packet::Packet,
     registry: Arc<core::registry::Registry>,
 }
@@ -177,6 +132,7 @@ fn execute_offline(
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Fuzz,
+            conversion: output::fuzz::Offline,
             run: Box::new(|session| {
                 let mut cases = Vec::new();
                 let summary = core::fuzz::run_observed(
@@ -210,22 +166,7 @@ fn execute_offline(
                 )
                 .map_err(CliError::classified)
             }),
-            on_event: |case, stream| {
-                let event =
-                    output::fuzz::Event::try_from_offline(case).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
-            },
-            into_result: Box::new(|report| {
-                output::fuzz::Report::try_from_offline(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                    .map_err(CliError::classified)
-            }),
-            render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::fuzz::Report::try_from_offline(report).map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
-            }),
-            complete: rendering::render_offline_complete,
+            render_text: Box::new(|converted, _| rendering::render_text(converted)),
         },
     )
 }
@@ -233,23 +174,13 @@ fn execute_offline(
 fn execute_live(
     request: core::fuzz::Request,
     packet: core::packet::Packet,
-    registry: Arc<core::registry::Registry>,
-    live: PreparedLive,
+    mut live: execution::FuzzLive,
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let mut session = LiveSession {
-        authorizer: packetcraftr::policy::PolicyAuthorizer::for_packets(&live.policy),
-        clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
-        executor: Executor {
-            client: client(Arc::clone(&registry), live.policy.clone()),
-            exchange: live.exchange,
-            interface: live.interface,
-        },
-        options: live.options,
-        packet,
-        registry,
-    };
+    let options = live.options;
+    let registry = live.registry();
+    let mut session = live.session();
     execution::run_workflow(
         &mut session,
         format,
@@ -257,56 +188,38 @@ fn execute_live(
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Fuzz,
+            conversion: output::fuzz::Live,
             run: Box::new(|session| {
                 packetcraftr::fuzz::run(
                     packetcraftr::fuzz::RunInput {
                         request: &request,
-                        live: session.options,
-                        packet: session.packet.clone(),
-                        registry: Arc::clone(&session.registry),
+                        live: options,
+                        packet: packet.clone(),
+                        registry: Arc::clone(&registry),
                     },
                     &mut session.authorizer,
-                    &mut session.executor,
+                    session.executor,
                     &mut session.clock,
                 )
                 .map_err(CliError::classified)
             }),
             run_with_events: Box::new(|session, emit| {
-                let runtime = crate::resources::runtime(
-                    "fuzz_progress",
-                    packetcraftr::progress::MAX_WORKER_CAPACITY,
-                );
                 packetcraftr::fuzz::run_with_events(
                     packetcraftr::fuzz::RunInput {
                         request: &request,
-                        live: session.options,
-                        packet: session.packet.clone(),
-                        registry: Arc::clone(&session.registry),
+                        live: options,
+                        packet: packet.clone(),
+                        registry: Arc::clone(&registry),
                     },
                     &mut session.authorizer,
-                    &mut session.executor,
+                    session.executor,
                     &mut session.clock,
-                    &runtime,
+                    session.runtime,
                     emit,
                 )
                 .map_err(CliError::classified)
             }),
-            on_event: |case, stream| {
-                let event =
-                    output::fuzz::Event::try_from_live(case).map_err(CliError::classified)?;
-                Ok(stream.emit_data(event, Vec::new())?)
-            },
-            into_result: Box::new(|report| {
-                output::fuzz::Report::try_from_live(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                    .map_err(CliError::classified)
-            }),
-            render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::fuzz::Report::try_from_live(report).map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
-            }),
-            complete: rendering::render_live_complete,
+            render_text: Box::new(|converted, _| rendering::render_text(converted)),
         },
     )
 }

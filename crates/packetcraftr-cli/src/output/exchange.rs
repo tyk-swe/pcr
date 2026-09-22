@@ -174,6 +174,57 @@ impl Event {
     }
 }
 
+pub struct Conversion;
+
+impl super::workflow::Conversion for Conversion {
+    type EngineEvent = packetcraftr::exchange::Event;
+    type EngineSummary = packetcraftr::exchange::Summary;
+    type EngineReport = packetcraftr::exchange::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<Diagnostic>), Error> {
+        Event::try_from_exchange(event)
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<Diagnostic>, Option<Stats>), Error> {
+        let (event, diagnostics, stats) = Event::complete_from_exchange(summary);
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
+        // The original frames belong to the new conversion result, never to
+        // the existing wire Report. Retain the exact capture bytes, link types,
+        // and timestamps before the one engine-to-wire conversion consumes it.
+        let frames = capture_frames(&report);
+        Report::try_from_exchange(report)
+            .map(super::workflow::Converted::with_stats)
+            .map(|converted| converted.with_capture_frames(frames))
+    }
+}
+
+fn capture_frames(report: &packetcraftr::exchange::Report) -> Vec<packetcraftr_core::frame::Frame> {
+    let mut frames = report
+        .sent
+        .iter()
+        .map(|sent| sent.frame())
+        .chain(
+            report
+                .responses
+                .iter()
+                .map(|response| &response.response.frame),
+        )
+        .chain(report.unsolicited.iter().map(|packet| &packet.frame))
+        .chain(report.undecoded.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    frames.sort_by_key(|frame| frame.timestamp);
+    frames
+}
+
 fn sent_output(sent: std::sync::Arc<packetcraftr::SentPacket>) -> (Wire, Vec<Diagnostic>) {
     (
         Wire::new(sent.wire_bytes().clone()),

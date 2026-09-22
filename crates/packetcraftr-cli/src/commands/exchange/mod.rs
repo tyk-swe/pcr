@@ -92,6 +92,7 @@ pub(super) fn run(
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Exchange,
+            conversion: output::exchange::Conversion,
             run: Box::new(|_| {
                 client
                     .exchange(&template, options.clone())
@@ -102,26 +103,19 @@ pub(super) fn run(
                     .exchange_with_events(&template, options.clone(), emit)
                     .map_err(CliError::classified)
             }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|report| {
-                output::exchange::Report::try_from_exchange(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                    .map_err(CliError::classified)
-            }),
-            render_text: Box::new(move |report, format| match format {
-                ExchangeFormat::Text => rendering::render_text(&report),
+            render_text: Box::new(move |converted, format| match format {
+                ExchangeFormat::Text => rendering::render_text(&converted),
                 ExchangeFormat::Pcap => {
-                    rendering::render_capture(&report, capture::Format::Pcap, compression)
+                    rendering::render_capture(&converted, capture::Format::Pcap, compression)
                 }
                 ExchangeFormat::PcapNg => {
-                    rendering::render_capture(&report, capture::Format::PcapNg, compression)
+                    rendering::render_capture(&converted, capture::Format::PcapNg, compression)
                 }
                 ExchangeFormat::Json | ExchangeFormat::Ndjson => Err(CliError::new(
                     Kind::Internal,
                     "exchange machine formats dispatch before text rendering",
                 )),
             }),
-            complete: rendering::render_complete,
         },
     )
 }

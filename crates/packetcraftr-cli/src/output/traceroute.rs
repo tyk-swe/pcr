@@ -187,6 +187,32 @@ impl Event {
     }
 }
 
+pub struct Conversion;
+
+impl super::workflow::Conversion for Conversion {
+    type EngineEvent = packetcraftr::traceroute::Event;
+    type EngineSummary = packetcraftr::traceroute::Summary;
+    type EngineReport = packetcraftr::traceroute::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<PacketDiagnostic>), Error> {
+        Event::try_from_traceroute(event)
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<PacketDiagnostic>, Option<Stats>), Error> {
+        let (event, diagnostics, stats) = Event::complete_from_traceroute(summary);
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
+        Report::try_from_traceroute(report).map(super::workflow::Converted::with_stats)
+    }
+}
+
 fn try_from_probe(probe: packetcraftr::traceroute::ProbeEvidence) -> Result<Probe, Error> {
     Ok(Probe {
         sequence: probe.sequence,

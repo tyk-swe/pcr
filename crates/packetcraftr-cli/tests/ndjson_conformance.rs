@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr_core as core;
 
 use packetcraftr_cli::output;
+use packetcraftr_cli::output::workflow::Conversion;
 use serde_json::{Value, json};
 
 mod support;
@@ -144,6 +145,30 @@ fn validate_typed_event<T: output::stream::StreamRecord>(
     validate_records(schema_validator(), &records);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["status"], "success");
+}
+
+fn validate_workflow_event<C: Conversion>(
+    command: output::contract::Command,
+    engine: C::EngineEvent,
+) {
+    let (event, diagnostics) = C::event(engine).expect("workflow event converts");
+    validate_typed_event(command, event, diagnostics);
+}
+
+fn validate_workflow_summary<C: Conversion>(
+    command: output::contract::Command,
+    summary: C::EngineSummary,
+) {
+    let (record, diagnostics, stats) = C::summary(summary).expect("workflow summary converts");
+    let (sink, bytes) = stream(command);
+    match stats {
+        Some(stats) => sink
+            .complete_with_stats(record, diagnostics, stats)
+            .unwrap(),
+        None => sink.complete(record, diagnostics).unwrap(),
+    }
+    validate_records(schema_validator(), &bytes.records());
+    assert_eq!(bytes.records()[0]["event"], "complete");
 }
 
 #[test]
@@ -591,8 +616,7 @@ fn validate_active_event_variants() {
             "warning",
         )),
     ] {
-        let (event, diagnostics) = output::scan::Event::try_from_scan(event).unwrap();
-        validate_typed_event(output::contract::Command::Scan, event, diagnostics);
+        validate_workflow_event::<output::scan::Conversion>(output::contract::Command::Scan, event);
     }
     for event in [
         packetcraftr::traceroute::Event::Probe {
@@ -608,9 +632,28 @@ fn validate_active_event_variants() {
             "warning",
         )),
     ] {
-        let (event, diagnostics) = output::traceroute::Event::try_from_traceroute(event).unwrap();
-        validate_typed_event(output::contract::Command::Traceroute, event, diagnostics);
+        validate_workflow_event::<output::traceroute::Conversion>(
+            output::contract::Command::Traceroute,
+            event,
+        );
     }
+    let connect = packetcraftr::scan::connect::Probe {
+        sequence: 0,
+        endpoint: "127.0.0.1:443".parse().unwrap(),
+        attempt: 1,
+        attempted: true,
+        connect_succeeded: Some(true),
+        outcome: packetcraftr::scan::connect::Outcome::Connected,
+        scheduled_at: UNIX_EPOCH,
+        finished_at: Some(UNIX_EPOCH + Duration::from_millis(1)),
+        elapsed: Duration::from_millis(1),
+        local: None,
+        error: None,
+    };
+    validate_workflow_event::<output::scan_connect::Conversion>(
+        output::contract::Command::Scan,
+        connect,
+    );
     validate_dns_event_variants();
 }
 
@@ -672,49 +715,31 @@ fn validate_dns_event_variants() {
         )),
     ];
     for event in events {
-        let (event, diagnostics) = output::dns::Event::try_from_dns(event).unwrap();
-        validate_typed_event(output::contract::Command::Dns, event, diagnostics);
+        validate_workflow_event::<output::dns::Single>(output::contract::Command::Dns, event);
     }
-    // The batch terminal record lists each question's deterministic status.
-    // `complete` is reserved for the terminal record, so it emits through the
-    // terminal path rather than `emit_data`.
-    let (sink, bytes) = stream(output::contract::Command::Dns);
-    sink.complete_with_stats(
-        output::dns::Event::BatchComplete {
+    validate_workflow_event::<output::dns::Batch>(
+        output::contract::Command::Dns,
+        packetcraftr::dns::Event::Diagnostic(core::diagnostic::Diagnostic::warning(
+            "dns.batch",
+            "batch warning",
+        )),
+    );
+    validate_workflow_summary::<output::dns::Batch>(
+        output::contract::Command::Dns,
+        packetcraftr::dns::BatchReport {
             server: "192.0.2.53".to_owned(),
             server_port: 53,
-            questions: vec![
-                output::dns::QuestionComplete {
-                    query_name: "1.2.0.192.in-addr.arpa".to_owned(),
-                    query_type: packetcraftr::dns::QueryType::PTR.code(),
-                    transaction_id: 0x1234,
-                    status: packetcraftr::dns::QuestionStatus::Completed,
-                    outcome: Some(packetcraftr::dns::Outcome::Response),
-                    error: None,
-                },
-                output::dns::QuestionComplete {
-                    query_name: "unreachable.test".to_owned(),
-                    query_type: packetcraftr::dns::QueryType::A.code(),
-                    transaction_id: 0x1235,
-                    status: packetcraftr::dns::QuestionStatus::Failed,
-                    outcome: None,
-                    error: Some("induced failure".to_owned()),
-                },
-                output::dns::QuestionComplete {
-                    query_name: "never.test".to_owned(),
-                    query_type: packetcraftr::dns::QueryType::A.code(),
-                    transaction_id: 0x1236,
-                    status: packetcraftr::dns::QuestionStatus::Unattempted,
-                    outcome: None,
-                    error: None,
-                },
-            ],
+            questions: vec![packetcraftr::dns::QuestionOutcome {
+                query_name: "never.test".to_owned(),
+                query_type: packetcraftr::dns::QueryType::A,
+                transaction_id: 0x1236,
+                status: packetcraftr::dns::QuestionStatus::Unattempted,
+                report: None,
+                error: None,
+            }],
+            stats: packetcraftr::Stats::default(),
         },
-        Vec::new(),
-        packetcraftr::Stats::default(),
-    )
-    .expect("batch terminal record renders");
-    validate_records(schema_validator(), &bytes.records());
+    );
 }
 
 #[test]
@@ -805,10 +830,8 @@ fn dns_schema_rejects_truncated_tcp_results() {
 
 fn validate_fuzz_event_variants() {
     let (offline, live) = fuzz_cases();
-    let event = output::fuzz::Event::try_from_offline(offline).unwrap();
-    validate_typed_event(output::contract::Command::Fuzz, event, Vec::new());
-    let event = output::fuzz::Event::try_from_live(live).unwrap();
-    validate_typed_event(output::contract::Command::Fuzz, event, Vec::new());
+    validate_workflow_event::<output::fuzz::Offline>(output::contract::Command::Fuzz, offline);
+    validate_workflow_event::<output::fuzz::Live>(output::contract::Command::Fuzz, live);
 }
 
 fn validate_exchange_event_variants() {
@@ -833,9 +856,98 @@ fn validate_exchange_event_variants() {
         )),
     ];
     for event in events {
-        let (event, diagnostics) = output::exchange::Event::try_from_exchange(event).unwrap();
-        validate_typed_event(output::contract::Command::Exchange, event, diagnostics);
+        validate_workflow_event::<output::exchange::Conversion>(
+            output::contract::Command::Exchange,
+            event,
+        );
     }
+}
+
+#[test]
+fn workflow_conversion_terminal_records_are_schema_valid() {
+    let address: IpAddr = "192.0.2.10".parse().unwrap();
+    validate_workflow_summary::<output::scan::Conversion>(
+        output::contract::Command::Scan,
+        packetcraftr::scan::Summary {
+            planned_duration: Duration::from_secs(1),
+            target: "scan.test".to_owned(),
+            resolved_addresses: vec![address],
+            counts: Default::default(),
+            stats: Default::default(),
+            rtt: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::scan_connect::Conversion>(
+        output::contract::Command::Scan,
+        packetcraftr::scan::connect::Summary {
+            target: "127.0.0.1".to_owned(),
+            resolved_addresses: vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
+            planned_duration: Duration::from_secs(1),
+            stats: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::traceroute::Conversion>(
+        output::contract::Command::Traceroute,
+        packetcraftr::traceroute::Summary {
+            target: "trace.test".to_owned(),
+            resolved_addresses: vec![address],
+            destination: address,
+            strategy: packetcraftr::probe::Transport::Udp,
+            destination_port: Some(33434),
+            completion: packetcraftr::traceroute::Completion::Timeout,
+            stats: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::dns::Single>(
+        output::contract::Command::Dns,
+        packetcraftr::dns::Summary {
+            server: "192.0.2.53".to_owned(),
+            server_port: 53,
+            resolved_addresses: vec!["192.0.2.53".parse().unwrap()],
+            query_name: "example.test".to_owned(),
+            query_type: packetcraftr::dns::QueryType::A,
+            transaction_id: 42,
+            completion: packetcraftr::dns::Completion::new(
+                packetcraftr::dns::Outcome::Timeout,
+                false,
+                None,
+                None,
+            )
+            .unwrap(),
+            stats: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::fuzz::Offline>(
+        output::contract::Command::Fuzz,
+        core::fuzz::Summary {
+            seed: 1,
+            first_case: 0,
+            diagnostics: vec![core::diagnostic::Diagnostic::warning(
+                "fuzz.fixture",
+                "warning",
+            )],
+            stats: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::fuzz::Live>(
+        output::contract::Command::Fuzz,
+        packetcraftr::fuzz::Summary {
+            seed: 1,
+            first_case: 0,
+            stats: Default::default(),
+        },
+    );
+    validate_workflow_summary::<output::exchange::Conversion>(
+        output::contract::Command::Exchange,
+        packetcraftr::exchange::Summary {
+            unanswered: vec![0],
+            diagnostics: vec![core::diagnostic::Diagnostic::warning(
+                "exchange.fixture",
+                "warning",
+            )],
+            stats: Default::default(),
+        },
+    );
 }
 
 fn complete(

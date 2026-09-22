@@ -9,7 +9,7 @@ use packetcraftr_netio as net;
 use super::recipe::RecipeArgs;
 
 /// Route-selection constraints shared by live commands.
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 pub(crate) struct RouteSelectionArgs {
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]

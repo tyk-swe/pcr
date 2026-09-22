@@ -9,8 +9,9 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
+use packetcraftr_cli::output::workflow::Conversion;
 use packetcraftr_cli::output::{build as build_output, dissect as dissect_output};
-use packetcraftr_cli::output::{capture, contract, expert, follow, read, stats};
+use packetcraftr_cli::output::{capture, contract, exchange, expert, follow, read, stats};
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamRef;
 use packetcraftr_core::analysis::StreamTransport as AnalysisStreamTransport;
@@ -160,6 +161,67 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         decode_diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "decode.fixture")
+    );
+}
+
+#[test]
+fn exchange_conversion_keeps_capture_tie_order_without_exposing_capture_frames_in_json() {
+    let decoded = |byte| {
+        let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![byte]).unwrap();
+        let mut packet = Packet::new();
+        packet.push(Raw::new(vec![byte]));
+        decode::DecodedPacket {
+            packet,
+            original: frame.bytes().clone(),
+            frame,
+            layout: Default::default(),
+            diagnostics: Vec::new(),
+        }
+    };
+    let converted = exchange::Conversion::report(packetcraftr::exchange::Report {
+        sent: Vec::new(),
+        responses: vec![packetcraftr::exchange::Response {
+            request_index: 0,
+            response: decoded(1),
+            latency: Duration::ZERO,
+        }],
+        unanswered: Vec::new(),
+        unsolicited: vec![decoded(2)],
+        undecoded: vec![Frame::new(UNIX_EPOCH, LinkType::RAW, vec![3]).unwrap()],
+        diagnostics: Vec::new(),
+        stats: Default::default(),
+    })
+    .unwrap();
+    assert_eq!(
+        converted
+            .capture_frames()
+            .expect("exchange retains original frames")
+            .iter()
+            .map(|frame| frame.bytes()[0])
+            .collect::<Vec<_>>(),
+        [1, 2, 3],
+    );
+    assert!(
+        serde_json::to_value(&converted.result)
+            .unwrap()
+            .get("capture_frames")
+            .is_none()
+    );
+
+    // The existing public wire-result shape still supports struct literals;
+    // a private field on Report would break downstream Rust callers.
+    let original_shape = exchange::Report {
+        sent: Vec::new(),
+        responses: Vec::new(),
+        unanswered: Vec::new(),
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+    };
+    assert_eq!(
+        serde_json::to_value(original_shape).unwrap(),
+        serde_json::json!({
+            "sent": [], "responses": [], "unanswered": [], "unsolicited": [], "undecoded": []
+        }),
     );
 }
 

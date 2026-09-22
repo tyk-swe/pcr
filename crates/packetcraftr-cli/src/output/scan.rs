@@ -270,6 +270,33 @@ impl crate::output::stream::StreamRecord for Event {
     }
 }
 
+/// The sole scan translation used by streaming, aggregate, and text output.
+pub struct Conversion;
+
+impl super::workflow::Conversion for Conversion {
+    type EngineEvent = packetcraftr::scan::Event;
+    type EngineSummary = packetcraftr::scan::Summary;
+    type EngineReport = packetcraftr::scan::Report;
+    type Event = Event;
+    type Terminal = Event;
+    type Result = Report;
+
+    fn event(event: Self::EngineEvent) -> Result<(Event, Vec<PacketDiagnostic>), Error> {
+        Event::try_from_scan(event)
+    }
+
+    fn summary(
+        summary: Self::EngineSummary,
+    ) -> Result<(Event, Vec<PacketDiagnostic>, Option<Stats>), Error> {
+        let (event, diagnostics, stats) = Event::complete_from_scan(summary);
+        Ok((event, diagnostics, Some(stats)))
+    }
+
+    fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
+        Report::try_from_scan(report).map(super::workflow::Converted::with_stats)
+    }
+}
+
 /// A probe still in flight when the pipeline failed, with its best response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Pending {

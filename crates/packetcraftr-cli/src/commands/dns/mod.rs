@@ -56,6 +56,7 @@ pub(super) fn run(
             crate::cancellation::signal(),
             execution::Hooks {
                 command: output::contract::Command::Dns,
+                conversion: output::dns::Single,
                 run: Box::new(|session| {
                     packetcraftr::dns::run(
                         request,
@@ -78,18 +79,7 @@ pub(super) fn run(
                     )
                     .map_err(CliError::classified)
                 }),
-                on_event: rendering::emit_event,
-                into_result: Box::new(|report| {
-                    output::dns::Report::try_from_dns(report)
-                        .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                        .map_err(CliError::classified)
-                }),
-                render_text: Box::new(|report, _| {
-                    let (result, diagnostics, stats) =
-                        output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
-                    rendering::render_text(result, diagnostics, stats)
-                }),
-                complete: rendering::emit_complete,
+                render_text: Box::new(|converted, _| rendering::render_text(converted)),
             },
         );
     }
@@ -100,6 +90,7 @@ pub(super) fn run(
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Dns,
+            conversion: output::dns::Batch,
             run: Box::new(|session| {
                 packetcraftr::dns::run_batch(
                     &requests,
@@ -122,18 +113,7 @@ pub(super) fn run(
                 )
                 .map_err(CliError::classified)
             }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|batch| {
-                output::dns::BatchResult::try_from_batch(batch)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
-                    .map_err(CliError::classified)
-            }),
-            render_text: Box::new(|batch, _| {
-                let (result, diagnostics, stats) = output::dns::BatchResult::try_from_batch(batch)
-                    .map_err(CliError::classified)?;
-                rendering::render_batch_text(result, diagnostics, stats)
-            }),
-            complete: rendering::emit_batch_complete,
+            render_text: Box::new(|converted, _| rendering::render_batch_text(converted)),
         },
     )
 }

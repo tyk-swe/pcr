@@ -2,19 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::error::Kind;
 
 use packetcraftr_cli::output;
 
 use crate::errors::CliError;
-use crate::rendering::{
-    StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
-};
+use crate::rendering::{render_diagnostics_text, write_capture_file, write_stdout_line};
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(), CliError> {
-    let mut diagnostics = result.diagnostics.clone();
-    for sent in &result.sent {
-        diagnostics.extend(sent.built().diagnostics.iter().cloned());
-    }
+pub(super) fn render_text(
+    converted: &output::workflow::Converted<output::exchange::Report>,
+) -> Result<(), CliError> {
+    let result = &converted.result;
     write_stdout_line(format_args!(
         "sent={} responses={} unanswered={} unsolicited={} undecoded={} bytes={}",
         result.sent.len(),
@@ -22,78 +20,22 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(),
         result.unanswered.len(),
         result.unsolicited.len(),
         result.undecoded.len(),
-        result.stats.bytes
+        converted
+            .stats
+            .as_ref()
+            .expect("exchange conversion includes packet statistics")
+            .bytes
     ))?;
-    render_diagnostics_text(&diagnostics)
+    render_diagnostics_text(&converted.diagnostics)
 }
 
 pub(super) fn render_capture(
-    result: &packetcraftr::exchange::Report,
+    converted: &output::workflow::Converted<output::exchange::Report>,
     format: Format,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
-    let frames = stable_timestamp_order(
-        result
-            .sent
-            .iter()
-            .map(|sent| sent.frame())
-            .chain(
-                result
-                    .responses
-                    .iter()
-                    .map(|response| &response.response.frame),
-            )
-            .chain(result.unsolicited.iter().map(|packet| &packet.frame))
-            .chain(result.undecoded.iter()),
-    );
-    write_capture_file(format, frames.into_iter().cloned(), compression)
-}
-
-fn stable_timestamp_order<'a>(
-    frames: impl IntoIterator<Item = &'a packetcraftr_core::frame::Frame>,
-) -> Vec<&'a packetcraftr_core::frame::Frame> {
-    let mut frames = frames.into_iter().collect::<Vec<_>>();
-    frames.sort_by_key(|frame| frame.timestamp);
-    frames
-}
-
-/// Adapts one engine event into its wire record on the stream.
-pub(super) fn emit_event(
-    event: packetcraftr::exchange::Event,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::exchange::Event::try_from_exchange(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
-}
-
-pub(super) fn render_complete(
-    summary: packetcraftr::exchange::Summary,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
-    let (event, diagnostics, stats) = output::exchange::Event::complete_from_exchange(summary);
-    Ok(stream.complete_with_stats(event, diagnostics, stats)?)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::UNIX_EPOCH;
-
-    use packetcraftr_core::frame::{Frame, LinkType};
-
-    use super::stable_timestamp_order;
-
-    #[test]
-    fn equal_timestamps_keep_source_tie_order() {
-        let frames = [1_u8, 2, 3]
-            .map(|byte| Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![byte]).expect("fixture frame"));
-        let ordered = stable_timestamp_order(frames.iter());
-        assert_eq!(
-            ordered
-                .iter()
-                .filter_map(|frame| frame.bytes().first().copied())
-                .collect::<Vec<_>>(),
-            [1, 2, 3]
-        );
-    }
+    let frames = converted.capture_frames().ok_or_else(|| {
+        CliError::new(Kind::Internal, "exchange conversion omitted capture frames")
+    })?;
+    write_capture_file(format, frames.iter().cloned(), compression)
 }

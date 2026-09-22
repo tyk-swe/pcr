@@ -32,6 +32,9 @@ fn main() {
             "native_workers",
             (native_route && os == "linux") || native_layer2,
         ),
+        // The isolated native suite enters Linux network namespaces through
+        // procfs; the launcher proves isolation at runtime.
+        ("packetcraftr_test_netns", os == "linux"),
     ];
     for (name, enabled) in capabilities {
         println!("cargo::rustc-check-cfg=cfg({name})");

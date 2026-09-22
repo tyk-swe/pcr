@@ -207,6 +207,56 @@ fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
     assert!(transform::rewrite(&truncated, &mac, Default::default()).is_err());
 }
 #[test]
+fn checksum_affecting_rewrite_refuses_source_route_and_home_address() {
+    let patch_v4 = HeaderRewrite {
+        destination_ip: Some("198.51.100.9".parse().unwrap()),
+        ..Default::default()
+    };
+    for option in [131, 137] {
+        let original = frame(false, false, false, false);
+        let mut bytes = original.bytes().to_vec();
+        bytes[0] = 0x47;
+        let length = u16::from_be_bytes([bytes[2], bytes[3]]) + 8;
+        bytes[2..4].copy_from_slice(&length.to_be_bytes());
+        bytes.splice(20..20, [option, 7, 4, 203, 0, 113, 9, 0]);
+        bytes[10..12].fill(0);
+        let sum = packetcraftr_core::protocol::checksum(&bytes[..28]);
+        bytes[10..12].copy_from_slice(&sum.to_be_bytes());
+        let routed = Frame::new(UNIX_EPOCH, LinkType::IPV4, bytes).unwrap();
+        assert!(matches!(
+            transform::rewrite(&routed, &patch_v4, Default::default()),
+            Err(transform::Error::Unsupported(
+                "IPv4 source routing changes checksum destinations"
+            ))
+        ));
+    }
+
+    let patch_v6 = HeaderRewrite {
+        source_ip: Some("2001:db8::9".parse().unwrap()),
+        ..Default::default()
+    };
+    for extension in [0_u8, 60] {
+        let original = frame(true, false, false, false);
+        let mut bytes = original.bytes().to_vec();
+        bytes[6] = extension;
+        let length = u16::from_be_bytes([bytes[4], bytes[5]]) + 24;
+        bytes[4..6].copy_from_slice(&length.to_be_bytes());
+        let mut options = [0_u8; 24];
+        options[0..4].copy_from_slice(&[17, 2, 201, 16]);
+        options[4..20]
+            .copy_from_slice(&[0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9]);
+        bytes.splice(40..40, options);
+        let home = Frame::new(UNIX_EPOCH, LinkType::IPV6, bytes).unwrap();
+        assert!(matches!(
+            transform::rewrite(&home, &patch_v6, Default::default()),
+            Err(transform::Error::Unsupported(
+                "IPv6 Home Address option changes checksum sources"
+            ))
+        ));
+    }
+}
+
+#[test]
 fn capture_mapping_preserves_interface_options_and_rejects_declared_fcs() {
     for fcs in [false, true] {
         let original = frame(false, false, true, false);

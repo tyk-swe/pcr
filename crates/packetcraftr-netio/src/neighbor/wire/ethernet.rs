@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanKind, VlanTag};
+use packetcraftr_core::protocol::network::envelope::{EthernetWalk, LinkHeaderKind};
 
 pub(super) const HEADER_LENGTH: usize = 14;
 pub(super) const MINIMUM_WITHOUT_FCS: usize = 60;
 pub(super) const VLAN_HEADER_LENGTH: usize = 4;
 pub(super) const ETHERTYPE_ARP: u16 = 0x0806;
 pub(super) const ETHERTYPE_IPV6: u16 = 0x86dd;
+#[cfg(test)]
 pub(super) const ETHERTYPE_VLAN: u16 = 0x8100;
+#[cfg(test)]
 pub(super) const ETHERTYPE_SERVICE_VLAN: u16 = 0x88a8;
 
 pub(super) struct View<'a> {
@@ -55,28 +58,25 @@ pub(super) fn parse(bytes: &[u8]) -> Option<View<'_>> {
     destination.copy_from_slice(&header[..6]);
     let mut source = [0; 6];
     source.copy_from_slice(&header[6..12]);
-    let mut ether_type = u16::from_be_bytes([header[12], header[13]]);
-    let mut offset = HEADER_LENGTH;
-    let mut vlan_tags = Vec::new();
-    while matches!(ether_type, ETHERTYPE_VLAN | ETHERTYPE_SERVICE_VLAN) {
-        if vlan_tags.len() >= MAX_VLAN_TAGS {
-            return None;
-        }
-        let tag_header = bytes.get(offset..)?.first_chunk::<VLAN_HEADER_LENGTH>()?;
-        let tci = u16::from_be_bytes([tag_header[0], tag_header[1]]);
-        vlan_tags.push(VlanTag {
-            kind: if ether_type == ETHERTYPE_SERVICE_VLAN {
-                VlanKind::Ieee8021Ad
-            } else {
-                VlanKind::Ieee8021Q
-            },
-            priority: ((tci >> 13) & 7) as u8,
-            drop_eligible: (tci & 0x1000) != 0,
-            vlan_id: tci & 0x0fff,
-        });
-        ether_type = u16::from_be_bytes([tag_header[2], tag_header[3]]);
-        offset = offset.checked_add(VLAN_HEADER_LENGTH)?;
-    }
+    let walk = EthernetWalk::new(bytes, MAX_VLAN_TAGS).ok()?;
+    let ether_type = walk.ether_type();
+    let offset = walk.payload_offset();
+    let vlan_tags = walk
+        .skip(1)
+        .map(|tag| {
+            let tci = tag.tci.expect("VLAN headers have a TCI");
+            VlanTag {
+                kind: if tag.kind == LinkHeaderKind::Vlan8021Ad {
+                    VlanKind::Ieee8021Ad
+                } else {
+                    VlanKind::Ieee8021Q
+                },
+                priority: ((tci >> 13) & 7) as u8,
+                drop_eligible: (tci & 0x1000) != 0,
+                vlan_id: tci & 0x0fff,
+            }
+        })
+        .collect();
     Some(View {
         destination: MacAddress(destination),
         source: MacAddress(source),

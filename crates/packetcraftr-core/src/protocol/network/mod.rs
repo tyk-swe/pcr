@@ -3,7 +3,7 @@
 
 //! Network-layer protocol models.
 
-mod envelope;
+pub mod envelope;
 mod igmp;
 mod ipv4;
 mod ipv6;

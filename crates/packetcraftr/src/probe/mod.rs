@@ -19,8 +19,8 @@ pub use runner::{Batch, Execution};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
-use std::time::Duration;
 
+use bytes::Bytes;
 use packetcraftr_core::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
     transport_tuple_reversed,
@@ -36,6 +36,14 @@ use crate::target::GateErrors;
 /// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
 pub(crate) const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
+}
+
+/// ICMP echo payload identifying one probe: `P`, the workflow's `tag`, and the
+/// sequence deliberately reduced to 16 bits across the last two bytes.
+/// Sent-probe matching rebuilds the payload, so the reduction is symmetric.
+pub(crate) fn icmp_identity(tag: u8, sequence: u64) -> Bytes {
+    let sequence = sequence as u16;
+    Bytes::copy_from_slice(&[0x50, tag, (sequence >> 8) as u8, sequence as u8])
 }
 
 /// First port of the IANA dynamic range, the base every workflow rotates
@@ -76,10 +84,6 @@ pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Resul
     deadline
         .enforce()
         .map_err(|interrupted| workflow.interrupted(interrupted))
-}
-
-pub(crate) fn duration_limit(workflow: Workflow, actual: Duration, limit: Duration) -> Error {
-    Error::new(workflow, ErrorKind::DurationLimit { actual, limit })
 }
 
 /// Returns the live collector entry for `key`, pushing `make()` first when

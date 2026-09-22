@@ -14,7 +14,7 @@ use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
-use super::engine::{Gates, PreparedOperation, duration_error};
+use super::engine::{Gates, PreparedOperation};
 use super::plan::batch_budget;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
@@ -143,12 +143,9 @@ where
     C: Clock,
     F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
 {
-    let observe = sink_observer(
-        runtime,
-        emit,
-        |error| duration_error(error.actual, error.limit),
-        |source| Error::Output { source },
-    )?;
+    let observe = sink_observer(runtime, emit, Error::from, |source| Error::Output {
+        source,
+    })?;
     let mut deadline = batch_deadline(requests)?.with_cancellation(clock.cancellation());
     run_batch_observed(
         requests,

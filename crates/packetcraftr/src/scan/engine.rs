@@ -20,7 +20,7 @@ use crate::probe::evidence::{
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::{DeclaredTargets, admit_selection, budgeted};
+use crate::target::{DeclaredTargets, GateErrors, admit_selection, budgeted};
 
 use super::WORKFLOW;
 use super::classification::classify_response;
@@ -32,8 +32,8 @@ use super::{
 };
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
 use crate::probe::{
-    Error, ErrorKind, Execution, Executor, ProbeEndpoint, ProbeStatus, Transport, duration_limit,
-    enforce_deadline, index_or_push,
+    Error, ErrorKind, Execution, Executor, ProbeEndpoint, ProbeStatus, Transport, enforce_deadline,
+    index_or_push,
 };
 use crate::probe::{PipelineEvent, PipelineOptions};
 
@@ -91,7 +91,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| duration_limit(WORKFLOW, error.actual, error.limit),
+        |error| WORKFLOW.duration_limit(error.actual, error.limit),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
@@ -224,7 +224,7 @@ where
     let mut sent_bytes = 0u64;
     let remaining = deadline
         .remaining()
-        .map_err(|error| duration_limit(WORKFLOW, error.actual, error.limit))?;
+        .map_err(|error| WORKFLOW.duration_limit(error.actual, error.limit))?;
     let settings = PipelineOptions {
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,

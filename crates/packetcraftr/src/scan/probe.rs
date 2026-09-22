@@ -22,7 +22,7 @@ use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{build, decode, packet::Packet, protocol::BuiltinProtocol};
 
 use crate::probe::{
-    EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, nonzero_ipv4_identification,
+    EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port, icmp_identity, nonzero_ipv4_identification,
 };
 
 use super::Probe;
@@ -87,11 +87,11 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
         }
         ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => packet.push(Icmpv4 {
-                body: icmp_identity(probe.sequence),
+                body: icmp_identity(ICMP_IDENTITY_TAG, probe.sequence),
                 ..Icmpv4::default()
             }),
             IpAddr::V6(_) => packet.push(Icmpv6 {
-                body: icmp_identity(probe.sequence),
+                body: icmp_identity(ICMP_IDENTITY_TAG, probe.sequence),
                 ..Icmpv6::default()
             }),
         },
@@ -99,12 +99,8 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
     packet
 }
 
-// the identity tag is a deliberate 16-bit reduction of the sequence, split across the two payload
-// bytes below
-fn icmp_identity(sequence: u64) -> Bytes {
-    let sequence = sequence as u16;
-    Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
-}
+/// Second byte of every scan ICMP echo payload; see [`icmp_identity`].
+const ICMP_IDENTITY_TAG: u8 = 0x43;
 
 const DNS_PORT: u16 = 53;
 const VXLAN_PORT: u16 = 4789;
@@ -346,12 +342,14 @@ pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
         }),
         ProbeEndpoint::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
-                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
+                icmp.icmp_type == 8
+                    && icmp.code == 0
+                    && icmp.body == icmp_identity(ICMP_IDENTITY_TAG, probe.sequence)
             }),
             IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
                 icmp.icmp_type == 128
                     && icmp.code == 0
-                    && icmp.body == icmp_identity(probe.sequence)
+                    && icmp.body == icmp_identity(ICMP_IDENTITY_TAG, probe.sequence)
             }),
         },
     }

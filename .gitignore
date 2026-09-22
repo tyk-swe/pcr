@@ -6,9 +6,7 @@
 .vscode/
 *.swp
 *~
-
-# Tool residue written outside target/
-scripts/__pycache__/
+.claude/settings.local.json
 
 # Files the CI workflows write into the working tree
 linked-libraries.txt

@@ -335,9 +335,9 @@ mod tests {
         }
     }
 
-    /// Previous `dns_source_port` behaviour: a base below the dynamic range
-    /// rotates within `1..EPHEMERAL_SOURCE_PORT_BASE` instead, so a pinned low
-    /// port never escapes into the dynamic range.
+    /// A base below the dynamic range rotates within
+    /// `1..EPHEMERAL_SOURCE_PORT_BASE`, so a pinned low port never escapes into
+    /// the dynamic range.
     #[test]
     fn a_low_base_rotates_below_the_dynamic_range() {
         let width = u32::from(EPHEMERAL_SOURCE_PORT_BASE) - 1;

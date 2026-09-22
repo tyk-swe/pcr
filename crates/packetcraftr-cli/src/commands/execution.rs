@@ -256,10 +256,9 @@ pub(super) struct Hooks<'a, S, E, U, R, F, T> {
 /// `on_event` after checking `cancellation` and the installed invocation
 /// deadline, and ends with `complete`. Every other format runs `run`, then
 /// either emits the `json` envelope from `into_result` or hands the report
-/// to `render_text`. Choosing the entry point before rendering removes the
-/// unreachable `ndjson` arm every command used to carry, and routing every
-/// emission through the shared check makes interrupt handling identical
-/// across the workflows.
+/// to `render_text`. Choosing the entry point before rendering means no
+/// renderer carries an `ndjson` arm, and routing every emission through the
+/// shared check makes interrupt handling identical across the workflows.
 pub(super) fn run_workflow<S, E, U, R, F, T>(
     session: &mut S,
     format: F,

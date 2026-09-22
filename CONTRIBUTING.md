@@ -31,7 +31,7 @@ Silicon macOS, and Windows. Runtime tests cover full native, portable and the
 exact pcap-free feature profile on Linux; default and all-features contracts
 also run on the three other platform runners. PRs run seven jobs: full-native
 Linux, portable Linux, the three platform jobs, the compact decoder oracle, and
-compilation of all 15 fuzz targets on the pinned nightly with warnings denied.
+compilation of every fuzz target on the pinned nightly with warnings denied.
 The pcap-free binary is built independently and checked for absence of libpcap.
 Linux also runs architecture and validation failure fixtures, archive-verifier failure
 fixtures, and documentation checks.
@@ -122,9 +122,10 @@ an internal validation-artifact contract, not a product output-schema change.
 The weekly full-corpus policy and exact-commit push-CI selection are unchanged.
 
 CI builds documentation with warnings denied for the portable, pcap-free and
-full-native profiles. Dependency upgrades
-must also pass `document_limit_contracts::yaml_stream_exhaustion_dependency_contract`
-until the YAML dependency provides a typed streaming end signal.
+full-native profiles. YAML dependency upgrades must also pass the
+`document::parse` unit tests (`cargo test --locked -p packetcraftr-core --lib
+document::parse`), which pin the untyped end-of-stream error the parser relies
+on, until the YAML dependency provides a typed streaming end signal.
 
 The CLI default features include `packetcraftr/default` so workspace and focused
 CLI builds select the same workflow features and can reuse their artifacts.
@@ -174,7 +175,7 @@ cargo test --locked -p packetcraftr-cli --test verify_forwarding --test aggregat
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 ```
 
-The compact decoder oracle now also runs before merge. Native changes require
-applicable [reviewed native evidence](docs/native-validation.md); platform
-compilation is not substituted for runtime validation. Required environment
-reviewers and merge protections are administrator-owned configuration.
+Native changes require applicable
+[reviewed native evidence](docs/native-validation.md); platform compilation is
+not substituted for runtime validation. Required environment reviewers and merge
+protections are administrator-owned configuration.

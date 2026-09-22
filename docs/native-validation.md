@@ -1,8 +1,8 @@
 # Capability and validation matrix
 
-These are validation routes and their scope, not a claim that this working tree
-has passed them. In particular, the implementation session had no Rust toolchain
-and did not exercise native networking.
+These are validation routes and their scope. Listing a route is not evidence
+that a particular commit passed it; that evidence is the recorded CI,
+reviewed-native, or release report.
 
 | Capability | Linux | Windows / macOS |
 | --- | --- | --- |
@@ -29,8 +29,8 @@ ready when it arrived. Use a backend-specific readiness-aware test for that clai
 
 ## Before merge
 
-The compact checksum-pinned decoder oracle now runs on pull requests; the larger
-generated corpus remains scheduled. Its corpus checks are independent decoder
+The compact checksum-pinned decoder oracle runs on pull requests; the weekly run
+adds the larger generated corpus. Its corpus checks are independent decoder
 comparisons, not a verdict-semantic oracle.
 
 Privileged review is intentionally **not** automatically enabled for arbitrary

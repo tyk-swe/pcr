@@ -2,6 +2,11 @@
 
 These notes describe the pending changes in `[Unreleased]`.
 
+All structured command envelopes now identify `packetcraftr.output/v6` and
+validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents
+now use `packetcraftr.packet/v2` and the corresponding v2 schema. Earlier
+packet-document versions are rejected with a schema error.
+
 ## Forwarding semantics and output/v6
 
 Ordinary preservation no longer treats two missing fields as a satisfied check.
@@ -47,11 +52,6 @@ messages encode names uncompressed, leaving unknown RDATA opaque. Opaque RDATA
 is not interpreted or relocated if it contains application-specific pointers.
 The reflected `wire` field preserves the original message through document
 round trips; explicit structured edits invalidate that retained image.
-
-
-All structured command envelopes now identify `packetcraftr.output/v6` and
-validate against `schemas/packetcraftr.output.v6.schema.json`. Packet documents now use `packetcraftr.packet/v2` and the corresponding v2 schema.
-Earlier packet-document versions are rejected with a schema error.
 
 Output/v6 includes streamed `build` packet/completion events and replay
 `{"bit_rate": BITS_PER_SECOND}` timing. Successful TCP DNS can have
@@ -496,6 +496,7 @@ The command produces files rather than a contract document: it ignores
 `--output` and reports failures on stderr with the `io.documentation`
 classification. Release archives now carry both trees, and the archive
 verifier requires a man page for every shipped subcommand.
+
 ## Standard traits and narrower APIs
 
 Wire constructors moved to `TryFrom`: `Dns`, `Dhcpv4`, and `Dhcpv6` implement
@@ -528,6 +529,21 @@ analysis HTTP/DNS collectors take `impl IntoIterator<Item = u16>` for ports.
 `frame::Direction`. `budget::Interrupted` and netio capture `Failure`/`Error`
 are `#[non_exhaustive]` — add a wildcard arm to exhaustive matches.
 
+## Layer codec input
+
+`LayerCodec::decode` takes the layer input as a refcounted `Bytes` view instead
+of `&[u8]`, and `dns::name::decompress` takes `&Bytes`. Custom codecs can
+retain ranges with `input.slice(..)` instead of copying them; callers holding
+borrowed bytes wrap them once with `Bytes::copy_from_slice` or `Bytes::from`.
+
+## TCP retransmission spans
+
+`analysis::reassembly::tcp::Event::Retransmission` gains a `ranges:
+Vec<Range<u32>>` field listing the arriving segment's retransmitted sequence
+spans in stream order; the spans need not form a contiguous prefix. `Event` is
+not `#[non_exhaustive]`, so struct patterns need `..` or a `ranges` binding and
+constructors must supply the field.
+
 ## Typed error sources
 
 Errors keep typed sources instead of display strings.
@@ -540,6 +556,14 @@ recovers the original cause through worker-reaper, route materialization,
 authorization, send-execution, DNS-classification, and capture-output
 failures. `fuzz::CaseFailure` implements `Error`. `CliError` implements
 `std::error::Error`; `rules::vlan`/`mac` return it directly.
+
+## Filter timestamp failures
+
+A display filter that reads `frame.time_epoch` on a frame without a timestamp
+now reports `packet.timestamp_unavailable` (exit 3) from every command,
+including `read --field`, `capture`, `replay`, and `rewrite`. It previously
+reported `packet.error` (exit 3) or `cli.filter` (exit 2) depending on the
+command; update scripts that match either code for this case.
 
 ## Format proof enums
 
@@ -570,3 +594,21 @@ Workflow-specific types keep their module homes: `dns::Error`,
 `dns::Execution`, `dns::Transport`, DNS execution receipts, `fuzz::Error`,
 `fuzz::Execution`, and the specialized `traceroute::Batch` alias are
 unchanged.
+
+## Removed equivalent paths
+
+Items that were reachable at more than one public path keep only their
+canonical path:
+
+| Removed path | Import instead |
+|---|---|
+| `packetcraftr_core::{Packet, PacketError}` | `packetcraftr_core::packet::{Packet, PacketError}` |
+| `build::{Context, Mode}` | `codec::{Context, Mode}` |
+| `build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` | `layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` |
+| `protocol::application::{Dns, Tls}` | `protocol::application::dns::Dns`, `protocol::application::tls::codec::Tls` |
+| `protocol::application::tls` facade re-exports | `tls::fingerprint::`, `tls::model::`, `tls::parse::` |
+| `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
+| `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_netio::SystemFault` |
+| `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
+| `packetcraftr::replay::{ReplayFrame, WireBudget}` | `packetcraftr::policy::{ReplayFrame, WireBudget}` |
+| `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `packetcraftr::dns::response_code_name(code)` |

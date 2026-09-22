@@ -3,10 +3,10 @@
 
 //! Live workflow orchestration shared by the probe-driven commands:
 //! provider composition ([`prepare`]/[`Providers`]), the per-invocation
-//! [`Session`], and [`run_workflow`], the one driver deciding between the
-//! streaming and collecting engine entry points under the negotiated output
-//! format. The deferred interface resolves once inside [`Executor`], then
-//! delegates to the library exchange.
+//! [`WorkflowSession`], and [`run_workflow`], the one driver deciding between
+//! the streaming and collecting engine entry points under the negotiated
+//! output format. The deferred interface resolves once inside [`Executor`],
+//! then delegates to the library exchange.
 
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::system::{client, exchange};
@@ -65,6 +65,9 @@ where
     for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
 {
     fn pipeline_capacity(&self) -> usize {
+        // A throwaway exchange, not `self.prepared()`: capacity is intrinsic
+        // to the request type, and binding the deferred interface here would
+        // touch the platform's interface list before target authorization.
         <Exchange<'_> as packetcraftr::probe::Executor<Req>>::pipeline_capacity(&Exchange::new(
             &self.client,
             self.exchange.clone(),
@@ -121,8 +124,8 @@ impl Providers {
     /// over the composed policy and the system resolver, the clock sharing
     /// the installed cancellation signal, and the registry, executor, and
     /// callback worker the engines drive.
-    pub(super) fn session(&mut self) -> Session<'_> {
-        Session {
+    pub(super) fn session(&mut self) -> WorkflowSession<'_> {
+        WorkflowSession {
             authorizer: packetcraftr::policy::PolicyAuthorizer::new(&self.policy, &self.resolver),
             clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
             registry: &self.registry,
@@ -135,7 +138,7 @@ impl Providers {
 /// The per-invocation run context [`Providers::session`] vends to a workflow
 /// command. Commands lend it to [`run_workflow`], which borrows the pieces
 /// each engine entry point needs.
-pub(super) struct Session<'a> {
+pub(super) struct WorkflowSession<'a> {
     /// Authorizes declared targets and the operation budget.
     pub(super) authorizer: packetcraftr::policy::PolicyAuthorizer<'a>,
     /// Pacing clock sharing the installed interrupt signal.

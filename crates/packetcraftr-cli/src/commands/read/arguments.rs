@@ -47,10 +47,10 @@ sequence remains the zero-based emitted-record position."#;
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Select a registered field; repeat to preserve the requested column order.
-    #[arg(long="field", value_name="PATH", conflicts_with_all=["normalize","dissect"])]
+    #[arg(long = "field", value_name = "PATH", conflicts_with_all = ["normalize", "dissect"])]
     pub(crate) fields: Vec<String>,
     /// Maximum encoded projection data bytes across all rows (excluding envelopes).
-    #[arg(long, default_value_t=16*1024*1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_projection_bytes: usize,
 
     /// Compress binary capture output; independent of the input's detected format.

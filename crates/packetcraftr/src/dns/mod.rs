@@ -76,21 +76,11 @@ pub use engine::{run, run_with_events};
 pub use error::{Error, WireError};
 pub use execution::{Exchange, Execution, Probe, TcpExchange, TcpExecution, TcpExecutor};
 pub use executor::TcpExchangeExecutor;
-pub use report::AttemptEvidence;
-pub use report::AttemptTransport;
-pub use report::Completion;
-pub use report::Event;
-pub use report::EventContext;
-pub use report::EvidenceError;
-pub use report::Outcome;
-pub use report::RejectedRecord;
-pub use report::Report;
-pub use report::ResponseMetadata;
-pub use report::Section;
-pub use report::Summary;
-pub use report::Transport;
-pub use report::UndecodedEvidence;
-pub use report::ValidatedResponse;
+pub use report::{
+    AttemptEvidence, AttemptTransport, Completion, Event, EventContext, EvidenceError, Outcome,
+    RejectedRecord, Report, ResponseMetadata, Section, Summary, Transport, UndecodedEvidence,
+    ValidatedResponse,
+};
 pub use request::{
     EdnsRequest, Limits, MessageLimits, QueryType, QueryTypeParseError, Request, TransportMode,
 };

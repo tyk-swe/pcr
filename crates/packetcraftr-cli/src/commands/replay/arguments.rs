@@ -43,7 +43,7 @@ pub(crate) struct Args {
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Fallback output interface; mapping-only runs may omit it.
-    #[arg(long, value_name="NAME_OR_INDEX", required_unless_present_any=["interface_maps","filter_maps"])]
+    #[arg(long, value_name = "NAME_OR_INDEX", required_unless_present_any = ["interface_maps", "filter_maps"])]
     pub(crate) interface: Option<String>,
     /// Map a capture-global input interface ID (classic PCAP uses 0).
     #[arg(long = "map-interface", value_name = "SOURCE_ID=OUTPUT_INTERFACE")]

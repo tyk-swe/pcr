@@ -8,19 +8,17 @@
 
 use serde::Serialize;
 
+use packetcraftr_core::analysis::Endpoint;
 use packetcraftr_core::analysis::tls::Alert as AnalysisAlert;
 use packetcraftr_core::analysis::tls::ClientSummary;
 use packetcraftr_core::analysis::tls::ServerSummary;
 use packetcraftr_core::analysis::tls::Session as AnalysisSession;
+use packetcraftr_core::analysis::tls::Status;
 use packetcraftr_core::analysis::tls::Summary as AnalysisSummary;
 use packetcraftr_core::protocol::application::tls::names;
 
 use super::envelope::is_zero;
 use super::hex::compact_hex;
-
-use packetcraftr_core::analysis::tls::Status;
-
-use packetcraftr_core::analysis::Endpoint;
 
 /// One alert record observed in the clear.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

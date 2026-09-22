@@ -5,12 +5,13 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::advance;
-use super::primitives::{read_u16, read_u32};
-const TYPE_OPT: u16 = 41;
 use super::super::DecodeError as WireError;
 use super::super::{DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record, RecordValue};
+use super::advance;
 use super::decode_name;
+use super::primitives::{read_u16, read_u32};
+
+const TYPE_OPT: u16 = 41;
 
 pub(super) fn decode_records(
     message: &Bytes,

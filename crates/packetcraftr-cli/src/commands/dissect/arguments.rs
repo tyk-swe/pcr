@@ -21,7 +21,7 @@ pub(crate) struct Args {
     #[arg(long = "field", value_name = "PATH")]
     pub(crate) fields: Vec<String>,
     /// Maximum encoded projection data bytes across all rows (excluding envelopes).
-    #[arg(long, default_value_t=16*1024*1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_projection_bytes: usize,
 
     /// Whole-frame hexadecimal bytes.

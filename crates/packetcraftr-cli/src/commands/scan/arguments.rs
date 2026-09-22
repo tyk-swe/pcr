@@ -124,7 +124,7 @@ pub(crate) struct Args {
     pub(crate) max_in_flight: usize,
 
     /// Explicit IP addresses, hostnames, or bounded CIDRs, in selection order.
-    #[arg(value_name = "TARGET", required=true, num_args=1..)]
+    #[arg(value_name = "TARGET", required = true, num_args = 1..)]
     pub(crate) targets: Vec<String>,
     /// Numeric IP or CIDR to exclude; repeat as needed.
     #[arg(long = "exclude", value_name = "IP_OR_CIDR")]
@@ -173,7 +173,7 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) udp_profiles: Option<std::path::PathBuf>,
     /// Maximum charged plans and in-flight packet descriptions.
-    #[arg(long,default_value_t=64*1024*1024)]
+    #[arg(long, default_value_t = 64 * 1024 * 1024)]
     pub(crate) max_prepared_bytes: usize,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,

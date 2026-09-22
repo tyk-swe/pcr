@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde::Serialize;
 
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V6};
@@ -74,8 +75,6 @@ impl Error {
 pub(super) const fn is_zero(value: &u64) -> bool {
     *value == 0
 }
-
-use packetcraftr_core::diagnostic::Diagnostic;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]

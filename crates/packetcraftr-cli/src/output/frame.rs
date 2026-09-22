@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use serde::Serialize;
 
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::frame::{Direction, Frame};
 use packetcraftr_core::{decode::DecodedPacket, layout::PacketLayout};
 
 use super::contract::Error;
@@ -171,8 +171,6 @@ impl Serialize for Wire {
         .serialize(serializer)
     }
 }
-
-use packetcraftr_core::frame::Direction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Captured {

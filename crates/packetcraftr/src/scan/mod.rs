@@ -33,7 +33,6 @@ mod execution;
 mod executor;
 mod pipeline;
 mod plan;
-pub use pipeline::{Error as PipelineError, PendingEvidence};
 mod probe;
 pub mod profile;
 mod registry;
@@ -45,6 +44,7 @@ mod tests;
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
 pub use execution::{Batch, Probe};
+pub use pipeline::{Error as PipelineError, PendingEvidence};
 pub use report::{
     Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, Report, Rtt, SentProbe,
     Summary,

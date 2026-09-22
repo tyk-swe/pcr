@@ -3,15 +3,15 @@
 
 use serde::Serialize;
 
+use packetcraftr::Stats;
 use packetcraftr::fuzz as live_fuzz;
-use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
-use packetcraftr_core::fuzz as packet_fuzz;
+use packetcraftr::fuzz::CaseOutcome as Outcome;
+use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::fuzz::{self as packet_fuzz, Strategy};
 
 use super::contract::Error as ContractError;
 use super::envelope::Error as OutputError;
 use super::frame::{Captured, Wire};
-use packetcraftr::Stats;
-use packetcraftr_core::diagnostic::Diagnostic;
 
 fn offline_stats(value: &packet_fuzz::Stats) -> Stats {
     Stats {
@@ -49,9 +49,6 @@ impl Mode {
         }
     }
 }
-
-use packet_fuzz::Strategy;
-use packetcraftr::fuzz::CaseOutcome as Outcome;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Mutation {
@@ -122,7 +119,7 @@ pub struct Report {
 impl Report {
     pub fn try_from_offline(
         result: packet_fuzz::Report,
-    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), ContractError> {
         let packet_fuzz::Report {
             seed,
             first_case,
@@ -150,7 +147,7 @@ impl Report {
 
     pub fn try_from_live(
         result: live_fuzz::Report,
-    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), ContractError> {
         let live_fuzz::Report {
             seed,
             first_case,
@@ -381,7 +378,7 @@ impl Event {
 
     pub fn complete_from_offline(
         summary: packet_fuzz::Summary,
-    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), ContractError> {
         let metadata = campaign(
             summary.seed,
             summary.first_case,
@@ -398,7 +395,7 @@ impl Event {
 
     pub fn complete_from_live(
         summary: live_fuzz::Summary,
-    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), ContractError> {
+    ) -> Result<(Self, Vec<Diagnostic>, Stats), ContractError> {
         let metadata = campaign(
             summary.seed,
             summary.first_case,
@@ -412,9 +409,9 @@ impl Event {
 
 fn complete(
     metadata: Campaign,
-    diagnostics: Vec<PacketDiagnostic>,
+    diagnostics: Vec<Diagnostic>,
     stats: Stats,
-) -> (Event, Vec<PacketDiagnostic>, Stats) {
+) -> (Event, Vec<Diagnostic>, Stats) {
     (
         Event::Complete {
             operation_seed: metadata.seed,

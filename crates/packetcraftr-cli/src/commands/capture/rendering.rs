@@ -409,7 +409,7 @@ fn realized_text<T: std::fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rendering::ndjson_test_support::stream;
+    use crate::test_support::stream;
     use packetcraftr_core::frame::{Frame, LinkType};
     use packetcraftr_netio::{self as net, capture as native, interface::Id};
     use std::{

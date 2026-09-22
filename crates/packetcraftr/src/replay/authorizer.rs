@@ -279,9 +279,10 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::{Layer, Raw, raw_layout};
     use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::packet::link::MacAddress;
     use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
     use packetcraftr_netio::interface::Id as InterfaceId;
-    use packetcraftr_netio::link::{Capability as LinkCapability, MacAddress};
+    use packetcraftr_netio::link::Capability as LinkCapability;
     use packetcraftr_netio::route::{Decision, Plan, Scope, SelectionReason};
 
     use super::*;

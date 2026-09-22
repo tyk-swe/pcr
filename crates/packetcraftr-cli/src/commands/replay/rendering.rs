@@ -43,7 +43,7 @@ pub(super) struct Run<'a, R, A, T, C> {
 impl<R, A, T, C> Run<'_, R, A, T, C>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -72,7 +72,7 @@ pub(super) fn render_text<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -99,7 +99,7 @@ pub(super) fn render_aggregate<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -122,7 +122,7 @@ pub(super) fn render_stream<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -141,7 +141,7 @@ pub(super) fn render_capture<R, A, T, C>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
 {
@@ -156,7 +156,7 @@ fn render_capture_to<R, A, T, C, W>(
 ) -> Result<(), CliError>
 where
     R: Read + std::io::Seek,
-    A: packetcraftr::replay::Authorizer,
+    A: packetcraftr::policy::Authorizer,
     T: packetcraftr::replay::Transmitter,
     C: packetcraftr::clock::Clock,
     W: Write,
@@ -317,9 +317,10 @@ mod tests {
 
     use packetcraftr_core::error::{Classification, Kind};
     use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::packet::link::MacAddress;
 
     use super::*;
-    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+    use crate::test_support::{assert_contiguous, stream};
 
     #[derive(Default)]
     struct FakeAuthorizer {
@@ -327,10 +328,10 @@ mod tests {
         deny_on: Option<usize>,
     }
 
-    impl packetcraftr::replay::Authorizer for FakeAuthorizer {
+    impl packetcraftr::policy::Authorizer for FakeAuthorizer {
         fn authorize_operation(
             &mut self,
-            _request: packetcraftr::replay::Operation<'_>,
+            _request: packetcraftr::policy::Operation<'_>,
         ) -> Result<(), packetcraftr_core::error::BoundaryError> {
             self.calls += 1;
             if self.deny_on == Some(self.calls) {
@@ -367,7 +368,7 @@ mod tests {
             frame: &Frame,
         ) -> Result<net::route::Materialized, net::Error> {
             let selected_source = "192.0.2.1".parse().expect("fixture source");
-            let source_mac = net::link::MacAddress([0x02, 0, 0, 0, 0, 1]);
+            let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
             let plan = net::route::Plan {
                 decision: net::route::Decision {
                     interface: interface.clone(),

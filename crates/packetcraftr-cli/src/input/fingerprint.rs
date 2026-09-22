@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_cli::output::forwarding::CaptureSource;
+use packetcraftr_cli::output::hex::compact_hex;
 use sha2::{Digest as _, Sha256};
 use std::cell::RefCell;
-use std::fmt::Write as _;
 use std::io::{self, Read};
 use std::rc::Rc;
 
@@ -21,12 +21,8 @@ impl Fingerprint {
     pub(crate) fn finish(&self) -> CaptureSource {
         let state = self.0.borrow();
         let digest = state.digest.clone().finalize();
-        let mut sha256 = String::with_capacity(64);
-        for byte in digest {
-            write!(&mut sha256, "{byte:02x}").expect("writing a String cannot fail");
-        }
         CaptureSource {
-            sha256,
+            sha256: compact_hex(&digest),
             encoded_bytes: state.bytes,
         }
     }

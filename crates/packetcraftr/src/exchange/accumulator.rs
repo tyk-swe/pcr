@@ -101,9 +101,7 @@ impl Accumulator {
     pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::model::Event> {
         self.pending_events.drain(..)
     }
-}
 
-impl Accumulator {
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,

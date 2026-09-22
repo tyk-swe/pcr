@@ -18,7 +18,7 @@ use crate::probe::evidence::{
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::{admit_operation, budgeted};
+use crate::target::{GateErrors, admit_operation, budgeted};
 use crate::{BoundaryError, SentPacket};
 
 use super::MAX_PROBE_BYTES;
@@ -31,8 +31,7 @@ use super::{
     Summary, UndecodedEvidence,
 };
 use crate::probe::{
-    Error, ErrorKind, Execution, Executor, ProbeStatus, Transport, duration_limit,
-    enforce_deadline, index_or_push,
+    Error, ErrorKind, Execution, Executor, ProbeStatus, Transport, enforce_deadline, index_or_push,
 };
 
 /// Validates the request, authorizes every resolved target and the complete
@@ -89,7 +88,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| duration_limit(WORKFLOW, error.actual, error.limit),
+        |error| WORKFLOW.duration_limit(error.actual, error.limit),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)

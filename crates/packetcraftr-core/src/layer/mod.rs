@@ -8,11 +8,13 @@ mod reflection;
 
 pub use model::{FieldError, FieldSchema};
 pub use model::{Id, Layer, Malformed, Padding, Raw, Schema};
-// Exported so sibling workspace crates can build their own layer layouts; not
-// part of the documented public API.
+// Codecs outside core call `raw_layout` to describe an opaque `Raw` layer; it
+// stays out of the documented API.
 #[doc(hidden)]
-pub use model::{malformed_layout, padding_layout, raw_layout};
-pub(crate) use model::{malformed_schema, padding_schema, raw_schema};
+pub use model::raw_layout;
+pub(crate) use model::{
+    malformed_layout, malformed_schema, padding_layout, padding_schema, raw_schema,
+};
 pub(crate) use reflection::reflective_layer;
 #[doc(hidden)]
 pub use reflection::{

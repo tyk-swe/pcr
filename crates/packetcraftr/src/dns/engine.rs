@@ -93,12 +93,9 @@ where
     C: Clock,
     F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
 {
-    let observe = sink_observer(
-        runtime,
-        emit,
-        |error| duration_error(error.actual, error.limit),
-        |source| Error::Output { source },
-    )?;
+    let observe = sink_observer(runtime, emit, Error::from, |source| Error::Output {
+        source,
+    })?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
 
@@ -650,7 +647,7 @@ impl crate::target::GateErrors for Gates {
     type Error = Error;
 
     fn duration_limit(&self, actual: Duration, limit: Duration) -> Error {
-        duration_error(actual, limit)
+        Error::DurationLimit { actual, limit }
     }
 
     fn authorization(&self, source: BoundaryError) -> Error {
@@ -666,8 +663,4 @@ impl crate::target::GateErrors for Gates {
             family: family.label(),
         }
     }
-}
-
-pub(super) fn duration_error(actual: Duration, limit: Duration) -> Error {
-    Error::DurationLimit { actual, limit }
 }

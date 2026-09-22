@@ -256,10 +256,9 @@ pub(super) struct Hooks<'a, S, E, U, R, F, T> {
 /// `on_event` after checking `cancellation` and the installed invocation
 /// deadline, and ends with `complete`. Every other format runs `run`, then
 /// either emits the `json` envelope from `into_result` or hands the report
-/// to `render_text`. Choosing the entry point before rendering removes the
-/// unreachable `ndjson` arm every command used to carry, and routing every
-/// emission through the shared check makes interrupt handling identical
-/// across the workflows.
+/// to `render_text`. Choosing the entry point before rendering means no
+/// renderer carries an `ndjson` arm, and routing every emission through the
+/// shared check makes interrupt handling identical across the workflows.
 pub(super) fn run_workflow<S, E, U, R, F, T>(
     session: &mut S,
     format: F,
@@ -402,8 +401,7 @@ mod tests {
         use std::cell::RefCell;
 
         use super::*;
-        use crate::rendering::ndjson_test_support::stream;
-        use crate::test_support::{TestRecord, assert_contiguous};
+        use crate::test_support::{TestRecord, assert_contiguous, stream};
         use packetcraftr_cli::output::contract::{ExchangeFormat, ToolFormat};
         use packetcraftr_core::budget::Cancellation;
 

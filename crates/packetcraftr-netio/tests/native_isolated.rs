@@ -3,7 +3,7 @@
 
 //! Real Linux native scenarios. The launcher proves isolation before enabling
 //! these ignored tests; every test rechecks it before touching native I/O.
-#![cfg(all(target_os = "linux", feature = "native-layer2"))]
+#![cfg(all(packetcraftr_test_netns, native_layer2))]
 #![forbid(unsafe_code)]
 
 use std::net::UdpSocket;

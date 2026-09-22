@@ -28,10 +28,10 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) stream: Option<String>,
     /// Cleartext HTTP/1 ports; repeat to add services. Defaults: 80 and 8080.
-    #[arg(long="http-port",default_values=["80","8080"])]
+    #[arg(long = "http-port", default_values = ["80", "8080"])]
     pub(crate) http_ports: Vec<u16>,
     /// Maximum counted entity bytes in one message. Bodies are discarded.
-    #[arg(long,default_value_t=16*1024*1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_http_body_bytes: u64,
     #[command(flatten)]
     pub(crate) application: ApplicationLimitsArgs,

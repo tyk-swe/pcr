@@ -83,7 +83,7 @@ impl OfflineCaptureLimitsArgs {
 #[derive(Clone, Copy, Debug, Args)]
 pub(crate) struct OfflineLimitsArgs {
     /// Maximum physical-frame provenance allocations retained by analysis consumers.
-    #[arg(long, default_value_t=16*1024*1024)]
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_provenance_bytes: usize,
     #[command(flatten)]
     pub(crate) capture: OfflineCaptureLimitsArgs,

@@ -29,16 +29,14 @@ use packetcraftr_core::frame::Direction as CaptureDirection;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::{Lengths, LinkType};
 use packetcraftr_core::layer::FieldSchema;
+use packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_netio::interface::Address;
 use packetcraftr_netio::interface::Flags;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::interface::Info;
 use packetcraftr_netio::link::Capability;
-use packetcraftr_netio::link::MacAddress;
 use packetcraftr_netio::link::Mode as LinkMode;
-use packetcraftr_netio::link::VlanKind;
-use packetcraftr_netio::link::VlanTag;
 use packetcraftr_netio::route::Decision;
 use packetcraftr_netio::route::Plan;
 use packetcraftr_netio::route::Scope;
@@ -449,12 +447,7 @@ fn planned_route_output_preserves_link_metadata() {
     let output =
         packetcraftr_cli::output::network::Plan::from(planned_route(source_mac, destination_mac));
     assert_eq!(output.decision.interface.name, "eth0");
-    assert_eq!(
-        output.destination_mac,
-        Some(packetcraftr_core::packet::link::MacAddress(
-            destination_mac.0
-        ))
-    );
+    assert_eq!(output.destination_mac, Some(MacAddress(destination_mac.0)));
     assert_eq!(output.neighbor_vlan_tags[0].vlan_id, 42);
     assert!(output.synthesized_ethernet);
 }

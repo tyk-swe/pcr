@@ -13,13 +13,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Captures in stable tie-breaking order; at most one may read stdin with -.
-    #[arg(required=true, num_args=2..)]
+    #[arg(required = true, num_args = 2..)]
     pub(crate) paths: Vec<PathBuf>,
     /// New PCAPNG destination. Existing files are never overwritten.
     #[arg(long)]
     pub(crate) write: PathBuf,
     /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t=Compression::None)]
+    #[arg(long, value_enum, default_value_t = Compression::None)]
     pub(crate) compression: Compression,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,

@@ -1,9 +1,9 @@
 # Consumer compatibility policy
 
-The pending machine contract is `packetcraftr.output/v6`; the previous v5 schema
-and a frozen v5 forwarding fixture remain available for explicit rejection and
-migration tests. The v6 change is semantic: missing values no longer satisfy
-ordinary preservation, and check-specific evidence states are explicit.
+The pending machine contract is `packetcraftr.output/v6`, which supersedes the
+unreleased v3–v5 drafts. Its forwarding change is semantic: missing values do
+not satisfy ordinary preservation, and check-specific evidence states are
+explicit.
 
 ## Versioning and immutable evidence
 
@@ -14,7 +14,8 @@ require a new family even if an old schema would accept the JSON.
 A release archive freezes its exact schema snapshots. Keep the archive and its
 release checksum together. v6 uses `urn:packetcraftr:output:v6`; resolve it to
 the bundled local schema, not a moving branch or network fetch. The release
-packager copies both v5 and v6 schema files and the verifier requires them.
+packager copies every file under `schemas/`, and the verifier requires the v6
+output schema.
 Never modify an already published archive in place.
 
 Consumers should tolerate unknown object members, but must not guess meanings
@@ -63,7 +64,8 @@ Its own successful exit means the report was interpreted, not that forwarding
 passed. Read `execution` and `verdict`, or use the regression harness's explicit
 test contract.
 
-Frozen fixtures and mutations are exercised by `scripts/test-output-consumer.py`.
+The frozen v6 fixture and its mutations are exercised by
+`scripts/test-output-consumer.py`.
 The Rust CLI tests continue validating real serializers against v6.
 
 ## Rust API adoption

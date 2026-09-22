@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use bytes::{Buf as _, Bytes, BytesMut};
 use serde::Serialize;
 
+use crate::analysis::Endpoint;
 use crate::analysis::dedup::{Deduplicator, PeerDirection};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
 use crate::protocol::application::tls::codec::escape_wire_text;
@@ -32,8 +33,6 @@ const ALERT_CHARGE: usize = size_of::<Alert>();
 
 const REASON_RECORD_CEILING: &str = "one direction's record buffer reached its ceiling";
 const REASON_HANDSHAKE_CEILING: &str = "one direction's handshake buffer reached its ceiling";
-
-use crate::analysis::Endpoint;
 
 /// How far a handshake got, and why it stopped.
 ///
@@ -253,10 +252,6 @@ pub struct Session {
     pub reason: Option<String>,
 }
 
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde requires this signature"
-)]
 fn is_zero(value: &u64) -> bool {
     *value == 0
 }

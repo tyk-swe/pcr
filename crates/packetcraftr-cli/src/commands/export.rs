@@ -29,7 +29,7 @@ pub(crate) struct Args {
     pub(crate) filter: Option<String>,
     #[arg(long, default_value_t = 100_000)]
     pub(crate) max_selected_frames: usize,
-    #[arg(long,value_enum,default_value_t=Compression::None)]
+    #[arg(long, value_enum, default_value_t = Compression::None)]
     pub(crate) compression: Compression,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,

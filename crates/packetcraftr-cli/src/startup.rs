@@ -1,9 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(test)]
-use crate::test_support::TestRecord;
-
 use packetcraftr_core::error::Kind;
 
 mod context;
@@ -250,6 +247,7 @@ fn command_failure(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestRecord;
 
     #[test]
     fn unavailable_encoder_fails_cleanup_without_another_output_attempt() {

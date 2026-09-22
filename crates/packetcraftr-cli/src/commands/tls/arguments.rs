@@ -8,11 +8,11 @@ use packetcraftr_core::analysis::tls::Limits as TlsLimits;
 use packetcraftr_core::analysis::tls::MAX_DIRECTION_BUFFER;
 use packetcraftr_core::analysis::tls::Status as AnalysisStatus;
 
+use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
+
 // The `--max-tls-buffer-bytes` help text below spells out the floor; keep it
 // honest when the core constant moves.
 const _: () = assert!(MAX_DIRECTION_BUFFER == 135_168);
-
-use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Session assembly is computed offline over dissected frames; no live capture or transmission is involved.
 

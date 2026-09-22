@@ -10,10 +10,11 @@ use bytes::Bytes;
 use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::link::MacAddress;
 use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
-    link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
+    link::{Capability as LinkCapability, Mode as LinkMode},
     route::{
         Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
         SystemError as RouteSystemError,

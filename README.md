@@ -22,7 +22,7 @@ For automation, start with the [forwarding contract](docs/verification-contract.
 [versioned resource presets](docs/resource-presets.md), and
 [consumer compatibility policy](docs/consumer-compatibility.md).
 
-## Quick Start
+## Quick start
 
 These offline examples work in every feature profile:
 
@@ -75,9 +75,11 @@ count filtered-out frames too; the same block and interface ceilings bound outpu
 | Area | Commands |
 | --- | --- |
 | Packets and captures | `build`, `dissect`, `protocols`, `read` |
+| Capture transformation | `fragment`, `merge`, `export`, `rewrite` |
 | Offline analysis | `expert`, `follow`, `stats`, `tls`, `dns-read`, `http`, `verify-forwarding`, `fuzz` |
 | Native inspection and planning | `interfaces`, `routes`, `plan` |
 | Live workflows | `send`, `exchange`, `capture`, `replay`, `scan`, `traceroute`, `dns`, `fuzz --live` |
+| Shell integration | `documentation` |
 
 ## Packet sets and decode-as
 
@@ -244,7 +246,7 @@ Packet documents use bounded JSON/YAML parsing. Put the global `--output`
 option before the command, for example `packetcraftr --output json stats
 capture.pcapng`. Supported formats depend on the command and include `text`,
 `json`, `ndjson`, `hex`, `raw`, `pcap`, `pcapng`, `csv`, and `tsv`; invalid
-combinations fail explicitly. Every output-v5 NDJSON envelope has an `event`
+combinations fail explicitly. Every output/v6 NDJSON envelope has an `event`
 discriminator; the schema enumerates the per-command event names, and
 `complete` and `error` are the terminal records. The payload is in `result` or
 `error`; consumers never need to
@@ -344,7 +346,7 @@ allowlist denial without emitting traffic.
 cargo doc --locked --workspace --all-features --no-deps --open
 ```
 
-## Live Networking
+## Live networking
 
 Live operations enforce destination policy, hostname-resolution opt-ins,
 permissive-packet and source-spoofing controls, route/interface and MTU checks,
@@ -482,20 +484,10 @@ operation:
 packetcraftr dns 192.0.2.53 example.test --udp-only --help
 ```
 
-## Contributing, Security, and License
+## Structured fixtures, fragmentation, and capture processing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Report
-suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
-
-PacketcraftR is licensed under the
-[GNU Affero General Public License v3.0 only](LICENSE). Bundled dependency
-attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-### Structured fixtures, fragmentation, and capture processing
-
-Packet recipes use `packetcraftr.packet/v2`; command JSON/NDJSON uses
-`packetcraftr.output/v6`. Named objects, `hex("00ff")`, and `bytes("text")`
-can appear inside expressions and nested template axes.
+Named objects, `hex("00ff")`, and `bytes("text")` can appear inside
+expressions and nested template axes.
 
 ```sh
 packetcraftr build --packet-file examples/documents/packet-dns-response.json
@@ -674,3 +666,12 @@ unobserved application evidence from transport reachability. A matching profile 
 not authenticated service identity. Unmapped ports preserve the ordinary payload
 fallback. Profile files use `packetcraftr.udp-profiles/v1`, are capped at 1 MiB,
 and never resolve the DNS question name merely to construct its wire bytes.
+
+## Contributing, security, and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidance. Report
+suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+PacketcraftR is licensed under the
+[GNU Affero General Public License v3.0 only](LICENSE). Bundled dependency
+attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

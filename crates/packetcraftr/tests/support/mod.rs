@@ -9,11 +9,11 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::link::MacAddress;
 use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability as LinkCapability;
-use packetcraftr_netio::link::MacAddress;
 use packetcraftr_netio::neighbor;
 use packetcraftr_netio::route::Decision;
 use packetcraftr_netio::route::Provider;

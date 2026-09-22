@@ -21,7 +21,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   report `io.runtime` with the failing path instead of `io.capture_file` and
   its capture-stream remediation; an oversized rules document reports
   `cli.error` instead of `policy.transform_limit`.
-
 - Packet documents use `packetcraftr.packet/v2`; structured command output uses
   `packetcraftr.output/v6`. Schemas and published examples migrate together.
   DNS questions use one typed list and section counts use `WireValue<u16>`.
@@ -70,16 +69,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   diagnostics, and demand-driven physical comparison analysis.
 - Versioned `ci-v1` / `workstation-v1` offline resource presets with explicit
   override precedence and resolved resource diagnostics.
-- A strict bounded downstream forwarding consumer, frozen v5/v6 fixtures,
+- A strict bounded downstream forwarding consumer, a frozen v6 fixture,
   mutation tests, and a checksummed reproducible offline regression harness.
 - Composed compression/capture, capture transformation, forwarding-semantic,
-  and HTTP segmentation fuzz targets; forwarding/HTTP measurement workloads.
+  HTTP segmentation, and HTTP pipeline fuzz targets; forwarding/HTTP
+  measurement workloads.
 - A detached public API consumer test, compact pre-merge decoder-oracle checks,
   explicitly reviewed native validation, and an opt-in passive native capture
   smoke runner with honest platform capability reporting.
 - Task-oriented onboarding and explicit verification, compatibility, preset,
   and native-validation contracts.
-
 - `Packet` implements `Extend` and `&Packet` implements `IntoIterator`,
   `analysis::SourceSet` dereferences to `[SourceFrame]`, `LinkType` implements
   `Display`, and the `as_str`-backed enums (`error::Kind`, `FieldKind`,
@@ -138,20 +137,17 @@ All notable changes to PacketcraftR are documented here. The format follows
   groups, attributable field violations, and counted omissions — evidence, not
   device-attribution claims. A completed `fail` or `inconclusive` verdict exits
   1 with one terminal output record.
-
 - Explicit bounded IPv4/IPv6 fragmentation and the offline `fragment` command.
 - Ordered multi-capture merging with source/interface provenance and atomic file publication.
 - Gzip/Zstd capture input/output with encoded/decoded-byte and window ceilings.
 - Registered field projection from `read`/`dissect`, including CSV/TSV, missing
   values, repeated layers, nested fields, stream indexes, and bounded row output.
-
 - Bounded TLS ClientHello/ServerHello fixtures with SNI/ALPN helpers, ordered
   opaque extensions, nested template/fuzz targets, and derived fingerprints.
 - Bounded named object fields and nested reflection/template/filter/fuzz paths.
 - Structured DNS question, record, EDNS and response construction through Rust
   and recipes, sharing the encoder with live DNS queries. Untouched decoded DNS
   retains exact original bytes; explicit edits derive lengths and counts.
-
 - Cartesian packet sets in core and `build`/`exchange`, with repeatable `--axis`,
   checked expansion limits, and streamed build packet/completion events.
 - Offline `--decode-as` for compatible TCP/UDP codecs, shared with `--tls-port`
@@ -167,8 +163,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   socket authorization, bounded framing, response validation, and retries.
 - `packetcraftr_core::budget::remaining_before` is the one helper every crate
   uses to turn a deadline into a remaining wait; the previous netio-private copy
-  is gone. Core exposes `protocol::application::dns::{read_u16, read_u32}` and
-  the CLI library exposes `output::hex` for the compact hex rendering shared by
+  is gone. Core exposes `protocol::application::dns::read_u16` and the CLI
+  library exposes `output::hex` for the compact hex rendering shared by
   rendering and machine output, with borrowed formatting for `--output hex`.
   `scan::DEFAULT_ATTEMPTS` names the scan attempts default.
 - Published `output-expert-complete.json` and `output-replay-complete.json`
@@ -179,10 +175,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Opt-in `--resource-diagnostics` adds effective settings and worker samples to
   existing JSON/NDJSON envelopes. `--output-timeout-ms` configures the finite
   NDJSON writer wait; its default remains one second.
-- Independent TShark and isolated Linux native validation on main pushes,
-  weekly runs, and manual CI dispatch, plus warnings-as-errors documentation
-  profiles on every PR. Releases retain exact-commit
-  evidence and explicitly identify unexercised Windows/macOS runtime lanes.
+- Independent TShark decoder validation on every CI run, with the full
+  generated corpus on the weekly run; isolated Linux native validation on main
+  pushes, weekly runs, and manual CI dispatch; and warnings-as-errors
+  documentation profiles on every PR. Releases retain exact-commit evidence and
+  explicitly identify unexercised Windows/macOS runtime lanes.
 - Opt-in EDNS v0 requests advertise a bounded UDP payload size and optionally
   set the DO bit. DO requests DNSSEC data; it does not enable signature validation.
 - DNS `--type` accepts bounded decimal and `TYPE<n>` codes alongside named
@@ -302,10 +299,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF
   rejection, header caps, and boundaries byte-exact.
+- Display-filter `contains` compiles its needle into a `memchr::memmem`
+  searcher once at filter-compile time instead of sliding a window over the
+  field bytes per frame, making the scan linear-time (~84× faster on a
+  64 KiB payload in the perf fixture).
+- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
+  output in 64 KiB chunks instead of issuing one write syscall per record,
+  removing the syscall bottleneck on large captures. Output bytes are
+  identical.
 - `read` without `--field` rejects JSON, CSV, and TSV output with the shared
   "this output format requires --field selections" message.
-- Trim redundant source comments and Rustdoc while retaining API contracts,
-  safety explanations, examples, and CLI help text.
 - Forwarding verification serializes each keyed observation's identity once
   instead of twice, preserving canonical key bytes and charging the scratch
   budget before retaining each serialized chunk.
@@ -336,7 +339,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   overflow checks are unchanged; see `CONTRIBUTING.md` for measurement commands.
 - CI denies Clippy warnings across portable, default, Layer 2 only, Layer 3
   only, and full-native profiles on Linux, macOS, and Windows. PRs also compile
-  all 15 fuzz targets with locked dependencies on the pinned nightly.
+  every fuzz target with locked dependencies on the pinned nightly.
 - **Breaking:** `policy::Policy` gains an `allowed_destinations` constraint
   list bounded by `MAX_DESTINATION_CONSTRAINTS`; the new
   `policy::DestinationConstraint` type parses exact addresses and canonical
@@ -353,7 +356,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   frame without a timestamp reports `packet.timestamp_unavailable` (exit 3)
   from every command, including `read --field`, `capture`, `replay`, and
   `rewrite`, which previously reported `packet.error` or `cli.filter`.
-
 - **Breaking:** `send` aggregates results into a `frames` list with per-frame
   `pass`/`index` metadata plus `passes_completed`, replacing the single-frame
   `frame`/`route` result; `send::Client::send` gains set-sending entry points
@@ -370,7 +372,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   returns a checked result. DNS `Request::transport: TransportMode` replaces
   `tcp_fallback`; unknown serialized request fields are rejected. Scan requests
   and probes gain `udp_payload`, and `scan::Probe` is no longer `Copy`.
-- Output/v5 supersedes the earlier unreleased v3/v4 schemas, adding build streams,
+- Output/v6 supersedes the earlier unreleased v3–v5 schemas, adding build streams,
   bit-rate timing, and successful direct TCP DNS with `fallback_attempted=false`.
   Schemas, examples, release assets, and migration notes follow the new contract.
 - `packetcraftr --help` lists exit code 130 for interrupted operations next to
@@ -383,9 +385,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Rust: `analysis::expert::Finding::code` and `Summary::codes` use the static
   code strings directly; `ReflectiveFieldError`, DNS name `Error`,
   `QueryTypeParseError`, and progress `EmitError` are `#[non_exhaustive]`.
-- PR CI runs five jobs, with documentation and validation failure fixtures
-  folded into Linux. Release-archive builds and smoke checks run in the release
-  workflow; decoder and isolated native validation run outside PRs.
+- PR CI folds documentation and validation failure fixtures into the Linux
+  job. Release-archive builds and smoke checks run in the release workflow, and
+  isolated native validation runs outside PRs.
 - Rust DNS `Request` gains an optional `edns` field, and `encode_query` takes
   that option as its fifth argument. `None` preserves the original query bytes.
 - DNS `query_type` values are integers in `0..=65535` in summaries and events.
@@ -451,22 +453,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   `scripts/measure-memory.sh`, and the static measurement snapshot, scaling
   chart and allocation comparison under `docs/`.
 - **Breaking:** the `packetcraftr::fuzz::PolicyAuthorizer` and
-  `packetcraftr::replay::{ReplayFrame, WireBudget}` re-exports; import them
-  from `packetcraftr::policy`.
+  `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}`
+  re-exports; import them from `packetcraftr::policy`.
+- **Breaking:** the `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}`
+  re-exports; import them from `packetcraftr_core::packet::link`.
+- The `#[doc(hidden)]` `packetcraftr_core::layer::{malformed_layout,
+  padding_layout}` exports. `raw_layout` remains available to codecs outside
+  core that emit `Raw` layers.
 - **Breaking:** `packetcraftr::dns::ResponseMetadata::response_code_name` and
   `ValidatedResponse::response_code_name`; use the canonical
   `packetcraftr::dns::response_code_name` function.
 
 ### Fixed
 
-- Display-filter `contains` compiles its needle into a `memchr::memmem`
-  searcher once at filter-compile time instead of sliding a window over the
-  field bytes per frame, making the scan linear-time (~84× faster on a
-  64 KiB payload in the perf fixture).
-- `export`, `merge`, `rewrite`, and capture snapshotting buffer staged file
-  output in 64 KiB chunks instead of issuing one write syscall per record,
-  removing the syscall bottleneck on large captures. Output bytes are
-  identical.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain
@@ -482,10 +481,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   pre-publication checks share an invocation deadline. Reader clock scopes
   restore correctly on errors and callback unwinding; committed files remain
   committed after a later reporting failure.
-- Missing checks cannot silently satisfy preservation, changed rules cannot
-  reuse mismatched observations, and unrequested forwarding conversation indexes
-  no longer exhaust the flow budget before physical-frame selection.
-
+- Unrequested forwarding conversation indexes no longer exhaust the flow budget
+  before physical-frame selection.
 - Restore native Windows Layer 2 builds by passing default native settings
   when opening the Npcap transmit handle.
 - Timestamp-type discovery safely handles empty lists from libpcap and Npcap
@@ -499,7 +496,6 @@ All notable changes to PacketcraftR are documented here. The format follows
   tunneled packet fields, preserving valid outer UDP checksums in VXLAN.
 - DNS matching preserves sequence-aware TCP correlation, and UDP probes validate
   inner tunnel endpoints and transport identity before reporting an open port.
-
 - TCP reassembly reports the actual retransmitted sequence spans of an
   arriving segment, so sourced analysis no longer drops provenance for the
   unique bytes of a gap fill that overlaps pending data at its middle or
@@ -513,15 +509,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   (`3 ;x=y`), while whitespace inside or before the hexadecimal digits stays
   invalid; a tolerated extension no longer disables the direction's
   pipelined analysis.
-
 - DNS, DHCPv4, and DHCPv6 borrowed wire conversions reject oversized input
   before allocating a copy.
-
-- Atomic updates use `try_update` without changing memory ordering, overflow
-  handling, or resource budgets, avoiding pinned-nightly deprecation warnings.
-- Windows test builds no longer import the Unix-only `PathBuf`; obsolete
-  fixture lint allowances are removed, and the `md-5` dependency is aliased as
-  `md5` to match its Rust imports and avoid dependency-audit false positives.
 - macOS route parsing accepts Darwin's aligned zero-length default netmask,
   and local routes may select a source assigned to another local interface.
 - HTTP analysis advances its application generation when TCP reassembly
@@ -545,7 +534,6 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Empty ICMP `rest` fields accept payload files, list axes retain whitespace
   compatibility, passive planning validates allowlist limits, and clock-regression
   findings retain interface context.
-
 - DNS batches authorize the combined UDP and TCP traffic budget before discovery,
   stop on output failure, and include confirmed traffic from failed questions in
   their totals, including deadline and cancellation failures.
@@ -596,8 +584,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   staging remains bounded separately from semantic node/list/payload limits.
 - TCP retransmission history uses an explicitly sized ring instead of assuming
   `VecDeque::try_reserve_exact` returns an exact capacity.
-- Live DNS truncation errors include their required byte widths, fixing
-  workspace compilation after the shared DNS decoder error gained that field.
+- Live DNS truncation errors report the message byte the truncated field
+  required.
 - Bounded JSON output sizing distinguishes budget exhaustion from serializer
   failures: a value that fails to serialize now reports an internal error with
   the original source instead of the `--max-application-output-bytes` policy

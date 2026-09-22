@@ -248,7 +248,6 @@ jobs:
               "examples/documents/output-dns-tcp-complete.json",
               "examples/documents/output-replay-bit-rate-success.json",
               "examples/consumers/forwarding.py",
-              "examples/consumers/fixtures/v5-forwarding.json",
               "examples/consumers/fixtures/v6-forwarding.json",
           )
           for source in map(pathlib.Path, assets):
@@ -258,7 +257,8 @@ jobs:
           shutil.copy2(binary, staging / binary.name)
           shutil.copy2(temporary / "BUILD-METADATA.json", staging / "BUILD-METADATA.json")
           shutil.copytree("schemas", staging / "schemas")
-          shutil.copytree("docs", staging / "docs")
+          # docs/agents configures repository agents and is not user documentation.
+          shutil.copytree("docs", staging / "docs", ignore=shutil.ignore_patterns("agents"))
           # Completions and man pages come from the packaged binary itself, so
           # they always describe the shipped command definitions.
           subprocess.run([

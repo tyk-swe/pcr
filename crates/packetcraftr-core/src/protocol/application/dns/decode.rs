@@ -3,7 +3,7 @@
 
 use super::{DecodeError, DecodeLimits, Dns, Name, Question};
 use bytes::Bytes;
-pub use primitives::{read_u16, read_u32};
+pub use primitives::read_u16;
 mod primitives;
 mod records;
 

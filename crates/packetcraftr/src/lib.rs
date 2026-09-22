@@ -28,6 +28,8 @@
 
 #![forbid(unsafe_code)]
 
+use packetcraftr_core::error::BoundaryError;
+
 mod address;
 pub mod capture;
 mod client;
@@ -56,5 +58,4 @@ mod test_fixtures;
 pub use client::Client;
 pub use error::Error;
 pub use evidence::SentPacket;
-use packetcraftr_core::error::BoundaryError;
 pub use stats::{Stats, StatsOverflow};

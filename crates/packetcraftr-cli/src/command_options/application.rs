@@ -7,27 +7,27 @@ use packetcraftr_core::analysis::application::Limits;
 pub(crate) struct ApplicationLimitsArgs {
     /// Distinct application messages the collector may count across all
     /// streams over the whole run.
-    #[arg(long,default_value_t=Limits::default().max_messages)]
+    #[arg(long, default_value_t = Limits::default().max_messages)]
     pub(crate) max_application_messages: usize,
     /// Distinct transport streams the collector may track at once (TCP
     /// conversations; DNS also counts UDP flows).
-    #[arg(long,default_value_t=Limits::default().max_streams)]
+    #[arg(long, default_value_t = Limits::default().max_streams)]
     pub(crate) max_application_streams: usize,
     /// Bytes buffered at once across all in-flight message parses (partial
     /// heads, body decoders, length prefixes).
-    #[arg(long,default_value_t=Limits::default().max_buffer_bytes)]
+    #[arg(long, default_value_t = Limits::default().max_buffer_bytes)]
     pub(crate) max_application_buffer_bytes: usize,
     /// Cumulative byte charge for retained and emitted evidence, including a
     /// conservative decoded-object expansion multiplier; bounds analysis
     /// state, not serialized output (see --max-application-output-bytes).
-    #[arg(long,default_value_t=Limits::default().max_retained_bytes)]
+    #[arg(long, default_value_t = Limits::default().max_retained_bytes)]
     pub(crate) max_application_retained_bytes: usize,
     /// TCP sequence spans retained to attribute deliveries to physical source
     /// frames; HTTP also bounds one message's distinct source frames.
-    #[arg(long,default_value_t=Limits::default().max_source_spans)]
+    #[arg(long, default_value_t = Limits::default().max_source_spans)]
     pub(crate) max_application_source_spans: usize,
     /// Total serialized message, transaction, and issue bytes, in every format.
-    #[arg(long,default_value_t=64*1024*1024)]
+    #[arg(long, default_value_t = 64 * 1024 * 1024)]
     pub(crate) max_application_output_bytes: usize,
 }
 impl ApplicationLimitsArgs {

@@ -29,7 +29,7 @@ pub(crate) struct Args {
     pub(crate) identification: Option<u32>,
     #[arg(long, default_value_t = 1024)]
     pub(crate) max_fragments: usize,
-    #[arg(long, default_value_t=256*1024*1024)]
+    #[arg(long, default_value_t = 256 * 1024 * 1024)]
     pub(crate) max_output_bytes: usize,
     #[command(flatten)]
     pub(crate) budget: PacketBudgetArgs,

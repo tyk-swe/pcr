@@ -31,9 +31,11 @@ pub(super) struct AnalysisSetup {
 }
 
 impl AnalysisSetup {
-    /// Analysis options from every prepared analysis-wide setting; commands
-    /// choose only whether the run drives TCP reassembly.
-    pub(super) fn options(&self, tcp_events: bool) -> analysis::Options<'_> {
+    /// Analysis options from every prepared analysis-wide setting, with every
+    /// optional stage at its base setting. Commands that drive a collector
+    /// through [`analysis::Session`] declare their needs there instead; the
+    /// session raises `plan`, `tcp_events`, and `track_sources` to cover them.
+    pub(super) fn options(&self) -> analysis::Options<'_> {
         analysis::Options {
             plan: analysis::Plan::default(),
             deadline: crate::invocation::deadline(),
@@ -41,7 +43,7 @@ impl AnalysisSetup {
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
             time_bounds: self.time_bounds,
-            tcp_events,
+            tcp_events: false,
             ip_overlap: self.ip_overlap,
             limits: self.limits.clone(),
         }
@@ -169,10 +171,16 @@ pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
 
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream
 /// carries. The other formats fold the same information into their terminal
-/// `ip_reassembly` report, so they pass `None` and the events are dropped.
-pub(super) fn ip_event_sink(
-    stream: Option<StreamEncoder>,
-) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError> {
+/// `ip_reassembly` report, so a non-NDJSON `format` drops every event.
+pub(super) fn ip_event_sink<F>(
+    format: F,
+    stream: &StreamEncoder,
+) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
+where
+    F: Into<packetcraftr_cli::output::contract::Format>,
+{
+    let stream = (format.into() == packetcraftr_cli::output::contract::Format::Ndjson)
+        .then(|| stream.clone());
     move |event| {
         if let Some(stream) = &stream {
             stream

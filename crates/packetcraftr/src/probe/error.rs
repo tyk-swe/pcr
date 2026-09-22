@@ -7,6 +7,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use packetcraftr_core::budget::{Cancelled, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use crate::BoundaryError;
@@ -108,7 +109,7 @@ pub enum ErrorKind {
     #[error("{0}")]
     TargetSelection(#[source] crate::target::SelectionError),
     #[error("{0}")]
-    Cancelled(#[source] packetcraftr_core::budget::Cancelled),
+    Cancelled(#[source] Cancelled),
     #[error("invalid limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -328,5 +329,22 @@ impl crate::target::GateErrors for Workflow {
 
     fn authorization(&self, source: BoundaryError) -> Error {
         Error::new(*self, ErrorKind::Authorization(source))
+    }
+
+    fn interrupted(&self, source: Interrupted) -> Error {
+        match source {
+            Interrupted::Cancelled(source) => Error::new(*self, ErrorKind::Cancelled(source)),
+            Interrupted::Exceeded(error) => self.duration_limit(error.actual, error.limit),
+            _ => Error::new(*self, ErrorKind::Cancelled(Cancelled)),
+        }
+    }
+
+    fn family(&self, family: crate::target::Family) -> Error {
+        Error::new(
+            *self,
+            ErrorKind::Family {
+                family: family.label(),
+            },
+        )
     }
 }

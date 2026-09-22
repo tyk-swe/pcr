@@ -9,7 +9,7 @@ use crate::{
     clock::Clock,
     policy::{Authorizer, Operation, SocketBudget, SocketOperation},
     probe::{Error, ErrorKind, Transport, enforce_deadline},
-    target::approve_operation,
+    target::{DeclaredTargets, admit_selection, approve_operation},
 };
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
@@ -196,24 +196,23 @@ fn execution(
 }
 
 /// The authorized connect plan: every endpoint to probe, the total attempt
-/// count, the pacing delay, the approved socket budget, and the metadata the
-/// summary reports.
+/// count, the pacing delay, and the approved socket budget. The admitted
+/// addresses accompany the plan in the return value for the summary.
 struct Planned {
     endpoints: Vec<SocketAddr>,
     count: usize,
     delay: Duration,
     budget: SocketBudget,
-    addresses: Vec<IpAddr>,
     planned_duration: Duration,
 }
 
-/// Validates the connect-specific request, resolves the declared targets, and
+/// Validates the connect-specific request, admits the declared targets, and
 /// approves the complete socket budget before any connection is scheduled.
 fn planned<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,
-) -> Result<Planned, Error> {
+) -> Result<(Vec<IpAddr>, Planned), Error> {
     request.validate()?;
     if request.transport != Transport::Tcp {
         return Err(invalid(
@@ -233,64 +232,66 @@ fn planned<A: Authorizer>(
     if ports.contains(&0) {
         return Err(invalid("port", 0, "TCP connect requires nonzero ports"));
     }
-    let addresses = super::targets::resolve(request, authorizer, deadline)?;
-    if addresses.is_empty() {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::Family {
-                family: request.address_family.label(),
-            },
-        ));
-    }
-    let count = addresses
-        .len()
-        .checked_mul(ports.len())
-        .and_then(|count| count.checked_mul(request.attempts as usize))
-        .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
-    crate::probe::evidence::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
-    let delay = crate::clock::rate_delay(1, request.probes_per_second)
-        .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
-    let windows = u32::try_from(count.div_ceil(request.max_in_flight))
-        .map_err(|_| invalid("probes", count, "duration overflow"))?;
-    let planned_duration = request
-        .timeout
-        .checked_mul(windows)
-        .and_then(|duration| {
-            delay
-                .checked_mul(count.saturating_sub(1) as u32)
-                .and_then(|pacing| duration.checked_add(pacing))
-        })
-        .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
-    crate::probe::evidence::check_probe_duration(
-        WORKFLOW,
-        planned_duration,
-        request.limits.max_duration,
-    )?;
-    let endpoints: Vec<_> = addresses
-        .iter()
-        .flat_map(|address| {
-            ports
-                .iter()
-                .map(move |port| SocketAddr::new(*address, *port))
-        })
-        .collect();
-    let budget = SocketBudget::new(count as u64, 0, 0);
-    let operation =
-        SocketOperation::new(&endpoints, budget).map_err(|source| execution(0, source))?;
-    approve_operation(
+    let (selected, planned) = admit_selection(
         authorizer,
-        Operation::Socket(operation),
         deadline,
         &WORKFLOW,
+        DeclaredTargets {
+            selection: &request.targets,
+            family: request.address_family,
+            max_targets: request.limits.max_targets,
+        },
+        |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),
+        |selected| {
+            let count = selected
+                .addresses
+                .len()
+                .checked_mul(ports.len())
+                .and_then(|count| count.checked_mul(request.attempts as usize))
+                .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
+            crate::probe::evidence::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
+            let delay = crate::clock::rate_delay(1, request.probes_per_second)
+                .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
+            let windows = u32::try_from(count.div_ceil(request.max_in_flight))
+                .map_err(|_| invalid("probes", count, "duration overflow"))?;
+            let planned_duration = request
+                .timeout
+                .checked_mul(windows)
+                .and_then(|duration| {
+                    delay
+                        .checked_mul(count.saturating_sub(1) as u32)
+                        .and_then(|pacing| duration.checked_add(pacing))
+                })
+                .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
+            crate::probe::evidence::check_probe_duration(
+                WORKFLOW,
+                planned_duration,
+                request.limits.max_duration,
+            )?;
+            let endpoints = selected
+                .addresses
+                .iter()
+                .flat_map(|address| {
+                    ports
+                        .iter()
+                        .map(move |port| SocketAddr::new(*address, *port))
+                })
+                .collect();
+            Ok(Planned {
+                endpoints,
+                count,
+                delay,
+                budget: SocketBudget::new(count as u64, 0, 0),
+                planned_duration,
+            })
+        },
+        |planned| {
+            SocketOperation::new(&planned.endpoints, planned.budget)
+                .map(Operation::Socket)
+                .map_err(|source| execution(0, source))
+        },
     )?;
-    Ok(Planned {
-        endpoints,
-        count,
-        delay,
-        budget,
-        addresses,
-        planned_duration,
-    })
+    Ok((selected.addresses, planned))
 }
 
 /// Approves and starts one connection attempt, returning the pending socket.
@@ -403,7 +404,7 @@ where
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     enforce_deadline(WORKFLOW, &deadline)?;
-    let planned = planned(request, authorizer, &deadline)?;
+    let (resolved_addresses, planned) = planned(request, authorizer, &deadline)?;
     let mut stats = Statistics::default();
     let mut rtt = super::report::RttAccumulator::default();
     let mut active: Vec<Active<P::Stream>> = Vec::new();
@@ -498,7 +499,7 @@ where
     stats.rtt = rtt.finish();
     Ok(Summary {
         target: request.targets.to_string(),
-        resolved_addresses: planned.addresses,
+        resolved_addresses,
         planned_duration: planned.planned_duration,
         stats,
     })

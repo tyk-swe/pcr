@@ -17,7 +17,6 @@ use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
-use analysis::StreamTransport;
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
@@ -60,35 +59,35 @@ pub(super) fn run(
         .transpose()?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
-    // Only TCP needs reassembly; UDP chunks come straight from frames.
-    let options = prepared.options(selector.transport == StreamTransport::Tcp);
-    let mut collector = Collector::new(selector);
+    // Only TCP needs reassembly; the collector's declared needs cover that.
+    let session = analysis::Session::new(
+        prepared.registry.clone(),
+        prepared.options(),
+        Collector::new(selector),
+        Some(selector),
+    );
     let direction = arguments.direction;
     let mut state = State::new(arguments.limits.capture.retention_ceiling());
-    let run_summary = analysis::run_with_ip_events(
-        &mut reader,
-        prepared.registry.clone(),
-        &options,
-        super::offline_analysis::ip_event_sink(
-            (format == FollowFormat::Ndjson).then(|| stream.clone()),
-        ),
-        |record| {
-            for chunk in collector.observe(&record) {
-                if !direction_matches(direction, &chunk) {
-                    continue;
-                }
-                if let Some(files) = files.as_mut() {
-                    files.write(&chunk).map_err(CliError::into_boundary_error)?;
-                }
-                rendering::render_record(format, chunk, &mut state, stream)
-                    .map_err(CliError::into_boundary_error)?;
+    let mut sink = |chunk: Chunk| -> Result<(), packetcraftr_core::error::BoundaryError> {
+        if direction_matches(direction, &chunk) {
+            if let Some(files) = files.as_mut() {
+                files.write(&chunk).map_err(CliError::into_boundary_error)?;
             }
-            Ok(())
-        },
-    )
-    .map_err(CliError::classified)?;
-    // Stream indices are assigned before filtering, including frames without payload.
-    if run_summary.frames_matched == 0 {
+            rendering::render_record(format, chunk, &mut state, stream)
+                .map_err(CliError::into_boundary_error)?;
+        }
+        Ok(())
+    };
+    let pass = session
+        .observe(
+            &mut reader,
+            super::offline_analysis::ip_event_sink(format, stream),
+            &mut sink,
+        )
+        .map_err(CliError::classified)?;
+    // Stream indices are assigned before filtering, including frames without
+    // payload. The verdict precedes finishing and publishing, as before.
+    if pass.selected_absent() {
         return Err(CliError::new(
             Kind::Cli,
             format!(
@@ -98,7 +97,9 @@ pub(super) fn run(
             ),
         ));
     }
-    let summary = collector.finish(&run_summary);
+    let outcome = pass.finish(&mut sink).map_err(CliError::classified)?;
+    let summary = outcome.summary;
+    let run_summary = outcome.run;
     let written = files
         .map(write::DirectionFiles::publish)
         .transpose()?

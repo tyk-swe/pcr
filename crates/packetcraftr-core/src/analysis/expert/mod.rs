@@ -10,7 +10,9 @@ use crate::protocol::transport::Tcp;
 
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::session::{self, CollectorNeeds};
 use crate::analysis::{StreamRef, StreamTransport};
+use crate::error::BoundaryError;
 
 use tcp::DirectionState;
 
@@ -119,5 +121,30 @@ impl Collector {
             self.summary.count(finding);
         }
         (findings, self.summary)
+    }
+}
+
+impl session::Collector for Collector {
+    type Event = Finding;
+    type Summary = Summary;
+
+    /// Findings read transport indexes, the reassembler's byte-exact
+    /// retransmission evidence, and reconstructed-datagram diagnostics.
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
+            tcp_stream: true,
+            udp_stream: true,
+            ip_reassembly: true,
+            tcp_events: true,
+            ..CollectorNeeds::default()
+        }
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<Finding>, BoundaryError> {
+        Ok(Self::observe(self, record))
+    }
+
+    fn finish(self, run: &RunSummary) -> Result<(Vec<Finding>, Summary), BoundaryError> {
+        Ok(Self::finish(self, run))
     }
 }

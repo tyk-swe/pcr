@@ -40,36 +40,33 @@ pub(super) fn run(
     )?;
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
-    // Expert needs the reassembler's byte-exact retransmission evidence.
-    let options = prepared.options(true);
-    let mut collector = analysis::expert::Collector::new();
-    let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
-    let outcome = analysis::run_with_ip_events(
-        &mut reader,
+    // The collector declares what expert reads: transport indexes, the
+    // reassembler's byte-exact retransmission evidence, and reconstructed-
+    // datagram diagnostics.
+    let session = analysis::Session::new(
         prepared.registry.clone(),
-        &options,
-        super::offline_analysis::ip_event_sink(
-            (format == ToolFormat::Ndjson).then(|| stream.clone()),
-        ),
-        |record| {
-            for finding in collector.observe(&record) {
-                if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
+        prepared.options(),
+        analysis::expert::Collector::new(),
+        None,
+    );
+    let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
+    let min_severity = arguments.min_severity;
+    let codes = &arguments.codes;
+    let outcome = session
+        .run(
+            &mut reader,
+            super::offline_analysis::ip_event_sink(format, stream),
+            |finding| {
+                if matches_selector(&finding, min_severity, codes) {
                     state.count(&finding);
                     rendering::render_record(format, finding.into(), &mut state, stream)
                         .map_err(CliError::into_boundary_error)?;
                 }
-            }
-            Ok(())
-        },
-    );
-    let summary = outcome.map_err(CliError::classified)?;
-    let (trailing, _expert_summary) = collector.finish(&summary);
-    for finding in trailing {
-        if matches_selector(&finding, arguments.min_severity, &arguments.codes) {
-            state.count(&finding);
-            rendering::render_record(format, finding.into(), &mut state, stream)?;
-        }
-    }
+                Ok(())
+            },
+        )
+        .map_err(CliError::classified)?;
+    let summary = outcome.run;
 
     match format {
         ToolFormat::Text => rendering::render_text(&summary, &state),

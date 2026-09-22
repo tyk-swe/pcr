@@ -138,7 +138,7 @@ fn collect(
     let (mut reader, fingerprint) = open_capture_hashed(path, bounds)?;
     // Select physical packets in the callback: pipeline filters also see
     // reconstructed datagrams, whose provenance this report cannot represent.
-    let mut options = prepared.options(false);
+    let mut options = prepared.options();
     let mut requirements = rules.requirements();
     if let Some(filter) = filter {
         let next = filter.requirements();

@@ -62,7 +62,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let plan = analysis::export::plan(
         &mut reader,
         setup.registry.clone(),
-        &setup.options(false),
+        &setup.options(),
         &selection,
     )
     .map_err(CliError::classified)?;

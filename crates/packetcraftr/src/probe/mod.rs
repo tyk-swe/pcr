@@ -26,14 +26,11 @@ use packetcraftr_core::protocol::{
     transport_tuple_reversed,
 };
 use packetcraftr_core::{
-    budget::{Cancelled, Deadline, Interrupted},
-    decode::DecodedPacket,
-    diagnostic::Diagnostic,
-    packet::Packet,
-    packet::semantics,
-    protocol::BuiltinProtocol,
-    registry::Registry,
+    budget::Deadline, decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet,
+    packet::semantics, protocol::BuiltinProtocol, registry::Registry,
 };
+
+use crate::target::GateErrors;
 
 /// Maps an operation-local sequence to an IPv4 identification that native
 /// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
@@ -76,11 +73,9 @@ pub fn ephemeral_source_port(base: u16, offset: u64) -> u16 {
 /// traceroute share this gate; the workflow tag keeps the code and remediation
 /// workflow-specific.
 pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Result<(), Error> {
-    deadline.enforce().map_err(|interrupted| match interrupted {
-        Interrupted::Cancelled(source) => Error::new(workflow, ErrorKind::Cancelled(source)),
-        Interrupted::Exceeded(error) => duration_limit(workflow, error.actual, error.limit),
-        _ => Error::new(workflow, ErrorKind::Cancelled(Cancelled)),
-    })
+    deadline
+        .enforce()
+        .map_err(|interrupted| workflow.interrupted(interrupted))
 }
 
 pub(crate) fn duration_limit(workflow: Workflow, actual: Duration, limit: Duration) -> Error {

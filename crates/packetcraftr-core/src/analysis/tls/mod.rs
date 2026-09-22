@@ -53,6 +53,8 @@ use serde::Serialize;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::session::{Collector as SessionCollector, CollectorNeeds};
+use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;
 
 mod limits;
@@ -599,5 +601,30 @@ impl Collector {
         ) {
             self.forget(key);
         }
+    }
+}
+
+impl SessionCollector for Collector {
+    type Event = SessionEvent;
+    type Summary = Summary;
+
+    /// Sessions are assembled from reassembled-TCP events, and UDP
+    /// conversation indexes feed the port-443 QUIC counter — without them
+    /// `udp_443_frames` silently reports zero.
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
+            tcp_stream: true,
+            udp_stream: true,
+            tcp_events: true,
+            ..CollectorNeeds::default()
+        }
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<SessionEvent>, BoundaryError> {
+        Ok(Self::observe(self, record))
+    }
+
+    fn finish(self, run: &RunSummary) -> Result<(Vec<SessionEvent>, Summary), BoundaryError> {
+        Ok(Self::finish(self, run))
     }
 }

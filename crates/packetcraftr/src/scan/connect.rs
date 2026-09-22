@@ -8,7 +8,11 @@ use crate::{
     BoundaryError,
     clock::Clock,
     policy::{Authorizer, Operation, SocketBudget, SocketOperation},
-    probe::{Error, ErrorKind, Transport, enforce_deadline},
+    probe::{
+        Error, ErrorKind, Transport, enforce_deadline,
+        live_step::{Pacer, StepErrors},
+        runner::ProbeStepErrors,
+    },
     target::{DeclaredTargets, admit_selection, approve_operation},
 };
 use packetcraftr_core::budget::Deadline;
@@ -250,7 +254,7 @@ fn planned<A: Authorizer>(
                 .and_then(|count| count.checked_mul(request.attempts as usize))
                 .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
             crate::probe::evidence::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
-            let delay = crate::clock::rate_delay(1, request.probes_per_second)
+            let delay = Pacer::delay(1, request.probes_per_second)
                 .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
             let windows = u32::try_from(count.div_ceil(request.max_in_flight))
                 .map_err(|_| invalid("probes", count, "duration overflow"))?;
@@ -471,26 +475,18 @@ where
                 wait = wait.min(next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {
-                deadline
-                    .start_accounting(Duration::ZERO)
-                    .map_err(|source| {
-                        Error::new(
-                            WORKFLOW,
-                            ErrorKind::DurationLimit {
-                                actual: source.actual,
-                                limit: source.limit,
-                            },
-                        )
-                    })?;
-                clock.sleep(wait).map_err(|source| {
-                    Error::new(
-                        WORKFLOW,
-                        ErrorKind::Clock {
-                            sequence: next as u64,
-                            source: Box::new(source),
-                        },
-                    )
-                })?;
+                let errors = ProbeStepErrors {
+                    workflow: WORKFLOW,
+                    sequence: next as u64,
+                };
+                Pacer::wait(
+                    &mut deadline,
+                    clock,
+                    wait,
+                    |source| errors.interrupted(source),
+                    |source| errors.duration(source),
+                    |source| errors.clock(Box::new(source)),
+                )?;
             }
         }
     }

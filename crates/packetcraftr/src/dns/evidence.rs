@@ -6,19 +6,17 @@ use std::time::Duration;
 use packetcraftr_core::{codec::NetworkEnvelope, packet::Packet, protocol::BuiltinProtocol};
 
 use crate::probe::evidence::{
-    ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
+    ExchangeEvidenceError, format_exchange_evidence_error, validate_capture_statistics_evidence,
+    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 
 use super::classification::dns_payload;
 use super::error::Error;
-use super::{Execution, Limits, Probe};
+use super::{Execution, Probe};
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,
     execution: &Execution,
-    limits: Limits,
     timeout: Duration,
 ) -> Result<(), Error> {
     let attempt = probe.attempt;
@@ -98,14 +96,6 @@ pub(super) fn validate_dns_execution(
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_aggregate_evidence_limits(
-        &execution.responses,
-        &execution.unsolicited,
-        &execution.undecoded,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-    )
-    .map_err(|error| map_dns_evidence_error(attempt, error))?;
     Ok(())
 }
 

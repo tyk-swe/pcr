@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::{build::Builder, packet::Packet, template::Template};
+use packetcraftr_core::{budget::Deadline, build::Builder, packet::Packet, template::Template};
 use packetcraftr_netio::{
     capture::Statistics,
     transmit::{Frame as TransmissionFrame, Sender as PacketIo},
@@ -14,6 +14,7 @@ use crate::Client;
 use crate::Error;
 use crate::Stats;
 use crate::clock::{CancellableClock, Clock, SystemClock};
+use crate::probe::live_step::Pacer;
 use crate::send::{Options, Report, SentFrame, SetOptions, SetReport};
 
 impl<R, N, I> Client<R, N, I>
@@ -120,8 +121,12 @@ where
         self.policy.authorize(crate::policy::Operation::Budgeted(
             crate::policy::WireBudget::new(total, 0),
         ))?;
-        let delay = crate::clock::rate_delay(1, options.rate)
-            .expect("validate_for checked the pacing rate");
+        let delay = Pacer::delay(1, options.rate).expect("validate_for checked the pacing rate");
+        // Send sets have no duration ceiling; the pacer still enforces the
+        // operation's cancellation across each delay without changing the
+        // send loop or its wall-clock report.
+        let mut pacing_deadline = Deadline::new(std::time::Duration::MAX)
+            .with_cancellation(self.cancellation.clone().or(cancellation.clone()));
 
         let builder = Builder::new(Arc::clone(&self.registry));
         let mut sent = Vec::new();
@@ -163,7 +168,14 @@ where
                     self.materialize_and_authorize(planned, &builder, &options.send, None)?;
                 check_cancelled()?;
                 if !sent.is_empty() {
-                    clock.sleep(delay).map_err(Into::into)?;
+                    Pacer::wait(
+                        &mut pacing_deadline,
+                        &mut clock,
+                        delay,
+                        pacing_interrupted,
+                        pacing_duration,
+                        Into::into,
+                    )?;
                     check_cancelled()?;
                 }
                 let io_report = self.io.send(TransmissionFrame::try_new(
@@ -192,5 +204,23 @@ where
             passes_completed: options.repeat,
             sent,
         })
+    }
+}
+
+fn pacing_interrupted(source: packetcraftr_core::budget::Interrupted) -> Error {
+    match source {
+        packetcraftr_core::budget::Interrupted::Cancelled(source) => source.into(),
+        packetcraftr_core::budget::Interrupted::Exceeded(source) => pacing_duration(source),
+        _ => Error::InvalidSendOption {
+            field: "rate",
+            message: "pacing was interrupted".to_owned(),
+        },
+    }
+}
+
+fn pacing_duration(source: packetcraftr_core::budget::DeadlineExceeded) -> Error {
+    Error::InvalidSendOption {
+        field: "rate",
+        message: format!("pacing exceeded its operation budget: {source}"),
     }
 }

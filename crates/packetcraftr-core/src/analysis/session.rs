@@ -7,7 +7,7 @@
 //! A [`Session`] is prepared with a registry, [`Options`], a [`Collector`],
 //! and the caller's optional conversation selector. Preparing narrows the
 //! run's [`Plan`] to the union of the display filter's
-//! [`Requirements`](crate::filter::Requirements) and the collector's
+//! [`Requirements`] and the collector's
 //! [`CollectorNeeds`], so no pipeline stage runs that nothing reads.
 //! [`Session::run`] then drives [`run`](super::run) over the reader —
 //! forwarding IP lifecycle events to one sink and each observed collector

@@ -4,6 +4,7 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use packetcraftr_cli::output::{contract::Command, stream::StreamEncoder};
 use serde_json::Value;
 
 /// A writer the test can still read after handing it to an encoder.
@@ -32,6 +33,12 @@ impl Write for SharedBuffer {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+/// An NDJSON encoder writing into a buffer the caller can read back.
+pub(crate) fn stream(command: Command) -> (StreamEncoder, SharedBuffer) {
+    let buffer = SharedBuffer::default();
+    (StreamEncoder::new(command, buffer.clone()), buffer)
 }
 
 pub(crate) fn parse_ndjson(bytes: &[u8]) -> Vec<Value> {

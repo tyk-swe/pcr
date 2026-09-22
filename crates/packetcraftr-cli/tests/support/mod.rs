@@ -6,7 +6,6 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use packetcraftr_cli::output;
 use serde_json::Value;
 
 #[path = "../../src/test_support.rs"]
@@ -16,7 +15,7 @@ mod shared;
 // even though the definitions behind it are allowed to be dead.
 #[allow(unused_imports)]
 pub(crate) use shared::{
-    SharedBuffer, TestRecord, assert_contiguous, output_schema, schema_validator,
+    SharedBuffer, TestRecord, assert_contiguous, output_schema, schema_validator, stream,
 };
 
 pub(crate) fn path_text(path: &Path) -> &str {
@@ -67,17 +66,6 @@ pub(crate) fn parse_ndjson(output: &Output) -> Vec<Value> {
         });
     }
     records
-}
-
-/// An NDJSON encoder writing into a buffer the caller can read back.
-pub(crate) fn stream(
-    command: output::contract::Command,
-) -> (output::stream::StreamEncoder, SharedBuffer) {
-    let buffer = SharedBuffer::default();
-    (
-        output::stream::StreamEncoder::new(command, buffer.clone()),
-        buffer,
-    )
 }
 
 // Facility prerequisites for the compile-time capability gates the package

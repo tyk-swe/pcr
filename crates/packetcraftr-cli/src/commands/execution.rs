@@ -401,8 +401,7 @@ mod tests {
         use std::cell::RefCell;
 
         use super::*;
-        use crate::rendering::ndjson_test_support::stream;
-        use crate::test_support::{TestRecord, assert_contiguous};
+        use crate::test_support::{TestRecord, assert_contiguous, stream};
         use packetcraftr_cli::output::contract::{ExchangeFormat, ToolFormat};
         use packetcraftr_core::budget::Cancellation;
 

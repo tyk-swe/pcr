@@ -3,9 +3,6 @@
 
 //! The NDJSON stream every structured command writes through.
 
-#[cfg(test)]
-use crate::test_support::TestRecord;
-
 use std::io;
 use std::time::Duration;
 
@@ -53,18 +50,6 @@ pub(crate) fn write_unattributed_error(
 }
 
 #[cfg(test)]
-pub(crate) mod test_support {
-    use super::*;
-
-    pub(crate) use crate::test_support::{SharedBuffer, assert_contiguous};
-
-    pub(crate) fn stream(command: output::contract::Command) -> (StreamEncoder, SharedBuffer) {
-        let output = SharedBuffer::default();
-        (StreamEncoder::new(command, output.clone()), output)
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use packetcraftr_core::error::Kind;
 
@@ -74,8 +59,8 @@ mod tests {
 
     use crate::errors::CliError;
 
-    use super::test_support::{assert_contiguous, stream};
     use super::*;
+    use crate::test_support::{TestRecord, assert_contiguous, stream};
 
     struct FailingSerialization;
 

@@ -320,7 +320,7 @@ mod tests {
     use packetcraftr_core::packet::link::MacAddress;
 
     use super::*;
-    use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
+    use crate::test_support::{assert_contiguous, stream};
 
     #[derive(Default)]
     struct FakeAuthorizer {

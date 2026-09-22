@@ -29,7 +29,4 @@ pub(crate) use machine::{
 
 pub(crate) use ndjson::{StreamEncoder, stdout_stream, write_unattributed_error};
 
-#[cfg(test)]
-pub(crate) use ndjson::test_support as ndjson_test_support;
-
 pub(crate) use style::terminal_document;

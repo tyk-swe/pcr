@@ -7,8 +7,7 @@ use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, emit_aggregate_with_stats, render_diagnostics_text, write_capture_file,
-    write_stdout_line,
+    StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
 };
 
 pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(), CliError> {
@@ -58,15 +57,14 @@ fn stable_timestamp_order<'a>(
     frames
 }
 
-pub(super) fn render_aggregate(result: packetcraftr::exchange::Report) -> Result<(), CliError> {
-    let (result, diagnostics, stats) =
-        output::exchange::Report::try_from_exchange(result).map_err(CliError::classified)?;
-    emit_aggregate_with_stats(
-        output::contract::Command::Exchange,
-        result,
-        diagnostics,
-        stats,
-    )
+/// Adapts one engine event into its wire record on the stream.
+pub(super) fn emit_event(
+    event: packetcraftr::exchange::Event,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    let (record, diagnostics) =
+        output::exchange::Event::try_from_exchange(event).map_err(CliError::classified)?;
+    Ok(stream.emit_data(record, diagnostics)?)
 }
 
 pub(super) fn render_complete(

@@ -45,121 +45,97 @@ pub(super) fn run(
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
-    let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
+    let mut session = providers.session();
     // A lone question keeps the single-query contract: its failure propagates
     // as the command's error rather than reporting as batch evidence.
     if let [request] = requests.as_slice() {
-        return run_single(
-            request,
+        return execution::run_workflow(
+            &mut session,
             format,
             stream,
-            Channels {
-                registry: &providers.registry,
-                executor: &mut providers.executor,
-                runtime: &providers.runtime,
+            crate::cancellation::signal(),
+            execution::Hooks {
+                command: output::contract::Command::Dns,
+                run: Box::new(|session| {
+                    packetcraftr::dns::run(
+                        request,
+                        &mut session.authorizer,
+                        session.registry,
+                        session.executor,
+                        &mut session.clock,
+                    )
+                    .map_err(CliError::classified)
+                }),
+                run_with_events: Box::new(|session, emit| {
+                    packetcraftr::dns::run_with_events(
+                        request,
+                        &mut session.authorizer,
+                        session.registry,
+                        session.executor,
+                        &mut session.clock,
+                        session.runtime,
+                        emit,
+                    )
+                    .map_err(CliError::classified)
+                }),
+                on_event: rendering::emit_event,
+                into_result: Box::new(|report| {
+                    output::dns::Report::try_from_dns(report)
+                        .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                        .map_err(CliError::classified)
+                }),
+                render_text: Box::new(|report, _| {
+                    let (result, diagnostics, stats) =
+                        output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
+                    rendering::render_text(result, diagnostics, stats)
+                }),
+                complete: rendering::emit_complete,
             },
-            &mut authorizer,
-            &mut clock,
         );
     }
-    if format == ToolFormat::Ndjson {
-        let events = stream.clone();
-        let batch = packetcraftr::dns::run_batch_with_events(
-            &requests,
-            &mut authorizer,
-            &providers.registry,
-            &mut providers.executor,
-            &mut clock,
-            &providers.runtime,
-            move |event| {
-                rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
-            },
-        )
-        .map_err(CliError::classified)?;
-        rendering::emit_batch_complete(batch, stream)
-    } else {
-        let batch = packetcraftr::dns::run_batch(
-            &requests,
-            &mut authorizer,
-            &providers.registry,
-            &mut providers.executor,
-            &mut clock,
-        )
-        .map_err(CliError::classified)?;
-        let (result, diagnostics, stats) =
-            output::dns::BatchResult::try_from_batch(batch).map_err(CliError::classified)?;
-        match format {
-            ToolFormat::Text => rendering::render_batch_text(result, diagnostics, stats),
-            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
-                output::contract::Command::Dns,
-                result,
-                diagnostics,
-                stats,
-            ),
-            ToolFormat::Ndjson => Err(CliError::new(
-                core::error::Kind::Internal,
-                "NDJSON DNS batch streaming returned before aggregate rendering",
-            )),
-        }
-    }
-}
-
-/// The prepared provider channels a query executes through.
-struct Channels<'a> {
-    registry: &'a core::registry::Registry,
-    executor: &'a mut execution::Executor,
-    runtime: &'a packetcraftr::progress::Runtime,
-}
-
-fn run_single(
-    request: &packetcraftr::dns::Request,
-    format: ToolFormat,
-    stream: &StreamEncoder,
-    channels: Channels<'_>,
-    authorizer: &mut packetcraftr::policy::PolicyAuthorizer<'_>,
-    clock: &mut packetcraftr::clock::CancellableClock,
-) -> Result<(), CliError> {
-    let Channels {
-        registry,
-        executor,
-        runtime,
-    } = channels;
-    if format == ToolFormat::Ndjson {
-        let events = stream.clone();
-        let summary = packetcraftr::dns::run_with_events(
-            request,
-            authorizer,
-            registry,
-            executor,
-            clock,
-            runtime,
-            move |event| {
-                rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
-            },
-        )
-        .map_err(CliError::classified)?;
-        rendering::emit_complete(summary, stream)
-    } else {
-        let report = packetcraftr::dns::run(request, authorizer, registry, executor, clock)
-            .map_err(CliError::classified)?;
-        let (result, diagnostics, stats) =
-            output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
-        match format {
-            ToolFormat::Text => rendering::render_text(result, diagnostics, stats),
-            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
-                output::contract::Command::Dns,
-                result,
-                diagnostics,
-                stats,
-            ),
-            ToolFormat::Ndjson => Err(CliError::new(
-                core::error::Kind::Internal,
-                "NDJSON DNS streaming returned before aggregate rendering",
-            )),
-        }
-    }
+    execution::run_workflow(
+        &mut session,
+        format,
+        stream,
+        crate::cancellation::signal(),
+        execution::Hooks {
+            command: output::contract::Command::Dns,
+            run: Box::new(|session| {
+                packetcraftr::dns::run_batch(
+                    &requests,
+                    &mut session.authorizer,
+                    session.registry,
+                    session.executor,
+                    &mut session.clock,
+                )
+                .map_err(CliError::classified)
+            }),
+            run_with_events: Box::new(|session, emit| {
+                packetcraftr::dns::run_batch_with_events(
+                    &requests,
+                    &mut session.authorizer,
+                    session.registry,
+                    session.executor,
+                    &mut session.clock,
+                    session.runtime,
+                    emit,
+                )
+                .map_err(CliError::classified)
+            }),
+            on_event: rendering::emit_event,
+            into_result: Box::new(|batch| {
+                output::dns::BatchResult::try_from_batch(batch)
+                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                    .map_err(CliError::classified)
+            }),
+            render_text: Box::new(|batch, _| {
+                let (result, diagnostics, stats) = output::dns::BatchResult::try_from_batch(batch)
+                    .map_err(CliError::classified)?;
+                rendering::render_batch_text(result, diagnostics, stats)
+            }),
+            complete: rendering::emit_batch_complete,
+        },
+    )
 }
 
 fn prepare_requests(

@@ -118,49 +118,50 @@ pub(super) fn run(
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    let resolver = packetcraftr::target::SystemResolver;
-    let mut authorizer = packetcraftr::policy::PolicyAuthorizer::new(&providers.policy, &resolver);
-    let mut clock = packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone());
-    if format == ToolFormat::Ndjson {
-        let events = stream.clone();
-        let summary = packetcraftr::scan::run_with_events(
-            &request,
-            &mut authorizer,
-            &providers.registry,
-            &mut providers.executor,
-            &mut clock,
-            &providers.runtime,
-            move |event| {
-                rendering::emit_event(event, &events).map_err(CliError::into_boundary_error)
-            },
-        )
-        .map_err(rendering::scan_error)?;
-        rendering::emit_complete(summary, stream)
-    } else {
-        let report = packetcraftr::scan::run(
-            &request,
-            &mut authorizer,
-            &providers.registry,
-            &mut providers.executor,
-            &mut clock,
-        )
-        .map_err(rendering::scan_error)?;
-        let (result, diagnostics, stats) =
-            output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
-        match format {
-            ToolFormat::Text => rendering::render_text(result, diagnostics, stats),
-            ToolFormat::Json => crate::rendering::emit_aggregate_with_stats(
-                output::contract::Command::Scan,
-                result,
-                diagnostics,
-                stats,
-            ),
-            ToolFormat::Ndjson => Err(CliError::new(
-                packetcraftr_core::error::Kind::Internal,
-                "NDJSON scan streaming returned before aggregate rendering",
-            )),
-        }
-    }
+    let mut session = providers.session();
+    execution::run_workflow(
+        &mut session,
+        format,
+        stream,
+        crate::cancellation::signal(),
+        execution::Hooks {
+            command: output::contract::Command::Scan,
+            run: Box::new(|session| {
+                packetcraftr::scan::run(
+                    &request,
+                    &mut session.authorizer,
+                    session.registry,
+                    session.executor,
+                    &mut session.clock,
+                )
+                .map_err(rendering::scan_error)
+            }),
+            run_with_events: Box::new(|session, emit| {
+                packetcraftr::scan::run_with_events(
+                    &request,
+                    &mut session.authorizer,
+                    session.registry,
+                    session.executor,
+                    &mut session.clock,
+                    session.runtime,
+                    emit,
+                )
+                .map_err(rendering::scan_error)
+            }),
+            on_event: rendering::emit_event,
+            into_result: Box::new(|report| {
+                output::scan::Report::try_from_scan(report)
+                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                    .map_err(CliError::classified)
+            }),
+            render_text: Box::new(|report, _| {
+                let (result, diagnostics, stats) =
+                    output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
+                rendering::render_text(result, diagnostics, stats)
+            }),
+            complete: rendering::emit_complete,
+        },
+    )
 }
 
 /// Every scan exchange carries exactly one correlated probe.

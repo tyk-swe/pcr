@@ -163,8 +163,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   socket authorization, bounded framing, response validation, and retries.
 - `packetcraftr_core::budget::remaining_before` is the one helper every crate
   uses to turn a deadline into a remaining wait; the previous netio-private copy
-  is gone. Core exposes `protocol::application::dns::{read_u16, read_u32}` and
-  the CLI library exposes `output::hex` for the compact hex rendering shared by
+  is gone. Core exposes `protocol::application::dns::read_u16` and the CLI
+  library exposes `output::hex` for the compact hex rendering shared by
   rendering and machine output, with borrowed formatting for `--output hex`.
   `scan::DEFAULT_ATTEMPTS` names the scan attempts default.
 - Published `output-expert-complete.json` and `output-replay-complete.json`

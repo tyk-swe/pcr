@@ -29,7 +29,7 @@ pub fn read_u16(
 /// ends before the value does.
 ///
 /// [`DecodeError::TruncatedField`]: super::super::DecodeError::TruncatedField
-pub fn read_u32(
+pub(super) fn read_u32(
     message: &[u8],
     offset: usize,
     field: &'static str,

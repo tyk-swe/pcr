@@ -10,7 +10,7 @@ use crate::protocol::transport::Tcp;
 
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
-use crate::analysis::session::{self, Needs};
+use crate::analysis::session::{self, CollectorNeeds};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;
 
@@ -130,13 +130,13 @@ impl session::Collector for Collector {
 
     /// Findings read transport indexes, the reassembler's byte-exact
     /// retransmission evidence, and reconstructed-datagram diagnostics.
-    fn needs(&self) -> Needs {
-        Needs {
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
             tcp_stream: true,
             udp_stream: true,
             ip_reassembly: true,
             tcp_events: true,
-            ..Needs::default()
+            ..CollectorNeeds::default()
         }
     }
 

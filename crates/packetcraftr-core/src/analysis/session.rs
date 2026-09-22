@@ -8,9 +8,10 @@
 //! and the caller's optional conversation selector. Preparing narrows the
 //! run's [`Plan`] to the union of the display filter's
 //! [`Requirements`](crate::filter::Requirements) and the collector's
-//! [`Needs`], so no pipeline stage runs that nothing reads. [`Session::run`]
-//! then drives [`run`](super::run) over the reader — forwarding IP lifecycle
-//! events to one sink and each observed collector event to another —
+//! [`CollectorNeeds`], so no pipeline stage runs that nothing reads.
+//! [`Session::run`] then drives [`run`](super::run) over the reader —
+//! forwarding IP lifecycle events to one sink and each observed collector
+//! event to another —
 //! captures [`Collector::scopes`] before [`Collector::finish`] consumes the
 //! collector, drains the trailing events through the same event sink, and
 //! reports the empty-selector verdict in its [`Outcome`]. The phases split
@@ -37,7 +38,7 @@ use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary, run_w
 /// reconstruction on, because canonical stream numbering follows
 /// reconstructed conversations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Needs {
+pub struct CollectorNeeds {
     /// `record.tcp` conversation indexes (`tcp.stream`).
     pub tcp_stream: bool,
     /// `record.udp` conversation indexes (`udp.stream`).
@@ -50,7 +51,7 @@ pub struct Needs {
     pub track_sources: bool,
 }
 
-impl Needs {
+impl CollectorNeeds {
     /// The optional stages these needs require.
     fn plan(self) -> Plan {
         Plan {
@@ -79,7 +80,7 @@ pub trait Collector {
 
     /// What this collector reads from each record. Queried once, while the
     /// session is prepared.
-    fn needs(&self) -> Needs;
+    fn needs(&self) -> CollectorNeeds;
 
     /// Capture scopes the collector exposes. Collected by the session after
     /// the run, before [`finish`](Self::finish).
@@ -206,7 +207,7 @@ impl Classified for SessionError {
 /// A prepared analysis pass: narrowed plan plus the collector lifecycle.
 ///
 /// `options.plan` is replaced — the session derives it from the filter's
-/// [`Filter::requirements`] and the collector's [`Needs`] — while
+/// [`Filter::requirements`] and the collector's [`CollectorNeeds`] — while
 /// `options.tcp_events` and `options.track_sources` are raised to cover the
 /// declared needs. `selector` only feeds the [`Outcome::selected_absent`]
 /// verdict; selection itself is the already-compiled `options.filter`.
@@ -341,7 +342,7 @@ mod tests {
     /// exposes, emits its frame's number per observation, and can fail on
     /// cue.
     struct Probe {
-        needs: Needs,
+        needs: CollectorNeeds,
         log: Log,
         views: Rc<RefCell<Vec<View>>>,
         fail_observe_at: Option<u64>,
@@ -350,7 +351,7 @@ mod tests {
     }
 
     impl Probe {
-        fn new(needs: Needs, log: &Log, views: &Rc<RefCell<Vec<View>>>) -> Self {
+        fn new(needs: CollectorNeeds, log: &Log, views: &Rc<RefCell<Vec<View>>>) -> Self {
             Self {
                 needs,
                 log: log.clone(),
@@ -374,7 +375,7 @@ mod tests {
         type Event = u64;
         type Summary = u64;
 
-        fn needs(&self) -> Needs {
+        fn needs(&self) -> CollectorNeeds {
             self.needs
         }
 
@@ -538,7 +539,7 @@ mod tests {
         let registry = builtin::registry();
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let mut probe = Probe::new(Needs::default(), &log, &views);
+        let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.trailing = vec![900, 901];
 
         let driven = drive(
@@ -575,7 +576,7 @@ mod tests {
         let filter = compile("tcp.stream == 42", &registry);
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let mut probe = Probe::new(Needs::default(), &log, &views);
+        let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.trailing = vec![7];
 
         let driven = drive(
@@ -608,7 +609,7 @@ mod tests {
         };
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let probe = Probe::new(Needs::default(), &log, &views);
+        let probe = Probe::new(CollectorNeeds::default(), &log, &views);
         let mut reader = reader_of(&[udp_frame(&registry, 0)]);
         let mut sink = |event: u64| -> Result<(), BoundaryError> {
             log.borrow_mut().push(format!("event:{event}"));
@@ -649,7 +650,7 @@ mod tests {
         let driven = drive(
             &registry,
             &frames,
-            Probe::new(Needs::default(), &log, &views),
+            Probe::new(CollectorNeeds::default(), &log, &views),
             None,
             None,
         )
@@ -682,11 +683,11 @@ mod tests {
             &registry,
             &frames,
             Probe::new(
-                Needs {
+                CollectorNeeds {
                     tcp_stream: true,
                     tcp_events: true,
                     track_sources: true,
-                    ..Needs::default()
+                    ..CollectorNeeds::default()
                 },
                 &log,
                 &views,
@@ -731,7 +732,7 @@ mod tests {
         let driven = drive(
             &registry,
             &frames,
-            Probe::new(Needs::default(), &log, &views),
+            Probe::new(CollectorNeeds::default(), &log, &views),
             Some(&filter),
             None,
         )
@@ -751,9 +752,9 @@ mod tests {
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let probe = Probe::new(
-            Needs {
+            CollectorNeeds {
                 ip_reassembly: true,
-                ..Needs::default()
+                ..CollectorNeeds::default()
             },
             &log,
             &views,
@@ -798,7 +799,7 @@ mod tests {
         let registry = builtin::registry();
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let mut probe = Probe::new(Needs::default(), &log, &views);
+        let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.fail_observe_at = Some(2);
 
         let error = expect_failure(drive(
@@ -827,7 +828,7 @@ mod tests {
         let registry = builtin::registry();
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let mut probe = Probe::new(Needs::default(), &log, &views);
+        let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.fail_finish = true;
 
         let error = expect_failure(drive(
@@ -852,7 +853,7 @@ mod tests {
         let frames = [udp_frame(&registry, 0)];
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let probe = Probe::new(Needs::default(), &log, &views);
+        let probe = Probe::new(CollectorNeeds::default(), &log, &views);
         let mut reader = reader_of(&frames);
         let mut failing = |event: u64| -> Result<(), BoundaryError> {
             if event == 1 {
@@ -877,7 +878,7 @@ mod tests {
         // the run itself completed.
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
-        let mut probe = Probe::new(Needs::default(), &log, &views);
+        let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.trailing = vec![900];
         let mut reader = reader_of(&frames);
         let pass = Session::new(registry, Options::default(), probe, None)
@@ -901,7 +902,7 @@ mod tests {
     #[test]
     fn needs_map_to_the_plan_they_read() {
         assert_eq!(
-            Needs::default().plan(),
+            CollectorNeeds::default().plan(),
             Plan {
                 ip_reassembly: false,
                 tcp_index: false,
@@ -909,9 +910,9 @@ mod tests {
             }
         );
         assert_eq!(
-            Needs {
+            CollectorNeeds {
                 tcp_stream: true,
-                ..Needs::default()
+                ..CollectorNeeds::default()
             }
             .plan(),
             Plan {
@@ -927,9 +928,9 @@ mod tests {
                 ..Requirements::default()
             })
             .union(
-                Needs {
+                CollectorNeeds {
                     tcp_stream: true,
-                    ..Needs::default()
+                    ..CollectorNeeds::default()
                 }
                 .plan()
             ),

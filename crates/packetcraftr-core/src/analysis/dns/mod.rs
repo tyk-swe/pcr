@@ -13,7 +13,7 @@ use super::{
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
-    session::{self, Needs},
+    session::{self, CollectorNeeds},
 };
 use crate::{
     error::BoundaryError,
@@ -484,13 +484,13 @@ impl session::Collector for Collector {
 
     /// Sourced messages and transactions over reassembled TCP and indexed
     /// UDP flows.
-    fn needs(&self) -> Needs {
-        Needs {
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
             tcp_stream: true,
             udp_stream: true,
             tcp_events: true,
             track_sources: true,
-            ..Needs::default()
+            ..CollectorNeeds::default()
         }
     }
 

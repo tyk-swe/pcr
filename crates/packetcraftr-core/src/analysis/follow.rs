@@ -7,7 +7,7 @@ use crate::analysis::adapter::transport_payload;
 use crate::analysis::dedup::Deduplicator;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, FlowKey, ScopedFlowKey};
-use crate::analysis::session::{self, Needs};
+use crate::analysis::session::{self, CollectorNeeds};
 use crate::analysis::{StreamRef, StreamTransport};
 use crate::error::BoundaryError;
 
@@ -237,16 +237,16 @@ impl session::Collector for Collector {
 
     /// Only TCP chunks need reassembly events; UDP chunks come straight
     /// from the indexed datagrams.
-    fn needs(&self) -> Needs {
+    fn needs(&self) -> CollectorNeeds {
         match self.selector.transport {
-            StreamTransport::Tcp => Needs {
+            StreamTransport::Tcp => CollectorNeeds {
                 tcp_stream: true,
                 tcp_events: true,
-                ..Needs::default()
+                ..CollectorNeeds::default()
             },
-            StreamTransport::Udp => Needs {
+            StreamTransport::Udp => CollectorNeeds {
                 udp_stream: true,
-                ..Needs::default()
+                ..CollectorNeeds::default()
             },
         }
     }

@@ -39,5 +39,5 @@ pub use pipeline::{
     IpEvent, IpEventRecord, IpFamilyCounters, IpReassemblyReport, Limits, Options, Plan, Summary,
     TcpView, UdpView, run, run_with_ip_events,
 };
-pub use session::{Collector, Needs, Outcome, Pass, Session, SessionError};
+pub use session::{Collector, CollectorNeeds, Outcome, Pass, Session, SessionError};
 pub use stream::{Endpoint, StreamRef, StreamTransport};

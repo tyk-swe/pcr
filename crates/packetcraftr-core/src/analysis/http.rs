@@ -10,7 +10,7 @@ use super::{
     provenance::SourceSet,
     reassembly::tcp::ScopedFlowKey,
     scope::Definition,
-    session::{self, Needs},
+    session::{self, CollectorNeeds},
 };
 use crate::error::BoundaryError;
 use crate::protocol::application::http::{self, Body, BodyDecoder, Head, Header};
@@ -569,12 +569,12 @@ impl session::Collector for Collector {
     type Summary = Summary;
 
     /// Sourced messages over reassembled TCP deliveries.
-    fn needs(&self) -> Needs {
-        Needs {
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
             tcp_stream: true,
             tcp_events: true,
             track_sources: true,
-            ..Needs::default()
+            ..CollectorNeeds::default()
         }
     }
 

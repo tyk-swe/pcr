@@ -1,6 +1,6 @@
 # Deepen CLI workflow output conversion and driver
 
-Status: open
+Status: resolved
 Blocked by: none
 Spec: ../spec.md §§ Implementation Decisions 5; Testing Decisions
 

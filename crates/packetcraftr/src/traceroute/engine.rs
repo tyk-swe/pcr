@@ -18,9 +18,7 @@ use crate::probe::evidence::{
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::approve_operation;
-use crate::target::budgeted;
-use crate::target::resolve_selected;
+use crate::target::{admit_operation, budgeted};
 use crate::{BoundaryError, SentPacket};
 
 use super::MAX_PROBE_BYTES;
@@ -205,47 +203,35 @@ fn approve_traceroute<A: Authorizer>(
     deadline: &Deadline,
 ) -> Result<ApprovedTraceroute, Error> {
     request.validate()?;
-    let resolved = resolve_selected(
+    let (selected, _) = admit_operation(
         authorizer,
+        deadline,
+        &WORKFLOW,
         &request.target,
         request.address_family,
-        deadline,
-        &WORKFLOW,
+        |_| {
+            let total_probes = request.total_probe_count()?;
+            validate_probe_plan(request, total_probes)?;
+            let maximum_wire_bytes = u64::try_from(total_probes)
+                .unwrap_or(u64::MAX)
+                .checked_mul(MAX_PROBE_BYTES)
+                .ok_or(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidLimit {
+                        field: "wire_bytes",
+                        value: u64::MAX,
+                        reason: "wire-byte accounting overflowed".to_owned(),
+                    },
+                ))?;
+            Ok((total_probes, maximum_wire_bytes))
+        },
+        |plan| Ok(budgeted(u64::try_from(plan.0).unwrap_or(u64::MAX), plan.1)),
     )?;
-    let Some(&destination) = resolved.addresses.first() else {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::Family {
-                family: request.address_family.label(),
-            },
-        ));
-    };
-
-    let total_probes = request.total_probe_count()?;
-    validate_probe_plan(request, total_probes)?;
-    let maximum_wire_bytes = u64::try_from(total_probes)
-        .unwrap_or(u64::MAX)
-        .checked_mul(MAX_PROBE_BYTES)
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            },
-        ))?;
-    approve_operation(
-        authorizer,
-        budgeted(
-            u64::try_from(total_probes).unwrap_or(u64::MAX),
-            maximum_wire_bytes,
-        ),
-        deadline,
-        &WORKFLOW,
-    )?;
+    // The admission gate guarantees the selected set is non-empty.
+    let destination = selected.addresses[0];
     Ok(ApprovedTraceroute {
-        declared_target: resolved.declared,
-        resolved_addresses: resolved.addresses,
+        declared_target: selected.declared,
+        resolved_addresses: selected.addresses,
         destination,
     })
 }

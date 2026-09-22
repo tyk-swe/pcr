@@ -25,36 +25,12 @@ pub struct Report {
     pub unanswered: Vec<u64>,
     pub unsolicited: Vec<Decoded>,
     pub undecoded: Vec<Captured>,
-    /// Original captured frames for PCAP/PCAPNG, not part of the v6 JSON result.
-    #[serde(skip)]
-    capture_frames: Vec<packetcraftr_core::frame::Frame>,
 }
 
 impl Report {
-    pub fn capture_frames(&self) -> &[packetcraftr_core::frame::Frame] {
-        &self.capture_frames
-    }
-
     pub fn try_from_exchange(
         result: packetcraftr::exchange::Report,
     ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        // Capture output needs original link types, timestamps and wire bytes,
-        // not the JSON projection. Preserve them during this one conversion.
-        let mut capture_frames = result
-            .sent
-            .iter()
-            .map(|sent| sent.frame())
-            .chain(
-                result
-                    .responses
-                    .iter()
-                    .map(|response| &response.response.frame),
-            )
-            .chain(result.unsolicited.iter().map(|packet| &packet.frame))
-            .chain(result.undecoded.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        capture_frames.sort_by_key(|frame| frame.timestamp);
         let packetcraftr::exchange::Report {
             sent,
             responses,
@@ -90,7 +66,6 @@ impl Report {
                     .into_iter()
                     .map(Captured::try_from_frame)
                     .collect::<Result<Vec<_>, _>>()?,
-                capture_frames,
             },
             diagnostics,
             stats,
@@ -221,8 +196,33 @@ impl super::workflow::Conversion for Conversion {
     }
 
     fn report(report: Self::EngineReport) -> Result<super::workflow::Converted<Report>, Error> {
-        Report::try_from_exchange(report).map(super::workflow::Converted::with_stats)
+        // The original frames belong to the new conversion result, never to
+        // the existing wire Report. Retain the exact capture bytes, link types,
+        // and timestamps before the one engine-to-wire conversion consumes it.
+        let frames = capture_frames(&report);
+        Report::try_from_exchange(report)
+            .map(super::workflow::Converted::with_stats)
+            .map(|converted| converted.with_capture_frames(frames))
     }
+}
+
+fn capture_frames(report: &packetcraftr::exchange::Report) -> Vec<packetcraftr_core::frame::Frame> {
+    let mut frames = report
+        .sent
+        .iter()
+        .map(|sent| sent.frame())
+        .chain(
+            report
+                .responses
+                .iter()
+                .map(|response| &response.response.frame),
+        )
+        .chain(report.unsolicited.iter().map(|packet| &packet.frame))
+        .chain(report.undecoded.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    frames.sort_by_key(|frame| frame.timestamp);
+    frames
 }
 
 fn sent_output(sent: std::sync::Arc<packetcraftr::SentPacket>) -> (Wire, Vec<Diagnostic>) {

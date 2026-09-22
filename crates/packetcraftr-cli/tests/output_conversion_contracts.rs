@@ -194,8 +194,8 @@ fn exchange_conversion_keeps_capture_tie_order_without_exposing_capture_frames_i
     .unwrap();
     assert_eq!(
         converted
-            .result
             .capture_frames()
+            .expect("exchange retains original frames")
             .iter()
             .map(|frame| frame.bytes()[0])
             .collect::<Vec<_>>(),
@@ -206,6 +206,22 @@ fn exchange_conversion_keeps_capture_tie_order_without_exposing_capture_frames_i
             .unwrap()
             .get("capture_frames")
             .is_none()
+    );
+
+    // The existing public wire-result shape still supports struct literals;
+    // a private field on Report would break downstream Rust callers.
+    let original_shape = exchange::Report {
+        sent: Vec::new(),
+        responses: Vec::new(),
+        unanswered: Vec::new(),
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+    };
+    assert_eq!(
+        serde_json::to_value(original_shape).unwrap(),
+        serde_json::json!({
+            "sent": [], "responses": [], "unanswered": [], "unsolicited": [], "undecoded": []
+        }),
     );
 }
 

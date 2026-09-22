@@ -106,13 +106,11 @@ pub(super) fn run(
             render_text: Box::new(move |converted, format| match format {
                 ExchangeFormat::Text => rendering::render_text(&converted),
                 ExchangeFormat::Pcap => {
-                    rendering::render_capture(&converted.result, capture::Format::Pcap, compression)
+                    rendering::render_capture(&converted, capture::Format::Pcap, compression)
                 }
-                ExchangeFormat::PcapNg => rendering::render_capture(
-                    &converted.result,
-                    capture::Format::PcapNg,
-                    compression,
-                ),
+                ExchangeFormat::PcapNg => {
+                    rendering::render_capture(&converted, capture::Format::PcapNg, compression)
+                }
                 ExchangeFormat::Json | ExchangeFormat::Ndjson => Err(CliError::new(
                     Kind::Internal,
                     "exchange machine formats dispatch before text rendering",

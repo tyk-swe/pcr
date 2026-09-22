@@ -178,6 +178,7 @@ fn workflow_envelope<C: Conversion>(command: Command, report: C::EngineReport) -
         result,
         diagnostics,
         stats,
+        ..
     } = C::report(report).expect("workflow conversion succeeds");
     match stats {
         Some(stats) => envelope_with_stats(command, result, diagnostics, stats),

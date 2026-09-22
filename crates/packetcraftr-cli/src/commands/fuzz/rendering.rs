@@ -14,6 +14,7 @@ pub(super) fn render_text(
         result,
         diagnostics,
         stats,
+        ..
     }: output::workflow::Converted<output::fuzz::Report>,
 ) -> Result<(), CliError> {
     let stats = stats.expect("fuzz conversion includes packet statistics");

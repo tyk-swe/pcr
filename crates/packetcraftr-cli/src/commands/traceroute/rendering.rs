@@ -14,6 +14,7 @@ pub(super) fn render_text(
         result,
         diagnostics,
         stats,
+        ..
     }: output::workflow::Converted<output::traceroute::Report>,
 ) -> Result<(), CliError> {
     let stats = stats.expect("traceroute conversion includes packet statistics");

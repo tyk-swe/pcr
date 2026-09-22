@@ -20,6 +20,7 @@ pub(super) fn render_batch_text(
         result,
         diagnostics,
         stats,
+        ..
     }: output::workflow::Converted<output::dns::BatchResult>,
 ) -> Result<(), CliError> {
     let stats = stats.expect("DNS batch conversion includes packet statistics");
@@ -59,6 +60,7 @@ pub(super) fn render_text(
         result,
         diagnostics,
         stats,
+        ..
     }: output::workflow::Converted<output::dns::Report>,
 ) -> Result<(), CliError> {
     let stats = stats.expect("DNS conversion includes packet statistics");

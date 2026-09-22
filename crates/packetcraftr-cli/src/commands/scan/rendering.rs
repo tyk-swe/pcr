@@ -14,6 +14,7 @@ pub(super) fn render_text(
         result,
         diagnostics,
         stats,
+        ..
     }: output::workflow::Converted<output::scan::Report>,
 ) -> Result<(), CliError> {
     let stats = stats.expect("scan conversion includes packet statistics");

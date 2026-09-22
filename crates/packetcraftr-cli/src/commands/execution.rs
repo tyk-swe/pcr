@@ -383,12 +383,18 @@ where
     C::EngineEvent: 'static,
     F: Copy + Into<output::contract::Format>,
 {
-    let _ = &hooks.conversion;
+    let Hooks {
+        command,
+        conversion: _conversion,
+        run,
+        run_with_events,
+        render_text,
+    } = hooks;
     match format.into() {
         output::contract::Format::Ndjson => {
             let events = stream.clone();
             let cancellation = cancellation.clone();
-            let summary = (hooks.run_with_events)(
+            let summary = run_with_events(
                 session,
                 Box::new(move |event| {
                     emission_check(&cancellation).map_err(CliError::into_boundary_error)?;
@@ -409,7 +415,7 @@ where
             Ok(())
         }
         wide => {
-            let report = (hooks.run)(session)?;
+            let report = run(session)?;
             emission_check(cancellation)?;
             let converted = C::report(report).map_err(CliError::classified)?;
             if wide == output::contract::Format::Json {
@@ -417,18 +423,19 @@ where
                     result,
                     diagnostics,
                     stats,
+                    ..
                 } = converted;
                 match stats {
                     Some(stats) => crate::rendering::emit_aggregate_with_stats(
-                        hooks.command,
+                        command,
                         result,
                         diagnostics,
                         stats,
                     ),
-                    None => crate::rendering::emit_aggregate(hooks.command, result, diagnostics),
+                    None => crate::rendering::emit_aggregate(command, result, diagnostics),
                 }
             } else {
-                (hooks.render_text)(converted, format)
+                render_text(converted, format)
             }
         }
     }

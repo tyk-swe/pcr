@@ -6,6 +6,7 @@
 
 use packetcraftr::Stats;
 use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::frame::Frame;
 use serde::Serialize;
 
 use super::{contract::Error, stream::StreamRecord};
@@ -17,6 +18,8 @@ pub struct Converted<T> {
     pub result: T,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: Option<Stats>,
+    /// Original exchange frames, separate from the public v6 wire result.
+    capture_frames: Option<Vec<Frame>>,
 }
 
 impl<T> Converted<T> {
@@ -25,11 +28,23 @@ impl<T> Converted<T> {
             result,
             diagnostics,
             stats,
+            capture_frames: None,
         }
     }
 
     pub fn with_stats((result, diagnostics, stats): (T, Vec<Diagnostic>, Stats)) -> Self {
         Self::new(result, diagnostics, Some(stats))
+    }
+
+    /// Attach the original frames needed by exchange's capture formats.
+    #[must_use]
+    pub fn with_capture_frames(mut self, frames: Vec<Frame>) -> Self {
+        self.capture_frames = Some(frames);
+        self
+    }
+
+    pub fn capture_frames(&self) -> Option<&[Frame]> {
+        self.capture_frames.as_deref()
     }
 }
 

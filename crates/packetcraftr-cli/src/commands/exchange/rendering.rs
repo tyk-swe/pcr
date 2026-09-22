@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::analysis::pcap::Format;
+use packetcraftr_core::error::Kind;
 
 use packetcraftr_cli::output;
 
@@ -29,9 +30,12 @@ pub(super) fn render_text(
 }
 
 pub(super) fn render_capture(
-    result: &output::exchange::Report,
+    converted: &output::workflow::Converted<output::exchange::Report>,
     format: Format,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
-    write_capture_file(format, result.capture_frames().iter().cloned(), compression)
+    let frames = converted.capture_frames().ok_or_else(|| {
+        CliError::new(Kind::Internal, "exchange conversion omitted capture frames")
+    })?;
+    write_capture_file(format, frames.iter().cloned(), compression)
 }

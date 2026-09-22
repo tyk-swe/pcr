@@ -317,6 +317,7 @@ mod tests {
 
     use packetcraftr_core::error::{Classification, Kind};
     use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::packet::link::MacAddress;
 
     use super::*;
     use crate::rendering::ndjson_test_support::{assert_contiguous, stream};
@@ -367,7 +368,7 @@ mod tests {
             frame: &Frame,
         ) -> Result<net::route::Materialized, net::Error> {
             let selected_source = "192.0.2.1".parse().expect("fixture source");
-            let source_mac = net::link::MacAddress([0x02, 0, 0, 0, 0, 1]);
+            let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
             let plan = net::route::Plan {
                 decision: net::route::Decision {
                     interface: interface.clone(),

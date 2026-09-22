@@ -25,11 +25,12 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
+use packetcraftr_core::packet::link::MacAddress;
 use packetcraftr_core::{packet::Packet, protocol};
 use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
-    link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
+    link::{Capability as LinkCapability, Mode as LinkMode},
     route::{
         Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
     },

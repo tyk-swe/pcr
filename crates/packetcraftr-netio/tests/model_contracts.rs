@@ -12,13 +12,14 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::link::MacAddress;
 use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_core::{layer::Raw, packet::Packet};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
     Error,
     capture::{self, Session as _},
-    link::{Capability, MacAddress, Mode},
+    link::{Capability, Mode},
     neighbor,
     route::{
         Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,

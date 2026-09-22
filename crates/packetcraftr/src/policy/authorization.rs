@@ -3,8 +3,10 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{packet::Packet, packet::semantics, protocol::link::Ethernet};
-use packetcraftr_netio::{link::MacAddress, route::Plan};
+use packetcraftr_core::{
+    packet::Packet, packet::link::MacAddress, packet::semantics, protocol::link::Ethernet,
+};
+use packetcraftr_netio::route::Plan;
 
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::address::is_public;

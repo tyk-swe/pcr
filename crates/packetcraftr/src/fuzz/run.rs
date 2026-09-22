@@ -241,6 +241,11 @@ fn maximum_wire_bytes(request: &packet_fuzz::Request, cases: &[Case]) -> Result<
     })
 }
 
+/// Authorizes the declared campaign. Fuzz deliberately stays outside
+/// `target::admit_operation`: there is no declared target to resolve, and the
+/// caller's cancellation-aware `enforce` brackets let an authorizer refusal
+/// outrank a deadline spent during the call — `approve_operation`'s
+/// elapsed-only gate would report the deadline first.
 fn authorize_campaign<A>(
     prepared: &PreparedCampaign,
     live: LiveOptions,

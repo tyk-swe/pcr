@@ -6,19 +6,29 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use super::{Family, Target};
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::check_deadline;
 use crate::policy::{Authorizer, Operation, WireBudget};
 
-/// How a workflow names the two failures every policy gate can raise.
+/// How a workflow names the failures each admission gate can raise.
 pub(crate) trait GateErrors {
     type Error;
+    /// The elapsed-time budget was spent at a policy boundary.
     fn duration_limit(&self, actual: Duration, limit: Duration) -> Self::Error;
+    /// The authorizer refused the declared target or the operation budget.
     fn authorization(&self, source: BoundaryError) -> Self::Error;
+    /// A cooperative `Deadline::enforce` boundary refused: the operation was
+    /// cancelled or its budget was spent.
+    fn interrupted(&self, source: Interrupted) -> Self::Error;
+    /// Resolution produced no address the requested family accepts.
+    fn family(&self, family: Family) -> Self::Error;
 }
 
+/// The admitted address set a resolution produced: the declared target
+/// string plus the family-filtered, deduplicated addresses.
+#[derive(Debug)]
 pub(crate) struct SelectedTargets {
     pub(crate) declared: String,
     pub(crate) addresses: Vec<IpAddr>,

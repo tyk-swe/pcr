@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crate::progress::Runtime;
 use bytes::Bytes;
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
@@ -22,8 +22,7 @@ use crate::probe::evidence::{
     ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
 };
 use crate::probe::runner::sink_observer;
-use crate::target::approve_operation;
-use crate::target::resolve_selected;
+use crate::target::{Family, approve_operation, require_family, resolve_selected};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{
@@ -147,6 +146,9 @@ where
 {
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
+    // `Operation::Dns` is deliberately approved before any server resolution:
+    // destination authorization follows budget approval for this shape, so
+    // admission cannot route through `admit_operation`'s resolve-first order.
     approve_operation(
         authorizer,
         AuthorizedOperation::Dns(prepared.budget),
@@ -418,11 +420,7 @@ where
         let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
-        if addresses.is_empty() {
-            return Err(Error::Family {
-                family: self.request.address_family.label(),
-            });
-        }
+        require_family(&addresses, self.request.address_family, &Gates)?;
         for address in &addresses {
             if !self.summary.resolved_addresses.contains(address) {
                 self.summary.resolved_addresses.push(*address);
@@ -657,6 +655,16 @@ impl crate::target::GateErrors for Gates {
 
     fn authorization(&self, source: BoundaryError) -> Error {
         Error::from(source)
+    }
+
+    fn interrupted(&self, source: Interrupted) -> Error {
+        Error::from(source)
+    }
+
+    fn family(&self, family: Family) -> Error {
+        Error::Family {
+            family: family.label(),
+        }
     }
 }
 

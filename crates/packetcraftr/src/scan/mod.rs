@@ -39,7 +39,6 @@ pub mod profile;
 mod registry;
 mod report;
 mod request;
-mod targets;
 #[cfg(test)]
 mod tests;
 

@@ -20,8 +20,7 @@ use crate::probe::evidence::{
     validate_batch_evidence,
 };
 use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
-use crate::target::approve_operation;
-use crate::target::budgeted;
+use crate::target::{DeclaredTargets, admit_selection, budgeted};
 
 use super::WORKFLOW;
 use super::classification::classify_response;
@@ -383,6 +382,13 @@ struct ApprovedScan {
     endpoints: Vec<ProbeEndpoint>,
 }
 
+/// The complete cost charged to the operation budget before any probe.
+struct ScanPlan {
+    total_probes: usize,
+    maximum_bytes: u64,
+    worst_case: Duration,
+}
+
 fn approve_scan<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
@@ -390,42 +396,53 @@ fn approve_scan<A: Authorizer>(
 ) -> Result<ApprovedScan, Error> {
     let ports = request.selected_ports()?;
     // Implementations must authorize the declared target before DNS and every
-    // answer before anything below constructs a probe.
-    let addresses = super::targets::resolve(request, authorizer, deadline)?;
-    if addresses.is_empty() {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::Family {
-                family: request.address_family.label(),
-            },
-        ));
-    }
-
-    let endpoints_per_address = if request.transport == Transport::Icmp {
-        1
-    } else {
-        ports.len()
-    };
-    let total_probes = probe_count(addresses.len(), endpoints_per_address, request.attempts)?;
-    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
-    let maximum_bytes = maximum_wire_bytes(&addresses, &ports, request)?;
-    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)?;
-    check_probe_duration(WORKFLOW, worst_case, request.limits.max_duration)?;
-    approve_operation(
+    // answer before anything below constructs a probe; `admit_selection` owns
+    // that ordering.
+    let (selected, plan) = admit_selection(
         authorizer,
-        budgeted(
-            u64::try_from(total_probes).unwrap_or(u64::MAX),
-            maximum_bytes,
-        ),
         deadline,
         &WORKFLOW,
+        DeclaredTargets {
+            selection: &request.targets,
+            family: request.address_family,
+            max_targets: request.limits.max_targets,
+        },
+        |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),
+        |selected| {
+            let endpoints_per_address = if request.transport == Transport::Icmp {
+                1
+            } else {
+                ports.len()
+            };
+            let total_probes = probe_count(
+                selected.addresses.len(),
+                endpoints_per_address,
+                request.attempts,
+            )?;
+            check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
+            let maximum_bytes = maximum_wire_bytes(&selected.addresses, &ports, request)?;
+            let worst_case =
+                worst_case_duration(request, selected.addresses.len(), endpoints_per_address)?;
+            check_probe_duration(WORKFLOW, worst_case, request.limits.max_duration)?;
+            Ok(ScanPlan {
+                total_probes,
+                maximum_bytes,
+                worst_case,
+            })
+        },
+        |plan| {
+            Ok(budgeted(
+                u64::try_from(plan.total_probes).unwrap_or(u64::MAX),
+                plan.maximum_bytes,
+            ))
+        },
     )?;
 
     let endpoints = probe_endpoints(request.transport, ports);
     Ok(ApprovedScan {
-        planned_duration: worst_case,
-        declared_target: request.targets.to_string(),
-        addresses,
+        planned_duration: plan.worst_case,
+        declared_target: selected.declared,
+        addresses: selected.addresses,
         endpoints,
     })
 }

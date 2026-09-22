@@ -1,6 +1,6 @@
 # Unify live request execution in probe
 
-Status: open
+Status: resolved
 Blocked by: none
 Spec: ../spec.md §§ Implementation Decisions 1; Testing Decisions
 

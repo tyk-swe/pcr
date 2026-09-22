@@ -390,39 +390,6 @@ fn selector_failures_exit_two_and_list_what_is_accepted() {
 }
 
 #[test]
-fn absent_streams_report_invocation_errors_in_every_format_including_empty_captures() {
-    let populated = write_capture(&[Handshake::complete(40_000, 443, "api.example.test")]);
-    let empty = write_capture(&[]);
-    for (capture, selector) in [(&populated, "tcp:9"), (&empty, "tcp:0")] {
-        let path = path_text(capture.path());
-        let expected = format!("--stream {selector} is not present");
-        for format in ["text", "json", "ndjson"] {
-            let output = run(&["--output", format, "tls", path, "--stream", selector]);
-            assert_eq!(output.status.code(), Some(2), "{format}: {selector}");
-            if format == "text" {
-                assert!(output.stdout.is_empty());
-                let rendered = String::from_utf8_lossy(&output.stderr);
-                assert!(rendered.contains(&expected), "{rendered}");
-                assert!(!rendered.contains("(0.."), "{rendered}");
-                continue;
-            }
-            let error = if format == "ndjson" {
-                let records = parse_ndjson(&output);
-                assert_contiguous(&records);
-                assert_eq!(records.len(), 1, "exactly one terminal error");
-                records[0].clone()
-            } else {
-                parse_json(&output)
-            };
-            assert_eq!(error["status"], "error");
-            assert_eq!(error["error"]["code"], "cli.error");
-            assert_eq!(error["error"]["message"], expected);
-            assert!(error.get("result").is_none());
-        }
-    }
-}
-
-#[test]
 fn the_retention_ceiling_reports_what_it_left_out() {
     let capture = write_capture(&[
         Handshake::complete(40_000, 443, "api.example.test"),

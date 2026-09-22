@@ -17,13 +17,12 @@ use packetcraftr_core::analysis;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{parse_stream_selector, prepare};
+use super::offline_analysis::{parse_stream_selector, prepare, require_selected_stream};
 use crate::errors::CliError;
-use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
-use analysis::StreamTransport;
 use analysis::tls::{Collector, Limits as TlsLimits, Status};
+use analysis::{StreamRef, StreamTransport};
 use rendering::State;
 
 /// Which assembled sessions the command reports.
@@ -141,22 +140,13 @@ pub(super) fn run(
     }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
-    // The stream filter narrows reassembly to one conversation while indices
-    // stay capture-global, so the index reported is the one asked for.
-    let source = selected_stream.map(|index| format!("tcp.stream == {index}"));
-    let prepared = prepare(arguments.limits, source.as_deref(), &arguments.decode)?;
-    // Assembly consumes the reassembler's in-order deliveries; the session
-    // raises the pipeline flags from the collector's declared needs.
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        prepared.options(),
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
+    let (mut reader, session) = prepared.open_session(
+        &arguments.path,
+        arguments.limits.capture.reader,
         collector,
-        selected_stream.map(|index| analysis::StreamRef {
-            transport: StreamTransport::Tcp,
-            index,
-        }),
-    );
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
+        selected_stream,
+    )?;
 
     let mut state = State::new(arguments.max_output_sessions);
     let outcome = session
@@ -173,16 +163,7 @@ pub(super) fn run(
         )
         .map_err(CliError::classified)?;
 
-    // Stream indices are assigned before filtering, so no matched frame
-    // means the requested conversation is absent.
-    if let Some(index) = selected_stream
-        && outcome.selected_absent()
-    {
-        return Err(CliError::new(
-            Kind::Cli,
-            format!("--stream tcp:{index} is not present"),
-        ));
-    }
+    require_selected_stream(outcome.selected_stream())?;
 
     let run_summary = outcome.run;
     let summary = output::tls::Summary::from_analysis(
@@ -193,7 +174,7 @@ pub(super) fn run(
         &run_summary.ip_reassembly,
     );
     match format {
-        ToolFormat::Text => rendering::render_text(&state, &summary, &prepared.registry),
+        ToolFormat::Text => rendering::render_text(&state, &summary, prepared.registry()),
         ToolFormat::Json => rendering::render_aggregate(state, summary),
         ToolFormat::Ndjson => rendering::render_stream(summary, stream),
     }
@@ -219,10 +200,10 @@ fn buffer_floor_error(value: usize) -> CliError {
 }
 
 /// Parses `--stream`, rejecting the transports this command cannot assemble.
-fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
+fn parse_tcp_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
     let selected = parse_stream_selector(spec)?;
     match selected.transport {
-        StreamTransport::Tcp => Ok(selected.index),
+        StreamTransport::Tcp => Ok(selected),
         StreamTransport::Udp => Err(CliError::new(
             Kind::Cli,
             format!(

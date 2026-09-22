@@ -37,10 +37,15 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     let options = prepared.options();
-    let summary = analysis::run(&mut reader, prepared.registry.clone(), &options, |record| {
-        collector.observe(&record);
-        Ok(())
-    })
+    let summary = analysis::run(
+        &mut reader,
+        prepared.shared_registry(),
+        &options,
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
     .map_err(CliError::classified)?;
     let mut report = collector.finish(&summary);
     let frames_read = summary.frames_read;

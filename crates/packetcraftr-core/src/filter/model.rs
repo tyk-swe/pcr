@@ -50,6 +50,20 @@ impl Filter {
         Ok(filter)
     }
 
+    /// Conjoins a prepared frame filter with another compiled predicate.
+    /// Used by analysis to add stream selection without recompiling caller input.
+    pub(crate) fn intersect(&self, other: &Self) -> Self {
+        Self {
+            plan: self.plan.intersect(&other.plan),
+            requirements: Requirements {
+                stream_index: self.requirements.stream_index || other.requirements.stream_index,
+                tcp_stream: self.requirements.tcp_stream || other.requirements.tcp_stream,
+                udp_stream: self.requirements.udp_stream || other.requirements.udp_stream,
+                timestamp: self.requirements.timestamp || other.requirements.timestamp,
+            },
+        }
+    }
+
     /// Required caller context, including TCP/UDP conversation indices.
     /// [`matches`](Self::matches) also checks timestamp availability per frame.
     pub fn requirements(&self) -> Requirements {

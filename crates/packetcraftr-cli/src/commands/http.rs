@@ -57,13 +57,9 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             "HTTP/1 inspection requires --stream tcp:INDEX",
         ));
     }
-    let filter = selector.map(|selected| format!("tcp.stream == {}", selected.index));
-    let setup = super::offline_analysis::prepare(args.limits, filter.as_deref(), &args.decode)?;
-    // The session narrows the plan and raises the TCP/source-tracking flags
-    // from the collector's declared needs.
-    let session =
-        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
-    let mut reader = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
+    let setup = super::offline_analysis::prepare(args.limits, None, &args.decode)?;
+    let (mut reader, session) =
+        setup.open_session(&args.path, args.limits.capture.reader, collector, selector)?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
     let mut output = EventOutput::new(
         format,
@@ -87,9 +83,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             |event| emit(event).map_err(CliError::into_boundary_error),
         )
         .map_err(CliError::classified)?;
-    if outcome.selected_absent() {
-        return Err(CliError::new(Kind::Cli, "selected stream is not present"));
-    }
+    super::offline_analysis::require_selected_stream(outcome.selected_stream())?;
     let run = outcome.run;
     let scopes = outcome.scopes;
     let summary = outcome.summary;

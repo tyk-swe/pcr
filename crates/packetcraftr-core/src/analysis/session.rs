@@ -5,16 +5,16 @@
 //! application commands used to assemble by hand.
 //!
 //! A [`Session`] is prepared with a registry, [`Options`], a [`Collector`],
-//! and the caller's optional conversation selector. Preparing narrows the
-//! run's [`Plan`] to the union of the display filter's
-//! [`Requirements`] and the collector's
-//! [`CollectorNeeds`], so no pipeline stage runs that nothing reads.
+//! and an optional conversation selector. The session intersects the selector
+//! with the caller's compiled frame filter, then narrows the run's [`Plan`] to
+//! the filter's [`Requirements`] and the collector's [`CollectorNeeds`], so no
+//! pipeline stage runs that nothing reads.
 //! [`Session::run`] then drives [`run`](super::run) over the reader —
 //! forwarding IP lifecycle events to one sink and each observed collector
 //! event to another —
 //! captures [`Collector::scopes`] before [`Collector::finish`] consumes the
 //! collector, drains the trailing events through the same event sink, and
-//! reports the empty-selector verdict in its [`Outcome`]. The phases split
+//! reports the typed stream-selection verdict in its [`Outcome`]. The phases split
 //! as [`Session::observe`] → [`Pass::finish`] for callers whose verdict must
 //! precede the collector's terminal work.
 
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::error::{BoundaryError, Classification, Classified, Coordinate};
-use crate::filter::{Filter, Requirements};
+use crate::filter::{Filter, Options as FilterOptions, Requirements};
 use crate::registry::Registry;
 
 use super::pcap::Reader;
@@ -96,11 +96,23 @@ pub trait Collector {
     fn finish(self, run: &Summary) -> Result<(Vec<Self::Event>, Self::Summary), BoundaryError>;
 }
 
+/// The outcome for a requested capture-global conversation.
+///
+/// An absent selection means no frame passed both the stream selector and
+/// any caller-supplied frame filter. No selection is represented by `None`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StreamSelection {
+    /// At least one matching frame was observed.
+    Present(StreamRef),
+    /// No matching frame was observed.
+    Absent(StreamRef),
+}
+
 /// A driven pass whose frames were observed but whose collector has not
 /// finished.
 ///
 /// [`Session::observe`] returns this so a caller can apply the
-/// [`selected_absent`](Self::selected_absent) verdict before
+/// [`selected_stream`](Self::selected_stream) verdict before
 /// [`finish`](Self::finish) — some commands report an absent selection
 /// before any terminal collector work runs.
 pub struct Pass<C: Collector> {
@@ -111,11 +123,17 @@ pub struct Pass<C: Collector> {
 }
 
 impl<C: Collector> Pass<C> {
-    /// A selector was supplied but no frame matched it: the selected stream
-    /// is not present in this capture.
+    /// Whether the requested stream had any matching frames. Available
+    /// before the collector's terminal work for commands that need it.
     #[must_use]
-    pub fn selected_absent(&self) -> bool {
-        self.selector.is_some() && self.run.frames_matched == 0
+    pub fn selected_stream(&self) -> Option<StreamSelection> {
+        self.selector.map(|stream| {
+            if self.run.frames_matched == 0 {
+                StreamSelection::Absent(stream)
+            } else {
+                StreamSelection::Present(stream)
+            }
+        })
     }
 
     /// Captures [`Collector::scopes`], consumes the collector through
@@ -125,7 +143,7 @@ impl<C: Collector> Pass<C> {
     where
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
-        let selected_absent = self.selected_absent();
+        let selected_stream = self.selected_stream();
         // Scope capture precedes finish, which consumes the collector.
         let scopes = self.collector.scopes();
         let (trailing, summary) = self.collector.finish(&self.run)?;
@@ -136,7 +154,7 @@ impl<C: Collector> Pass<C> {
             run: self.run,
             summary,
             scopes,
-            selected_absent,
+            selected_stream,
         })
     }
 }
@@ -144,8 +162,8 @@ impl<C: Collector> Pass<C> {
 /// What a finished [`Session`] produced.
 ///
 /// Trailing events have already drained through the sink when this returns;
-/// [`selected_absent`](Self::selected_absent) is the session's verdict on the
-/// selector the caller supplied, which the caller phrases as it needs.
+/// [`selected_stream`](Self::selected_stream) is the typed verdict on the
+/// selector the caller supplied.
 pub struct Outcome<C: Collector> {
     /// The run's terminal counters and residue.
     pub run: Summary,
@@ -153,15 +171,14 @@ pub struct Outcome<C: Collector> {
     pub summary: C::Summary,
     /// The capture scopes the collector exposed before finishing.
     pub scopes: Vec<Definition>,
-    selected_absent: bool,
+    selected_stream: Option<StreamSelection>,
 }
 
 impl<C: Collector> Outcome<C> {
-    /// A selector was supplied but no frame matched it: the selected stream
-    /// is not present in this capture.
+    /// The selection verdict, after the collector's trailing events drained.
     #[must_use]
-    pub fn selected_absent(&self) -> bool {
-        self.selected_absent
+    pub fn selected_stream(&self) -> Option<StreamSelection> {
+        self.selected_stream
     }
 }
 
@@ -206,21 +223,21 @@ impl Classified for SessionError {
 
 /// A prepared analysis pass: narrowed plan plus the collector lifecycle.
 ///
-/// `options.plan` is replaced — the session derives it from the filter's
-/// [`Filter::requirements`] and the collector's [`CollectorNeeds`] — while
-/// `options.tcp_events` and `options.track_sources` are raised to cover the
-/// declared needs. `selector` only feeds the [`Outcome::selected_absent`]
-/// verdict; selection itself is the already-compiled `options.filter`.
+/// `options.plan` is replaced — the session derives it from the intersection
+/// of `options.filter` and `selector`, plus the collector's [`CollectorNeeds`]
+/// — while `options.tcp_events` and `options.track_sources` are raised to cover
+/// the declared needs. Indexing still happens capture-wide before selection.
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
     registry: Arc<Registry>,
     selector: Option<StreamRef>,
+    selected_filter: Option<Filter>,
 }
 
 impl<'a, C: Collector> Session<'a, C> {
-    /// Prepares a run, narrowing `options`' plan to what the compiled filter
-    /// and the collector actually read.
+    /// Prepares a run, deriving the stream predicate and intersecting it with
+    /// the caller's prepared frame filter before narrowing the plan.
     ///
     /// Conversation indexes are capture-global accounting: they are assigned
     /// before the filter runs and `max_flows` bounds the distinct
@@ -233,8 +250,20 @@ impl<'a, C: Collector> Session<'a, C> {
         collector: C,
         selector: Option<StreamRef>,
     ) -> Self {
-        let requirements = options
-            .filter
+        let selected_filter = selector.map(|stream| {
+            // Both field names are reserved and the value is a u64, so this
+            // generated predicate always fits the default compiler bounds.
+            let source = format!("{}.stream == {}", stream.transport.as_str(), stream.index);
+            let selected = Filter::compile(&source, &registry, FilterOptions::default())
+                .expect("generated stream predicate compiles");
+            match options.filter {
+                Some(filter) => filter.intersect(&selected),
+                None => selected,
+            }
+        });
+        let requirements = selected_filter
+            .as_ref()
+            .or(options.filter)
             .map_or_else(Requirements::default, Filter::requirements);
         let needs = collector.needs();
         options.plan = Plan::physical(requirements).union(needs.plan());
@@ -248,6 +277,7 @@ impl<'a, C: Collector> Session<'a, C> {
             options,
             registry,
             selector,
+            selected_filter,
         }
     }
 
@@ -290,8 +320,18 @@ impl<'a, C: Collector> Session<'a, C> {
         I: FnMut(IpEventRecord) -> Result<(), BoundaryError>,
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
-        let mut collector = self.collector;
-        let run = run_with_ip_events(reader, self.registry, &self.options, ip_sink, |record| {
+        let Self {
+            mut collector,
+            options,
+            registry,
+            selector,
+            selected_filter,
+        } = self;
+        let options = Options {
+            filter: selected_filter.as_ref().or(options.filter),
+            ..options
+        };
+        let run = run_with_ip_events(reader, registry, &options, ip_sink, |record| {
             for event in collector.observe(&record)? {
                 event_sink(event)?;
             }
@@ -300,7 +340,7 @@ impl<'a, C: Collector> Session<'a, C> {
         Ok(Pass {
             run,
             collector,
-            selector: self.selector,
+            selector,
         })
     }
 }
@@ -423,6 +463,10 @@ mod tests {
     }
 
     fn udp_frame(registry: &Arc<Registry>, seconds: u64) -> Frame {
+        udp_frame_on(registry, seconds, 50_000)
+    }
+
+    fn udp_frame_on(registry: &Arc<Registry>, seconds: u64, source_port: u16) -> Frame {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
             protocol: WireValue::Exact(17),
@@ -431,7 +475,7 @@ mod tests {
             ..Ipv4::default()
         });
         packet.push(Udp {
-            source_port: 50_000,
+            source_port,
             destination_port: 9_999,
             ..Udp::default()
         });
@@ -440,6 +484,16 @@ mod tests {
     }
 
     fn tcp_frame(registry: &Arc<Registry>, seconds: u64, flags: u16, sequence: u32) -> Frame {
+        tcp_frame_on(registry, seconds, 40_000, flags, sequence)
+    }
+
+    fn tcp_frame_on(
+        registry: &Arc<Registry>,
+        seconds: u64,
+        source_port: u16,
+        flags: u16,
+        sequence: u32,
+    ) -> Frame {
         let mut packet = Packet::new();
         packet.push(Ipv4 {
             protocol: WireValue::Exact(6),
@@ -448,7 +502,7 @@ mod tests {
             ..Ipv4::default()
         });
         packet.push(Tcp {
-            source_port: 40_000,
+            source_port,
             destination_port: 80,
             sequence,
             flags,
@@ -553,7 +607,7 @@ mod tests {
 
         assert_eq!(driven.outcome.summary, 42);
         assert_eq!(driven.outcome.run.frames_matched, 2);
-        assert!(!driven.outcome.selected_absent());
+        assert_eq!(driven.outcome.selected_stream(), None);
         assert_eq!(
             driven.log,
             [
@@ -571,27 +625,133 @@ mod tests {
     }
 
     #[test]
+    fn stream_selection_keeps_only_the_requested_tcp_or_udp_conversation() {
+        let registry = builtin::registry();
+        let frames = [
+            tcp_frame_on(&registry, 0, 40_000, Tcp::SYN, 100),
+            udp_frame_on(&registry, 1, 50_000),
+            tcp_frame_on(&registry, 2, 40_001, Tcp::SYN, 100),
+            udp_frame_on(&registry, 3, 50_001),
+            tcp_frame_on(&registry, 4, 40_001, Tcp::ACK, 101),
+            udp_frame_on(&registry, 5, 50_001),
+        ];
+        for (transport, expected) in [
+            (StreamTransport::Tcp, [3, 5]),
+            (StreamTransport::Udp, [4, 6]),
+        ] {
+            let selected = StreamRef {
+                transport,
+                index: 1,
+            };
+            let log = Log::default();
+            let views = Rc::new(RefCell::new(Vec::new()));
+            let driven = drive(
+                &registry,
+                &frames,
+                Probe::new(CollectorNeeds::default(), &log, &views),
+                None,
+                Some(selected),
+            )
+            .expect("session runs");
+            assert_eq!(
+                driven.outcome.selected_stream(),
+                Some(StreamSelection::Present(selected))
+            );
+            assert_eq!(
+                driven.outcome.run.frames_read, 6,
+                "all frames consume read budgets"
+            );
+            assert_eq!(driven.outcome.run.frames_matched, 2);
+            assert_eq!(
+                driven.log[..4],
+                [
+                    format!("observe:{}", expected[0]),
+                    format!("event:{}", expected[0]),
+                    format!("observe:{}", expected[1]),
+                    format!("event:{}", expected[1]),
+                ],
+            );
+            assert!(driven.views.iter().all(|view| match transport {
+                StreamTransport::Tcp => view.tcp_indexed,
+                StreamTransport::Udp => view.udp_indexed,
+            }));
+        }
+    }
+
+    #[test]
+    fn stream_selection_intersects_a_prepared_frame_filter() {
+        let registry = builtin::registry();
+        let filter = compile("frame.number == 1 || frame.number == 3", &registry);
+        let frames = [
+            udp_frame_on(&registry, 0, 50_000),
+            udp_frame_on(&registry, 1, 50_001),
+            udp_frame_on(&registry, 2, 50_001),
+            udp_frame_on(&registry, 3, 50_001),
+        ];
+        let log = Log::default();
+        let views = Rc::new(RefCell::new(Vec::new()));
+        let driven = drive(
+            &registry,
+            &frames,
+            Probe::new(CollectorNeeds::default(), &log, &views),
+            Some(&filter),
+            Some(StreamRef {
+                transport: StreamTransport::Udp,
+                index: 1,
+            }),
+        )
+        .expect("session runs");
+        assert_eq!(driven.outcome.run.frames_read, 4);
+        assert_eq!(driven.outcome.run.frames_matched, 1);
+        assert_eq!(&driven.log[..2], ["observe:3", "event:3"]);
+        assert!(driven.views[0].udp_indexed);
+
+        let filter = compile("!(frame.number == 2)", &registry);
+        let log = Log::default();
+        let views = Rc::new(RefCell::new(Vec::new()));
+        let driven = drive(
+            &registry,
+            &frames,
+            Probe::new(CollectorNeeds::default(), &log, &views),
+            Some(&filter),
+            Some(StreamRef {
+                transport: StreamTransport::Udp,
+                index: 1,
+            }),
+        )
+        .expect("session runs");
+        assert_eq!(driven.outcome.run.frames_matched, 2);
+        assert_eq!(
+            &driven.log[..4],
+            ["observe:3", "event:3", "observe:4", "event:4"]
+        );
+    }
+
+    #[test]
     fn empty_selector_verdict_arrives_after_the_trailing_drain() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
         probe.trailing = vec![7];
+        let selected = StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 42,
+        };
 
         let driven = drive(
             &registry,
             &[udp_frame(&registry, 0)],
             probe,
-            Some(&filter),
-            Some(StreamRef {
-                transport: StreamTransport::Tcp,
-                index: 42,
-            }),
+            None,
+            Some(selected),
         )
         .expect("session runs");
 
-        assert!(driven.outcome.selected_absent());
+        assert_eq!(
+            driven.outcome.selected_stream(),
+            Some(StreamSelection::Absent(selected))
+        );
         assert_eq!(
             driven.log,
             ["scopes", "finish", "event:7"],
@@ -602,11 +762,6 @@ mod tests {
     #[test]
     fn split_phases_let_the_verdict_precede_finish() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
-        let options = Options {
-            filter: Some(&filter),
-            ..Options::default()
-        };
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let probe = Probe::new(CollectorNeeds::default(), &log, &views);
@@ -616,19 +771,18 @@ mod tests {
             Ok(())
         };
 
-        let pass = Session::new(
-            registry,
-            options,
-            probe,
-            Some(StreamRef {
-                transport: StreamTransport::Tcp,
-                index: 42,
-            }),
-        )
-        .observe(&mut reader, |_| Ok(()), &mut sink)
-        .expect("frames observe");
+        let selected = StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 42,
+        };
+        let pass = Session::new(registry, Options::default(), probe, Some(selected))
+            .observe(&mut reader, |_| Ok(()), &mut sink)
+            .expect("frames observe");
 
-        assert!(pass.selected_absent());
+        assert_eq!(
+            pass.selected_stream(),
+            Some(StreamSelection::Absent(selected))
+        );
         assert_eq!(
             pass.run.frames_matched, 0,
             "the run summary is available before finish"

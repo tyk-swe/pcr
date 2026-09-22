@@ -129,6 +129,33 @@ impl Plan {
         }
     }
 
+    /// Intersects two already-compiled plans without recompiling caller input.
+    /// A match in the left plan proceeds to the first step of the right plan;
+    /// a miss still stops immediately.
+    pub(super) fn intersect(&self, other: &Self) -> Self {
+        let offset = self.steps.len() as u32;
+        let mut steps = self.steps.to_vec();
+        for step in &mut steps {
+            if step.on_true == MATCH {
+                step.on_true = offset;
+            }
+            if step.on_false == MATCH {
+                step.on_false = offset;
+            }
+        }
+        steps.extend(other.steps.iter().cloned().map(|mut step| {
+            for target in [&mut step.on_true, &mut step.on_false] {
+                if *target != MATCH && *target != MISS {
+                    *target += offset;
+                }
+            }
+            step
+        }));
+        Self {
+            steps: steps.into(),
+        }
+    }
+
     /// Whether the packet satisfies the filter.
     ///
     /// Follows the precomputed jumps, so only predicates the outcome depends

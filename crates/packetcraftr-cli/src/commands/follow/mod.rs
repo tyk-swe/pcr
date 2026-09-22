@@ -12,9 +12,8 @@ mod write;
 use packetcraftr_core::analysis;
 
 use self::arguments::{Args, Direction};
-use super::offline_analysis::{parse_stream_selector, prepare};
+use super::offline_analysis::{parse_stream_selector, prepare, require_selected_stream};
 use crate::errors::CliError;
-use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
 use analysis::follow::{Chunk, Collector};
@@ -33,15 +32,7 @@ pub(super) fn run(
              choose --direction client or --direction server",
         ));
     }
-    // The stream filter narrows reassembly to the followed conversation
-    // while indices stay capture-global, so the index stats reports is the
-    // index extracted here.
-    let source = format!(
-        "{}.stream == {}",
-        selector.transport.as_str(),
-        selector.index
-    );
-    let prepared = prepare(arguments.limits, Some(&source), &arguments.decode)?;
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     crate::command_options::validate_output_bytes(arguments.max_application_output_bytes)?;
     // Stage one file per selected direction before any capture is read, so a
     // missing or unwritable directory fails before the run.
@@ -57,15 +48,12 @@ pub(super) fn run(
             )
         })
         .transpose()?;
-    let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
-
-    // Only TCP needs reassembly; the collector's declared needs cover that.
-    let session = analysis::Session::new(
-        prepared.registry.clone(),
-        prepared.options(),
+    let (mut reader, session) = prepared.open_session(
+        &arguments.path,
+        arguments.limits.capture.reader,
         Collector::new(selector),
         Some(selector),
-    );
+    )?;
     let direction = arguments.direction;
     let mut state = State::new(arguments.limits.capture.retention_ceiling());
     let mut sink = |chunk: Chunk| -> Result<(), packetcraftr_core::error::BoundaryError> {
@@ -85,18 +73,8 @@ pub(super) fn run(
             &mut sink,
         )
         .map_err(CliError::classified)?;
-    // Stream indices are assigned before filtering, including frames without
-    // payload. The verdict precedes finishing and publishing, as before.
-    if pass.selected_absent() {
-        return Err(CliError::new(
-            Kind::Cli,
-            format!(
-                "--stream {}:{} is not present",
-                selector.transport.as_str(),
-                selector.index
-            ),
-        ));
-    }
+    // The verdict precedes collector finish and publication, as before.
+    require_selected_stream(pass.selected_stream())?;
     let outcome = pass.finish(&mut sink).map_err(CliError::classified)?;
     let summary = outcome.summary;
     let run_summary = outcome.run;

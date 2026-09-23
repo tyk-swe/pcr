@@ -120,7 +120,7 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CaseErrors;
 
-impl crate::execution::Errors for CaseErrors {
+impl crate::execution::PacingErrors for CaseErrors {
     type Error = Error;
     type Step = u64;
 
@@ -135,7 +135,9 @@ impl crate::execution::Errors for CaseErrors {
     fn clock(&self, case_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { case_index, source }
     }
+}
 
+impl crate::execution::Errors for CaseErrors {
     fn execution(&self, case_index: u64, source: crate::BoundaryError) -> Error {
         Error::Execution { case_index, source }
     }

@@ -613,7 +613,7 @@ impl crate::target::GateErrors for Gates {
 /// the DNS batch runner paces between questions as attempt 1.
 pub(super) struct Attempts;
 
-impl crate::execution::Errors for Attempts {
+impl crate::execution::PacingErrors for Attempts {
     type Error = Error;
     type Step = u32;
 
@@ -628,7 +628,9 @@ impl crate::execution::Errors for Attempts {
     fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { attempt, source }
     }
+}
 
+impl crate::execution::Errors for Attempts {
     fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
         Error::Execution { attempt, source }
     }

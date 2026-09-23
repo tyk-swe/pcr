@@ -351,7 +351,7 @@ impl crate::target::GateErrors for Workflow {
 
 /// Names execution-context failures at the probe sequence of the batch they
 /// concern.
-impl crate::execution::Errors for Workflow {
+impl crate::execution::PacingErrors for Workflow {
     type Error = Error;
     type Step = u64;
 
@@ -366,7 +366,9 @@ impl crate::execution::Errors for Workflow {
     fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::new(*self, ErrorKind::Clock { sequence, source })
     }
+}
 
+impl crate::execution::Errors for Workflow {
     fn execution(&self, sequence: u64, source: BoundaryError) -> Error {
         Error::new(*self, ErrorKind::Execution { sequence, source })
     }

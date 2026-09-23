@@ -20,11 +20,12 @@ use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::{BoundaryError, Stats, StatsOverflow};
 
-/// How a workflow names the failures the execution context can raise, in the
-/// style of [`crate::target::GateErrors`]. Every method receives the step
-/// coordinate the failure concerns and the original source, so workflow errors
-/// stay typed.
-pub(crate) trait Errors {
+/// How a workflow names the failures pacing can raise, in the style of
+/// [`crate::target::GateErrors`]. Every method receives the step coordinate
+/// the failure concerns and the original source, so workflow errors stay
+/// typed. A workflow that only paces, such as replay, implements just this
+/// and waits through [`pause`].
+pub(crate) trait PacingErrors {
     type Error;
     /// The coordinate that names a step or pause in errors: a probe sequence,
     /// a fuzz case index, a DNS attempt, or a replay source index.
@@ -43,12 +44,53 @@ pub(crate) trait Errors {
         step: Self::Step,
         source: Box<dyn std::error::Error + Send + Sync>,
     ) -> Self::Error;
+}
+
+/// How a workflow that runs steps through a [`Context`] names the failures a
+/// step and the context's statistics can raise, on top of pacing failures.
+pub(crate) trait Errors: PacingErrors {
     /// The step's work failed at its provider boundary.
     fn execution(&self, step: Self::Step, source: BoundaryError) -> Self::Error;
     /// The step returned evidence bound to a different execution permit.
     fn invalid_evidence(&self, step: Self::Step, message: String) -> Self::Error;
     /// Merging the step's statistics, or the scheduled delay, overflowed.
     fn stats_overflow(&self, step: Self::Step, source: StatsOverflow) -> Self::Error;
+}
+
+/// Waits `delay` before `step`, charging it to the deadline.
+///
+/// The order is fixed: check → start accounting the delay → sleep → check
+/// both cancellation and the deadline → surface a clock failure → account
+/// the delay. A spent deadline or a stop request observed after the sleep
+/// therefore outranks a clock failure in every workflow. [`Context::pace`]
+/// runs this and then adds the delay to its statistics; a workflow that keeps
+/// its own schedule and no statistics calls it directly.
+pub(crate) fn pause<C, R>(
+    deadline: &mut Deadline,
+    clock: &mut C,
+    errors: &R,
+    step: R::Step,
+    delay: Duration,
+) -> Result<(), R::Error>
+where
+    C: Clock,
+    R: PacingErrors,
+{
+    let enforce = |deadline: &Deadline| {
+        deadline
+            .enforce()
+            .map_err(|source| errors.interrupted(step, source))
+    };
+    enforce(deadline)?;
+    deadline
+        .start_accounting(delay)
+        .map_err(|source| errors.duration_limit(step, source))?;
+    let slept = clock.sleep(delay);
+    enforce(deadline)?;
+    slept.map_err(|source| errors.clock(step, Box::new(source)))?;
+    deadline
+        .account(delay)
+        .map_err(|source| errors.duration_limit(step, source))
 }
 
 /// Evidence a step returns: the permit it was executed under and the
@@ -123,25 +165,10 @@ where
             .map_err(|source| self.errors.stats_overflow(step, source))
     }
 
-    /// Waits `delay` before `step`, charging it to the deadline and to the
-    /// elapsed statistics.
-    ///
-    /// The order is fixed: check → start accounting the delay → sleep →
-    /// check both cancellation and the deadline → surface a clock failure →
-    /// account the delay → add the scheduled delay. A spent deadline or a
-    /// stop request observed after the sleep therefore outranks a clock
-    /// failure in every workflow.
+    /// Waits `delay` before `step` in the fixed [`pause`] order, then adds the
+    /// scheduled delay to the elapsed statistics.
     pub(crate) fn pace(&mut self, step: R::Step, delay: Duration) -> Result<(), R::Error> {
-        self.enforce(step)?;
-        self.deadline
-            .start_accounting(delay)
-            .map_err(|source| self.errors.duration_limit(step, source))?;
-        let slept = self.clock.sleep(delay);
-        self.enforce(step)?;
-        slept.map_err(|source| self.errors.clock(step, Box::new(source)))?;
-        self.deadline
-            .account(delay)
-            .map_err(|source| self.errors.duration_limit(step, source))?;
+        pause(self.deadline, self.clock, &self.errors, step, delay)?;
         self.merge(
             step,
             &Stats {

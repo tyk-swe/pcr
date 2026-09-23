@@ -22,7 +22,7 @@ enum Failure {
 
 struct TestErrors;
 
-impl Errors for TestErrors {
+impl PacingErrors for TestErrors {
     type Error = Failure;
     type Step = u64;
 
@@ -35,6 +35,9 @@ impl Errors for TestErrors {
     fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
         Failure::Clock(step, source)
     }
+}
+
+impl Errors for TestErrors {
     fn execution(&self, step: u64, source: BoundaryError) -> Failure {
         Failure::Execution(step, source)
     }

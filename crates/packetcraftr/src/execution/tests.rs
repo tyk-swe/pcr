@@ -266,6 +266,28 @@ fn scheduled_delay_is_added_to_elapsed_stats() {
 }
 
 #[test]
+fn a_delay_past_the_remaining_budget_is_refused_before_sleeping() {
+    let time = Time::new();
+    let mut deadline = time.deadline(Duration::from_secs(1));
+    let mut clock = RecordingClock::default();
+    let mut context = Context::new(&mut deadline, &mut clock, TestErrors);
+    context
+        .pace(1, Duration::from_millis(600))
+        .expect("delay fits the budget");
+
+    let error = context
+        .pace(2, Duration::from_millis(600))
+        .expect_err("the delay would pass the budget");
+
+    assert!(matches!(
+        error,
+        Failure::DurationLimit(2, DeadlineExceeded { limit, .. }) if limit == Duration::from_secs(1)
+    ));
+    assert_eq!(context.into_stats().elapsed, Duration::from_millis(600));
+    assert_eq!(clock.delays, [Duration::from_millis(600)]);
+}
+
+#[test]
 fn step_timeouts_are_clipped_to_the_remaining_budget() {
     let time = Time::new();
     let mut deadline = time.deadline(Duration::from_secs(1));

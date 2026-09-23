@@ -59,7 +59,8 @@ pub(crate) trait Classifier {
         outcome: Outcome<Self::Observation>,
     ) -> Self::Event;
     /// Wraps one retained undecodable frame. `probes` is the batch the frame
-    /// arrived with, empty when it arrived outside any batch.
+    /// arrived with. Only a pipelined workflow retains frames outside any
+    /// batch and passes an empty slice; a serial-only workflow may rely on it.
     fn undecoded(&self, probes: &[Self::Probe], frame: Frame) -> Self::Event;
     fn diagnostic(&self, diagnostic: Diagnostic) -> Self::Event;
     /// Whether this probe event ends the operation once its batch finishes.

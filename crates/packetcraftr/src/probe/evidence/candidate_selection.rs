@@ -28,11 +28,11 @@ pub(crate) struct ResponseCandidate<'a, O> {
 /// What the one candidate ordering compares about a response. Serial batch
 /// selection builds it from each [`ResponseCandidate`]; a pipelined executor
 /// that keeps a best-so-far response builds it from what it retained.
-pub(crate) struct CandidateKey<'a, K> {
+pub(crate) struct CandidateKey<'a, T> {
     /// Higher wins.
     pub(crate) rank: u8,
     /// Breaks rank ties; lower wins. Probe workflows use the responder.
-    pub(crate) tie_break: K,
+    pub(crate) tie_break: T,
     /// Breaks key ties; shorter wins.
     pub(crate) latency: Duration,
     /// Breaks latency ties; the lexicographically lower exact frame wins.
@@ -42,9 +42,9 @@ pub(crate) struct CandidateKey<'a, K> {
 /// The single tie-break rule: rank, then tie-break key (responder), then
 /// latency, then bytes. A complete tie keeps the current candidate, so equal
 /// evidence never depends on arrival order.
-pub(crate) fn candidate_precedes<K: Ord>(
-    candidate: &CandidateKey<'_, K>,
-    current: &CandidateKey<'_, K>,
+pub(crate) fn candidate_precedes<T: Ord>(
+    candidate: &CandidateKey<'_, T>,
+    current: &CandidateKey<'_, T>,
 ) -> bool {
     if candidate.rank != current.rank {
         return candidate.rank > current.rank;

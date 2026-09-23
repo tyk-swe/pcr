@@ -114,7 +114,7 @@ impl Classifier for ProbeClassifier<'_> {
     fn undecoded(&self, probes: &[Probe], frame: Frame) -> Event {
         let hop_limit = probes
             .first()
-            .expect("traceroute undecoded frames arrive with their hop batch")
+            .expect("serial traceroute retains undecoded frames with their hop batch")
             .hop_limit;
         Event::Undecoded(UndecodedEvidence { hop_limit, frame })
     }

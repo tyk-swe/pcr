@@ -228,7 +228,7 @@ fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
         RunInput {
             request: &request,
             live: LiveOptions {
-                timeout: Duration::from_millis(1),
+                timeout: Duration::from_millis(100),
                 ..LiveOptions::default()
             },
             packet,

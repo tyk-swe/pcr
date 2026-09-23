@@ -433,13 +433,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   report renders: an interrupt landing in that window now exits cancelled
   instead of printing the report.
 - Serial `scan` and `traceroute` pace and execute probe batches through one
-  shared execution context with a fixed step order. A batch's statistics are
-  merged before an interruption observed after that batch surfaces, so
-  traffic that reached the wire stays accounted. When a batch execution fails
-  while the operation is cancelled or out of time, the run reports the
-  cancellation or `--max-duration` limit instead of the executor failure.
-  Evidence bound to a different execution permit is rejected before evidence
-  validation, and time is accounted after validation.
+  shared execution context with a fixed step order: the execution permit is
+  checked before evidence validation, a batch's statistics are merged before
+  an interruption observed after that batch surfaces, and time is accounted
+  after validation. When a batch execution fails while the operation is
+  cancelled or out of time, the run now reports the cancellation or
+  `--max-duration` limit instead of the executor failure.
 
 ### Removed
 

@@ -50,7 +50,9 @@ where
             max_message_bytes: self.request.limits.message.max_message_bytes,
             permit: crate::evidence::ExecutionPermit::new(),
         };
-        self.deadline.start_accounting(Duration::ZERO)?;
+        self.execution
+            .deadline_mut()
+            .start_accounting(Duration::ZERO)?;
         if attempt_deadline.start_accounting(Duration::ZERO).is_err() {
             return Ok(tcp_timeout_evidence(
                 probe,
@@ -63,7 +65,7 @@ where
                 attempt: probe.attempt,
                 message: "shared DNS attempt deadline regressed after accounting".to_owned(),
             })?
-            .min(self.deadline.remaining()?);
+            .min(self.execution.deadline().remaining()?);
         if timeout.is_zero() {
             return Ok(tcp_timeout_evidence(
                 probe,
@@ -110,15 +112,10 @@ where
             });
         }
         tcp_stats.bytes = u64::try_from(bytes_written).unwrap_or(u64::MAX);
-        self.summary
-            .stats
-            .checked_add_assign(&tcp_stats)
-            .map_err(|_| Error::StatisticsOverflow {
-                attempt: probe.attempt,
-            })?;
+        self.execution.merge(probe.attempt, &tcp_stats)?;
 
-        self.deadline.check_cancelled()?;
-        self.deadline.account(reported_elapsed)?;
+        self.execution.deadline().check_cancelled()?;
+        self.execution.deadline_mut().account(reported_elapsed)?;
         let attempt_expired = attempt_deadline.account(reported_elapsed).is_err();
 
         if attempt_expired || reported_elapsed > timeout {
@@ -181,10 +178,10 @@ where
             self.authorizer,
             &target,
             Family::Any,
-            &*self.deadline,
+            self.execution.deadline(),
             &Gates,
         );
-        self.deadline.enforce()?;
+        self.execution.deadline().enforce()?;
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }

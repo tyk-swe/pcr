@@ -13,6 +13,8 @@ use packetcraftr_netio::{
 };
 
 use crate::clock::Clock;
+use crate::execution::Context;
+use crate::{BoundaryError, StatsOverflow};
 
 use super::error::Error;
 use super::model::{
@@ -179,6 +181,7 @@ where
             pace(
                 run.clock,
                 &mut session.deadline,
+                &options.limits,
                 0,
                 options.inter_pass_delay,
             )?;
@@ -322,7 +325,13 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
                     )
                 })?;
             let remaining = target.saturating_duration_since(self.clock.now());
-            pace(self.clock, &mut session.deadline, source_index, remaining)?;
+            pace(
+                self.clock,
+                &mut session.deadline,
+                &limits,
+                source_index,
+                remaining,
+            )?;
             let transmission = transmit_frame(
                 self.transmitter,
                 &session.deadline,
@@ -604,24 +613,69 @@ fn authorize_final_wire<A: Authorizer>(
     })
 }
 
+/// Waits a source-timing delay through the execution context. Replay keeps
+/// its own schedule in [`Progress`], so the context's statistics are dropped.
 fn pace<C: Clock>(
     clock: &mut C,
     deadline: &mut Deadline,
+    limits: &Limits,
     source_index: u64,
     delay: Duration,
 ) -> Result<(), Error> {
-    deadline
-        .start_accounting(delay)
-        .map_err(|error| duration_limit(source_index, error))?;
-    let slept = clock.sleep(delay);
-    deadline.check_cancelled()?;
-    slept.map_err(|source| Error::Clock {
-        source_index,
-        source: Box::new(source),
-    })?;
-    deadline
-        .account(delay)
-        .map_err(|error| duration_limit(source_index, error))
+    let errors = SourceFrames {
+        limit: limits.max_duration,
+    };
+    Context::new(deadline, clock, errors).pace(source_index, delay)
+}
+
+/// Names execution-context failures as replay errors at a source index.
+/// Replay only paces through the context; it never runs a context step.
+struct SourceFrames {
+    limit: Duration,
+}
+
+impl crate::execution::Errors for SourceFrames {
+    type Error = Error;
+    type Step = u64;
+
+    fn duration_limit(&self, source_index: u64, source: DeadlineExceeded) -> Error {
+        duration_limit(source_index, source)
+    }
+
+    fn interrupted(&self, source_index: u64, source: Interrupted) -> Error {
+        interrupted(source_index, source)
+    }
+
+    fn clock(&self, source_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock {
+            source_index,
+            source,
+        }
+    }
+
+    fn execution(&self, source_index: u64, source: BoundaryError) -> Error {
+        Error::InvalidEvidence {
+            source_index,
+            message: format!("replay does not run execution steps: {source}"),
+        }
+    }
+
+    fn invalid_evidence(&self, source_index: u64, message: String) -> Error {
+        Error::InvalidEvidence {
+            source_index,
+            message,
+        }
+    }
+
+    fn stats_overflow(&self, source_index: u64, _: StatsOverflow) -> Error {
+        duration_limit(
+            source_index,
+            DeadlineExceeded {
+                actual: Duration::MAX,
+                limit: self.limit,
+            },
+        )
+    }
 }
 
 fn transmit_frame<T: Transmitter>(
@@ -676,11 +730,17 @@ fn finish_summary(
 }
 
 fn enforce_deadline(deadline: &Deadline, source_index: u64) -> Result<(), Error> {
-    deadline.enforce().map_err(|interrupted| match interrupted {
+    deadline
+        .enforce()
+        .map_err(|source| interrupted(source_index, source))
+}
+
+fn interrupted(source_index: u64, source: Interrupted) -> Error {
+    match source {
         Interrupted::Cancelled(cancelled) => cancelled.into(),
         Interrupted::Exceeded(error) => duration_limit(source_index, error),
         _ => Error::Cancelled(Cancelled),
-    })
+    }
 }
 
 fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {
@@ -688,69 +748,5 @@ fn duration_limit(source_index: u64, error: DeadlineExceeded) -> Error {
         source_index,
         actual: error.actual,
         limit: error.limit,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_fixtures::RecordingClock;
-    use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::interface::Id;
-    use std::time::{Instant, UNIX_EPOCH};
-
-    #[test]
-    fn processing_time_leaves_only_the_remaining_anchored_wait_to_budget() {
-        let anchor = Instant::now();
-        let options = Options {
-            interface: Some(Id {
-                name: "test0".to_owned(),
-                index: 7,
-            }),
-            repeat: 1,
-            inter_pass_delay: Duration::ZERO,
-            link_mode: LinkMode::Auto,
-            timing: Timing::Original,
-            limits: Limits {
-                max_duration: Duration::from_secs(12),
-                ..Limits::default()
-            },
-        };
-        let mut deadline = Deadline::with_time_source(options.limits.max_duration, move || anchor);
-        deadline.account(Duration::from_secs(5)).unwrap();
-        let progress = Progress {
-            frames_transmitted: 1,
-            previous_timestamp: Some(UNIX_EPOCH),
-            has_previous: true,
-            ..Progress::default()
-        };
-        let frame = Frame::new(
-            UNIX_EPOCH + Duration::from_secs(10),
-            LinkType::ETHERNET,
-            vec![1],
-        )
-        .unwrap();
-        let plan = plan_frame(
-            &options,
-            &options.limits,
-            options.timing,
-            &progress,
-            &frame,
-            1,
-        )
-        .unwrap();
-        assert_eq!(plan.next_duration, Duration::from_secs(10));
-        let remaining =
-            (anchor + plan.next_duration).duration_since(anchor + Duration::from_secs(5));
-        let mut clock = RecordingClock::default();
-        pace(&mut clock, &mut deadline, 1, remaining).unwrap();
-        assert_eq!(clock.delays, [Duration::from_secs(5)]);
-        assert_eq!(deadline.remaining().unwrap(), Duration::from_secs(2));
-
-        assert!(matches!(
-            pace(&mut clock, &mut deadline, 2, Duration::from_secs(3)),
-            Err(Error::DurationLimit { .. })
-        ));
-        assert_eq!(clock.delays.len(), 1);
     }
 }

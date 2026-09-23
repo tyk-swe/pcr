@@ -87,6 +87,16 @@ pub struct Execution {
     pub(crate) stats: Stats,
 }
 
+impl crate::execution::Receipt for Execution {
+    fn permit(&self) -> crate::evidence::ExecutionPermit {
+        self.permit
+    }
+
+    fn stats(&self) -> &Stats {
+        &self.stats
+    }
+}
+
 impl crate::probe::Request for Exchange {
     type Execution = Execution;
 }

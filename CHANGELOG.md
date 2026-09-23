@@ -432,6 +432,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   checked — and once more after a collecting run completes, before the
   report renders: an interrupt landing in that window now exits cancelled
   instead of printing the report.
+- `dns` retry delays, the wait between `dns` batch questions, and `replay`
+  source-timing and inter-pass waits use the shared execution context's
+  pacing order: check, start accounting the delay, sleep, check both
+  cancellation and `--max-duration`, surface a clock failure, account the
+  delay, then add it to elapsed statistics. A wait that overruns
+  `--max-duration` while the clock also fails now reports the duration limit
+  instead of the clock failure, and a batch question stopped that way is
+  unattempted rather than failed. `dns` elapsed statistics include a retry
+  delay only once that delay has been accounted.
 - Serial `scan` and `traceroute` pace and execute probe batches through one
   shared execution context with a fixed step order: the execution permit is
   checked before evidence validation, a batch's statistics are merged before

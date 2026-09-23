@@ -1,10 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
-use super::{Batch, Classification, SentProbe, classify_response};
+use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, SentPacket, Stats,
-    probe::{ExchangeExecutor, Execution, PipelineEvent, PipelineOptions},
+    probe::{
+        ExchangeExecutor, Execution, PipelineEvent, PipelineOptions,
+        evidence::{CandidateKey, candidate_precedes},
+    },
 };
 use packetcraftr_core::{
     build::Builder,
@@ -20,6 +23,7 @@ use packetcraftr_netio::{
 };
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
+    net::IpAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -67,10 +71,26 @@ struct EvidenceUsage {
 struct Pending {
     sent: Arc<SentPacket>,
     deadline: Instant,
-    best: Option<crate::exchange::Response>,
+    best: Option<Best>,
     last_response: Option<Frame>,
-    rank: u8,
     charge: usize,
+}
+/// The response a pending probe would report if it completed now, with what
+/// the shared candidate ordering compares about it.
+struct Best {
+    response: crate::exchange::Response,
+    rank: u8,
+    responder: IpAddr,
+}
+impl Best {
+    fn key(&self) -> CandidateKey<'_, IpAddr> {
+        CandidateKey {
+            rank: self.rank,
+            tie_break: self.responder,
+            latency: self.response.latency,
+            bytes: self.response.response.frame.bytes().as_ref(),
+        }
+    }
 }
 /// Rejects an empty or out-of-budget pipeline configuration before any
 /// resource is armed, so a scan that cannot proceed arms no capture.
@@ -97,51 +117,46 @@ fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), 
     Ok(())
 }
 
-/// Scores every pending probe a captured record could complete: interface,
+/// Observes every pending probe a captured record could complete: interface,
 /// freshness window, transport classification, and application evidence. An
 /// empty or ambiguous result leaves the frame unattributed.
-fn ranked_candidates(
+fn candidates(
     pending: &BTreeMap<usize, Pending>,
     batches: &[Batch],
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
     native_interface: &packetcraftr_netio::interface::Id,
     received: Instant,
-) -> Vec<(usize, u8, bool)> {
-    let mut candidates = Vec::new();
-    for (index, entry) in pending {
-        if entry.sent.route().plan.decision.interface != *native_interface
-            || received < entry.sent.timing().freshness_marker().monotonic()
-            || received > entry.deadline
-        {
-            continue;
-        }
-        if let Some(classified) = classify_response(
-            registry,
-            batches[*index].probe().endpoint.transport(),
-            &entry.sent.built().packet,
-            decoded,
-        ) {
-            let application = super::profile::evidence(
+) -> Vec<(usize, Observation)> {
+    pending
+        .iter()
+        .filter(|(_, entry)| {
+            entry.sent.route().plan.decision.interface == *native_interface
+                && received >= entry.sent.timing().freshness_marker().monotonic()
+                && received <= entry.deadline
+        })
+        .filter_map(|(index, entry)| {
+            Observation::observe(
+                registry,
                 batches[*index].probe(),
                 &entry.sent.built().packet,
                 decoded,
-            );
-            let rank = classified.classification.rank() * 4
-                + application
-                    .as_ref()
-                    .map_or(2, super::profile::Evidence::rank);
-            let definitive = classified.classification == Classification::Open
-                && application.as_ref().is_none_or(|evidence| {
-                    matches!(
-                        evidence.status,
-                        super::profile::Status::Confirmed | super::profile::Status::Unchecked
-                    )
-                });
-            candidates.push((*index, rank, definitive));
-        }
-    }
-    candidates
+            )
+            .map(|observation| (*index, observation))
+        })
+        .collect()
+}
+
+/// An open response with confirmed or unchecked application evidence
+/// completes its probe without waiting for the rest of its timeout.
+fn definitive(observation: &Observation) -> bool {
+    observation.response.classification == Classification::Open
+        && observation.application.as_ref().is_none_or(|evidence| {
+            matches!(
+                evidence.status,
+                profile::Status::Confirmed | profile::Status::Unchecked
+            )
+        })
 }
 
 pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
@@ -324,7 +339,6 @@ where
                         deadline: end,
                         best: None,
                         last_response: None,
-                        rank: 0,
                         charge: plan.costs[next].memory,
                     },
                 );
@@ -418,7 +432,7 @@ where
                 }
                 continue;
             };
-            let candidates = ranked_candidates(
+            let mut candidates = candidates(
                 &pending,
                 batches,
                 &executor.client.registry,
@@ -435,21 +449,30 @@ where
                 }
                 continue;
             }
-            let (index, rank, definitive) = candidates[0];
+            let (index, observation) = candidates.pop().expect("one candidate");
+            let definitive = definitive(&observation);
             let entry = pending.get_mut(&index).expect("candidate is pending");
-            if entry.best.is_none() || rank > entry.rank {
-                if let Some(previous) = &entry.best {
-                    evidence.frames -= 1;
-                    evidence.bytes -= previous.response.frame.bytes().len();
-                }
-                retain(raw.bytes().len(), &mut evidence, options)?;
-                entry.rank = rank;
-                entry.best = Some(crate::exchange::Response {
+            let candidate = Best {
+                rank: observation.rank(),
+                responder: observation.response.responder,
+                response: crate::exchange::Response {
                     request_index: 0,
                     response: decoded,
                     latency: received
                         .duration_since(entry.sent.timing().freshness_marker().monotonic()),
-                });
+                },
+            };
+            if entry
+                .best
+                .as_ref()
+                .is_none_or(|current| candidate_precedes(&candidate.key(), &current.key()))
+            {
+                if let Some(previous) = &entry.best {
+                    evidence.frames -= 1;
+                    evidence.bytes -= previous.response.response.frame.bytes().len();
+                }
+                retain(raw.bytes().len(), &mut evidence, options)?;
+                entry.best = Some(candidate);
             }
             if definitive {
                 complete(
@@ -550,7 +573,7 @@ fn complete(
     entry.last_response = entry
         .best
         .as_ref()
-        .map(|response| response.response.frame.clone());
+        .map(|best| best.response.response.frame.clone());
     *failed = Some(batches[index].probe().clone());
     let stats = Stats {
         packets_attempted: 1,
@@ -562,7 +585,12 @@ fn complete(
     let execution = Execution {
         permit: batches[index].permit,
         sent: vec![entry.sent.as_ref().clone()],
-        responses: entry.best.take().into_iter().collect(),
+        responses: entry
+            .best
+            .take()
+            .map(|best| best.response)
+            .into_iter()
+            .collect(),
         unsolicited: Vec::new(),
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
@@ -589,7 +617,7 @@ fn pending_evidence(pending: &BTreeMap<usize, Pending>, batches: &[Batch]) -> Ve
             response: entry
                 .best
                 .as_ref()
-                .map(|response| response.response.frame.clone())
+                .map(|best| best.response.response.frame.clone())
                 .or_else(|| entry.last_response.clone()),
         })
         .collect()

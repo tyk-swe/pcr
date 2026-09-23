@@ -299,6 +299,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Pipelined `scan` (`--max-in-flight` above 1) picks each probe's winning
+  response with the serial rule: highest rank, then lowest responder address,
+  then shortest latency, then lowest exact frame bytes. Equally ranked
+  responses no longer go to whichever arrived first, so the same captured
+  evidence yields the same probe outcome in either execution mode.
 - HTTP analysis accumulates reassembled header bytes in bulk runs ending at
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF

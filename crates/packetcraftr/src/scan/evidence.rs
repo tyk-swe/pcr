@@ -23,8 +23,8 @@ use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 /// One correlated scan response: its transport classification and, for a
 /// profiled UDP port, the application evidence it carries.
 pub(super) struct Observation {
-    response: ResponseClassification,
-    application: Option<profile::Evidence>,
+    pub(super) response: ResponseClassification,
+    pub(super) application: Option<profile::Evidence>,
 }
 
 impl Observation {

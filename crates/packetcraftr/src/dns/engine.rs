@@ -7,22 +7,20 @@ use std::time::Duration;
 
 use crate::progress::Runtime;
 use bytes::Bytes;
-use packetcraftr_core::budget::{Deadline, Interrupted};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
-use crate::BoundaryError;
-use crate::Stats;
 use crate::clock::Clock;
-use crate::evidence::{Budget, DiagnosticLog};
+use crate::execution::Context;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::probe::Executor;
-use crate::probe::evidence::{
-    ResponseCandidate, UndecodedRetention, response_within_deadline, update_best_candidate,
-};
+use crate::probe::evidence::{EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector};
 use crate::probe::runner::sink_observer;
 use crate::target::{Family, approve_operation, require_family, resolve_selected};
+use crate::{BoundaryError, Stats, StatsOverflow};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{
@@ -231,24 +229,16 @@ impl<'a> PreparedOperation<'a> {
             authorizer,
             registry,
             executor,
-            clock,
-            deadline,
+            execution: Context::new(deadline, clock, Attempts),
             query: self.query.clone(),
             delay: self.delay,
             context,
             summary: &mut self.summary,
-            state: DnsState::default(),
+            evidence: EvidenceState::new(self.request.limits.evidence(), EVIDENCE_DIAGNOSTICS),
             emit: &mut emit,
         }
         .execute()
     }
-}
-
-#[derive(Default)]
-struct DnsState {
-    evidence_budget: Budget,
-    diagnostics: DiagnosticLog,
-    retained_undecoded: usize,
 }
 
 struct Operation<'a, A, E, C, F> {
@@ -256,13 +246,17 @@ struct Operation<'a, A, E, C, F> {
     authorizer: &'a mut A,
     registry: &'a Registry,
     executor: &'a mut E,
-    clock: &'a mut C,
-    deadline: &'a mut Deadline,
+    /// Owns the operation deadline, retry pacing, and the UDP execution step.
+    /// Its statistics become the summary's when the operation ends, however
+    /// it ends.
+    execution: Context<'a, C, Attempts>,
     query: Bytes,
     delay: Duration,
     context: Arc<EventContext>,
     summary: &'a mut Summary,
-    state: DnsState,
+    /// Operation-wide evidence retention and diagnostics, shared by every
+    /// attempt.
+    evidence: EvidenceState,
     emit: &'a mut F,
 }
 
@@ -280,12 +274,20 @@ where
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     fn execute(mut self) -> Result<(), Error> {
+        let result = self.execute_attempts();
+        self.summary.stats = self.execution.into_stats();
+        result
+    }
+
+    fn execute_attempts(&mut self) -> Result<(), Error> {
+        let mut last_attempt = 1;
         for attempt in 1..=self.request.attempts {
+            last_attempt = attempt;
             if self.execute_attempt(attempt)? {
                 break;
             }
         }
-        self.deadline.enforce()?;
+        self.execution.enforce(last_attempt)?;
         self.summary.completion.validate()?;
         Ok(())
     }
@@ -294,36 +296,30 @@ where
         self.wait_before_attempt(attempt)?;
         let probe = self.prepare_probe(attempt)?;
         if self.request.transport == TransportMode::Tcp {
-            let mut attempt_deadline = self.deadline.for_wait(self.request.timeout)?;
+            let mut attempt_deadline = self.execution.deadline().for_wait(self.request.timeout)?;
             return self.query_over_tcp(&probe, &mut attempt_deadline);
         }
         let ProbeExecution {
-            execution,
+            mut execution,
             timeout,
             mut attempt_deadline,
         } = self.execute_probe(&probe)?;
-        self.publish_new_diagnostics()?;
+        self.record_diagnostics(attempt, execution.diagnostics.drain(..))?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
-            &*self.deadline,
             self.registry,
             &probe,
-            &execution,
+            &mut execution,
             self.request.limits,
             timeout,
+            || self.execution.enforce(attempt),
         )?;
         let udp = match best {
-            Some(candidate) => candidate_evidence(
-                &probe,
-                sent_at,
-                candidate,
-                self.request.limits,
-                &mut self.state.evidence_budget,
-                &mut self.state.diagnostics,
-            ),
+            Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
             None => timeout_evidence(&probe, sent_at),
         };
-        self.publish_new_diagnostics()?;
+        // Publishes what retaining the response raised.
+        self.record_diagnostics(attempt, [])?;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
@@ -381,39 +377,22 @@ where
     }
 
     fn wait_before_attempt(&mut self, attempt: u32) -> Result<(), Error> {
-        if attempt != 1 {
-            self.deadline.enforce()?;
-            self.deadline.start_accounting(self.delay)?;
-            let slept = self.clock.sleep(self.delay);
-            self.deadline.check_cancelled()?;
-            slept.map_err(|source| Error::Clock {
-                attempt,
-                source: Box::new(source),
-            })?;
-            self.summary.stats.elapsed =
-                self.summary
-                    .stats
-                    .elapsed
-                    .checked_add(self.delay)
-                    .ok_or(Error::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: self.request.limits.max_duration,
-                    })?;
-            self.deadline.account(self.delay)?;
+        if attempt == 1 {
+            return Ok(());
         }
-        Ok(())
+        self.execution.pace(attempt, self.delay)
     }
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
-        self.deadline.enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
             self.request.address_family,
-            &*self.deadline,
+            self.execution.deadline(),
             &Gates,
         );
-        self.deadline.enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
@@ -449,62 +428,42 @@ where
     }
 
     fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
-        self.deadline.start_accounting(Duration::ZERO)?;
-        let timeout = self.deadline.bounded_timeout(self.request.timeout)?;
+        let limits = self.request.limits;
+        // The attempt window starts before the exchange and is shared with a
+        // TCP fallback, which may use only what the exchange left of it.
         let mut attempt_deadline = Deadline::new(self.request.timeout);
-        let execution_request = Exchange {
-            probe: probe.clone(),
-            timeout,
-            limits: self.request.limits,
-            permit: crate::evidence::ExecutionPermit::new(),
-        };
-        self.deadline.enforce()?;
-        let execution = self.executor.execute(&execution_request);
-        let interrupted = self.deadline.enforce();
-        let mut execution = match execution {
-            Ok(execution) => execution,
-            Err(source) => {
-                interrupted?;
-                return Err(Error::Execution {
-                    attempt: probe.attempt,
-                    source,
-                });
-            }
-        };
-        if execution.permit != execution_request.permit {
-            return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
-        }
-        validate_dns_execution(probe, &execution, self.request.limits, timeout)?;
-        // Confirm the receipt before charging it, but retain that traffic even
-        // when cancellation or elapsed time stops this question at the boundary.
-        self.summary
-            .stats
-            .checked_add_assign(&execution.stats)
-            .map_err(|_| Error::StatisticsOverflow {
-                attempt: probe.attempt,
-            })?;
-        interrupted?;
-        self.deadline.account(execution.stats.elapsed)?;
+        let (execution, grant) = self.execution.step(
+            probe.attempt,
+            self.request.timeout,
+            &mut *self.executor,
+            |executor, grant| {
+                executor.execute(&Exchange {
+                    probe: probe.clone(),
+                    timeout: grant.timeout,
+                    limits,
+                    permit: grant.permit,
+                })
+            },
+            |_, execution, grant, _| {
+                validate_dns_execution(probe, execution, limits, grant.timeout)
+            },
+        )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
-        self.deadline.enforce()?;
-        for diagnostic in execution.diagnostics.drain(..) {
-            self.state.diagnostics.push_once(diagnostic);
-        }
         Ok(ProbeExecution {
             execution,
-            timeout,
+            timeout: grant.timeout,
             attempt_deadline,
         })
     }
 
     fn emit_attempt(&mut self, evidence: AttemptEvidence) -> Result<(), Error> {
-        self.publish(Event::Attempt {
-            context: Arc::clone(&self.context),
-            evidence,
-        })
+        self.publish(
+            evidence.attempt,
+            Event::Attempt {
+                context: Arc::clone(&self.context),
+                evidence,
+            },
+        )
     }
 
     fn accept_response(
@@ -536,12 +495,15 @@ where
             }
         }
         for record in rejected_records {
-            self.publish(Event::Rejected {
+            self.publish(
                 attempt,
-                transport,
-                context: Arc::clone(&self.context),
-                record,
-            })?;
+                Event::Rejected {
+                    attempt,
+                    transport,
+                    context: Arc::clone(&self.context),
+                    record,
+                },
+            )?;
         }
         self.summary.completion.response = Some(metadata);
         Ok(())
@@ -554,91 +516,105 @@ where
         section: Section,
         record: Record,
     ) -> Result<(), Error> {
-        self.publish(Event::Record {
+        self.publish(
             attempt,
-            transport,
-            context: Arc::clone(&self.context),
-            section,
-            record,
-        })
-    }
-
-    fn publish(&mut self, event: Event) -> Result<(), Error> {
-        (self.emit)(event, &*self.deadline)?;
-        self.deadline.enforce()?;
-        Ok(())
-    }
-
-    fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
-        let mut retention = UndecodedRetention::new(
-            &mut self.state.retained_undecoded,
-            self.request.limits.max_undecoded,
-            &mut self.state.evidence_budget,
-            EVIDENCE_DIAGNOSTICS,
-            self.request.limits.max_evidence_frames,
-            self.request.limits.max_evidence_bytes,
-            &mut self.state.diagnostics,
-        );
-        retention.retain(
-            frames,
-            |frame| Event::Undecoded(UndecodedEvidence { attempt, frame }),
-            Event::Diagnostic,
-            |event| (self.emit)(event, &*self.deadline),
-            || self.deadline.enforce().map_err(Into::into),
+            Event::Record {
+                attempt,
+                transport,
+                context: Arc::clone(&self.context),
+                section,
+                record,
+            },
         )
     }
 
-    fn publish_new_diagnostics(&mut self) -> Result<(), Error> {
-        let Self {
-            state,
-            emit,
-            deadline,
-            ..
-        } = self;
-        state
-            .diagnostics
-            .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))?;
-        self.deadline.enforce()?;
-        Ok(())
+    fn publish(&mut self, attempt: u32, event: Event) -> Result<(), Error> {
+        (self.emit)(event, self.execution.deadline())?;
+        self.execution.enforce(attempt)
+    }
+
+    fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
+        self.evidence.retain_undecoded(
+            frames,
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
+            },
+        )
+    }
+
+    /// Records the diagnostics once, publishes every one not yet published,
+    /// then checks the deadline.
+    fn record_diagnostics(
+        &mut self,
+        attempt: u32,
+        diagnostics: impl IntoIterator<Item = Diagnostic>,
+    ) -> Result<(), Error> {
+        self.evidence.record_diagnostics(
+            diagnostics,
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
+            },
+        )?;
+        self.execution.enforce(attempt)
+    }
+}
+
+/// Publishes what the operation's evidence state keeps during one attempt as
+/// DNS events.
+struct AttemptEvents<'e, 'a, C, F> {
+    attempt: u32,
+    execution: &'e Context<'a, C, Attempts>,
+    emit: &'e mut F,
+}
+
+impl<C, F> EvidenceSink for AttemptEvents<'_, '_, C, F>
+where
+    C: Clock,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
+    type Error = Error;
+
+    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
+        (self.emit)(
+            Event::Undecoded(UndecodedEvidence {
+                attempt: self.attempt,
+                frame,
+            }),
+            self.execution.deadline(),
+        )
+    }
+
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
+        (self.emit)(Event::Diagnostic(diagnostic), self.execution.deadline())
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        self.execution.enforce(self.attempt)
     }
 }
 
 fn select_response<'a>(
-    deadline: &Deadline,
     registry: &Registry,
     probe: &Probe,
-    execution: &'a Execution,
+    execution: &'a mut Execution,
     limits: Limits,
     timeout: Duration,
+    check: impl FnMut() -> Result<(), Error>,
 ) -> Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
     let sent_packet = &execution.sent.built().packet;
-    let mut best = None;
-    for matched in &execution.responses {
-        deadline.enforce()?;
-        if response_within_deadline(matched.latency, timeout)
-            && let Some(classification) = classify_response(
-                registry,
-                probe,
-                sent_packet,
-                &matched.response,
-                limits.message,
-            )
-        {
-            update_best_candidate(
-                &mut best,
-                ResponseCandidate {
-                    observation: classification,
-                    decoded: &matched.response,
-                    latency: matched.latency,
-                },
-                timeout,
-                ResponseClassification::rank,
-                |_| (),
-            );
-        }
-        deadline.enforce()?;
-    }
-    Ok(best)
+    // Validation admits only responses to the single query, request index 0.
+    ResponseSelector::new(&mut execution.responses).select(
+        0,
+        timeout,
+        |response| classify_response(registry, probe, sent_packet, response, limits.message),
+        ResponseClassification::rank,
+        |_| (),
+        check,
+    )
 }
 
 pub(super) struct Gates;
@@ -662,5 +638,41 @@ impl crate::target::GateErrors for Gates {
         Error::Family {
             family: family.label(),
         }
+    }
+}
+
+/// Names execution-context failures as DNS errors at the retry attempt they
+/// concern. The DNS batch runner's wait between questions concerns the next
+/// question's first attempt.
+pub(super) struct Attempts;
+
+impl crate::execution::PacingErrors for Attempts {
+    type Error = Error;
+    type Step = u32;
+
+    fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
+        Error::from(source)
+    }
+
+    fn interrupted(&self, _: u32, source: Interrupted) -> Error {
+        Error::from(source)
+    }
+
+    fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock { attempt, source }
+    }
+}
+
+impl crate::execution::Errors for Attempts {
+    fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
+        Error::Execution { attempt, source }
+    }
+
+    fn invalid_evidence(&self, attempt: u32, message: String) -> Error {
+        Error::InvalidEvidence { attempt, message }
+    }
+
+    fn stats_overflow(&self, attempt: u32, _: StatsOverflow) -> Error {
+        Error::StatisticsOverflow { attempt }
     }
 }

@@ -7,11 +7,11 @@
 use std::fmt;
 use std::time::Duration;
 
-use packetcraftr_core::budget::{Cancelled, Interrupted};
+use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use crate::BoundaryError;
 use crate::probe::evidence::EvidenceDiagnosticDescriptor;
+use crate::{BoundaryError, StatsOverflow};
 
 /// The probe workflows that share one lifecycle, error shape, and evidence
 /// budget.
@@ -346,5 +346,38 @@ impl crate::target::GateErrors for Workflow {
                 family: family.label(),
             },
         )
+    }
+}
+
+/// Names execution-context failures at the probe sequence of the batch they
+/// concern.
+impl crate::execution::PacingErrors for Workflow {
+    type Error = Error;
+    type Step = u64;
+
+    fn duration_limit(&self, _sequence: u64, source: DeadlineExceeded) -> Error {
+        crate::target::GateErrors::duration_limit(self, source.actual, source.limit)
+    }
+
+    fn interrupted(&self, _sequence: u64, source: Interrupted) -> Error {
+        crate::target::GateErrors::interrupted(self, source)
+    }
+
+    fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::new(*self, ErrorKind::Clock { sequence, source })
+    }
+}
+
+impl crate::execution::Errors for Workflow {
+    fn execution(&self, sequence: u64, source: BoundaryError) -> Error {
+        Error::new(*self, ErrorKind::Execution { sequence, source })
+    }
+
+    fn invalid_evidence(&self, sequence: u64, message: String) -> Error {
+        Error::new(*self, ErrorKind::InvalidEvidence { sequence, message })
+    }
+
+    fn stats_overflow(&self, sequence: u64, _source: StatsOverflow) -> Error {
+        Error::new(*self, ErrorKind::StatisticsOverflow { sequence })
     }
 }

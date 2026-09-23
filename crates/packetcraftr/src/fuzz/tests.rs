@@ -7,20 +7,17 @@ use std::time::Duration;
 
 use crate::progress::Runtime;
 use bytes::Bytes;
-use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{layer::Raw, packet::Packet};
-use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
 
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
-use super::evidence::add_execution_stats;
 use crate::policy::{Authorizer, Operation};
 
-use super::{Execution, ExecutionCase, RunInput, run, run_with_events};
+use super::{CaseOutcome, Execution, ExecutionCase, RunInput, run, run_with_events};
 use super::{LiveLimits, LiveOptions, Stats};
 use crate::probe::Executor;
 
@@ -78,78 +75,6 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
         super::Error::Campaign(packet_fuzz::Error::InvalidLimit { field: "cases", .. })
     ));
     assert_eq!(executor.executions, 0);
-}
-
-#[test]
-fn execution_statistics_aggregation_is_complete_and_atomic() {
-    let mut total = Stats {
-        cases_generated: 7,
-        cases_built: 5,
-        packets_attempted: 1,
-        packets_completed: 2,
-        bytes: 3,
-        elapsed: Duration::from_secs(4),
-        capture: CaptureStatistics {
-            received_frames: 5,
-            dropped_frames: 6,
-            receiver_dropped_frames: 4,
-            ..CaptureStatistics::default()
-        },
-    };
-    add_execution_stats(
-        &mut total,
-        &ExecutionStats {
-            packets_attempted: 10,
-            packets_completed: 20,
-            bytes: 30,
-            elapsed: Duration::from_secs(40),
-            capture: CaptureStatistics {
-                received_frames: 50,
-                dropped_frames: 60,
-                receiver_dropped_frames: 40,
-                ..CaptureStatistics::default()
-            },
-        },
-        11,
-    )
-    .expect("bounded statistics");
-    assert_eq!(
-        total,
-        Stats {
-            cases_generated: 7,
-            cases_built: 5,
-            packets_attempted: 11,
-            packets_completed: 22,
-            bytes: 33,
-            elapsed: Duration::from_secs(44),
-            capture: CaptureStatistics {
-                received_frames: 55,
-                dropped_frames: 66,
-                receiver_dropped_frames: 44,
-                ..CaptureStatistics::default()
-            },
-        }
-    );
-
-    let before = total.clone();
-    let error = add_execution_stats(
-        &mut total,
-        &ExecutionStats {
-            packets_attempted: 1,
-            capture: CaptureStatistics {
-                receiver_dropped_frames: u64::MAX,
-                ..CaptureStatistics::default()
-            },
-            ..ExecutionStats::default()
-        },
-        12,
-    )
-    .expect_err("capture counter must overflow");
-    assert!(matches!(
-        error,
-        super::Error::StatisticsOverflow { case_index: 12 }
-    ));
-    assert_eq!(total, before);
 }
 
 struct AllowAll;
@@ -289,28 +214,254 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
     }
 }
 
-struct RouteMaterializingExecutor {
-    registry: Arc<packetcraftr_core::registry::Registry>,
+/// Reports the first case as having spent most of the campaign budget, then
+/// answers the next case after `latency`.
+struct BudgetSpendingExecutor {
+    latency: Duration,
+    executions: usize,
 }
 
-impl Executor<ExecutionCase> for RouteMaterializingExecutor {
+impl Executor<ExecutionCase> for BudgetSpendingExecutor {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
-        let sent = route_materialized_sent_packet(&self.registry, case.packet.clone());
+        let first = self.executions == 0;
+        self.executions += 1;
+        let sent = crate::evidence::test_sent_packet(case.packet.clone());
+        let responses = if first {
+            Vec::new()
+        } else {
+            vec![crate::exchange::Response {
+                request_index: 0,
+                response: crate::probe::test_fixtures::decoded_packet(
+                    case.packet.clone(),
+                    std::time::UNIX_EPOCH,
+                    sent.wire_bytes(),
+                    Vec::new(),
+                ),
+                latency: self.latency,
+            }]
+        };
         Ok(Execution {
             permit: case.permit,
             stats: ExecutionStats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: u64::try_from(sent.bytes_sent()).unwrap(),
+                elapsed: Duration::from_millis(if first { 4300 } else { 300 }),
                 ..ExecutionStats::default()
             },
             sent,
-            responses: Vec::new(),
+            responses,
             unmatched: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
         })
     }
+}
+
+/// A 5 s campaign whose first case reports 4.3 s and whose pacing adds
+/// 200 ms leaves at most 500 ms for the second case's 1 s timeout.
+fn budget_spending_input(request: &packet_fuzz::Request) -> RunInput<'_> {
+    RunInput {
+        request,
+        live: LiveOptions {
+            timeout: Duration::from_secs(1),
+            cases_per_second: Some(5),
+            ..LiveOptions::default()
+        },
+        packet: packet(),
+        registry: packetcraftr_core::protocol::builtin::registry(),
+    }
+}
+
+fn budget_spending_request() -> packet_fuzz::Request {
+    packet_fuzz::Request {
+        cases: 2,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().unwrap()],
+        limits: packet_fuzz::Limits {
+            max_duration: Duration::from_secs(5),
+            ..packet_fuzz::Limits::default()
+        },
+        ..packet_fuzz::Request::default()
+    }
+}
+
+#[test]
+fn live_cases_are_classified_and_their_statistics_summarized() {
+    let request = budget_spending_request();
+    let mut executor = BudgetSpendingExecutor {
+        latency: Duration::from_millis(300),
+        executions: 0,
+    };
+
+    let report = run(
+        budget_spending_input(&request),
+        &mut AllowAll,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("a response within the remaining budget is valid");
+
+    assert_eq!(
+        report
+            .cases
+            .iter()
+            .map(|case| case.outcome)
+            .collect::<Vec<_>>(),
+        [CaseOutcome::Timeout, CaseOutcome::Response]
+    );
+    assert_eq!(report.cases[1].responses.len(), 1);
+    let bytes = report
+        .cases
+        .iter()
+        .map(|case| u64::try_from(case.sent.as_ref().unwrap().bytes().len()).unwrap())
+        .sum();
+    // Both executions plus the scheduled pacing delay.
+    assert_eq!(
+        report.stats,
+        Stats {
+            cases_generated: 2,
+            cases_built: 2,
+            packets_attempted: 2,
+            packets_completed: 2,
+            bytes,
+            elapsed: Duration::from_millis(4300 + 200 + 300),
+            ..Stats::default()
+        }
+    );
+}
+
+#[test]
+fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication() {
+    let request = budget_spending_request();
+    let mut executor = BudgetSpendingExecutor {
+        latency: Duration::from_millis(700),
+        executions: 0,
+    };
+    let published = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&published);
+
+    let error = run_with_events(
+        budget_spending_input(&request),
+        &mut AllowAll,
+        &mut executor,
+        &mut NoopClock,
+        &Runtime::default(),
+        move |_| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        },
+    )
+    .expect_err("700 ms latency fits the requested timeout but not the remaining budget");
+
+    assert!(matches!(
+        error,
+        super::Error::InvalidEvidence { case_index: 1, .. }
+    ));
+    assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// Answers every case with one response, one unmatched and one undecodable
+/// frame.
+struct ThreeFrameExecutor;
+
+impl Executor<ExecutionCase> for ThreeFrameExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+        let mut execution = RebuildingExecutor.execute(case)?;
+        let frame = |bytes: &'static [u8]| {
+            packetcraftr_core::frame::Frame::new(
+                std::time::UNIX_EPOCH,
+                packetcraftr_core::frame::LinkType::RAW,
+                bytes,
+            )
+            .unwrap()
+        };
+        execution.responses.push(crate::exchange::Response {
+            request_index: 0,
+            response: crate::probe::test_fixtures::decoded_packet(
+                case.packet.clone(),
+                std::time::UNIX_EPOCH,
+                &[1],
+                Vec::new(),
+            ),
+            latency: Duration::from_millis(1),
+        });
+        execution.unmatched.push(frame(&[2]));
+        execution.undecoded.push(frame(&[3]));
+        Ok(execution)
+    }
+}
+
+#[test]
+fn live_evidence_is_retained_under_one_campaign_budget_that_warns_once() {
+    let request = packet_fuzz::Request {
+        cases: 3,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().unwrap()],
+        ..packet_fuzz::Request::default()
+    };
+
+    let report = run(
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                limits: LiveLimits {
+                    max_evidence_frames: 4,
+                    ..LiveLimits::default()
+                },
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry: packetcraftr_core::protocol::builtin::registry(),
+        },
+        &mut AllowAll,
+        &mut ThreeFrameExecutor,
+        &mut NoopClock,
+    )
+    .expect("omitted evidence is not a failure");
+
+    let retained = |case: &super::Case| {
+        [&case.responses, &case.unmatched, &case.undecoded].map(|frames| {
+            frames
+                .iter()
+                .map(|frame| frame.bytes().to_vec())
+                .collect::<Vec<_>>()
+        })
+    };
+    let warnings = |case: &super::Case| {
+        case.prepared
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "fuzz.evidence_limit")
+            .map(|diagnostic| diagnostic.message.to_string())
+            .collect::<Vec<_>>()
+    };
+    let none: Vec<Vec<u8>> = Vec::new();
+    assert_eq!(
+        report.cases.iter().map(retained).collect::<Vec<_>>(),
+        [
+            [vec![vec![1]], vec![vec![2]], vec![vec![3]]],
+            [vec![vec![1]], none.clone(), none.clone()],
+            [none.clone(), none.clone(), none],
+        ]
+    );
+    assert!(
+        report
+            .cases
+            .iter()
+            .all(|case| case.outcome == CaseOutcome::Response)
+    );
+    assert_eq!(
+        report.cases.iter().map(warnings).collect::<Vec<_>>(),
+        [
+            Vec::new(),
+            vec![format!(
+                "fuzz response evidence exceeded 4 frame(s) or {} byte(s); later exact frames were omitted",
+                LiveLimits::default().max_evidence_bytes
+            )],
+            Vec::new(),
+        ]
+    );
 }
 
 struct SubstitutingFuzzExecutor;
@@ -349,84 +500,6 @@ pub(super) fn packet() -> Packet {
         })
         .push(Raw::new(Bytes::from_static(b"campaign")));
     packet
-}
-
-fn route_materialized_packet() -> Packet {
-    let mut packet = Packet::new();
-    packet
-        .push(Ipv4 {
-            destination: Ipv4Addr::new(198, 51, 100, 2),
-            ..Ipv4::default()
-        })
-        .push(Udp {
-            destination_port: 9,
-            ..Udp::default()
-        })
-        .push(Raw::new(Bytes::from_static(b"campaign")));
-    packet
-}
-
-fn route_materialized_sent_packet(
-    registry: &Arc<packetcraftr_core::registry::Registry>,
-    mut packet: Packet,
-) -> crate::SentPacket {
-    let route = route_materializing_route();
-    crate::materialize::materialize_network_fields(&mut packet, &route.plan)
-        .expect("route source should materialize");
-    crate::materialize::materialize_link_structure(&mut packet, &route.plan)
-        .expect("link structure should materialize");
-    let built = Builder::new(Arc::clone(registry))
-        .build(
-            packet,
-            crate::materialize::build_context(&route.plan),
-            packetcraftr_core::build::Options::default(),
-        )
-        .expect("materialized sent packet should build");
-    let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
-    crate::SentPacket::try_new(built, route, report).expect("trusted materialized sent packet")
-}
-
-fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
-    use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::{
-        interface::Id as InterfaceId,
-        link::{Capability, Mode},
-        route::{Decision, Materialized, Plan},
-    };
-
-    let source = Ipv4Addr::new(192, 0, 2, 10);
-    let destination = Ipv4Addr::new(198, 51, 100, 2);
-    Materialized {
-        plan: Plan {
-            decision: Decision {
-                interface: InterfaceId {
-                    name: "fixture0".to_owned(),
-                    index: 1,
-                },
-                source_mac: None,
-                selected_source: Some(IpAddr::V4(source)),
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: packetcraftr_netio::route::SelectionReason::Gateway,
-                destination_scope: packetcraftr_netio::route::Scope::Global,
-                mtu: u32::MAX,
-                capability: Capability::Layer3,
-                link_type: LinkType::RAW,
-            },
-            mode: Mode::Layer3,
-            lookup_destination: Some(IpAddr::V4(destination)),
-            final_destination: Some(IpAddr::V4(destination)),
-            visited_destinations: vec![IpAddr::V4(destination)],
-            packet_source: Some(IpAddr::V4(source)),
-            neighbor_source: None,
-            neighbor_target: None,
-            destination_mac: None,
-            source_mac: None,
-            neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: false,
-        },
-        neighbor_resolution: None,
-    }
 }
 
 #[test]
@@ -524,48 +597,6 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
 }
 
 #[test]
-fn live_fuzz_accepts_route_materialized_case() {
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let request = packet_fuzz::Request {
-        cases: 1,
-        strategies: vec![packet_fuzz::Strategy::BitFlip],
-        targets: vec!["2.bytes".parse().expect("raw field target")],
-        ..packet_fuzz::Request::default()
-    };
-    let mut authorizer = AllowAll;
-    let mut executor = RouteMaterializingExecutor {
-        registry: Arc::clone(&registry),
-    };
-    let live = run(
-        RunInput {
-            request: &request,
-            live: LiveOptions {
-                timeout: Duration::from_millis(1),
-                ..LiveOptions::default()
-            },
-            packet: route_materialized_packet(),
-            registry,
-        },
-        &mut authorizer,
-        &mut executor,
-        &mut NoopClock,
-    )
-    .expect("route-materialized live fuzz case should be accepted");
-
-    let built = live
-        .cases
-        .iter()
-        .find_map(|case| case.prepared.built.as_ref())
-        .expect("one built live fuzz case");
-    let ipv4 = built
-        .packet
-        .layer(0)
-        .and_then(|layer| layer.as_any().downcast_ref::<Ipv4>())
-        .expect("materialized IPv4 layer");
-    assert_eq!(ipv4.source, Ipv4Addr::new(192, 0, 2, 10));
-}
-
-#[test]
 fn live_fuzz_rejects_substituted_authorized_case() {
     let registry = packetcraftr_core::protocol::builtin::registry();
     let request = packet_fuzz::Request {
@@ -594,6 +625,58 @@ fn live_fuzz_rejects_substituted_authorized_case() {
 
     assert_eq!(error.classification().code, "internal.fuzz_evidence");
     assert!(error.to_string().contains("substituted bytes"));
+}
+
+#[test]
+fn live_fuzz_keeps_the_preparation_error_for_a_case_its_route_cannot_verify() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let request = packet_fuzz::Request {
+        cases: 1,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        ..packet_fuzz::Request::default()
+    };
+    // The reported route has no packet source to fill the unspecified one.
+    let mut unsourced = packet();
+    unsourced
+        .layer_mut(0)
+        .expect("IPv4 layer")
+        .set_field(
+            "source",
+            packetcraftr_core::field::FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED),
+        )
+        .expect("IPv4 source field");
+    let error = run(
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: unsourced,
+            registry,
+        },
+        &mut AllowAll,
+        &mut RebuildingExecutor,
+        &mut NoopClock,
+    )
+    .expect_err("a case its reported route cannot prepare must be rejected");
+
+    assert_eq!(error.classification().code, "internal.fuzz_evidence");
+    let super::Error::UnverifiableRoute { case_index, source } = &error else {
+        panic!("expected the preparation error as the source, got {error:?}");
+    };
+    assert_eq!(*case_index, 0);
+    assert!(
+        matches!(
+            source,
+            crate::Error::PacketMaterialization {
+                field: "source",
+                ..
+            }
+        ),
+        "{source:?}"
+    );
 }
 
 struct DenyingAuthorizer {

@@ -4,13 +4,14 @@ use packetcraftr::{
     Client,
     clock::SystemClock,
     policy::{Policy, PolicyAuthorizer},
-    probe::{ExchangeExecutor, Transport},
+    probe::{ExchangeExecutor, Execution, Executor, Transport},
     scan::{self, Classification, Request},
     target::Target,
 };
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
+    error::{BoundaryError, Classified},
     frame::{Frame, LinkType},
     packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Tcp},
@@ -41,6 +42,9 @@ struct State {
     send_times: Vec<Instant>,
     bad_ingress: Option<Option<Instant>>,
     suppress_replies: bool,
+    /// Answers each probe at once with two equally ranked resets that share
+    /// one ingress time and differ only in their IP identification.
+    tied_resets: bool,
 }
 #[derive(Clone)]
 struct Io(Arc<Mutex<State>>);
@@ -94,31 +98,42 @@ impl transmit::Sender for Io {
             .unwrap();
         let ip = decoded.packet.get::<Ipv4>().unwrap();
         let tcp = decoded.packet.get::<Tcp>().unwrap();
-        let mut response = Packet::new();
-        response.push(Ipv4 {
-            source: ip.destination,
-            destination: ip.source,
-            ..Default::default()
-        });
-        response.push(Tcp {
-            source_port: tcp.destination_port,
-            destination_port: tcp.source_port,
-            sequence: 100,
-            acknowledgment: tcp.sequence.wrapping_add(1),
-            flags: Tcp::SYN | Tcp::ACK,
-            ..Default::default()
-        });
-        let wire = Builder::new(builtin::registry())
-            .build(response, Default::default(), Default::default())
-            .unwrap()
-            .bytes;
+        let reply = |identification: u16, flags: u16| {
+            let mut response = Packet::new();
+            response.push(Ipv4 {
+                identification,
+                source: ip.destination,
+                destination: ip.source,
+                ..Default::default()
+            });
+            response.push(Tcp {
+                source_port: tcp.destination_port,
+                destination_port: tcp.source_port,
+                sequence: 100,
+                acknowledgment: tcp.sequence.wrapping_add(1),
+                flags,
+                ..Default::default()
+            });
+            let wire = Builder::new(builtin::registry())
+                .build(response, Default::default(), Default::default())
+                .unwrap()
+                .bytes;
+            Frame::new(SystemTime::now(), LinkType::RAW, wire).unwrap()
+        };
         let report = transmit::Report::committed(frame.bytes().len(), frame.bytes().clone());
-        state.replies.push_back(capture::Captured::new(
-            Frame::new(SystemTime::now(), LinkType::RAW, wire).unwrap(),
-            Instant::now(),
-        ));
+        let ingress = Instant::now();
+        let replies = if state.tied_resets {
+            vec![reply(2, Tcp::RST | Tcp::ACK), reply(1, Tcp::RST | Tcp::ACK)]
+        } else {
+            vec![reply(0, Tcp::SYN | Tcp::ACK)]
+        };
+        for frame in replies {
+            state
+                .replies
+                .push_back(capture::Captured::new(frame, ingress));
+            state.pending += 1;
+        }
         state.sends += 1;
-        state.pending += 1;
         state.peak = state.peak.max(state.pending);
         state.send_times.push(Instant::now());
         Ok(report)
@@ -141,7 +156,7 @@ impl capture::Session for Capture {
         _: Duration,
     ) -> Result<Option<capture::Captured>, net::Error> {
         let mut state = self.state.lock().unwrap();
-        if state.sends < 2 {
+        if state.sends < 2 && !state.tied_resets {
             return Ok(None);
         }
         if state.suppress_replies {
@@ -385,4 +400,74 @@ fn unproven_ingress_does_not_free_a_window_and_timeouts_advance_in_bounded_waves
     let state = state.lock().unwrap();
     assert!(state.send_times[2].duration_since(state.send_times[0]) >= Duration::from_millis(20));
     assert_eq!(state.shutdowns, 1);
+}
+
+#[test]
+fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
+    let winner = |max_in_flight| {
+        let state = Arc::new(Mutex::new(State {
+            tied_resets: true,
+            ..Default::default()
+        }));
+        let mut request = request();
+        request.max_in_flight = max_in_flight;
+        request.ports = vec![80];
+        let report = execute(&request, state).unwrap();
+        let probe = &report.endpoints[0].probes[0];
+        assert_eq!(probe.classification, Classification::Closed);
+        let frame = probe.response.clone().expect("a tied reset wins");
+        let decoded = Dissector::new(builtin::registry())
+            .decode(frame, Default::default())
+            .unwrap();
+        decoded.packet.get::<Ipv4>().unwrap().identification
+    };
+    // Equal rank, responder, and latency: the lower exact bytes win, not the
+    // first arrival (identification 2).
+    assert_eq!(winner(1), 1);
+    assert_eq!(winner(2), 1);
+}
+
+/// Delegates to the scan executor with each batch's probe removed.
+struct Reshaping<'c>(ExchangeExecutor<'c, Routes, NoNeighbors, Io>);
+
+impl Executor<scan::Batch> for Reshaping<'_> {
+    fn execute(&mut self, batch: &scan::Batch) -> Result<Execution, BoundaryError> {
+        let mut reshaped = batch.clone();
+        reshaped.probes.clear();
+        self.0.execute(&reshaped)
+    }
+}
+
+#[test]
+fn a_scan_batch_without_exactly_one_probe_is_rejected_before_any_send() {
+    let state = Arc::new(Mutex::new(State::default()));
+    let mut request = request();
+    request.max_in_flight = 1;
+    let policy = Policy {
+        max_packets_per_operation: 32,
+        max_bytes_per_operation: 32 * 1500,
+        ..Default::default()
+    };
+    let registry = builtin::registry();
+    let client = Client::new(
+        registry.clone(),
+        Routes,
+        NoNeighbors,
+        Io(state.clone()),
+        policy.clone(),
+    );
+    let mut options = packetcraftr::exchange::Options::default();
+    options.send.plan.link_mode = Mode::Layer3;
+
+    let error = scan::run(
+        &request,
+        &mut PolicyAuthorizer::for_packets(&policy),
+        &registry,
+        &mut Reshaping(ExchangeExecutor::new(&client, options)),
+        &mut SystemClock,
+    )
+    .expect_err("a scan batch without its probe must be rejected");
+
+    assert_eq!(error.classification().code, "cli.scan_executor");
+    assert_eq!(state.lock().unwrap().sends, 0);
 }

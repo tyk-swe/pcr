@@ -3,34 +3,15 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::build::BuiltPacket;
-use packetcraftr_core::codec;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{
     field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
 };
-use packetcraftr_netio::route;
 
-use super::target::Family;
 use crate::Error;
+use crate::target::Family;
 
-/// A packet that has a route and has been built and authorized against it,
-/// but whose neighbor materialization has not run yet.
-pub(crate) struct PlannedPacket {
-    pub(crate) packet: Packet,
-    pub(crate) plan: route::Plan,
-    pub(crate) build_context: codec::Context,
-    pub(crate) preliminary_build: BuiltPacket,
-}
-
-/// The exact bytes and the materialized route a transmission uses, after both
-/// have been authorized together.
-pub(crate) struct PreparedPacket {
-    pub(crate) built: BuiltPacket,
-    pub(crate) route: route::Materialized,
-}
-
-pub(crate) fn build_context(
+pub(super) fn build_context(
     plan: &packetcraftr_netio::route::Plan,
 ) -> packetcraftr_core::codec::Context {
     packetcraftr_core::codec::Context {
@@ -39,7 +20,7 @@ pub(crate) fn build_context(
     }
 }
 
-pub(crate) fn materialize_link_structure(
+pub(super) fn materialize_link_structure(
     packet: &mut Packet,
     plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
@@ -60,7 +41,7 @@ pub(crate) fn materialize_link_structure(
     Ok(())
 }
 
-pub(crate) fn materialize_network_fields(
+pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
@@ -140,7 +121,7 @@ pub(crate) fn materialize_network_fields(
     Ok(())
 }
 
-pub(crate) fn materialize_link_fields(
+pub(super) fn materialize_link_fields(
     packet: &mut Packet,
     route: &packetcraftr_netio::route::Materialized,
 ) -> Result<bool, Error> {
@@ -205,7 +186,7 @@ pub(crate) fn materialize_link_fields(
     }
     Ok(changed)
 }
-pub(crate) fn require_fixed_width_link_materialization(
+pub(super) fn require_fixed_width_link_materialization(
     preliminary_len: usize,
     materialized_len: usize,
 ) -> Result<(), Error> {

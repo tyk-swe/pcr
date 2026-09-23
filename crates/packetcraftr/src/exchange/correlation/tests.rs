@@ -149,10 +149,10 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
 fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     let received_at = Instant::now();
     let sent = [Arc::new(crate::evidence::test_sent_packet(raw_packet()))];
-    let prepared = [PreparedPacket {
-        built: sent[0].built().clone(),
-        route: sent[0].route().clone(),
-    }];
+    let prepared = [PreparedPacket::fixture(
+        sent[0].built().clone(),
+        sent[0].route().clone(),
+    )];
     let mut accumulator = Accumulator::new(1);
     accumulator.unsolicited = vec![
         UnsolicitedEvidence {

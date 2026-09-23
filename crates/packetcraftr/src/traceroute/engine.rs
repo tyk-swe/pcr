@@ -3,36 +3,25 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::progress::Runtime;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
+use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::policy::Authorizer;
-use crate::probe::evidence::{
-    EvidenceState, ResponseSelector, Retained, check_probe_count, check_probe_duration,
-    validate_batch_evidence,
-};
-use crate::probe::runner::{ProbeLifecycle, run_batches, sink_observer};
+use crate::probe::limits::{check_probe_count, check_probe_duration};
+use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
 use crate::target::{GateErrors, admit_operation, budgeted};
-use crate::{BoundaryError, SentPacket};
 
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
-use super::classification::classify_response;
+use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, worst_case_duration};
-use super::probe::sent_probe_matches;
-use super::{
-    Batch, Completion, Event, Hop, Limits, Probe, ProbeEvidence, Report, Request, ResponseKind,
-    Summary, UndecodedEvidence,
-};
-use crate::probe::{
-    Error, ErrorKind, Execution, Executor, ProbeStatus, Transport, enforce_deadline, index_or_push,
-};
+use super::{Batch, Completion, Event, Hop, Report, Request, Summary, UndecodedEvidence};
+use crate::probe::{Error, ErrorKind, Executor, Transport, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -100,7 +89,7 @@ fn run_observed<A, E, C, F>(
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
-    mut emit: F,
+    emit: F,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
@@ -114,26 +103,25 @@ where
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
     enforce_deadline(WORKFLOW, &deadline)?;
-    let mut state = TracerouteState::default();
-    let stats = {
-        let mut lifecycle = Lifecycle {
-            executor,
+    let mut evidence = BatchEvidence::new(
+        WORKFLOW,
+        request.limits.evidence(),
+        ProbeClassifier {
             registry,
-            limits: request.limits,
             target: Arc::from(approved.declared_target.as_str()),
-            state: &mut state,
-            emit: &mut emit,
-        };
-        run_batches(
-            WORKFLOW,
-            &mut batches,
-            request.probes_per_second,
-            &mut deadline,
-            clock,
-            &mut lifecycle,
-        )
-    };
-    let stats = stats?;
+            completion: Completion::Timeout,
+        },
+        emit,
+    );
+    let stats = run_batches(
+        &mut batches,
+        request.probes_per_second,
+        &mut deadline,
+        clock,
+        executor,
+        &mut evidence,
+    )?;
+    let completion = evidence.into_classifier().completion;
 
     Ok(Summary {
         target: approved.declared_target,
@@ -141,7 +129,7 @@ where
         destination: approved.destination,
         strategy: request.strategy,
         destination_port: request.destination_port,
-        completion: state.completion,
+        completion,
         stats,
     })
 }
@@ -259,262 +247,4 @@ fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Err
         worst_case_duration(request)?,
         request.limits.max_duration,
     )
-}
-
-struct TracerouteState {
-    evidence: EvidenceState,
-    completion: Completion,
-}
-
-impl Default for TracerouteState {
-    fn default() -> Self {
-        Self {
-            evidence: EvidenceState::default(),
-            completion: Completion::Timeout,
-        }
-    }
-}
-
-impl TracerouteState {
-    fn observe_probe(&mut self, probe: &ProbeEvidence) {
-        self.completion = match (self.completion, probe.response_kind, probe.status) {
-            (_, Some(ResponseKind::DestinationReached), _)
-            | (Completion::DestinationReached, _, _) => Completion::DestinationReached,
-            (_, Some(ResponseKind::Unreachable), _) | (Completion::Unreachable, _, _) => {
-                Completion::Unreachable
-            }
-            (_, _, ProbeStatus::Response) => Completion::MaximumHops,
-            (completion, _, _) => completion,
-        };
-    }
-}
-
-struct Lifecycle<'a, E, F> {
-    executor: &'a mut E,
-    registry: &'a Registry,
-    limits: Limits,
-    target: Arc<str>,
-    state: &'a mut TracerouteState,
-    emit: &'a mut F,
-}
-
-impl<E, F> ProbeLifecycle<Batch> for Lifecycle<'_, E, F>
-where
-    E: Executor<Batch>,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.executor.execute(batch)
-    }
-
-    fn validate(&mut self, batch: &Batch, execution: &Execution) -> Result<(), Error> {
-        validate_batch_evidence(
-            WORKFLOW,
-            &batch.probes,
-            batch.timeout,
-            execution,
-            self.limits.evidence(),
-            sent_probe_matches,
-        )
-    }
-
-    fn process(
-        &mut self,
-        batch: &Batch,
-        execution: Execution,
-        deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Error> {
-        self.process_batch(batch, execution, deadline)
-    }
-}
-
-impl<E, F> Lifecycle<'_, E, F>
-where
-    E: Executor<Batch>,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    fn process_batch(
-        &mut self,
-        batch: &Batch,
-        execution: Execution,
-        deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Error> {
-        enforce_deadline(WORKFLOW, deadline)?;
-        let Execution {
-            permit,
-            sent,
-            mut responses,
-            unsolicited: _,
-            undecoded: batch_undecoded,
-            diagnostics: batch_diagnostics,
-            stats: _,
-        } = execution;
-        if permit != batch.permit {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidEvidence {
-                    sequence: batch.sequence,
-                    message: "executor returned evidence for a different execution permit"
-                        .to_owned(),
-                },
-            ));
-        }
-        self.record_diagnostics(batch_diagnostics, deadline)?;
-        enforce_deadline(WORKFLOW, deadline)?;
-        let mut response_selector = ResponseSelector::new(&mut responses);
-        let terminal = self.process_probes(batch, &sent, &mut response_selector, deadline)?;
-        // every hop batch is built with at least one probe per hop limit
-        let hop_limit = batch.probes[0].hop_limit;
-        self.retain_undecoded(batch_undecoded, hop_limit, deadline)?;
-        Ok(terminal)
-    }
-
-    fn process_probes(
-        &mut self,
-        batch: &Batch,
-        sent: &[SentPacket],
-        response_selector: &mut ResponseSelector<'_>,
-        deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Error> {
-        let mut terminal = ControlFlow::Continue(());
-        for (request_index, (probe, sent)) in batch.probes.iter().zip(sent.iter()).enumerate() {
-            let evidence = self.classify_probe(
-                probe,
-                sent,
-                request_index,
-                batch.timeout,
-                response_selector,
-                deadline,
-            )?;
-            self.publish_new_diagnostics(deadline)?;
-            if matches!(
-                evidence.response_kind,
-                Some(ResponseKind::DestinationReached | ResponseKind::Unreachable)
-            ) {
-                terminal = ControlFlow::Break(());
-            }
-            self.state.observe_probe(&evidence);
-            (self.emit)(
-                Event::Probe {
-                    target: Arc::clone(&self.target),
-                    probe: evidence,
-                },
-                deadline,
-            )?;
-            enforce_deadline(WORKFLOW, deadline)?;
-        }
-        Ok(terminal)
-    }
-
-    fn classify_probe(
-        &mut self,
-        probe: &Probe,
-        sent: &SentPacket,
-        request_index: usize,
-        timeout: Duration,
-        response_selector: &mut ResponseSelector<'_>,
-        deadline: &Deadline,
-    ) -> Result<ProbeEvidence, Error> {
-        enforce_deadline(WORKFLOW, deadline)?;
-        let sent_at = sent.timing().freshness_marker().wall_clock();
-        let best = response_selector.select(
-            request_index,
-            timeout,
-            |response| {
-                classify_response(
-                    self.registry,
-                    probe.target.transport(),
-                    &sent.built().packet,
-                    response,
-                )
-            },
-            |observation| observation.kind.rank(),
-            |observation| observation.responder,
-            || enforce_deadline(WORKFLOW, deadline),
-        )?;
-        let Some(candidate) = best else {
-            return Ok(ProbeEvidence {
-                sequence: probe.sequence,
-                hop_limit: probe.hop_limit,
-                attempt: probe.attempt,
-                destination: probe.address,
-                strategy: probe.target.transport(),
-                destination_port: probe.target.port(),
-                status: ProbeStatus::Timeout,
-                response_kind: None,
-                responder: None,
-                sent_at,
-                received_at: None,
-                latency: None,
-                response: None,
-                reason: "no checksum-valid, protocol-consistent response before the deadline"
-                    .to_owned(),
-            });
-        };
-        let response = self.state.evidence.retain_response(
-            &candidate.decoded.frame,
-            self.limits.evidence(),
-            WORKFLOW.evidence_diagnostics(),
-        );
-        Ok(ProbeEvidence {
-            sequence: probe.sequence,
-            hop_limit: probe.hop_limit,
-            attempt: probe.attempt,
-            destination: probe.address,
-            strategy: probe.target.transport(),
-            destination_port: probe.target.port(),
-            status: ProbeStatus::Response,
-            response_kind: Some(candidate.observation.kind),
-            responder: Some(candidate.observation.responder),
-            sent_at,
-            received_at: candidate.decoded.frame.timestamp,
-            latency: Some(candidate.latency),
-            response,
-            reason: candidate.observation.reason.to_owned(),
-        })
-    }
-
-    fn retain_undecoded(
-        &mut self,
-        frames: Vec<packetcraftr_core::frame::Frame>,
-        hop_limit: u8,
-        deadline: &Deadline,
-    ) -> Result<(), Error> {
-        self.state.evidence.retain_undecoded(
-            frames,
-            self.limits.evidence(),
-            WORKFLOW.evidence_diagnostics(),
-            |retained| {
-                let event = match retained {
-                    Retained::Frame(frame) => {
-                        Event::Undecoded(UndecodedEvidence { hop_limit, frame })
-                    }
-                    Retained::Diagnostic(diagnostic) => Event::Diagnostic(diagnostic),
-                };
-                (self.emit)(event, deadline)
-            },
-            || enforce_deadline(WORKFLOW, deadline),
-        )
-    }
-
-    fn record_diagnostics(
-        &mut self,
-        diagnostics: Vec<Diagnostic>,
-        deadline: &Deadline,
-    ) -> Result<(), Error> {
-        let Self { state, emit, .. } = self;
-        state
-            .evidence
-            .record_diagnostics(diagnostics, |diagnostic| {
-                emit(Event::Diagnostic(diagnostic), deadline)
-            })
-    }
-
-    fn publish_new_diagnostics(&mut self, deadline: &Deadline) -> Result<(), Error> {
-        let Self { state, emit, .. } = self;
-        state
-            .evidence
-            .diagnostics
-            .publish_new(|diagnostic| emit(Event::Diagnostic(diagnostic), deadline))
-    }
 }

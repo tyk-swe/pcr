@@ -11,15 +11,15 @@ use packetcraftr_core::{decode::Dissector, registry::Registry};
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{OverflowPolicy, Session, Statistics},
-    transmit::{Frame as TransmissionFrame, Sender as PacketIo},
+    transmit::Sender as PacketIo,
 };
 
 use super::CaptureGuard;
 use super::capture::DrainPolicy;
 use super::{Accumulator, Event, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
 
-use crate::materialize::PreparedPacket;
 use crate::planning::expired;
+use crate::preparation::PreparedPacket;
 use crate::{Error, Stats};
 
 pub(super) enum OperationError {
@@ -188,19 +188,12 @@ impl<C: Session> Transaction<C> {
         F: FnMut(Event) -> Result<(), crate::BoundaryError>,
     {
         // `send_index` is produced by `0..self.prepared.len()` in `send_requests`, the only caller
-        let prepared = &self.prepared[send_index];
-        let built = &prepared.built;
-        let route = &prepared.route;
-        let frame = TransmissionFrame::try_new(&built.bytes, route)?;
-        if let Some(signal) = &self.cancellation {
-            signal.check().map_err(LiveIoError::from)?;
-        }
-        let report = io.send(frame)?;
-        let sent = Arc::new(crate::SentPacket::try_new(
-            built.clone(),
-            route.clone(),
-            report,
-        )?);
+        let sent = Arc::new(self.prepared[send_index].clone().transmit(io, || {
+            if let Some(signal) = &self.cancellation {
+                signal.check().map_err(LiveIoError::from)?;
+            }
+            Ok::<(), OperationError>(())
+        })?);
         self.completed_sends =
             self.completed_sends
                 .checked_add(1)

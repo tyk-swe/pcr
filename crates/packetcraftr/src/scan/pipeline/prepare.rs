@@ -1,32 +1,42 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{Batch, limit};
+use super::{Planned, limit};
 use crate::{
-    BoundaryError, Client,
-    materialize::PlannedPacket,
-    policy::{Operation, WireBudget},
+    BoundaryError,
+    preparation::{AdmittedCost, AuthorizedRoute, Discovery},
     probe::{ExchangeExecutor, PipelineOptions},
 };
-use packetcraftr_core::{build::Builder, field::FieldValue, packet::Packet};
-use packetcraftr_netio::{neighbor, route, transmit};
-use std::{collections::HashMap, net::IpAddr, time::Instant};
-#[derive(Clone, Copy)]
-pub(super) struct Cost {
-    pub wire: usize,
-    pub memory: usize,
-}
-pub(super) struct Plan {
-    pub routes: HashMap<IpAddr, route::Plan>,
-    pub costs: Vec<Cost>,
-    pub interfaces: Vec<packetcraftr_netio::interface::Id>,
+use packetcraftr_core::{field::FieldValue, packet::Packet};
+use packetcraftr_netio::{capture::group::MAX_SOURCES, interface, neighbor, route, transmit};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    net::IpAddr,
+    time::Instant,
+};
+/// What the pipeline keeps after every probe was admitted: the discovery
+/// phase that rebuilds each probe at send time, one route per probe address,
+/// each probe's [`AdmittedProbe`] in send order, and the capture interfaces.
+pub(super) struct Plan<'c, R, N, I> {
+    pub discovery: Discovery<'c, R, N, I>,
+    pub routes: HashMap<IpAddr, AuthorizedRoute>,
+    pub probes: Vec<AdmittedProbe>,
+    pub interfaces: Vec<interface::Id>,
     pub base_bytes: usize,
 }
-pub(super) fn plan<R, N, I>(
-    executor: &ExchangeExecutor<'_, R, N, I>,
-    batches: &[Batch],
+/// One admitted probe: the wire cost its send-time rebuild must match, and
+/// the prepared-description memory it holds while in flight.
+pub(super) struct AdmittedProbe {
+    pub cost: AdmittedCost,
+    pub memory: usize,
+}
+/// Admits every probe before any neighbor discovery, charging the prepared
+/// descriptions the pipeline may hold at once against `max_prepared_bytes`.
+pub(super) fn plan<'c, R, N, I>(
+    executor: &'c ExchangeExecutor<'_, R, N, I>,
+    planned: &[Planned<'_>],
     options: PipelineOptions,
     deadline: Instant,
-) -> Result<Plan, BoundaryError>
+) -> Result<Plan<'c, R, N, I>, BoundaryError>
 where
     R: route::Provider,
     N: neighbor::Resolver,
@@ -37,132 +47,76 @@ where
         .validate()
         .map_err(BoundaryError::from_error)?;
     let client = executor.client;
-    let builder = Builder::new(client.registry.clone());
     let mut routes = HashMap::new();
     let mut interfaces = Vec::new();
-    let mut costs = Vec::with_capacity(batches.len());
-    let mut total = 0u64;
-    let mut base_bytes = batches
+    let mut admitted_probes = Vec::with_capacity(planned.len());
+    let mut base_bytes = planned
         .len()
         .checked_mul(384)
         .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
     if base_bytes > options.max_prepared_bytes {
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
-    client
-        .policy
-        .authorize(Operation::Budgeted(WireBudget::new(
-            batches.len() as u64,
-            0,
-        )))
+    let mut admission = client
+        .admission(&executor.options.send, planned.len() as u64, deadline)
         .map_err(BoundaryError::from_error)?;
-    for batch in batches {
+    for &Planned { probe, .. } in planned {
         super::check(client, deadline)?;
-        let packet = batch.probe.packet();
-        if !super::super::probe::sent_probe_matches(&batch.probe, &packet) {
+        let packet = probe.packet();
+        if !super::super::probe::sent_probe_matches(probe, &packet) {
             return Err(BoundaryError::from_error(super::super::profile::Error(
                 "probe fields differ from its selected profile",
             )));
         }
-        let route = match routes.get(&batch.probe.address) {
-            Some(route) => route::Plan::clone(route),
-            None => {
-                let route = client
-                    .plan_with_provider(
-                        &packet,
-                        Some(batch.probe.address),
-                        &executor.options.send.plan,
-                        &client.routes,
-                        Some(deadline),
-                    )
+        let route = match routes.entry(probe.address) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let route = admission
+                    .route(&packet, *entry.key())
                     .map_err(BoundaryError::from_error)?;
-                if !interfaces
-                    .iter()
-                    .any(|interface| interface == &route.decision.interface)
-                {
-                    interfaces.push(route.decision.interface.clone());
-                    if interfaces.len() > packetcraftr_netio::capture::group::MAX_SOURCES {
-                        return Err(limit(
-                            "capture interfaces",
-                            packetcraftr_netio::capture::group::MAX_SOURCES,
-                        ));
+                if !interfaces.contains(route.interface()) {
+                    interfaces.push(route.interface().clone());
+                    if interfaces.len() > MAX_SOURCES {
+                        return Err(limit("capture interfaces", MAX_SOURCES));
                     }
                 }
                 base_bytes = base_bytes
-                    .checked_add(2048 + route.decision.interface.name.len())
+                    .checked_add(2048 + route.interface().name.len())
                     .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
                 if base_bytes > options.max_prepared_bytes {
                     return Err(limit("prepared descriptions", options.max_prepared_bytes));
                 }
-                routes.insert(batch.probe.address, route.clone());
-                route
+                entry.insert(route)
             }
         };
-        let prepared = planned(
-            client,
-            batch,
-            route,
-            &builder,
-            &executor.options.send,
-            deadline,
-        )?;
-        let wire = prepared.preliminary_build.bytes.len();
-        total = total
-            .checked_add(wire as u64)
-            .ok_or_else(|| limit("wire bytes", usize::MAX))?;
-        client
-            .policy
-            .authorize(Operation::Budgeted(WireBudget::new(
-                batches.len() as u64,
-                total,
-            )))
+        let admitted = admission
+            .admit_on(packet, route)
             .map_err(BoundaryError::from_error)?;
-        let memory = charge(&prepared.packet, options.max_prepared_bytes)?
+        let charge = charge(admitted.packet(), options.max_prepared_bytes)?
             .checked_mul(3)
-            .and_then(|bytes| bytes.checked_add(wire))
+            .and_then(|bytes| bytes.checked_add(admitted.wire_len()))
             .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
-        if base_bytes.saturating_add(memory) > options.max_prepared_bytes {
+        if base_bytes.saturating_add(charge) > options.max_prepared_bytes {
             return Err(limit("prepared descriptions", options.max_prepared_bytes));
         }
-        costs.push(Cost { wire, memory });
+        admitted_probes.push(AdmittedProbe {
+            cost: admitted.into_cost(),
+            memory: charge,
+        });
     }
-    if costs
+    if admitted_probes
         .iter()
-        .any(|cost| cost.memory.saturating_add(base_bytes) > options.max_prepared_bytes)
+        .any(|probe| probe.memory.saturating_add(base_bytes) > options.max_prepared_bytes)
     {
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
     Ok(Plan {
+        discovery: admission.discover(),
         routes,
-        costs,
+        probes: admitted_probes,
         interfaces,
         base_bytes,
     })
-}
-pub(super) fn planned<R, N, I>(
-    client: &Client<R, N, I>,
-    batch: &Batch,
-    route: route::Plan,
-    builder: &Builder,
-    options: &crate::send::Options,
-    deadline: Instant,
-) -> Result<PlannedPacket, BoundaryError>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
-    let mut options = options.clone();
-    options.destination = Some(batch.probe.address);
-    client
-        .plan_and_authorize(
-            batch.probe.packet(),
-            route,
-            builder,
-            &options,
-            Some(deadline),
-        )
-        .map_err(BoundaryError::from_error)
 }
 fn charge(packet: &Packet, maximum: usize) -> Result<usize, BoundaryError> {
     fn value(value: &FieldValue, maximum: usize) -> Result<usize, BoundaryError> {

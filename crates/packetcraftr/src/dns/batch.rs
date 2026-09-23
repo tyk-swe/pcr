@@ -7,6 +7,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
+use crate::execution::Context;
 use crate::policy::{Authorizer, Operation};
 use crate::probe::Executor;
 use crate::probe::runner::sink_observer;
@@ -14,7 +15,7 @@ use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
-use super::engine::{Gates, PreparedOperation};
+use super::engine::{Attempts, Gates, PreparedOperation};
 use super::plan::batch_budget;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
@@ -190,6 +191,10 @@ fn batch_deadline(requests: &[Request]) -> Result<Deadline, Error> {
     ))
 }
 
+/// The wait between questions precedes the next question's first attempt,
+/// so its failures name that attempt.
+const FIRST_ATTEMPT: u32 = 1;
+
 pub(super) fn run_batch_observed<A, E, C, F>(
     requests: &[Request],
     authorizer: &mut A,
@@ -231,21 +236,14 @@ where
         if let Some(previous) = previous_delay {
             let delay = previous.max(prepared.delay);
             if !delay.is_zero() {
-                let waited = (|| {
-                    deadline.start_accounting(delay)?;
-                    let slept = clock.sleep(delay);
-                    deadline.check_cancelled()?;
-                    slept.map_err(|source| Error::Clock {
-                        attempt: 1,
-                        source: Box::new(source),
-                    })?;
-                    stats.elapsed = stats
-                        .elapsed
-                        .checked_add(delay)
-                        .ok_or(Error::StatisticsOverflow { attempt: 1 })?;
-                    deadline.account(delay)?;
-                    Ok::<(), Error>(())
-                })();
+                let mut pause = Context::new(&mut *deadline, &mut *clock, Attempts);
+                let waited = pause.pace(FIRST_ATTEMPT, delay).and_then(|()| {
+                    stats.checked_add_assign(&pause.into_stats()).map_err(|_| {
+                        Error::StatisticsOverflow {
+                            attempt: FIRST_ATTEMPT,
+                        }
+                    })
+                });
                 if let Err(error) = waited {
                     stop = true;
                     questions.push(match error {

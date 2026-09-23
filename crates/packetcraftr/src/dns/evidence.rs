@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use packetcraftr_core::{codec::NetworkEnvelope, packet::Packet, protocol::BuiltinProtocol};
 
-use crate::probe::evidence::{
+use crate::probe::validation::{
     ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,

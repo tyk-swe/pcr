@@ -4,7 +4,8 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 
-use crate::probe::{Execution, ProbeEndpoint};
+use crate::BoundaryError;
+use crate::probe::ProbeEndpoint;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -33,26 +34,31 @@ impl crate::probe::runner::Sequenced for Probe {
     }
 }
 
-/// One correlated scan probe and its admitted execution context.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Batch {
-    pub probe: Probe,
-    pub timeout: std::time::Duration,
-    pub(crate) permit: crate::evidence::ExecutionPermit,
-}
+/// One correlated scan probe and its admitted execution context. Scan
+/// executes exactly one probe per batch.
+pub type Batch = crate::probe::Batch<Probe>;
 
-impl crate::probe::Request for Batch {
-    type Execution = Execution;
-}
+impl Batch {
+    /// Plans the batch that executes `probe` alone.
+    pub(super) fn single(probe: Probe, timeout: std::time::Duration) -> Self {
+        Self {
+            sequence: probe.sequence,
+            probes: vec![probe],
+            timeout,
+            permit: crate::evidence::ExecutionPermit::new(),
+        }
+    }
 
-impl crate::probe::runner::BatchPlan for Batch {
-    fn sequence(&self) -> u64 {
-        self.probe.sequence
-    }
-    fn probe_count(&self) -> usize {
-        1
-    }
-    fn timeout_mut(&mut self) -> &mut std::time::Duration {
-        &mut self.timeout
+    /// The batch's only probe. Scan plans every batch with exactly one, so
+    /// only a batch reshaped outside the planner is rejected.
+    pub(crate) fn probe(&self) -> Result<&Probe, BoundaryError> {
+        match self.probes.as_slice() {
+            [probe] => Ok(probe),
+            _ => Err(super::executor::EXECUTOR_FAULT.invalid(format!(
+                "scan batch at probe {} carries {} probes instead of one",
+                self.sequence,
+                self.probes.len()
+            ))),
+        }
     }
 }

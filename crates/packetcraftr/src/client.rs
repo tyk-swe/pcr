@@ -8,18 +8,7 @@ use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::transmit::Sender as PacketIo;
 
 use crate::Error;
-use crate::materialize::{
-    PlannedPacket, PreparedPacket, build_context, materialize_link_fields,
-    materialize_link_structure, materialize_network_fields,
-    require_fixed_width_link_materialization,
-};
-use crate::mtu::validate_mtu;
-use crate::planning::ensure_preparation_deadline;
 use crate::policy::Policy;
-use packetcraftr_core::build::Builder;
-use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::{neighbor, route, transmit};
-use std::time::Instant;
 
 /// High-level composition of packet construction, passive route planning,
 /// explicit neighbor materialization, policy, and packet I/O.
@@ -99,95 +88,4 @@ impl<R, N, I> Client<R, N, I> {
     pub fn policy(&self) -> &Policy {
         &self.policy
     }
-}
-
-impl<R, N, I> Client<R, N, I>
-where
-    R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
-{
-    /// Materializes route-dependent fields and authorizes built bytes without
-    /// traffic.
-    ///
-    /// Checks `deadline` between allocating steps; the single-packet path uses
-    /// `None`.
-    pub(crate) fn plan_and_authorize(
-        &self,
-        mut packet: Packet,
-        plan: route::Plan,
-        builder: &Builder,
-        options: &crate::send::Options,
-        deadline: Option<Instant>,
-    ) -> Result<PlannedPacket, Error> {
-        materialize_network_fields(&mut packet, &plan)?;
-        materialize_link_structure(&mut packet, &plan)?;
-        self.check_cancelled()?;
-        ensure_deadline(deadline)?;
-        let build_context = build_context(&plan);
-        let preliminary_build =
-            builder.build(packet.clone(), build_context.clone(), options.build.clone())?;
-        self.check_cancelled()?;
-        ensure_deadline(deadline)?;
-        validate_mtu(&preliminary_build, plan.decision.mtu)?;
-        self.policy
-            .authorize_built_packet(&preliminary_build, options.allow_permissive_live)?;
-        self.policy
-            .authorize_built_wire(&preliminary_build, &plan)?;
-        Ok(PlannedPacket {
-            packet,
-            plan,
-            build_context,
-            preliminary_build,
-        })
-    }
-
-    /// Resolves link fields (which may emit discovery traffic), rebuilds
-    /// changed packets, and checks the planned frame width. Always reauthorizes
-    /// final bytes and route before transmission.
-    pub(crate) fn materialize_and_authorize(
-        &self,
-        planned: PlannedPacket,
-        builder: &Builder,
-        options: &crate::send::Options,
-        deadline: Option<Instant>,
-    ) -> Result<PreparedPacket, Error> {
-        let PlannedPacket {
-            mut packet,
-            plan,
-            build_context,
-            preliminary_build,
-        } = planned;
-        let preliminary_len = preliminary_build.bytes.len();
-        // The resolver stops at the deadline on its own; a failure it reports
-        // after the deadline passed is the deadline, not a neighbor verdict.
-        self.check_cancelled()?;
-        let route = match route::materialize(plan, &self.neighbors, deadline) {
-            Ok(route) => route,
-            Err(error) => {
-                self.check_cancelled()?;
-                ensure_deadline(deadline)?;
-                return Err(error.into());
-            }
-        };
-        let link_changed = materialize_link_fields(&mut packet, &route)?;
-        let built = if link_changed {
-            self.check_cancelled()?;
-            ensure_deadline(deadline)?;
-            builder.build(packet, build_context, options.build.clone())?
-        } else {
-            preliminary_build
-        };
-        require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
-        self.check_cancelled()?;
-        ensure_deadline(deadline)?;
-        self.policy
-            .authorize_built_packet(&built, options.allow_permissive_live)?;
-        self.policy.authorize_built_wire(&built, &route.plan)?;
-        Ok(PreparedPacket { built, route })
-    }
-}
-
-fn ensure_deadline(deadline: Option<Instant>) -> Result<(), Error> {
-    deadline.map_or(Ok(()), ensure_preparation_deadline)
 }

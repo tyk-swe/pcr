@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
@@ -46,13 +46,6 @@ pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
         .expect("probe test fixture frame carries bytes")
 }
 
-pub(crate) fn raw_frame(seconds: u64) -> Frame {
-    evidence_frame(
-        SystemTime::UNIX_EPOCH + Duration::from_secs(seconds),
-        &[0x45],
-    )
-}
-
 /// Counts executions and shutdowns while optionally failing the `fail_at`-th
 /// call, so progressive-output tests share one failure-injection executor
 /// across request types. `failure_message` and `failure_code` keep the induced
@@ -83,26 +76,5 @@ where
         let execution = self.inner.execute(request);
         self.shutdowns.fetch_add(1, Ordering::SeqCst);
         execution
-    }
-}
-
-/// Retains `frames` plus `diagnostic` on every batch the inner executor
-/// produces, so evidence-limits tests share one fixture across workflows.
-pub(crate) struct RetainedEvidenceExecutor<I> {
-    pub(crate) inner: I,
-    pub(crate) frames: Vec<Frame>,
-    pub(crate) diagnostic: Diagnostic,
-}
-
-impl<R, I> Executor<R> for RetainedEvidenceExecutor<I>
-where
-    R: Request<Execution = super::runner::Execution>,
-    I: Executor<R>,
-{
-    fn execute(&mut self, request: &R) -> Result<R::Execution, BoundaryError> {
-        let mut execution = self.inner.execute(request)?;
-        execution.undecoded.extend(self.frames.iter().cloned());
-        execution.diagnostics.push(self.diagnostic.clone());
-        Ok(execution)
     }
 }

@@ -11,14 +11,12 @@ use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, packet::Packet, registry::Registry,
 };
 
-use crate::evidence::{Budget, DiagnosticLog};
-use crate::probe::evidence::{ResponseCandidate, retain_evidence};
+use crate::probe::evidence::{EvidenceState, ResponseCandidate};
 use crate::probe::{self, Transport as ProbeTransport};
 
-use super::EVIDENCE_DIAGNOSTICS;
 use super::error::{Error, WireError};
 use super::wire::{decode_response, decode_tcp_frame};
-use super::{AttemptEvidence, Limits, MessageLimits, Outcome, Probe, ValidatedResponse};
+use super::{AttemptEvidence, MessageLimits, Outcome, Probe, ValidatedResponse};
 
 pub const fn response_code_name(code: u16) -> &'static str {
     match code {
@@ -239,19 +237,9 @@ pub(super) fn candidate_evidence(
     probe: &Probe,
     sent_at: SystemTime,
     candidate: ResponseCandidate<'_, ResponseClassification>,
-    limits: Limits,
-    budget: &mut Budget,
-    diagnostics: &mut DiagnosticLog,
+    evidence: &mut EvidenceState,
 ) -> ClassifiedAttempt {
-    let response_frame = retain_evidence(
-        budget,
-        &candidate.decoded.frame,
-        EVIDENCE_DIAGNOSTICS,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-        diagnostics,
-    )
-    .then(|| candidate.decoded.frame.clone());
+    let response_frame = evidence.retain_response(&candidate.decoded.frame);
     let (status, response_code, reason, response) = match classify_attempt(candidate.observation) {
         AttemptClassification::Accepted {
             truncated,

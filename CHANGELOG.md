@@ -61,6 +61,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   eliminating a per-packet memcpy in the DHCP, ICMP, IGMP, raw, DNS, NTP, HTTP,
   and TLS decode paths. Callers holding borrowed bytes wrap them once with
   `Bytes::copy_from_slice`/`Bytes::from`.
+- `scan::Batch` is now an alias of the shared `probe::Batch<scan::Probe>`, as
+  `traceroute::Batch` already was. Executor implementations read the scan
+  batch's single probe from the one-element `batch.probes` instead of
+  `batch.probe`. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -295,6 +299,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Pipelined `scan` (`--max-in-flight` above 1) picks each probe's winning
+  response with the serial rule: highest rank, then lowest responder address,
+  then shortest latency, then lowest exact frame bytes. Equally ranked
+  responses no longer go to whichever arrived first, so the same captured
+  evidence yields the same probe outcome in either execution mode.
+- Pipelined `scan` prepares its probes through the same staged preparation as
+  `exchange`, so a cumulative wire-byte overflow reports the policy byte limit
+  instead of `policy.scan_pipeline_limit`.
 - HTTP analysis accumulates reassembled header bytes in bulk runs ending at
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF
@@ -432,6 +444,36 @@ All notable changes to PacketcraftR are documented here. The format follows
   checked — and once more after a collecting run completes, before the
   report renders: an interrupt landing in that window now exits cancelled
   instead of printing the report.
+- `dns` retry delays, the wait between `dns` batch questions, and `replay`
+  source-timing and inter-pass waits use the shared execution context's
+  pacing order: check, start accounting the delay, sleep, check both
+  cancellation and `--max-duration`, surface a clock failure, account the
+  delay, then add it to elapsed statistics. A wait that overruns
+  `--max-duration` while the clock also fails now reports the duration limit
+  instead of the clock failure, and a batch question stopped that way is
+  unattempted rather than failed. `dns` elapsed statistics include a retry
+  delay only once that delay has been accounted.
+- Serial `scan` and `traceroute` pace and execute probe batches through one
+  shared execution context with a fixed step order: the execution permit is
+  checked before evidence validation, a batch's statistics are merged before
+  an interruption observed after that batch surfaces, and time is accounted
+  after validation. When a batch execution fails while the operation is
+  cancelled or out of time, the run now reports the cancellation or
+  `--max-duration` limit instead of the executor failure.
+- Live `fuzz` paces and executes cases through the same execution context.
+  After a `--rate` delay it checks both `--max-duration-ms` and cancellation
+  before it reports a failed rate timer, so a delay that fails its timer and
+  also spends the duration budget now reports `policy.fuzz_resource_limit`
+  instead of `io.fuzz_clock`. A case's execution permit, sent bytes and
+  evidence are validated, and its statistics merged, before an interruption
+  observed after that case surfaces, so invalid evidence is reported even
+  when the campaign was cancelled or ran out of time during that case. Time
+  is accounted after validation.
+- A live `fuzz` case whose exact bytes cannot be prepared on the route its
+  executor reported now fails with `fuzz::Error::UnverifiableRoute`, which
+  keeps the preparation error as its source, instead of `InvalidEvidence`
+  with that error's text. The code (`internal.fuzz_evidence`) and message are
+  unchanged; the error's `causes` now list the preparation error.
 
 ### Removed
 

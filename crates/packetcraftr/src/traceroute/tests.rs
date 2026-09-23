@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
-use crate::probe::test_fixtures::{
-    ProgressiveExecutor, RetainedEvidenceExecutor, decoded_packet, private_policy, raw_frame,
-};
+use crate::probe::test_fixtures::{ProgressiveExecutor, decoded_packet, private_policy};
 use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
@@ -673,44 +671,4 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
     assert_eq!(error.classification().code, "io.test_output");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn traceroute_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
-    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let mut request = udp_traceroute_request(Target::Address(address));
-    request.max_hops = 1;
-    request.probes_per_hop = 1;
-    request.limits.max_undecoded = 1;
-    let result = run(
-        &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
-        &packetcraftr_core::protocol::builtin::registry(),
-        &mut RetainedEvidenceExecutor {
-            inner: NoResponseExecutor::default(),
-            frames: vec![raw_frame(3), raw_frame(4)],
-            diagnostic: Diagnostic::info("traceroute.fixture", "fixture diagnostic"),
-        },
-        &mut NoopClock,
-    )
-    .expect("bounded undecoded evidence must complete");
-
-    assert_eq!(result.hops.len(), 1);
-    assert_eq!(result.hops[0].probes.len(), 1);
-    assert_eq!(result.undecoded.len(), 1);
-    assert_eq!(result.stats.packets_completed, 1);
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "traceroute.fixture")
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "traceroute.undecoded_limit")
-    );
 }

@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Range and cross-limit checks for probe workflow requests, and the probe
+//! count and duration checks their plans must pass.
+
 use std::time::Duration;
 
 use crate::probe::{Error, ErrorKind, Workflow};

@@ -595,6 +595,12 @@ Workflow-specific types keep their module homes: `dns::Error`,
 `fuzz::Execution`, and the specialized `traceroute::Batch` alias are
 unchanged.
 
+`scan::Batch` is now the specialized `probe::Batch<scan::Probe>` alias, like
+`traceroute::Batch`. A scan batch still carries exactly one probe, so an
+executor implementation reads `batch.probes[0]` (or iterates `batch.probes`)
+where it read `batch.probe`. Probe order, timeouts, and upfront budgets are
+unchanged.
+
 ## Removed equivalent paths
 
 Items that were reachable at more than one public path keep only their

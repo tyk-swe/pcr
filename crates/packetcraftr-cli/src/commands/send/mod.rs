@@ -5,80 +5,33 @@ pub(super) mod arguments;
 
 use packetcraftr_cli::output::contract::SendFormat;
 
-use std::sync::Arc;
-
 use packetcraftr_core as core;
 use packetcraftr_core::analysis::pcap as capture;
 
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
+use super::preparation::{self, Prepared};
 use crate::errors::CliError;
-use crate::input::read_recipe;
 use crate::rendering::{
     emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
     write_raw, write_summary_line,
 };
-use crate::system::{Client, client, prepare_packet_route};
 
-/// The recipe, route, and set-execution options with a client bound to the
-/// same policy.
-struct PreparedSend {
-    template: core::template::Template,
-    options: packetcraftr::send::SetOptions,
-    client: Client,
-}
-
-fn prepare(arguments: Args) -> Result<PreparedSend, CliError> {
+fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::SetOptions>, CliError> {
     let Args {
         send,
         template,
         repeat,
         rate,
     } = arguments;
-    let max_template_packets = template.max_template_packets;
-    let axes = template.parse()?;
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let packet = read_recipe(
-        send.route.recipe,
-        &registry,
-        core::layout::DEFAULT_MAX_LAYERS,
-    )?;
-    let template = axes.into_template(packet);
-    let policy = send.policy.into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    let mut options = packetcraftr::send::SetOptions {
+    let options = packetcraftr::send::SetOptions {
         repeat,
         rate,
-        max_template_packets,
+        max_template_packets: template.max_template_packets,
         ..Default::default()
     };
-    let total = options
-        .validate_for(&template)
-        .map_err(CliError::classified)?;
-    policy
-        .authorize(packetcraftr::policy::Operation::Budgeted(
-            packetcraftr::policy::WireBudget::new(total, 0),
-        ))
-        .map_err(CliError::classified)?;
-    let first =
-        crate::system::authorize_expanded_destinations(&template, max_template_packets, &policy)?;
-    let prepared = prepare_packet_route(first, send.route.destination, send.route.route, policy)?;
-    let client = client(Arc::clone(&registry), prepared.policy);
-    options.send = packetcraftr::send::Options {
-        destination: prepared.destination,
-        plan: prepared.options,
-        build: core::build::Options {
-            mode: send.mode.into(),
-            ..core::build::Options::default()
-        },
-        allow_permissive_live: send.allow_permissive_live,
-    };
-    Ok(PreparedSend {
-        template,
-        options,
-        client,
-    })
+    preparation::prepare(send, template, options)
 }
 
 /// Maps a per-frame rendering failure into the workflow's output channel.

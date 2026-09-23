@@ -14,7 +14,7 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::policy::Authorizer;
-use crate::probe::evidence::{check_probe_count, check_probe_duration};
+use crate::probe::limits::{check_probe_count, check_probe_duration};
 use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
 use crate::target::{DeclaredTargets, GateErrors, admit_selection, budgeted};
 
@@ -239,7 +239,8 @@ where
         match event {
             PipelineEvent::Sent { index, sent } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                if confirmed[index] || !sent_probe_matches(batch.probe(), &sent.built().packet) {
+                let probe = batch.probe()?;
+                if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
                     return Err(invalid(index));
                 }
                 confirmed[index] = true;
@@ -249,7 +250,7 @@ where
                 evidence
                     .emit(
                         Event::Sent(super::SentProbe {
-                            probe: batch.probe().clone(),
+                            probe: probe.clone(),
                             sent,
                         }),
                         deadline,

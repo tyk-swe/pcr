@@ -4,6 +4,8 @@ mod prepare;
 use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, SentPacket, Stats,
+    evidence::ExecutionPermit,
+    preparation::RebuildError,
     probe::{
         ExchangeExecutor, Execution, PipelineEvent, PipelineOptions,
         evidence::{CandidateKey, candidate_precedes},
@@ -20,6 +22,7 @@ use packetcraftr_netio::{
     capture::{self, group},
     neighbor, route, transmit,
 };
+use prepare::AdmittedProbe;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     net::IpAddr,
@@ -93,6 +96,24 @@ impl Best {
 }
 /// Rejects an empty or out-of-budget pipeline configuration before any
 /// resource is armed, so a scan that cannot proceed arms no capture.
+/// One batch as the pipeline runs it: its only probe and the permit its
+/// evidence must carry. Every batch is checked for exactly one probe before
+/// anything is planned.
+#[derive(Clone, Copy)]
+struct Planned<'b> {
+    probe: &'b super::Probe,
+    permit: ExecutionPermit,
+}
+
+impl<'b> Planned<'b> {
+    fn new(batch: &'b Batch) -> Result<Self, BoundaryError> {
+        Ok(Self {
+            probe: batch.probe()?,
+            permit: batch.permit,
+        })
+    }
+}
+
 fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), BoundaryError> {
     if batches.is_empty()
         || batches.len() > super::MAX_PROBES
@@ -121,7 +142,7 @@ fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), 
 /// empty or ambiguous result leaves the frame unattributed.
 fn candidates(
     pending: &BTreeMap<usize, Pending>,
-    batches: &[Batch],
+    planned: &[Planned<'_>],
     registry: &packetcraftr_core::registry::Registry,
     decoded: &packetcraftr_core::decode::DecodedPacket,
     native_interface: &packetcraftr_netio::interface::Id,
@@ -137,7 +158,7 @@ fn candidates(
         .filter_map(|(index, entry)| {
             Observation::observe(
                 registry,
-                batches[*index].probe(),
+                planned[*index].probe,
                 &entry.sent.built().packet,
                 decoded,
             )
@@ -199,7 +220,11 @@ where
     let deadline = started
         .checked_add(options.max_duration)
         .ok_or_else(|| limit("duration", 3600))?;
-    let mut plan = prepare::plan(executor, batches, options, deadline)?;
+    let planned = batches
+        .iter()
+        .map(Planned::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut plan = prepare::plan(executor, &planned, options, deadline)?;
     let request = group::Request {
         interfaces: plan.interfaces.clone(),
         limits: executor.options.capture,
@@ -233,7 +258,9 @@ where
         let mut next = 0usize;
         let mut next_send = Instant::now();
         let mut retained = plan.base_bytes;
-        let mut costs = std::mem::take(&mut plan.costs).into_iter();
+        // One admitted probe per batch, consumed in send order: the next one
+        // belongs to `batches[next]`.
+        let mut admitted = std::mem::take(&mut plan.probes).into_iter().peekable();
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()
@@ -267,7 +294,7 @@ where
                     for index in expired {
                         complete(
                             index,
-                            batches,
+                            &planned,
                             &mut pending,
                             &mut retained,
                             emit,
@@ -280,24 +307,26 @@ where
                 capture_drain_remaining = capture_drain_limit;
             }
             while !draining_captures
-                && next < batches.len()
                 && pending.len() < options.max_in_flight
                 && Instant::now() >= next_send
-                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
+                && let Some(AdmittedProbe { cost, memory }) = admitted.next_if(|probe| {
+                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
+                })
             {
                 check(executor.client, deadline)?;
                 let batch = &batches[next];
-                failed_probe = Some(batch.probe().clone());
-                let cost = costs.next().expect("every probe was admitted");
+                let probe = planned[next].probe;
+                failed_probe = Some(probe.clone());
                 let prepared = plan
                     .discovery
-                    .rebuild(
-                        batch.probe().packet(),
-                        &plan.routes[&batch.probe().address],
-                        cost,
-                    )
-                    .map_err(BoundaryError::from_error)?;
-                if !super::probe::sent_probe_matches(batch.probe(), &prepared.built().packet) {
+                    .rebuild(probe.packet(), &plan.routes[&probe.address], cost)
+                    .map_err(|error| match error {
+                        RebuildError::Changed { admitted } => {
+                            limit("changed preparation size", admitted)
+                        }
+                        RebuildError::Preparation(source) => BoundaryError::from_error(source),
+                    })?;
+                if !super::probe::sent_probe_matches(probe, &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
                         "materialized scan packet differs from its probe",
                         "internal.scan_probe_mismatch",
@@ -330,10 +359,10 @@ where
                         deadline: end,
                         best: None,
                         last_response: None,
-                        charge: plan.memory[next],
+                        charge: memory,
                     },
                 );
-                retained += plan.memory[next];
+                retained += memory;
                 emit(PipelineEvent::Sent { index: next, sent })?;
                 failed_probe = None;
                 next += 1;
@@ -353,10 +382,10 @@ where
                 .min()
                 .unwrap_or(deadline)
                 .min(deadline);
-            let wake = if next < batches.len()
-                && pending.len() < options.max_in_flight
-                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
-            {
+            let wake = if pending.len() < options.max_in_flight
+                && admitted.peek().is_some_and(|probe| {
+                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
+                }) {
                 earliest.min(next_send)
             } else {
                 earliest
@@ -425,7 +454,7 @@ where
             };
             let mut candidates = candidates(
                 &pending,
-                batches,
+                &planned,
                 &executor.client.registry,
                 &decoded,
                 &plan.interfaces[record.source],
@@ -468,7 +497,7 @@ where
             if definitive {
                 complete(
                     index,
-                    batches,
+                    &planned,
                     &mut pending,
                     &mut retained,
                     emit,
@@ -527,7 +556,7 @@ where
         Err(source) => Err(BoundaryError::from_error(Error {
             source,
             stats,
-            pending: pending_evidence(&pending, batches),
+            pending: pending_evidence(&pending, &planned),
             failed_probe,
             capture_sources,
             cleanup,
@@ -553,7 +582,7 @@ fn retain(
 }
 fn complete(
     index: usize,
-    batches: &[Batch],
+    planned: &[Planned<'_>],
     pending: &mut BTreeMap<usize, Pending>,
     retained: &mut usize,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
@@ -565,7 +594,7 @@ fn complete(
         .best
         .as_ref()
         .map(|best| best.response.response.frame.clone());
-    *failed = Some(batches[index].probe().clone());
+    *failed = Some(planned[index].probe.clone());
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -574,7 +603,7 @@ fn complete(
         capture: Default::default(),
     };
     let execution = Execution {
-        permit: batches[index].permit,
+        permit: planned[index].permit,
         sent: vec![entry.sent.as_ref().clone()],
         responses: entry
             .best
@@ -597,12 +626,15 @@ fn complete(
     *failed = None;
     Ok(())
 }
-fn pending_evidence(pending: &BTreeMap<usize, Pending>, batches: &[Batch]) -> Vec<PendingEvidence> {
+fn pending_evidence(
+    pending: &BTreeMap<usize, Pending>,
+    planned: &[Planned<'_>],
+) -> Vec<PendingEvidence> {
     pending
         .iter()
         .map(|(index, entry)| PendingEvidence {
             sent: SentProbe {
-                probe: batches[*index].probe().clone(),
+                probe: planned[*index].probe.clone(),
                 sent: entry.sent.clone(),
             },
             response: entry

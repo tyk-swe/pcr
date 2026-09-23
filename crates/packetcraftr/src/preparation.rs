@@ -507,18 +507,33 @@ where
         packet: Packet,
         route: &AuthorizedRoute,
         cost: AdmittedCost,
-    ) -> Result<PreparedPacket, Error> {
+    ) -> Result<PreparedPacket, RebuildError> {
         self.stages.check()?;
         let admitted = self
             .stages
             .build_and_authorize(packet, route.plan.clone())?;
         if admitted.wire_len() != cost.wire_len {
-            return Err(Error::PreparationChanged {
+            return Err(RebuildError::Changed {
                 admitted: cost.wire_len,
-                rebuilt: admitted.wire_len(),
             });
         }
-        self.stages.materialize(admitted)
+        Ok(self.stages.materialize(admitted)?)
+    }
+}
+
+/// Why [`Discovery::rebuild`] refused a packet. The caller names a changed
+/// build in its own error, because only it knows why it rebuilds.
+#[derive(Debug)]
+pub(crate) enum RebuildError {
+    /// The rebuild's exact wire length differs from the `admitted` one.
+    Changed { admitted: usize },
+    /// A preparation stage refused the rebuilt packet.
+    Preparation(Error),
+}
+
+impl From<Error> for RebuildError {
+    fn from(source: Error) -> Self {
+        Self::Preparation(source)
     }
 }
 
@@ -723,8 +738,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                Error::PreparationChanged { admitted, rebuilt }
-                    if admitted == admitted_len && rebuilt == admitted_len + 1
+                RebuildError::Changed { admitted } if admitted == admitted_len
             ),
             "{error:?}"
         );

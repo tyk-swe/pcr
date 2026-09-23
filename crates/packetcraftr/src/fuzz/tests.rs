@@ -627,6 +627,58 @@ fn live_fuzz_rejects_substituted_authorized_case() {
     assert!(error.to_string().contains("substituted bytes"));
 }
 
+#[test]
+fn live_fuzz_keeps_the_preparation_error_for_a_case_its_route_cannot_verify() {
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let request = packet_fuzz::Request {
+        cases: 1,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw field target")],
+        ..packet_fuzz::Request::default()
+    };
+    // The reported route has no packet source to fill the unspecified one.
+    let mut unsourced = packet();
+    unsourced
+        .layer_mut(0)
+        .expect("IPv4 layer")
+        .set_field(
+            "source",
+            packetcraftr_core::field::FieldValue::Ipv4(Ipv4Addr::UNSPECIFIED),
+        )
+        .expect("IPv4 source field");
+    let error = run(
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet: unsourced,
+            registry,
+        },
+        &mut AllowAll,
+        &mut RebuildingExecutor,
+        &mut NoopClock,
+    )
+    .expect_err("a case its reported route cannot prepare must be rejected");
+
+    assert_eq!(error.classification().code, "internal.fuzz_evidence");
+    let super::Error::UnverifiableRoute { case_index, source } = &error else {
+        panic!("expected the preparation error as the source, got {error:?}");
+    };
+    assert_eq!(*case_index, 0);
+    assert!(
+        matches!(
+            source,
+            crate::Error::PacketMaterialization {
+                field: "source",
+                ..
+            }
+        ),
+        "{source:?}"
+    );
+}
+
 struct DenyingAuthorizer {
     invocations: usize,
 }

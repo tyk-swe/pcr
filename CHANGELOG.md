@@ -305,10 +305,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   responses no longer go to whichever arrived first, so the same captured
   evidence yields the same probe outcome in either execution mode.
 - Pipelined `scan` prepares its probes through the same staged preparation as
-  `exchange`. A probe rebuilt at send time with a different exact wire length
-  than its admitted build now fails with the new `Error::PreparationChanged`
-  (`policy.preparation_changed`) instead of `policy.scan_pipeline_limit`, and a
-  cumulative wire-byte overflow reports the policy byte limit.
+  `exchange`, so a cumulative wire-byte overflow reports the policy byte limit
+  instead of `policy.scan_pipeline_limit`.
 - HTTP analysis accumulates reassembled header bytes in bulk runs ending at
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF
@@ -471,6 +469,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   observed after that case surfaces, so invalid evidence is reported even
   when the campaign was cancelled or ran out of time during that case. Time
   is accounted after validation.
+- A live `fuzz` case whose exact bytes cannot be prepared on the route its
+  executor reported now fails with `fuzz::Error::UnverifiableRoute`, which
+  keeps the preparation error as its source, instead of `InvalidEvidence`
+  with that error's text. The code (`internal.fuzz_evidence`) and message are
+  unchanged; the error's `causes` now list the preparation error.
 
 ### Removed
 

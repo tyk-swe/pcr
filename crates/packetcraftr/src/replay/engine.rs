@@ -13,8 +13,7 @@ use packetcraftr_netio::{
 };
 
 use crate::clock::Clock;
-use crate::execution::Context;
-use crate::{BoundaryError, StatsOverflow};
+use crate::execution;
 
 use super::error::Error;
 use super::model::{
@@ -181,7 +180,6 @@ where
             pace(
                 run.clock,
                 &mut session.deadline,
-                &options.limits,
                 0,
                 options.inter_pass_delay,
             )?;
@@ -325,13 +323,7 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
                     )
                 })?;
             let remaining = target.saturating_duration_since(self.clock.now());
-            pace(
-                self.clock,
-                &mut session.deadline,
-                &limits,
-                source_index,
-                remaining,
-            )?;
+            pace(self.clock, &mut session.deadline, source_index, remaining)?;
             let transmission = transmit_frame(
                 self.transmitter,
                 &session.deadline,
@@ -613,28 +605,21 @@ fn authorize_final_wire<A: Authorizer>(
     })
 }
 
-/// Waits a source-timing delay through the execution context. Replay keeps
-/// its own schedule in [`Progress`], so the context's statistics are dropped.
+/// Waits a source-timing delay in the shared pacing order. Replay keeps its
+/// own schedule in [`Progress`] and no execution statistics.
 fn pace<C: Clock>(
     clock: &mut C,
     deadline: &mut Deadline,
-    limits: &Limits,
     source_index: u64,
     delay: Duration,
 ) -> Result<(), Error> {
-    let errors = SourceFrames {
-        limit: limits.max_duration,
-    };
-    Context::new(deadline, clock, errors).pace(source_index, delay)
+    execution::pause(deadline, clock, &SourceFrames, source_index, delay)
 }
 
-/// Names execution-context failures as replay errors at a source index.
-/// Replay only paces through the context; it never runs a context step.
-struct SourceFrames {
-    limit: Duration,
-}
+/// Names pacing failures as replay errors at a source index.
+struct SourceFrames;
 
-impl crate::execution::Errors for SourceFrames {
+impl execution::PacingErrors for SourceFrames {
     type Error = Error;
     type Step = u64;
 
@@ -651,30 +636,6 @@ impl crate::execution::Errors for SourceFrames {
             source_index,
             source,
         }
-    }
-
-    fn execution(&self, source_index: u64, source: BoundaryError) -> Error {
-        Error::InvalidEvidence {
-            source_index,
-            message: format!("replay does not run execution steps: {source}"),
-        }
-    }
-
-    fn invalid_evidence(&self, source_index: u64, message: String) -> Error {
-        Error::InvalidEvidence {
-            source_index,
-            message,
-        }
-    }
-
-    fn stats_overflow(&self, source_index: u64, _: StatsOverflow) -> Error {
-        duration_limit(
-            source_index,
-            DeadlineExceeded {
-                actual: Duration::MAX,
-                limit: self.limit,
-            },
-        )
     }
 }
 

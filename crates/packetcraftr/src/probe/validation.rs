@@ -1,18 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Exact validation of what executors return: sent bytes and packets, matched
+//! and unsolicited responses, capture statistics, and aggregate evidence
+//! limits, checked before any evidence is charged or published.
+
 use std::time::Duration;
 
 use crate::SentPacket;
 use crate::probe::runner::{Execution, Sequenced};
 use crate::probe::{Error, ErrorKind, Workflow};
 
-use super::EvidenceLimits;
+use crate::probe::evidence::EvidenceLimits;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
 use packetcraftr_netio::capture::Statistics;
-
-use super::budget::{checked_frame_bytes, checked_frame_count};
 
 fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
     if decoded.original != decoded.frame.bytes() {
@@ -302,3 +304,18 @@ pub(crate) fn validate_batch_evidence<P: Sequenced>(
         )
     })
 }
+
+fn checked_frame_count(counts: &[usize]) -> Option<usize> {
+    counts
+        .iter()
+        .try_fold(0_usize, |total, count| total.checked_add(*count))
+}
+
+fn checked_frame_bytes<'a>(frames: impl IntoIterator<Item = &'a Frame>) -> Option<usize> {
+    frames.into_iter().try_fold(0_usize, |total, frame| {
+        total.checked_add(frame.bytes().len())
+    })
+}
+
+#[cfg(test)]
+mod tests;

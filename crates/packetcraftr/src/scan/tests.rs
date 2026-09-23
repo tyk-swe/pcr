@@ -55,7 +55,7 @@ struct TimeoutExecutor {
 impl Executor<Batch> for TimeoutExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         self.batches.push((
-            batch.probe().attempt,
+            batch.probes[0].attempt,
             batch
                 .probes
                 .iter()
@@ -860,7 +860,7 @@ impl Executor<Batch> for EchoReplyExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe().address, batch.probe().endpoint)
+            (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
         };
@@ -948,12 +948,12 @@ struct EveryOtherEchoExecutor {
 impl Executor<Batch> for EveryOtherEchoExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        if batch.probe().sequence % 2 == 1 {
+        if batch.probes[0].sequence % 2 == 1 {
             return Ok(execution);
         }
-        let latency = Duration::from_micros(250 + 250 * (batch.probe().sequence / 2));
+        let latency = Duration::from_micros(250 + 250 * (batch.probes[0].sequence / 2));
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe().address, batch.probe().endpoint)
+            (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
         };
@@ -1049,7 +1049,7 @@ impl Executor<Batch> for StaleEchoExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe().address, batch.probe().endpoint)
+            (batch.probes[0].address, batch.probes[0].endpoint)
         else {
             return Ok(execution);
         };

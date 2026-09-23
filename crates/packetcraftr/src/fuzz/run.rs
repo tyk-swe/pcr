@@ -318,9 +318,9 @@ fn validate_case(
 ) -> Result<(), Error> {
     let route = execution.sent.route();
     let expected = exact_bytes(builder, &request.build, case.prepared.recipe.clone(), route)
-        .map_err(|source| Error::InvalidEvidence {
+        .map_err(|source| Error::UnverifiableRoute {
             case_index: case.prepared.index,
-            message: source.to_string(),
+            source,
         })?;
     if execution.sent.wire_bytes() != &expected {
         return Err(Error::InvalidEvidence {

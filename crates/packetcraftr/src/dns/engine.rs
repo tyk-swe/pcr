@@ -17,7 +17,7 @@ use crate::execution::Context;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::probe::Executor;
-use crate::probe::evidence::{EvidenceState, ResponseCandidate, ResponseSelector, Retained};
+use crate::probe::evidence::{EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector};
 use crate::probe::runner::sink_observer;
 use crate::target::{Family, approve_operation, require_family, resolve_selected};
 use crate::{BoundaryError, Stats, StatsOverflow};
@@ -280,12 +280,14 @@ where
     }
 
     fn execute_attempts(&mut self) -> Result<(), Error> {
+        let mut last_attempt = 1;
         for attempt in 1..=self.request.attempts {
+            last_attempt = attempt;
             if self.execute_attempt(attempt)? {
                 break;
             }
         }
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(last_attempt)?;
         self.summary.completion.validate()?;
         Ok(())
     }
@@ -302,22 +304,22 @@ where
             timeout,
             mut attempt_deadline,
         } = self.execute_probe(&probe)?;
-        self.record_diagnostics(execution.diagnostics.drain(..))?;
+        self.record_diagnostics(attempt, execution.diagnostics.drain(..))?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
-            self.execution.deadline(),
             self.registry,
             &probe,
             &mut execution,
             self.request.limits,
             timeout,
+            || self.execution.enforce(attempt),
         )?;
         let udp = match best {
             Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
             None => timeout_evidence(&probe, sent_at),
         };
         // Publishes what retaining the response raised.
-        self.record_diagnostics([])?;
+        self.record_diagnostics(attempt, [])?;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
@@ -382,7 +384,7 @@ where
     }
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
@@ -390,7 +392,7 @@ where
             self.execution.deadline(),
             &Gates,
         );
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
@@ -455,10 +457,13 @@ where
     }
 
     fn emit_attempt(&mut self, evidence: AttemptEvidence) -> Result<(), Error> {
-        self.publish(Event::Attempt {
-            context: Arc::clone(&self.context),
-            evidence,
-        })
+        self.publish(
+            evidence.attempt,
+            Event::Attempt {
+                context: Arc::clone(&self.context),
+                evidence,
+            },
+        )
     }
 
     fn accept_response(
@@ -490,12 +495,15 @@ where
             }
         }
         for record in rejected_records {
-            self.publish(Event::Rejected {
+            self.publish(
                 attempt,
-                transport,
-                context: Arc::clone(&self.context),
-                record,
-            })?;
+                Event::Rejected {
+                    attempt,
+                    transport,
+                    context: Arc::clone(&self.context),
+                    record,
+                },
+            )?;
         }
         self.summary.completion.response = Some(metadata);
         Ok(())
@@ -508,40 +516,31 @@ where
         section: Section,
         record: Record,
     ) -> Result<(), Error> {
-        self.publish(Event::Record {
+        self.publish(
             attempt,
-            transport,
-            context: Arc::clone(&self.context),
-            section,
-            record,
-        })
+            Event::Record {
+                attempt,
+                transport,
+                context: Arc::clone(&self.context),
+                section,
+                record,
+            },
+        )
     }
 
-    fn publish(&mut self, event: Event) -> Result<(), Error> {
+    fn publish(&mut self, attempt: u32, event: Event) -> Result<(), Error> {
         (self.emit)(event, self.execution.deadline())?;
-        self.execution.deadline().enforce()?;
-        Ok(())
+        self.execution.enforce(attempt)
     }
 
     fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
-        let Self {
-            evidence,
-            emit,
-            execution,
-            ..
-        } = self;
-        evidence.retain_undecoded(
+        self.evidence.retain_undecoded(
             frames,
-            |retained| {
-                let event = match retained {
-                    Retained::Frame(frame) => {
-                        Event::Undecoded(UndecodedEvidence { attempt, frame })
-                    }
-                    Retained::Diagnostic(diagnostic) => Event::Diagnostic(diagnostic),
-                };
-                emit(event, execution.deadline())
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
             },
-            || execution.deadline().enforce().map_err(Into::into),
         )
     }
 
@@ -549,29 +548,62 @@ where
     /// then checks the deadline.
     fn record_diagnostics(
         &mut self,
+        attempt: u32,
         diagnostics: impl IntoIterator<Item = Diagnostic>,
     ) -> Result<(), Error> {
-        let Self {
-            evidence,
-            emit,
-            execution,
-            ..
-        } = self;
-        evidence.record_diagnostics(diagnostics, |diagnostic| {
-            emit(Event::Diagnostic(diagnostic), execution.deadline())
-        })?;
-        self.execution.deadline().enforce()?;
-        Ok(())
+        self.evidence.record_diagnostics(
+            diagnostics,
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
+            },
+        )?;
+        self.execution.enforce(attempt)
+    }
+}
+
+/// Publishes what the operation's evidence state keeps during one attempt as
+/// DNS events.
+struct AttemptEvents<'e, 'a, C, F> {
+    attempt: u32,
+    execution: &'e Context<'a, C, Attempts>,
+    emit: &'e mut F,
+}
+
+impl<C, F> EvidenceSink for AttemptEvents<'_, '_, C, F>
+where
+    C: Clock,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
+    type Error = Error;
+
+    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
+        (self.emit)(
+            Event::Undecoded(UndecodedEvidence {
+                attempt: self.attempt,
+                frame,
+            }),
+            self.execution.deadline(),
+        )
+    }
+
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
+        (self.emit)(Event::Diagnostic(diagnostic), self.execution.deadline())
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        self.execution.enforce(self.attempt)
     }
 }
 
 fn select_response<'a>(
-    deadline: &Deadline,
     registry: &Registry,
     probe: &Probe,
     execution: &'a mut Execution,
     limits: Limits,
     timeout: Duration,
+    check: impl FnMut() -> Result<(), Error>,
 ) -> Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
     let sent_packet = &execution.sent.built().packet;
     // Validation admits only responses to the single query, request index 0.
@@ -581,7 +613,7 @@ fn select_response<'a>(
         |response| classify_response(registry, probe, sent_packet, response, limits.message),
         ResponseClassification::rank,
         |_| (),
-        || deadline.enforce().map_err(Error::from),
+        check,
     )
 }
 
@@ -609,11 +641,12 @@ impl crate::target::GateErrors for Gates {
     }
 }
 
-/// Names execution-context failures as DNS errors. A step is a retry attempt;
-/// the DNS batch runner paces between questions as attempt 1.
+/// Names execution-context failures as DNS errors at the retry attempt they
+/// concern. The DNS batch runner's wait between questions concerns the next
+/// question's first attempt.
 pub(super) struct Attempts;
 
-impl crate::execution::Errors for Attempts {
+impl crate::execution::PacingErrors for Attempts {
     type Error = Error;
     type Step = u32;
 
@@ -628,7 +661,9 @@ impl crate::execution::Errors for Attempts {
     fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { attempt, source }
     }
+}
 
+impl crate::execution::Errors for Attempts {
     fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
         Error::Execution { attempt, source }
     }

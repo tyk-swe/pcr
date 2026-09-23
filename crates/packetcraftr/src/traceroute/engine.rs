@@ -12,7 +12,7 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::policy::Authorizer;
-use crate::probe::evidence::{check_probe_count, check_probe_duration};
+use crate::probe::limits::{check_probe_count, check_probe_duration};
 use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
 use crate::target::{GateErrors, admit_operation, budgeted};
 

@@ -191,6 +191,10 @@ fn batch_deadline(requests: &[Request]) -> Result<Deadline, Error> {
     ))
 }
 
+/// The wait between questions precedes the next question's first attempt,
+/// so its failures name that attempt.
+const FIRST_ATTEMPT: u32 = 1;
+
 pub(super) fn run_batch_observed<A, E, C, F>(
     requests: &[Request],
     authorizer: &mut A,
@@ -233,10 +237,12 @@ where
             let delay = previous.max(prepared.delay);
             if !delay.is_zero() {
                 let mut pause = Context::new(&mut *deadline, &mut *clock, Attempts);
-                let waited = pause.pace(1, delay).and_then(|()| {
-                    stats
-                        .checked_add_assign(&pause.into_stats())
-                        .map_err(|_| Error::StatisticsOverflow { attempt: 1 })
+                let waited = pause.pace(FIRST_ATTEMPT, delay).and_then(|()| {
+                    stats.checked_add_assign(&pause.into_stats()).map_err(|_| {
+                        Error::StatisticsOverflow {
+                            attempt: FIRST_ATTEMPT,
+                        }
+                    })
                 });
                 if let Err(error) = waited {
                     stop = true;

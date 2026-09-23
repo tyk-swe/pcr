@@ -12,7 +12,9 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::Stats;
 use crate::clock::Clock;
-use crate::dns::tcp::Category as TcpCategory;
+use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
+use crate::evidence::ExecutionPermit;
+use crate::execution::Receipt;
 use crate::policy::Authorizer;
 use crate::probe::Executor;
 use crate::target::{Family, Target, resolve_selected};
@@ -21,7 +23,7 @@ use super::super::classification::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
 use super::super::error::Error;
-use super::super::{Event, Exchange, Outcome, Probe, TcpExchange, TcpExecutor};
+use super::super::{Event, Exchange, Outcome, Probe, TcpExchange, TcpExecution, TcpExecutor};
 use super::{Gates, Operation};
 
 impl<A, E, C, F> Operation<'_, A, E, C, F>
@@ -37,61 +39,22 @@ where
         attempt_deadline: &mut Deadline,
     ) -> Result<ClassifiedAttempt, Error> {
         if !self.authorize_tcp_destination(probe, attempt_deadline)? {
-            return Ok(tcp_timeout_evidence(
-                probe,
-                "the DNS attempt deadline expired before connection",
-            ));
+            return Ok(expired_before_connection(probe));
         }
-        let mut exchange = TcpExchange {
-            attempt: probe.attempt,
-            endpoint: SocketAddr::new(probe.server_address, probe.server_port),
-            query: probe.query.clone(),
-            timeout: Duration::ZERO,
-            max_message_bytes: self.request.limits.message.max_message_bytes,
-            permit: crate::evidence::ExecutionPermit::new(),
-        };
-        self.execution
-            .deadline_mut()
-            .start_accounting(Duration::ZERO)?;
+        // The attempt window is DNS's own; what it has left is the timeout
+        // this step requests from the execution context.
         if attempt_deadline.start_accounting(Duration::ZERO).is_err() {
-            return Ok(tcp_timeout_evidence(
-                probe,
-                "the DNS attempt deadline expired before connection",
-            ));
+            return Ok(expired_before_connection(probe));
         }
-        let timeout = attempt_deadline
+        let requested = attempt_deadline
             .remaining()
             .map_err(|_| Error::InvalidEvidence {
                 attempt: probe.attempt,
                 message: "shared DNS attempt deadline regressed after accounting".to_owned(),
-            })?
-            .min(self.execution.deadline().remaining()?);
-        if timeout.is_zero() {
-            return Ok(tcp_timeout_evidence(
-                probe,
-                "the DNS attempt deadline expired before connection",
-            ));
+            })?;
+        if requested.is_zero() {
+            return Ok(expired_before_connection(probe));
         }
-        exchange.timeout = timeout;
-        let boundary_started = Instant::now();
-        let result = self.executor.execute_tcp(&exchange);
-        let boundary_elapsed = boundary_started.elapsed();
-        if let Ok(execution) = &result
-            && execution.permit != exchange.permit
-        {
-            return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "TCP executor returned evidence for a different execution permit"
-                    .to_owned(),
-            });
-        }
-        let reported_elapsed = result
-            .as_ref()
-            .map_or(boundary_elapsed, |execution| execution.response.elapsed);
-        let mut tcp_stats = Stats {
-            elapsed: reported_elapsed,
-            ..Stats::default()
-        };
         let framed_query_bytes =
             probe
                 .query
@@ -101,21 +64,35 @@ where
                     attempt: probe.attempt,
                     message: "TCP query length accounting overflowed".to_owned(),
                 })?;
-        let bytes_written = match &result {
-            Ok(execution) => execution.response.bytes_written,
-            Err(error) => error.query_bytes_written(framed_query_bytes),
-        };
-        if bytes_written > framed_query_bytes {
-            return Err(Error::InvalidEvidence {
-                attempt: probe.attempt,
-                message: "TCP executor reported more query bytes than were authorized".to_owned(),
-            });
-        }
-        tcp_stats.bytes = u64::try_from(bytes_written).unwrap_or(u64::MAX);
-        self.execution.merge(probe.attempt, &tcp_stats)?;
-
-        self.execution.deadline().check_cancelled()?;
-        self.execution.deadline_mut().account(reported_elapsed)?;
+        let max_message_bytes = self.request.limits.message.max_message_bytes;
+        let (attempt, grant) = self.execution.step(
+            probe.attempt,
+            requested,
+            &mut *self.executor,
+            |executor, grant| {
+                let exchange = TcpExchange {
+                    attempt: probe.attempt,
+                    endpoint: SocketAddr::new(probe.server_address, probe.server_port),
+                    query: probe.query.clone(),
+                    timeout: grant.timeout,
+                    max_message_bytes,
+                    permit: grant.permit,
+                };
+                Ok(TcpAttempt::execute(executor, &exchange, framed_query_bytes))
+            },
+            |_, attempt, _, _| {
+                if attempt.bytes_written > framed_query_bytes {
+                    return Err(Error::InvalidEvidence {
+                        attempt: probe.attempt,
+                        message: "TCP executor reported more query bytes than were authorized"
+                            .to_owned(),
+                    });
+                }
+                Ok(())
+            },
+        )?;
+        let timeout = grant.timeout;
+        let reported_elapsed = attempt.stats.elapsed;
         let attempt_expired = attempt_deadline.account(reported_elapsed).is_err();
 
         if attempt_expired || reported_elapsed > timeout {
@@ -124,7 +101,7 @@ where
                 "DNS-over-TCP did not complete within the shared attempt deadline",
             ));
         }
-        let error = match result {
+        let error = match attempt.result {
             Ok(execution) => {
                 return classify_tcp_response(
                     probe,
@@ -181,7 +158,7 @@ where
             self.execution.deadline(),
             &Gates,
         );
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(probe.attempt)?;
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }
@@ -196,5 +173,64 @@ where
             });
         }
         Ok(true)
+    }
+}
+
+fn expired_before_connection(probe: &Probe) -> ClassifiedAttempt {
+    tcp_timeout_evidence(probe, "the DNS attempt deadline expired before connection")
+}
+
+/// One DNS-over-TCP execution as the execution context sees it. Socket and
+/// framing failures are the executor's typed data, not a boundary failure, so
+/// they are carried here with the traffic they may already have produced.
+struct TcpAttempt {
+    result: Result<TcpExecution, TcpError>,
+    permit: ExecutionPermit,
+    bytes_written: usize,
+    stats: Stats,
+}
+
+impl TcpAttempt {
+    fn execute<E: TcpExecutor>(
+        executor: &mut E,
+        exchange: &TcpExchange,
+        framed_query_bytes: usize,
+    ) -> Self {
+        let started = Instant::now();
+        let result = executor.execute_tcp(exchange);
+        let boundary_elapsed = started.elapsed();
+        let (permit, elapsed, bytes_written) = match &result {
+            Ok(execution) => (
+                execution.permit,
+                execution.response.elapsed,
+                execution.response.bytes_written,
+            ),
+            // A failure carries no evidence to bind to another permit.
+            Err(error) => (
+                exchange.permit,
+                boundary_elapsed,
+                error.query_bytes_written(framed_query_bytes),
+            ),
+        };
+        Self {
+            result,
+            permit,
+            bytes_written,
+            stats: Stats {
+                elapsed,
+                bytes: u64::try_from(bytes_written).unwrap_or(u64::MAX),
+                ..Stats::default()
+            },
+        }
+    }
+}
+
+impl Receipt for TcpAttempt {
+    fn permit(&self) -> ExecutionPermit {
+        self.permit
+    }
+
+    fn stats(&self) -> &Stats {
+        &self.stats
     }
 }

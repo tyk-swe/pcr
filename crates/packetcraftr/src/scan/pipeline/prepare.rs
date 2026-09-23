@@ -58,19 +58,19 @@ where
         .map_err(BoundaryError::from_error)?;
     for batch in batches {
         super::check(client, deadline)?;
-        let packet = batch.probe.packet();
-        if !super::super::probe::sent_probe_matches(&batch.probe, &packet) {
+        let packet = batch.probe().packet();
+        if !super::super::probe::sent_probe_matches(batch.probe(), &packet) {
             return Err(BoundaryError::from_error(super::super::profile::Error(
                 "probe fields differ from its selected profile",
             )));
         }
-        let route = match routes.get(&batch.probe.address) {
+        let route = match routes.get(&batch.probe().address) {
             Some(route) => route::Plan::clone(route),
             None => {
                 let route = client
                     .plan_with_provider(
                         &packet,
-                        Some(batch.probe.address),
+                        Some(batch.probe().address),
                         &executor.options.send.plan,
                         &client.routes,
                         Some(deadline),
@@ -94,7 +94,7 @@ where
                 if base_bytes > options.max_prepared_bytes {
                     return Err(limit("prepared descriptions", options.max_prepared_bytes));
                 }
-                routes.insert(batch.probe.address, route.clone());
+                routes.insert(batch.probe().address, route.clone());
                 route
             }
         };
@@ -153,10 +153,10 @@ where
     I: transmit::Sender,
 {
     let mut options = options.clone();
-    options.destination = Some(batch.probe.address);
+    options.destination = Some(batch.probe().address);
     client
         .plan_and_authorize(
-            batch.probe.packet(),
+            batch.probe().packet(),
             route,
             builder,
             &options,

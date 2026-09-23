@@ -43,7 +43,7 @@ where
             super::registry::configured(self.client.registry(), std::slice::from_ref(batch))?;
         let client = super::registry::client(self.client, registry);
         let executor = ExchangeExecutor::new(&client, self.options.clone());
-        let first = &batch.probe;
+        let first = batch.probe();
         let packet = first.packet();
         if !super::probe::sent_probe_matches(first, &packet) {
             return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));

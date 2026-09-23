@@ -118,12 +118,12 @@ fn ranked_candidates(
         }
         if let Some(classified) = classify_response(
             registry,
-            batches[*index].probe.endpoint.transport(),
+            batches[*index].probe().endpoint.transport(),
             &entry.sent.built().packet,
             decoded,
         ) {
             let application = super::profile::evidence(
-                &batches[*index].probe,
+                batches[*index].probe(),
                 &entry.sent.built().packet,
                 decoded,
             );
@@ -273,11 +273,11 @@ where
             {
                 check(executor.client, deadline)?;
                 let batch = &batches[next];
-                failed_probe = Some(batch.probe.clone());
+                failed_probe = Some(batch.probe().clone());
                 let planned = prepare::planned(
                     executor.client,
                     batch,
-                    plan.routes[&batch.probe.address].clone(),
+                    plan.routes[&batch.probe().address].clone(),
                     &builder,
                     &executor.options.send,
                     deadline,
@@ -286,12 +286,12 @@ where
                     return Err(limit("changed preparation size", plan.costs[next].wire));
                 }
                 let mut send = executor.options.send.clone();
-                send.destination = Some(batch.probe.address);
+                send.destination = Some(batch.probe().address);
                 let prepared = executor
                     .client
                     .materialize_and_authorize(planned, &builder, &send, Some(deadline))
                     .map_err(BoundaryError::from_error)?;
-                if !super::probe::sent_probe_matches(&batch.probe, &prepared.built().packet) {
+                if !super::probe::sent_probe_matches(batch.probe(), &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
                         "materialized scan packet differs from its probe",
                         "internal.scan_probe_mismatch",
@@ -551,7 +551,7 @@ fn complete(
         .best
         .as_ref()
         .map(|response| response.response.frame.clone());
-    *failed = Some(batches[index].probe.clone());
+    *failed = Some(batches[index].probe().clone());
     let stats = Stats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -583,7 +583,7 @@ fn pending_evidence(pending: &BTreeMap<usize, Pending>, batches: &[Batch]) -> Ve
         .iter()
         .map(|(index, entry)| PendingEvidence {
             sent: SentProbe {
-                probe: batches[*index].probe.clone(),
+                probe: batches[*index].probe().clone(),
                 sent: entry.sent.clone(),
             },
             response: entry

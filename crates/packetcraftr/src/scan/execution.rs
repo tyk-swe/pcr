@@ -4,7 +4,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 
-use crate::probe::{Execution, ProbeEndpoint};
+use crate::probe::ProbeEndpoint;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Probe {
@@ -33,30 +33,25 @@ impl crate::probe::runner::Sequenced for Probe {
     }
 }
 
-/// One correlated scan probe and its admitted execution context.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Batch {
-    pub probe: Probe,
-    pub timeout: std::time::Duration,
-    pub(crate) permit: crate::evidence::ExecutionPermit,
-}
+/// One correlated scan probe and its admitted execution context. Scan
+/// executes exactly one probe per batch.
+pub type Batch = crate::probe::Batch<Probe>;
 
-impl crate::probe::Request for Batch {
-    type Execution = Execution;
-}
+impl Batch {
+    /// Plans the batch that executes `probe` alone.
+    pub(super) fn single(probe: Probe, timeout: std::time::Duration) -> Self {
+        Self {
+            sequence: probe.sequence,
+            probes: vec![probe],
+            timeout,
+            permit: crate::evidence::ExecutionPermit::new(),
+        }
+    }
 
-impl crate::probe::runner::BatchPlan for Batch {
-    fn sequence(&self) -> u64 {
-        self.probe.sequence
-    }
-    fn probe_count(&self) -> usize {
-        1
-    }
-    fn timeout(&self) -> std::time::Duration {
-        self.timeout
-    }
-    fn bind(&mut self, grant: crate::execution::Grant) {
-        self.timeout = grant.timeout;
-        self.permit = grant.permit;
+    /// The batch's only probe.
+    pub(crate) fn probe(&self) -> &Probe {
+        self.probes
+            .first()
+            .expect("scan batches are planned with exactly one probe")
     }
 }

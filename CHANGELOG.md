@@ -61,6 +61,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   eliminating a per-packet memcpy in the DHCP, ICMP, IGMP, raw, DNS, NTP, HTTP,
   and TLS decode paths. Callers holding borrowed bytes wrap them once with
   `Bytes::copy_from_slice`/`Bytes::from`.
+- `scan::Batch` is now an alias of the shared `probe::Batch<scan::Probe>`, as
+  `traceroute::Batch` already was. Executor implementations read the scan
+  batch's single probe from the one-element `batch.probes` instead of
+  `batch.probe`. See `docs/migration-unreleased.md`.
 
 ### Added
 

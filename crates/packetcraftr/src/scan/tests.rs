@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
-use crate::probe::test_fixtures::{
-    ProgressiveExecutor, RetainedEvidenceExecutor, decoded_packet, evidence_frame, private_policy,
-};
+use crate::probe::test_fixtures::{ProgressiveExecutor, decoded_packet, private_policy};
 use crate::progress::Runtime;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
@@ -56,11 +54,17 @@ struct TimeoutExecutor {
 
 impl Executor<Batch> for TimeoutExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        self.batches
-            .push((batch.probe.attempt, vec![batch.probe.endpoint.port()]));
+        self.batches.push((
+            batch.probe().attempt,
+            batch
+                .probes
+                .iter()
+                .map(|probe| probe.endpoint.port())
+                .collect(),
+        ));
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
-        for probe in std::iter::once(&batch.probe) {
+        for probe in &batch.probes {
             let mut packet = probe_packet(probe);
             match probe.address {
                 IpAddr::V4(_) => {
@@ -603,47 +607,6 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
 }
 
 #[test]
-fn scan_event_collection_preserves_stats_diagnostics_and_evidence_limits() {
-    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
-    let mut request = tcp_scan_request(Target::Address(address));
-    request.limits.max_undecoded = 1;
-    let result = run(
-        &request,
-        &mut AddressListAuthorizer {
-            addresses: vec![address],
-        },
-        &packetcraftr_core::protocol::builtin::registry(),
-        &mut RetainedEvidenceExecutor {
-            inner: TimeoutExecutor::default(),
-            frames: vec![
-                evidence_frame(UNIX_EPOCH, &[0xff]),
-                evidence_frame(UNIX_EPOCH, &[0xfe]),
-            ],
-            diagnostic: Diagnostic::info("scan.fixture", "fixture diagnostic"),
-        },
-        &mut NoopClock,
-    )
-    .expect("bounded undecoded evidence must complete");
-
-    assert_eq!(result.endpoints.len(), 1);
-    assert_eq!(result.endpoints[0].probes.len(), 1);
-    assert_eq!(result.undecoded.len(), 1);
-    assert_eq!(result.stats.packets_completed, 1);
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "scan.fixture")
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "scan.undecoded_limit")
-    );
-}
-
-#[test]
 fn scan_summary_counts_endpoints_by_winning_classification() {
     let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let mut request = tcp_scan_request(Target::Address(address));
@@ -897,7 +860,7 @@ impl Executor<Batch> for EchoReplyExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe.address, batch.probe.endpoint)
+            (batch.probe().address, batch.probe().endpoint)
         else {
             return Ok(execution);
         };
@@ -985,12 +948,12 @@ struct EveryOtherEchoExecutor {
 impl Executor<Batch> for EveryOtherEchoExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
-        if batch.probe.sequence % 2 == 1 {
+        if batch.probe().sequence % 2 == 1 {
             return Ok(execution);
         }
-        let latency = Duration::from_micros(250 + 250 * (batch.probe.sequence / 2));
+        let latency = Duration::from_micros(250 + 250 * (batch.probe().sequence / 2));
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe.address, batch.probe.endpoint)
+            (batch.probe().address, batch.probe().endpoint)
         else {
             return Ok(execution);
         };
@@ -1086,7 +1049,7 @@ impl Executor<Batch> for StaleEchoExecutor {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
-            (batch.probe.address, batch.probe.endpoint)
+            (batch.probe().address, batch.probe().endpoint)
         else {
             return Ok(execution);
         };

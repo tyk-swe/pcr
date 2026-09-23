@@ -1,6 +1,6 @@
 # Deepen the probe execution seams: batch evidence, execution context, staged preparation
 
-Status: ready-for-agent
+Status: resolved
 
 ## Problem Statement
 

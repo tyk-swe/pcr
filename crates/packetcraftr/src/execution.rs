@@ -150,9 +150,9 @@ where
             .map_err(|source| self.errors.interrupted(step, source))
     }
 
-    /// Checked merge of statistics a workflow accounts outside [`Self::step`].
-    /// On overflow the merged statistics are left untouched.
-    pub(crate) fn merge(&mut self, step: R::Step, stats: &Stats) -> Result<(), R::Error> {
+    /// Checked merge of a step's statistics or a scheduled delay. On overflow
+    /// the merged statistics are left untouched.
+    fn merge(&mut self, step: R::Step, stats: &Stats) -> Result<(), R::Error> {
         self.stats
             .checked_add_assign(stats)
             .map_err(|source| self.errors.stats_overflow(step, source))

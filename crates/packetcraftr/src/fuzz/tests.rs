@@ -7,12 +7,10 @@ use std::time::Duration;
 
 use crate::progress::Runtime;
 use bytes::Bytes;
-use packetcraftr_core::build::Builder;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{layer::Raw, packet::Packet};
-use packetcraftr_netio::transmit::Submission;
 
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
@@ -363,30 +361,6 @@ fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication
     assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
-struct RouteMaterializingExecutor {
-    registry: Arc<packetcraftr_core::registry::Registry>,
-}
-
-impl Executor<ExecutionCase> for RouteMaterializingExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
-        let sent = route_materialized_sent_packet(&self.registry, case.packet.clone());
-        Ok(Execution {
-            permit: case.permit,
-            stats: ExecutionStats {
-                packets_attempted: 1,
-                packets_completed: 1,
-                bytes: u64::try_from(sent.bytes_sent()).unwrap(),
-                ..ExecutionStats::default()
-            },
-            sent,
-            responses: Vec::new(),
-            unmatched: Vec::new(),
-            undecoded: Vec::new(),
-            diagnostics: Vec::new(),
-        })
-    }
-}
-
 struct SubstitutingFuzzExecutor;
 
 impl Executor<ExecutionCase> for SubstitutingFuzzExecutor {
@@ -423,84 +397,6 @@ pub(super) fn packet() -> Packet {
         })
         .push(Raw::new(Bytes::from_static(b"campaign")));
     packet
-}
-
-fn route_materialized_packet() -> Packet {
-    let mut packet = Packet::new();
-    packet
-        .push(Ipv4 {
-            destination: Ipv4Addr::new(198, 51, 100, 2),
-            ..Ipv4::default()
-        })
-        .push(Udp {
-            destination_port: 9,
-            ..Udp::default()
-        })
-        .push(Raw::new(Bytes::from_static(b"campaign")));
-    packet
-}
-
-fn route_materialized_sent_packet(
-    registry: &Arc<packetcraftr_core::registry::Registry>,
-    mut packet: Packet,
-) -> crate::SentPacket {
-    let route = route_materializing_route();
-    crate::materialize::materialize_network_fields(&mut packet, &route.plan)
-        .expect("route source should materialize");
-    crate::materialize::materialize_link_structure(&mut packet, &route.plan)
-        .expect("link structure should materialize");
-    let built = Builder::new(Arc::clone(registry))
-        .build(
-            packet,
-            crate::materialize::build_context(&route.plan),
-            packetcraftr_core::build::Options::default(),
-        )
-        .expect("materialized sent packet should build");
-    let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
-    crate::SentPacket::try_new(built, route, report).expect("trusted materialized sent packet")
-}
-
-fn route_materializing_route() -> packetcraftr_netio::route::Materialized {
-    use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::{
-        interface::Id as InterfaceId,
-        link::{Capability, Mode},
-        route::{Decision, Materialized, Plan},
-    };
-
-    let source = Ipv4Addr::new(192, 0, 2, 10);
-    let destination = Ipv4Addr::new(198, 51, 100, 2);
-    Materialized {
-        plan: Plan {
-            decision: Decision {
-                interface: InterfaceId {
-                    name: "fixture0".to_owned(),
-                    index: 1,
-                },
-                source_mac: None,
-                selected_source: Some(IpAddr::V4(source)),
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: packetcraftr_netio::route::SelectionReason::Gateway,
-                destination_scope: packetcraftr_netio::route::Scope::Global,
-                mtu: u32::MAX,
-                capability: Capability::Layer3,
-                link_type: LinkType::RAW,
-            },
-            mode: Mode::Layer3,
-            lookup_destination: Some(IpAddr::V4(destination)),
-            final_destination: Some(IpAddr::V4(destination)),
-            visited_destinations: vec![IpAddr::V4(destination)],
-            packet_source: Some(IpAddr::V4(source)),
-            neighbor_source: None,
-            neighbor_target: None,
-            destination_mac: None,
-            source_mac: None,
-            neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: false,
-        },
-        neighbor_resolution: None,
-    }
 }
 
 #[test]
@@ -595,48 +491,6 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
     assert!(matches!(error, super::Error::Output { .. }));
     assert_eq!(executor.executions, 1);
     assert_eq!(*emitted.lock().unwrap(), [0]);
-}
-
-#[test]
-fn live_fuzz_accepts_route_materialized_case() {
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let request = packet_fuzz::Request {
-        cases: 1,
-        strategies: vec![packet_fuzz::Strategy::BitFlip],
-        targets: vec!["2.bytes".parse().expect("raw field target")],
-        ..packet_fuzz::Request::default()
-    };
-    let mut authorizer = AllowAll;
-    let mut executor = RouteMaterializingExecutor {
-        registry: Arc::clone(&registry),
-    };
-    let live = run(
-        RunInput {
-            request: &request,
-            live: LiveOptions {
-                timeout: Duration::from_millis(1),
-                ..LiveOptions::default()
-            },
-            packet: route_materialized_packet(),
-            registry,
-        },
-        &mut authorizer,
-        &mut executor,
-        &mut NoopClock,
-    )
-    .expect("route-materialized live fuzz case should be accepted");
-
-    let built = live
-        .cases
-        .iter()
-        .find_map(|case| case.prepared.built.as_ref())
-        .expect("one built live fuzz case");
-    let ipv4 = built
-        .packet
-        .layer(0)
-        .and_then(|layer| layer.as_any().downcast_ref::<Ipv4>())
-        .expect("materialized IPv4 layer");
-    assert_eq!(ipv4.source, Ipv4Addr::new(192, 0, 2, 10));
 }
 
 #[test]

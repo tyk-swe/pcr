@@ -9,10 +9,14 @@ mod support;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-use packetcraftr::policy::{DestinationConstraint, Policy};
+use packetcraftr::clock::SystemClock;
+use packetcraftr::fuzz::{self, LiveOptions, RunInput};
+use packetcraftr::policy::{Authorizer, DestinationConstraint, Operation, Policy};
+use packetcraftr::probe::ExchangeExecutor;
 use packetcraftr::{Client, exchange, send};
-use packetcraftr_core::error::Classified;
+use packetcraftr_core::error::{BoundaryError, Classified};
 use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -21,7 +25,9 @@ use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::template::Template;
 use packetcraftr_netio::link::Mode;
 
-use support::{FixedRoutes, RecordingNeighbors, RecordingTransmit, SELECTED_SOURCE, Step, Steps};
+use support::{
+    FixedRoutes, NEIGHBOR_MAC, RecordingNeighbors, RecordingTransmit, SELECTED_SOURCE, Step, Steps,
+};
 
 const FIRST: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
 const SECOND: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 11);
@@ -181,5 +187,81 @@ fn a_streamed_set_authorizes_each_packet_before_its_own_discovery() {
         assert_eq!(steps[3], neighbor(SECOND), "{code}");
         assert!(is_transmit(&steps[4]), "{code}: {steps:?}");
         assert_eq!(steps[5], Step::Published(1), "{code}");
+    }
+}
+
+/// Leaves every decision to the client's own policy.
+struct AllowAll;
+
+impl Authorizer for AllowAll {
+    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
+    let (client, steps) = client(Policy::default());
+    let mut executor = ExchangeExecutor::new(&client, exchange_options());
+    let request = packet_fuzz::Request {
+        cases: 2,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().expect("raw payload target")],
+        ..packet_fuzz::Request::default()
+    };
+    // No source address and no link header: preparation fills in the route's
+    // source, synthesizes Ethernet, and rebuilds with the resolved neighbor.
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            destination: FIRST,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        })
+        .push(Raw::new(b"probe".to_vec()));
+
+    let report = fuzz::run(
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                timeout: Duration::from_millis(1),
+                ..LiveOptions::default()
+            },
+            packet,
+            registry: builtin::registry(),
+        },
+        &mut AllowAll,
+        &mut executor,
+        &mut SystemClock,
+    )
+    .expect("the executor's prepared bytes are the expected exact bytes");
+
+    let transmitted = steps
+        .take()
+        .into_iter()
+        .filter_map(|step| match step {
+            Step::Transmit(bytes) => Some(bytes),
+            Step::Neighbor(_) | Step::Published(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let recorded = report
+        .cases
+        .iter()
+        .map(|case| {
+            case.sent
+                .as_ref()
+                .expect("every case is sent")
+                .bytes()
+                .to_vec()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded, transmitted);
+    for frame in &recorded {
+        assert_eq!(frame[..6], NEIGHBOR_MAC.0, "resolved destination MAC");
     }
 }

@@ -28,23 +28,30 @@
 //!   and transmitted before the next one is planned, so frames are confirmed
 //!   as they go and large sets are never held in memory. `send_set` uses it;
 //!   single send is streaming with one packet.
+//!
+//! [`exact_bytes`] applies the same materialization rules to a packet and an
+//! already materialized route, without providers or authorization, so a
+//! workflow can check what an executor transmitted.
+
+mod materialize;
 
 use std::time::Instant;
 
+use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
-use packetcraftr_core::build::{Builder, BuiltPacket};
+use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::{Error as LiveIoError, neighbor, route, transmit};
 
-use crate::materialize::{
-    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    require_fixed_width_link_materialization,
-};
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 use crate::policy::{Operation, Policy, WireBudget};
 use crate::{Client, Error, SentPacket, send};
+use materialize::{
+    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
+    require_fixed_width_link_materialization,
+};
 
 /// A packet whose route is planned and whose preliminary build passed the MTU,
 /// packet, wire, and cumulative budget checks. Neighbor discovery has not run
@@ -124,6 +131,74 @@ impl PreparedPacket {
     }
 }
 
+/// The exact bytes preparation produces for `packet` on the materialized
+/// `route`: route-dependent network fields and link structure, the
+/// preliminary build, then link fields, rebuilt at the planned width when they
+/// changed.
+///
+/// Deterministic: no provider is consulted and nothing is authorized, so the
+/// result is only a reference for bytes that were prepared elsewhere.
+pub(crate) fn exact_bytes(
+    builder: &Builder,
+    options: &build::Options,
+    mut packet: Packet,
+    route: &route::Materialized,
+) -> Result<Bytes, Error> {
+    let rules = Materializer { builder, options };
+    let unchecked = || Ok(());
+    let (context, preliminary) = rules.preliminary(&mut packet, &route.plan, unchecked)?;
+    let built = rules.link(packet, route, context, preliminary, unchecked)?;
+    Ok(built.bytes)
+}
+
+/// The materialization rules shared by live preparation and [`exact_bytes`].
+/// `check` runs between steps that may take time.
+struct Materializer<'a> {
+    builder: &'a Builder,
+    options: &'a build::Options,
+}
+
+impl Materializer<'_> {
+    /// Fills route-dependent network fields and link structure into `packet`,
+    /// then builds it with the route's checksum endpoints.
+    fn preliminary(
+        &self,
+        packet: &mut Packet,
+        plan: &route::Plan,
+        check: impl Fn() -> Result<(), Error>,
+    ) -> Result<(codec::Context, BuiltPacket), Error> {
+        materialize_network_fields(packet, plan)?;
+        materialize_link_structure(packet, plan)?;
+        check()?;
+        let context = build_context(plan);
+        let built = self
+            .builder
+            .build(packet.clone(), context.clone(), self.options.clone())?;
+        Ok((context, built))
+    }
+
+    /// Fills the materialized route's link fields and rebuilds when they
+    /// changed. The final bytes must keep the preliminary build's width.
+    fn link(
+        &self,
+        mut packet: Packet,
+        route: &route::Materialized,
+        context: codec::Context,
+        preliminary: BuiltPacket,
+        check: impl Fn() -> Result<(), Error>,
+    ) -> Result<BuiltPacket, Error> {
+        let preliminary_len = preliminary.bytes.len();
+        let built = if materialize_link_fields(&mut packet, route)? {
+            check()?;
+            self.builder.build(packet, context, self.options.clone())?
+        } else {
+            preliminary
+        };
+        require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
+        Ok(built)
+    }
+}
+
 /// The operation's packet count and cumulative exact wire bytes.
 #[derive(Debug)]
 struct Budget {
@@ -192,6 +267,13 @@ where
         }
     }
 
+    fn materializer(&self) -> Materializer<'_> {
+        Materializer {
+            builder: &self.builder,
+            options: &self.options.build,
+        }
+    }
+
     fn check(&self) -> Result<(), Error> {
         self.client.check_cancelled()?;
         if let Some(signal) = &self.cancellation {
@@ -232,15 +314,9 @@ where
         plan: route::Plan,
     ) -> Result<Admitted, Error> {
         let policy = &self.client.policy;
-        materialize_network_fields(&mut packet, &plan)?;
-        materialize_link_structure(&mut packet, &plan)?;
-        self.check()?;
-        let build_context = build_context(&plan);
-        let preliminary_build = self.builder.build(
-            packet.clone(),
-            build_context.clone(),
-            self.options.build.clone(),
-        )?;
+        let (build_context, preliminary_build) =
+            self.materializer()
+                .preliminary(&mut packet, &plan, || self.check())?;
         self.check()?;
         validate_mtu(&preliminary_build, plan.decision.mtu)?;
         policy.authorize_built_packet(&preliminary_build, self.options.allow_permissive_live)?;
@@ -258,13 +334,12 @@ where
     /// final bytes and route together.
     fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         let Admitted {
-            mut packet,
+            packet,
             plan,
             build_context,
             preliminary_build,
         } = admitted;
         let policy = &self.client.policy;
-        let preliminary_len = preliminary_build.bytes.len();
         self.check()?;
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
@@ -275,15 +350,11 @@ where
                 return Err(error.into());
             }
         };
-        let link_changed = materialize_link_fields(&mut packet, &route)?;
-        let built = if link_changed {
-            self.check()?;
-            self.builder
-                .build(packet, build_context, self.options.build.clone())?
-        } else {
-            preliminary_build
-        };
-        require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
+        let built =
+            self.materializer()
+                .link(packet, &route, build_context, preliminary_build, || {
+                    self.check()
+                })?;
         self.check()?;
         policy.authorize_built_packet(&built, self.options.allow_permissive_live)?;
         policy.authorize_built_wire(&built, &route.plan)?;

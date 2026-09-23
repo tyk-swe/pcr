@@ -4,10 +4,10 @@
 
 **Blocked by:** 02, 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Fuzz no longer re-derives materialization.
-- [ ] A test shows the exact-bytes operation matches what was transmitted for the same packet and route.
-- [ ] Fuzz tests stop hand-building route materialization steps.
-- [ ] The fuzz contract tests pass.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Fuzz no longer re-derives materialization.
+- [x] A test shows the exact-bytes operation matches what was transmitted for the same packet and route.
+- [x] Fuzz tests stop hand-building route materialization steps.
+- [x] The fuzz contract tests pass.
+- [x] fmt, clippy and the workspace tests pass.

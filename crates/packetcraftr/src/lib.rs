@@ -40,7 +40,6 @@ mod evidence;
 pub mod exchange;
 mod execution;
 pub mod fuzz;
-mod materialize;
 mod mtu;
 mod planning;
 pub mod policy;

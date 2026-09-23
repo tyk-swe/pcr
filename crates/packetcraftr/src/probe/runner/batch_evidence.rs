@@ -18,9 +18,8 @@ use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Execution, Sequenced};
 use crate::SentPacket;
-use crate::probe::evidence::{
-    EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector, validate_batch_evidence,
-};
+use crate::probe::evidence::{EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector};
+use crate::probe::validation::validate_batch_evidence;
 use crate::probe::{Error, ErrorKind, Workflow, enforce_deadline};
 
 /// The reason both probe workflows report for a probe without a winner.

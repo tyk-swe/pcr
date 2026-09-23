@@ -10,9 +10,9 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
-use crate::probe::evidence::{
-    EvidenceDiagnosticDescriptor, EvidenceState, format_exchange_evidence_error,
-    validate_response_frames_and_deadlines,
+use crate::probe::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
+use crate::probe::validation::{
+    format_exchange_evidence_error, validate_response_frames_and_deadlines,
 };
 
 use super::error::{Error, duration_limit};

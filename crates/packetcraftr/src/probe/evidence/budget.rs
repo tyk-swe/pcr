@@ -160,17 +160,3 @@ impl EvidenceState {
         false
     }
 }
-
-pub(super) fn checked_frame_count(counts: &[usize]) -> Option<usize> {
-    counts
-        .iter()
-        .try_fold(0_usize, |total, count| total.checked_add(*count))
-}
-
-pub(super) fn checked_frame_bytes<'a>(
-    frames: impl IntoIterator<Item = &'a Frame>,
-) -> Option<usize> {
-    frames.into_iter().try_fold(0_usize, |total, frame| {
-        total.checked_add(frame.bytes().len())
-    })
-}

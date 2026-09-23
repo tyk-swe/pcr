@@ -249,7 +249,7 @@ fn planned<A: Authorizer>(
                 .checked_mul(ports.len())
                 .and_then(|count| count.checked_mul(request.attempts as usize))
                 .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
-            crate::probe::evidence::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
+            crate::probe::limits::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
             let delay = crate::clock::rate_delay(1, request.probes_per_second)
                 .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
             let windows = u32::try_from(count.div_ceil(request.max_in_flight))
@@ -263,7 +263,7 @@ fn planned<A: Authorizer>(
                         .and_then(|pacing| duration.checked_add(pacing))
                 })
                 .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
-            crate::probe::evidence::check_probe_duration(
+            crate::probe::limits::check_probe_duration(
                 WORKFLOW,
                 planned_duration,
                 request.limits.max_duration,

@@ -4,9 +4,9 @@
 
 **Blocked by:** 02, 03, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The evidence module exports only `EvidenceState`, the response selector and the types they need. The former helper exports are private.
-- [ ] DNS and fuzz evidence behavior is unchanged: their contract and engine tests pass. (The DNS `max_retained_bytes` double counter is out of scope, so don't fix it here.)
-- [ ] The evidence module's tests go through `EvidenceState` and the selector, not the private helpers.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] The evidence module exports only `EvidenceState`, the response selector and the types they need. The former helper exports are private.
+- [x] DNS and fuzz evidence behavior is unchanged: their contract and engine tests pass. (The DNS `max_retained_bytes` double counter is out of scope, so don't fix it here.)
+- [x] The evidence module's tests go through `EvidenceState` and the selector, not the private helpers.
+- [x] fmt, clippy and the workspace tests pass.

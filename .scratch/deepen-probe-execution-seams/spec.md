@@ -269,6 +269,14 @@ machine-output schemas, and `packetcraftr.output/v6` contract.
   every workflow: traffic that reached the wire is accounted even when
   the operation stops at that boundary. The probe runner, scan,
   traceroute and fuzz adopt it; that is a sanctioned change.
+- *Amendment (implementation):* when an execution fails and an
+  interruption was observed at the same boundary, the interruption is
+  reported rather than the execution failure. The failure is usually a
+  consequence of the cancellation or spent deadline. DNS and fuzz already
+  behaved this way, and user story 11 (uniform interruption
+  classification) needs it. The probe runner's former failure-first
+  behavior is the sanctioned change, and it is recorded under
+  `[Unreleased]`.
 - Pacing inputs stay workflow-owned: the probe runner's rate from the
   previous batch size, fuzz's cases-per-second, DNS's retry delay, the
   DNS batch runner's max-of-previous-and-current delay, and replay's

@@ -8,10 +8,10 @@ use packetcraftr_core::{
     field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
 };
 
-use super::target::Family;
 use crate::Error;
+use crate::target::Family;
 
-pub(crate) fn build_context(
+pub(super) fn build_context(
     plan: &packetcraftr_netio::route::Plan,
 ) -> packetcraftr_core::codec::Context {
     packetcraftr_core::codec::Context {
@@ -20,7 +20,7 @@ pub(crate) fn build_context(
     }
 }
 
-pub(crate) fn materialize_link_structure(
+pub(super) fn materialize_link_structure(
     packet: &mut Packet,
     plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
@@ -41,7 +41,7 @@ pub(crate) fn materialize_link_structure(
     Ok(())
 }
 
-pub(crate) fn materialize_network_fields(
+pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &packetcraftr_netio::route::Plan,
 ) -> Result<(), Error> {
@@ -121,7 +121,7 @@ pub(crate) fn materialize_network_fields(
     Ok(())
 }
 
-pub(crate) fn materialize_link_fields(
+pub(super) fn materialize_link_fields(
     packet: &mut Packet,
     route: &packetcraftr_netio::route::Materialized,
 ) -> Result<bool, Error> {
@@ -186,7 +186,7 @@ pub(crate) fn materialize_link_fields(
     }
     Ok(changed)
 }
-pub(crate) fn require_fixed_width_link_materialization(
+pub(super) fn require_fixed_width_link_materialization(
     preliminary_len: usize,
     materialized_len: usize,
 ) -> Result<(), Error> {

@@ -1,24 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::fmt::Display;
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
-    build::{Builder, BuiltPacket},
-    frame::LinkType,
-    fuzz as packet_fuzz,
-    packet::Packet,
-    registry::Registry,
+    build::Builder, frame::LinkType, fuzz as packet_fuzz, packet::Packet, registry::Registry,
 };
 
 use crate::clock::Clock;
 use crate::execution::{Context, Grant};
-use crate::materialize::{
-    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    require_fixed_width_link_materialization,
-};
+use crate::preparation::exact_bytes;
 use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 
@@ -144,6 +136,7 @@ where
         ..
     } = prepared;
     let delay = rate_delay(live.cases_per_second)?;
+    let builder = Builder::new(Arc::clone(&registry));
     let mut recorder = Recorder::new(Arc::clone(&registry), request.limits, live.limits);
     let mut context = Context::new(&mut deadline, clock, CaseErrors);
     let mut executed_before = false;
@@ -169,7 +162,7 @@ where
                     })
                 },
                 |_, execution, grant, deadline| {
-                    validate_case(request, &registry, &case, execution, grant, deadline)
+                    validate_case(request, &builder, &case, execution, grant, deadline)
                 },
             )?;
             recorder.record(&mut case, execution, context.deadline())?;
@@ -317,20 +310,19 @@ where
 /// granted, already clipped, timeout.
 fn validate_case(
     request: &packet_fuzz::Request,
-    registry: &Arc<Registry>,
+    builder: &Builder,
     case: &Case,
     execution: &Execution,
     grant: Grant,
     deadline: &Deadline,
 ) -> Result<(), Error> {
-    let expected_live_build =
-        expected_live_build(request, case.prepared.recipe.clone(), registry, execution).map_err(
-            |message| Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message,
-            },
-        )?;
-    if execution.sent.wire_bytes() != &expected_live_build.bytes {
+    let route = execution.sent.route();
+    let expected = exact_bytes(builder, &request.build, case.prepared.recipe.clone(), route)
+        .map_err(|source| Error::InvalidEvidence {
+            case_index: case.prepared.index,
+            message: source.to_string(),
+        })?;
+    if execution.sent.wire_bytes() != &expected {
         return Err(Error::InvalidEvidence {
             case_index: case.prepared.index,
             message: "executor substituted bytes for the route-materialized case".to_owned(),
@@ -345,48 +337,8 @@ fn validate_case(
     )
 }
 
-fn expected_live_build(
-    request: &packet_fuzz::Request,
-    mut packet: Packet,
-    registry: &Arc<Registry>,
-    execution: &Execution,
-) -> Result<BuiltPacket, String> {
-    let route = execution.sent.route();
-    stringify(materialize_network_fields(&mut packet, &route.plan))?;
-    stringify(materialize_link_structure(&mut packet, &route.plan))?;
-
-    let context = build_context(&route.plan);
-    let builder = Builder::new(Arc::clone(registry));
-    let preliminary = build_packet(&builder, packet.clone(), context.clone(), request)?;
-    let preliminary_len = preliminary.bytes.len();
-
-    let built = if stringify(materialize_link_fields(&mut packet, route))? {
-        build_packet(&builder, packet, context, request)?
-    } else {
-        preliminary
-    };
-    stringify(require_fixed_width_link_materialization(
-        preliminary_len,
-        built.bytes.len(),
-    ))?;
-    Ok(built)
-}
-
-fn build_packet(
-    builder: &Builder,
-    packet: Packet,
-    context: packetcraftr_core::codec::Context,
-    request: &packet_fuzz::Request,
-) -> Result<BuiltPacket, String> {
-    stringify(builder.build(packet, context, request.build.clone()))
-}
-
 fn last_case_index(request: &packet_fuzz::Request) -> u64 {
     request
         .first_case
         .saturating_add(u64::try_from(request.cases.saturating_sub(1)).unwrap_or(u64::MAX))
-}
-
-fn stringify<T, E: Display>(result: Result<T, E>) -> Result<T, String> {
-    result.map_err(|source| source.to_string())
 }

@@ -181,7 +181,7 @@ where
             self.execution.deadline(),
             &Gates,
         );
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(probe.attempt)?;
         if attempt_deadline.check().is_err() {
             return Ok(false);
         }

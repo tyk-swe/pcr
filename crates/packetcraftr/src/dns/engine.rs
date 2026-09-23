@@ -280,12 +280,14 @@ where
     }
 
     fn execute_attempts(&mut self) -> Result<(), Error> {
+        let mut last_attempt = 1;
         for attempt in 1..=self.request.attempts {
+            last_attempt = attempt;
             if self.execute_attempt(attempt)? {
                 break;
             }
         }
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(last_attempt)?;
         self.summary.completion.validate()?;
         Ok(())
     }
@@ -305,12 +307,12 @@ where
         self.record_diagnostics(attempt, execution.diagnostics.drain(..))?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
-            self.execution.deadline(),
             self.registry,
             &probe,
             &mut execution,
             self.request.limits,
             timeout,
+            || self.execution.enforce(attempt),
         )?;
         let udp = match best {
             Some(candidate) => candidate_evidence(&probe, sent_at, candidate, &mut self.evidence),
@@ -382,7 +384,7 @@ where
     }
 
     fn prepare_probe(&mut self, attempt: u32) -> Result<Probe, Error> {
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolve_selected(
             self.authorizer,
             &self.request.server,
@@ -390,7 +392,7 @@ where
             self.execution.deadline(),
             &Gates,
         );
-        self.execution.deadline().enforce()?;
+        self.execution.enforce(attempt)?;
         let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
@@ -455,10 +457,13 @@ where
     }
 
     fn emit_attempt(&mut self, evidence: AttemptEvidence) -> Result<(), Error> {
-        self.publish(Event::Attempt {
-            context: Arc::clone(&self.context),
-            evidence,
-        })
+        self.publish(
+            evidence.attempt,
+            Event::Attempt {
+                context: Arc::clone(&self.context),
+                evidence,
+            },
+        )
     }
 
     fn accept_response(
@@ -490,12 +495,15 @@ where
             }
         }
         for record in rejected_records {
-            self.publish(Event::Rejected {
+            self.publish(
                 attempt,
-                transport,
-                context: Arc::clone(&self.context),
-                record,
-            })?;
+                Event::Rejected {
+                    attempt,
+                    transport,
+                    context: Arc::clone(&self.context),
+                    record,
+                },
+            )?;
         }
         self.summary.completion.response = Some(metadata);
         Ok(())
@@ -508,19 +516,21 @@ where
         section: Section,
         record: Record,
     ) -> Result<(), Error> {
-        self.publish(Event::Record {
+        self.publish(
             attempt,
-            transport,
-            context: Arc::clone(&self.context),
-            section,
-            record,
-        })
+            Event::Record {
+                attempt,
+                transport,
+                context: Arc::clone(&self.context),
+                section,
+                record,
+            },
+        )
     }
 
-    fn publish(&mut self, event: Event) -> Result<(), Error> {
+    fn publish(&mut self, attempt: u32, event: Event) -> Result<(), Error> {
         (self.emit)(event, self.execution.deadline())?;
-        self.execution.deadline().enforce()?;
-        Ok(())
+        self.execution.enforce(attempt)
     }
 
     fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
@@ -588,12 +598,12 @@ where
 }
 
 fn select_response<'a>(
-    deadline: &Deadline,
     registry: &Registry,
     probe: &Probe,
     execution: &'a mut Execution,
     limits: Limits,
     timeout: Duration,
+    check: impl FnMut() -> Result<(), Error>,
 ) -> Result<Option<ResponseCandidate<'a, ResponseClassification>>, Error> {
     let sent_packet = &execution.sent.built().packet;
     // Validation admits only responses to the single query, request index 0.
@@ -603,7 +613,7 @@ fn select_response<'a>(
         |response| classify_response(registry, probe, sent_packet, response, limits.message),
         ResponseClassification::rank,
         |_| (),
-        || deadline.enforce().map_err(Error::from),
+        check,
     )
 }
 

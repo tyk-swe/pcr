@@ -38,6 +38,7 @@ pub mod dns;
 mod error;
 mod evidence;
 pub mod exchange;
+mod execution;
 pub mod fuzz;
 mod materialize;
 mod mtu;

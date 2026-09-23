@@ -49,6 +49,10 @@ use crate::{Client, Error, SentPacket, send};
 /// A packet whose route is planned and whose preliminary build passed the MTU,
 /// packet, wire, and cumulative budget checks. Neighbor discovery has not run
 /// for it yet.
+///
+/// The transitional [`Client::plan_and_authorize`] is the one exception: it
+/// yields an uncharged `Admitted` for the scan pipeline, which still charges
+/// its own budget.
 pub(crate) struct Admitted {
     packet: Packet,
     plan: route::Plan,
@@ -57,11 +61,6 @@ pub(crate) struct Admitted {
 }
 
 impl Admitted {
-    /// The passive route plan the packet was admitted on.
-    pub(crate) fn plan(&self) -> &route::Plan {
-        &self.plan
-    }
-
     /// The packet description after network-field materialization.
     pub(crate) fn packet(&self) -> &Packet {
         &self.packet
@@ -70,6 +69,13 @@ impl Admitted {
     /// Exact wire bytes charged to the cumulative budget.
     pub(crate) fn wire_len(&self) -> usize {
         self.preliminary_build.bytes.len()
+    }
+
+    /// Whether both packets leave through the same interface in the same link
+    /// mode.
+    pub(crate) fn shares_route_with(&self, other: &Self) -> bool {
+        self.plan.decision.interface == other.plan.decision.interface
+            && self.plan.mode == other.plan.mode
     }
 }
 
@@ -393,9 +399,7 @@ where
         packets: u64,
         deadline: Instant,
     ) -> Result<Admission<'c, R, N, I>, Error> {
-        let stages = Stages::new(self, options, Some(deadline), None);
-        stages.check()?;
-        let budget = Budget::open(&self.policy, packets)?;
+        let (stages, budget) = self.open_stages(options, packets, Some(deadline), None)?;
         Ok(Admission { stages, budget })
     }
 
@@ -408,10 +412,21 @@ where
         packets: u64,
         cancellation: Option<Cancellation>,
     ) -> Result<Streaming<'c, R, N, I>, Error> {
-        let stages = Stages::new(self, options, None, cancellation);
+        let (stages, budget) = self.open_stages(options, packets, None, cancellation)?;
+        Ok(Streaming { stages, budget })
+    }
+
+    fn open_stages<'c>(
+        &'c self,
+        options: &'c send::Options,
+        packets: u64,
+        deadline: Option<Instant>,
+        cancellation: Option<Cancellation>,
+    ) -> Result<(Stages<'c, R, N, I>, Budget), Error> {
+        let stages = Stages::new(self, options, deadline, cancellation);
         stages.check()?;
         let budget = Budget::open(&self.policy, packets)?;
-        Ok(Streaming { stages, budget })
+        Ok((stages, budget))
     }
 
     /// Stage 3 on a caller-planned route, without a budget charge.

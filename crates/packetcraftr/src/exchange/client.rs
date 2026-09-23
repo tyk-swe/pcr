@@ -214,14 +214,13 @@ where
                 message: source.to_string(),
                 source: Some(source),
             })?;
-            let packet = admission.admit(packet, &routes)?;
+            let admitted_packet = admission.admit(packet, &routes)?;
             if let Some(first_packet) = admitted.first()
-                && (first_packet.plan().decision.interface != packet.plan().decision.interface
-                    || first_packet.plan().mode != packet.plan().mode)
+                && !first_packet.shares_route_with(&admitted_packet)
             {
                 return Err(Error::HeterogeneousExchangeRoute);
             }
-            admitted.push(packet);
+            admitted.push(admitted_packet);
         }
         let total_bytes = admission.wire_bytes();
         // Neighbor discovery is delayed until every packet has passed packet,

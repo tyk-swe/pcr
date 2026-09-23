@@ -7,6 +7,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
+use crate::execution::Context;
 use crate::policy::{Authorizer, Operation};
 use crate::probe::Executor;
 use crate::probe::runner::sink_observer;
@@ -14,7 +15,7 @@ use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
-use super::engine::{Gates, PreparedOperation};
+use super::engine::{Attempts, Gates, PreparedOperation};
 use super::plan::batch_budget;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
@@ -231,21 +232,12 @@ where
         if let Some(previous) = previous_delay {
             let delay = previous.max(prepared.delay);
             if !delay.is_zero() {
-                let waited = (|| {
-                    deadline.start_accounting(delay)?;
-                    let slept = clock.sleep(delay);
-                    deadline.check_cancelled()?;
-                    slept.map_err(|source| Error::Clock {
-                        attempt: 1,
-                        source: Box::new(source),
-                    })?;
-                    stats.elapsed = stats
-                        .elapsed
-                        .checked_add(delay)
-                        .ok_or(Error::StatisticsOverflow { attempt: 1 })?;
-                    deadline.account(delay)?;
-                    Ok::<(), Error>(())
-                })();
+                let mut pause = Context::new(&mut *deadline, &mut *clock, Attempts);
+                let waited = pause.pace(1, delay).and_then(|()| {
+                    stats
+                        .checked_add_assign(&pause.into_stats())
+                        .map_err(|_| Error::StatisticsOverflow { attempt: 1 })
+                });
                 if let Err(error) = waited {
                     stop = true;
                     questions.push(match error {

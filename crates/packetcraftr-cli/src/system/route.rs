@@ -21,6 +21,8 @@ pub(crate) struct RoutedPacket {
     pub(crate) policy: packetcraftr::policy::Policy,
 }
 
+/// Reads one recipe, validates `policy`, and authorizes the packet's declared
+/// destinations before hostname or interface work.
 pub(crate) fn prepare_route(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
@@ -32,14 +34,31 @@ pub(crate) fn prepare_route(
         route,
     } = arguments;
     let packet = read_recipe(recipe, registry, core::layout::DEFAULT_MAX_LAYERS)?;
-    prepare_packet_route(packet, destination, route, policy)
+    policy.validate().map_err(CliError::classified)?;
+    // This check intentionally precedes interface discovery and route lookup.
+    policy
+        .authorize_packet_destinations(&packet)
+        .map_err(CliError::classified)?;
+    resolve_route(packet, destination, route, policy)
 }
 
 /// Expands the bounded template lazily and authorizes every expanded packet's
-/// declared destinations before hostname or interface work, returning the
-/// first packet for route preparation. The library repeats these checks
-/// against every final packet before transmission.
-pub(crate) fn authorize_expanded_destinations(
+/// declared destinations before hostname or interface work, then prepares the
+/// route for the first packet. The caller has already validated `policy`; the
+/// library repeats these checks against every final packet before
+/// transmission.
+pub(crate) fn prepare_expanded_route(
+    template: &core::template::Template,
+    max_template_packets: usize,
+    destination: Option<String>,
+    route: RouteSelectionArgs,
+    policy: packetcraftr::policy::Policy,
+) -> Result<RoutedPacket, CliError> {
+    let first = authorize_expanded_destinations(template, max_template_packets, &policy)?;
+    resolve_route(first, destination, route, policy)
+}
+
+fn authorize_expanded_destinations(
     template: &core::template::Template,
     max_template_packets: usize,
     policy: &packetcraftr::policy::Policy,
@@ -69,17 +88,14 @@ pub(crate) fn authorize_expanded_destinations(
     Ok(first)
 }
 
-pub(crate) fn prepare_packet_route(
+/// Resolves the destination and interface for a packet whose declared
+/// destinations the caller has already authorized.
+fn resolve_route(
     packet: Packet,
     destination: Option<String>,
     route: RouteSelectionArgs,
     policy: packetcraftr::policy::Policy,
 ) -> Result<RoutedPacket, CliError> {
-    policy.validate().map_err(CliError::classified)?;
-    // This check intentionally precedes interface discovery and route lookup.
-    policy
-        .authorize_packet_destinations(&packet)
-        .map_err(CliError::classified)?;
     let destination = resolve_destination(destination, &packet, &policy)?;
     let interface = interface::InterfaceSelector::parse_optional(route.interface.as_deref())?
         .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))

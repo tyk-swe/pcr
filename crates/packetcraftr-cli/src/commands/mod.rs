@@ -42,6 +42,7 @@ mod interfaces;
 mod merge;
 mod offline_analysis;
 mod plan;
+mod preparation;
 mod projection;
 mod protocols;
 mod read;

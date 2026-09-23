@@ -14,9 +14,8 @@ use packetcraftr_core::error::Kind;
 use packetcraftr_cli::output;
 
 use self::arguments::Args;
-use super::execution;
+use super::{execution, preparation};
 use crate::errors::CliError;
-use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
 
 pub(super) fn run(
@@ -34,54 +33,21 @@ pub(super) fn run(
         max_unmatched_frames,
         limits,
     } = arguments;
-    let max_template_packets = template.max_template_packets;
-    let axes = template.parse()?;
     let limits = limits.into_limits();
     let mut options = packetcraftr::exchange::Options {
         timeout: Duration::from_millis(timeout_ms),
-        max_template_packets,
+        max_template_packets: template.max_template_packets,
         max_responses,
         max_unmatched_frames,
         capture: limits,
         ..packetcraftr::exchange::Options::default()
     };
     options.decode.max_packet_size = limits.snap_length;
-    // Validate before packet parsing can trigger hostname/interface work.
-    options.validate().map_err(CliError::classified)?;
-
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let packet = read_recipe(
-        send.route.recipe,
-        &registry,
-        packetcraftr_core::layout::DEFAULT_MAX_LAYERS,
-    )?;
-    let template = axes.into_template(packet);
-    let policy = send.policy.into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    let count = template.expansion_len().map_err(CliError::classified)?;
-    policy
-        .authorize(packetcraftr::policy::Operation::Budgeted(
-            packetcraftr::policy::WireBudget::new(u64::try_from(count).unwrap_or(u64::MAX), 0),
-        ))
-        .map_err(CliError::classified)?;
-    let first =
-        crate::system::authorize_expanded_destinations(&template, max_template_packets, &policy)?;
-    let prepared = crate::system::prepare_packet_route(
-        first,
-        send.route.destination,
-        send.route.route,
-        policy,
-    )?;
-    options.send = packetcraftr::send::Options {
-        destination: prepared.destination,
-        plan: prepared.options,
-        build: packetcraftr_core::build::Options {
-            mode: send.mode.into(),
-            ..packetcraftr_core::build::Options::default()
-        },
-        allow_permissive_live: send.allow_permissive_live,
-    };
-    let client = crate::system::client(registry, prepared.policy);
+    let preparation::Prepared {
+        template,
+        options,
+        client,
+    } = preparation::prepare(send, template, options)?;
     // Exchange drives the composed client itself — authorization,
     // cancellation, and the callback runtime live inside it — so the driver
     // vends no session state.

@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The eight-step copy is gone from both commands, and policy validation runs once per command.
-- [ ] Unit tests on the shared step with an invalid option and an invalid recipe show that options fail first for both commands.
-- [ ] The CLI process contract tests and the machine-output schemas and examples are unchanged and pass.
-- [ ] If option-before-recipe ordering changes a user-visible error for either command, it is recorded under `[Unreleased]`.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] The eight-step copy is gone from both commands, and policy validation runs once per command.
+- [x] Unit tests on the shared step with an invalid option and an invalid recipe show that options fail first for both commands.
+- [x] The CLI process contract tests and the machine-output schemas and examples are unchanged and pass.
+- [x] If option-before-recipe ordering changes a user-visible error for either command, it is recorded under `[Unreleased]`.
+- [x] fmt, clippy and the workspace tests pass.

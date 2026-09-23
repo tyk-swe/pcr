@@ -23,7 +23,11 @@
 //! - **All-before-discovery** ([`Admission`] then [`Discovery`]): every
 //!   packet is admitted before any is materialized. [`Admission::discover`]
 //!   consumes the admission, so no packet can be admitted once discovery
-//!   traffic may have been emitted. Exchange uses it.
+//!   traffic may have been emitted. Exchange keeps its admitted packets and
+//!   materializes them. The scan pipeline keeps only each packet's
+//!   [`AdmittedCost`] and rebuilds the packet at send time with
+//!   [`Discovery::rebuild`], which rejects a rebuild whose exact wire length
+//!   differs from the admitted one.
 //! - **Streaming** ([`Streaming`]): each packet is admitted, materialized,
 //!   and transmitted before the next one is planned, so frames are confirmed
 //!   as they go and large sets are never held in memory. `send_set` uses it;
@@ -35,6 +39,7 @@
 
 mod materialize;
 
+use std::net::IpAddr;
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -42,7 +47,7 @@ use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::{Error as LiveIoError, neighbor, route, transmit};
+use packetcraftr_netio::{Error as LiveIoError, interface, neighbor, route, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
@@ -53,13 +58,34 @@ use materialize::{
     require_fixed_width_link_materialization,
 };
 
+/// A route planned for one destination after the destination and the
+/// planning packet's declared endpoints were authorized. Only
+/// [`Admission::route`] creates one, so every packet admitted or rebuilt on it
+/// leaves on a planned route. Each packet's own endpoints and bytes are still
+/// authorized when it is built.
+#[derive(Clone)]
+pub(crate) struct AuthorizedRoute {
+    plan: route::Plan,
+}
+
+impl AuthorizedRoute {
+    /// The interface the route leaves through.
+    pub(crate) fn interface(&self) -> &interface::Id {
+        &self.plan.decision.interface
+    }
+}
+
+/// The exact wire bytes one admitted packet charged to the cumulative budget.
+/// It is neither `Clone` nor `Copy`: [`Discovery::rebuild`] consumes it, so
+/// each admission pays for exactly one rebuild.
+#[derive(Debug)]
+pub(crate) struct AdmittedCost {
+    wire_len: usize,
+}
+
 /// A packet whose route is planned and whose preliminary build passed the MTU,
 /// packet, wire, and cumulative budget checks. Neighbor discovery has not run
 /// for it yet.
-///
-/// The transitional [`Client::plan_and_authorize`] is the one exception: it
-/// yields an uncharged `Admitted` for the scan pipeline, which still charges
-/// its own budget.
 pub(crate) struct Admitted {
     packet: Packet,
     plan: route::Plan,
@@ -83,6 +109,14 @@ impl Admitted {
     pub(crate) fn shares_route_with(&self, other: &Self) -> bool {
         self.plan.decision.interface == other.plan.decision.interface
             && self.plan.mode == other.plan.mode
+    }
+
+    /// Drops the prepared packet and keeps only what it charged, for a caller
+    /// that rebuilds it at send time instead of holding it.
+    pub(crate) fn into_cost(self) -> AdmittedCost {
+        AdmittedCost {
+            wire_len: self.wire_len(),
+        }
     }
 }
 
@@ -285,6 +319,26 @@ where
         Ok(())
     }
 
+    /// Stage 2: plans `packet` toward `destination` through `routes`,
+    /// authorizing the destination and the packet's endpoints.
+    fn plan<P: route::Provider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        routes: &P,
+    ) -> Result<route::Plan, Error> {
+        self.check()?;
+        let plan = self.client.plan_with_provider(
+            packet,
+            destination,
+            &self.options.plan,
+            routes,
+            self.deadline,
+        )?;
+        self.check()?;
+        Ok(plan)
+    }
+
     /// Stages 2–4 for one packet, planning its route through `routes`.
     fn admit<P: route::Provider>(
         &self,
@@ -292,16 +346,12 @@ where
         packet: Packet,
         routes: &P,
     ) -> Result<Admitted, Error> {
-        self.check()?;
-        let plan = self.client.plan_with_provider(
-            &packet,
-            self.options.destination,
-            &self.options.plan,
-            routes,
-            self.deadline,
-        )?;
-        self.check()?;
-        let admitted = self.build_and_authorize(packet, plan)?;
+        let plan = self.plan(&packet, self.options.destination, routes)?;
+        self.charge(budget, self.build_and_authorize(packet, plan)?)
+    }
+
+    /// Stage 4: charges an admitted packet's exact wire bytes.
+    fn charge(&self, budget: &mut Budget, admitted: Admitted) -> Result<Admitted, Error> {
         budget.charge(&self.client.policy, admitted.wire_len())?;
         Ok(admitted)
     }
@@ -390,6 +440,34 @@ where
         self.stages.admit(&mut self.budget, packet, routes)
     }
 
+    /// Plans `packet` toward `destination` through the client's routes, for a
+    /// caller that shares one route among the packets it sends to the same
+    /// destination.
+    pub(crate) fn route(
+        &self,
+        packet: &Packet,
+        destination: IpAddr,
+    ) -> Result<AuthorizedRoute, Error> {
+        let plan = self
+            .stages
+            .plan(packet, Some(destination), &self.stages.client.routes)?;
+        Ok(AuthorizedRoute { plan })
+    }
+
+    /// Checks `packet`'s preliminary build on an already planned `route` and
+    /// charges its exact wire bytes to the cumulative budget.
+    pub(crate) fn admit_on(
+        &mut self,
+        packet: Packet,
+        route: &AuthorizedRoute,
+    ) -> Result<Admitted, Error> {
+        self.stages.check()?;
+        let admitted = self
+            .stages
+            .build_and_authorize(packet, route.plan.clone())?;
+        self.stages.charge(&mut self.budget, admitted)
+    }
+
     /// Cumulative exact wire bytes admitted so far.
     pub(crate) fn wire_bytes(&self) -> u64 {
         self.budget.wire_bytes
@@ -417,6 +495,29 @@ where
     I: transmit::Sender,
 {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
+        self.stages.materialize(admitted)
+    }
+
+    /// Prepares a packet admitted earlier whose preparation was dropped to
+    /// bound memory. The preliminary checks run again without a second
+    /// budget charge, and a build whose exact wire length differs from
+    /// `cost` is rejected before any discovery traffic for it.
+    pub(crate) fn rebuild(
+        &self,
+        packet: Packet,
+        route: &AuthorizedRoute,
+        cost: AdmittedCost,
+    ) -> Result<PreparedPacket, Error> {
+        self.stages.check()?;
+        let admitted = self
+            .stages
+            .build_and_authorize(packet, route.plan.clone())?;
+        if admitted.wire_len() != cost.wire_len {
+            return Err(Error::PreparationChanged {
+                admitted: cost.wire_len,
+                rebuilt: admitted.wire_len(),
+            });
+        }
         self.stages.materialize(admitted)
     }
 }
@@ -499,57 +600,135 @@ where
         let budget = Budget::open(&self.policy, packets)?;
         Ok((stages, budget))
     }
-
-    /// Stage 3 on a caller-planned route, without a budget charge.
-    ///
-    /// Transitional: the scan pipeline still sequences its own chain until it
-    /// moves onto [`Admission`].
-    pub(crate) fn plan_and_authorize(
-        &self,
-        packet: Packet,
-        plan: route::Plan,
-        builder: &Builder,
-        options: &send::Options,
-        deadline: Option<Instant>,
-    ) -> Result<Admitted, Error> {
-        self.detached_stages(builder, options, deadline)
-            .build_and_authorize(packet, plan)
-    }
-
-    /// Stages 5–6 for a packet admitted by
-    /// [`plan_and_authorize`](Self::plan_and_authorize).
-    ///
-    /// Transitional: see [`plan_and_authorize`](Self::plan_and_authorize).
-    pub(crate) fn materialize_and_authorize(
-        &self,
-        admitted: Admitted,
-        builder: &Builder,
-        options: &send::Options,
-        deadline: Option<Instant>,
-    ) -> Result<PreparedPacket, Error> {
-        self.detached_stages(builder, options, deadline)
-            .materialize(admitted)
-    }
-
-    fn detached_stages<'c>(
-        &'c self,
-        builder: &Builder,
-        options: &'c send::Options,
-        deadline: Option<Instant>,
-    ) -> Stages<'c, R, N, I> {
-        Stages {
-            client: self,
-            builder: builder.clone(),
-            options,
-            deadline,
-            cancellation: None,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+    use std::net::Ipv4Addr;
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::protocol::builtin;
+    use packetcraftr_core::protocol::network::Ipv4;
+    use packetcraftr_core::protocol::transport::Udp;
+    use packetcraftr_netio::link::{Capability, Mode};
+
     use super::*;
+
+    const DESTINATION: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 2);
+
+    /// Puts every destination on-link over one Layer 3 interface.
+    struct Layer3Routes;
+
+    impl route::Provider for Layer3Routes {
+        type Error = Infallible;
+
+        fn lookup_with_preferences(
+            &self,
+            _destination: IpAddr,
+            _interface_hint: Option<&interface::Id>,
+            _preferred_source: Option<IpAddr>,
+        ) -> Result<route::Decision, Self::Error> {
+            Ok(route::Decision {
+                interface: interface::Id {
+                    index: 1,
+                    name: "fixture0".to_owned(),
+                },
+                source_mac: None,
+                selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: route::SelectionReason::OnLink,
+                destination_scope: route::Scope::Link,
+                mtu: 1_500,
+                capability: Capability::Layer3,
+                link_type: LinkType::RAW,
+            })
+        }
+    }
+
+    struct NoNeighbors;
+
+    impl neighbor::Resolver for NoNeighbors {
+        fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
+            panic!("a Layer 3 route needs no neighbor discovery")
+        }
+    }
+
+    struct NoTransmit;
+
+    impl transmit::Sender for NoTransmit {
+        fn send(&self, _: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+            panic!("preparation never transmits on its own")
+        }
+    }
+
+    fn datagram(payload: &'static [u8]) -> Packet {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                destination: DESTINATION,
+                ..Ipv4::default()
+            })
+            .push(Udp {
+                source_port: 40_000,
+                destination_port: 9,
+                ..Udp::default()
+            })
+            .push(Raw::new(Bytes::from_static(payload)));
+        packet
+    }
+
+    #[test]
+    fn a_rebuild_must_match_the_wire_bytes_its_admission_charged() {
+        let client = Client::new(
+            builtin::registry(),
+            Layer3Routes,
+            NoNeighbors,
+            NoTransmit,
+            Policy::default(),
+        );
+        let mut options = send::Options::default();
+        options.plan.link_mode = Mode::Layer3;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let admitted_packet = datagram(b"four");
+        let mut admission = client
+            .admission(&options, 2, deadline)
+            .expect("two packets fit the default budget");
+        let route = admission
+            .route(&admitted_packet, IpAddr::V4(DESTINATION))
+            .expect("documentation destination is authorized");
+        let unchanged = admission
+            .admit_on(admitted_packet.clone(), &route)
+            .expect("first packet is admitted")
+            .into_cost();
+        let changed = admission
+            .admit_on(admitted_packet.clone(), &route)
+            .expect("second packet is admitted")
+            .into_cost();
+        let admitted_len = unchanged.wire_len;
+        let discovery = admission.discover();
+
+        let prepared = discovery
+            .rebuild(admitted_packet, &route, unchanged)
+            .expect("an identical rebuild keeps its admitted cost");
+        assert_eq!(prepared.built().bytes.len(), admitted_len);
+
+        let Err(error) = discovery.rebuild(datagram(b"fives"), &route, changed) else {
+            panic!("a rebuild with a different wire length must be rejected");
+        };
+        assert!(
+            matches!(
+                error,
+                Error::PreparationChanged { admitted, rebuilt }
+                    if admitted == admitted_len && rebuilt == admitted_len + 1
+            ),
+            "{error:?}"
+        );
+    }
 
     #[test]
     fn cumulative_byte_overflow_is_a_byte_limit_denial() {

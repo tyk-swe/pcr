@@ -4,9 +4,9 @@
 
 **Blocked by:** 05, 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The pipeline's copied plan → authorize → budget → materialize → final-check → transmit chain is gone. What stays in the pipeline is pipeline-specific: the prepared-description memory charge, capture-interface grouping and batching.
-- [ ] A test through the client or pipeline shows a rebuild that doesn't match the admitted cost is rejected.
-- [ ] The scan pipeline contract tests pass.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] The pipeline's copied plan → authorize → budget → materialize → final-check → transmit chain is gone. What stays in the pipeline is pipeline-specific: the prepared-description memory charge, capture-interface grouping and batching.
+- [x] A test through the client or pipeline shows a rebuild that doesn't match the admitted cost is rejected.
+- [x] The scan pipeline contract tests pass.
+- [x] fmt, clippy and the workspace tests pass.

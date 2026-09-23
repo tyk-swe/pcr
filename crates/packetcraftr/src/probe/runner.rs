@@ -3,8 +3,11 @@
 
 //! Shared bounded lifecycle for homogeneous probe workflows.
 
+mod batch_evidence;
+
+pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, Outcome};
+
 use std::borrow::BorrowMut;
-use std::ops::ControlFlow;
 use std::time::Duration;
 
 use crate::progress::{EmitError, Runtime, Sink};
@@ -16,10 +19,11 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 use crate::clock::{Clock, rate_delay};
 use crate::evidence::ExecutionPermit;
 use crate::execution::{Context, Grant, Receipt};
-use crate::probe::{Error, ErrorKind, Workflow};
+use crate::probe::{Error, ErrorKind, Executor};
 use crate::{SentPacket, Stats};
 
-/// Multi-probe request envelope used for traceroute hop batches.
+/// A planned batch of probes executed together: one probe per scan batch,
+/// one hop's probes per traceroute batch. Never empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Batch<P> {
     pub probes: Vec<P>,
@@ -31,28 +35,9 @@ pub struct Batch<P> {
     pub(crate) sequence: u64,
 }
 
-/// Private pacing and binding controls for the two existing probe workflows.
-/// Scan owns a single-probe value; traceroute owns a variable-size hop batch.
-pub(crate) trait BatchPlan {
-    fn sequence(&self) -> u64;
-    fn probe_count(&self) -> usize;
-    /// The timeout the plan requested, before clipping to the operation budget.
-    fn timeout(&self) -> Duration;
+impl<P> Batch<P> {
     /// Binds the execution context's grant so the executor runs the batch
     /// under the clipped timeout and returns evidence for the fresh permit.
-    fn bind(&mut self, grant: Grant);
-}
-
-impl<P> BatchPlan for Batch<P> {
-    fn sequence(&self) -> u64 {
-        self.sequence
-    }
-    fn probe_count(&self) -> usize {
-        self.probes.len()
-    }
-    fn timeout(&self) -> Duration {
-        self.timeout
-    }
     fn bind(&mut self, grant: Grant) {
         self.timeout = grant.timeout;
         self.permit = grant.permit;
@@ -140,44 +125,34 @@ pub(crate) trait Sequenced {
     fn sequence(&self) -> u64;
 }
 
-/// Workflow-owned operations for the shared probe runner.
-pub(crate) trait ProbeLifecycle<B> {
-    fn execute(&mut self, batch: &B) -> Result<Execution, BoundaryError>;
-    fn validate(&mut self, batch: &B, execution: &Execution) -> Result<(), Error>;
-    /// Consumes one batch's evidence. [`ControlFlow::Break`] ends the
-    /// operation without running the remaining batches.
-    fn process(
-        &mut self,
-        batch: &B,
-        execution: Execution,
-        deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Error>;
-}
-
 /// Runs already-approved homogeneous batches through the execution context,
 /// which owns deadline, pacing, permit, timeout-clipping, and checked-statistics
-/// policy. The runner supplies the pacing input: each batch waits for the
-/// previous batch's probe count at `probes_per_second`.
-pub(crate) fn run_batches<B, L, C>(
-    workflow: Workflow,
-    batches: impl IntoIterator<Item = impl BorrowMut<B>>,
+/// policy, and hands each batch's evidence to `evidence`, which validates it
+/// inside the step and processes it after. The runner supplies the pacing
+/// input: each batch waits for the previous batch's probe count at
+/// `probes_per_second`. A batch whose processing breaks ends the operation.
+pub(crate) fn run_batches<E, C, K, F>(
+    batches: impl IntoIterator<Item = impl BorrowMut<Batch<K::Probe>>>,
     probes_per_second: Option<u32>,
     deadline: &mut Deadline,
     clock: &mut C,
-    lifecycle: &mut L,
+    executor: &mut E,
+    evidence: &mut BatchEvidence<K, F>,
 ) -> Result<Stats, Error>
 where
-    B: BatchPlan,
-    L: ProbeLifecycle<B>,
+    E: Executor<Batch<K::Probe>>,
     C: Clock,
+    K: Classifier,
+    F: FnMut(K::Event, &Deadline) -> Result<(), Error>,
 {
+    let workflow = evidence.workflow();
     let mut context = Context::new(deadline, clock, workflow);
     let mut previous_probes = None;
     let mut last_sequence = 0;
 
     for mut planned in batches {
         let batch = planned.borrow_mut();
-        let sequence = batch.sequence();
+        let sequence = batch.sequence;
         context.enforce(sequence)?;
         if let Some(previous_probes) = previous_probes {
             let delay = rate_delay(previous_probes, probes_per_second).ok_or_else(|| {
@@ -192,20 +167,20 @@ where
             })?;
             context.pace(sequence, delay)?;
         }
-        previous_probes = Some(batch.probe_count());
+        previous_probes = Some(batch.probes.len());
         last_sequence = sequence;
 
         let (execution, _) = context.step(
             sequence,
-            batch.timeout(),
-            &mut (&mut *batch, &mut *lifecycle),
-            |(batch, lifecycle), grant| {
+            batch.timeout,
+            &mut (&mut *batch, &mut *executor),
+            |(batch, executor), grant| {
                 batch.bind(grant);
-                lifecycle.execute(batch)
+                executor.execute(batch)
             },
-            |(batch, lifecycle), execution, _, _| lifecycle.validate(batch, execution),
+            |(batch, _), execution, _, _| evidence.validate(batch, execution),
         )?;
-        if lifecycle
+        if evidence
             .process(batch, execution, context.deadline())?
             .is_break()
         {

@@ -28,6 +28,7 @@ const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
 mod engine;
+mod evidence;
 mod execution;
 mod executor;
 mod plan;

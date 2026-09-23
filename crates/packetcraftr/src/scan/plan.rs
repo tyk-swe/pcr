@@ -37,26 +37,24 @@ pub(super) fn build_batches<'a>(
             })
         })
         .zip(0u64..)
-        .map(move |((address, attempt, endpoint), sequence)| Batch {
-            probe: Probe {
-                sequence,
-                address,
-                endpoint,
-                attempt,
-                udp_profile: endpoint
-                    .port()
-                    .and_then(|port| request.udp_profiles.get(&port))
-                    .cloned(),
-                udp_payload: endpoint
-                    .port()
-                    .and_then(|port| request.udp_profiles.get(&port))
-                    .map_or_else(
+        .map(move |((address, attempt, endpoint), sequence)| {
+            let profile = endpoint
+                .port()
+                .and_then(|port| request.udp_profiles.get(&port));
+            Batch::single(
+                Probe {
+                    sequence,
+                    address,
+                    endpoint,
+                    attempt,
+                    udp_profile: profile.cloned(),
+                    udp_payload: profile.map_or_else(
                         || request.udp_payload.clone(),
                         |profile| profile.payload(sequence),
                     ),
-            },
-            timeout: request.timeout,
-            permit: crate::evidence::ExecutionPermit::new(),
+                },
+                request.timeout,
+            )
         }))
 }
 

@@ -29,6 +29,7 @@ const WORKFLOW: Workflow = Workflow::Scan;
 mod classification;
 pub mod connect;
 mod engine;
+mod evidence;
 mod execution;
 mod executor;
 mod pipeline;

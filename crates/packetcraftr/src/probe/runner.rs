@@ -14,6 +14,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, rate_delay};
+use crate::evidence::ExecutionPermit;
 use crate::execution::{Context, Grant, Receipt};
 use crate::probe::{Error, ErrorKind, Workflow};
 use crate::{SentPacket, Stats};
@@ -23,7 +24,7 @@ use crate::{SentPacket, Stats};
 pub struct Batch<P> {
     pub probes: Vec<P>,
     pub timeout: Duration,
-    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) permit: ExecutionPermit,
     /// The first probe's operation-local sequence, recorded by the planner
     /// that built the batch; it names the batch in every error the runner
     /// reports.
@@ -61,7 +62,7 @@ impl<P> BatchPlan for Batch<P> {
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
 pub struct Execution {
-    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unsolicited: Vec<DecodedPacket>,
@@ -71,10 +72,7 @@ pub struct Execution {
 }
 
 impl Execution {
-    pub(crate) fn from_exchange(
-        permit: crate::evidence::ExecutionPermit,
-        result: crate::exchange::Report,
-    ) -> Self {
+    pub(crate) fn from_exchange(permit: ExecutionPermit, result: crate::exchange::Report) -> Self {
         let crate::exchange::Report {
             sent,
             responses,
@@ -101,7 +99,7 @@ impl Execution {
 }
 
 impl Receipt for Execution {
-    fn permit(&self) -> crate::evidence::ExecutionPermit {
+    fn permit(&self) -> ExecutionPermit {
         self.permit
     }
     fn stats(&self) -> &Stats {

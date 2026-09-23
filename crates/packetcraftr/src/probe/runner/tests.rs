@@ -7,10 +7,11 @@ use super::*;
 use crate::test_fixtures::RecordingClock;
 
 /// Echoes each batch's bound permit with a fixed elapsed time and records
-/// what the executor was handed.
+/// what the executor was handed and which timeout validation judged against.
 #[derive(Default)]
 struct Lifecycle {
     executed: Vec<Batch<()>>,
+    validated_timeouts: Vec<Duration>,
     processed: usize,
 }
 
@@ -31,7 +32,8 @@ impl ProbeLifecycle<Batch<()>> for Lifecycle {
         })
     }
 
-    fn validate(&mut self, _batch: &Batch<()>, _execution: &Execution) -> Result<(), Error> {
+    fn validate(&mut self, batch: &Batch<()>, _execution: &Execution) -> Result<(), Error> {
+        self.validated_timeouts.push(batch.timeout);
         Ok(())
     }
 
@@ -83,6 +85,11 @@ fn batches_are_paced_by_the_previous_batch_size_and_run_under_their_grant() {
             .iter()
             .map(|batch| batch.timeout)
             .collect::<Vec<_>>(),
+        [800, 500, 200].map(Duration::from_millis)
+    );
+    // Evidence is judged against the clipped timeout, not the planned one.
+    assert_eq!(
+        lifecycle.validated_timeouts,
         [800, 500, 200].map(Duration::from_millis)
     );
     let permits = lifecycle

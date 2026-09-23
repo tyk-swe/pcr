@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Single send, `send_set` and exchange no longer hand-sequence the chain. The three `ByteLimit` overflow blocks become one.
-- [ ] Leave the module room for the scan pipeline's keep-or-rebuild use (ticket 08), without implementing it early.
-- [ ] Tests go through the client with the test-support netio fakes (fixed routes, a recording neighbor resolver, a recording transmitter). They assert: in all-before-discovery mode, a packet rejected by policy late in the expansion triggers no neighbor call; in streaming mode, each packet is authorized before its own discovery and frames are emitted as they are confirmed; and cumulative-byte overflow surfaces as `ByteLimit`.
-- [ ] The `send_set` and exchange-failure contract tests pass unchanged.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Single send, `send_set` and exchange no longer hand-sequence the chain. The three `ByteLimit` overflow blocks become one.
+- [x] Leave the module room for the scan pipeline's keep-or-rebuild use (ticket 08), without implementing it early.
+- [x] Tests go through the client with the test-support netio fakes (fixed routes, a recording neighbor resolver, a recording transmitter). They assert: in all-before-discovery mode, a packet rejected by policy late in the expansion triggers no neighbor call; in streaming mode, each packet is authorized before its own discovery and frames are emitted as they are confirmed; and cumulative-byte overflow surfaces as `ByteLimit`.
+- [x] The `send_set` and exchange-failure contract tests pass unchanged.
+- [x] fmt, clippy and the workspace tests pass.

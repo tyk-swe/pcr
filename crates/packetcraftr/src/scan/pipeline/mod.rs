@@ -21,6 +21,7 @@ use packetcraftr_netio::{
     capture::{self, group},
     neighbor, route, transmit,
 };
+use prepare::AdmittedProbe;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     net::IpAddr,
@@ -234,7 +235,9 @@ where
         let mut next = 0usize;
         let mut next_send = Instant::now();
         let mut retained = plan.base_bytes;
-        let mut costs = std::mem::take(&mut plan.costs).into_iter();
+        // One admitted probe per batch, consumed in send order: the next one
+        // belongs to `batches[next]`.
+        let mut admitted = std::mem::take(&mut plan.probes).into_iter().peekable();
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()
@@ -281,15 +284,15 @@ where
                 capture_drain_remaining = capture_drain_limit;
             }
             while !draining_captures
-                && next < batches.len()
                 && pending.len() < options.max_in_flight
                 && Instant::now() >= next_send
-                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
+                && let Some(AdmittedProbe { cost, memory }) = admitted.next_if(|probe| {
+                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
+                })
             {
                 check(executor.client, deadline)?;
                 let batch = &batches[next];
                 failed_probe = Some(batch.probe().clone());
-                let cost = costs.next().expect("every probe was admitted");
                 let prepared = plan
                     .discovery
                     .rebuild(
@@ -336,10 +339,10 @@ where
                         deadline: end,
                         best: None,
                         last_response: None,
-                        charge: plan.memory[next],
+                        charge: memory,
                     },
                 );
-                retained += plan.memory[next];
+                retained += memory;
                 emit(PipelineEvent::Sent { index: next, sent })?;
                 failed_probe = None;
                 next += 1;
@@ -359,10 +362,10 @@ where
                 .min()
                 .unwrap_or(deadline)
                 .min(deadline);
-            let wake = if next < batches.len()
-                && pending.len() < options.max_in_flight
-                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
-            {
+            let wake = if pending.len() < options.max_in_flight
+                && admitted.peek().is_some_and(|probe| {
+                    retained.saturating_add(probe.memory) <= options.max_prepared_bytes
+                }) {
                 earliest.min(next_send)
             } else {
                 earliest

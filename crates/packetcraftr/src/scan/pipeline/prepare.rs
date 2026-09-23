@@ -15,15 +15,19 @@ use std::{
 };
 /// What the pipeline keeps after every probe was admitted: the discovery
 /// phase that rebuilds each probe at send time, one route per probe address,
-/// each probe's admitted cost (consumed in send order) and prepared-description
-/// memory charge, and the capture interfaces.
+/// each probe's [`AdmittedProbe`] in send order, and the capture interfaces.
 pub(super) struct Plan<'c, R, N, I> {
     pub discovery: Discovery<'c, R, N, I>,
     pub routes: HashMap<IpAddr, AuthorizedRoute>,
-    pub costs: Vec<AdmittedCost>,
-    pub memory: Vec<usize>,
+    pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
     pub base_bytes: usize,
+}
+/// One admitted probe: the wire cost its send-time rebuild must match, and
+/// the prepared-description memory it holds while in flight.
+pub(super) struct AdmittedProbe {
+    pub cost: AdmittedCost,
+    pub memory: usize,
 }
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
@@ -45,8 +49,7 @@ where
     let client = executor.client;
     let mut routes = HashMap::new();
     let mut interfaces = Vec::new();
-    let mut costs = Vec::with_capacity(batches.len());
-    let mut memory = Vec::with_capacity(batches.len());
+    let mut probes = Vec::with_capacity(batches.len());
     let mut base_bytes = batches
         .len()
         .checked_mul(384)
@@ -96,20 +99,21 @@ where
         if base_bytes.saturating_add(charge) > options.max_prepared_bytes {
             return Err(limit("prepared descriptions", options.max_prepared_bytes));
         }
-        memory.push(charge);
-        costs.push(admitted.into_cost());
+        probes.push(AdmittedProbe {
+            cost: admitted.into_cost(),
+            memory: charge,
+        });
     }
-    if memory
+    if probes
         .iter()
-        .any(|charge| charge.saturating_add(base_bytes) > options.max_prepared_bytes)
+        .any(|probe| probe.memory.saturating_add(base_bytes) > options.max_prepared_bytes)
     {
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
     Ok(Plan {
         discovery: admission.discover(),
         routes,
-        costs,
-        memory,
+        probes,
         interfaces,
         base_bytes,
     })

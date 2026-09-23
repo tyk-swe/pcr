@@ -17,8 +17,9 @@ pub(super) fn configured(
 ) -> Result<Arc<Registry>, BoundaryError> {
     let mut mappings = BTreeMap::new();
     for batch in batches {
-        if let Some(profile) = &batch.probe().udp_profile
-            && let Some(port) = batch.probe().endpoint.port()
+        let probe = batch.probe()?;
+        if let Some(profile) = &probe.udp_profile
+            && let Some(port) = probe.endpoint.port()
         {
             let child = Id::new(if profile.raw_payload() { "raw" } else { "dns" });
             if mappings

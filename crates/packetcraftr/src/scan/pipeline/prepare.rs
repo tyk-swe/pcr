@@ -1,6 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{Batch, limit};
+use super::{Planned, limit};
 use crate::{
     BoundaryError,
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
@@ -33,7 +33,7 @@ pub(super) struct AdmittedProbe {
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
 pub(super) fn plan<'c, R, N, I>(
     executor: &'c ExchangeExecutor<'_, R, N, I>,
-    batches: &[Batch],
+    planned: &[Planned<'_>],
     options: PipelineOptions,
     deadline: Instant,
 ) -> Result<Plan<'c, R, N, I>, BoundaryError>
@@ -49,8 +49,8 @@ where
     let client = executor.client;
     let mut routes = HashMap::new();
     let mut interfaces = Vec::new();
-    let mut probes = Vec::with_capacity(batches.len());
-    let mut base_bytes = batches
+    let mut admitted_probes = Vec::with_capacity(planned.len());
+    let mut base_bytes = planned
         .len()
         .checked_mul(384)
         .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
@@ -58,17 +58,17 @@ where
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
     let mut admission = client
-        .admission(&executor.options.send, batches.len() as u64, deadline)
+        .admission(&executor.options.send, planned.len() as u64, deadline)
         .map_err(BoundaryError::from_error)?;
-    for batch in batches {
+    for &Planned { probe, .. } in planned {
         super::check(client, deadline)?;
-        let packet = batch.probe().packet();
-        if !super::super::probe::sent_probe_matches(batch.probe(), &packet) {
+        let packet = probe.packet();
+        if !super::super::probe::sent_probe_matches(probe, &packet) {
             return Err(BoundaryError::from_error(super::super::profile::Error(
                 "probe fields differ from its selected profile",
             )));
         }
-        let route = match routes.entry(batch.probe().address) {
+        let route = match routes.entry(probe.address) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let route = admission
@@ -99,12 +99,12 @@ where
         if base_bytes.saturating_add(charge) > options.max_prepared_bytes {
             return Err(limit("prepared descriptions", options.max_prepared_bytes));
         }
-        probes.push(AdmittedProbe {
+        admitted_probes.push(AdmittedProbe {
             cost: admitted.into_cost(),
             memory: charge,
         });
     }
-    if probes
+    if admitted_probes
         .iter()
         .any(|probe| probe.memory.saturating_add(base_bytes) > options.max_prepared_bytes)
     {
@@ -113,7 +113,7 @@ where
     Ok(Plan {
         discovery: admission.discover(),
         routes,
-        probes,
+        probes: admitted_probes,
         interfaces,
         base_bytes,
     })

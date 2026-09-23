@@ -4,6 +4,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 
+use crate::BoundaryError;
 use crate::probe::ProbeEndpoint;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,10 +49,16 @@ impl Batch {
         }
     }
 
-    /// The batch's only probe.
-    pub(crate) fn probe(&self) -> &Probe {
-        self.probes
-            .first()
-            .expect("scan batches are planned with exactly one probe")
+    /// The batch's only probe. Scan plans every batch with exactly one, so
+    /// only a batch reshaped outside the planner is rejected.
+    pub(crate) fn probe(&self) -> Result<&Probe, BoundaryError> {
+        match self.probes.as_slice() {
+            [probe] => Ok(probe),
+            _ => Err(super::executor::EXECUTOR_FAULT.invalid(format!(
+                "scan batch at probe {} carries {} probes instead of one",
+                self.sequence,
+                self.probes.len()
+            ))),
+        }
     }
 }

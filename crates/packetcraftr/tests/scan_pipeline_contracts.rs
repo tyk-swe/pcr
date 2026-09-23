@@ -4,13 +4,14 @@ use packetcraftr::{
     Client,
     clock::SystemClock,
     policy::{Policy, PolicyAuthorizer},
-    probe::{ExchangeExecutor, Transport},
+    probe::{ExchangeExecutor, Execution, Executor, Transport},
     scan::{self, Classification, Request},
     target::Target,
 };
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
+    error::{BoundaryError, Classified},
     frame::{Frame, LinkType},
     packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Tcp},
@@ -424,4 +425,49 @@ fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
     // first arrival (identification 2).
     assert_eq!(winner(1), 1);
     assert_eq!(winner(2), 1);
+}
+
+/// Delegates to the scan executor with each batch's probe removed.
+struct Reshaping<'c>(ExchangeExecutor<'c, Routes, NoNeighbors, Io>);
+
+impl Executor<scan::Batch> for Reshaping<'_> {
+    fn execute(&mut self, batch: &scan::Batch) -> Result<Execution, BoundaryError> {
+        let mut reshaped = batch.clone();
+        reshaped.probes.clear();
+        self.0.execute(&reshaped)
+    }
+}
+
+#[test]
+fn a_scan_batch_without_exactly_one_probe_is_rejected_before_any_send() {
+    let state = Arc::new(Mutex::new(State::default()));
+    let mut request = request();
+    request.max_in_flight = 1;
+    let policy = Policy {
+        max_packets_per_operation: 32,
+        max_bytes_per_operation: 32 * 1500,
+        ..Default::default()
+    };
+    let registry = builtin::registry();
+    let client = Client::new(
+        registry.clone(),
+        Routes,
+        NoNeighbors,
+        Io(state.clone()),
+        policy.clone(),
+    );
+    let mut options = packetcraftr::exchange::Options::default();
+    options.send.plan.link_mode = Mode::Layer3;
+
+    let error = scan::run(
+        &request,
+        &mut PolicyAuthorizer::for_packets(&policy),
+        &registry,
+        &mut Reshaping(ExchangeExecutor::new(&client, options)),
+        &mut SystemClock,
+    )
+    .expect_err("a scan batch without its probe must be rejected");
+
+    assert_eq!(error.classification().code, "cli.scan_executor");
+    assert_eq!(state.lock().unwrap().sends, 0);
 }

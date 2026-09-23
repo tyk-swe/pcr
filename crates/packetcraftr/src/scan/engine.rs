@@ -239,7 +239,8 @@ where
         match event {
             PipelineEvent::Sent { index, sent } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                if confirmed[index] || !sent_probe_matches(batch.probe(), &sent.built().packet) {
+                let probe = batch.probe()?;
+                if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
                     return Err(invalid(index));
                 }
                 confirmed[index] = true;
@@ -249,7 +250,7 @@ where
                 evidence
                     .emit(
                         Event::Sent(super::SentProbe {
-                            probe: batch.probe().clone(),
+                            probe: probe.clone(),
                             sent,
                         }),
                         deadline,

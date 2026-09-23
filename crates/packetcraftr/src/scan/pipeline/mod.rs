@@ -10,7 +10,6 @@ use crate::{
     },
 };
 use packetcraftr_core::{
-    build::Builder,
     decode::Dissector,
     diagnostic::Diagnostic,
     error::{BoundaryError, Classification as ErrorClassification, Classified, Kind},
@@ -200,7 +199,7 @@ where
     let deadline = started
         .checked_add(options.max_duration)
         .ok_or_else(|| limit("duration", 3600))?;
-    let plan = prepare::plan(executor, batches, options, deadline)?;
+    let mut plan = prepare::plan(executor, batches, options, deadline)?;
     let request = group::Request {
         interfaces: plan.interfaces.clone(),
         limits: executor.options.capture,
@@ -228,13 +227,13 @@ where
         group
             .wait_ready(deadline.saturating_duration_since(Instant::now()))
             .map_err(BoundaryError::from_error)?;
-        let builder = Builder::new(executor.client.registry.clone());
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
         let mut next = 0usize;
         let mut next_send = Instant::now();
         let mut retained = plan.base_bytes;
+        let mut costs = std::mem::take(&mut plan.costs).into_iter();
         let source_count = group.sources().len();
         let capture_drain_limit = group
             .sources()
@@ -284,27 +283,19 @@ where
                 && next < batches.len()
                 && pending.len() < options.max_in_flight
                 && Instant::now() >= next_send
-                && retained.saturating_add(plan.costs[next].memory) <= options.max_prepared_bytes
+                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
             {
                 check(executor.client, deadline)?;
                 let batch = &batches[next];
                 failed_probe = Some(batch.probe().clone());
-                let planned = prepare::planned(
-                    executor.client,
-                    batch,
-                    plan.routes[&batch.probe().address].clone(),
-                    &builder,
-                    &executor.options.send,
-                    deadline,
-                )?;
-                if planned.wire_len() != plan.costs[next].wire {
-                    return Err(limit("changed preparation size", plan.costs[next].wire));
-                }
-                let mut send = executor.options.send.clone();
-                send.destination = Some(batch.probe().address);
-                let prepared = executor
-                    .client
-                    .materialize_and_authorize(planned, &builder, &send, Some(deadline))
+                let cost = costs.next().expect("every probe was admitted");
+                let prepared = plan
+                    .discovery
+                    .rebuild(
+                        batch.probe().packet(),
+                        &plan.routes[&batch.probe().address],
+                        cost,
+                    )
                     .map_err(BoundaryError::from_error)?;
                 if !super::probe::sent_probe_matches(batch.probe(), &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
@@ -339,10 +330,10 @@ where
                         deadline: end,
                         best: None,
                         last_response: None,
-                        charge: plan.costs[next].memory,
+                        charge: plan.memory[next],
                     },
                 );
-                retained += plan.costs[next].memory;
+                retained += plan.memory[next];
                 emit(PipelineEvent::Sent { index: next, sent })?;
                 failed_probe = None;
                 next += 1;
@@ -364,7 +355,7 @@ where
                 .min(deadline);
             let wake = if next < batches.len()
                 && pending.len() < options.max_in_flight
-                && retained.saturating_add(plan.costs[next].memory) <= options.max_prepared_bytes
+                && retained.saturating_add(plan.memory[next]) <= options.max_prepared_bytes
             {
                 earliest.min(next_send)
             } else {

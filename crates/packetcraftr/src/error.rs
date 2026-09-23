@@ -58,6 +58,10 @@ pub enum Error {
     InvalidExchangeEvents { message: String },
     #[error("exchange packets selected different interfaces or link modes")]
     HeterogeneousExchangeRoute,
+    /// A packet rebuilt at send time differs in exact wire length from the
+    /// build admitted to the operation's byte budget.
+    #[error("send-time preparation built {rebuilt} wire bytes where {admitted} were admitted")]
+    PreparationChanged { admitted: usize, rebuilt: usize },
     #[error("packet template expansion failed: {message}")]
     Template {
         message: String,
@@ -143,6 +147,11 @@ impl Classified for Error {
                 Kind::Cli,
                 Some("split the exchange so every packet uses the same interface and link mode"),
             ),
+            Self::PreparationChanged { .. } => Classification::new(
+                "policy.preparation_changed",
+                Kind::Policy,
+                Some("use packet codecs that build the same description to the same wire bytes"),
+            ),
             Self::Template { .. } => Classification::new(
                 "packet.template",
                 Kind::Packet,
@@ -190,6 +199,7 @@ impl Classified for Error {
             | Self::PermissiveLiveOptInRequired
             | Self::InvalidExchangeEvents { .. }
             | Self::HeterogeneousExchangeRoute
+            | Self::PreparationChanged { .. }
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }

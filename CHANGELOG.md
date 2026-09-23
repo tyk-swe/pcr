@@ -304,6 +304,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   then shortest latency, then lowest exact frame bytes. Equally ranked
   responses no longer go to whichever arrived first, so the same captured
   evidence yields the same probe outcome in either execution mode.
+- Pipelined `scan` prepares its probes through the same staged preparation as
+  `exchange`. A probe rebuilt at send time with a different exact wire length
+  than its admitted build now fails with the new `Error::PreparationChanged`
+  (`policy.preparation_changed`) instead of `policy.scan_pipeline_limit`, and a
+  cumulative wire-byte overflow reports the policy byte limit.
 - HTTP analysis accumulates reassembled header bytes in bulk runs ending at
   each line feed instead of one byte per loop iteration, removing the per-byte
   upgrade-membership lookup and terminator rescan while keeping bare CR/LF

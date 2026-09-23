@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
@@ -62,7 +62,7 @@ impl Clock for RecordingClock {
 fn packet(ttl: u8) -> Packet {
     let mut packet = Packet::new();
     packet.push(Ipv4 {
-        source: support::SELECTED_SOURCE,
+        source: common::SELECTED_SOURCE,
         destination: Ipv4Addr::new(10, 0, 0, 2),
         ttl,
         ..Ipv4::default()
@@ -91,11 +91,11 @@ fn options(repeat: u32, rate: Option<u32>) -> send::SetOptions {
 
 fn client(
     sender: RecordingSender,
-) -> Client<support::FixedRoutes, support::NeverNeighbors, RecordingSender> {
+) -> Client<common::FixedRoutes, common::NeverNeighbors, RecordingSender> {
     Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         sender,
         packetcraftr::policy::Policy::default(),
     )
@@ -169,8 +169,8 @@ fn cumulative_byte_budget_stops_the_run_and_keeps_emitted_evidence() {
     let template = Template::new(packet(64));
     let client = Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         RecordingSender::default(),
         // Two 20-byte IPv4 frames fit; the third crosses the operation budget.
         packetcraftr::policy::Policy {
@@ -258,8 +258,8 @@ fn expansion_times_repetition_is_one_bounded_budget() {
     };
     let client = Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         RecordingSender::default(),
         policy,
     );
@@ -296,8 +296,8 @@ fn cancellation_between_frames_stops_the_set() {
     };
     let client = Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         sender,
         packetcraftr::policy::Policy::default(),
     )

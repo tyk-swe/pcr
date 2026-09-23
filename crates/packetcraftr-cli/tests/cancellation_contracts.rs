@@ -17,7 +17,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 
-mod support;
+mod common;
 
 // Every process assertion has finite cleanup, including failures before stdin
 // is released. Output files normally keep a generating child from blocking on
@@ -111,7 +111,7 @@ impl Drop for Running {
 
 #[test]
 fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() {
-    support::require_procfs();
+    common::require_procfs();
     let mut capture = tempfile::NamedTempFile::new().unwrap();
     let builder = Builder::new(packetcraftr_core::protocol::builtin::registry());
     {
@@ -144,7 +144,7 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
                 "--output",
                 "json",
                 "stats",
-                support::path_text(capture.path()),
+                common::path_text(capture.path()),
                 "--top",
                 "1000",
             ],
@@ -162,7 +162,7 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
         std::thread::sleep(Duration::from_millis(100));
         let output = process.finish();
         assert_eq!(output.status.code(), Some(130), "{signal}: {output:?}");
-        let document = support::parse_json(&output);
+        let document = common::parse_json(&output);
         assert_eq!(
             document["result"]["conversations"]
                 .as_array()
@@ -179,7 +179,7 @@ fn cancellation_during_aggregate_json_publication_keeps_one_complete_document() 
 fn build_retains_signal_termination_while_recipe_stdin_is_open() {
     use std::os::unix::process::ExitStatusExt;
 
-    support::require_procfs();
+    common::require_procfs();
     for (signal, number) in [("INT", 2), ("TERM", 15)] {
         let mut process = Running::start(&["--output", "ndjson", "build"]);
         process.wait_until(|p| {
@@ -197,7 +197,7 @@ fn build_retains_signal_termination_while_recipe_stdin_is_open() {
 
 #[test]
 fn cancellation_during_build_json_publication_keeps_one_complete_document() {
-    support::require_procfs();
+    common::require_procfs();
     // The rendered payload exceeds the pipe capacity, keeping publication
     // blocked until the signal has been handled and finish drains stdout.
     let payload_len = 64 * 1024;
@@ -229,7 +229,7 @@ fn cancellation_during_build_json_publication_keeps_one_complete_document() {
 
 #[test]
 fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
-    support::require_procfs();
+    common::require_procfs();
     for format in [Format::Pcap, Format::PcapNg] {
         let mut prefix = Vec::new();
         let mut writer = Writer::new(&mut prefix, format, LinkType::IPV4).unwrap();
@@ -293,7 +293,7 @@ fn interrupted_capture_copy_and_selection_reject_later_records_and_eof() {
 
 #[test]
 fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
-    support::require_procfs();
+    common::require_procfs();
     for format in ["text", "json", "ndjson"] {
         for signal in ["INT", "TERM"] {
             let mut process = Running::start(&[
@@ -325,13 +325,10 @@ fn offline_fuzz_cancels_without_a_success_report_in_every_format() {
             let output = process.finish();
             assert_eq!(output.status.code(), Some(130), "{format}: {output:?}");
             match format {
-                "json" => assert_eq!(
-                    support::parse_json(&output)["error"]["code"],
-                    "io.cancelled"
-                ),
+                "json" => assert_eq!(common::parse_json(&output)["error"]["code"], "io.cancelled"),
                 "ndjson" => {
-                    let records = support::parse_ndjson(&output);
-                    support::assert_contiguous(&records);
+                    let records = common::parse_ndjson(&output);
+                    common::assert_contiguous(&records);
                     if records.last().unwrap()["event"] == "error" {
                         assert_eq!(records.last().unwrap()["error"]["code"], "io.cancelled");
                     } else {

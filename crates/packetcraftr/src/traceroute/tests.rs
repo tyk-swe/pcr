@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
-use crate::probe::test_fixtures::{ProgressiveExecutor, decoded_packet, private_policy};
+use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
 use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
@@ -29,7 +29,7 @@ use crate::policy::PolicyAuthorizer;
 use crate::probe::{Execution, Executor, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
 use crate::target::Target;
-use crate::test_fixtures::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
+use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
 use crate::{BoundaryError, Stats, target::Family};
 
 fn udp_traceroute_request(target: Target) -> Request {

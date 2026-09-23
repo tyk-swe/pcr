@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
 use serde_json::Value;
 
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 #[test]
 fn offline_fuzz_is_bounded_reproducible_and_reports_rejections() {

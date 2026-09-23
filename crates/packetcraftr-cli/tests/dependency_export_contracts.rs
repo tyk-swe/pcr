@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{parse_json, run, run_success};
+mod common;
+use common::{parse_json, run, run_success};
 #[test]
 fn export_uses_a_stable_compressed_snapshot_and_publishes_only_valid_captures() {
     use packetcraftr_core::analysis::pcap::{Reader, compression::Input};

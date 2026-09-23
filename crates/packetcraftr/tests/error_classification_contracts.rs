@@ -37,9 +37,9 @@ use packetcraftr_netio::{
     transmit::Submission,
 };
 
-mod support;
+mod common;
 
-use support::{FixedRoutes, NeverNeighbors, NeverTransmit};
+use common::{FixedRoutes, NeverNeighbors, NeverTransmit};
 
 fn assert_message_is_stable(message: &str, variant: &str) {
     assert!(!message.is_empty(), "{variant} must render a message");

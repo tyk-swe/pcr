@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{parse_json, run, run_success};
+mod common;
+use common::{parse_json, run, run_success};
 #[test]
 fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_capture() {
     use packetcraftr_core::{

@@ -4,7 +4,7 @@
 //! Generic exchange attributes structured DNS replies by message identity, so
 //! concurrent requests on one UDP tuple stay distinct while malformed or
 //! mismatched replies remain unsolicited evidence.
-mod support;
+mod common;
 
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr};
@@ -214,8 +214,8 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Re
     }));
     let client = Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         Io {
             state: state.clone(),
         },
@@ -426,7 +426,7 @@ fn non_dns_udp_and_quoted_icmp_errors_keep_their_exchange_semantics() {
             let mut response = Packet::new();
             response.push(Ipv4 {
                 source: ROUTER,
-                destination: support::SELECTED_SOURCE,
+                destination: common::SELECTED_SOURCE,
                 ..Ipv4::default()
             });
             response.push(Icmpv4 {

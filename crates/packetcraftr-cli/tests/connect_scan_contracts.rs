@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
+use common::{parse_json, parse_ndjson, run, run_success};
 use std::{
     net::TcpListener,
     time::{Duration, Instant},
 };
-use support::{parse_json, parse_ndjson, run, run_success};
 
 #[test]
 fn ordinary_tcp_scans_report_open_refused_and_budget_denial_without_capture() {

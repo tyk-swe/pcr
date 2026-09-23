@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
-use support::{parse_json, path_text, run};
+use common::{parse_json, path_text, run};
 
 #[test]
 fn udp_payload_input_is_bounded_and_charged_before_probe_execution() {

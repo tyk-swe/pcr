@@ -10,7 +10,7 @@ pub(crate) mod limits;
 mod model;
 pub(crate) mod runner;
 #[cfg(test)]
-pub(crate) mod test_fixtures;
+pub(crate) mod test_support;
 pub(crate) mod validation;
 
 pub use error::{Error, ErrorKind, Workflow};

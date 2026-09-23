@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{parse_json, run};
+mod common;
+use common::{parse_json, run};
 #[test]
 fn storage_limits_are_checked_before_interface_lookup_or_activation() {
     let directory = tempfile::tempdir().unwrap();

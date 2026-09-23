@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
+use common::{parse_json, parse_ndjson, run, run_success};
 use serde_json::Value;
-use support::{parse_json, parse_ndjson, run, run_success};
 
 fn capture() -> String {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

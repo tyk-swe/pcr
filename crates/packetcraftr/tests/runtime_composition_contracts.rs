@@ -1,14 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
+use common::{FixedRoutes, NeverNeighbors, NeverTransmit};
 use packetcraftr::{
     Client,
     policy::Policy,
     progress::{Runtime, Sink},
 };
-use support::{FixedRoutes, NeverNeighbors, NeverTransmit};
 
 fn client() -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
     Client::new(

@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
+use common::{parse_json, parse_ndjson, path_text, run, run_success};
 use packetcraftr_core::{
     analysis::pcap::Writer,
     build, codec,
@@ -16,7 +17,6 @@ use packetcraftr_core::{
     },
 };
 use std::time::UNIX_EPOCH;
-use support::{parse_json, parse_ndjson, path_text, run, run_success};
 
 fn frame(tcp: bool, source: u16, destination: u16, payload: &[u8]) -> Frame {
     let mut packet = Packet::new();

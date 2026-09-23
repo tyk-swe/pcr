@@ -18,9 +18,9 @@ use packetcraftr_netio::capture;
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::neighbor;
 
-mod support;
+mod common;
 
-use support::{FixedRoutes, NeverTransmit, SELECTED_SOURCE};
+use common::{FixedRoutes, NeverTransmit, SELECTED_SOURCE};
 
 /// A resolver that records the propagated deadline and immediately refuses discovery.
 #[derive(Default)]

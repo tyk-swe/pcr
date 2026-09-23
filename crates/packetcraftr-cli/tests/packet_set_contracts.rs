@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
-use support::{parse_json, parse_ndjson, run, run_success};
+use common::{parse_json, parse_ndjson, run, run_success};
 
 const PACKET: &str = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp()";
 

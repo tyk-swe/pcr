@@ -25,7 +25,7 @@ use crate::probe::Executor;
 use crate::target::Authorized;
 use crate::target::Family;
 use crate::target::Target;
-use crate::test_fixtures::NoopClock;
+use crate::test_support::NoopClock;
 use crate::{BoundaryError, Stats};
 
 use super::{Exchange, TcpExecutor};
@@ -1062,7 +1062,7 @@ fn direct_tcp_retries_validate_responses_and_charge_only_socket_traffic() {
         },
     ]);
     let mut authorizer = RecordingAuthorizer::new(address);
-    let mut clock = crate::test_fixtures::RecordingClock::default();
+    let mut clock = crate::test_support::RecordingClock::default();
     let report = super::run(
         &request,
         &mut authorizer,

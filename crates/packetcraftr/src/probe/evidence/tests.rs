@@ -131,7 +131,7 @@ fn response(request_index: usize, latency_ms: u64, bytes: &'static [u8]) -> Resp
     let latency = Duration::from_millis(latency_ms);
     Response {
         request_index,
-        response: crate::probe::test_fixtures::decoded_packet(
+        response: crate::probe::test_support::decoded_packet(
             Packet::new(),
             UNIX_EPOCH + latency,
             bytes,

@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use packetcraftr_cli::output::contract::Command;
 use serde_json::Value;
 
-mod support;
+mod common;
 
-use support::output_schema;
+use common::output_schema;
 
 fn documents_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents")

@@ -12,7 +12,7 @@ use packetcraftr_core::document::Format;
 use packetcraftr_core::document::Packet;
 use serde_json::Value;
 
-mod support;
+mod common;
 
 fn examples_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents")
@@ -47,7 +47,7 @@ fn format_for(path: &Path) -> Format {
 
 #[test]
 fn every_published_json_packet_example_validates_against_the_schema() {
-    let validator = support::packet_schema_validator();
+    let validator = common::packet_schema_validator();
 
     let mut validated = 0_usize;
     for path in packet_examples() {

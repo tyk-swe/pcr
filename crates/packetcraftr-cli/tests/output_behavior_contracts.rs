@@ -43,9 +43,9 @@ use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
 use serde_json::json;
 
-mod support;
+mod common;
 
-use support::SharedBuffer;
+use common::SharedBuffer;
 
 #[test]
 fn contract_errors_carry_message_code_kind_and_remediation() {

@@ -10,10 +10,10 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
 
-mod support;
-use support::TestRecord;
+mod common;
+use common::TestRecord;
 
-use support::{SharedBuffer, parse_json, path_text, run_success, schema_validator};
+use common::{SharedBuffer, parse_json, path_text, run_success, schema_validator};
 
 #[test]
 fn aggregate_and_stream_envelopes_keep_version_and_discriminators() {

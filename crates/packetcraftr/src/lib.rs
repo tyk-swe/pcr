@@ -54,7 +54,7 @@ pub mod target;
 pub mod traceroute;
 
 #[cfg(test)]
-mod test_fixtures;
+mod test_support;
 
 pub use client::Client;
 pub use error::Error;

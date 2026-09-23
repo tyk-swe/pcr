@@ -4,9 +4,9 @@
 //! native capability report `capability.*` and exit 4 when the capability is
 //! compiled out, and enumerate the loopback interface when it is compiled in.
 
-mod support;
+mod common;
 
-use support::{parse_json, run};
+use common::{parse_json, run};
 
 /// Every failed process here must exit 4 with a `capability.*` code in both
 /// renderings; text goes to stderr with nothing on stdout, JSON goes to stdout.

@@ -8,7 +8,7 @@ use packetcraftr_core::budget::{Cancellation, Cancelled};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::*;
-use crate::test_fixtures::RecordingClock;
+use crate::test_support::RecordingClock;
 
 #[derive(Debug)]
 enum Failure {

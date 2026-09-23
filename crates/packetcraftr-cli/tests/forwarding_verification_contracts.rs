@@ -4,14 +4,14 @@
 //! `verify-forwarding` process contracts: verdicts, exit statuses, terminal
 //! records, and rule rejection.
 
-#[path = "support/process.rs"]
+mod common;
+#[path = "common/process.rs"]
 mod process_support;
-mod support;
 
 use std::io::Write;
 
+use common::{parse_json, parse_ndjson, path_text, run, run_success};
 use process_support::{decode_hex, run_with_stdin};
-use support::{parse_json, parse_ndjson, path_text, run, run_success};
 
 /// 192.0.2.1:12345 → 198.51.100.2:9 UDP carrying "hello", TTL 64.
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";

@@ -34,10 +34,17 @@ pub(crate) struct EvidenceLimits {
     pub(crate) max_undecoded: usize,
 }
 
-/// What [`EvidenceState::retain_undecoded`] emits while it keeps frames.
-pub(crate) enum Retained {
-    Frame(Frame),
-    Diagnostic(Diagnostic),
+/// Where a workflow publishes what [`EvidenceState`] keeps, as the
+/// workflow's own events, and how it checks its deadline between frames.
+pub(crate) trait EvidenceSink {
+    type Error;
+
+    /// Publishes one retained undecodable frame.
+    fn undecoded(&mut self, frame: Frame) -> Result<(), Self::Error>;
+    /// Publishes one diagnostic.
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Self::Error>;
+    /// Checks the operation deadline around each undecodable frame.
+    fn check(&mut self) -> Result<(), Self::Error>;
 }
 
 /// Operation-wide evidence accounting shared by live workflows: the exact
@@ -68,16 +75,15 @@ impl EvidenceState {
         self.reserve(frame).then(|| frame.clone())
     }
 
-    /// Emits every retained undecodable frame and every new diagnostic in
+    /// Publishes every retained undecodable frame and every new diagnostic in
     /// arrival order, stopping at the undecoded limit with its diagnostic.
-    pub(crate) fn retain_undecoded<E>(
+    pub(crate) fn retain_undecoded<S: EvidenceSink>(
         &mut self,
         frames: Vec<Frame>,
-        mut emit: impl FnMut(Retained) -> Result<(), E>,
-        mut check_deadline: impl FnMut() -> Result<(), E>,
-    ) -> Result<(), E> {
+        sink: &mut S,
+    ) -> Result<(), S::Error> {
         for frame in frames {
-            check_deadline()?;
+            sink.check()?;
             if self.retained_undecoded >= self.limits.max_undecoded {
                 self.diagnostics.push_once(Diagnostic::warning(
                     self.descriptor.undecoded_limit_code,
@@ -86,31 +92,31 @@ impl EvidenceState {
                         self.descriptor.display_name, self.limits.max_undecoded
                     ),
                 ));
-                self.publish_diagnostics(|diagnostic| emit(Retained::Diagnostic(diagnostic)))?;
+                self.publish_diagnostics(|diagnostic| sink.diagnostic(diagnostic))?;
                 break;
             }
             if self.reserve(&frame) {
                 // `reserve` fails once the count reaches `max_frames`, so the
                 // increment cannot overflow.
                 self.retained_undecoded += 1;
-                emit(Retained::Frame(frame))?;
+                sink.undecoded(frame)?;
             }
-            self.publish_diagnostics(|diagnostic| emit(Retained::Diagnostic(diagnostic)))?;
-            check_deadline()?;
+            self.publish_diagnostics(|diagnostic| sink.diagnostic(diagnostic))?;
+            sink.check()?;
         }
         Ok(())
     }
 
     /// Records each diagnostic once and publishes the ones not yet published.
-    pub(crate) fn record_diagnostics<E>(
+    pub(crate) fn record_diagnostics<S: EvidenceSink>(
         &mut self,
         diagnostics: impl IntoIterator<Item = Diagnostic>,
-        publish: impl FnMut(Diagnostic) -> Result<(), E>,
-    ) -> Result<(), E> {
+        sink: &mut S,
+    ) -> Result<(), S::Error> {
         for diagnostic in diagnostics {
             self.diagnostics.push_once(diagnostic);
         }
-        self.publish_diagnostics(publish)
+        self.publish_diagnostics(|diagnostic| sink.diagnostic(diagnostic))
     }
 
     /// Publishes every diagnostic recorded since the last publication.

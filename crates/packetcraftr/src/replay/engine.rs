@@ -177,7 +177,12 @@ where
                     message: "capture format changed between passes".to_owned(),
                 });
             }
-            pace(run.clock, &mut session.deadline, 0, options.inter_pass_delay)?;
+            pace(
+                run.clock,
+                &mut session.deadline,
+                0,
+                options.inter_pass_delay,
+            )?;
             session.progress.scheduled_duration = session
                 .progress
                 .scheduled_duration

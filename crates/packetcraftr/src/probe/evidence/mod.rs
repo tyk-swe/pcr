@@ -8,7 +8,9 @@
 //! pick responses only through [`ResponseSelector`]. Exact validation and
 //! limit checks guard what executors return and what callers request.
 
-pub(crate) use budget::{EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceState, Retained};
+pub(crate) use budget::{
+    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceSink, EvidenceState,
+};
 pub(crate) use candidate_selection::{
     CandidateKey, ResponseCandidate, ResponseSelector, candidate_precedes,
 };

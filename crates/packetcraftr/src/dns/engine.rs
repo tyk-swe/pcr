@@ -17,7 +17,7 @@ use crate::execution::Context;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
 use crate::probe::Executor;
-use crate::probe::evidence::{EvidenceState, ResponseCandidate, ResponseSelector, Retained};
+use crate::probe::evidence::{EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector};
 use crate::probe::runner::sink_observer;
 use crate::target::{Family, approve_operation, require_family, resolve_selected};
 use crate::{BoundaryError, Stats, StatsOverflow};
@@ -302,7 +302,7 @@ where
             timeout,
             mut attempt_deadline,
         } = self.execute_probe(&probe)?;
-        self.record_diagnostics(execution.diagnostics.drain(..))?;
+        self.record_diagnostics(attempt, execution.diagnostics.drain(..))?;
         let sent_at = execution.sent.timing().freshness_marker().wall_clock();
         let best = select_response(
             self.execution.deadline(),
@@ -317,7 +317,7 @@ where
             None => timeout_evidence(&probe, sent_at),
         };
         // Publishes what retaining the response raised.
-        self.record_diagnostics([])?;
+        self.record_diagnostics(attempt, [])?;
         let udp_status = udp.evidence.status;
         self.emit_attempt(udp.evidence)?;
         self.retain_undecoded(attempt, execution.undecoded)?;
@@ -524,24 +524,13 @@ where
     }
 
     fn retain_undecoded(&mut self, attempt: u32, frames: Vec<Frame>) -> Result<(), Error> {
-        let Self {
-            evidence,
-            emit,
-            execution,
-            ..
-        } = self;
-        evidence.retain_undecoded(
+        self.evidence.retain_undecoded(
             frames,
-            |retained| {
-                let event = match retained {
-                    Retained::Frame(frame) => {
-                        Event::Undecoded(UndecodedEvidence { attempt, frame })
-                    }
-                    Retained::Diagnostic(diagnostic) => Event::Diagnostic(diagnostic),
-                };
-                emit(event, execution.deadline())
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
             },
-            || execution.deadline().enforce().map_err(Into::into),
         )
     }
 
@@ -549,19 +538,52 @@ where
     /// then checks the deadline.
     fn record_diagnostics(
         &mut self,
+        attempt: u32,
         diagnostics: impl IntoIterator<Item = Diagnostic>,
     ) -> Result<(), Error> {
-        let Self {
-            evidence,
-            emit,
-            execution,
-            ..
-        } = self;
-        evidence.record_diagnostics(diagnostics, |diagnostic| {
-            emit(Event::Diagnostic(diagnostic), execution.deadline())
-        })?;
-        self.execution.deadline().enforce()?;
-        Ok(())
+        self.evidence.record_diagnostics(
+            diagnostics,
+            &mut AttemptEvents {
+                attempt,
+                execution: &self.execution,
+                emit: &mut *self.emit,
+            },
+        )?;
+        self.execution.enforce(attempt)
+    }
+}
+
+/// Publishes what the operation's evidence state keeps during one attempt as
+/// DNS events.
+struct AttemptEvents<'e, 'a, C, F> {
+    attempt: u32,
+    execution: &'e Context<'a, C, Attempts>,
+    emit: &'e mut F,
+}
+
+impl<C, F> EvidenceSink for AttemptEvents<'_, '_, C, F>
+where
+    C: Clock,
+    F: FnMut(Event, &Deadline) -> Result<(), Error>,
+{
+    type Error = Error;
+
+    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
+        (self.emit)(
+            Event::Undecoded(UndecodedEvidence {
+                attempt: self.attempt,
+                frame,
+            }),
+            self.execution.deadline(),
+        )
+    }
+
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
+        (self.emit)(Event::Diagnostic(diagnostic), self.execution.deadline())
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        self.execution.enforce(self.attempt)
     }
 }
 

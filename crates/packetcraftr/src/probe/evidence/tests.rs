@@ -8,11 +8,12 @@ use crate::exchange::Response;
 use crate::probe::runner::{Execution, Sequenced};
 use crate::probe::{ErrorKind, Workflow};
 use bytes::Bytes;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{decode::DecodedPacket, layer::Raw, layout::PacketLayout, packet::Packet};
 
 use super::{
-    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceState, ResponseSelector, Retained,
+    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector,
     validate_batch_evidence,
 };
 
@@ -89,29 +90,51 @@ fn a_complete_tie_keeps_the_first_response() {
     assert_eq!(best.map(|candidate| candidate.observation), Some(1));
 }
 
+/// Records what [`EvidenceState`] publishes and fails the `fail_on`th
+/// deadline check.
+struct RecordingSink {
+    emitted: Vec<String>,
+    checks: usize,
+    fail_on: usize,
+}
+
+impl EvidenceSink for RecordingSink {
+    type Error = ();
+
+    fn undecoded(&mut self, frame: Frame) -> Result<(), ()> {
+        self.emitted
+            .push(format!("frame {:?}", frame.bytes().as_ref()));
+        Ok(())
+    }
+
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), ()> {
+        self.emitted.push(diagnostic.code.to_string());
+        Ok(())
+    }
+
+    fn check(&mut self) -> Result<(), ()> {
+        self.checks += 1;
+        if self.checks == self.fail_on {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[test]
 fn retained_undecoded_evidence_is_emitted_before_a_later_deadline_failure() {
     let mut state = EvidenceState::new(LIMITS, DESCRIPTOR);
-    let mut emitted = Vec::new();
-    let mut checks = 0;
+    let mut sink = RecordingSink {
+        emitted: Vec::new(),
+        checks: 0,
+        fail_on: 4,
+    };
 
-    let result = state.retain_undecoded(
-        vec![frame(&[1]), frame(&[2])],
-        |retained| {
-            emitted.push(match retained {
-                Retained::Frame(frame) => format!("frame {:?}", frame.bytes().as_ref()),
-                Retained::Diagnostic(diagnostic) => diagnostic.code.to_string(),
-            });
-            Ok(())
-        },
-        || {
-            checks += 1;
-            if checks == 4 { Err(()) } else { Ok(()) }
-        },
-    );
+    let result = state.retain_undecoded(vec![frame(&[1]), frame(&[2])], &mut sink);
 
     assert_eq!(result, Err(()));
-    assert_eq!(emitted, ["frame [1]", "fixture.evidence_limit"]);
+    assert_eq!(sink.emitted, ["frame [1]", "fixture.evidence_limit"]);
     state
         .publish_diagnostics::<()>(|_| panic!("the omission diagnostic was already published"))
         .unwrap();

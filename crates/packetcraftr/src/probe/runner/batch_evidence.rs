@@ -19,7 +19,7 @@ use packetcraftr_core::packet::Packet;
 use super::{Batch, Execution, Sequenced};
 use crate::SentPacket;
 use crate::probe::evidence::{
-    EvidenceLimits, EvidenceState, ResponseSelector, Retained, validate_batch_evidence,
+    EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector, validate_batch_evidence,
 };
 use crate::probe::{Error, ErrorKind, Workflow, enforce_deadline};
 
@@ -235,14 +235,13 @@ where
         } = self;
         state.retain_undecoded(
             frames,
-            |retained| {
-                let event = match retained {
-                    Retained::Frame(frame) => classifier.undecoded(probes, frame),
-                    Retained::Diagnostic(diagnostic) => classifier.diagnostic(diagnostic),
-                };
-                emit(event, deadline)
+            &mut Events {
+                workflow: *workflow,
+                classifier,
+                emit,
+                probes,
+                deadline,
             },
-            || enforce_deadline(*workflow, deadline),
         )
     }
 
@@ -253,17 +252,55 @@ where
         deadline: &Deadline,
     ) -> Result<(), Error> {
         let Self {
+            workflow,
             state,
             classifier,
             emit,
             ..
         } = self;
-        state.record_diagnostics(diagnostics, |diagnostic| {
-            emit(classifier.diagnostic(diagnostic), deadline)
-        })
+        state.record_diagnostics(
+            diagnostics,
+            &mut Events {
+                workflow: *workflow,
+                classifier,
+                emit,
+                probes: &[],
+                deadline,
+            },
+        )
     }
 
     fn enforce(&self, deadline: &Deadline) -> Result<(), Error> {
         enforce_deadline(self.workflow, deadline)
+    }
+}
+
+/// Publishes what the evidence state keeps as the classifier's events.
+/// `probes` is the batch undecodable frames arrived with.
+struct Events<'e, K: Classifier, F> {
+    workflow: Workflow,
+    classifier: &'e K,
+    emit: &'e mut F,
+    probes: &'e [K::Probe],
+    deadline: &'e Deadline,
+}
+
+impl<K, F> EvidenceSink for Events<'_, K, F>
+where
+    K: Classifier,
+    F: FnMut(K::Event, &Deadline) -> Result<(), Error>,
+{
+    type Error = Error;
+
+    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
+        (self.emit)(self.classifier.undecoded(self.probes, frame), self.deadline)
+    }
+
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
+        (self.emit)(self.classifier.diagnostic(diagnostic), self.deadline)
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        enforce_deadline(self.workflow, self.deadline)
     }
 }

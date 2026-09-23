@@ -3,12 +3,10 @@
 
 use std::fmt::Display;
 use std::sync::Arc;
-use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     build::{Builder, BuiltPacket},
-    decode::Dissector,
     frame::LinkType,
     fuzz as packet_fuzz,
     packet::Packet,
@@ -16,7 +14,7 @@ use packetcraftr_core::{
 };
 
 use crate::clock::Clock;
-use crate::evidence::{Budget, DiagnosticLog};
+use crate::execution::{Context, Grant};
 use crate::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,
@@ -25,13 +23,11 @@ use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
-use super::error::{Error, duration_limit};
-use super::evidence::{
-    ExecutionEvidence, add_execution_stats, retain_evidence, validate_execution,
-};
+use super::error::{CaseErrors, Error, duration_limit};
+use super::evidence::{Recorder, validate_execution};
 use super::execution::{Execution, ExecutionCase};
 use super::plan::{rate_delay, worst_case_duration};
-use super::{Case, CaseOutcome, LiveOptions, Report, Stats, Summary};
+use super::{Case, LiveOptions, Report, Stats, Summary};
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
 use crate::probe::Executor;
 
@@ -137,7 +133,6 @@ where
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     deadline.check_cancelled()?;
     live.validate()?;
-    let live_dissector = Dissector::new(Arc::clone(&registry));
     let prepared = prepare_campaign(request, live, packet, &registry, &mut deadline)?;
     deadline.enforce()?;
     authorize_campaign(&prepared, live, authorizer)?;
@@ -148,23 +143,61 @@ where
         built_case_count,
         ..
     } = prepared;
-    ExecutionPhase {
-        request,
-        live,
-        registry,
-        live_dissector,
-        deadline,
-        cases,
+    let delay = rate_delay(live.cases_per_second)?;
+    let mut recorder = Recorder::new(Arc::clone(&registry), request.limits, live.limits);
+    let mut context = Context::new(&mut deadline, clock, CaseErrors);
+    let mut paced = false;
+    for mut case in cases {
+        let case_index = case.prepared.index;
+        context.enforce(case_index)?;
+        if case.prepared.built.is_some() {
+            // Cases per second: every built case after the first waits one
+            // case's share of a second.
+            if std::mem::replace(&mut paced, true) {
+                context.pace(case_index, delay)?;
+            }
+            let (execution, _) = context.step(
+                case_index,
+                live.timeout,
+                &mut *executor,
+                |executor, grant| {
+                    executor.execute(&ExecutionCase {
+                        permit: grant.permit,
+                        packet: case.prepared.recipe.clone(),
+                        timeout: grant.timeout,
+                    })
+                },
+                |_, execution, grant, deadline| {
+                    validate_case(request, &registry, &case, execution, grant, deadline)
+                },
+            )?;
+            recorder.record(&mut case, execution, context.deadline())?;
+        }
+        recorder.publish_diagnostics(&mut case)?;
+        emit(case, context.deadline())?;
+    }
+    context.enforce(last_case_index(request))?;
+
+    let crate::Stats {
+        packets_attempted,
+        packets_completed,
+        bytes,
+        elapsed,
+        capture,
+    } = context.into_stats();
+    Ok(Summary {
+        seed: request.seed,
+        first_case: request.first_case,
         stats: Stats {
             cases_generated: u64::try_from(request.cases).unwrap_or(u64::MAX),
             cases_built: built_case_count,
-            ..Stats::default()
+            packets_attempted,
+            packets_completed,
+            bytes,
+            elapsed,
+            capture,
         },
-        evidence: Budget::default(),
-        diagnostics: DiagnosticLog::default(),
-        scheduled_delay: Duration::ZERO,
-    }
-    .execute(executor, clock, &mut emit)
+    })
 }
 
 struct PreparedCampaign {
@@ -277,191 +310,38 @@ where
     Ok(())
 }
 
-struct ExecutionPhase<'a> {
-    request: &'a packet_fuzz::Request,
-    live: LiveOptions,
-    registry: Arc<Registry>,
-    live_dissector: Dissector,
-    deadline: Deadline,
-    cases: Vec<Case>,
-    stats: Stats,
-    evidence: Budget,
-    diagnostics: DiagnosticLog,
-    scheduled_delay: Duration,
-}
-
-impl ExecutionPhase<'_> {
-    fn execute<E, C, F>(
-        mut self,
-        executor: &mut E,
-        clock: &mut C,
-        emit: &mut F,
-    ) -> Result<Summary, Error>
-    where
-        E: Executor<ExecutionCase>,
-        C: Clock,
-        F: FnMut(Case, &Deadline) -> Result<(), Error>,
-    {
-        let cases = std::mem::take(&mut self.cases);
-        let mut built_ordinal = 0;
-        for mut case in cases {
-            self.deadline.enforce()?;
-            if case.prepared.built.is_some() {
-                self.pace(built_ordinal, case.prepared.index, clock)?;
-                self.execute_case(&mut case, executor)?;
-                // one increment per case in `cases`, so the ordinal cannot exceed `cases.len()`
-                {
-                    built_ordinal += 1;
-                }
-            }
-            // Campaign-level diagnostics reach the caller on the case they
-            // were raised during; the campaign never republishes them.
-            self.diagnostics.publish_new::<Error>(|diagnostic| {
-                case.prepared.diagnostics.push(diagnostic);
-                Ok(())
-            })?;
-            emit(case, &self.deadline)?;
-        }
-        self.finish()
-    }
-
-    fn pace<C>(&mut self, ordinal: usize, case_index: u64, clock: &mut C) -> Result<(), Error>
-    where
-        C: Clock,
-    {
-        self.deadline.enforce()?;
-        if ordinal == 0 {
-            return Ok(());
-        }
-        let delay = rate_delay(self.live.cases_per_second)?;
-        let prospective_scheduled_delay =
-            self.scheduled_delay
-                .checked_add(delay)
-                .ok_or(Error::DurationLimit {
-                    actual: Duration::MAX,
-                    limit: self.request.limits.max_duration,
-                })?;
-        self.deadline
-            .start_accounting(delay)
-            .map_err(duration_limit)?;
-        let slept = clock.sleep(delay);
-        self.deadline.check_cancelled()?;
-        slept.map_err(|source| Error::Clock {
-            case_index,
-            source: Box::new(source),
-        })?;
-        self.deadline.account(delay).map_err(duration_limit)?;
-        self.scheduled_delay = prospective_scheduled_delay;
-        Ok(())
-    }
-
-    fn execute_case<E>(&mut self, case: &mut Case, executor: &mut E) -> Result<(), Error>
-    where
-        E: Executor<ExecutionCase>,
-    {
-        self.deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
-        let execution_case = ExecutionCase {
-            permit: crate::evidence::ExecutionPermit::new(),
-            packet: case.prepared.recipe.clone(),
-            timeout: self
-                .deadline
-                .bounded_timeout(self.live.timeout)
-                .map_err(duration_limit)?,
-        };
-        self.deadline.enforce()?;
-        let execution = executor.execute(&execution_case);
-        self.deadline.enforce()?;
-        let execution = execution.map_err(|source| Error::Execution {
-            case_index: case.prepared.index,
-            source,
-        })?;
-        if execution.permit != execution_case.permit {
-            return Err(Error::InvalidEvidence {
+/// Judges one case's evidence before any of it is recorded: the executor must
+/// have sent exactly the route-materialized authorized case, within the
+/// campaign's packet limit, and every response must arrive within the
+/// granted, already clipped, timeout.
+fn validate_case(
+    request: &packet_fuzz::Request,
+    registry: &Arc<Registry>,
+    case: &Case,
+    execution: &Execution,
+    grant: Grant,
+    deadline: &Deadline,
+) -> Result<(), Error> {
+    let expected_live_build =
+        expected_live_build(request, case.prepared.recipe.clone(), registry, execution).map_err(
+            |message| Error::InvalidEvidence {
                 case_index: case.prepared.index,
-                message: "executor returned evidence for a different execution permit".to_owned(),
-            });
-        }
-        let expected_live_build = expected_live_build(
-            self.request,
-            case.prepared.recipe.clone(),
-            &self.registry,
-            &execution,
-        )
-        .map_err(|message| Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message,
-        })?;
-        if execution.sent.wire_bytes() != &expected_live_build.bytes {
-            return Err(Error::InvalidEvidence {
-                case_index: case.prepared.index,
-                message: "executor substituted bytes for the route-materialized case".to_owned(),
-            });
-        }
-        self.deadline.enforce()?;
-        self.deadline
-            .account(execution.stats.elapsed)
-            .map_err(duration_limit)?;
-        validate_execution(
-            case,
-            &execution,
-            execution_case.timeout,
-            self.request.limits.max_packet_bytes,
-            &self.deadline,
-        )?;
-        add_execution_stats(&mut self.stats, &execution.stats, case.prepared.index)?;
-        let had_response = !execution.responses.is_empty();
-        case.prepared.diagnostics = execution.sent.built().diagnostics.clone();
-        case.prepared.decoded = packet_fuzz::dissect_built(
-            &self.live_dissector,
-            execution.sent.built(),
-            self.request.limits,
-            &mut case.prepared.diagnostics,
-        );
-        self.deadline.enforce()?;
-        case.prepared.built = Some(execution.sent.built().clone());
-        case.sent = Some(execution.sent.frame().clone());
-        case.prepared.diagnostics.extend(execution.diagnostics);
-        retain_evidence(
-            case,
-            ExecutionEvidence {
-                responses: execution
-                    .responses
-                    .into_iter()
-                    .map(|response| response.response.frame)
-                    .collect(),
-                unmatched: execution.unmatched,
-                undecoded: execution.undecoded,
-            },
-            self.live.limits,
-            &mut self.evidence,
-            &mut self.diagnostics,
-            &self.deadline,
-        )?;
-        case.outcome = if had_response {
-            CaseOutcome::Response
-        } else {
-            CaseOutcome::Timeout
-        };
-        self.deadline.enforce()?;
-        Ok(())
-    }
-
-    fn finish(mut self) -> Result<Summary, Error> {
-        self.stats.elapsed = self.stats.elapsed.checked_add(self.scheduled_delay).ok_or(
-            Error::StatisticsOverflow {
-                case_index: last_case_index(self.request),
+                message,
             },
         )?;
-        self.deadline.enforce()?;
-
-        Ok(Summary {
-            seed: self.request.seed,
-            first_case: self.request.first_case,
-            stats: self.stats,
-        })
+    if execution.sent.wire_bytes() != &expected_live_build.bytes {
+        return Err(Error::InvalidEvidence {
+            case_index: case.prepared.index,
+            message: "executor substituted bytes for the route-materialized case".to_owned(),
+        });
     }
+    validate_execution(
+        case,
+        execution,
+        grant.timeout,
+        request.limits.max_packet_bytes,
+        deadline,
+    )
 }
 
 fn expected_live_build(
@@ -509,6 +389,3 @@ fn last_case_index(request: &packet_fuzz::Request) -> u64 {
 fn stringify<T, E: Display>(result: Result<T, E>) -> Result<T, String> {
     result.map_err(|source| source.to_string())
 }
-
-#[cfg(test)]
-mod tests;

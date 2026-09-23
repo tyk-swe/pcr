@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::budget::DeadlineExceeded;
+use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use thiserror::Error;
 
@@ -113,5 +113,41 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
     Error::DurationLimit {
         actual: error.actual,
         limit: error.limit,
+    }
+}
+
+/// Names execution-context failures at the index of the case they concern.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CaseErrors;
+
+impl crate::execution::Errors for CaseErrors {
+    type Error = Error;
+    type Step = u64;
+
+    fn duration_limit(&self, _case_index: u64, source: DeadlineExceeded) -> Error {
+        duration_limit(source)
+    }
+
+    fn interrupted(&self, _case_index: u64, source: Interrupted) -> Error {
+        source.into_error()
+    }
+
+    fn clock(&self, case_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
+        Error::Clock { case_index, source }
+    }
+
+    fn execution(&self, case_index: u64, source: crate::BoundaryError) -> Error {
+        Error::Execution { case_index, source }
+    }
+
+    fn invalid_evidence(&self, case_index: u64, message: String) -> Error {
+        Error::InvalidEvidence {
+            case_index,
+            message,
+        }
+    }
+
+    fn stats_overflow(&self, case_index: u64, _source: crate::StatsOverflow) -> Error {
+        Error::StatisticsOverflow { case_index }
     }
 }

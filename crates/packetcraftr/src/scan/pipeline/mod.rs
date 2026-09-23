@@ -4,6 +4,7 @@ mod prepare;
 use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, SentPacket, Stats,
+    preparation::RebuildError,
     probe::{
         ExchangeExecutor, Execution, PipelineEvent, PipelineOptions,
         evidence::{CandidateKey, candidate_precedes},
@@ -296,7 +297,12 @@ where
                         &plan.routes[&batch.probe().address],
                         cost,
                     )
-                    .map_err(BoundaryError::from_error)?;
+                    .map_err(|error| match error {
+                        RebuildError::Changed { admitted } => {
+                            limit("changed preparation size", admitted)
+                        }
+                        RebuildError::Preparation(source) => BoundaryError::from_error(source),
+                    })?;
                 if !super::probe::sent_probe_matches(batch.probe(), &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
                         "materialized scan packet differs from its probe",

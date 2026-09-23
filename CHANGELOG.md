@@ -439,6 +439,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   after validation. When a batch execution fails while the operation is
   cancelled or out of time, the run now reports the cancellation or
   `--max-duration` limit instead of the executor failure.
+- Live `fuzz` paces and executes cases through the same execution context.
+  After a `--rate` delay it checks both `--max-duration-ms` and cancellation
+  before it reports a failed rate timer, so a delay that fails its timer and
+  also spends the duration budget now reports `policy.fuzz_resource_limit`
+  instead of `io.fuzz_clock`. A case's execution permit, sent bytes and
+  evidence are validated, and its statistics merged, before an interruption
+  observed after that case surfaces, so invalid evidence is reported even
+  when the campaign was cancelled or ran out of time during that case. Time
+  is accounted after validation.
 
 ### Removed
 

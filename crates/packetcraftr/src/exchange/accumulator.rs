@@ -14,7 +14,7 @@ use packetcraftr_netio::capture::RecordIdentity;
 
 use super::model::Options;
 use crate::evidence::{Budget, BudgetError, DiagnosticLog};
-use crate::materialize::PreparedPacket;
+use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy)]
 pub(super) struct UnsolicitedFreshness {

@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{BoundaryError, Classification, Kind};
-use packetcraftr_core::{build::Builder, packet::Packet, template};
+use packetcraftr_core::template;
 use packetcraftr_netio::{
     capture::{Provider as CaptureProvider, Request as CaptureRequest},
     transmit::Sender as PacketIo,
@@ -20,8 +20,8 @@ use crate::Client;
 use crate::Error;
 
 use crate::exchange::{Collector, Transaction, WorkflowResponseMatcher, WorkflowStopPredicate};
-use crate::materialize::{PlannedPacket, PreparedPacket};
 use crate::planning::ensure_preparation_deadline;
+use crate::preparation::{Admitted, PreparedPacket};
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -119,7 +119,7 @@ where
                 source: None,
             });
         };
-        let first_route = &first_packet.route.plan;
+        let first_route = &first_packet.route().plan;
         ensure_preparation_deadline(prepared.deadline)?;
         self.check_cancelled()?;
         let capture = self.io.arm_capture(&CaptureRequest {
@@ -186,33 +186,51 @@ where
             message: source.to_string(),
             source: Some(source),
         })?;
-        self.policy.authorize(crate::policy::Operation::Budgeted(
-            crate::policy::WireBudget::new(u64::try_from(expansion_len).unwrap_or(u64::MAX), 0),
-        ))?;
+        let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
+        let mut admission = self.admission(&options.send, packet_count, deadline)?;
         if expansion_len == 0 {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
                 source: None,
             });
         }
-        let expanded_packets = template
-            .expand(options.max_template_packets)
-            .map_err(|source| Error::Template {
+        let mut expanded_packets =
+            template
+                .expand(options.max_template_packets)
+                .map_err(|source| Error::Template {
+                    message: source.to_string(),
+                    source: Some(source),
+                })?;
+        let routes = CachedProvider::new(&self.routes);
+        let mut admitted: Vec<Admitted> = Vec::with_capacity(expanded_packets.len());
+        loop {
+            // Expansion allocates, so the operation's stop conditions are
+            // checked before each packet is pulled.
+            admission.check()?;
+            let Some(expanded_packet) = expanded_packets.next() else {
+                break;
+            };
+            let packet = expanded_packet.map_err(|source| Error::Template {
                 message: source.to_string(),
                 source: Some(source),
             })?;
-        let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
-        let builder = Builder::new(Arc::clone(&self.registry));
-        let routes = CachedProvider::new(&self.routes);
-        let (planned_packets, total_bytes) = self.plan_packets(
-            expanded_packets,
-            packet_count,
-            deadline,
-            &options,
-            &builder,
-            &routes,
-        )?;
-        let packets = self.materialize_packets(planned_packets, deadline, &options, &builder)?;
+            let packet = admission.admit(packet, &routes)?;
+            if let Some(first_packet) = admitted.first()
+                && (first_packet.plan().decision.interface != packet.plan().decision.interface
+                    || first_packet.plan().mode != packet.plan().mode)
+            {
+                return Err(Error::HeterogeneousExchangeRoute);
+            }
+            admitted.push(packet);
+        }
+        let total_bytes = admission.wire_bytes();
+        // Neighbor discovery is delayed until every packet has passed packet,
+        // route, permissive-build, and aggregate byte-policy checks.
+        let discovery = admission.discover();
+        let packets = admitted
+            .into_iter()
+            .map(|packet| discovery.materialize(packet))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Prepared {
             cancellation: self.cancellation.clone(),
@@ -223,91 +241,5 @@ where
             packet_count,
             total_bytes,
         })
-    }
-
-    fn plan_packets(
-        &self,
-        mut expanded_packets: impl ExactSizeIterator<Item = Result<Packet, template::Error>>,
-        packet_count: u64,
-        deadline: Instant,
-        options: &Options,
-        builder: &Builder,
-        routes: &CachedProvider<'_, R>,
-    ) -> Result<(Vec<PlannedPacket>, u64), Error> {
-        let mut planned_packets: Vec<PlannedPacket> = Vec::with_capacity(expanded_packets.len());
-        let mut total_bytes = 0u64;
-        loop {
-            self.check_cancelled()?;
-            ensure_preparation_deadline(deadline)?;
-            let Some(expanded_packet) = expanded_packets.next() else {
-                break;
-            };
-            self.check_cancelled()?;
-            ensure_preparation_deadline(deadline)?;
-            let packet_to_send = expanded_packet.map_err(|source| Error::Template {
-                message: source.to_string(),
-                source: Some(source),
-            })?;
-            self.check_cancelled()?;
-            ensure_preparation_deadline(deadline)?;
-            let plan = self.plan_with_provider(
-                &packet_to_send,
-                options.send.destination,
-                &options.send.plan,
-                routes,
-                Some(deadline),
-            )?;
-            self.check_cancelled()?;
-            ensure_preparation_deadline(deadline)?;
-            let planned = self.plan_and_authorize(
-                packet_to_send,
-                plan,
-                builder,
-                &options.send,
-                Some(deadline),
-            )?;
-            total_bytes = total_bytes
-                .checked_add(
-                    u64::try_from(planned.preliminary_build.bytes.len()).unwrap_or(u64::MAX),
-                )
-                .ok_or(crate::policy::Error::ByteLimit {
-                    actual: u64::MAX,
-                    limit: self.policy.max_bytes_per_operation,
-                })?;
-            self.policy.authorize(crate::policy::Operation::Budgeted(
-                crate::policy::WireBudget::new(packet_count, total_bytes),
-            ))?;
-            if let Some(first_packet) = planned_packets.first()
-                && (first_packet.plan.decision.interface != planned.plan.decision.interface
-                    || first_packet.plan.mode != planned.plan.mode)
-            {
-                return Err(Error::HeterogeneousExchangeRoute);
-            }
-            planned_packets.push(planned);
-        }
-        Ok((planned_packets, total_bytes))
-    }
-
-    fn materialize_packets(
-        &self,
-        planned_packets: Vec<PlannedPacket>,
-        deadline: Instant,
-        options: &Options,
-        builder: &Builder,
-    ) -> Result<Vec<PreparedPacket>, Error> {
-        // Neighbor discovery is delayed until every packet has passed packet,
-        // route, permissive-build, and aggregate byte-policy checks.
-        let mut prepared_packets = Vec::with_capacity(planned_packets.len());
-        for planned_packet in planned_packets {
-            self.check_cancelled()?;
-            ensure_preparation_deadline(deadline)?;
-            prepared_packets.push(self.materialize_and_authorize(
-                planned_packet,
-                builder,
-                &options.send,
-                Some(deadline),
-            )?);
-        }
-        Ok(prepared_packets)
     }
 }

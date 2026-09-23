@@ -16,8 +16,8 @@ use super::accumulator::{
     UnsolicitedFreshness, WorkflowResponseMatcher,
 };
 use super::model::{Options, Response};
-use crate::materialize::PreparedPacket;
 use crate::planning::expired;
+use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Attribution {
@@ -70,12 +70,12 @@ fn select_attribution(
         }
 
         let mut request_match: Option<Match> = None;
-        for layer in prepared_request.built.packet.iter() {
+        for layer in prepared_request.built().packet.iter() {
             ensure_correlation_active(deadline)?;
             let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
                 continue;
             };
-            let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);
+            let candidate = matcher.matches(&prepared_request.built().packet, &decoded.packet);
             ensure_correlation_active(deadline)?;
             if let Some(candidate) = candidate
                 && request_match.is_none_or(|best| candidate.confidence > best.confidence)
@@ -356,7 +356,7 @@ impl Accumulator {
             {
                 let matched = matches_request(
                     request_index,
-                    &prepared_request.built.packet,
+                    &prepared_request.built().packet,
                     &candidate.decoded,
                 );
                 if expired(deadline) {

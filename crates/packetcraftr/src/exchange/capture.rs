@@ -176,7 +176,7 @@ impl<C: Session> Transaction<C> {
                 .prepared
                 .get(response.request_index)
                 .expect("retained response indices identify prepared requests")
-                .built
+                .built()
                 .packet;
             stop_predicate(response.request_index, request, &response.response)
         })
@@ -201,7 +201,7 @@ fn drain_deadline_error() -> LiveIoError {
 #[cfg(test)]
 mod tests {
 
-    use crate::materialize::PreparedPacket;
+    use crate::preparation::PreparedPacket;
 
     use std::collections::VecDeque;
     use std::net::Ipv4Addr;
@@ -318,9 +318,11 @@ mod tests {
         let response = udp_packet(server, client, 9, 40_000);
         let prepared_evidence = crate::evidence::test_sent_packet(request);
         let prepared_packets = (0..request_count)
-            .map(|_| PreparedPacket {
-                built: prepared_evidence.built().clone(),
-                route: prepared_evidence.route().clone(),
+            .map(|_| {
+                PreparedPacket::fixture(
+                    prepared_evidence.built().clone(),
+                    prepared_evidence.route().clone(),
+                )
             })
             .collect();
         let response_frame = crate::evidence::test_sent_packet(response).frame().clone();

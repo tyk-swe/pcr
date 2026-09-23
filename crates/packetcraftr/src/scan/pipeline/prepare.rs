@@ -3,8 +3,8 @@
 use super::{Batch, limit};
 use crate::{
     BoundaryError, Client,
-    materialize::PlannedPacket,
     policy::{Operation, WireBudget},
+    preparation::Admitted,
     probe::{ExchangeExecutor, PipelineOptions},
 };
 use packetcraftr_core::{build::Builder, field::FieldValue, packet::Packet};
@@ -106,7 +106,7 @@ where
             &executor.options.send,
             deadline,
         )?;
-        let wire = prepared.preliminary_build.bytes.len();
+        let wire = prepared.wire_len();
         total = total
             .checked_add(wire as u64)
             .ok_or_else(|| limit("wire bytes", usize::MAX))?;
@@ -117,7 +117,7 @@ where
                 total,
             )))
             .map_err(BoundaryError::from_error)?;
-        let memory = charge(&prepared.packet, options.max_prepared_bytes)?
+        let memory = charge(prepared.packet(), options.max_prepared_bytes)?
             .checked_mul(3)
             .and_then(|bytes| bytes.checked_add(wire))
             .ok_or_else(|| limit("prepared descriptions", options.max_prepared_bytes))?;
@@ -146,7 +146,7 @@ pub(super) fn planned<R, N, I>(
     builder: &Builder,
     options: &crate::send::Options,
     deadline: Instant,
-) -> Result<PlannedPacket, BoundaryError>
+) -> Result<Admitted, BoundaryError>
 where
     R: route::Provider,
     N: neighbor::Resolver,

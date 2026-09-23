@@ -14,6 +14,7 @@ use packetcraftr_core::{
     frame::Frame,
 };
 use packetcraftr_netio::{
+    Error as LiveIoError,
     capture::{self, group},
     neighbor, route, transmit,
 };
@@ -281,7 +282,7 @@ where
                     &executor.options.send,
                     deadline,
                 )?;
-                if planned.preliminary_build.bytes.len() != plan.costs[next].wire {
+                if planned.wire_len() != plan.costs[next].wire {
                     return Err(limit("changed preparation size", plan.costs[next].wire));
                 }
                 let mut send = executor.options.send.clone();
@@ -290,7 +291,7 @@ where
                     .client
                     .materialize_and_authorize(planned, &builder, &send, Some(deadline))
                     .map_err(BoundaryError::from_error)?;
-                if !super::probe::sent_probe_matches(&batch.probe, &prepared.built.packet) {
+                if !super::probe::sent_probe_matches(&batch.probe, &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
                         "materialized scan packet differs from its probe",
                         "internal.scan_probe_mismatch",
@@ -298,16 +299,10 @@ where
                     ));
                 }
                 check(executor.client, deadline)?;
-                let frame = transmit::Frame::try_new(&prepared.built.bytes, &prepared.route)
-                    .map_err(BoundaryError::from_error)?;
                 stats.packets_attempted += 1;
-                let receipt = executor
-                    .client
-                    .io
-                    .send(frame)
-                    .map_err(BoundaryError::from_error)?;
                 let sent = Arc::new(
-                    SentPacket::try_new(prepared.built, prepared.route, receipt)
+                    prepared
+                        .transmit(&executor.client.io, || Ok::<(), LiveIoError>(()))
                         .map_err(BoundaryError::from_error)?,
                 );
                 stats.packets_completed += 1;

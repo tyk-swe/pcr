@@ -5,7 +5,7 @@
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use packetcraftr_core::frame::LinkType;
@@ -91,6 +91,75 @@ impl capture::Provider for NeverTransmit {
             snap_length: request.limits.snap_length,
             native: Default::default(),
         }))
+    }
+}
+
+/// The MAC address [`RecordingNeighbors`] resolves every target to.
+pub(crate) const NEIGHBOR_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x02]);
+
+/// One observable step recorded by the recording fakes, in the order it
+/// happened. Tests may add their own [`Step::Published`] entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// Neighbor discovery was requested for this target.
+    Neighbor(IpAddr),
+    /// These exact bytes were handed to the transmitter.
+    Transmit(Vec<u8>),
+    /// The workflow published the evidence of this confirmed send.
+    Published(usize),
+}
+
+/// A shared, ordered record of provider calls.
+#[derive(Clone, Default)]
+pub(crate) struct Steps(Arc<Mutex<Vec<Step>>>);
+
+impl Steps {
+    pub(crate) fn push(&self, step: Step) {
+        self.0.lock().expect("steps lock").push(step);
+    }
+
+    pub(crate) fn take(&self) -> Vec<Step> {
+        std::mem::take(&mut *self.0.lock().expect("steps lock"))
+    }
+}
+
+/// A resolver that records each discovery request and answers with
+/// [`NEIGHBOR_MAC`].
+pub(crate) struct RecordingNeighbors(pub(crate) Steps);
+
+impl neighbor::Resolver for RecordingNeighbors {
+    fn resolve(
+        &self,
+        request: &neighbor::Request,
+    ) -> Result<neighbor::Resolution, neighbor::Error> {
+        self.0.push(Step::Neighbor(request.target));
+        Ok(neighbor::Resolution {
+            mac_address: NEIGHBOR_MAC,
+            attempts: 1,
+            cache_hit: false,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: capture::Statistics::default(),
+        })
+    }
+}
+
+/// I/O that records every frame it is handed and confirms it in full. Its
+/// capture is armed but never observes anything.
+pub(crate) struct RecordingTransmit(pub(crate) Steps);
+
+impl transmit::Sender for RecordingTransmit {
+    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+        self.0.push(Step::Transmit(frame.bytes().to_vec()));
+        Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+impl capture::Provider for RecordingTransmit {
+    type Capture = IdleCapture;
+
+    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        NeverTransmit.arm_capture(request)
     }
 }
 

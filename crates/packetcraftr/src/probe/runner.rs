@@ -13,8 +13,9 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
-use crate::StatsOverflow;
 use crate::clock::{Clock, rate_delay};
+use crate::evidence::ExecutionPermit;
+use crate::execution::{Context, Grant, Receipt};
 use crate::probe::{Error, ErrorKind, Workflow};
 use crate::{SentPacket, Stats};
 
@@ -23,19 +24,23 @@ use crate::{SentPacket, Stats};
 pub struct Batch<P> {
     pub probes: Vec<P>,
     pub timeout: Duration,
-    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) permit: ExecutionPermit,
     /// The first probe's operation-local sequence, recorded by the planner
     /// that built the batch; it names the batch in every error the runner
     /// reports.
     pub(crate) sequence: u64,
 }
 
-/// Private pacing/deadline controls for the two existing probe workflows.
+/// Private pacing and binding controls for the two existing probe workflows.
 /// Scan owns a single-probe value; traceroute owns a variable-size hop batch.
 pub(crate) trait BatchPlan {
     fn sequence(&self) -> u64;
     fn probe_count(&self) -> usize;
-    fn timeout_mut(&mut self) -> &mut Duration;
+    /// The timeout the plan requested, before clipping to the operation budget.
+    fn timeout(&self) -> Duration;
+    /// Binds the execution context's grant so the executor runs the batch
+    /// under the clipped timeout and returns evidence for the fresh permit.
+    fn bind(&mut self, grant: Grant);
 }
 
 impl<P> BatchPlan for Batch<P> {
@@ -45,15 +50,19 @@ impl<P> BatchPlan for Batch<P> {
     fn probe_count(&self) -> usize {
         self.probes.len()
     }
-    fn timeout_mut(&mut self) -> &mut Duration {
-        &mut self.timeout
+    fn timeout(&self) -> Duration {
+        self.timeout
+    }
+    fn bind(&mut self, grant: Grant) {
+        self.timeout = grant.timeout;
+        self.permit = grant.permit;
     }
 }
 
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
 pub struct Execution {
-    pub(crate) permit: crate::evidence::ExecutionPermit,
+    pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unsolicited: Vec<DecodedPacket>,
@@ -63,10 +72,7 @@ pub struct Execution {
 }
 
 impl Execution {
-    pub(crate) fn from_exchange(
-        permit: crate::evidence::ExecutionPermit,
-        result: crate::exchange::Report,
-    ) -> Self {
+    pub(crate) fn from_exchange(permit: ExecutionPermit, result: crate::exchange::Report) -> Self {
         let crate::exchange::Report {
             sent,
             responses,
@@ -89,6 +95,15 @@ impl Execution {
             diagnostics,
             stats,
         }
+    }
+}
+
+impl Receipt for Execution {
+    fn permit(&self) -> ExecutionPermit {
+        self.permit
+    }
+    fn stats(&self) -> &Stats {
+        &self.stats
     }
 }
 
@@ -139,8 +154,10 @@ pub(crate) trait ProbeLifecycle<B> {
     ) -> Result<ControlFlow<()>, Error>;
 }
 
-/// Runs already-approved homogeneous batches with shared deadline, pacing,
-/// executor-boundary, evidence-validation, and checked-statistics policy.
+/// Runs already-approved homogeneous batches through the execution context,
+/// which owns deadline, pacing, permit, timeout-clipping, and checked-statistics
+/// policy. The runner supplies the pacing input: each batch waits for the
+/// previous batch's probe count at `probes_per_second`.
 pub(crate) fn run_batches<B, L, C>(
     workflow: Workflow,
     batches: impl IntoIterator<Item = impl BorrowMut<B>>,
@@ -154,74 +171,50 @@ where
     L: ProbeLifecycle<B>,
     C: Clock,
 {
-    let fail = |kind| Error::new(workflow, kind);
-    let duration = |actual, limit| fail(ErrorKind::DurationLimit { actual, limit });
-    let exceeded = |error: DeadlineExceeded| duration(error.actual, error.limit);
-    let statistics = |sequence| fail(ErrorKind::StatisticsOverflow { sequence });
-    let mut stats = Stats::default();
-    let mut scheduled_delay = Duration::ZERO;
-    let mut previous: Option<(usize, u64)> = None;
+    let mut context = Context::new(deadline, clock, workflow);
+    let mut previous_probes = None;
+    let mut last_sequence = 0;
 
     for mut planned in batches {
         let batch = planned.borrow_mut();
-        crate::probe::enforce_deadline(workflow, deadline)?;
         let sequence = batch.sequence();
-        if let Some((previous_probes, _)) = previous {
+        context.enforce(sequence)?;
+        if let Some(previous_probes) = previous_probes {
             let delay = rate_delay(previous_probes, probes_per_second).ok_or_else(|| {
-                fail(ErrorKind::InvalidLimit {
-                    field: "probes_per_second",
-                    value: u64::from(probes_per_second.unwrap_or_default()),
-                    reason: "rate-delay arithmetic overflowed".to_owned(),
-                })
+                Error::new(
+                    workflow,
+                    ErrorKind::InvalidLimit {
+                        field: "probes_per_second",
+                        value: u64::from(probes_per_second.unwrap_or_default()),
+                        reason: "rate-delay arithmetic overflowed".to_owned(),
+                    },
+                )
             })?;
-            crate::probe::enforce_deadline(workflow, deadline)?;
-            deadline.start_accounting(delay).map_err(exceeded)?;
-            let slept = clock.sleep(delay);
-            crate::probe::enforce_deadline(workflow, deadline)?;
-            slept.map_err(|source| {
-                fail(ErrorKind::Clock {
-                    sequence,
-                    source: Box::new(source),
-                })
-            })?;
-            deadline.account(delay).map_err(exceeded)?;
-            scheduled_delay = scheduled_delay
-                .checked_add(delay)
-                .ok_or_else(|| statistics(sequence))?;
+            context.pace(sequence, delay)?;
         }
-        previous = Some((batch.probe_count(), sequence));
+        previous_probes = Some(batch.probe_count());
+        last_sequence = sequence;
 
-        crate::probe::enforce_deadline(workflow, deadline)?;
-        deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(exceeded)?;
-        let timeout = batch.timeout_mut();
-        *timeout = deadline.bounded_timeout(*timeout).map_err(exceeded)?;
-        let batch = &*batch;
-        let execution = lifecycle
-            .execute(batch)
-            .map_err(|source| fail(ErrorKind::Execution { sequence, source }))?;
-        crate::probe::enforce_deadline(workflow, deadline)?;
-        deadline
-            .account(execution.stats.elapsed)
-            .map_err(exceeded)?;
-        lifecycle.validate(batch, &execution)?;
-        crate::probe::enforce_deadline(workflow, deadline)?;
-        stats
-            .checked_add_assign(&execution.stats)
-            .map_err(|StatsOverflow| statistics(sequence))?;
-        if lifecycle.process(batch, execution, deadline)?.is_break() {
+        let (execution, _) = context.step(
+            sequence,
+            batch.timeout(),
+            &mut (&mut *batch, &mut *lifecycle),
+            |(batch, lifecycle), grant| {
+                batch.bind(grant);
+                lifecycle.execute(batch)
+            },
+            |(batch, lifecycle), execution, _, _| lifecycle.validate(batch, execution),
+        )?;
+        if lifecycle
+            .process(batch, execution, context.deadline())?
+            .is_break()
+        {
             break;
         }
     }
 
-    crate::probe::enforce_deadline(workflow, deadline)?;
-    let final_sequence = previous.map_or(0, |(_, sequence)| sequence);
-    stats.elapsed = stats
-        .elapsed
-        .checked_add(scheduled_delay)
-        .ok_or_else(|| statistics(final_sequence))?;
-    Ok(stats)
+    context.enforce(last_sequence)?;
+    Ok(context.into_stats())
 }
 
 #[cfg(test)]

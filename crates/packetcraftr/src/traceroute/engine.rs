@@ -340,8 +340,9 @@ where
         deadline: &Deadline,
     ) -> Result<ControlFlow<()>, Error> {
         enforce_deadline(WORKFLOW, deadline)?;
+        // The execution context already rejected evidence for another permit.
         let Execution {
-            permit,
+            permit: _,
             sent,
             mut responses,
             unsolicited: _,
@@ -349,16 +350,6 @@ where
             diagnostics: batch_diagnostics,
             stats: _,
         } = execution;
-        if permit != batch.permit {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidEvidence {
-                    sequence: batch.sequence,
-                    message: "executor returned evidence for a different execution permit"
-                        .to_owned(),
-                },
-            ));
-        }
         self.record_diagnostics(batch_diagnostics, deadline)?;
         enforce_deadline(WORKFLOW, deadline)?;
         let mut response_selector = ResponseSelector::new(&mut responses);

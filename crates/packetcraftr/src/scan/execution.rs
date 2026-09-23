@@ -52,7 +52,11 @@ impl crate::probe::runner::BatchPlan for Batch {
     fn probe_count(&self) -> usize {
         1
     }
-    fn timeout_mut(&mut self) -> &mut std::time::Duration {
-        &mut self.timeout
+    fn timeout(&self) -> std::time::Duration {
+        self.timeout
+    }
+    fn bind(&mut self, grant: crate::execution::Grant) {
+        self.timeout = grant.timeout;
+        self.permit = grant.permit;
     }
 }

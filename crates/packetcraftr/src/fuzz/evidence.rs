@@ -64,7 +64,7 @@ impl Recorder {
         case.prepared.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
         case.prepared.diagnostics.extend(execution.diagnostics);
-        retain_evidence(
+        self.retain(
             case,
             ExecutionEvidence {
                 responses: execution
@@ -75,9 +75,6 @@ impl Recorder {
                 unmatched: execution.unmatched,
                 undecoded: execution.undecoded,
             },
-            self.retention,
-            &mut self.budget,
-            &mut self.diagnostics,
             deadline,
         )?;
         case.outcome = if had_response {
@@ -86,6 +83,51 @@ impl Recorder {
             CaseOutcome::Timeout
         };
         deadline.enforce()?;
+        Ok(())
+    }
+
+    /// Retains exact frames while the campaign-wide evidence budget allows,
+    /// noting once that later frames were omitted.
+    fn retain(
+        &mut self,
+        case: &mut Case,
+        evidence: ExecutionEvidence,
+        deadline: &Deadline,
+    ) -> Result<(), Error> {
+        let limits = self.retention;
+        let budget = &mut self.budget;
+        let mut omitted = false;
+        let mut retain = |frames: Vec<Frame>, sink: &mut Vec<Frame>| -> Result<(), Error> {
+            for frame in frames {
+                deadline.check().map_err(duration_limit)?;
+                if budget
+                    .reserve(
+                        frame.bytes().len(),
+                        limits.max_evidence_frames,
+                        limits.max_evidence_bytes,
+                    )
+                    .is_ok()
+                {
+                    sink.push(frame);
+                } else {
+                    omitted = true;
+                }
+            }
+            Ok(())
+        };
+        retain(evidence.responses, &mut case.responses)?;
+        retain(evidence.unmatched, &mut case.unmatched)?;
+        retain(evidence.undecoded, &mut case.undecoded)?;
+        if omitted {
+            self.diagnostics.push_once(Diagnostic::warning(
+                "fuzz.evidence_limit",
+                format!(
+                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+                    limits.max_evidence_frames, limits.max_evidence_bytes
+                ),
+            ));
+        }
+        deadline.check().map_err(duration_limit)?;
         Ok(())
     }
 
@@ -147,54 +189,8 @@ pub(super) fn validate_execution(
     Ok(())
 }
 
-fn retain_fuzz_evidence(budget: &mut Budget, frame: &Frame, limits: LiveLimits) -> bool {
-    budget
-        .reserve(
-            frame.bytes().len(),
-            limits.max_evidence_frames,
-            limits.max_evidence_bytes,
-        )
-        .is_ok()
-}
-
 struct ExecutionEvidence {
     responses: Vec<Frame>,
     unmatched: Vec<Frame>,
     undecoded: Vec<Frame>,
-}
-
-fn retain_evidence(
-    case: &mut Case,
-    evidence: ExecutionEvidence,
-    limits: LiveLimits,
-    budget: &mut Budget,
-    diagnostics: &mut DiagnosticLog,
-    deadline: &Deadline,
-) -> Result<(), Error> {
-    let mut omitted = false;
-    let mut retain = |frames: Vec<Frame>, sink: &mut Vec<Frame>| -> Result<(), Error> {
-        for frame in frames {
-            deadline.check().map_err(duration_limit)?;
-            if retain_fuzz_evidence(budget, &frame, limits) {
-                sink.push(frame);
-            } else {
-                omitted = true;
-            }
-        }
-        Ok(())
-    };
-    retain(evidence.responses, &mut case.responses)?;
-    retain(evidence.unmatched, &mut case.unmatched)?;
-    retain(evidence.undecoded, &mut case.undecoded)?;
-    if omitted {
-        diagnostics.push_once(Diagnostic::warning(
-            "fuzz.evidence_limit",
-            format!(
-                "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                limits.max_evidence_frames, limits.max_evidence_bytes
-            ),
-        ));
-    }
-    deadline.check().map_err(duration_limit)?;
-    Ok(())
 }

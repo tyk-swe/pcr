@@ -146,16 +146,17 @@ where
     let delay = rate_delay(live.cases_per_second)?;
     let mut recorder = Recorder::new(Arc::clone(&registry), request.limits, live.limits);
     let mut context = Context::new(&mut deadline, clock, CaseErrors);
-    let mut paced = false;
+    let mut executed_before = false;
     for mut case in cases {
         let case_index = case.prepared.index;
         context.enforce(case_index)?;
         if case.prepared.built.is_some() {
             // Cases per second: every built case after the first waits one
             // case's share of a second.
-            if std::mem::replace(&mut paced, true) {
+            if executed_before {
                 context.pace(case_index, delay)?;
             }
+            executed_before = true;
             let (execution, _) = context.step(
                 case_index,
                 live.timeout,

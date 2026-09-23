@@ -4,10 +4,10 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The pipeline's own ranking (the strict greater-than on `rank()*4 + profile`) is gone. One ordering is shared with the serial selector.
-- [ ] A runner-level or scan-pipeline test shows a tie that used to go to the first arrival in pipelined mode now picks the same winner as serial mode.
-- [ ] The scan pipeline contract tests still pass as the outer net, updated only where they pin the sanctioned tie-break.
-- [ ] `[Unreleased]` records the single tie-break rule.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] The pipeline's own ranking (the strict greater-than on `rank()*4 + profile`) is gone. One ordering is shared with the serial selector.
+- [x] A runner-level or scan-pipeline test shows a tie that used to go to the first arrival in pipelined mode now picks the same winner as serial mode.
+- [x] The scan pipeline contract tests still pass as the outer net, updated only where they pin the sanctioned tie-break.
+- [x] `[Unreleased]` records the single tie-break rule.
+- [x] fmt, clippy and the workspace tests pass.

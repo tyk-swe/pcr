@@ -6,11 +6,11 @@
 
 use std::path::PathBuf;
 
-mod support;
-#[path = "support/tls_capture.rs"]
+mod common;
+#[path = "common/tls_capture.rs"]
 mod tls_capture;
 
-use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
+use common::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 use tls_capture::{
     Handshake, client_hello_frame_hex, write_capture, write_capture_with_udp_443,
     write_fragmented_capture,

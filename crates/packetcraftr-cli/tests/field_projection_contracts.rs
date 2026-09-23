@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+mod common;
+use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 const IP: &str = "45000014000000004001f6e7c0000201c6336402";
 
 #[test]

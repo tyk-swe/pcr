@@ -4,7 +4,7 @@
 //! Staged preparation keeps authorization ahead of neighbor discovery and the
 //! final check ahead of transmission, in both of its orders.
 
-mod support;
+mod common;
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
@@ -25,7 +25,7 @@ use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::template::Template;
 use packetcraftr_netio::link::Mode;
 
-use support::{
+use common::{
     FixedRoutes, NEIGHBOR_MAC, RecordingNeighbors, RecordingTransmit, SELECTED_SOURCE, Step, Steps,
 };
 

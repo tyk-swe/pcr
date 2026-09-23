@@ -14,12 +14,12 @@ use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::ipv6::Fragment as Ipv6Fragment;
 use packetcraftr_core::protocol::network::Ipv6;
-#[path = "support/process.rs"]
+mod common;
+#[path = "common/process.rs"]
 mod process_support;
-mod support;
 
+use common::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-use support::{assert_contiguous, parse_json, parse_ndjson, path_text, run, run_success};
 
 const UDP_CLIENT: &str = "450000210000000040118e95c0000201c633640230390009000d9f8868656c6c6f";
 

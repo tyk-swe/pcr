@@ -12,7 +12,7 @@ use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
-use crate::test_fixtures::NoopClock;
+use crate::test_support::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
 use crate::policy::{Authorizer, Operation};
@@ -231,7 +231,7 @@ impl Executor<ExecutionCase> for BudgetSpendingExecutor {
         } else {
             vec![crate::exchange::Response {
                 request_index: 0,
-                response: crate::probe::test_fixtures::decoded_packet(
+                response: crate::probe::test_support::decoded_packet(
                     case.packet.clone(),
                     std::time::UNIX_EPOCH,
                     sent.wire_bytes(),
@@ -378,7 +378,7 @@ impl Executor<ExecutionCase> for ThreeFrameExecutor {
         };
         execution.responses.push(crate::exchange::Response {
             request_index: 0,
-            response: crate::probe::test_fixtures::decoded_packet(
+            response: crate::probe::test_support::decoded_packet(
                 case.packet.clone(),
                 std::time::UNIX_EPOCH,
                 &[1],

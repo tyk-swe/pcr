@@ -12,8 +12,8 @@ use super::*;
 use crate::evidence::ExecutionPermit;
 use crate::probe::Workflow;
 use crate::probe::evidence::EvidenceLimits;
-use crate::probe::test_fixtures::{decoded_packet, evidence_frame};
-use crate::test_fixtures::RecordingClock;
+use crate::probe::test_support::{decoded_packet, evidence_frame};
+use crate::test_support::RecordingClock;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestProbe(u64);

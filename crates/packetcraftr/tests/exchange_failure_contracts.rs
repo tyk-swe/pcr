@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Faults at external-effect boundaries use existing provider contracts.
-mod support;
+mod common;
 
 use packetcraftr::{Client, exchange, policy::Policy};
 use packetcraftr_core::{
@@ -127,15 +127,15 @@ impl capture::Session for Capture {
     }
 }
 
-type FixtureClient = Client<support::FixedRoutes, support::NeverNeighbors, Io>;
+type FixtureClient = Client<common::FixedRoutes, common::NeverNeighbors, Io>;
 
 fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
     let state = Arc::new(Mutex::new(State::default()));
     let signal = Cancellation::default();
     let client = Client::new(
         builtin::registry(),
-        support::FixedRoutes,
-        support::NeverNeighbors,
+        common::FixedRoutes,
+        common::NeverNeighbors,
         Io {
             fault,
             state: state.clone(),
@@ -255,7 +255,7 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
             0,
             "source",
             vec![
-                FieldValue::Ipv4(support::SELECTED_SOURCE),
+                FieldValue::Ipv4(common::SELECTED_SOURCE),
                 FieldValue::Ipv4("192.0.2.99".parse().unwrap()),
             ],
         )

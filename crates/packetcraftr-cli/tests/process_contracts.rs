@@ -21,12 +21,12 @@ use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Tcp;
 use serde_json::Value;
 
-#[path = "support/process.rs"]
+mod common;
+#[path = "common/process.rs"]
 mod process_support;
-mod support;
 
+use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 const IPV4_FRAME_HEX: &str = "45000014000000004001f6e7c0000201c6336402";
 
@@ -83,7 +83,7 @@ fn run_command_with_open_stdin(mut command: Command) -> Output {
 #[cfg(packetcraftr_test_util_linux)]
 #[test]
 fn capture_commands_reject_terminal_stdin_before_reading() {
-    support::require_util_linux_script();
+    common::require_util_linux_script();
     for arguments in [
         "read -",
         "expert -",
@@ -1048,7 +1048,7 @@ fn published_quick_start_capture_reads_as_a_complete_stream() {
 #[cfg(packetcraftr_test_util_linux)]
 #[test]
 fn binary_stdout_requires_deliberate_override_on_a_terminal() {
-    support::require_util_linux_script();
+    common::require_util_linux_script();
     let fixture = tempfile::NamedTempFile::new().unwrap();
     let mut writer = Writer::pcap(fixture.reopen().unwrap(), LinkType::ETHERNET).unwrap();
     writer

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+mod common;
+use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 
 #[test]
 fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {

@@ -10,12 +10,12 @@ use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 
-#[path = "support/process.rs"]
+mod common;
+#[path = "common/process.rs"]
 mod process_support;
-mod support;
 
+use common::{assert_contiguous, parse_ndjson, path_text, run};
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-use support::{assert_contiguous, parse_ndjson, path_text, run};
 
 const COMMANDS: [(&str, &[&str]); 5] = [
     ("read", &[]),

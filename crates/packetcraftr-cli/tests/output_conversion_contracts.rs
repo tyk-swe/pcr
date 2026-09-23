@@ -32,7 +32,7 @@ use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
 use serde_json::Value;
 
-#[path = "support/stats_report.rs"]
+#[path = "common/stats_report.rs"]
 mod stats_report;
 
 fn built_udp_packet() -> (

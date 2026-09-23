@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
-use support::{parse_json, parse_ndjson, run_success};
+mod common;
+use common::{parse_json, parse_ndjson, run_success};
 
 #[test]
 fn cli_builds_named_dns_and_tls_fixtures_and_nested_axes() {

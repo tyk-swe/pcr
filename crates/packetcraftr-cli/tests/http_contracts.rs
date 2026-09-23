@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
+mod common;
+use common::{assert_contiguous, parse_json, parse_ndjson, run, run_success};
 #[test]
 fn http_command_reports_sourced_messages_without_retaining_entity_bodies() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

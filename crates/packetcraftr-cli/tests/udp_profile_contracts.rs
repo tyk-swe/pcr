@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{parse_json, run};
+mod common;
+use common::{parse_json, run};
 #[test]
 fn profile_files_validate_before_target_resolution_and_keep_their_wire_schema() {
     let schema: serde_json::Value = serde_json::from_str(include_str!(

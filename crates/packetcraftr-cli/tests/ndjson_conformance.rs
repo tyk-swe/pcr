@@ -12,9 +12,9 @@ use packetcraftr_core as core;
 use packetcraftr_cli::output;
 use serde_json::{Value, json};
 
-mod support;
+mod common;
 
-use support::{assert_contiguous, schema_validator, stream};
+use common::{assert_contiguous, schema_validator, stream};
 
 const COMPLETION_FIXTURES: &[(output::contract::Command, bool, &str)] = &[
     (
@@ -853,17 +853,17 @@ fn complete(
 #[test]
 fn ndjson_framing_requires_one_complete_value_per_newline_terminated_line() {
     use std::io::Write as _;
-    let mut buffer = support::SharedBuffer::default();
+    let mut buffer = common::SharedBuffer::default();
     buffer.write_all(b"{\"sequence\":0}\n").unwrap();
     assert_eq!(buffer.records().len(), 1);
-    assert!(support::SharedBuffer::default().records().is_empty());
+    assert!(common::SharedBuffer::default().records().is_empty());
     for malformed in [
         &b"{\"sequence\":0}"[..],                   // unterminated final record
         &b"{\"sequence\":0}{\"sequence\":1}\n"[..], // two values on one line
         &b"{\n\"sequence\":0\n}\n"[..],             // a record spread across lines
         &b"{\"sequence\":0}\n\n"[..],               // a blank line is not a record
     ] {
-        let mut buffer = support::SharedBuffer::default();
+        let mut buffer = common::SharedBuffer::default();
         buffer.write_all(malformed).unwrap();
         let result = std::panic::catch_unwind(|| buffer.records());
         assert!(

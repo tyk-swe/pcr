@@ -31,7 +31,7 @@ use super::wire::{
 };
 use crate::BoundaryError;
 use crate::policy::{Authorizer, Operation};
-use crate::test_fixtures::RecordingClock;
+use crate::test_support::RecordingClock;
 
 #[derive(Default)]
 struct RecordingAuthorizer {

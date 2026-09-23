@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
-use support::{path_text, run, run_success};
+use common::{path_text, run, run_success};
 
 /// The `Commands:` section of `--help` is the clap-published command list, so
 /// comparing it against the generated man pages keeps the assertion in step

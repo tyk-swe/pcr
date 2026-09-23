@@ -59,11 +59,11 @@ use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
 use serde_json::Value;
 
-#[path = "support/stats_report.rs"]
+mod common;
+#[path = "common/stats_report.rs"]
 mod stats_report;
-mod support;
 
-use support::{output_schema, schema_validator};
+use common::{output_schema, schema_validator};
 
 /// One representative aggregate payload, already wrapped in its envelope.
 type Case = fn() -> Value;

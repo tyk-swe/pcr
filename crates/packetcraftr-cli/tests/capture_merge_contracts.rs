@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
+use common::{parse_json, run, run_success};
 use packetcraftr_core::analysis::pcap::{Reader, compression::Input};
-use support::{parse_json, run, run_success};
 
 #[test]
 fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {

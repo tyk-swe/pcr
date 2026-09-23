@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
+use common::{parse_ndjson, path_text, run, run_success};
 use packetcraftr_core::analysis::pcap::{Reader, Writer, compression::Input};
 use packetcraftr_core::frame::{Frame, LinkType};
 use std::{
@@ -9,7 +10,6 @@ use std::{
     path::PathBuf,
     time::UNIX_EPOCH,
 };
-use support::{parse_ndjson, path_text, run, run_success};
 
 #[test]
 fn capture_paths_and_outputs_detect_both_formats_without_filename_hints() {

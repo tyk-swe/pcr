@@ -19,12 +19,12 @@ use packetcraftr_core::frame::Direction;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::{Lengths, LinkType};
 
-#[path = "support/process.rs"]
+mod common;
+#[path = "common/process.rs"]
 mod process_support;
-mod support;
 
+use common::{path_text, run};
 use process_support::{append_truncated_record, decode_hex, run_with_stdin};
-use support::{path_text, run};
 
 const FIRST_FRAGMENT: &str =
     "45000024002a200040116e68c0000201c63364029c40270f001800006162636465666768";
@@ -365,7 +365,7 @@ fn normalization_rejects_timestamps_not_representable_in_capture_time() {
 #[cfg(packetcraftr_test_dev_full)]
 #[test]
 fn normalized_stdout_failure_exits_with_an_io_error() {
-    support::require_dev_full();
+    common::require_dev_full();
     let mut file = tempfile::NamedTempFile::new().unwrap();
     file.write_all(&capture(Format::Pcap, &[frame(FIRST_FRAGMENT)]))
         .unwrap();

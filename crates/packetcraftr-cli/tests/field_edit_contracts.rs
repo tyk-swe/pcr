@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-mod support;
-use support::{parse_json, parse_ndjson, path_text, run, run_success};
+mod common;
+use common::{parse_json, parse_ndjson, path_text, run, run_success};
 
 fn examples() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples")

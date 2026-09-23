@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod support;
+mod common;
 
+use common::{parse_json, parse_ndjson, run, run_success};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
-use support::{parse_json, parse_ndjson, run, run_success};
 
 #[test]
 fn direct_tcp_dns_uses_sockets_and_publishes_no_udp_or_fallback_evidence() {

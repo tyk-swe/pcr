@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
-use crate::probe::test_fixtures::{ProgressiveExecutor, decoded_packet, private_policy};
+use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
 use crate::progress::Runtime;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
@@ -24,7 +24,7 @@ use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_port
 use crate::policy::PolicyAuthorizer;
 use crate::probe::{Execution, Executor, ProbeStatus, Transport};
 use crate::target::Target;
-use crate::test_fixtures::{
+use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
 use crate::{BoundaryError, Stats, target::Family};

@@ -138,13 +138,6 @@ where
         self.deadline
     }
 
-    /// The operation deadline, for work a workflow times outside
-    /// [`Self::step`], such as DNS-over-TCP under its own attempt window.
-    /// Statistics for that work go through [`Self::merge`].
-    pub(crate) fn deadline_mut(&mut self) -> &mut Deadline {
-        self.deadline
-    }
-
     /// Statistics merged so far, including every scheduled delay.
     pub(crate) fn into_stats(self) -> Stats {
         self.stats

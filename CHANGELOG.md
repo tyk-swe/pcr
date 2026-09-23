@@ -469,6 +469,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   observed after that case surfaces, so invalid evidence is reported even
   when the campaign was cancelled or ran out of time during that case. Time
   is accounted after validation.
+- A live `fuzz` case whose exact bytes cannot be prepared on the route its
+  executor reported now fails with `fuzz::Error::UnverifiableRoute`, which
+  keeps the preparation error as its source, instead of `InvalidEvidence`
+  with that error's text. The code (`internal.fuzz_evidence`) and message are
+  unchanged; the error's `causes` now list the preparation error.
 
 ### Removed
 

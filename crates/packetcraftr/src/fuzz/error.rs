@@ -40,6 +40,14 @@ pub enum Error {
     },
     #[error("fuzz executor returned invalid evidence at case {case_index}: {message}")]
     InvalidEvidence { case_index: u64, message: String },
+    /// The case's exact bytes could not be prepared on the route the executor
+    /// reported, so its transmission cannot be verified.
+    #[error("fuzz executor returned invalid evidence at case {case_index}: {source}")]
+    UnverifiableRoute {
+        case_index: u64,
+        #[source]
+        source: crate::Error,
+    },
     #[error("fuzz statistic accounting overflowed at case {case_index}")]
     StatisticsOverflow { case_index: u64 },
     #[error("fuzz progressive output failed: {source}")]
@@ -73,7 +81,9 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+            Self::InvalidEvidence { .. }
+            | Self::UnverifiableRoute { .. }
+            | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.fuzz_evidence",
                 Kind::Internal,
                 Some("treat the fuzz operation as incomplete because evidence was inconsistent"),
@@ -88,6 +98,7 @@ impl Classified for Error {
             Self::Execution { case_index, .. }
             | Self::Clock { case_index, .. }
             | Self::InvalidEvidence { case_index, .. }
+            | Self::UnverifiableRoute { case_index, .. }
             | Self::StatisticsOverflow { case_index } => Some(Coordinate::CaseIndex(*case_index)),
             _ => None,
         }

@@ -641,8 +641,9 @@ impl crate::target::GateErrors for Gates {
     }
 }
 
-/// Names execution-context failures as DNS errors. A step is a retry attempt;
-/// the DNS batch runner paces between questions as attempt 1.
+/// Names execution-context failures as DNS errors at the retry attempt they
+/// concern. The DNS batch runner's wait between questions concerns the next
+/// question's first attempt.
 pub(super) struct Attempts;
 
 impl crate::execution::PacingErrors for Attempts {

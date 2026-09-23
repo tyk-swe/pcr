@@ -30,3 +30,12 @@ pub struct Execution {
     pub(crate) diagnostics: Vec<Diagnostic>,
     pub(crate) stats: crate::Stats,
 }
+
+impl crate::execution::Receipt for Execution {
+    fn permit(&self) -> crate::evidence::ExecutionPermit {
+        self.permit
+    }
+    fn stats(&self) -> &crate::Stats {
+        &self.stats
+    }
+}

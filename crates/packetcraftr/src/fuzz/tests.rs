@@ -12,15 +12,14 @@ use packetcraftr_core::error::Classified;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{layer::Raw, packet::Packet};
-use packetcraftr_netio::{capture::Statistics as CaptureStatistics, transmit::Submission};
+use packetcraftr_netio::transmit::Submission;
 
 use crate::test_fixtures::NoopClock;
 use crate::{BoundaryError, Stats as ExecutionStats};
 
-use super::evidence::add_execution_stats;
 use crate::policy::{Authorizer, Operation};
 
-use super::{Execution, ExecutionCase, RunInput, run, run_with_events};
+use super::{CaseOutcome, Execution, ExecutionCase, RunInput, run, run_with_events};
 use super::{LiveLimits, LiveOptions, Stats};
 use crate::probe::Executor;
 
@@ -78,78 +77,6 @@ fn aggregate_live_fuzz_validates_case_count_before_collecting() {
         super::Error::Campaign(packet_fuzz::Error::InvalidLimit { field: "cases", .. })
     ));
     assert_eq!(executor.executions, 0);
-}
-
-#[test]
-fn execution_statistics_aggregation_is_complete_and_atomic() {
-    let mut total = Stats {
-        cases_generated: 7,
-        cases_built: 5,
-        packets_attempted: 1,
-        packets_completed: 2,
-        bytes: 3,
-        elapsed: Duration::from_secs(4),
-        capture: CaptureStatistics {
-            received_frames: 5,
-            dropped_frames: 6,
-            receiver_dropped_frames: 4,
-            ..CaptureStatistics::default()
-        },
-    };
-    add_execution_stats(
-        &mut total,
-        &ExecutionStats {
-            packets_attempted: 10,
-            packets_completed: 20,
-            bytes: 30,
-            elapsed: Duration::from_secs(40),
-            capture: CaptureStatistics {
-                received_frames: 50,
-                dropped_frames: 60,
-                receiver_dropped_frames: 40,
-                ..CaptureStatistics::default()
-            },
-        },
-        11,
-    )
-    .expect("bounded statistics");
-    assert_eq!(
-        total,
-        Stats {
-            cases_generated: 7,
-            cases_built: 5,
-            packets_attempted: 11,
-            packets_completed: 22,
-            bytes: 33,
-            elapsed: Duration::from_secs(44),
-            capture: CaptureStatistics {
-                received_frames: 55,
-                dropped_frames: 66,
-                receiver_dropped_frames: 44,
-                ..CaptureStatistics::default()
-            },
-        }
-    );
-
-    let before = total.clone();
-    let error = add_execution_stats(
-        &mut total,
-        &ExecutionStats {
-            packets_attempted: 1,
-            capture: CaptureStatistics {
-                receiver_dropped_frames: u64::MAX,
-                ..CaptureStatistics::default()
-            },
-            ..ExecutionStats::default()
-        },
-        12,
-    )
-    .expect_err("capture counter must overflow");
-    assert!(matches!(
-        error,
-        super::Error::StatisticsOverflow { case_index: 12 }
-    ));
-    assert_eq!(total, before);
 }
 
 struct AllowAll;
@@ -287,6 +214,153 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
             }
         }
     }
+}
+
+/// Reports the first case as having spent most of the campaign budget, then
+/// answers the next case after `latency`.
+struct BudgetSpendingExecutor {
+    latency: Duration,
+    executions: usize,
+}
+
+impl Executor<ExecutionCase> for BudgetSpendingExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+        let first = self.executions == 0;
+        self.executions += 1;
+        let sent = crate::evidence::test_sent_packet(case.packet.clone());
+        let responses = if first {
+            Vec::new()
+        } else {
+            vec![crate::exchange::Response {
+                request_index: 0,
+                response: crate::probe::test_fixtures::decoded_packet(
+                    case.packet.clone(),
+                    std::time::UNIX_EPOCH,
+                    sent.wire_bytes(),
+                    Vec::new(),
+                ),
+                latency: self.latency,
+            }]
+        };
+        Ok(Execution {
+            permit: case.permit,
+            stats: ExecutionStats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: u64::try_from(sent.bytes_sent()).unwrap(),
+                elapsed: Duration::from_millis(if first { 4300 } else { 300 }),
+                ..ExecutionStats::default()
+            },
+            sent,
+            responses,
+            unmatched: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+/// A 5 s campaign whose first case reports 4.3 s and whose pacing adds
+/// 200 ms leaves at most 500 ms for the second case's 1 s timeout.
+fn budget_spending_input(request: &packet_fuzz::Request) -> RunInput<'_> {
+    RunInput {
+        request,
+        live: LiveOptions {
+            timeout: Duration::from_secs(1),
+            cases_per_second: Some(5),
+            ..LiveOptions::default()
+        },
+        packet: packet(),
+        registry: packetcraftr_core::protocol::builtin::registry(),
+    }
+}
+
+fn budget_spending_request() -> packet_fuzz::Request {
+    packet_fuzz::Request {
+        cases: 2,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().unwrap()],
+        limits: packet_fuzz::Limits {
+            max_duration: Duration::from_secs(5),
+            ..packet_fuzz::Limits::default()
+        },
+        ..packet_fuzz::Request::default()
+    }
+}
+
+#[test]
+fn live_cases_are_classified_and_their_statistics_summarized() {
+    let request = budget_spending_request();
+    let mut executor = BudgetSpendingExecutor {
+        latency: Duration::from_millis(300),
+        executions: 0,
+    };
+
+    let report = run(
+        budget_spending_input(&request),
+        &mut AllowAll,
+        &mut executor,
+        &mut NoopClock,
+    )
+    .expect("a response within the remaining budget is valid");
+
+    assert_eq!(
+        report
+            .cases
+            .iter()
+            .map(|case| case.outcome)
+            .collect::<Vec<_>>(),
+        [CaseOutcome::Timeout, CaseOutcome::Response]
+    );
+    assert_eq!(report.cases[1].responses.len(), 1);
+    let bytes = report
+        .cases
+        .iter()
+        .map(|case| u64::try_from(case.sent.as_ref().unwrap().bytes().len()).unwrap())
+        .sum();
+    // Both executions plus the scheduled pacing delay.
+    assert_eq!(
+        report.stats,
+        Stats {
+            cases_generated: 2,
+            cases_built: 2,
+            packets_attempted: 2,
+            packets_completed: 2,
+            bytes,
+            elapsed: Duration::from_millis(4300 + 200 + 300),
+            ..Stats::default()
+        }
+    );
+}
+
+#[test]
+fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication() {
+    let request = budget_spending_request();
+    let mut executor = BudgetSpendingExecutor {
+        latency: Duration::from_millis(700),
+        executions: 0,
+    };
+    let published = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = Arc::clone(&published);
+
+    let error = run_with_events(
+        budget_spending_input(&request),
+        &mut AllowAll,
+        &mut executor,
+        &mut NoopClock,
+        &Runtime::default(),
+        move |_| {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        },
+    )
+    .expect_err("700 ms latency fits the requested timeout but not the remaining budget");
+
+    assert!(matches!(
+        error,
+        super::Error::InvalidEvidence { case_index: 1, .. }
+    ));
+    assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 struct RouteMaterializingExecutor {

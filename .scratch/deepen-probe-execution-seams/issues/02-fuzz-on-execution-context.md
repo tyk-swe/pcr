@@ -4,11 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Fuzz computes its own delay and hands it to the context. The context owns the pacing and step order, including the canonical pacing order and checking the permit immediately.
-- [ ] Fuzz's own pacing and execute-case plumbing is gone. Fuzz keeps only fuzz semantics: case generation, evidence and classification.
-- [ ] Fuzz's run tests that mirrored the runner's pacing tests are deleted, since the execution context's suite covers them. Any remaining fuzz tests drive the campaign through its public or engine interface without building a private phase struct field by field.
-- [ ] The fuzz cancellation contract tests still pass.
-- [ ] `[Unreleased]` records the canonical pacing order for fuzz: after a sleep, the deadline and cancellation are checked before a clock failure is reported.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Fuzz computes its own delay and hands it to the context. The context owns the pacing and step order, including the canonical pacing order and checking the permit immediately.
+- [x] Fuzz's own pacing and execute-case plumbing is gone. Fuzz keeps only fuzz semantics: case generation, evidence and classification.
+- [x] Fuzz's run tests that mirrored the runner's pacing tests are deleted, since the execution context's suite covers them. Any remaining fuzz tests drive the campaign through its public or engine interface without building a private phase struct field by field.
+- [x] The fuzz cancellation contract tests still pass.
+- [x] `[Unreleased]` records the canonical pacing order for fuzz: after a sleep, the deadline and cancellation are checked before a clock failure is reported.
+- [x] fmt, clippy and the workspace tests pass.

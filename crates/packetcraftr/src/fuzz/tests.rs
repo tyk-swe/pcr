@@ -363,6 +363,109 @@ fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication
     assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
+/// Answers every case with one response, one unmatched and one undecodable
+/// frame.
+struct ThreeFrameExecutor;
+
+impl Executor<ExecutionCase> for ThreeFrameExecutor {
+    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+        let mut execution = RebuildingExecutor.execute(case)?;
+        let frame = |bytes: &'static [u8]| {
+            packetcraftr_core::frame::Frame::new(
+                std::time::UNIX_EPOCH,
+                packetcraftr_core::frame::LinkType::RAW,
+                bytes,
+            )
+            .unwrap()
+        };
+        execution.responses.push(crate::exchange::Response {
+            request_index: 0,
+            response: crate::probe::test_fixtures::decoded_packet(
+                case.packet.clone(),
+                std::time::UNIX_EPOCH,
+                &[1],
+                Vec::new(),
+            ),
+            latency: Duration::from_millis(1),
+        });
+        execution.unmatched.push(frame(&[2]));
+        execution.undecoded.push(frame(&[3]));
+        Ok(execution)
+    }
+}
+
+#[test]
+fn live_evidence_is_retained_under_one_campaign_budget_that_warns_once() {
+    let request = packet_fuzz::Request {
+        cases: 3,
+        strategies: vec![packet_fuzz::Strategy::BitFlip],
+        targets: vec!["2.bytes".parse().unwrap()],
+        ..packet_fuzz::Request::default()
+    };
+
+    let report = run(
+        RunInput {
+            request: &request,
+            live: LiveOptions {
+                limits: LiveLimits {
+                    max_evidence_frames: 4,
+                    ..LiveLimits::default()
+                },
+                ..LiveOptions::default()
+            },
+            packet: packet(),
+            registry: packetcraftr_core::protocol::builtin::registry(),
+        },
+        &mut AllowAll,
+        &mut ThreeFrameExecutor,
+        &mut NoopClock,
+    )
+    .expect("omitted evidence is not a failure");
+
+    let retained = |case: &super::Case| {
+        [&case.responses, &case.unmatched, &case.undecoded].map(|frames| {
+            frames
+                .iter()
+                .map(|frame| frame.bytes().to_vec())
+                .collect::<Vec<_>>()
+        })
+    };
+    let warnings = |case: &super::Case| {
+        case.prepared
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "fuzz.evidence_limit")
+            .map(|diagnostic| diagnostic.message.to_string())
+            .collect::<Vec<_>>()
+    };
+    let none: Vec<Vec<u8>> = Vec::new();
+    assert_eq!(
+        report.cases.iter().map(retained).collect::<Vec<_>>(),
+        [
+            [vec![vec![1]], vec![vec![2]], vec![vec![3]]],
+            [vec![vec![1]], none.clone(), none.clone()],
+            [none.clone(), none.clone(), none],
+        ]
+    );
+    assert!(
+        report
+            .cases
+            .iter()
+            .all(|case| case.outcome == CaseOutcome::Response)
+    );
+    assert_eq!(
+        report.cases.iter().map(warnings).collect::<Vec<_>>(),
+        [
+            Vec::new(),
+            vec![format!(
+                "fuzz response evidence exceeded 4 frame(s) or {} byte(s); later exact frames were omitted",
+                LiveLimits::default().max_evidence_bytes
+            )],
+            Vec::new(),
+        ]
+    );
+}
+
 struct RouteMaterializingExecutor {
     registry: Arc<packetcraftr_core::registry::Registry>,
 }

@@ -11,7 +11,7 @@ use packetcraftr_core::decode::DecodedPacket;
 
 use crate::exchange::Response;
 
-pub(crate) fn response_within_deadline(latency: Duration, timeout: Duration) -> bool {
+fn response_within_deadline(latency: Duration, timeout: Duration) -> bool {
     latency <= timeout
 }
 
@@ -58,7 +58,7 @@ pub(crate) fn candidate_precedes<T: Ord>(
     candidate.bytes < current.bytes
 }
 
-pub(crate) fn update_best_candidate<'a, O, K: Ord>(
+fn update_best_candidate<'a, O, K: Ord>(
     best: &mut Option<ResponseCandidate<'a, O>>,
     candidate: ResponseCandidate<'a, O>,
     timeout: Duration,

@@ -100,7 +100,7 @@ impl<K, F> BatchEvidence<K, F> {
         Self {
             workflow,
             limits,
-            state: EvidenceState::default(),
+            state: EvidenceState::new(limits, workflow.evidence_diagnostics()),
             classifier,
             emit,
         }
@@ -182,10 +182,10 @@ where
             self.enforce(deadline)?;
             let Self {
                 workflow,
-                limits,
                 state,
                 classifier,
                 emit,
+                ..
             } = self;
             let best = selector.select(
                 request_index,
@@ -198,20 +198,16 @@ where
             let outcome = match best {
                 None => Outcome::Timeout,
                 Some(candidate) => Outcome::Reply(Reply {
-                    frame: state.retain_response(
-                        &candidate.decoded.frame,
-                        *limits,
-                        workflow.evidence_diagnostics(),
-                    ),
+                    frame: state.retain_response(&candidate.decoded.frame),
                     received_at: candidate.decoded.frame.timestamp,
                     latency: candidate.latency,
                     observation: candidate.observation,
                 }),
             };
             let event = classifier.evidence(probe, sent, outcome);
-            state
-                .diagnostics
-                .publish_new(|diagnostic| emit(classifier.diagnostic(diagnostic), deadline))?;
+            state.publish_diagnostics(|diagnostic| {
+                emit(classifier.diagnostic(diagnostic), deadline)
+            })?;
             if classifier.ends_operation(&event) {
                 flow = ControlFlow::Break(());
             }
@@ -232,15 +228,13 @@ where
     ) -> Result<(), Error> {
         let Self {
             workflow,
-            limits,
             state,
             classifier,
             emit,
+            ..
         } = self;
         state.retain_undecoded(
             frames,
-            *limits,
-            workflow.evidence_diagnostics(),
             |retained| {
                 let event = match retained {
                     Retained::Frame(frame) => classifier.undecoded(probes, frame),

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::{CaptureEvidenceLimits, check_limits, duration_violation};
+use crate::probe::evidence::{
+    CaptureEvidenceLimits, EvidenceLimits, check_limits, duration_violation,
+};
 use crate::target::Family;
 use crate::target::Target;
 
@@ -210,6 +212,14 @@ impl Default for Limits {
 }
 
 impl Limits {
+    pub(crate) const fn evidence(&self) -> EvidenceLimits {
+        EvidenceLimits {
+            max_frames: self.max_evidence_frames,
+            max_bytes: self.max_evidence_bytes,
+            max_undecoded: self.max_undecoded,
+        }
+    }
+
     /// Rejects any bound above the ceiling this crate enforces, and any pair
     /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {

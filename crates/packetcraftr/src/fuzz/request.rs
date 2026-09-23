@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::CaptureEvidenceLimits;
+use crate::probe::evidence::{CaptureEvidenceLimits, EvidenceLimits};
 
 use crate::fuzz::MAX_RATE;
 use crate::fuzz::error::Error;
@@ -30,6 +30,15 @@ impl Default for LiveLimits {
 }
 
 impl LiveLimits {
+    /// Fuzz bounds undecodable frames by the frame budget alone.
+    pub(crate) const fn evidence(&self) -> EvidenceLimits {
+        EvidenceLimits {
+            max_frames: self.max_evidence_frames,
+            max_bytes: self.max_evidence_bytes,
+            max_undecoded: self.max_evidence_frames,
+        }
+    }
+
     /// Rejects any retention bound above the ceiling this crate enforces.
     pub fn validate(&self) -> Result<(), Error> {
         CaptureEvidenceLimits {

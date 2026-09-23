@@ -40,62 +40,65 @@ pub(crate) enum Retained {
     Diagnostic(Diagnostic),
 }
 
-/// Operation-wide evidence accounting shared by probe workflows: the exact
+/// Operation-wide evidence accounting shared by live workflows: the exact
 /// frame budget, how many undecodable frames were kept, and the diagnostics
-/// raised while keeping them.
-#[derive(Default)]
+/// raised while keeping them, each published once.
 pub(crate) struct EvidenceState {
+    limits: EvidenceLimits,
+    descriptor: EvidenceDiagnosticDescriptor,
     budget: Budget,
     retained_undecoded: usize,
-    pub(crate) diagnostics: DiagnosticLog,
+    diagnostics: DiagnosticLog,
 }
 
 impl EvidenceState {
+    pub(crate) fn new(limits: EvidenceLimits, descriptor: EvidenceDiagnosticDescriptor) -> Self {
+        Self {
+            limits,
+            descriptor,
+            budget: Budget::default(),
+            retained_undecoded: 0,
+            diagnostics: DiagnosticLog::default(),
+        }
+    }
+
     /// Keeps a copy of `frame` when the budget allows it, otherwise records a
     /// truncation diagnostic once.
-    pub(crate) fn retain_response(
-        &mut self,
-        frame: &Frame,
-        limits: EvidenceLimits,
-        descriptor: EvidenceDiagnosticDescriptor,
-    ) -> Option<Frame> {
-        retain_evidence(
-            &mut self.budget,
-            frame,
-            descriptor,
-            limits.max_frames,
-            limits.max_bytes,
-            &mut self.diagnostics,
-        )
-        .then(|| frame.clone())
+    pub(crate) fn retain_response(&mut self, frame: &Frame) -> Option<Frame> {
+        self.reserve(frame).then(|| frame.clone())
     }
 
     /// Emits every retained undecodable frame and every new diagnostic in
-    /// arrival order, stopping at the undecoded limit.
+    /// arrival order, stopping at the undecoded limit with its diagnostic.
     pub(crate) fn retain_undecoded<E>(
         &mut self,
         frames: Vec<Frame>,
-        limits: EvidenceLimits,
-        descriptor: EvidenceDiagnosticDescriptor,
-        emit: impl FnMut(Retained) -> Result<(), E>,
-        check_deadline: impl FnMut() -> Result<(), E>,
+        mut emit: impl FnMut(Retained) -> Result<(), E>,
+        mut check_deadline: impl FnMut() -> Result<(), E>,
     ) -> Result<(), E> {
-        UndecodedRetention::new(
-            &mut self.retained_undecoded,
-            limits.max_undecoded,
-            &mut self.budget,
-            descriptor,
-            limits.max_frames,
-            limits.max_bytes,
-            &mut self.diagnostics,
-        )
-        .retain(
-            frames,
-            Retained::Frame,
-            Retained::Diagnostic,
-            emit,
-            check_deadline,
-        )
+        for frame in frames {
+            check_deadline()?;
+            if self.retained_undecoded >= self.limits.max_undecoded {
+                self.diagnostics.push_once(Diagnostic::warning(
+                    self.descriptor.undecoded_limit_code,
+                    format!(
+                        "undecodable {} evidence limit {} reached; later frames were omitted",
+                        self.descriptor.display_name, self.limits.max_undecoded
+                    ),
+                ));
+                self.publish_diagnostics(|diagnostic| emit(Retained::Diagnostic(diagnostic)))?;
+                break;
+            }
+            if self.reserve(&frame) {
+                // `reserve` fails once the count reaches `max_frames`, so the
+                // increment cannot overflow.
+                self.retained_undecoded += 1;
+                emit(Retained::Frame(frame))?;
+            }
+            self.publish_diagnostics(|diagnostic| emit(Retained::Diagnostic(diagnostic)))?;
+            check_deadline()?;
+        }
+        Ok(())
     }
 
     /// Records each diagnostic once and publishes the ones not yet published.
@@ -107,136 +110,58 @@ impl EvidenceState {
         for diagnostic in diagnostics {
             self.diagnostics.push_once(diagnostic);
         }
+        self.publish_diagnostics(publish)
+    }
+
+    /// Publishes every diagnostic recorded since the last publication.
+    pub(crate) fn publish_diagnostics<E>(
+        &mut self,
+        publish: impl FnMut(Diagnostic) -> Result<(), E>,
+    ) -> Result<(), E> {
         self.diagnostics.publish_new(publish)
     }
-}
 
-pub(crate) fn retain_evidence(
-    budget: &mut Budget,
-    frame: &Frame,
-    descriptor: EvidenceDiagnosticDescriptor,
-    max_frames: usize,
-    max_bytes: usize,
-    diagnostics: &mut DiagnosticLog,
-) -> bool {
-    let error = match budget.reserve(frame.bytes().len(), max_frames, max_bytes) {
-        Ok(()) => return true,
-        Err(error) => error,
-    };
-    let message = match error {
-        BudgetError::FrameCountOverflow => format!(
-            "{} evidence frame accounting overflowed; later frames were omitted",
-            descriptor.display_name
-        ),
-        BudgetError::ByteCountOverflow => format!(
-            "{} evidence byte accounting overflowed; later frames were omitted",
-            descriptor.display_name
-        ),
-        BudgetError::FrameLimit | BudgetError::ByteLimit => format!(
-            "{} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted",
-            descriptor.display_name
-        ),
-    };
-    diagnostics.push_once(Diagnostic::warning(descriptor.evidence_limit_code, message));
-    false
-}
-
-pub(crate) fn push_undecoded_limit_diagnostic(
-    diagnostics: &mut DiagnosticLog,
-    descriptor: EvidenceDiagnosticDescriptor,
-    limit: usize,
-) {
-    diagnostics.push_once(Diagnostic::warning(
-        descriptor.undecoded_limit_code,
-        format!(
-            "undecodable {} evidence limit {limit} reached; later frames were omitted",
-            descriptor.display_name
-        ),
-    ));
-}
-
-/// Operation-wide evidence state for retaining undecodable frames.
-pub(crate) struct UndecodedRetention<'a> {
-    retained_count: &'a mut usize,
-    max_undecoded: usize,
-    budget: &'a mut Budget,
-    descriptor: EvidenceDiagnosticDescriptor,
-    max_evidence_frames: usize,
-    max_evidence_bytes: usize,
-    diagnostics: &'a mut DiagnosticLog,
-}
-
-impl<'a> UndecodedRetention<'a> {
-    pub(crate) fn new(
-        retained_count: &'a mut usize,
-        max_undecoded: usize,
-        budget: &'a mut Budget,
-        descriptor: EvidenceDiagnosticDescriptor,
-        max_evidence_frames: usize,
-        max_evidence_bytes: usize,
-        diagnostics: &'a mut DiagnosticLog,
-    ) -> Self {
-        Self {
-            retained_count,
-            max_undecoded,
-            budget,
-            descriptor,
-            max_evidence_frames,
-            max_evidence_bytes,
-            diagnostics,
-        }
-    }
-
-    pub(crate) fn retain<T, E>(
-        &mut self,
-        frames: Vec<Frame>,
-        mut map: impl FnMut(Frame) -> T,
-        mut map_diagnostic: impl FnMut(Diagnostic) -> T,
-        mut emit: impl FnMut(T) -> Result<(), E>,
-        mut check_deadline: impl FnMut() -> Result<(), E>,
-    ) -> Result<(), E> {
-        for frame in frames {
-            check_deadline()?;
-            if *self.retained_count >= self.max_undecoded {
-                push_undecoded_limit_diagnostic(
-                    self.diagnostics,
-                    self.descriptor,
-                    self.max_undecoded,
-                );
-                self.diagnostics
-                    .publish_new(|diagnostic| emit(map_diagnostic(diagnostic)))?;
-                break;
+    /// Charges `frame` to the budget, or records why it was omitted.
+    fn reserve(&mut self, frame: &Frame) -> bool {
+        let EvidenceLimits {
+            max_frames,
+            max_bytes,
+            ..
+        } = self.limits;
+        let error = match self
+            .budget
+            .reserve(frame.bytes().len(), max_frames, max_bytes)
+        {
+            Ok(()) => return true,
+            Err(error) => error,
+        };
+        let name = self.descriptor.display_name;
+        let message = match error {
+            BudgetError::FrameCountOverflow => {
+                format!("{name} evidence frame accounting overflowed; later frames were omitted")
             }
-            if retain_evidence(
-                self.budget,
-                &frame,
-                self.descriptor,
-                self.max_evidence_frames,
-                self.max_evidence_bytes,
-                self.diagnostics,
-            ) {
-                // `retain_evidence` returns false once the count reaches `max_evidence_frames`, so
-                // the increment cannot overflow
-                {
-                    *self.retained_count += 1;
-                }
-                emit(map(frame))?;
+            BudgetError::ByteCountOverflow => {
+                format!("{name} evidence byte accounting overflowed; later frames were omitted")
             }
-            self.diagnostics
-                .publish_new(|diagnostic| emit(map_diagnostic(diagnostic)))?;
-            check_deadline()?;
-        }
-        Ok(())
+            BudgetError::FrameLimit | BudgetError::ByteLimit => format!(
+                "{name} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"
+            ),
+        };
+        self.diagnostics.push_once(Diagnostic::warning(
+            self.descriptor.evidence_limit_code,
+            message,
+        ));
+        false
     }
 }
 
-pub(crate) fn checked_frame_count(counts: &[usize]) -> Option<usize> {
+pub(super) fn checked_frame_count(counts: &[usize]) -> Option<usize> {
     counts
         .iter()
         .try_fold(0_usize, |total, count| total.checked_add(*count))
 }
 
-pub(crate) fn checked_frame_bytes<'a>(
+pub(super) fn checked_frame_bytes<'a>(
     frames: impl IntoIterator<Item = &'a Frame>,
 ) -> Option<usize> {
     frames.into_iter().try_fold(0_usize, |total, frame| {

@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Private response-evidence accounting and ordering shared by workflows.
+//!
+//! Workflows retain evidence only through [`EvidenceState`], which owns the
+//! operation-wide frame budget, undecoded retention and diagnostic log, and
+//! pick responses only through [`ResponseSelector`]. Exact validation and
+//! limit checks guard what executors return and what callers request.
 
-pub(crate) use budget::{
-    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceState, Retained, UndecodedRetention,
-    retain_evidence,
-};
+pub(crate) use budget::{EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceState, Retained};
 pub(crate) use candidate_selection::{
     CandidateKey, ResponseCandidate, ResponseSelector, candidate_precedes,
-    response_within_deadline, update_best_candidate,
 };
 pub(crate) use exact_validation::{
     ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,

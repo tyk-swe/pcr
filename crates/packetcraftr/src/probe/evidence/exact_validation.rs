@@ -14,14 +14,14 @@ use packetcraftr_netio::capture::Statistics;
 
 use super::budget::{checked_frame_bytes, checked_frame_count};
 
-pub(crate) fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
+fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
     if decoded.original != decoded.frame.bytes() {
         return Err(format!("{kind} original bytes differ from its exact frame"));
     }
     Ok(())
 }
 
-pub(crate) fn validate_capture_statistics(statistics: Statistics) -> Result<(), String> {
+fn validate_capture_statistics(statistics: Statistics) -> Result<(), String> {
     statistics
         .validate()
         .map(|_| ())
@@ -215,7 +215,7 @@ pub(crate) fn format_exchange_evidence_error(
     }
 }
 
-pub(crate) fn validate_batch_exchange_evidence<P, F>(
+fn validate_batch_exchange_evidence<P, F>(
     probes: &[P],
     timeout: Duration,
     execution: &Execution,

@@ -6,19 +6,26 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::decode::Dissector;
-use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
-use crate::evidence::{Budget, DiagnosticLog};
 use crate::probe::evidence::{
-    format_exchange_evidence_error, validate_response_frames_and_deadlines,
+    EvidenceDiagnosticDescriptor, EvidenceState, format_exchange_evidence_error,
+    validate_response_frames_and_deadlines,
 };
 
 use super::error::{Error, duration_limit};
 use super::execution::Execution;
 use super::{Case, CaseOutcome, LiveLimits};
+
+/// Fuzz keeps undecodable frames as case evidence under the frame budget
+/// alone, so its undecoded-limit code is never raised.
+const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDescriptor::new(
+    "fuzz.evidence_limit",
+    "fuzz.undecoded_limit",
+    "fuzz response",
+);
 
 /// Turns each validated live execution into its case's evidence: the decoded
 /// sent packet, the exact frames retained under the campaign-wide evidence
@@ -26,9 +33,7 @@ use super::{Case, CaseOutcome, LiveLimits};
 pub(super) struct Recorder {
     dissector: Dissector,
     decode_limits: packet_fuzz::Limits,
-    retention: LiveLimits,
-    budget: Budget,
-    diagnostics: DiagnosticLog,
+    evidence: EvidenceState,
 }
 
 impl Recorder {
@@ -40,9 +45,7 @@ impl Recorder {
         Self {
             dissector: Dissector::new(registry),
             decode_limits,
-            retention,
-            budget: Budget::default(),
-            diagnostics: DiagnosticLog::default(),
+            evidence: EvidenceState::new(retention.evidence(), EVIDENCE_DIAGNOSTICS),
         }
     }
 
@@ -64,19 +67,14 @@ impl Recorder {
         case.prepared.built = Some(execution.sent.built().clone());
         case.sent = Some(execution.sent.frame().clone());
         case.prepared.diagnostics.extend(execution.diagnostics);
-        self.retain(
-            case,
-            ExecutionEvidence {
-                responses: execution
-                    .responses
-                    .into_iter()
-                    .map(|response| response.response.frame)
-                    .collect(),
-                unmatched: execution.unmatched,
-                undecoded: execution.undecoded,
-            },
-            deadline,
-        )?;
+        let responses = execution
+            .responses
+            .into_iter()
+            .map(|response| response.response.frame);
+        self.retain(responses, &mut case.responses, deadline)?;
+        self.retain(execution.unmatched, &mut case.unmatched, deadline)?;
+        self.retain(execution.undecoded, &mut case.undecoded, deadline)?;
+        deadline.check().map_err(duration_limit)?;
         case.outcome = if had_response {
             CaseOutcome::Response
         } else {
@@ -90,51 +88,21 @@ impl Recorder {
     /// noting once that later frames were omitted.
     fn retain(
         &mut self,
-        case: &mut Case,
-        evidence: ExecutionEvidence,
+        frames: impl IntoIterator<Item = Frame>,
+        sink: &mut Vec<Frame>,
         deadline: &Deadline,
     ) -> Result<(), Error> {
-        let limits = self.retention;
-        let budget = &mut self.budget;
-        let mut omitted = false;
-        let mut retain = |frames: Vec<Frame>, sink: &mut Vec<Frame>| -> Result<(), Error> {
-            for frame in frames {
-                deadline.check().map_err(duration_limit)?;
-                if budget
-                    .reserve(
-                        frame.bytes().len(),
-                        limits.max_evidence_frames,
-                        limits.max_evidence_bytes,
-                    )
-                    .is_ok()
-                {
-                    sink.push(frame);
-                } else {
-                    omitted = true;
-                }
-            }
-            Ok(())
-        };
-        retain(evidence.responses, &mut case.responses)?;
-        retain(evidence.unmatched, &mut case.unmatched)?;
-        retain(evidence.undecoded, &mut case.undecoded)?;
-        if omitted {
-            self.diagnostics.push_once(Diagnostic::warning(
-                "fuzz.evidence_limit",
-                format!(
-                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                    limits.max_evidence_frames, limits.max_evidence_bytes
-                ),
-            ));
+        for frame in frames {
+            deadline.check().map_err(duration_limit)?;
+            sink.extend(self.evidence.retain_response(&frame));
         }
-        deadline.check().map_err(duration_limit)?;
         Ok(())
     }
 
     /// Campaign-level diagnostics reach the caller on the case they were
     /// raised during; the campaign never republishes them.
     pub(super) fn publish_diagnostics(&mut self, case: &mut Case) -> Result<(), Error> {
-        self.diagnostics.publish_new::<Error>(|diagnostic| {
+        self.evidence.publish_diagnostics::<Error>(|diagnostic| {
             case.prepared.diagnostics.push(diagnostic);
             Ok(())
         })
@@ -187,10 +155,4 @@ pub(super) fn validate_execution(
     )?;
     deadline.check().map_err(duration_limit)?;
     Ok(())
-}
-
-struct ExecutionEvidence {
-    responses: Vec<Frame>,
-    unmatched: Vec<Frame>,
-    undecoded: Vec<Frame>,
 }

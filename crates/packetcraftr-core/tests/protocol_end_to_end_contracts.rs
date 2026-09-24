@@ -587,6 +587,42 @@ fn link_capture_and_raw_ip_roots_round_trip() {
     }
 }
 
+/// Linux cooked headers carry the sender's full address length while the slot
+/// keeps only its first eight bytes, as an IPoIB capture's 20-byte addresses do.
+#[test]
+fn cooked_capture_link_addresses_longer_than_the_slot_round_trip() {
+    const ARPHRD_INFINIBAND: u16 = 32;
+    let address = [0x80, 0, 0x02, 0x48, 0xfe, 0x80, 0, 0];
+
+    let mut sll = Packet::new();
+    sll.push(LinuxSll {
+        arp_hardware_type: ARPHRD_INFINIBAND,
+        address_length: 20,
+        address,
+        ..LinuxSll::default()
+    });
+    sll.push(ipv4([203, 0, 113, 1], [203, 0, 113, 2]));
+    sll.push(Icmpv4::default());
+    let (_, decoded) = round_trip(sll, "linux_sll");
+    let header = decoded.packet.get::<LinuxSll>().expect("cooked header");
+    assert_eq!((header.address_length, header.address), (20, address));
+    assert!(decoded.packet.get::<Ipv4>().is_some());
+
+    let mut sll2 = Packet::new();
+    sll2.push(LinuxSll2 {
+        arp_hardware_type: ARPHRD_INFINIBAND,
+        address_length: 20,
+        address,
+        ..LinuxSll2::default()
+    });
+    sll2.push(ipv4([203, 0, 113, 1], [203, 0, 113, 2]));
+    sll2.push(Icmpv4::default());
+    let (_, decoded) = round_trip(sll2, "linux_sll2");
+    let header = decoded.packet.get::<LinuxSll2>().expect("cooked header");
+    assert_eq!((header.address_length, header.address), (20, address));
+    assert!(decoded.packet.get::<Ipv4>().is_some());
+}
+
 fn assert_overlay_tunnels_round_trip() {
     let mut vxlan = Packet::new();
     vxlan.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));

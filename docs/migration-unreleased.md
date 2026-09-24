@@ -23,6 +23,12 @@ and `deadline`; exhaustive struct initializers must add them or use defaults.
 The default analysis plan preserves previous reconstruction/index semantics.
 Analysis processing deadlines now classify as `policy.duration_limit`, matching
 capture-reader and invocation deadlines, instead of `policy.analysis_resource_limit`.
+Analysis dissection failures keep the decode error's own code instead of
+`packet.decode`: a layer-limit refusal reports `policy.analysis_resource_limit`,
+like a byte-limit refusal, and codec-contract failures report
+`internal.codec_contract`. Live workflow build failures likewise report the
+build error's own code (such as `policy.build_resource_limit`) instead of
+`packet.build`.
 
 Forwarding defaults now retain at most 4 MiB of detail charges across categories,
 in addition to the per-category entry ceiling. Omission counts remain explicit

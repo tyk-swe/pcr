@@ -1,6 +1,6 @@
 # Count permitted frame length changes in PCAPNG mapping
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem
 
@@ -19,3 +19,8 @@ contains the new length.
 ## References
 
 - Spec: [`../spec.md`](../spec.md), finding 6.
+
+## Comments
+
+- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); code review
+  is pending.

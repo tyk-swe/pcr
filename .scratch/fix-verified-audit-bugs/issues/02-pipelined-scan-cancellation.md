@@ -1,6 +1,6 @@
 # Honor workflow clock cancellation in pipelined scans
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem
 
@@ -21,3 +21,8 @@ arming or readiness can therefore be followed by discovery or packet sends.
 ## References
 
 - Spec: [`../spec.md`](../spec.md), finding 3.
+
+## Comments
+
+- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); code review
+  is pending.

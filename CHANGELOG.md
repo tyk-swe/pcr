@@ -632,6 +632,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   failures: a value that fails to serialize now reports an internal error with
   the original source instead of the `--max-application-output-bytes` policy
   error, which remains reserved for actual limit exceedances.
+- Native `ip broadcast` capture filters use the selected interface's IPv4
+  netmask, and numeric TCP/UDP `portrange` filters compile while symbolic host
+  and service operands remain rejected.
+- Pipelined scans honor cancellation supplied through the workflow clock while
+  arming and waiting for capture and before each packet send, then shut down the
+  capture group.
+- `dns-read` always inspects port 53 and treats repeatable `--dns-port` values
+  as deduplicated additions.
+- Raw `dissect` input no longer receives an invented capture timestamp; time
+  projections stay missing and timestamp filters report
+  `packet.timestamp_unavailable`.
+- PCAPNG mapping reports frames changed when permitted frame lengths change,
+  even if the captured bytes stay the same.
+- Structured startup errors retain the attempted command when split-form or
+  inline `--resource-preset` options appear before it.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

@@ -1,6 +1,6 @@
 # Fix the seven verified bug-audit findings
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem Statement
 
@@ -186,3 +186,8 @@ Make each affected operation report and act on the facts it was given:
   execution was not available.
 - Implement each correction with focused Conventional Commits, and request
   applicable CODEOWNERS review in the eventual PR.
+
+## Comments
+
+- Implementation is on [PR #209](https://github.com/tyk-swe/pcr/pull/209);
+  validation is complete and code review is pending.

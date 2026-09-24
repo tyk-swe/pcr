@@ -1,6 +1,6 @@
 # Correct DNS ports, raw timestamps, and startup command context
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem
 
@@ -21,3 +21,8 @@ resource preset value for the command.
 ## References
 
 - Spec: [`../spec.md`](../spec.md), findings 4–5 and 7.
+
+## Comments
+
+- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); code review
+  is pending.

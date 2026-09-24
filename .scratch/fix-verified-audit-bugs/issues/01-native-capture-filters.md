@@ -1,6 +1,6 @@
 # Correct native capture filter masks and numeric ranges
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem
 
@@ -19,3 +19,8 @@ names even though libpcap accepts them.
 ## References
 
 - Spec: [`../spec.md`](../spec.md), findings 1–2.
+
+## Comments
+
+- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); code review
+  is pending.

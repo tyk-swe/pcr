@@ -89,6 +89,10 @@ pub enum Event {
 #[derive(Clone, Debug)]
 pub struct Summary {
     pub unanswered: Vec<usize>,
+    /// Diagnostics not already published as [`Event::Diagnostic`]. The
+    /// exchange publishes every diagnostic as an event before its summary, so
+    /// a summary it produces leaves this empty; [`Collector::finish`] appends
+    /// any entries after the observed ones.
     pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     pub stats: Stats,
 }

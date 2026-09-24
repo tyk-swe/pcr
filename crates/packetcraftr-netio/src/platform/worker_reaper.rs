@@ -15,9 +15,6 @@ use std::{
     time::Duration,
 };
 
-/// The maximum number of native workers that may concurrently hold a cleanup
-/// reservation. The channel and cleanup pool have the same capacity, so every
-/// reserved worker can be transferred and reaped independently.
 use super::workers::{Exhausted, PermitPool, WorkerPermit, shared_budget};
 
 static SHARED_REAPER: OnceLock<Result<ReaperService, ReaperStartError>> = OnceLock::new();
@@ -118,6 +115,10 @@ fn start_reaper(
     permits: Arc<PermitPool>,
     mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
+    // The permit capacity bounds the native workers that may concurrently
+    // hold a cleanup reservation. The channel and cleanup pool have the same
+    // capacity, so every reserved worker can be transferred and reaped
+    // independently.
     let capacity = permits.capacity;
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));

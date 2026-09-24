@@ -112,7 +112,6 @@ pub(crate) fn finish_route(
     })
 }
 
-// prefix_length above 30 is rejected above, so host bits stay within u32::BITS
 fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> bool {
     let IpAddr::V4(destination) = destination else {
         return false;
@@ -125,6 +124,8 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
             let IpAddr::V4(address) = assigned.address else {
                 return false;
             };
+            // Rejecting prefix_length above 30 keeps host_bits within
+            // 2..=u32::BITS, so the mask shift below cannot overflow.
             if assigned.prefix_length > 30 {
                 return false;
             }

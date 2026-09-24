@@ -3,8 +3,9 @@
 
 //! Validates the interface name/index pair at native I/O boundaries to detect
 //! renamed, removed, or recreated interfaces. Capture enumerates once for
-//! addresses and a BPF netmask; per-frame transmission queries only the
-//! selected name.
+//! addresses and a BPF netmask. Per-frame transmission queries only the
+//! selected name on Linux and macOS; other targets have no cheap name lookup
+//! and enumerate on every check.
 
 #![cfg_attr(any(target_os = "linux", target_os = "macos"), allow(unsafe_code))]
 
@@ -33,8 +34,9 @@ pub(super) fn validate_current_interface_identity(
     Err(identity_changed(expected, actual.as_deref()))
 }
 
-/// Checks the current name/index pair without a full native enumeration on each
-/// send.
+/// Checks the current name/index pair. Linux and macOS avoid a full native
+/// enumeration on each send; other targets fall back to
+/// [`validate_current_interface_identity`].
 pub(super) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {

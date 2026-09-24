@@ -64,11 +64,13 @@ where
 
 /// [`admit_operation`] over a declared [`Selection`].
 ///
-/// Each distinct specification is expanded and authorized once; oversized
-/// networks fail through `invalid` before any authorizer call; numeric
-/// addresses already excluded, seen, or family-mismatched are skipped without
-/// spending an authorization call; and admitted addresses are deduplicated
-/// and capped at `targets.max_targets` in declared order.
+/// Each distinct specification is expanded and authorized once, in declared
+/// order; an oversized network fails through `invalid` before any of its own
+/// addresses reach the authorizer, though earlier specifications may already
+/// have been authorized; numeric addresses already excluded, seen, or
+/// family-mismatched are skipped without spending an authorization call; and
+/// admitted addresses are deduplicated and capped at `targets.max_targets` in
+/// declared order.
 pub(crate) fn admit_selection<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,

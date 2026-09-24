@@ -334,6 +334,18 @@ fn prepare_payload(
         "IPv4",
         &mut diagnostics,
     );
+    // The decoder refuses an option list it cannot walk, because it may hide a
+    // source-routed destination, so strict mode must not emit one.
+    if let Err(error) = ipv4_source_route_destination(layer.destination, &options) {
+        strict_or_diagnostic(
+            NAME,
+            "build.ipv4_options",
+            "options",
+            error.to_string(),
+            context,
+            &mut diagnostics,
+        )?;
+    }
     let covered_payload_len = payload_without_padding(NAME, payload, context)?.len();
     if layer.dont_fragment && (layer.more_fragments || layer.fragment_offset != 0) {
         strict_or_diagnostic(

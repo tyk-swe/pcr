@@ -140,7 +140,10 @@ pub enum Error {
         #[source]
         source: Option<SystemFault>,
     },
-    #[error("DNS-over-TCP response prefix ended after {actual} of 2 bytes")]
+    #[error(
+        "DNS-over-TCP response prefix ended after {actual} of {} bytes",
+        LENGTH_PREFIX_BYTES
+    )]
     IncompletePrefix { actual: usize },
     #[error("DNS-over-TCP response declared a zero-length DNS message")]
     ZeroLength,

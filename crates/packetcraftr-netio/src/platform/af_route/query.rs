@@ -126,7 +126,7 @@ fn query_route(
             source: None,
         })?;
     let request = build_route_request(destination, interface_index)?;
-    let socket = send_route_request(&request, deadline)?;
+    let socket = send_route_request(&request, destination, deadline)?;
     read_route_response(&socket, destination, deadline, &request)
 }
 
@@ -190,7 +190,11 @@ fn build_route_request(
     })
 }
 
-fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socket, SystemError> {
+fn send_route_request(
+    request: &RouteRequest,
+    destination: IpAddr,
+    deadline: Instant,
+) -> Result<Socket, SystemError> {
     let socket = Socket::new(Domain::from(libc::AF_ROUTE), Type::RAW, None)
         .map_err(|error| os_error("open routing socket", error))?;
     let remaining = remaining_before(deadline).ok_or_else(|| SystemError::OperatingSystem {
@@ -203,7 +207,7 @@ fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socke
         .map_err(|error| os_error("set routing-socket timeout", error))?;
     let sent = socket
         .send(&request.bytes)
-        .map_err(|error| os_error("write RTM_GET", error))?;
+        .map_err(|error| route_write_error(destination, error))?;
     if sent != request.bytes.len() {
         return Err(SystemError::InvalidResponse {
             message: format!(
@@ -214,6 +218,16 @@ fn send_route_request(request: &RouteRequest, deadline: Instant) -> Result<Socke
     }
 
     Ok(socket)
+}
+
+/// Darwin fails the RTM_GET write itself when the lookup finds no route
+/// ("writing to routing socket: not in table"), so the no-route errnos an
+/// echoed `rtm_errno` would carry mean the same thing here.
+fn route_write_error(destination: IpAddr, error: std::io::Error) -> SystemError {
+    if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENETUNREACH)) {
+        return SystemError::RouteNotFound { destination };
+    }
+    os_error("write RTM_GET", error)
 }
 
 fn read_route_response(
@@ -371,6 +385,24 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
+
+    #[test]
+    fn a_route_write_refused_for_lack_of_a_route_reports_route_not_found() {
+        let destination = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
+        for errno in [libc::ESRCH, libc::ENETUNREACH] {
+            assert!(matches!(
+                route_write_error(destination, std::io::Error::from_raw_os_error(errno)),
+                SystemError::RouteNotFound { destination: actual } if actual == destination
+            ));
+        }
+        assert!(matches!(
+            route_write_error(destination, std::io::Error::from_raw_os_error(libc::EACCES)),
+            SystemError::OperatingSystem {
+                operation: "write RTM_GET",
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn sockaddr_encoding_fills_exactly_the_darwin_length_family_and_address_fields() {

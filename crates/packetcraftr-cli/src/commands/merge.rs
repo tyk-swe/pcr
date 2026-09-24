@@ -51,7 +51,8 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         ))?,
         pcap::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
-            max_interfaces: args.limits.reader.max_interfaces,
+            // --max-interfaces bounds each input section, not the one output section.
+            max_interfaces: pcap::DEFAULT_TOTAL_INTERFACE_LIMIT,
             stream_limits: pcap::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,

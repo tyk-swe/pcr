@@ -37,11 +37,7 @@ fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::SetOptions>, 
 /// Maps a per-frame rendering failure into the workflow's output channel.
 fn output_failure(error: CliError) -> packetcraftr::Error {
     packetcraftr::Error::SendOutput {
-        source: Box::new(packetcraftr_core::error::BoundaryError::new(
-            error.message,
-            error.classification,
-            error.causes,
-        )),
+        source: Box::new(error.into_boundary_error()),
     }
 }
 

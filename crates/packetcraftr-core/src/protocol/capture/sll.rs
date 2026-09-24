@@ -26,6 +26,8 @@ const SLL2_NAME: &str = BuiltinProtocol::LinuxSll2.as_str();
 pub struct LinuxSll {
     pub packet_type: u16,
     pub arp_hardware_type: u16,
+    /// The sender's full link-address length. The slot holds at most its first
+    /// eight bytes, so a longer address (InfiniBand's 20) is truncated there.
     pub address_length: u16,
     pub address: [u8; 8],
     pub protocol: WireValue<u16>,
@@ -49,6 +51,7 @@ pub struct LinuxSll2 {
     pub interface_index: u32,
     pub arp_hardware_type: u16,
     pub packet_type: u8,
+    /// The sender's full link-address length; see [`LinuxSll::address_length`].
     pub address_length: u8,
     pub address: [u8; 8],
 }
@@ -72,7 +75,7 @@ reflective_layer! {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", reflect: protocol, layout: (14, 16) },
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (0, 2) },
         "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (2, 4) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (4, 6) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Sender link address length; the slot keeps its first eight bytes", reflect: address_length, layout: (4, 6) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (6, 14) },
     }
     layout pub(crate) fn linux_sll_layout();
@@ -85,7 +88,7 @@ reflective_layer! {
         "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", reflect: packet_type, layout: (10, 11) },
         "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", reflect: arp_hardware_type, layout: (8, 10) },
         "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", reflect: interface_index, layout: (4, 8) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", reflect_bounded: address_length, 8_u64, layout: (11, 12) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Sender link address length; the slot keeps its first eight bytes", reflect: address_length, layout: (11, 12) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", reflect: address, layout: (12, 20) },
     }
     layout pub(crate) fn linux_sll2_layout();
@@ -109,9 +112,6 @@ impl LayerCodec for LinuxSllCodec {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll>(SLL_NAME, layer)?;
-        if layer.address_length > 8 {
-            return Err(invalid(SLL_NAME, "address length exceeds slot"));
-        }
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator(SLL_NAME, context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
@@ -157,9 +157,6 @@ impl LayerCodec for LinuxSllCodec {
             return Err(truncated(SLL_NAME, 16, input.len()));
         };
         let address_length = u16::from_be_bytes([header[4], header[5]]);
-        if address_length > 8 {
-            return Err(invalid(SLL_NAME, "address length exceeds slot"));
-        }
         let mut address = [0; 8];
         address.copy_from_slice(&header[6..14]);
         let protocol_value = u16::from_be_bytes([header[14], header[15]]);
@@ -201,9 +198,6 @@ impl LayerCodec for LinuxSll2Codec {
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
         let layer = typed_layer::<LinuxSll2>(SLL2_NAME, layer)?;
-        if layer.address_length > 8 {
-            return Err(invalid(SLL2_NAME, "address length exceeds slot"));
-        }
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator(SLL2_NAME, context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
@@ -252,9 +246,6 @@ impl LayerCodec for LinuxSll2Codec {
         };
         if header[2] != 0 || header[3] != 0 {
             return Err(invalid(SLL2_NAME, "reserved field is non-zero"));
-        }
-        if header[11] > 8 {
-            return Err(invalid(SLL2_NAME, "address length exceeds slot"));
         }
         let protocol_value = u16::from_be_bytes([header[0], header[1]]);
         let mut address = [0; 8];

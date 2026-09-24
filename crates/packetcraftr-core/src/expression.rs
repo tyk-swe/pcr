@@ -348,7 +348,7 @@ fn parse_value_bounded(input: &str, depth: usize, max_nesting: usize) -> Result<
 }
 
 fn parse_quoted(input: &str) -> Result<String, Error> {
-    if input.len() < 2 || !input.ends_with('"') {
+    if input.len() < 2 || !input.starts_with('"') || !input.ends_with('"') {
         return Err(Error::Syntax {
             offset: 0,
             message: "unterminated quoted string".to_owned(),
@@ -623,6 +623,21 @@ mod tests {
         ] {
             let error = parse_quoted(source).expect_err(source);
             assert!(error.to_string().contains(expected), "{source}: {error}");
+        }
+    }
+
+    #[test]
+    fn byte_literals_require_an_opening_quote() {
+        assert_eq!(
+            parse_value_bounded(r#"bytes("abc")"#, 0, 8).unwrap(),
+            FieldValue::Bytes(bytes::Bytes::from_static(b"abc"))
+        );
+        for source in [r#"bytes(abc")"#, r#"hex(x0a")"#, r#"bytes(a")"#] {
+            let error = parse_value_bounded(source, 0, 8).expect_err(source);
+            assert!(
+                error.to_string().contains("unterminated quoted string"),
+                "{source}: {error}"
+            );
         }
     }
 

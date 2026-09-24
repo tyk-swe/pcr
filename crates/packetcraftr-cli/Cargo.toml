@@ -17,8 +17,9 @@ workspace = true
 # Match workspace builds so focused CLI builds can reuse workflow artifacts.
 default = ["native-route", "packetcraftr/default"]
 native-route = ["packetcraftr/native-route"]
-native-layer2 = ["packetcraftr/native-layer2"]
-native-layer3 = ["packetcraftr/native-layer3"]
+# Packet I/O providers compile route lookup in, so they imply `native-route`.
+native-layer2 = ["native-route", "packetcraftr/native-layer2"]
+native-layer3 = ["native-route", "packetcraftr/native-layer3"]
 
 [dependencies]
 ctrlc.workspace = true

@@ -13,10 +13,12 @@ use packetcraftr_netio::{
 use crate::Client;
 use crate::Error;
 
-/// Whether `deadline` has passed.
+/// Whether `deadline` has arrived.
 ///
-/// The boundary instant itself is not expired, matching correlation
-/// eligibility, which accepts a capture whose `received_at <= deadline`.
+/// The boundary instant itself is expired: no time remains once
+/// `now == deadline`, as [`remaining_before`] reports. Correlation eligibility
+/// is a separate test on the capture timestamp and still accepts a frame whose
+/// `received_at <= deadline`.
 ///
 /// Preparation callers retain the error vocabulary of their operation.
 #[must_use]

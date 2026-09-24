@@ -38,7 +38,9 @@ impl<K: Ord> ExpiryIndex<K> {
         }
     }
 
-    /// Removes deadlines through `now`, ordered by deadline and then stable key.
+    /// Removes deadlines through `now` and returns their keys in index order
+    /// (deadline, then key). Eviction order is the caller's to choose: the
+    /// TCP engine re-sorts them by key alone.
     pub(super) fn take_expired(&mut self, now: Instant) -> Vec<K> {
         let mut keys = Vec::new();
         self.drain_expired(now, |key| keys.push(key));

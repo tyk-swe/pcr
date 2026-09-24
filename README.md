@@ -115,9 +115,9 @@ with its one-based `pass` and expansion `index`) and `passes_completed`; PCAP
 and PCAPNG capture every transmitted frame.
 
 Offline `dissect`, `read`, `follow`, `stats`, `expert`, and `tls` accept
-`--decode-as 'udp.port=5353:dns'`. TCP ports support `tls` and `raw`; UDP ports
-support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, and `raw`. A
-mapping overrides the built-in
+`--decode-as 'udp.port=5353:dns'`. TCP ports support `dns`, `http`, `tls`, and
+`raw`; UDP ports support `dhcpv4`, `dhcpv6`, `dns`, `ntp`, `vxlan`, `geneve`, and
+`raw`. A mapping overrides the built-in
 binding for that port; transport source/destination precedence stays unchanged.
 Conflicting declarations are rejected. `--tls-port 4433` is shorthand for
 `--decode-as 'tcp.port=4433:tls'`. At most 256 declarations and 64 KiB of mapping

@@ -122,7 +122,6 @@ pub fn plan<R: Read>(
     let mut matched_datagrams = BTreeSet::new();
     let mut frames = BTreeSet::new();
     let mut selected_complete_datagrams = 0;
-    let mut scopes = Vec::new();
     let run_options = Options {
         track_sources: true,
         tcp_events: false,
@@ -130,7 +129,6 @@ pub fn plan<R: Read>(
         ..options.clone()
     };
     let run = super::run(reader, registry, &run_options, |record| {
-        scopes.extend_from_slice(&record.scope_definitions()[scopes.len()..]);
         let mut selected_views = Vec::new();
         let matched_filter = selection
             .filter
@@ -230,7 +228,7 @@ pub fn plan<R: Read>(
         unselected_incomplete_datagrams,
         source_outcomes_omitted: run.source_outcomes_omitted,
         frames_read: run.frames_read,
-        scopes,
+        scopes: run.scopes,
         ip_reassembly: run.ip_reassembly,
     })
 }

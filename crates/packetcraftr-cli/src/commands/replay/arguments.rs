@@ -75,7 +75,8 @@ pub(crate) struct Args {
     /// synthetic media overhead. Scheduling is best effort; first frame is immediate.
     #[arg(long, conflicts_with_all = ["rate", "speed"], value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) bps: Option<u64>,
-    /// Maximum cumulative intentional replay delay in milliseconds.
+    /// Maximum replay run time in milliseconds, which also bounds the cumulative
+    /// scheduled delay.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
     #[command(flatten)]

@@ -85,11 +85,16 @@ pub(crate) enum FamilyHeader {
     Loop,
 }
 
+/// Maps an address family to the registry's synthetic discriminators: 4 for
+/// IPv4, 6 for any platform's IPv6 family, and 0 for the raw fallback. Every
+/// other family is moved above the 32-bit family range, so families whose
+/// numbers happen to be 4 or 6 (AF_PUP, AF_IPX, AF_NS) cannot select IP.
 pub(crate) fn family_discriminator(family: u32) -> u64 {
     match family {
+        0 => 0,
         2 => 4,
         10 | 24 | 28 | 30 => 6,
-        other => u64::from(other),
+        other => (1 << u32::BITS) | u64::from(other),
     }
 }
 
@@ -117,14 +122,12 @@ pub(crate) fn validate_family_binding(
     else {
         return Ok(diagnostics);
     };
-    let actual = family_discriminator(family);
-    if actual == expected.0 {
+    if family_discriminator(family) == expected.0 {
         return Ok(diagnostics);
     }
     let message = format!(
-        "address family {family} selects discriminator {actual}, but child {} requires {}",
-        child.protocol_id(),
-        expected.0
+        "address family {family} does not select child {}",
+        child.protocol_id()
     );
     if context.mode == crate::codec::Mode::Strict {
         return Err(invalid(parent, message));
@@ -244,4 +247,31 @@ pub(crate) fn decode_family(
         stop: input.len() == 4,
         network: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_ip_address_families_select_the_ip_discriminators() {
+        assert_eq!(family_discriminator(0), 0);
+        assert_eq!(family_discriminator(2), 4);
+        for ipv6 in [10, 24, 28, 30] {
+            assert_eq!(family_discriminator(ipv6), 6, "family {ipv6}");
+        }
+        for other in [4, 6, 7, 17] {
+            assert!(
+                ![0, 4, 6].contains(&family_discriminator(other)),
+                "family {other} must not select a synthetic discriminator"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_ip_family_whose_number_is_4_stays_opaque() {
+        let decoded =
+            decode_family(&[0, 0, 0, 4, 0x45, 0, 0, 20], FamilyHeader::Loop).expect("decodes");
+        assert_ne!(decoded.next, [Discriminator(4)]);
+    }
 }

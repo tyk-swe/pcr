@@ -206,6 +206,29 @@ fn policy_validates_address_and_operation_bounds() {
     // The published CLI contract for this refusal does not move with its home.
     assert_eq!(over_limit.classification().code, "cli.live_target");
     assert_eq!(over_limit.classification().kind, Kind::Cli);
+    assert_eq!(
+        over_limit.classification().remediation,
+        Some("set the resolved-address limit to at least 1 and no more than the supported maximum")
+    );
+    let too_many_constraints = policy::Policy {
+        allowed_destinations: vec![
+            "192.0.2.1".parse().expect("constraint");
+            policy::MAX_DESTINATION_CONSTRAINTS + 1
+        ],
+        ..defaults.clone()
+    }
+    .validate()
+    .expect_err("a constraint list beyond its bound is rejected");
+    assert!(matches!(
+        too_many_constraints,
+        policy::Error::DestinationConstraintLimit { .. }
+    ));
+    assert_eq!(
+        too_many_constraints.classification().remediation,
+        Some(
+            "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible"
+        )
+    );
 
     defaults
         .authorize(policy::Operation::Budgeted(policy::WireBudget::new(
@@ -465,8 +488,38 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     let build_causes = codec.causes();
     assert_eq!(build_causes, ["invalid udp layer: port 53 is reserved"]);
 
+    let build_classification = codec.classification();
     let workflow = packetcraftr::Error::Build(codec);
     assert_eq!(workflow.causes(), build_causes);
+    assert_eq!(
+        workflow.classification(),
+        build_classification,
+        "a workflow keeps the build failure's own classification"
+    );
+    let over_budget = packetcraftr_core::build::Error::LayerLimit {
+        actual: 4,
+        limit: 3,
+    };
+    assert_eq!(
+        packetcraftr::Error::Build(over_budget)
+            .classification()
+            .code,
+        "policy.build_resource_limit"
+    );
+
+    let snapshot = || {
+        Box::new(packetcraftr_core::error::BoundaryError::new(
+            "progressive output failed",
+            packetcraftr_core::error::Classification::new("io.fixture", Kind::Io, None),
+            vec!["fixture disk is full".to_owned()],
+        ))
+    };
+    for workflow in [
+        packetcraftr::Error::SendOutput { source: snapshot() },
+        packetcraftr::Error::ExchangeOutput { source: snapshot() },
+    ] {
+        assert_eq!(workflow.causes(), ["fixture disk is full"], "{workflow}");
+    }
 
     // A hostname lookup keeps the system refusal instead of pasting it into
     // the message, so the message and the cause each say it once.

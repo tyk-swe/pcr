@@ -453,7 +453,7 @@ fn parse_field_predicate(
         }) => {
             let (value, next) = parse_literal(tokens, index.saturating_add(1), *operator_offset)?;
             check_literal(&field, &value, *operator_offset)?;
-            // Prefixes support membership only.
+            // Prefixes describe a set, so only `==` and `!=` test membership.
             if value.is_prefix()
                 && !matches!(operator, CompareOperator::Equal | CompareOperator::NotEqual)
             {
@@ -501,7 +501,7 @@ fn parse_field_predicate(
     }
 }
 
-/// Parses either a braced set or a single prefix literal after `in`.
+/// Parses either a braced set or a single unbraced literal after `in`.
 fn parse_membership(
     tokens: &[Spanned],
     start: usize,

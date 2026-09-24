@@ -2,12 +2,12 @@ schema: "packetcraftr.packet/v2"
 layers:
   - protocol: ipv4
     fields:
-      source: 192.0.2.1
-      destination: 198.51.100.2
+      source: {type: ipv4, value: 192.0.2.1}
+      destination: {type: ipv4, value: 198.51.100.2}
   - protocol: udp
     fields:
-      source_port: 53
-      destination_port: 53
+      source_port: {type: unsigned, value: 40000}
+      destination_port: {type: unsigned, value: 9}
   - protocol: raw
     fields:
-      bytes: [0x68, 0x65, 0x6c, 0x6c, 0x6f]
+      bytes: {type: bytes, value: [0x68, 0x65, 0x6c, 0x6c, 0x6f]}

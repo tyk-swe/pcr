@@ -27,8 +27,8 @@ use crate::{
 /// The option area the four-bit TCP data offset can address.
 const MAX_OPTION_BYTES: usize = 40;
 
-pub(crate) const KIND_END: u8 = 0;
-pub(crate) const KIND_NOP: u8 = 1;
+const KIND_END: u8 = 0;
+const KIND_NOP: u8 = 1;
 const KIND_MSS: u8 = 2;
 const KIND_WINDOW_SCALE: u8 = 3;
 const KIND_SACK_PERMITTED: u8 = 4;

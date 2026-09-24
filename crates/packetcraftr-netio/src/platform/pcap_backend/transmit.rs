@@ -7,15 +7,13 @@ use std::sync::Arc;
 
 use pcap::{Capture, Error as PcapError};
 
-use super::capture::map_open_error;
+use super::capture::{READ_TIMEOUT_MILLIS, map_open_error};
 use crate::{
     Error,
     interface::Id as InterfaceId,
     platform::pcap_common::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
-
-const READ_TIMEOUT_MILLIS: i32 = 50;
 
 pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     let interface = &frame.route().plan.decision.interface;

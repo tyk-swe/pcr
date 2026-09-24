@@ -217,6 +217,44 @@ fn a_client_hello_publishes_its_handshake_fields() {
     assert!(decoded.diagnostics.is_empty());
 }
 
+/// Replaces the first occurrence of `marker` in `record` with `replacement`,
+/// keeping every length field valid because both have the same size.
+fn patch(mut record: Vec<u8>, marker: &[u8], replacement: &[u8]) -> Vec<u8> {
+    assert_eq!(marker.len(), replacement.len());
+    let start = record
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .expect("marker is in the record");
+    record[start..start + marker.len()].copy_from_slice(replacement);
+    record
+}
+
+#[test]
+fn alpn_text_escapes_the_wire_octets_rather_than_a_lossy_decoding() {
+    let with_alpn = |name: &str| {
+        handshake_record(&client_hello(&ClientHelloSpec {
+            alpn: vec![name.to_owned()],
+            ..ClientHelloSpec::default()
+        }))
+    };
+    let invalid = patch(with_alpn("Zh2"), b"Zh2", b"\xffh2");
+    let replacement_character = with_alpn("\u{fffd}h2");
+
+    let alpn = |record: &[u8]| tls_field(&dissect(CLIENT_PORT, 443, record), "alpn");
+    assert_eq!(
+        alpn(&invalid),
+        Some(FieldValue::List(vec![FieldValue::Text(
+            "\\255h2".to_owned()
+        )]))
+    );
+    assert_eq!(
+        alpn(&replacement_character),
+        Some(FieldValue::List(vec![FieldValue::Text(
+            "\\239\\191\\189h2".to_owned()
+        )]))
+    );
+}
+
 #[test]
 fn a_server_hello_publishes_its_selection() {
     let decoded = dissect(443, CLIENT_PORT, &server_hello_record());
@@ -458,4 +496,18 @@ fn extra_tls_ports_are_additive_and_leave_the_defaults_bound() {
             .map(packetcraftr_core::layer::Id::as_str),
         Some("raw")
     );
+}
+
+#[test]
+fn extra_tls_ports_refuse_the_raw_fallback_and_ports_bound_elsewhere() {
+    for port in [0_u16, 53, 80] {
+        assert!(
+            matches!(
+                builtin::registry_with_tls_ports(&[port]),
+                Err(packetcraftr_core::registry::Error::BindingConflict { discriminator, .. })
+                    if discriminator == u64::from(port)
+            ),
+            "port {port}"
+        );
+    }
 }

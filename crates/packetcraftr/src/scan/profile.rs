@@ -134,11 +134,12 @@ impl<'de> Deserialize<'de> for UdpProfile {
 }
 impl UdpProfile {
     pub fn new(config: Config) -> Result<Self, Error> {
+        // Counted in characters, as the published schema's maxLength counts.
         if config.name.is_empty()
-            || config.name.len() > 128
+            || config.name.chars().count() > 128
             || config.name.chars().any(char::is_control)
         {
-            return Err(Error("name must contain 1..=128 non-control bytes"));
+            return Err(Error("name must contain 1..=128 non-control characters"));
         }
         let payload = match &config.request {
             Payload::Bytes { data } => {
@@ -439,5 +440,28 @@ mod optional_hex {
         Option::<String>::deserialize(deserializer)?
             .map(|value| hex::decode(&value).map_err(serde::de::Error::custom))
             .transpose()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn named(name: String) -> Result<UdpProfile, Error> {
+        UdpProfile::new(Config {
+            name,
+            request: Payload::Bytes {
+                data: Bytes::from_static(b"probe"),
+            },
+            response: ResponseCheck::Any,
+        })
+    }
+
+    #[test]
+    fn profile_names_are_bounded_in_characters_as_the_schema_counts() {
+        assert!(named("\u{e9}".repeat(128)).is_ok());
+        assert!(named("\u{e9}".repeat(129)).is_err());
+        assert!(named(String::new()).is_err());
+        assert!(named("tab\tname".to_owned()).is_err());
     }
 }

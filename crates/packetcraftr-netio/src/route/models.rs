@@ -100,13 +100,17 @@ pub struct Options {
 pub struct Plan {
     pub decision: Decision,
     pub mode: Mode,
-    /// Route lookup destination. For an SRH this is the first visited segment.
-    /// Destination-free Layer 2 frames have no lookup destination.
+    /// Route lookup destination. For an SRH this is the first visited segment;
+    /// for IPv4 LSRR/SSRR it is the header destination, the first hop the
+    /// route visits. Destination-free Layer 2 frames have no lookup
+    /// destination.
     pub lookup_destination: Option<IpAddr>,
     /// Final network-layer destination used for transport checksums. This is
     /// absent for a packet containing no network-layer route.
     pub final_destination: Option<IpAddr>,
-    /// Ordered SRH visit targets, or the single final destination without SRH.
+    /// Ordered source-route visit targets: the SRH segments still to visit, or
+    /// the IPv4 header destination followed by the remaining LSRR/SSRR hops;
+    /// without a source route, the single final destination.
     pub visited_destinations: Vec<IpAddr>,
     pub packet_source: Option<IpAddr>,
     pub neighbor_source: Option<IpAddr>,

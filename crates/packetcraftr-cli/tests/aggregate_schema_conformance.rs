@@ -1892,9 +1892,57 @@ fn rewrite_case() -> Value {
 }
 
 fn capture_case() -> Value {
+    use packetcraftr_netio::capture::{Limits, Metadata, OverflowPolicy, group};
+    let sources = [
+        OverflowPolicy::Fail,
+        OverflowPolicy::DropNewest,
+        OverflowPolicy::DropOldest,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, overflow_policy)| {
+        let source = packetcraftr::capture::Source {
+            capture: group::Source {
+                index,
+                metadata: Metadata {
+                    interface: packetcraftr_netio::interface::Id {
+                        name: format!("fixture{index}"),
+                        index: u32::try_from(index + 1).expect("fixture index fits"),
+                    },
+                    link_type: LinkType::ETHERNET,
+                    snap_length: 65_535,
+                    native: Default::default(),
+                },
+                limits: Limits {
+                    overflow_policy,
+                    ..Limits::default()
+                },
+                metadata_valid: true,
+                ready: true,
+                shutdown_confirmed: true,
+                statistics_valid: true,
+                statistics: CaptureStatistics::default(),
+                delivered_frames: 0,
+                delivered_bytes: 0,
+            },
+            admitted_frames: 0,
+            matched_frames: 0,
+            emitted_frames: 0,
+            late_frames: 0,
+        };
+        packetcraftr_cli::output::capture::Source::from(&source)
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.overflow_policy.as_str())
+            .collect::<Vec<_>>(),
+        ["fail", "drop_newest", "drop_oldest"]
+    );
     let summary = packetcraftr_cli::output::capture::Summary {
         requested_interfaces: Vec::new(),
-        sources: Vec::new(),
+        sources,
         frames_delivered: 0,
         stop_reason: packetcraftr::capture::StopReason::Window,
         capture_statistics_complete: true,

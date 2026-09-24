@@ -260,9 +260,10 @@ pub(in crate::analysis::pcap) fn parse_packet_direction(
     Ok(direction)
 }
 
-/// Rejects `epb_flags` options a packet rewrite cannot retain: only the
-/// inbound/outbound direction bits are carried onto the frame. A value that is
-/// not four bytes is reported with `malformed_reason`.
+/// Rejects `epb_flags` options a packet rewrite cannot retain: only a defined
+/// inbound/outbound direction is carried onto the frame, so other flag bits and
+/// the undefined direction value 3 are refused. A value that is not four bytes
+/// is reported with `malformed_reason`.
 pub(in crate::analysis::pcap) fn validate_rewritable_packet_flags(
     options: &[PcapNgOption],
     endianness: Endianness,
@@ -284,6 +285,44 @@ pub(in crate::analysis::pcap) fn validate_rewritable_packet_flags(
         if flags & !3 != 0 {
             return Err("extended packet flags");
         }
+        if flags == 3 {
+            return Err("undefined packet direction");
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags(value: u32) -> Vec<PcapNgOption> {
+        vec![PcapNgOption {
+            code: PCAPNG_OPTION_EPB_FLAGS,
+            value: Bytes::copy_from_slice(&value.to_le_bytes()),
+        }]
+    }
+
+    #[test]
+    fn a_rewrite_retains_only_a_defined_packet_direction() {
+        let validate = |value| {
+            validate_rewritable_packet_flags(&flags(value), Endianness::Little, "malformed")
+        };
+        for direction in [0, 1, 2] {
+            assert_eq!(validate(direction), Ok(()), "direction {direction}");
+        }
+        assert_eq!(validate(3), Err("undefined packet direction"));
+        assert_eq!(validate(4), Err("extended packet flags"));
+        assert_eq!(
+            validate_rewritable_packet_flags(
+                &[PcapNgOption {
+                    code: PCAPNG_OPTION_EPB_FLAGS,
+                    value: Bytes::from_static(&[1, 0]),
+                }],
+                Endianness::Little,
+                "malformed",
+            ),
+            Err("malformed")
+        );
+    }
 }

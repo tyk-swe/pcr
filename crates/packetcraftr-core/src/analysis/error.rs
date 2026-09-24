@@ -108,7 +108,15 @@ impl Classified for Error {
             // Refusals for exceeding a configured finite budget are resource
             // conditions, not malformed input.
             Self::Decode {
-                source: crate::decode::Error::PacketSizeLimit { .. },
+                source:
+                    crate::decode::Error::PacketSizeLimit { .. }
+                    | crate::decode::Error::LayerLimit { .. },
+                ..
+            }
+            | Self::DerivedDecode {
+                source:
+                    crate::decode::Error::PacketSizeLimit { .. }
+                    | crate::decode::Error::LayerLimit { .. },
                 ..
             }
             | Self::Scope {
@@ -119,11 +127,11 @@ impl Classified for Error {
                 ..
             }
             | Self::StreamLimit { .. } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
-            Self::Decode { .. } | Self::DerivedDecode { .. } => Classification::new(
-                "packet.decode",
-                Kind::Packet,
-                Some("repair the frame or raise the per-frame byte limit it was read under"),
-            ),
+            // Malformed bytes dissect as diagnosed layers, so a decode error is
+            // a registry or codec-contract condition the error names itself.
+            Self::Decode { source, .. } | Self::DerivedDecode { source, .. } => {
+                source.classification()
+            }
             Self::DerivedFrame { .. } => Classification::new(
                 "internal.derived_frame",
                 Kind::Internal,

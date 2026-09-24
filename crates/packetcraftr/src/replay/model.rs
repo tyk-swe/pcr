@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Maximum cumulative intentional delay accepted by one replay operation.
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::analysis::pcap::{
@@ -16,6 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use super::error::Error;
 
+/// Ceiling for [`Limits::max_duration`], which bounds one replay operation as
+/// a deadline on elapsed time from its start. The intentional delays it
+/// schedules must also fit within that limit.
 pub const MAX_REPLAY_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

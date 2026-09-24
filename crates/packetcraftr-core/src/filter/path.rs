@@ -86,7 +86,8 @@ pub(super) struct FieldRef {
     /// What every field this path may read declares, for compile-time literal
     /// checking. Empty when nothing is knowable in advance.
     pub(super) specs: Vec<FieldSpec>,
-    /// The path exactly as typed, retained for diagnostics.
+    /// The path exactly as typed, byte slice included, retained for
+    /// diagnostics and projection column names.
     pub(super) path: String,
 }
 
@@ -398,5 +399,7 @@ pub(super) fn attach_slice(
     }
     field.slice = Some(slice);
     field.specs = vec![FieldSpec::synthetic(FieldKind::Bytes)];
+    // A sliced column must not share its whole field's name.
+    field.path = format!("{}[{contents}]", field.path);
     Ok(())
 }

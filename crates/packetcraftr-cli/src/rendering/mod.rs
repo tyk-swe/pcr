@@ -17,16 +17,18 @@ pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_c
 pub(crate) use dns::render_dns_records;
 
 pub(crate) use human::{
-    captured_frame_text, comma_separated, emit_stderr_document, emit_stderr_error,
-    emit_stderr_message, emit_stdout_document, optional_debug, optional_display,
+    HumanWriteError, captured_frame_text, comma_separated, document_spelling, emit_stderr_document,
+    emit_stderr_error, emit_stderr_message, emit_stdout_document, optional_debug, optional_display,
     render_diagnostics_stderr, render_diagnostics_text, render_undecoded, spaced_hex,
-    write_plain_line, write_stdout_line, write_summary_line,
+    write_plain_line, write_stdout_line, write_stdout_line_with_interrupt, write_summary_line,
 };
 
 pub(crate) use machine::{
     bounded_json_len, bounded_pretty_json_len, emit_aggregate, emit_aggregate_with_stats, emit_json,
 };
 
-pub(crate) use ndjson::{StreamEncoder, stdout_stream, write_unattributed_error};
+pub(crate) use ndjson::{
+    OUTPUT_TIMEOUT_MS, StreamEncoder, stdout_stream, write_unattributed_error,
+};
 
 pub(crate) use style::terminal_document;

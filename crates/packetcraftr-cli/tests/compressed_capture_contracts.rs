@@ -8,6 +8,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use std::{
     io::{Cursor, Read, Write},
     path::PathBuf,
+    process::Command,
     time::UNIX_EPOCH,
 };
 
@@ -72,6 +73,41 @@ fn invalid_compression_output_is_rejected_before_live_or_input_work() {
     }
 }
 
+/// Generated capture files are spooled before any stdout byte, so a spool
+/// failure must not leave even an empty compressed container behind.
+#[test]
+fn failed_capture_spool_emits_no_compressed_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing");
+    let packet = format!(
+        "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=40001)/raw(text={})",
+        "x".repeat(200)
+    );
+    for compression in ["none", "gzip", "zstd"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args([
+                "--output",
+                "pcap",
+                "fragment",
+                "--mtu",
+                "128",
+                "--packet",
+                &packet,
+                "--compression",
+                compression,
+            ])
+            .env("TMPDIR", &missing)
+            .output()
+            .expect("CLI process must start");
+        assert_eq!(output.status.code(), Some(5), "{compression}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("io.capture_file"),
+            "{compression}: {output:?}"
+        );
+        assert!(output.stdout.is_empty(), "{compression}: {output:?}");
+    }
+}
+
 #[test]
 fn failed_read_finalizes_zstd_and_keeps_completed_frames() {
     let expected = Frame::new(UNIX_EPOCH, LinkType::IPV4, vec![0x45, 0, 0, 0]).unwrap();
@@ -112,5 +148,58 @@ fn failed_read_finalizes_zstd_and_keeps_completed_frames() {
                 .is_none(),
             "{arguments:?} emitted more than the completed prefix"
         );
+    }
+}
+
+/// A read or replay that cannot write its input in the requested capture
+/// format fails before stdout is wrapped, so no empty compressed container is
+/// written. Replay fails before any interface lookup or transmission.
+#[test]
+fn rejected_capture_format_conversion_emits_no_compressed_bytes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures");
+    let (pcap, pcapng) = (
+        root.join("dns-response.pcap"),
+        root.join("tls-handshake.pcapng"),
+    );
+    let cases = [
+        (
+            vec!["--output", "pcapng", "read", path_text(&pcap)],
+            2,
+            "cli.capture_rewrite_format",
+        ),
+        (
+            vec!["--output", "pcap", "read", path_text(&pcapng)],
+            2,
+            "cli.capture_rewrite_format",
+        ),
+        (
+            vec![
+                "--output",
+                "pcap",
+                "replay",
+                path_text(&pcapng),
+                "--interface",
+                "missing-interface",
+            ],
+            3,
+            "packet.capture_file",
+        ),
+    ];
+    for (command, status, code) in cases {
+        for compression in ["gzip", "zstd"] {
+            let mut arguments = command.clone();
+            arguments.extend(["--compression", compression]);
+            let output = run(&arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(status),
+                "{arguments:?}: {output:?}"
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(code),
+                "{arguments:?}: {output:?}"
+            );
+            assert!(output.stdout.is_empty(), "{arguments:?}: {output:?}");
+        }
     }
 }

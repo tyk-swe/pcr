@@ -227,8 +227,8 @@ fn prepare_campaign(
         .map_err(duration_limit)?;
     let maximum_wire_bytes = maximum_wire_bytes(request, &cases)?;
     // Whether the opt-in is *needed* is decided here; whether it was *given*
-    // is decided by `authorize_campaign` on the next line, so the destination
-    // gate runs first and `policy.allow_permissive_packets` also applies.
+    // is decided later by the authorizer that `authorize_campaign` calls, so
+    // `policy.allow_permissive_packets` also applies.
     let requires_malformed_live = cases.iter().any(|case| {
         case.prepared
             .built

@@ -226,6 +226,29 @@ fn registry_build_decode_and_error_paths_are_bounded() {
     assert_build_decode_limits(&registry, &builder);
 }
 
+#[test]
+fn an_unbound_child_discriminator_is_attributed_to_its_parent_layer() {
+    let mut builder = packetcraftr_core::registry::Builder::new();
+    builder.register_codec(ProbeCodec, &["p"]).expect("probe");
+    builder
+        .bind_link_type(PROBE_LINK_TYPE, "probe")
+        .expect("bind root");
+    let registry = Arc::new(builder.build().expect("registry without a child binding"));
+
+    let decoded = decode_probe(&registry, vec![7, 3], decode::Options::default())
+        .expect("an unbound child is preserved");
+    assert_eq!(
+        decoded.packet.get::<Raw>().map(|raw| raw.bytes.as_ref()),
+        Some(&[3][..])
+    );
+    let unknown = decoded
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "decode.unknown_binding")
+        .expect("unknown binding diagnostic");
+    assert_eq!(unknown.layer, Some(0));
+}
+
 fn assert_registry_binding_conflicts() {
     let mut duplicate = packetcraftr_core::registry::Builder::new();
     duplicate

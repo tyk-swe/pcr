@@ -13,6 +13,17 @@ use packetcraftr_netio::{
 
 use super::error::Error;
 
+/// Whether a resolved interface is the one a possibly partial selector named:
+/// a selector fills in its name, its index, or both.
+pub(super) fn requested_interface_matches(
+    actual: &packetcraftr_netio::interface::Id,
+    requested: &packetcraftr_netio::interface::Id,
+) -> bool {
+    !(requested.index == 0 && requested.name.is_empty())
+        && (requested.index == 0 || actual.index == requested.index)
+        && (requested.name.is_empty() || actual.name == requested.name)
+}
+
 /// Maps route failures to live-I/O errors, retaining the adapter error as the
 /// source.
 pub(super) fn map_replay_route_error(

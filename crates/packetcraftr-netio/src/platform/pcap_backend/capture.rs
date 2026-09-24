@@ -32,7 +32,7 @@ use crate::{
         timestamp_source_value, validate_effective_snapshot_length,
     },
 };
-const READ_TIMEOUT_MILLIS: i32 = 50;
+pub(super) const READ_TIMEOUT_MILLIS: i32 = 50;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
 // The locked pcap crate calls pcap_set_* through private raw bindings that

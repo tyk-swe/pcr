@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::analysis::Endpoint;
 use crate::analysis::dedup::{Deduplicator, PeerDirection};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
-use crate::protocol::application::tls::codec::escape_wire_text;
+use crate::protocol::application::tls::codec::{escape_wire_bytes, escape_wire_text};
 use crate::protocol::application::tls::fingerprint::{Transport, ja3, ja3s, ja4};
 use crate::protocol::application::tls::model::{
     CONTENT_TYPE_ALERT, CONTENT_TYPE_APPLICATION_DATA, CONTENT_TYPE_CHANGE_CIPHER_SPEC,
@@ -153,9 +153,9 @@ impl ClientSummary {
             sni_is_outer: hello.ech && hello.has_sni_extension,
             ech: hello.ech,
             alpn: hello
-                .alpn
+                .alpn_raw
                 .iter()
-                .map(|name| escape_wire_text(name))
+                .map(|name| escape_wire_bytes(name))
                 .collect(),
             supported_versions: hello.supported_versions.clone(),
             cipher_suites: hello.cipher_suites.clone(),
@@ -194,7 +194,7 @@ impl ServerSummary {
         Self {
             selected_version: hello.selected_version,
             cipher_suite: hello.cipher_suite,
-            alpn: hello.alpn.as_deref().map(escape_wire_text),
+            alpn: hello.alpn_raw.as_deref().map(escape_wire_bytes),
             key_share_group: hello.key_share_group,
             ja3s: fingerprint.md5,
             ja3s_raw: fingerprint.raw,

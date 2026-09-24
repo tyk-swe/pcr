@@ -569,6 +569,19 @@ fn bytes_after_a_server_hello_extension_block_are_malformed() {
 }
 
 #[test]
+fn bytes_after_an_extension_list_name_the_extension() {
+    let mut groups = vector16(&u16_bytes(&[0x001d]));
+    groups.extend_from_slice(&[0, 0]);
+    let outcome = parse_handshake(&client_hello(&[extension(0x000a, &groups)]));
+    let message = malformed_message(outcome);
+    assert!(
+        message.contains("supported_groups extension has 2 trailing bytes"),
+        "{message}"
+    );
+    assert!(!message.contains("extension block"), "{message}");
+}
+
+#[test]
 fn mutated_handshake_bytes_never_panic() {
     let seed = client_hello(&[
         server_name_extension(b"api.example.test"),

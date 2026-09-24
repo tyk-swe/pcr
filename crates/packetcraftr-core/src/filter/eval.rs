@@ -259,8 +259,13 @@ fn project_nested<'a>(
     }
 }
 
-/// Clamps a byte slice's range to `len`, rejecting a start past the end.
+/// Clamps a byte slice's range to `len`. A start past the end, or a non-empty
+/// bounded range starting at the end (such as `[len]`), selects no value; an
+/// open `[len:]` still selects the empty tail.
 fn slice_range(len: usize, slice: ByteSlice) -> Option<(usize, usize)> {
+    if slice.start >= len && slice.end.is_some_and(|end| end > slice.start) {
+        return None;
+    }
     let end = slice.end.unwrap_or(len).min(len);
     (slice.start <= end).then_some((slice.start, end))
 }

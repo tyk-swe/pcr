@@ -9,6 +9,7 @@ use packetcraftr_core::document::{
     DEFAULT_MAX_DOCUMENT_BYTES, DocumentLimits, Error, Format, Layer, Limit, MAX_DOCUMENT_NESTING,
     PACKET_DOCUMENT_SCHEMA_V2, Packet,
 };
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::field::FieldValue;
 use serde::Deserialize;
 
@@ -311,13 +312,25 @@ fn invalid_limits_are_rejected_before_any_parsing() {
         ..DocumentLimits::DEFAULT
     };
     for format in [Format::Json, Format::Yaml] {
+        let error = Packet::parse_with_limits("not a document", format, &limits)
+            .expect_err("an unsupported limit is refused");
         assert!(matches!(
-            Packet::parse_with_limits("not a document", format, &limits),
-            Err(Error::InvalidLimit {
+            error,
+            Error::InvalidLimit {
                 field: "max_nesting",
                 ..
-            })
+            }
         ));
+        // The fix is the configuration, not the document.
+        let classification = error.classification();
+        assert_eq!(classification.code, "cli.document_limit");
+        assert!(
+            classification
+                .remediation
+                .is_some_and(|remediation| remediation.contains("configured document limit")),
+            "{:?}",
+            classification.remediation
+        );
     }
 }
 

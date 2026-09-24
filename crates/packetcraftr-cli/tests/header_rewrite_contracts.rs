@@ -81,3 +81,30 @@ fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_ca
     invalid["rules"][0]["patch"] = serde_json::json!({});
     assert!(!validator.is_valid(&invalid));
 }
+
+/// `--max-interfaces` bounds each input section, so a rewrite gathering two
+/// one-interface sections into its single output section stays within it.
+#[test]
+fn per_section_interface_limit_does_not_bound_the_rewritten_output() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/tls-handshake.pcapng");
+    let section = std::fs::read(source).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("two-sections.pcapng");
+    std::fs::write(&input, [section.as_slice(), section.as_slice()].concat()).unwrap();
+    let target = directory.path().join("rewritten.pcapng");
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "rewrite",
+        input.to_str().unwrap(),
+        "--set",
+        "ipv4.ttl=9",
+        "--max-interfaces",
+        "1",
+        "--write",
+        target.to_str().unwrap(),
+    ]));
+    assert_eq!(report["result"]["interfaces"], 2);
+    assert!(target.exists());
+}

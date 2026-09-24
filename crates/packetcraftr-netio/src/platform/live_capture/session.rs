@@ -611,7 +611,9 @@ mod tests {
                 metadata: metadata("fake-panic", 2),
             },
             Limits::default(),
-            Duration::from_millis(100),
+            // The panic hook may symbolize a backtrace (RUST_BACKTRACE=1)
+            // before the worker finishes, so the deadline only bounds a hang.
+            Duration::from_secs(10),
         )
         .expect("fake capture worker should spawn");
         started_receiver

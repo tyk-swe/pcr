@@ -82,8 +82,9 @@ impl Template {
     }
 
     /// Adds a varying field to the Cartesian product. Declaration order is
-    /// stable, with the last axis varying fastest. Repeating a field (including
-    /// an alias of it) is rejected by [`Self::expand`].
+    /// stable, with the last axis varying fastest. [`Self::expand`] rejects a
+    /// repeated field (including an alias of it), but only for a non-empty
+    /// product: an empty axis yields zero packets without validating any axis.
     #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
         self.axes.push(TemplateAxis {
@@ -107,6 +108,10 @@ impl Template {
         })
     }
 
+    /// Iterates the Cartesian product, refusing one larger than `maximum`.
+    ///
+    /// Every axis is validated before the iterator is returned, unless the
+    /// product is empty: then nothing is yielded and nothing is validated.
     pub fn expand(
         &self,
         maximum: usize,

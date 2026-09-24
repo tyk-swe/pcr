@@ -269,8 +269,8 @@ impl Collector {
             .tcp
             .trailing(&run.trailing_tcp_events, run.frames_read)?
         {
-            if let application::Event::Evicted { flow, stream } = event {
-                self.stop(flow, stream, Status::Incomplete, &mut events)?;
+            if let application::Event::Evicted { flow, .. } = event {
+                self.stop(flow, Status::Incomplete, &mut events)?;
             } else {
                 self.tcp_event(event, run.frames_read, &mut events)?;
             }
@@ -352,23 +352,18 @@ impl Collector {
                 }
                 self.directions.insert(data.flow, direction);
             }
-            application::Event::Gap { flow, stream } => {
-                self.stop(flow, stream, Status::Gap, events)?;
+            application::Event::Gap { flow, .. } => {
+                self.stop(flow, Status::Gap, events)?;
             }
-            application::Event::Conflict { flow, stream } => {
-                self.stop(flow, stream, Status::Conflict, events)?;
+            application::Event::Conflict { flow, .. } => {
+                self.stop(flow, Status::Conflict, events)?;
             }
-            application::Event::Evicted { flow, stream } => {
-                self.stop(flow, stream, Status::Evicted, events)?;
+            application::Event::Evicted { flow, .. } => {
+                self.stop(flow, Status::Evicted, events)?;
             }
-            application::Event::Closed {
-                flow,
-                stream,
-                reset,
-            } => {
+            application::Event::Closed { flow, reset, .. } => {
                 self.stop(
                     flow.clone(),
-                    stream,
                     if reset {
                         Status::Reset
                     } else {
@@ -377,7 +372,7 @@ impl Collector {
                     events,
                 )?;
                 if reset {
-                    self.stop(flow.reverse(), stream, Status::Reset, events)?;
+                    self.stop(flow.reverse(), Status::Reset, events)?;
                 }
             }
         }
@@ -386,7 +381,6 @@ impl Collector {
     fn stop(
         &mut self,
         flow: ScopedFlowKey,
-        _stream: u64,
         status: Status,
         events: &mut Vec<Event>,
     ) -> Result<(), Error> {

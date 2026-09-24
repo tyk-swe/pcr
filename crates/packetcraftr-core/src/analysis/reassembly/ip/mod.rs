@@ -63,13 +63,6 @@ enum Reconstruction {
 }
 
 impl Reconstruction {
-    fn retained_bytes(&self) -> usize {
-        match self {
-            Self::Ipv4 { first_header, .. } => first_header.as_ref().map_or(0, Bytes::len),
-            Self::Ipv6 { prefix, .. } => prefix.len(),
-        }
-    }
-
     fn ecn(&self) -> Ecn {
         match self {
             Self::Ipv4 { ecn, .. } | Self::Ipv6 { ecn, .. } => *ecn,
@@ -207,5 +200,71 @@ mod memory_charge_tests {
             .expect("small metadata multiplier fits usize");
 
         assert!(DATAGRAM_METADATA_CHARGE >= conservative_floor);
+    }
+
+    fn ipv6_fragment(offset: u16, payload: &'static [u8]) -> Fragment {
+        let key = Ipv6DatagramKey {
+            scope: crate::analysis::scope::Interner::new()
+                .intern(None, Vec::new())
+                .expect("one empty scope fits"),
+            source: "2001:db8::1".parse().expect("fixture source"),
+            destination: "2001:db8::2".parse().expect("fixture destination"),
+            identification: 7,
+        };
+        let payload_length = u16::try_from(8 + payload.len()).expect("fixture length fits");
+        let mut prefix = vec![0_u8; 40];
+        prefix[0] = 0x60;
+        prefix[4..6].copy_from_slice(&payload_length.to_be_bytes());
+        prefix[6] = 44;
+        prefix[7] = 64;
+        prefix[8..24].copy_from_slice(&key.source.octets());
+        prefix[24..40].copy_from_slice(&key.destination.octets());
+        Fragment::Ipv6(Ipv6Fragment {
+            key,
+            fragment_offset: offset,
+            more_fragments: true,
+            next_header: 17,
+            unfragmentable_prefix: Bytes::from(prefix),
+            predecessor_next_header_offset: 6,
+            payload: Bytes::from_static(payload),
+        })
+    }
+
+    #[test]
+    fn replacing_a_provisional_ipv6_prefix_charges_its_copy_at_peak() {
+        let now = Instant::now();
+        let later = ipv6_fragment(1, b"ijklmnop");
+        let first = ipv6_fragment(0, b"abcdefgh");
+        let mut roomy = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        roomy.push(later.clone(), now).expect("later fragment fits");
+        // The offset-zero prefix is copied while the provisional one is still
+        // retained, beside the one merged range and its 16-byte union.
+        let peak = roomy.aggregate_memory_charge() + RANGE_METADATA_CHARGE + 16 + 40;
+
+        for (limit, admitted) in [(peak - 1, false), (peak, true)] {
+            let mut reassembler = Reassembler::new(
+                Limits {
+                    max_aggregate_bytes: limit,
+                    ..Limits::default()
+                },
+                OverlapPolicy::Reject,
+            );
+            reassembler
+                .push(later.clone(), now)
+                .expect("later fragment fits");
+            let retained = reassembler.aggregate_memory_charge();
+            let result = reassembler.push(first.clone(), now);
+            if admitted {
+                assert!(result.is_ok(), "limit {limit}: {result:?}");
+            } else {
+                assert_eq!(
+                    result,
+                    Err(Error::Resource(ResourceError::AggregateMemoryLimit {
+                        limit
+                    }))
+                );
+                assert_eq!(reassembler.aggregate_memory_charge(), retained);
+            }
+        }
     }
 }

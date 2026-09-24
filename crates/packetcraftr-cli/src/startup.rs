@@ -13,8 +13,8 @@ use packetcraftr_cli::output;
 use self::context::{Context, MachineFormat, from_env};
 use super::errors::{CANCELLED_EXIT_CODE, CliError, exit_code_for};
 use super::rendering::{
-    StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error, emit_stdout_document,
-    stdout_stream, terminal_document, write_unattributed_error,
+    OUTPUT_TIMEOUT_MS, StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error,
+    emit_stdout_document, stdout_stream, terminal_document, write_unattributed_error,
 };
 use crate::commands;
 
@@ -72,7 +72,7 @@ pub(crate) fn run() -> ExitCode {
     let stream = match if format == output::contract::Format::Ndjson {
         stdout_stream(
             command,
-            std::time::Duration::from_millis(cli.output_timeout_ms.unwrap_or(1000)),
+            std::time::Duration::from_millis(cli.output_timeout_ms.unwrap_or(OUTPUT_TIMEOUT_MS)),
         )
     } else {
         Ok(StreamEncoder::new(command, std::io::stdout()))

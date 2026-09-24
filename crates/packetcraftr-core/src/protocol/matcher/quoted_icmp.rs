@@ -150,8 +150,8 @@ fn quoted_probe_matches(
     match transport {
         QuotedProbeTransport::Tcp | QuotedProbeTransport::Udp | QuotedProbeTransport::Sctp => {
             let (protocol, protocol_number) = match transport {
-                QuotedProbeTransport::Tcp => (BuiltinProtocol::Tcp, 6),
-                QuotedProbeTransport::Udp => (BuiltinProtocol::Udp, 17),
+                QuotedProbeTransport::Tcp => (BuiltinProtocol::Tcp, ip_protocol::TCP),
+                QuotedProbeTransport::Udp => (BuiltinProtocol::Udp, ip_protocol::UDP),
                 QuotedProbeTransport::Sctp => (BuiltinProtocol::Sctp, 132),
                 QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
             };
@@ -349,9 +349,9 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
                 protocol = next;
                 header_len
             }
-            // Fragment. Only atomic and first fragments can quote a transport
-            // key at the start of this payload.
-            44 => {
+            // Only atomic and first fragments can quote a transport key at the
+            // start of this payload.
+            ip_protocol::FRAGMENT => {
                 let fragment = header.first_chunk::<8>()?;
                 let offset_and_flags = u16::from_be_bytes([fragment[2], fragment[3]]);
                 if offset_and_flags & 0xfffe != 0 {
@@ -360,9 +360,9 @@ fn parse_quoted_ipv6_payload(bytes: &[u8], mut protocol: u8, end: usize) -> Opti
                 protocol = fragment[0];
                 8
             }
-            // Authentication Header. Its length is measured in 32-bit words
-            // excluding the first two words.
-            51 => {
+            // The AH length is measured in 32-bit words excluding the first
+            // two words.
+            ip_protocol::AH => {
                 let (next, header_len) = extension_len(header, 2, 4, 12)?;
                 protocol = next;
                 header_len

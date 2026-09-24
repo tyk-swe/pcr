@@ -37,7 +37,7 @@ pub(super) fn render_batch_text(
             question.error.as_deref().unwrap_or("none"),
         ))?;
         if let Some(report) = &question.result {
-            render_report_text((**report).clone())?;
+            render_text((**report).clone(), Vec::new(), None)?;
         }
     }
     write_stdout_line(format_args!(
@@ -47,14 +47,12 @@ pub(super) fn render_batch_text(
     render_diagnostics_text(&diagnostics)
 }
 
-fn render_report_text(result: output::dns::Report) -> Result<(), CliError> {
-    render_text(result, Vec::new(), packetcraftr::Stats::default())
-}
-
+/// `stats` is absent for a batch question, whose counters only the batch
+/// total reports.
 pub(super) fn render_text(
     result: output::dns::Report,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    stats: Option<packetcraftr::Stats>,
 ) -> Result<(), CliError> {
     let server = result.server.parse::<IpAddr>().map_or_else(
         |_| format!("{}:{}", result.server, result.server_port),
@@ -138,8 +136,7 @@ pub(super) fn render_text(
                 .saturating_add(result.authorities.len())
                 .saturating_add(result.additionals.len()),
             rejected: result.rejected_record_count,
-            udp_packets_completed: stats.packets_completed,
-            bytes: stats.bytes,
+            counters: stats.map(|stats| (stats.packets_completed, stats.bytes)),
         })
     ))?;
     render_diagnostics_text(&diagnostics)
@@ -172,8 +169,8 @@ struct ResponseLine<'a> {
     truncated: String,
     accepted: usize,
     rejected: usize,
-    udp_packets_completed: u64,
-    bytes: u64,
+    /// Completed UDP packets and bytes.
+    counters: Option<(u64, u64)>,
 }
 
 fn response_summary(summary: ResponseLine<'_>) -> String {
@@ -184,12 +181,17 @@ fn response_summary(summary: ResponseLine<'_>) -> String {
         truncated,
         accepted,
         rejected,
-        udp_packets_completed,
-        bytes,
+        counters,
     } = summary;
-    format!(
-        "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected} udp_packets_completed={udp_packets_completed} bytes={bytes}"
-    )
+    let line = format!(
+        "dns response_code={response_code} response_code_name={response_code_name} authoritative={authoritative} truncated={truncated} accepted={accepted} rejected={rejected}"
+    );
+    match counters {
+        Some((udp_packets_completed, bytes)) => {
+            format!("{line} udp_packets_completed={udp_packets_completed} bytes={bytes}")
+        }
+        None => line,
+    }
 }
 
 pub(super) fn emit_event(
@@ -237,8 +239,7 @@ mod tests {
             truncated: "false".to_owned(),
             accepted: 1,
             rejected: 0,
-            udp_packets_completed: 1,
-            bytes: 64,
+            counters: Some((1, 64)),
         });
 
         assert!(summary.contains("response_code_name=NOERROR"));

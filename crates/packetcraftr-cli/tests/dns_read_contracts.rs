@@ -48,6 +48,22 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
     assert_eq!(error["command"], "dns-read");
 }
 
+/// `--dns-port` adds nonstandard services; port 53 is always analyzed.
+#[test]
+fn additional_dns_ports_keep_the_standard_port() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/dns-response.pcap");
+    let document = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "dns-read",
+        path.to_str().unwrap(),
+        "--dns-port",
+        "5353",
+    ]));
+    assert_eq!(document["result"]["summary"]["complete_messages"], 1);
+}
+
 #[test]
 fn application_output_budget_counts_only_compact_event_payloads() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

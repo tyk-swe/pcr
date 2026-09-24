@@ -48,20 +48,28 @@ pub(crate) fn deadline() -> Option<Arc<Deadline>> {
 }
 
 pub(crate) fn check() -> Result<(), CliError> {
-    if let Some(deadline) = deadline() {
-        deadline.enforce().map_err(|error| match error {
-            Interrupted::Cancelled(error) => CliError::classified(error),
-            Interrupted::Exceeded(error) => CliError::from_classification(
-                Classification::new(
-                    "policy.duration_limit",
-                    Kind::Policy,
-                    Some("reduce work or raise the finite invocation duration"),
-                ),
-                error.to_string(),
-                Vec::new(),
+    check_interrupted().map_err(interruption_error)
+}
+
+pub(crate) fn interruption_error(error: Interrupted) -> CliError {
+    match error {
+        Interrupted::Cancelled(error) => CliError::classified(error),
+        Interrupted::Exceeded(error) => CliError::from_classification(
+            Classification::new(
+                "policy.duration_limit",
+                Kind::Policy,
+                Some("reduce work or raise the finite invocation duration"),
             ),
-            other => CliError::new(Kind::Policy, other.to_string()),
-        })?;
+            error.to_string(),
+            Vec::new(),
+        ),
+        other => CliError::new(Kind::Policy, other.to_string()),
+    }
+}
+
+pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
+    if let Some(deadline) = deadline() {
+        deadline.enforce()?;
     }
     Ok(())
 }

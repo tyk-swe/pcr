@@ -27,8 +27,10 @@ pub(crate) struct Args {
     /// Match physical or reconstructed fields, including attached IP dependencies.
     #[arg(long)]
     pub(crate) filter: Option<String>,
+    /// Maximum physical frames selected for export; at most 1,000,000.
     #[arg(long, default_value_t = 100_000)]
     pub(crate) max_selected_frames: usize,
+    /// Compression of the saved capture file.
     #[arg(long, value_enum, default_value_t = Compression::None)]
     pub(crate) compression: Compression,
     #[command(flatten)]

@@ -111,6 +111,7 @@ pub(super) fn run(
         return finish_compressed_output(result, destination);
     }
     if let Some(rewrite_format) = rewrite_format {
+        validate_rewrite_format(reader.format(), rewrite_format)?;
         let stream_limits = Limits {
             max_frames: limits.max_frames,
             max_bytes: limits.max_bytes,
@@ -119,7 +120,6 @@ pub(super) fn run(
         let mut destination = compression.writer(stdout.lock())?;
         let result = rewrite_capture(
             &mut reader,
-            rewrite_format,
             stream_limits,
             bounds,
             decoding.as_ref(),
@@ -174,15 +174,13 @@ fn kept_by_time(bounds: Option<core::frame::TimeBounds>, frame: &core::frame::Fr
     bounds.is_none_or(|bounds| bounds.contains(frame.timestamp))
 }
 
-fn rewrite_capture(
-    reader: &mut Reader<impl Read>,
-    format: capture::Format,
-    limits: Limits,
-    bounds: Option<core::frame::TimeBounds>,
-    decoding: Option<&Decoding>,
-    destination: &mut impl Write,
+/// Checked before stdout is wrapped, so a rejected conversion writes no
+/// compressed container.
+fn validate_rewrite_format(
+    input: capture::Format,
+    output: capture::Format,
 ) -> Result<(), CliError> {
-    if format != reader.format() {
+    if output != input {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_rewrite_format",
@@ -190,12 +188,21 @@ fn rewrite_capture(
                 Some("select the capture output format matching the input capture"),
             ),
             format!(
-                "capture rewriting cannot convert {} input to {format} without normalization",
-                reader.format()
+                "capture rewriting cannot convert {input} input to {output} without normalization"
             ),
             Vec::new(),
         ));
     }
+    Ok(())
+}
+
+fn rewrite_capture(
+    reader: &mut Reader<impl Read>,
+    limits: Limits,
+    bounds: Option<core::frame::TimeBounds>,
+    decoding: Option<&Decoding>,
+    destination: &mut impl Write,
+) -> Result<(), CliError> {
     if decoding.is_none() && bounds.is_none() {
         return rewrite(reader, destination, limits)
             .map(|_| ())

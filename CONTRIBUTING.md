@@ -170,8 +170,8 @@ python3 scripts/test-output-consumer.py
 python3 scripts/test-forwarding-regression.py
 python3 scripts/test-native-capture.py
 python3 scripts/check-external-consumer.py
-cargo test --locked -p packetcraftr-core --test forwarding_verify --test invocation_deadline_contracts --test pipeline_limit_contracts
-cargo test --locked -p packetcraftr-cli --test verify_forwarding --test aggregate_schema_conformance
+cargo test --locked -p packetcraftr-core --test forwarding_verification_contracts --test invocation_deadline_contracts --test pipeline_limit_contracts
+cargo test --locked -p packetcraftr-cli --test forwarding_verification_contracts --test aggregate_schema_conformance
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 ```
 

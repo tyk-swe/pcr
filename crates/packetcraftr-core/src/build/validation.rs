@@ -20,11 +20,25 @@ pub(super) fn validate_bindings(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     debug_assert_eq!(protocols.len(), packet.len());
+    let mut previous_padding: Option<&Padding> = None;
     for (index, layer) in packet.iter().enumerate() {
         let Some(padding) = layer.as_any().downcast_ref::<Padding>() else {
+            previous_padding = None;
             continue;
         };
         validate_padding(packet, protocols, index, padding, mode, diagnostics)?;
+        // Covered lengths trim trailing padding from the end, so a run must
+        // list the innermost boundary first and link padding last, the order
+        // dissection produces.
+        if let (Some(previous), Some(outside_layer)) = (previous_padding, padding.outside_layer)
+            && outside_layer > previous.outside_layer.unwrap_or(0)
+        {
+            return Err(Error::InvalidPaddingBoundary {
+                index,
+                outside_layer,
+            });
+        }
+        previous_padding = Some(padding);
     }
     validate_adjacent_bindings(registry, protocols, mode, diagnostics)
 }

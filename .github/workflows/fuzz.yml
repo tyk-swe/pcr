@@ -70,7 +70,8 @@ jobs:
         env:
           FUZZ_SECONDS: ${{ inputs.seconds || 30 }}
         run: |
-          [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]] && (( FUZZ_SECONDS >= 1 && FUZZ_SECONDS <= 900 ))
+          # A failing test before `&&` does not trip errexit, so fail explicitly.
+          [[ "$FUZZ_SECONDS" =~ ^[0-9]+$ ]] && (( FUZZ_SECONDS >= 1 && FUZZ_SECONDS <= 900 )) || { echo "FUZZ_SECONDS must be 1..=900" >&2; exit 1; }
           rustc +nightly-2026-08-28 --version --verbose > fuzz-run-metadata.txt
           git rev-parse HEAD >> fuzz-run-metadata.txt
           sha256sum Cargo.lock >> fuzz-run-metadata.txt

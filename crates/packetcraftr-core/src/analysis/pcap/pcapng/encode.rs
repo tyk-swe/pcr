@@ -34,7 +34,9 @@ impl InterfacePlan {
     }
 }
 
-fn interface_description_base_length(timestamp_offset: i64) -> usize {
+/// Interface description block length before custom options: header, fields,
+/// the generated timestamp options, end of options, and trailing length.
+pub(in crate::analysis::pcap) fn interface_description_base_length(timestamp_offset: i64) -> usize {
     if timestamp_offset == 0 { 32 } else { 44 }
 }
 

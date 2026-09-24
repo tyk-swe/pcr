@@ -295,6 +295,9 @@ fn planned<A: Authorizer>(
 }
 
 /// Approves and starts one connection attempt, returning the pending socket.
+/// `None` means every native connect admission is still held, for example by
+/// a cancelled attempt whose provider call has not returned or a finished one
+/// whose worker has not yet released it, so the caller retries this endpoint.
 fn admit_next<P, A, C>(
     request: &Request,
     planned: &Planned,
@@ -303,7 +306,7 @@ fn admit_next<P, A, C>(
     deadline: &Deadline,
     provider: &Arc<P>,
     clock: &mut C,
-) -> Result<Active<P::Stream>, Error>
+) -> Result<Option<Active<P::Stream>>, Error>
 where
     P: Provider + Send + Sync + 'static,
     P::Stream: Send + 'static,
@@ -334,14 +337,17 @@ where
         })?;
     let admitted = Instant::now();
     let scheduled_at = SystemTime::now();
-    let pending = tcp::start_connect(
+    let pending = match tcp::start_connect(
         Arc::clone(provider),
         endpoint,
         timeout,
         clock.cancellation(),
-    )
-    .map_err(|source| execution(next as u64, source))?;
-    Ok(Active {
+    ) {
+        Ok(pending) => pending,
+        Err(tcp::ConnectError::Capacity { .. }) => return Ok(None),
+        Err(source) => return Err(execution(next as u64, source)),
+    };
+    Ok(Some(Active {
         pending,
         sequence: next as u64,
         endpoint,
@@ -349,7 +355,7 @@ where
         started: admitted,
         scheduled_at,
         timeout,
-    })
+    }))
 }
 
 /// Polls one pending connection, removing and settling it when it finished or
@@ -413,13 +419,19 @@ where
     let mut evidence_bytes = 0usize;
     while next < planned.count || !active.is_empty() {
         enforce_deadline(WORKFLOW, &deadline)?;
+        let mut admission_held = false;
         while next < planned.count
             && active.len() < request.max_in_flight
             && clock.now() >= next_start
         {
-            active.push(admit_next(
+            let Some(admitted) = admit_next(
                 request, &planned, next, authorizer, &deadline, &provider, clock,
-            )?);
+            )?
+            else {
+                admission_held = true;
+                break;
+            };
+            active.push(admitted);
             stats.connections_scheduled += 1;
             next += 1;
             next_start = clock
@@ -467,7 +479,7 @@ where
         }
         if next < planned.count || !active.is_empty() {
             let mut wait = Duration::from_millis(1);
-            if next < planned.count && active.len() < request.max_in_flight {
+            if next < planned.count && active.len() < request.max_in_flight && !admission_held {
                 wait = wait.min(next_start.saturating_duration_since(clock.now()));
             }
             if !wait.is_zero() {

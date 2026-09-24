@@ -255,6 +255,56 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
 }
 
 #[test]
+fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
+    use packetcraftr_core::analysis;
+
+    type Case = (fn() -> decode::Error, &'static str, Kind);
+    let cases: [Case; 4] = [
+        (
+            || decode::Error::LayerLimit { limit: 64 },
+            "policy.analysis_resource_limit",
+            Kind::Policy,
+        ),
+        (
+            || decode::Error::PacketSizeLimit {
+                actual: 70_000,
+                limit: 65_535,
+            },
+            "policy.analysis_resource_limit",
+            Kind::Policy,
+        ),
+        (
+            || decode::Error::InvalidCodecCursor { protocol: ipv4() },
+            "internal.codec_contract",
+            Kind::Internal,
+        ),
+        (
+            || decode::Error::MissingRootCodec {
+                protocol: Id::new("linktype_999"),
+            },
+            "packet.missing_codec",
+            Kind::Packet,
+        ),
+    ];
+    for (source, code, kind) in cases {
+        for error in [
+            analysis::Error::Decode {
+                number: 1,
+                source: source(),
+            },
+            analysis::Error::DerivedDecode {
+                number: 1,
+                source: source(),
+            },
+        ] {
+            let classification = error.classification();
+            assert_eq!(classification.code, code, "{error}");
+            assert_eq!(classification.kind, kind, "{error}");
+        }
+    }
+}
+
+#[test]
 fn registry_duplicate_alias_and_matcher_errors_name_the_conflict() {
     let alias = registry::Error::DuplicateAlias {
         alias: "ip".to_owned(),
@@ -440,4 +490,22 @@ fn ipv4_wire_with_truncated_options_may_hide_a_destination() {
         ),
         "{error:?}"
     );
+
+    // A hand-built layer naming the protocol in another case is held to the
+    // same check the registry's case-insensitive lookup would apply.
+    for spelling in ["IPv4", " IPV6 "] {
+        let mut packet = packetcraftr_core::packet::Packet::new();
+        packet.push(Malformed::new(
+            Some(spelling.to_owned()),
+            vec![0x45, 0],
+            "hand-built",
+        ));
+        assert!(
+            matches!(
+                live_destinations(&packet),
+                Err(SemanticsError::MalformedMayHideDestination { .. })
+            ),
+            "{spelling:?}"
+        );
+    }
 }

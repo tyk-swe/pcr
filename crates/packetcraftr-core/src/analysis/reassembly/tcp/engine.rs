@@ -122,8 +122,8 @@ impl Reassembler {
     /// when the flow is tracked at all. Together with the base this brackets
     /// the acknowledgment a current-generation SYN-ACK may carry — a Fast
     /// Open SYN's payload moves it past the base.
-    // validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so
-    // next_offset never reaches 2^32 and the narrowing is lossless
+    // next_offset counts every delivered byte and can pass 2^32 on a long stream; the `as u32`
+    // deliberately keeps it modulo 2^32, which is what wire sequence arithmetic needs
     pub fn flow_next_sequence(&self, flow: &ScopedFlowKey) -> Option<u32> {
         self.flows
             .get(flow)
@@ -188,18 +188,10 @@ impl Reassembler {
         Ok((aggregate_bytes, aggregate_memory_charge))
     }
 
-    // validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so neither
-    // next_offset nor a pending offset reaches 2^32
+    // Stream offsets are cumulative and can pass 2^32 on a long stream; the `as u32` casts
+    // deliberately keep them modulo 2^32 inside the wrapping sequence arithmetic
     fn remove_flows(&mut self, mut keys: Vec<ScopedFlowKey>) -> Vec<Event> {
-        keys.sort_by_key(|key| {
-            (
-                key.scope,
-                key.flow.source,
-                key.flow.source_port,
-                key.flow.destination,
-                key.flow.destination_port,
-            )
-        });
+        keys.sort();
         let mut events = Vec::new();
         for key in keys {
             let Some(state) = self.flows.remove(&key) else {

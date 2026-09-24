@@ -220,7 +220,9 @@ fn capture_netmask(interface: &interface::Info) -> Option<u32> {
         .iter()
         .find(|assigned| assigned.address.is_ipv4())?;
     let shift = u32::BITS.checked_sub(u32::from(assigned.prefix_length))?;
-    Some(u32::MAX.checked_shl(shift).unwrap_or(0).to_be())
+    // pcap_compile compares the mask with host-order BPF word loads, so a /24
+    // is 0xffffff00 on every target, not its network-order bytes.
+    Some(u32::MAX.checked_shl(shift).unwrap_or(0))
 }
 
 /// A diagnostic read never creates native workers or starts the reaper.
@@ -275,7 +277,7 @@ mod tests {
             link_type: LinkType::ETHERNET,
         };
 
-        assert_eq!(capture_netmask(&interface), Some((u32::MAX << 24).to_be()));
+        assert_eq!(capture_netmask(&interface), Some(0xff00_0000));
 
         let mut ipv6_only = interface;
         ipv6_only.addresses = vec![interface::Address {

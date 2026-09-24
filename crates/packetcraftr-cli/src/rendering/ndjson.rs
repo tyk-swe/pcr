@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::progress::{Runtime, Sink};
+use packetcraftr::progress::{EmitError, Runtime, Sink};
 use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
@@ -15,9 +15,11 @@ use packetcraftr_cli::output;
 
 pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 
-/// Per-write ceiling; max-duration publishers clip it to their remaining budget.
-/// A terminal error may use this separate cleanup allowance.
-const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
+/// Per-write ceiling when `--output-timeout-ms` is absent; max-duration
+/// publishers clip it to their remaining budget. A terminal error may use this
+/// separate cleanup allowance.
+pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
+const OUTPUT_TIMEOUT: Duration = Duration::from_millis(OUTPUT_TIMEOUT_MS);
 
 pub(crate) fn stdout_stream(
     command: output::contract::Command,
@@ -41,11 +43,13 @@ pub(crate) fn write_unattributed_error(
     })
     .map_err(CliError::classified)?;
     sink.emit(error, &Deadline::new(OUTPUT_TIMEOUT))
-        .map_err(|source| {
-            CliError::from(output::stream::EncodeError::Write {
+        .map_err(|source| match source {
+            // The callback already reported the classified write failure.
+            EmitError::Output(source) => CliError::classified(source),
+            source => CliError::from(output::stream::EncodeError::Write {
                 sequence: 0,
-                source: io::Error::other(format!("NDJSON stream is incomplete: {source}")),
-            })
+                source: io::Error::other(source),
+            }),
         })
 }
 

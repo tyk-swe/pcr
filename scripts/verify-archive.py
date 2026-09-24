@@ -18,6 +18,7 @@ ASSETS = (
     'examples/consumers/forwarding.py',
     'examples/consumers/fixtures/v6-forwarding.json',
     'schemas/packetcraftr.rewrite.v1.schema.json',
+    'schemas/packetcraftr.rewrite.v2.schema.json',
     'schemas/packetcraftr.udp-profiles.v1.schema.json',
     'examples/captures/tls-handshake.pcapng',
     'examples/captures/http-stream.pcap',

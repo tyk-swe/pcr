@@ -155,8 +155,8 @@ fn commit_flow_push(
     events
 }
 
-// validate_limits rejects max_bytes_per_flow above MAX_BYTES_PER_FLOW (2^31 - 1), so next_offset
-// never reaches 2^32 and the narrowing to a wire sequence is lossless
+// next_offset counts every delivered byte and can pass 2^32 on a long stream; the `as u32`
+// deliberately keeps it modulo 2^32, which is what wire sequence arithmetic needs
 fn emit_data(
     state: &mut TcpFlowState,
     flow: &ScopedFlowKey,

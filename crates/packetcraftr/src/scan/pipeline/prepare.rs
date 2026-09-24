@@ -119,7 +119,7 @@ where
     })
 }
 fn charge(packet: &Packet, maximum: usize) -> Result<usize, BoundaryError> {
-    fn value(value: &FieldValue, maximum: usize) -> Result<usize, BoundaryError> {
+    fn value_cost(value: &FieldValue, maximum: usize) -> Result<usize, BoundaryError> {
         let mut bytes = 64usize;
         match value {
             FieldValue::Text(text) => bytes = bytes.saturating_add(text.len().saturating_mul(32)),
@@ -144,15 +144,12 @@ fn charge(packet: &Packet, maximum: usize) -> Result<usize, BoundaryError> {
             Ok(bytes)
         }
     }
-    fn value_cost(v: &FieldValue, max: usize) -> Result<usize, BoundaryError> {
-        value(v, max)
-    }
     let mut bytes = 1024usize;
     for layer in packet.iter() {
         bytes = bytes.saturating_add(256);
         for field in layer.schema().fields {
             if let Some(field) = layer.field(field.name) {
-                bytes = bytes.saturating_add(value(&field, maximum)?);
+                bytes = bytes.saturating_add(value_cost(&field, maximum)?);
             }
         }
         if bytes > maximum {

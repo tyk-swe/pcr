@@ -135,6 +135,45 @@ fn a_fragment_selector_and_derived_filter_expand_to_physical_dependencies() {
         .is_err()
     );
 }
+/// An incomplete group's key names a capture scope, so the plan defines it
+/// even when no frame of the group reached the selection within time bounds.
+#[test]
+fn every_selected_incomplete_group_scope_is_defined() {
+    let (frames, _) = frames();
+    let options = analysis::Options {
+        time_bounds: Some(
+            packetcraftr_core::frame::TimeBounds::new(
+                Some(UNIX_EPOCH + std::time::Duration::from_secs(1)),
+                None,
+            )
+            .expect("ordered bounds"),
+        ),
+        ..analysis::Options::default()
+    };
+    let plan = export::plan(
+        &mut reader(&frames[1..2]),
+        registry(),
+        &options,
+        &Selection {
+            datagram_frames: vec![1],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(plan.selected_incomplete_datagrams.len(), 1);
+    for group in &plan.selected_incomplete_datagrams {
+        let scope = match &group.key {
+            analysis::reassembly::ip::DatagramKey::Ipv4(key) => key.scope,
+            analysis::reassembly::ip::DatagramKey::Ipv6(key) => key.scope,
+        };
+        assert!(
+            plan.scopes.iter().any(|definition| definition.id == scope),
+            "{scope:?} is undefined in {:?}",
+            plan.scopes
+        );
+    }
+}
+
 #[test]
 fn incomplete_dependencies_and_unmatched_streams_are_explicit() {
     let (mut frames, count) = frames();

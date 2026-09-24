@@ -46,3 +46,28 @@ fn merged_file_is_compressed_scoped_and_never_overwrites_an_existing_path() {
     assert!(!output.status.success());
     assert!(!absent.exists());
 }
+
+/// `--max-interfaces` bounds each input section, so the single merged output
+/// section may hold one interface per source without tripping it.
+#[test]
+fn per_section_interface_limit_does_not_bound_the_merged_output() {
+    let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/dns-response.pcap");
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("merged.pcapng");
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "merge",
+        source.to_str().unwrap(),
+        source.to_str().unwrap(),
+        "--max-interfaces",
+        "1",
+        "--write",
+        target.to_str().unwrap(),
+    ]));
+    assert_eq!(report["result"]["interfaces"].as_array().unwrap().len(), 2);
+    let mut reader = Reader::new(std::fs::File::open(&target).unwrap()).unwrap();
+    while reader.next_frame().unwrap().is_some() {}
+    assert_eq!(reader.interfaces().len(), 2);
+}

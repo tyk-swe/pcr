@@ -31,6 +31,7 @@ pub(super) fn build_solicitation(
         request.interface_mac,
         &request.vlan_tags,
         ethernet::ETHERTYPE_IPV6,
+        IPV6_HEADER_LENGTH + SOLICITATION_LENGTH,
     );
     let mut icmp = Vec::with_capacity(SOLICITATION_LENGTH);
     icmp.extend_from_slice(&[SOLICITATION_TYPE, 0, 0, 0]);

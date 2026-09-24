@@ -121,8 +121,8 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
                 dissector: &dissector,
                 prepared: &[],
                 sent: &[],
-                // Unambiguously past: the boundary instant itself is not
-                // expired under the shared convention.
+                // Unambiguously past, independent of how the boundary
+                // instant itself is treated.
                 deadline: Instant::now()
                     .checked_sub(Duration::from_millis(1))
                     .expect("fixture deadline"),

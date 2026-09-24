@@ -149,3 +149,31 @@ fn versioned_presets_and_explicit_overrides_match_the_resource_schema() {
         );
     }
 }
+
+#[test]
+fn capture_retention_is_reported_as_a_policy_setting() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("capture.pcapng");
+    let output = run(&[
+        "--output",
+        "json",
+        "--resource-diagnostics",
+        "capture",
+        "--interface",
+        "does-not-exist",
+        "--write",
+        target.to_str().unwrap(),
+        "--rotate-bytes",
+        "100000",
+        "--rotate-files",
+        "2",
+        "--retention",
+        "ring",
+    ]);
+    assert!(!output.status.success());
+    let report = parse_json(&output);
+    assert_eq!(setting(&report, "--retention")["value"], "ring");
+    assert_eq!(setting(&report, "--retention")["unit"], "policy");
+    assert_eq!(setting(&report, "--rotate-files")["unit"], "count");
+    assert!(!target.exists());
+}

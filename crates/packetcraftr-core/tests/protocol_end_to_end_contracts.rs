@@ -17,7 +17,7 @@ use packetcraftr_core::diagnostic::{
 };
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Layer, Malformed, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::gre::Gre;
@@ -585,6 +585,241 @@ fn link_capture_and_raw_ip_roots_round_trip() {
             .expect("raw-IP root should sniff version");
         assert!(decoded.packet.get::<Ipv4>().is_some());
     }
+}
+
+/// A permissive raw Next Header is emitted verbatim and stays raw in the built
+/// packet, as every other codec keeps a raw discriminator.
+#[test]
+fn ipv6_option_headers_keep_a_raw_next_header_raw() {
+    for raw_first in [true, false] {
+        let mut packet = Packet::new();
+        packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+        let raw = WireValue::Raw(Bytes::from_static(&[59]));
+        if raw_first {
+            packet.push(HopByHop {
+                next_header: raw.clone(),
+                ..HopByHop::default()
+            });
+        } else {
+            packet.push(DestinationOptions {
+                next_header: raw.clone(),
+                ..DestinationOptions::default()
+            });
+        }
+        let built = build::Builder::new(rooted_registry("ipv6"))
+            .build(
+                packet,
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..build::Options::default()
+                },
+            )
+            .expect("a raw Next Header builds permissively");
+        let next_header = built
+            .packet
+            .iter()
+            .nth(1)
+            .and_then(|layer| layer.field("next_header"));
+        assert_eq!(
+            next_header,
+            Some(packetcraftr_core::field::FieldValue::Bytes(
+                Bytes::from_static(&[59])
+            )),
+            "raw_first={raw_first}"
+        );
+        assert_eq!(built.bytes[40], 59);
+    }
+}
+
+/// Trailing paddings list the innermost coverage boundary first, as dissection
+/// orders them, so each layer's declared length excludes exactly its outside bytes.
+#[test]
+fn coverage_paddings_build_only_in_innermost_first_order() {
+    let packet = |paddings: [Padding; 2]| {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+        packet.push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[1, 2, 3, 4])));
+        for padding in paddings {
+            packet.push(padding);
+        }
+        packet
+    };
+    let outside_udp = || Padding::after_layer(vec![0xbb; 3], 2);
+    let outside_ipv4 = || Padding::after_layer(vec![0xaa; 2], 1);
+
+    let (_, decoded) = round_trip(packet([outside_udp(), outside_ipv4()]), "ethernet");
+    let paddings = decoded
+        .packet
+        .iter()
+        .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
+        .map(|padding| (padding.outside_layer, padding.bytes.len()))
+        .collect::<Vec<_>>();
+    assert_eq!(paddings, [(Some(2), 3), (Some(1), 2)]);
+
+    let error = build::Builder::new(rooted_registry("ethernet"))
+        .build(
+            packet([outside_ipv4(), outside_udp()]),
+            codec::Context::default(),
+            build::Options::default(),
+        )
+        .expect_err("an outer boundary listed first is refused");
+    assert!(
+        matches!(
+            error,
+            build::Error::InvalidPaddingBoundary {
+                index: 5,
+                outside_layer: 2
+            }
+        ),
+        "{error}"
+    );
+}
+
+/// Option bytes the IPv4 decoder cannot walk would dissect the whole header as
+/// malformed, so strict builds refuse them and permissive builds say so.
+#[test]
+fn ipv4_options_the_decoder_refuses_are_not_built_strictly() {
+    for options in [&[0x44, 0x01, 0x00, 0x00][..], &[0x07]] {
+        let packet = || {
+            let mut packet = Packet::new();
+            packet.push(Ipv4 {
+                options: Bytes::copy_from_slice(options),
+                ..ipv4([192, 0, 2, 1], [192, 0, 2, 2])
+            });
+            packet
+        };
+        let builder = build::Builder::new(rooted_registry("ipv4"));
+        assert!(
+            builder
+                .build(
+                    packet(),
+                    codec::Context::default(),
+                    build::Options::default()
+                )
+                .is_err(),
+            "{options:02x?}"
+        );
+        let built = builder
+            .build(
+                packet(),
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..build::Options::default()
+                },
+            )
+            .expect("permissive builds keep the requested bytes");
+        assert!(
+            built
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.ipv4_options"),
+            "{options:02x?}: {:?}",
+            built.diagnostics
+        );
+    }
+
+    let mut routed = Packet::new();
+    routed.push(source_routed_ipv4(
+        0x83,
+        4,
+        &[Ipv4Addr::new(198, 51, 100, 1)],
+    ));
+    build::Builder::new(rooted_registry("ipv4"))
+        .build(routed, codec::Context::default(), build::Options::default())
+        .expect("a walkable source route still builds strictly");
+}
+
+/// A PPPoE discovery code needs the discovery EtherType from whichever parent
+/// carries it, not only from an Ethernet or VLAN header.
+#[test]
+fn pppoe_stage_is_checked_against_every_ethertype_parent() {
+    let parents: Vec<(&str, Vec<Box<dyn Layer>>)> = vec![
+        ("ethernet", vec![Box::new(Ethernet::default())]),
+        (
+            "ipv4",
+            vec![
+                Box::new(ipv4([192, 0, 2, 1], [192, 0, 2, 2])),
+                Box::new(Gre::default()),
+            ],
+        ),
+        (
+            "ethernet",
+            vec![
+                Box::new(Ethernet::default()),
+                Box::new(Llc::default()),
+                Box::new(Snap::default()),
+            ],
+        ),
+    ];
+    for (root, layers) in parents {
+        let mut packet = Packet::new();
+        let parent = layers
+            .last()
+            .map(|layer| layer.protocol_id().as_str())
+            .expect("a parent layer");
+        for layer in layers {
+            packet.push_boxed(layer);
+        }
+        // PADI, a discovery stage, under a parent left to choose its EtherType.
+        packet.push(Pppoe {
+            code: 0x09,
+            ..Pppoe::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[0x01, 0x01, 0x00, 0x00])));
+        let error = build::Builder::new(rooted_registry(root))
+            .build(packet, codec::Context::default(), build::Options::default())
+            .expect_err("a discovery code under the session EtherType is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("requires the enclosing EtherType 0x8863"),
+            "{parent}: {error}"
+        );
+    }
+}
+
+/// Linux cooked headers carry the sender's full address length while the slot
+/// keeps only its first eight bytes, as an IPoIB capture's 20-byte addresses do.
+#[test]
+fn cooked_capture_link_addresses_longer_than_the_slot_round_trip() {
+    const ARPHRD_INFINIBAND: u16 = 32;
+    let address = [0x80, 0, 0x02, 0x48, 0xfe, 0x80, 0, 0];
+
+    let mut sll = Packet::new();
+    sll.push(LinuxSll {
+        arp_hardware_type: ARPHRD_INFINIBAND,
+        address_length: 20,
+        address,
+        ..LinuxSll::default()
+    });
+    sll.push(ipv4([203, 0, 113, 1], [203, 0, 113, 2]));
+    sll.push(Icmpv4::default());
+    let (_, decoded) = round_trip(sll, "linux_sll");
+    let header = decoded.packet.get::<LinuxSll>().expect("cooked header");
+    assert_eq!((header.address_length, header.address), (20, address));
+    assert!(decoded.packet.get::<Ipv4>().is_some());
+
+    let mut sll2 = Packet::new();
+    sll2.push(LinuxSll2 {
+        arp_hardware_type: ARPHRD_INFINIBAND,
+        address_length: 20,
+        address,
+        ..LinuxSll2::default()
+    });
+    sll2.push(ipv4([203, 0, 113, 1], [203, 0, 113, 2]));
+    sll2.push(Icmpv4::default());
+    let (_, decoded) = round_trip(sll2, "linux_sll2");
+    let header = decoded.packet.get::<LinuxSll2>().expect("cooked header");
+    assert_eq!((header.address_length, header.address), (20, address));
+    assert!(decoded.packet.get::<Ipv4>().is_some());
 }
 
 fn assert_overlay_tunnels_round_trip() {

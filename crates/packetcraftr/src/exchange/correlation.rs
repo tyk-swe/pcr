@@ -267,9 +267,6 @@ impl Accumulator {
                     ));
                     return ProcessOutcome::Continue;
                 }
-                if expired(context.deadline) {
-                    return self.expire_decoded(identity, decoded, context.options);
-                }
                 if self.reserve_decoded_evidence(decoded.original.len(), context.options) {
                     self.mark_record_retained(identity);
                     // a unique attribution indexes a request that was already sent, so

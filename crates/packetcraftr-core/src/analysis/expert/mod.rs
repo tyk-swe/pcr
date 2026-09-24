@@ -75,8 +75,10 @@ impl Summary {
 }
 
 /// Detects TCP conditions from headers. Reassembly events supply retransmission
-/// and gap evidence; acknowledgment and window fields supply duplicate ACK,
-/// zero window, window-full, keep-alive, and reset findings.
+/// evidence, and bytes still pending when the run's trailing evictions flush a
+/// flow supply end-of-capture incompleteness; header sequence, acknowledgment,
+/// window, and flag fields supply missed-segment, duplicate ACK, zero window,
+/// window-full, keep-alive, and reset findings.
 #[derive(Debug, Default)]
 pub struct Collector {
     flows: HashMap<ScopedFlowKey, DirectionState>,

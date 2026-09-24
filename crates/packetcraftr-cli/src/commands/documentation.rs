@@ -35,6 +35,9 @@ pub(crate) fn run(arguments: &Args) -> Result<(), CliError> {
 }
 
 fn io_error(directory: &Path, error: std::io::Error) -> CliError {
+    let causes = std::iter::once(error.to_string())
+        .chain(packetcraftr_core::error::source_chain(&error))
+        .collect();
     CliError::from_classification(
         Classification::new(
             "io.documentation",
@@ -45,6 +48,6 @@ fn io_error(directory: &Path, error: std::io::Error) -> CliError {
             "cannot write generated documentation under {}: {error}",
             directory.display()
         ),
-        Vec::new(),
+        causes,
     )
 }

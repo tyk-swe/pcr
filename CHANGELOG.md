@@ -8,6 +8,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- Error codes follow the failure's own classification. Live `send`,
+  `exchange`, and other workflow build failures publish the build error's code
+  (for example `policy.build_resource_limit`, `packet.codec`,
+  `internal.codec_contract`) instead of `packet.build`. Offline analysis
+  dissection failures publish the decode error's code; a layer-limit refusal
+  reports `policy.analysis_resource_limit` like a byte-limit refusal, instead of
+  `packet.decode`. Generated capture output from `fragment`, `send`, and
+  `exchange` keeps `packet.capture_file` (exit 3) for non-I/O encoding failures
+  instead of `io.runtime`, and replay interrupted while emitting a record
+  reports `io.cancelled` or `policy.replay_limit` instead of `io.replay`.
 - Forwarding ordinary preservation requires readable values on both sides;
   missing values are unevaluable. Explicit presence/absence checks are separate.
   v6 publishes check-specific evidence states and comparison labels.
@@ -299,6 +309,24 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `dns-read --dns-port` adds ports to 53 instead of replacing it, as README
+  documents and `http --http-port` already behaves.
+- Display filters read eight two-digit hex groups (`47:45:54:20:2f:69:6e:64`)
+  as a byte run, like runs of every other length; an IPv6 literal spelled that
+  way needs a four-digit group, `::`, or `/128`. A byte slice starting at or
+  past a field's end (`[len]`) selects no value, and projection column and
+  forwarding field names keep the typed slice (`raw.bytes[0:1]`).
+- Strict builds refuse IPv4 option lists the decoder cannot walk (permissive
+  builds report `build.ipv4_options`) and trailing coverage paddings listed
+  with an outer boundary before an inner one.
+- The DNS exchange executor refuses a client capture wider than the request's
+  evidence bounds with `cli.dns_executor` before any I/O, instead of failing
+  afterwards with `internal.dns_evidence`.
+- The UDP-profile schema states the loader's rules: names are bounded in
+  characters and exclude control characters.
+- `--retention` is reported as a `policy` resource setting, capture text output
+  spells stop reasons and retention as JSON does, and DNS batch text omits the
+  per-question counters it could not report.
 - Pipelined `scan` (`--max-in-flight` above 1) picks each probe's winning
   response with the serial rule: highest rank, then lowest responder address,
   then shortest latency, then lowest exact frame bytes. Equally ranked
@@ -508,6 +536,69 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Replay text output reports a stdout write failure even if the invocation
+  deadline expires while the write is blocked.
+- `exchange --output ndjson` no longer fails with
+  `policy.exchange_duration_limit` whenever a request goes unanswered; events
+  published after the collection window get their own finite allowance.
+- `replay --interface NAME` or `--interface INDEX` no longer fails its first
+  frame with `internal.replay_evidence` once the selector resolves to the
+  complete interface identity.
+- TCP connect scans wait for native connect admission held by cancelled or
+  finishing attempts instead of failing with `io.tcp_connect_capacity`.
+- Linux routes multicast destinations instead of reporting
+  `io.route_not_found`, and reports an unassigned preferred source or a vanished
+  interface hint as macOS and Windows do. macOS reads the interface netmasks XNU
+  trims (addresses were reported as /32 and /128) and reports a missing route
+  as `io.route_not_found`. Capture filters receive their BPF netmask in host
+  byte order, so `ip broadcast` matches directed broadcasts.
+- ARP and NDP resolution accepts replies on the same VLAN whatever their
+  priority or drop-eligible markings.
+- Capture sources publish `overflow_policy` as `drop_newest` and
+  `drop_oldest`, the spellings the v6 schema requires.
+- Generated capture output and `read` or `replay` format rejections no longer
+  leave an empty gzip or zstd container on stdout.
+- `merge`, `rewrite`, and replay PCAPNG output are bounded by the capture-wide
+  interface ceiling rather than the per-section `--max-interfaces`.
+- Parse-error documents name the command when `--resource-preset` precedes it,
+  an unwritable NDJSON parse-error record reports its write failure once, and
+  input, follow, generated documentation, send output, and capture consumer
+  failures keep their underlying I/O causes.
+- `--version` of Layer 2 and Layer 3-only builds lists `native-route`.
+- TLS ALPN text escapes the wire octets instead of the UTF-8 of U+FFFD for
+  names that are not UTF-8, in layers and session summaries, and supported
+  group 0x0013 is named `secp192r1`.
+- Linux cooked captures whose link addresses exceed the 8-byte slot (IPoIB)
+  dissect and rebuild byte-exactly; BSD NULL and LOOP families numbered 4 or 6
+  no longer select IPv4 or IPv6; PPPoE stage codes are checked under GRE and
+  SNAP parents; and a raw IPv6 option-header Next Header stays raw when built.
+- HTTP analysis reports header-count and start-line limits as `limit`, pcapng
+  merge and map refuse the undefined packet direction instead of rewriting it,
+  export plans define every scope their incomplete datagram groups name, and
+  IPv6 fragment reassembly charges a replaced prefix copy at its admission
+  peak.
+- Packet expressions reject `bytes(...)` and `hex(...)` bodies without an
+  opening quote, a space in a field assignment path is named as such, and a
+  hand-built malformed layer naming `IPv4` in another case meets the same
+  destination guard as `ipv4`.
+- Target selection reports the 100000-candidate budget when a network overruns
+  it, instead of the remainder.
+- The root and `dissect` help examples decode without diagnostics,
+  `--decode-as` help and README list every accepted protocol, and flags without
+  help text gained descriptions.
+- The YAML packet-document fuzz seed is a valid packet/v2 document, the release
+  archive verifier requires the rewrite v2 schema, and CONTRIBUTING and
+  CODEOWNERS name current paths.
+- DNS reports RCODE 11 as `dso_type_not_implemented` instead of `unknown`.
+  `decode.unknown_binding` and `decode.missing_codec` diagnostics carry their
+  `layer`. Scan pipeline refusals name the bound that failed, and TLS, UDP
+  encapsulation-port, VXLAN, Geneve, resolved-address-limit,
+  destination-constraint-count, and document-limit messages or remediations
+  name what is actually at fault.
+- `builtin::registry_with_tls_ports` refuses port 0, TCP's raw-fallback
+  discriminator. On Windows, an Npcap runtime without `pcap_free_tstamp_types`
+  reports timestamp selection as unsupported instead of leaking the listed
+  types.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

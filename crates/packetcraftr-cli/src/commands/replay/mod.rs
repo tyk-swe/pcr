@@ -38,7 +38,6 @@ struct ReplayRun {
     clock: packetcraftr::clock::CancellableClock,
     selector: selection::Selector,
     requested_interface: Option<net::interface::Id>,
-    max_interfaces: usize,
 }
 
 pub(super) fn run(
@@ -50,7 +49,6 @@ pub(super) fn run(
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.selector.filter.is_some();
     let requested_interface = prepared.requested_interface.clone();
-    let max_interfaces = prepared.max_interfaces;
     let run = rendering::Run {
         reader: &mut prepared.reader,
         options: &prepared.options,
@@ -67,7 +65,6 @@ pub(super) fn run(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::Pcap,
-                max_interfaces,
                 compression: arguments.compression,
             },
         ),
@@ -75,7 +72,6 @@ pub(super) fn run(
             run,
             rendering::CaptureSettings {
                 format: capture::Format::PcapNg,
-                max_interfaces,
                 compression: arguments.compression,
             },
         ),
@@ -186,6 +182,5 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
             fallback: requested_interface.is_some(),
         },
         requested_interface,
-        max_interfaces: arguments.reader.max_interfaces,
     })
 }

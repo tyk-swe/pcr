@@ -9,8 +9,8 @@ pub(crate) struct ApplicationLimitsArgs {
     /// streams over the whole run.
     #[arg(long, default_value_t = Limits::default().max_messages)]
     pub(crate) max_application_messages: usize,
-    /// Distinct transport streams the collector may track at once (TCP
-    /// conversations; DNS also counts UDP flows).
+    /// Distinct transport streams the collector may track over the whole run,
+    /// closed streams included (TCP conversations; DNS also counts UDP flows).
     #[arg(long, default_value_t = Limits::default().max_streams)]
     pub(crate) max_application_streams: usize,
     /// Bytes buffered at once across all in-flight message parses (partial

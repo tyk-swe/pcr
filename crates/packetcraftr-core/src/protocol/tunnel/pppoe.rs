@@ -264,6 +264,14 @@ fn validate_parent_stage(
             parent
                 .field("ether_type")
                 .or_else(|| parent.field("protocol"))
+                // GRE and SNAP carry the same EtherType under their own names;
+                // SNAP only when its OUI selects the EtherType space.
+                .or_else(|| parent.field("protocol_type"))
+                .or_else(|| {
+                    (parent.field("oui") == Some(FieldValue::Unsigned(0)))
+                        .then(|| parent.field("protocol_id"))
+                        .flatten()
+                })
         });
     let disagrees = match &parent_ether_type {
         Some(FieldValue::Unsigned(value @ (0x8863 | 0x8864))) => *value != expected_ether_type,

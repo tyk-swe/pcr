@@ -118,6 +118,18 @@ fn parse_option_chain(options: &[u8]) -> Option<OptionChain> {
     Some(chain)
 }
 
+/// The first fixed-header reserved field holding a non-zero value, which a
+/// reserved-bits diagnostic names.
+fn nonzero_reserved_field(reserved1: u8, reserved2: u8) -> Option<&'static str> {
+    if reserved1 != 0 {
+        Some("reserved1")
+    } else if reserved2 != 0 {
+        Some("reserved2")
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GeneveCodec;
 
@@ -206,13 +218,13 @@ impl LayerCodec for GeneveCodec {
         let options = input.slice_ref(option_bytes);
 
         let mut diagnostics = Vec::new();
-        if reserved1 != 0 || reserved2 != 0 {
+        if let Some(field) = nonzero_reserved_field(reserved1, reserved2) {
             diagnostics.push(
                 Diagnostic::warning(
                     "decode.geneve_reserved",
                     "GENEVE reserved bits are non-zero",
                 )
-                .at_field("reserved1"),
+                .at_field(field),
             );
         }
         match parse_option_chain(&options) {
@@ -307,11 +319,11 @@ fn validate_geneve(
             &mut diagnostics,
         )?;
     }
-    if layer.reserved1 != 0 || layer.reserved2 != 0 {
+    if let Some(field) = nonzero_reserved_field(layer.reserved1, layer.reserved2) {
         strict_or_diagnostic(
             NAME,
             "build.geneve_reserved",
-            "reserved1",
+            field,
             "GENEVE reserved fields must be zero on transmission",
             context,
             &mut diagnostics,
@@ -582,6 +594,32 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("only 7 remain"));
+    }
+
+    #[test]
+    fn reserved_diagnostics_name_the_nonzero_field() {
+        let reserved_fields = |diagnostics: &[Diagnostic]| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code.ends_with(".geneve_reserved"))
+                .filter_map(|diagnostic| diagnostic.field)
+                .collect::<Vec<_>>()
+        };
+        for (reserved1, reserved2, expected) in [
+            (0, 1, "reserved2"),
+            (1, 0, "reserved1"),
+            (1, 1, "reserved1"),
+        ] {
+            let layer = Geneve {
+                reserved1,
+                reserved2,
+                ..Geneve::default()
+            };
+            let encoded = encode(&layer, crate::codec::Mode::Permissive, 8).unwrap();
+            assert_eq!(reserved_fields(&encoded.diagnostics), [expected]);
+            let decoded = decode(&encoded.prefix).unwrap();
+            assert_eq!(reserved_fields(&decoded.diagnostics), [expected]);
+        }
     }
 
     #[test]

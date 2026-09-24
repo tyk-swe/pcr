@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{FieldValue, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Layer, reflect_get, reflective_layer},
     registry::Discriminator,
 };
 
@@ -100,7 +100,7 @@ where
     let expectation = expected_discriminator(name, context, 59_u8, next_header);
     let mut diagnostics = Vec::new();
     validate_auto_raw_discriminator(name, "next_header", next_header, context, &mut diagnostics)?;
-    let (next, _) = resolve_u8(
+    let (next, materialized_next) = resolve_u8(
         name,
         "next_header",
         next_header,
@@ -131,7 +131,8 @@ where
     prefix.extend_from_slice(options);
     prefix.resize(header_len, 0);
     let mut materialized = layer.clone_box();
-    materialized.set_field("next_header", FieldValue::Unsigned(u64::from(next)))?;
+    // A raw value stays raw, as every other codec keeps its discriminator.
+    materialized.set_field("next_header", reflect_get(&materialized_next))?;
     // `prefix` was resized to `header_len`, which is the option length plus the two-byte fixed
     // header rounded up to an eight-byte boundary
     let padded_options = Bytes::copy_from_slice(&prefix[2..header_len]);

@@ -171,8 +171,16 @@ fn version_is_available_without_network_access() {
         version.contains("native features:"),
         "missing native feature line in:\n{version}"
     );
+    // Layer 2 and Layer 3 providers compile route lookup in, so both report it.
     for (name, enabled) in [
-        ("native-route", cfg!(feature = "native-route")),
+        (
+            "native-route",
+            cfg!(any(
+                feature = "native-route",
+                feature = "native-layer2",
+                feature = "native-layer3"
+            )),
+        ),
         ("native-layer2", cfg!(feature = "native-layer2")),
         ("native-layer3", cfg!(feature = "native-layer3")),
     ] {
@@ -384,6 +392,32 @@ fn root_help_publishes_every_documented_exit_code() {
     assert_eq!(codes, ["0", "1", "2", "3", "4", "5", "6", "70", "130"]);
 }
 
+/// A help example that dissects inline bytes is copied verbatim by users, so
+/// it has to decode cleanly.
+#[test]
+fn inline_dissect_help_examples_decode_without_diagnostics() {
+    for help in [&["--help"][..], &["dissect", "--help"]] {
+        let stdout = String::from_utf8(run_success(help).stdout).expect("help is UTF-8");
+        let examples = stdout
+            .lines()
+            .filter(|line| line.trim_start().starts_with("packetcraftr ") && line.contains("--hex"))
+            .collect::<Vec<_>>();
+        assert!(!examples.is_empty(), "{help:?} has no inline example");
+        for example in examples {
+            let mut arguments = example
+                .split_whitespace()
+                .skip(1)
+                .map(|argument| argument.trim_matches('\''))
+                .collect::<Vec<_>>();
+            if !arguments.contains(&"--output") {
+                arguments.splice(0..0, ["--output", "json"]);
+            }
+            let document = parse_json(&run_success(&arguments));
+            assert_eq!(document["diagnostics"], serde_json::json!([]), "{example}");
+        }
+    }
+}
+
 #[test]
 fn human_runtime_errors_include_actionable_classification_and_help() {
     let expected = concat!(
@@ -432,6 +466,35 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
     assert_eq!(value["command"], "protocols");
     assert_eq!(value["sequence"], 0);
     assert_eq!(value["error"]["kind"], "cli");
+}
+
+// The write-failure case sinks stdout into /dev/full; the package build script
+// enables the gate on targets that provide it.
+#[cfg(packetcraftr_test_dev_full)]
+#[test]
+fn unwritable_parse_error_record_reports_the_write_failure_once() {
+    common::require_dev_full();
+    let failure = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--output", "ndjson", "not-a-command"])
+        .stdout(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .expect("/dev/full must be writable for the write-failure contract"),
+        )
+        .output()
+        .expect("CLI process must start");
+    assert_eq!(failure.status.code(), Some(5), "{failure:?}");
+    let stderr = String::from_utf8(failure.stderr).expect("stderr is UTF-8");
+    assert!(
+        stderr.starts_with("error[io.stdout]: NDJSON stream is incomplete: "),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr.matches("NDJSON stream is incomplete").count(),
+        1,
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -863,8 +926,12 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         assert_eq!(output.status.code(), Some(5), "{arguments:?}");
         let error = parse_json(&output)["error"].clone();
         assert_eq!(error["code"], "io.runtime", "{arguments:?}");
+        let message = error["message"].as_str().unwrap();
+        assert!(message.starts_with("open "), "{arguments:?}: {error}");
+        // The operating-system cause is kept as a cause, not only as text.
+        let causes = error["causes"].as_array().unwrap();
         assert!(
-            error["message"].as_str().unwrap().starts_with("open "),
+            matches!(&causes[..], [cause] if message.ends_with(cause.as_str().unwrap())),
             "{arguments:?}: {error}"
         );
     }

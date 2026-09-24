@@ -17,19 +17,24 @@ pub(crate) fn write_capture_file(
     frames: impl IntoIterator<Item = Frame>,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
-    let stdout = io::stdout();
-    let mut stdout = compression.writer(stdout.lock())?;
-    write_capture_file_with(format, frames, tempfile::tempfile, &mut stdout)?;
+    let stdout = write_capture_file_with(format, frames, tempfile::tempfile, || {
+        compression.writer(io::stdout().lock())
+    })?;
     drop(stdout.finish().map_err(CliError::classified)?);
     Ok(())
 }
 
-fn write_capture_file_with<S: Read + Write + Seek>(
+/// Encodes every frame into a spool and opens the destination only once the
+/// whole capture has encoded, so a failure leaves the destination untouched.
+///
+/// Opening it earlier is not enough: dropping an unfinished gzip compressor
+/// still writes a complete, empty container.
+fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     format: Format,
     frames: impl IntoIterator<Item = Frame>,
     create_spool: impl FnOnce() -> io::Result<S>,
-    destination: &mut dyn Write,
-) -> Result<(), CliError> {
+    open_destination: impl FnOnce() -> Result<D, CliError>,
+) -> Result<D, CliError> {
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
@@ -54,7 +59,9 @@ fn write_capture_file_with<S: Read + Write + Seek>(
     spool
         .seek(SeekFrom::Start(0))
         .map_err(|source| capture_io_error("rewind temporary capture output failed", source))?;
-    copy_spool(&mut spool, destination)
+    let mut destination = open_destination()?;
+    copy_spool(&mut spool, &mut destination)?;
+    Ok(destination)
 }
 
 fn copy_spool(spool: &mut dyn Read, destination: &mut dyn Write) -> Result<(), CliError> {
@@ -80,10 +87,7 @@ fn initialize_error(source: CaptureError) -> CliError {
         CaptureError::Io(source) => {
             capture_io_error("initialize temporary capture output failed", source)
         }
-        source => CliError::new(
-            Kind::Io,
-            format!("initialize capture output failed: {source}"),
-        ),
+        source => CliError::classified(source),
     }
 }
 
@@ -92,7 +96,7 @@ fn write_error(source: CaptureError) -> CliError {
         CaptureError::Io(source) => {
             capture_io_error("write temporary capture output failed", source)
         }
-        source => CliError::new(Kind::Io, format!("write capture output failed: {source}")),
+        source => CliError::classified(source),
     }
 }
 

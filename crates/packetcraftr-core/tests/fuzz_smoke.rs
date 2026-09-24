@@ -76,6 +76,32 @@ fn smoke_test_json_packet_documents() {
     assert!(checked > 0, "corpus must contain seed inputs");
 }
 
+/// Every checked-in YAML seed parses under the fuzz target's limits, so a
+/// campaign starts from valid documents rather than only from mutations.
+#[test]
+fn yaml_packet_document_seeds_parse_under_the_fuzz_limits() {
+    let mut checked = 0_usize;
+    for entry in fs::read_dir(corpus("packet_document_yaml"))
+        .expect("corpus directory")
+        .flatten()
+    {
+        let path = entry.path();
+        let text = fs::read_to_string(&path).expect("read YAML seed");
+        DocPacket::parse_with_limits(
+            &text,
+            Format::Yaml,
+            &DocumentLimits {
+                max_input_bytes: 64 * 1024,
+                max_layers: 32,
+                ..DocumentLimits::DEFAULT
+            },
+        )
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        checked += 1;
+    }
+    assert!(checked > 0, "corpus must contain seed inputs");
+}
+
 #[test]
 fn smoke_test_ip_reassembly_seeds_reach_completion_and_overlap() {
     let corpus_dir = corpus("ip_reassembly");

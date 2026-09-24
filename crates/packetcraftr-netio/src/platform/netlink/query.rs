@@ -35,11 +35,18 @@ pub(super) async fn query_route(
 ) -> Result<Decision, SystemError> {
     let message = route_request(destination, interface_hint.as_ref(), preferred_source);
     let mut replies = handle.route().get(message).execute();
-    let reply = replies
-        .try_next()
-        .await
-        .map_err(|error| route_lookup_error(destination, error))?
-        .ok_or(SystemError::RouteNotFound { destination })?;
+    let reply = match replies.try_next().await {
+        Ok(reply) => reply.ok_or(SystemError::RouteNotFound { destination })?,
+        Err(error) => {
+            let unowned_source = unowned_preferred_source(&handle, preferred_source, &error).await;
+            return Err(refine_route_lookup_error(
+                destination,
+                interface_hint.as_ref(),
+                unowned_source,
+                error,
+            ));
+        }
+    };
 
     let mut output_index = None;
     let mut selected_source = None;
@@ -112,6 +119,57 @@ pub(super) async fn query_route(
     )
 }
 
+fn netlink_errno(error: &rtnetlink::Error) -> Option<i32> {
+    match error {
+        rtnetlink::Error::NetlinkError(reply) => reply.raw_code().checked_abs(),
+        _ => None,
+    }
+}
+
+/// The kernel refuses an IPv4 lookup whose preferred source no interface owns
+/// with ENETUNREACH (EINVAL for a source that can never be local), which would
+/// otherwise read as a missing route. Returns that source when a local-address
+/// query confirms nothing owns it.
+async fn unowned_preferred_source(
+    handle: &Handle,
+    preferred_source: Option<IpAddr>,
+    error: &rtnetlink::Error,
+) -> Option<IpAddr> {
+    let source = preferred_source?;
+    if !matches!(netlink_errno(error), Some(libc::ENETUNREACH | libc::EINVAL)) {
+        return None;
+    }
+    let local = query_local_addresses(handle).await.ok()?;
+    (!local.contains(&source)).then_some(source)
+}
+
+/// Reports a failed lookup the way the other targets do: an unowned preferred
+/// source as `SourceUnavailable` and a vanished hinted interface as
+/// `InterfaceNotFound`, before the generic errno translation.
+fn refine_route_lookup_error(
+    destination: IpAddr,
+    interface_hint: Option<&InterfaceId>,
+    unowned_source: Option<IpAddr>,
+    error: rtnetlink::Error,
+) -> SystemError {
+    if let Some(preferred_source) = unowned_source {
+        return SystemError::SourceUnavailable {
+            preferred_source,
+            interface: interface_hint
+                .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
+        };
+    }
+    if let Some(hint) = interface_hint
+        && netlink_errno(&error) == Some(libc::ENODEV)
+    {
+        return SystemError::InterfaceNotFound {
+            name: hint.name.clone(),
+            index: hint.index,
+        };
+    }
+    route_lookup_error(destination, error)
+}
+
 /// Reports the kernel's "no route" errnos as `RouteNotFound`, so an
 /// unreachable destination classifies as `io.route_not_found` on every target.
 fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemError {
@@ -121,12 +179,7 @@ fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemErr
         libc::ENOENT,
         libc::ESRCH,
     ];
-    if let rtnetlink::Error::NetlinkError(reply) = &error
-        && reply
-            .raw_code()
-            .checked_abs()
-            .is_some_and(|errno| NO_ROUTE.contains(&errno))
-    {
+    if netlink_errno(&error).is_some_and(|errno| NO_ROUTE.contains(&errno)) {
         return SystemError::RouteNotFound { destination };
     }
     os_error("RTM_GETROUTE", error)
@@ -155,7 +208,9 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
     match kind {
         RouteType::Local => Some(SelectionReason::Local),
         RouteType::Broadcast => Some(SelectionReason::Broadcast),
-        RouteType::Unicast | RouteType::Anycast => Some({
+        // The kernel answers a multicast destination with RTN_MULTICAST and
+        // the output interface the group is sent on.
+        RouteType::Unicast | RouteType::Anycast | RouteType::Multicast => Some({
             if has_next_hop {
                 SelectionReason::Gateway
             } else {
@@ -508,6 +563,48 @@ mod tests {
     }
 
     #[test]
+    fn lookup_failures_name_an_unowned_source_or_a_vanished_hint() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let source = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 99));
+        let hint = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 9,
+        };
+        assert!(matches!(
+            refine_route_lookup_error(
+                destination,
+                None,
+                Some(source),
+                netlink_error(-libc::ENETUNREACH)
+            ),
+            SystemError::SourceUnavailable { preferred_source, ref interface }
+                if preferred_source == source && interface == "any interface"
+        ));
+        assert!(matches!(
+            refine_route_lookup_error(
+                destination,
+                Some(&hint),
+                Some(source),
+                netlink_error(-libc::ENETUNREACH)
+            ),
+            SystemError::SourceUnavailable { ref interface, .. } if interface == "fixture0"
+        ));
+        assert!(matches!(
+            refine_route_lookup_error(
+                destination,
+                Some(&hint),
+                None,
+                netlink_error(-libc::ENODEV)
+            ),
+            SystemError::InterfaceNotFound { ref name, index: 9 } if name == "fixture0"
+        ));
+        assert!(matches!(
+            refine_route_lookup_error(destination, None, None, netlink_error(-libc::ENETUNREACH)),
+            SystemError::RouteNotFound { .. }
+        ));
+    }
+
+    #[test]
     fn linux_route_type_preserves_broadcast_before_native_normalization() {
         assert_eq!(
             route_selection_reason(&RouteType::Broadcast, false),
@@ -521,5 +618,10 @@ mod tests {
             route_selection_reason(&RouteType::Unicast, true),
             Some(SelectionReason::Gateway)
         );
+        assert_eq!(
+            route_selection_reason(&RouteType::Multicast, false),
+            Some(SelectionReason::OnLink)
+        );
+        assert_eq!(route_selection_reason(&RouteType::Unreachable, false), None);
     }
 }

@@ -392,6 +392,32 @@ fn root_help_publishes_every_documented_exit_code() {
     assert_eq!(codes, ["0", "1", "2", "3", "4", "5", "6", "70", "130"]);
 }
 
+/// A help example that dissects inline bytes is copied verbatim by users, so
+/// it has to decode cleanly.
+#[test]
+fn inline_dissect_help_examples_decode_without_diagnostics() {
+    for help in [&["--help"][..], &["dissect", "--help"]] {
+        let stdout = String::from_utf8(run_success(help).stdout).expect("help is UTF-8");
+        let examples = stdout
+            .lines()
+            .filter(|line| line.trim_start().starts_with("packetcraftr ") && line.contains("--hex"))
+            .collect::<Vec<_>>();
+        assert!(!examples.is_empty(), "{help:?} has no inline example");
+        for example in examples {
+            let mut arguments = example
+                .split_whitespace()
+                .skip(1)
+                .map(|argument| argument.trim_matches('\''))
+                .collect::<Vec<_>>();
+            if !arguments.contains(&"--output") {
+                arguments.splice(0..0, ["--output", "json"]);
+            }
+            let document = parse_json(&run_success(&arguments));
+            assert_eq!(document["diagnostics"], serde_json::json!([]), "{example}");
+        }
+    }
+}
+
 #[test]
 fn human_runtime_errors_include_actionable_classification_and_help() {
     let expected = concat!(

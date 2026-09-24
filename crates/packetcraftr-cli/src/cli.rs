@@ -23,11 +23,11 @@ const ROOT_HELP_FORMATS: &str = r"Output formats:
 
 Output availability is command-specific. Machine formats never contain terminal colour codes.";
 
-const ROOT_HELP_EXAMPLES: &str = r"The word after the code is the `error.kind` of the same failure in JSON and NDJSON output.
+const ROOT_HELP_EXAMPLES: &str = r"For codes 2 through 70, the word after the code is the `error.kind` of the same failure in JSON and NDJSON output; a cancellation reports kind `io`.
 
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
-  packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
+  packetcraftr --output json dissect --link-type 228 --hex '4500001c0000000040018eaac0000201c63364020800f7ff00000000'
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples.";

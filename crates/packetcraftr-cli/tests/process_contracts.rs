@@ -926,8 +926,12 @@ fn missing_input_file_reports_the_same_io_failure_for_every_reader() {
         assert_eq!(output.status.code(), Some(5), "{arguments:?}");
         let error = parse_json(&output)["error"].clone();
         assert_eq!(error["code"], "io.runtime", "{arguments:?}");
+        let message = error["message"].as_str().unwrap();
+        assert!(message.starts_with("open "), "{arguments:?}: {error}");
+        // The operating-system cause is kept as a cause, not only as text.
+        let causes = error["causes"].as_array().unwrap();
         assert!(
-            error["message"].as_str().unwrap().starts_with("open "),
+            matches!(&causes[..], [cause] if message.ends_with(cause.as_str().unwrap())),
             "{arguments:?}: {error}"
         );
     }

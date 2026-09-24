@@ -286,20 +286,33 @@ pub(crate) fn read_bounded_file_allow_empty(
 
 fn open_file(path: &Path) -> Result<File, CliError> {
     File::open(path).map_err(|source| {
-        CliError::new(
+        CliError::caused(
             Kind::Io,
-            format!("open {} failed: {source}", path.display()),
+            &FileIo {
+                operation: "open",
+                path: path.to_owned(),
+                source,
+            },
         )
     })
 }
 
-/// A file operation on a document path, retaining the I/O source so the
+/// A file operation on an input path, retaining the I/O source so the
 /// published error names the file and keeps its cause chain.
 #[derive(Debug, thiserror::Error)]
 #[error("{operation} {} failed: {source}", .path.display())]
-struct DocumentIo {
+struct FileIo {
     operation: &'static str,
     path: PathBuf,
+    #[source]
+    source: io::Error,
+}
+
+/// A failed read of bounded packet or frame input, retaining the I/O source.
+#[derive(Debug, thiserror::Error)]
+#[error("read {label} input failed: {source}")]
+struct InputRead {
+    label: &'static str,
     #[source]
     source: io::Error,
 }
@@ -316,7 +329,7 @@ pub(crate) fn read_bounded_json_document(
         move |source: io::Error| {
             CliError::caused(
                 Kind::Io,
-                &DocumentIo {
+                &FileIo {
                     operation,
                     path: path.to_owned(),
                     source,
@@ -481,9 +494,12 @@ fn read_bounded_allow_empty(
         .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| {
-            CliError::new(
+            CliError::caused(
                 Kind::Io,
-                format!("read {} input failed: {source}", kind.label()),
+                &InputRead {
+                    label: kind.label(),
+                    source,
+                },
             )
         })?;
     if bytes.len() > max_bytes {
@@ -611,6 +627,11 @@ mod tests {
                 required.message.to_lowercase().contains("broken pipe"),
                 "{}",
                 required.message
+            );
+            assert!(
+                matches!(&required.causes[..], [cause] if cause.to_lowercase().contains("broken pipe")),
+                "{:?}",
+                required.causes
             );
 
             let optional = read_bounded_allow_empty(BrokenReader { delivered: false }, 64, kind)

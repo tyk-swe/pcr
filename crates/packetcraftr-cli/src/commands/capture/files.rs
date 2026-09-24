@@ -111,6 +111,8 @@ pub(super) enum Error {
     FrameTooLarge { required: u64, limit: u64 },
     #[error("capture rotation counters overflowed")]
     Counters,
+    #[error("capture rotation elapsed time regressed")]
+    ElapsedRegressed,
     #[error("capture file sink has no initialized source metadata")]
     State,
 }
@@ -126,7 +128,7 @@ impl Classified for Error {
             Self::FrameTooLarge { .. } => {
                 Classification::new("policy.capture_file_bytes", Kind::Policy, None)
             }
-            Self::State | Self::Counters => {
+            Self::State | Self::Counters | Self::ElapsedRegressed => {
                 Classification::new("internal.capture_files", Kind::Internal, None)
             }
         }
@@ -235,7 +237,7 @@ impl Files {
             return Ok(packetcraftr::capture::Control::StopBefore);
         }
         if elapsed < self.last_elapsed {
-            return Err(Error::Invalid("rotation elapsed time regressed"));
+            return Err(Error::ElapsedRegressed);
         }
         self.last_elapsed = elapsed;
         let (next_frames, next_bytes) =
@@ -615,6 +617,22 @@ mod tests {
         );
         assert_eq!(read_file(&report.files[0])[0].bytes(), frame(3).bytes());
         assert_eq!(read_file(&report.files[1])[0].bytes(), frame(4).bytes());
+    }
+    /// Elapsed time comes from the capture engine's monotonic clock, so a
+    /// regression is a broken invariant rather than a usage error.
+    #[test]
+    fn elapsed_time_regression_is_an_internal_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut options = options(directory.path().join("clock.pcapng"), Compression::None);
+        options.rotate_after = Some(Duration::from_millis(10));
+        let mut files = Files::new(options, limits()).unwrap();
+        files.initialize(sources()).unwrap();
+        files.write(&frame(1), 1, Duration::from_millis(5)).unwrap();
+        let error = files
+            .write(&frame(2), 2, Duration::from_millis(4))
+            .expect_err("elapsed time regressed");
+        assert_eq!(error.classification().code, "internal.capture_files");
+        assert_eq!(error.classification().kind, Kind::Internal);
     }
     #[test]
     fn preexisting_files_and_impossible_metadata_budgets_are_never_overwritten() {

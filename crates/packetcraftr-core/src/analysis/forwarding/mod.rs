@@ -223,9 +223,10 @@ impl Rules {
     ///
     /// `identity` must hold at least one field and at most the projection
     /// column limit. Identity and preservation fields may not name
-    /// capture-local positions (`frame.number`, `frame.interface_id`,
-    /// `frame.time_epoch`, `tcp.stream`, `udp.stream`), because those
-    /// describe where a packet sat in one capture, not what it carried.
+    /// capture-local fields (`frame.number`, `frame.interface_id`,
+    /// `frame.time_epoch`, `frame.cap_len`, `frame.link_type`, `tcp.stream`,
+    /// `udp.stream`), because those describe how one capture recorded a
+    /// packet, not what it carried.
     /// Expectations use the existing field-path/literal syntax as
     /// `FIELD=VALUE` and are evaluated on every selected egress observation.
     ///

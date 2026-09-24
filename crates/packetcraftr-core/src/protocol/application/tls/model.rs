@@ -19,7 +19,8 @@ pub const MAX_CIPHER_SUITES: usize = 512;
 pub const MAX_EXTENSIONS: usize = 64;
 pub const MAX_EXTENSION_LEN: usize = 16 * 1024;
 pub const MAX_ALPN: usize = 32;
-/// Largest server name accepted, per RFC 6066's host_name limit.
+/// Largest server name accepted. RFC 6066 lets `HostName` run to 2^16-1
+/// bytes; the 255-byte cap is the DNS name limit (RFC 1035 section 2.3.4).
 pub const MAX_SNI_LEN: usize = 255;
 /// Largest session identifier accepted, per RFC 8446.
 pub const MAX_SESSION_ID_LEN: usize = 32;

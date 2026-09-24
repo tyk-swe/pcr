@@ -32,10 +32,11 @@ pub(in crate::analysis::pcap) fn timestamp_from_ticks(
     };
     let (whole_seconds, nanoseconds) = match ticks_per_second {
         Some(exact_ticks_per_second) => {
+            // `checked_pow`/`checked_shl` return `Some` only for a power that
+            // fits in u128, which is never zero, so every division below is
+            // defined.
             let wide_ticks = u128::from(ticks);
-            // `checked_pow`/`checked_shl` yield `Some` only for a non-zero divisor
             let whole_seconds = wide_ticks / exact_ticks_per_second;
-            // `checked_pow`/`checked_shl` yield `Some` only for a non-zero divisor
             let remainder = wide_ticks % exact_ticks_per_second;
             let scaled = remainder
                 .checked_mul(1_000_000_000)
@@ -48,7 +49,6 @@ pub(in crate::analysis::pcap) fn timestamp_from_ticks(
             }
             // scaled is a sub-second remainder scaled by one billion, so the quotient is below one
             // billion and fits u32
-            // `checked_pow`/`checked_shl` yield `Some` only for a non-zero divisor
             let nanoseconds = (scaled / exact_ticks_per_second) as u32;
             (whole_seconds, nanoseconds)
         }

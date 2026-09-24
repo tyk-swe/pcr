@@ -94,8 +94,10 @@ const NAMED_GROUPS: &[(u16, &str)] = &[
     (0x6399, "X25519Kyber768Draft00"),
 ];
 
-/// Protocol versions, including the SSL versions a plausibility gate may still
-/// see and the DTLS versions that share the registry.
+/// Protocol versions as hello version fields carry them. Unlike the record
+/// header (floor `0x0300`) those fields are not range-checked, so SSL 2.0 is
+/// named at its SSLv2 wire value `0x0002`, not the `0x0200` JA4 codes as `s2`;
+/// the DTLS versions share the registry.
 const VERSIONS: &[(u16, &str)] = &[
     (0x0002, "SSL 2.0"),
     (0x0300, "SSL 3.0"),

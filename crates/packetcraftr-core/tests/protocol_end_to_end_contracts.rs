@@ -587,6 +587,51 @@ fn link_capture_and_raw_ip_roots_round_trip() {
     }
 }
 
+/// A permissive raw Next Header is emitted verbatim and stays raw in the built
+/// packet, as every other codec keeps a raw discriminator.
+#[test]
+fn ipv6_option_headers_keep_a_raw_next_header_raw() {
+    for raw_first in [true, false] {
+        let mut packet = Packet::new();
+        packet.push(ipv6("2001:db8::1", "2001:db8::2"));
+        let raw = WireValue::Raw(Bytes::from_static(&[59]));
+        if raw_first {
+            packet.push(HopByHop {
+                next_header: raw.clone(),
+                ..HopByHop::default()
+            });
+        } else {
+            packet.push(DestinationOptions {
+                next_header: raw.clone(),
+                ..DestinationOptions::default()
+            });
+        }
+        let built = build::Builder::new(rooted_registry("ipv6"))
+            .build(
+                packet,
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..build::Options::default()
+                },
+            )
+            .expect("a raw Next Header builds permissively");
+        let next_header = built
+            .packet
+            .iter()
+            .nth(1)
+            .and_then(|layer| layer.field("next_header"));
+        assert_eq!(
+            next_header,
+            Some(packetcraftr_core::field::FieldValue::Bytes(
+                Bytes::from_static(&[59])
+            )),
+            "raw_first={raw_first}"
+        );
+        assert_eq!(built.bytes[40], 59);
+    }
+}
+
 /// Trailing paddings list the innermost coverage boundary first, as dissection
 /// orders them, so each layer's declared length excludes exactly its outside bytes.
 #[test]

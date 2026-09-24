@@ -199,7 +199,8 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
         Vec::new(),
     )
 }
-fn check<R, N, I>(
+/// Checks the workflow operation and client cancellation signals and deadline.
+fn check_operation<R, N, I>(
     client: &Client<R, N, I>,
     deadline: Instant,
     cancellation: Option<&Cancellation>,
@@ -245,9 +246,9 @@ where
         .iter()
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
-    check(executor.client, deadline, cancellation.as_ref())?;
+    check_operation(executor.client, deadline, cancellation.as_ref())?;
     let mut plan = prepare::plan(executor, &planned, options, deadline, cancellation.as_ref())?;
-    check(executor.client, deadline, cancellation.as_ref())?;
+    check_operation(executor.client, deadline, cancellation.as_ref())?;
     let request = group::Request {
         interfaces: plan.interfaces.clone(),
         limits: executor.options.capture,
@@ -256,7 +257,7 @@ where
         native: Default::default(),
     };
     request.validate().map_err(BoundaryError::from_error)?;
-    check(executor.client, deadline, cancellation.as_ref())?;
+    check_operation(executor.client, deadline, cancellation.as_ref())?;
     let mut group = group::Group::arm(
         &executor.client.io,
         &request,
@@ -272,11 +273,11 @@ where
     let mut seen_order = VecDeque::new();
     let mut diagnostics = HashSet::new();
     let result = (|| -> Result<(), BoundaryError> {
-        check(executor.client, deadline, cancellation.as_ref())?;
+        check_operation(executor.client, deadline, cancellation.as_ref())?;
         group
             .wait_ready(deadline.saturating_duration_since(Instant::now()))
             .map_err(BoundaryError::from_error)?;
-        check(executor.client, deadline, cancellation.as_ref())?;
+        check_operation(executor.client, deadline, cancellation.as_ref())?;
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
@@ -296,7 +297,7 @@ where
         let mut capture_drain_remaining = capture_drain_limit;
         let mut draining_expired = HashSet::new();
         while next < batches.len() || !pending.is_empty() {
-            check(executor.client, deadline, cancellation.as_ref())?;
+            check_operation(executor.client, deadline, cancellation.as_ref())?;
             let now = Instant::now();
             let expired: Vec<_> = pending
                 .iter()
@@ -338,7 +339,7 @@ where
                     retained.saturating_add(probe.memory) <= options.max_prepared_bytes
                 })
             {
-                check(executor.client, deadline, cancellation.as_ref())?;
+                check_operation(executor.client, deadline, cancellation.as_ref())?;
                 let batch = &batches[next];
                 let probe = planned[next].probe;
                 failed_probe = Some(probe.clone());
@@ -358,12 +359,12 @@ where
                         "preserve the planned endpoint and identity",
                     ));
                 }
-                check(executor.client, deadline, cancellation.as_ref())?;
+                check_operation(executor.client, deadline, cancellation.as_ref())?;
                 stats.packets_attempted += 1;
                 let sent = Arc::new(
                     prepared
                         .transmit(&executor.client.io, || {
-                            check(executor.client, deadline, cancellation.as_ref())
+                            check_operation(executor.client, deadline, cancellation.as_ref())
                                 .map_err(PipelineSendError::Check)
                         })
                         .map_err(|error| match error {

@@ -68,7 +68,7 @@ where
         )
         .map_err(BoundaryError::from_error)?;
     for &Planned { probe, .. } in planned {
-        super::check(client, deadline, cancellation)?;
+        super::check_operation(client, deadline, cancellation)?;
         let packet = probe.packet();
         if !super::super::probe::sent_probe_matches(probe, &packet) {
             return Err(BoundaryError::from_error(super::super::profile::Error(
@@ -78,7 +78,7 @@ where
         let route = match routes.entry(probe.address) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                super::check(client, deadline, cancellation)?;
+                super::check_operation(client, deadline, cancellation)?;
                 let route = admission
                     .route(&packet, *entry.key())
                     .map_err(BoundaryError::from_error)?;
@@ -97,7 +97,7 @@ where
                 entry.insert(route)
             }
         };
-        super::check(client, deadline, cancellation)?;
+        super::check_operation(client, deadline, cancellation)?;
         let admitted = admission
             .admit_on(packet, route)
             .map_err(BoundaryError::from_error)?;

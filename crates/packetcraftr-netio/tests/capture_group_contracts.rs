@@ -340,6 +340,23 @@ fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_rea
     assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
 }
 #[test]
+fn cancellation_supersedes_a_readiness_failure_observed_at_the_boundary() {
+    let signal = Cancellation::default();
+    let provider = Provider::new(vec![Script {
+        ready_error: true,
+        cancel_on_ready: Some(signal.clone()),
+        ..Default::default()
+    }]);
+    let mut group = Group::arm(&provider, &request(1), Some(signal)).unwrap();
+    let error = group.wait_ready(Duration::from_secs(1)).unwrap_err();
+    assert!(
+        matches!(*error.cause, Cause::Configuration(net::Error::Cancelled(_))),
+        "an observed stop must report the typed interruption, not the readiness failure"
+    );
+    drop(group);
+    assert_eq!(provider.shutdowns[0].load(Ordering::SeqCst), 1);
+}
+#[test]
 fn an_empty_source_does_not_pretend_the_wait_or_capture_has_ended() {
     let provider = Provider::new(vec![Script::default(), Script::default()]);
     let mut group = Group::arm(&provider, &request(2), None).unwrap();

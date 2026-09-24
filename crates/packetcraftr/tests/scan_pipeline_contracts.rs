@@ -49,6 +49,7 @@ struct State {
     cancel_during_arm: Option<Cancellation>,
     cancel_during_ready: Option<Cancellation>,
     cancel_after_send: Option<(usize, Cancellation)>,
+    ready_error: bool,
 }
 #[derive(Clone)]
 struct Io(Arc<Mutex<State>>);
@@ -165,6 +166,11 @@ impl capture::Session for Capture {
         state.ready = true;
         if let Some(signal) = state.cancel_during_ready.take() {
             signal.cancel();
+        }
+        if state.ready_error {
+            return Err(net::Error::CaptureReadiness {
+                message: "fixture readiness failure".to_owned(),
+            });
         }
         Ok(())
     }
@@ -439,6 +445,27 @@ fn clock_cancellation_after_readiness_stops_before_the_first_send() {
     assert_eq!(error.classification().code, "io.cancelled");
     let state = state.lock().unwrap();
     assert!(state.ready);
+    assert_eq!(state.sends, 0);
+    assert_eq!(state.shutdowns, 1);
+}
+
+#[test]
+fn clock_cancellation_supersedes_a_capture_readiness_failure() {
+    let signal = Cancellation::default();
+    let state = Arc::new(Mutex::new(State {
+        cancel_during_ready: Some(signal.clone()),
+        ready_error: true,
+        ..Default::default()
+    }));
+    let error = execute_with_clock(
+        &request(),
+        state.clone(),
+        &mut packetcraftr::clock::CancellableClock(signal),
+    )
+    .expect_err("workflow cancellation must supersede the readiness failure");
+
+    assert_eq!(error.classification().code, "io.cancelled");
+    let state = state.lock().unwrap();
     assert_eq!(state.sends, 0);
     assert_eq!(state.shutdowns, 1);
 }

@@ -258,10 +258,14 @@ where
     };
     request.validate().map_err(BoundaryError::from_error)?;
     check_operation(executor.client, deadline, cancellation.as_ref())?;
+    // The armed capture observes both operation-stop signals: the embedder's
+    // client handle and this workflow's clock cancellation.
     let mut group = group::Group::arm(
         &executor.client.io,
         &request,
-        executor.client.cancellation.clone(),
+        [executor.client.cancellation.clone(), cancellation.clone()]
+            .into_iter()
+            .flatten(),
     )
     .map_err(BoundaryError::from_error)?;
     let mut stats = Stats::default();

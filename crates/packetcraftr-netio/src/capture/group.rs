@@ -200,13 +200,15 @@ pub struct Group<C: Session> {
     cursor: usize,
     ready: bool,
     closed: bool,
-    cancellation: Option<Cancellation>,
+    /// Every operation-stop signal the group observes; a caller may arm one
+    /// resource with more than one cooperative cancellation source.
+    cancellations: Vec<Cancellation>,
 }
 impl<C: Session> Group<C> {
     pub fn arm<P: Provider<Capture = C>>(
         provider: &P,
         request: &Request,
-        cancellation: Option<Cancellation>,
+        cancellations: impl IntoIterator<Item = Cancellation>,
     ) -> Result<Self, Error> {
         let requests = request.partition()?;
         let mut group = Self {
@@ -214,7 +216,7 @@ impl<C: Session> Group<C> {
             cursor: 0,
             ready: false,
             closed: false,
-            cancellation,
+            cancellations: cancellations.into_iter().collect(),
         };
         for (index, request) in requests.iter().enumerate() {
             if let Err(cause) = group.check_cancelled() {
@@ -223,6 +225,9 @@ impl<C: Session> Group<C> {
             let capture = match provider.arm_capture(request) {
                 Ok(capture) => capture,
                 Err(source) => {
+                    if let Err(cause) = group.check_cancelled() {
+                        return Err(group.fail(cause));
+                    }
                     return Err(group.fail(Cause::Provider(Failure {
                         index,
                         interface: request.interface.clone(),
@@ -339,6 +344,12 @@ impl<C: Session> Group<C> {
                 ))));
             };
             if let Err(source) = self.sources[index].capture.wait_ready(remaining) {
+                // An observed stop outranks a provider failure: a readiness
+                // wait that ran while cancelled reports the typed
+                // interruption, not a readiness error.
+                if let Err(cause) = self.check_cancelled() {
+                    return Err(self.fail(cause));
+                }
                 return Err(self.fail(Cause::Provider(self.failure(index, Phase::Ready, source))));
             }
             if Instant::now() > deadline {
@@ -483,12 +494,13 @@ impl<C: Session> Group<C> {
         }
     }
     fn check_cancelled(&self) -> Result<(), Cause> {
-        self.cancellation.as_ref().map_or(Ok(()), |signal| {
+        for signal in &self.cancellations {
             signal
                 .check()
                 .map_err(crate::Error::from)
-                .map_err(Cause::Configuration)
-        })
+                .map_err(Cause::Configuration)?;
+        }
+        Ok(())
     }
     fn fail(&mut self, cause: Cause) -> Error {
         let cleanup = self.shutdown_all();

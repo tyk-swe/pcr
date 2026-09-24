@@ -26,3 +26,7 @@ arming or readiness can therefore be followed by discovery or packet sends.
 
 - Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); automated
   code review is complete and the fix is ready for human review.
+- Follow-up review found readiness ignored an embedder's distinct workflow
+  signal: the capture group now observes every armed cancellation source, and
+  an observed stop supersedes a provider readiness failure with the typed
+  `io.cancelled` interruption.

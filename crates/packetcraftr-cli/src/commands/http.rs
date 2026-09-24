@@ -27,8 +27,9 @@ pub(crate) struct Args {
     /// Select a whole TCP conversation, using tcp:INDEX.
     #[arg(long)]
     pub(crate) stream: Option<String>,
-    /// Cleartext HTTP/1 ports; repeat to add services. Defaults: 80 and 8080.
-    #[arg(long = "http-port", default_values = ["80", "8080"])]
+    /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
+    /// 8080 are always inspected.
+    #[arg(long = "http-port")]
     pub(crate) http_ports: Vec<u16>,
     /// Maximum counted entity bytes in one message. Bodies are discarded.
     #[arg(long, default_value_t = 16 * 1024 * 1024)]

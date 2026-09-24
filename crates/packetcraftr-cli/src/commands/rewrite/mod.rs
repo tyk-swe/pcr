@@ -50,25 +50,34 @@ pub(crate) struct Args {
     /// creating or replacing the destination. Requires assignments only.
     #[arg(long)]
     pub(crate) dry_run: bool,
+    /// Replace the outer Ethernet source MAC address.
     #[arg(long, value_parser = rules::mac)]
     pub(crate) source_mac: Option<[u8; 6]>,
+    /// Replace the outer Ethernet destination MAC address.
     #[arg(long, value_parser = rules::mac)]
     pub(crate) destination_mac: Option<[u8; 6]>,
+    /// Replace the IP source address.
     #[arg(long)]
     pub(crate) source_ip: Option<IpAddr>,
+    /// Replace the IP destination address.
     #[arg(long)]
     pub(crate) destination_ip: Option<IpAddr>,
+    /// Replace the TCP or UDP source port.
     #[arg(long)]
     pub(crate) source_port: Option<u16>,
+    /// Replace the TCP or UDP destination port.
     #[arg(long)]
     pub(crate) destination_port: Option<u16>,
     /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
     #[arg(long = "vlan", value_parser = rules::vlan, conflicts_with = "strip_vlans")]
     pub(crate) vlans: Vec<VlanRewrite>,
+    /// Remove the outer VLAN stack.
     #[arg(long)]
     pub(crate) strip_vlans: bool,
+    /// Compression of the saved PCAPNG file.
     #[arg(long, value_enum, default_value_t = Compression::None)]
     pub(crate) compression: Compression,
+    /// Maximum rewrite run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000, value_parser = clap::value_parser!(u64).range(1..=3_600_000))]
     pub(crate) max_duration_ms: u64,
     #[command(flatten)]

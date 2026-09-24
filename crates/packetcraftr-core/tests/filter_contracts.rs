@@ -203,7 +203,13 @@ fn byte_and_mac_comparisons_accept_every_spelling_of_a_byte_run() {
             ("ethernet.source[1] == 7", true),
             ("ethernet.source[1] == 8", false),
             ("ipv4.source[0:2] == c0:00", true),
+            // Eight groups read as bytes, not as an uncompressed IPv6 address.
+            ("raw.bytes[0:8] == 47:45:54:20:2f:69:6e:64", true),
         ],
+    );
+    assert_filters(
+        &ipv6_tcp(),
+        &[("ipv6.src[0:8] == 20:01:0d:b8:00:00:00:00", true)],
     );
 }
 
@@ -216,6 +222,7 @@ fn contains_searches_byte_text_and_mac_haystacks() {
             ("raw.bytes contains \"INDEX\"", false),
             ("raw.bytes contains 47:45:54", true),
             ("raw.bytes contains 47:45:55", false),
+            ("raw.bytes contains 47:45:54:20:2f:69:6e:64", true),
             // An empty needle is contained by every haystack the path can read,
             // and by nothing the path cannot.
             ("raw.bytes contains \"\"", true),

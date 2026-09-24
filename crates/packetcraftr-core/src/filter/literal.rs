@@ -65,8 +65,9 @@ impl fmt::Display for Literal {
     }
 }
 
-/// Tries literal forms from most to least specific: `2001:db8::1` is IPv6
-/// before it is a MAC; `47:45:54:20` is bytes because it is neither.
+/// Tries literal forms from most to least specific. Two-digit hex groups form
+/// a byte run (a MAC at six groups) even at eight groups, where they could
+/// also spell an IPv6 address; `2001:db8::1` is not a run, so it is IPv6.
 pub(super) fn parse(word: &str) -> Option<Literal> {
     match word {
         "true" => return Some(Literal::Bool(true)),
@@ -87,14 +88,14 @@ pub(super) fn parse(word: &str) -> Option<Literal> {
     if let Ok(value) = word.parse::<Ipv4Addr>() {
         return Some(Literal::Ipv4(value));
     }
-    if let Ok(value) = word.parse::<Ipv6Addr>() {
-        return Some(Literal::Ipv6(value));
-    }
     if let Some(groups) = hex_groups(word) {
         return match <[u8; 6]>::try_from(groups.as_slice()) {
             Ok(mac) => Some(Literal::Mac(mac)),
             Err(_) => Some(Literal::Bytes(Bytes::from(groups))),
         };
+    }
+    if let Ok(value) = word.parse::<Ipv6Addr>() {
+        return Some(Literal::Ipv6(value));
     }
     if let Ok(value) = word.parse::<u64>() {
         return Some(Literal::Unsigned(value));
@@ -232,6 +233,28 @@ mod tests {
             Some(Literal::Unsigned(u64::MAX))
         );
         assert_eq!(parse("-42"), Some(Literal::Signed(-42)));
+    }
+
+    #[test]
+    fn eight_byte_runs_stay_bytes_while_other_ipv6_spellings_stay_addresses() {
+        // Eight two-digit groups also spell an uncompressed IPv6 address; the
+        // byte run wins so an 8-byte run reads like every other length.
+        assert_eq!(
+            parse("47:45:54:20:2f:69:6e:64"),
+            Some(Literal::Bytes(Bytes::from_static(b"GET /ind")))
+        );
+        for address in [
+            "::1",
+            "fe:80::1",
+            "1:2:3:4:5:6:7:8",
+            "2001:0db8:0000:0000:0000:0000:0000:0001",
+            "::ffff:192.0.2.1",
+        ] {
+            assert!(
+                matches!(parse(address), Some(Literal::Ipv6(_))),
+                "{address}"
+            );
+        }
     }
 
     #[test]

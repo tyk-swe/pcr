@@ -258,7 +258,8 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
 fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
     use packetcraftr_core::analysis;
 
-    let cases: [(fn() -> decode::Error, &str, Kind); 4] = [
+    type Case = (fn() -> decode::Error, &'static str, Kind);
+    let cases: [Case; 4] = [
         (
             || decode::Error::LayerLimit { limit: 64 },
             "policy.analysis_resource_limit",

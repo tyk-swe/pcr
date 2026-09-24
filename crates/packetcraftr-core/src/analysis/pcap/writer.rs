@@ -15,8 +15,8 @@ use super::model::{
     TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
-    select_interface, validate_new_interface, write_enhanced_packet, write_interface_description,
-    write_section_header,
+    interface_description_base_length, select_interface, validate_new_interface,
+    write_enhanced_packet, write_interface_description, write_section_header,
 };
 use super::wire::{
     PCAP_RECORD_HEADER_LEN, PCAPNG_OPTION_END, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
@@ -338,12 +338,7 @@ impl<W: Write> Writer<W> {
         options: &[super::PcapNgOption],
     ) -> Result<u32, Error> {
         self.ensure_output_available()?;
-        let base = if description.timestamp_offset == 0 {
-            32usize
-        } else {
-            44
-        };
-        let mut length = base;
+        let mut length = interface_description_base_length(description.timestamp_offset);
         for option in options {
             if matches!(
                 option.code,
@@ -355,14 +350,16 @@ impl<W: Write> Writer<W> {
                     reason: "custom interface options conflict with generated metadata or exceed wire length",
                 });
             }
-            length = length
-                .checked_add(4 + option.value.len().div_ceil(4) * 4)
-                .filter(|length| *length <= self.max_size)
-                .ok_or(Error::SizeLimitExceeded {
-                    kind: "interface description",
-                    declared: u64::MAX,
-                    limit: self.max_size,
-                })?;
+            length = length.saturating_add(4 + option.value.len().div_ceil(4) * 4);
+        }
+        // Without custom options, `validate_new_interface` checks the base
+        // length along with the rest of the interface metadata.
+        if !options.is_empty() && length > self.max_size {
+            return Err(Error::SizeLimitExceeded {
+                kind: "interface description",
+                declared: u64::try_from(length).unwrap_or(u64::MAX),
+                limit: self.max_size,
+            });
         }
         let (max_size, max_interfaces) = (self.max_size, self.max_interfaces);
         let interface_id = validate_new_interface(
@@ -771,5 +768,50 @@ mod tests {
             }
             assert!(writer.output_failure.is_some());
         }
+    }
+
+    #[test]
+    fn oversized_interface_options_report_the_computed_block_length() {
+        let mut writer = Writer::pcapng_with_options(
+            Vec::new(),
+            PcapNgOptions {
+                max_size: 40,
+                ..PcapNgOptions::default()
+            },
+        )
+        .unwrap();
+        let before = writer.get_ref().clone();
+        let description = Interface {
+            link_type: LinkType::ETHERNET,
+            snap_len: 40,
+            timestamp_resolution: TimestampResolution::Decimal(6),
+            timestamp_offset: 0,
+        };
+        let options = [
+            crate::analysis::pcap::PcapNgOption {
+                code: 2,
+                value: vec![0; 5].into(),
+            },
+            crate::analysis::pcap::PcapNgOption {
+                code: 3,
+                value: vec![0; 3].into(),
+            },
+        ];
+        let error = writer
+            .add_interface_description_with_options(description, &options)
+            .unwrap_err();
+        // The 32-byte base block, plus 4 + 8 and 4 + 4 bytes of padded options.
+        assert!(
+            matches!(
+                error,
+                Error::SizeLimitExceeded {
+                    kind: "interface description",
+                    declared: 52,
+                    limit: 40,
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(writer.get_ref(), &before);
     }
 }

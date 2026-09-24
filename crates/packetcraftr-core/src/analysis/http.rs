@@ -348,7 +348,7 @@ impl Collector {
                         self.flush(
                             &data.flow,
                             &mut direction,
-                            Status::Malformed,
+                            failure_status(&error),
                             Some(error),
                             output,
                         )?;
@@ -449,11 +449,7 @@ impl Collector {
                         }
                     }
                     Err(error) => {
-                        let status = if matches!(error, http::Error::Limit(_)) {
-                            Status::Limit
-                        } else {
-                            Status::Malformed
-                        };
+                        let status = failure_status(&error);
                         self.flush(&data.flow, &mut direction, status, Some(error), output)?;
                         direction.disabled = true;
                     }
@@ -618,6 +614,15 @@ fn bare_crlf_offset(prev: Option<u8>, run: &[u8]) -> Option<usize> {
         }
     }
     None
+}
+
+/// A parser refusal past a fixed bound is a limit, not malformed framing.
+fn failure_status(error: &http::Error) -> Status {
+    if matches!(error, http::Error::Limit(_)) {
+        Status::Limit
+    } else {
+        Status::Malformed
+    }
 }
 
 #[cfg(test)]
@@ -917,6 +922,35 @@ mod tests {
         assert!(matches!(
             message.error,
             Some(http::Error::Limit("header bytes"))
+        ));
+    }
+
+    #[test]
+    fn a_head_past_the_header_count_reports_a_limit() {
+        let tracker = Tracker::new(1 << 20, 8).expect("tracker");
+        let flow = flow();
+        let mut collector =
+            Collector::new(Limits::default(), vec![80], 1 << 20).expect("collector");
+        let mut output = Vec::new();
+        let mut head = b"GET / HTTP/1.1\r\n".to_vec();
+        for _ in 0..=http::MAX_HEADERS {
+            head.extend_from_slice(b"X: y\r\n");
+        }
+        head.extend_from_slice(b"\r\n");
+        let input: &'static [u8] = Box::leak(head.into_boxed_slice());
+
+        collector
+            .data(delivery(&tracker, &flow, 4, input), &mut output)
+            .expect("over-count header");
+
+        let messages = messages(&output);
+        let [message] = messages.as_slice() else {
+            panic!("one limited message expected, got {}", messages.len());
+        };
+        assert_eq!(message.status, Status::Limit);
+        assert!(matches!(
+            message.error,
+            Some(http::Error::Limit("header count"))
         ));
     }
 

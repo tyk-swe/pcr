@@ -11,7 +11,7 @@ use std::mem::size_of;
 use std::net::IpAddr;
 use std::ptr;
 
-use super::parser::sockaddr_ip;
+use super::parser::{netmask_prefix, sockaddr_ip};
 use crate::{
     interface::{self, Id as InterfaceId},
     link::{Capability, MacAddress},
@@ -146,26 +146,7 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     // SAFETY: getifaddrs owns the live record for this call, and its leading
     // length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
-    let ip = sockaddr_ip(bytes)?;
-    match (interface_address, ip) {
-        (IpAddr::V4(_), IpAddr::V4(mask)) => contiguous_prefix(&mask.octets()),
-        (IpAddr::V6(_), IpAddr::V6(mask)) => contiguous_prefix(&mask.octets()),
-        _ => None,
-    }
-}
-
-fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
-    let mut prefix = 0_u32;
-    let mut reached_suffix = false;
-    for &byte in bytes {
-        let leading = byte.leading_ones();
-        if (reached_suffix && byte != 0) || byte.count_ones() != leading {
-            return None;
-        }
-        prefix = prefix.checked_add(leading)?;
-        reached_suffix |= leading != u8::BITS;
-    }
-    u8::try_from(prefix).ok()
+    netmask_prefix(bytes, interface_address)
 }
 
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {

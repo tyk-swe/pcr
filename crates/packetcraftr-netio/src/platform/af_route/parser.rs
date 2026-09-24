@@ -31,6 +31,37 @@ pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     }
 }
 
+/// Decodes an interface netmask sockaddr for an address of the interface's
+/// family. XNU trims trailing zero bytes from netmask sockaddrs and records
+/// the shortened length (255.255.255.0 arrives with length 7), so the mask
+/// is zero-extended to the family's address width instead of requiring a
+/// complete sockaddr, and the mask's own family byte is not relied on.
+pub(super) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
+    let (offset, width) = match interface_address {
+        IpAddr::V4(_) => (offset_of!(libc::sockaddr_in, sin_addr), 4),
+        IpAddr::V6(_) => (offset_of!(libc::sockaddr_in6, sin6_addr), 16),
+    };
+    let present = bytes.get(offset..).unwrap_or_default();
+    let copied = present.len().min(width);
+    let mut mask = [0_u8; 16];
+    mask[..copied].copy_from_slice(&present[..copied]);
+    contiguous_prefix(&mask[..width])
+}
+
+fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
+    let mut prefix = 0_u32;
+    let mut reached_suffix = false;
+    for &byte in bytes {
+        let leading = byte.leading_ones();
+        if (reached_suffix && byte != 0) || byte.count_ones() != leading {
+            return None;
+        }
+        prefix = prefix.checked_add(leading)?;
+        reached_suffix |= leading != u8::BITS;
+    }
+    u8::try_from(prefix).ok()
+}
+
 pub(super) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
@@ -122,6 +153,34 @@ mod tests {
         let address_offset = offset_of!(libc::sockaddr_in, sin_addr);
         bytes[address_offset..address_offset + 4].copy_from_slice(&address.octets());
         bytes
+    }
+
+    #[test]
+    fn trimmed_netmask_sockaddrs_keep_their_prefix_length() {
+        let v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let v6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let inet = u8::try_from(libc::AF_INET).expect("AF_INET fits in u8");
+        let inet6 = u8::try_from(libc::AF_INET6).expect("AF_INET6 fits in u8");
+        assert_eq!(
+            netmask_prefix(&[7, inet, 0, 0, 255, 255, 255], v4),
+            Some(24)
+        );
+        assert_eq!(
+            netmask_prefix(&[8, inet, 0, 0, 255, 255, 255, 255], v4),
+            Some(32)
+        );
+        assert_eq!(netmask_prefix(&[5, inet, 0, 0, 0xf0], v4), Some(4));
+        assert_eq!(netmask_prefix(&[0], v4), Some(0));
+        let full = ipv4_sockaddr(Ipv4Addr::new(255, 255, 254, 0));
+        assert_eq!(netmask_prefix(&full, v4), Some(23));
+        let mut slash64 = vec![16, inet6, 0, 0, 0, 0, 0, 0];
+        slash64.extend_from_slice(&[0xff; 8]);
+        assert_eq!(netmask_prefix(&slash64, v6), Some(64));
+        assert_eq!(
+            netmask_prefix(&[7, inet, 0, 0, 255, 0, 255], v4),
+            None,
+            "a non-contiguous mask has no prefix length"
+        );
     }
 
     fn mask(indices: &[libc::c_int]) -> libc::c_int {

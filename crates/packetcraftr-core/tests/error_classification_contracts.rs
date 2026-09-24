@@ -255,6 +255,55 @@ fn every_decode_error_variant_renders_and_classifies_stably() {
 }
 
 #[test]
+fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
+    use packetcraftr_core::analysis;
+
+    let cases: [(fn() -> decode::Error, &str, Kind); 4] = [
+        (
+            || decode::Error::LayerLimit { limit: 64 },
+            "policy.analysis_resource_limit",
+            Kind::Policy,
+        ),
+        (
+            || decode::Error::PacketSizeLimit {
+                actual: 70_000,
+                limit: 65_535,
+            },
+            "policy.analysis_resource_limit",
+            Kind::Policy,
+        ),
+        (
+            || decode::Error::InvalidCodecCursor { protocol: ipv4() },
+            "internal.codec_contract",
+            Kind::Internal,
+        ),
+        (
+            || decode::Error::MissingRootCodec {
+                protocol: Id::new("linktype_999"),
+            },
+            "packet.missing_codec",
+            Kind::Packet,
+        ),
+    ];
+    for (source, code, kind) in cases {
+        for error in [
+            analysis::Error::Decode {
+                number: 1,
+                source: source(),
+            },
+            analysis::Error::DerivedDecode {
+                number: 1,
+                source: source(),
+            },
+        ] {
+            let classification = error.classification();
+            assert_eq!(classification.code, code, "{error}");
+            assert_eq!(classification.kind, kind, "{error}");
+        }
+    }
+}
+
+#[test]
 fn registry_duplicate_alias_and_matcher_errors_name_the_conflict() {
     let alias = registry::Error::DuplicateAlias {
         alias: "ip".to_owned(),

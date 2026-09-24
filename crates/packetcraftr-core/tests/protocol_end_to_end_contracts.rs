@@ -587,6 +587,61 @@ fn link_capture_and_raw_ip_roots_round_trip() {
     }
 }
 
+/// Option bytes the IPv4 decoder cannot walk would dissect the whole header as
+/// malformed, so strict builds refuse them and permissive builds say so.
+#[test]
+fn ipv4_options_the_decoder_refuses_are_not_built_strictly() {
+    for options in [&[0x44, 0x01, 0x00, 0x00][..], &[0x07]] {
+        let packet = || {
+            let mut packet = Packet::new();
+            packet.push(Ipv4 {
+                options: Bytes::copy_from_slice(options),
+                ..ipv4([192, 0, 2, 1], [192, 0, 2, 2])
+            });
+            packet
+        };
+        let builder = build::Builder::new(rooted_registry("ipv4"));
+        assert!(
+            builder
+                .build(
+                    packet(),
+                    codec::Context::default(),
+                    build::Options::default()
+                )
+                .is_err(),
+            "{options:02x?}"
+        );
+        let built = builder
+            .build(
+                packet(),
+                codec::Context::default(),
+                build::Options {
+                    mode: codec::Mode::Permissive,
+                    ..build::Options::default()
+                },
+            )
+            .expect("permissive builds keep the requested bytes");
+        assert!(
+            built
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.ipv4_options"),
+            "{options:02x?}: {:?}",
+            built.diagnostics
+        );
+    }
+
+    let mut routed = Packet::new();
+    routed.push(source_routed_ipv4(
+        0x83,
+        4,
+        &[Ipv4Addr::new(198, 51, 100, 1)],
+    ));
+    build::Builder::new(rooted_registry("ipv4"))
+        .build(routed, codec::Context::default(), build::Options::default())
+        .expect("a walkable source route still builds strictly");
+}
+
 /// A PPPoE discovery code needs the discovery EtherType from whichever parent
 /// carries it, not only from an Ethernet or VLAN header.
 #[test]

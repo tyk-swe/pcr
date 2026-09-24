@@ -587,6 +587,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 - The YAML packet-document fuzz seed is a valid packet/v2 document, the release
   archive verifier requires the rewrite v2 schema, and CONTRIBUTING and
   CODEOWNERS name current paths.
+- DNS reports RCODE 11 as `dso_type_not_implemented` instead of `unknown`.
+  `decode.unknown_binding` and `decode.missing_codec` diagnostics carry their
+  `layer`. Scan pipeline refusals name the bound that failed, and TLS, UDP
+  encapsulation-port, VXLAN, Geneve, resolved-address-limit,
+  destination-constraint-count, and document-limit messages or remediations
+  name what is actually at fault.
+- `builtin::registry_with_tls_ports` refuses port 0, TCP's raw-fallback
+  discriminator. On Windows, an Npcap runtime without `pcap_free_tstamp_types`
+  reports timestamp selection as unsupported instead of leaking the listed
+  types.
 - Forwarding verification keeps incomplete layer occurrences unevaluable even
   when only one scalar value was decoded, preventing false preservation and
   expectation failures after truncation. Explicit occurrence selectors retain

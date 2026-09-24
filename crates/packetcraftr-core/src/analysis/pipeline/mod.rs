@@ -243,6 +243,9 @@ pub struct Summary {
     /// Classic PCAP has one entry; PCAPNG without interface-description blocks
     /// has none.
     pub interfaces: Vec<crate::analysis::pcap::Interface>,
+    /// Every capture scope interned during the run, including scopes of
+    /// frames the sink never saw, which `incomplete_sources` keys may name.
+    pub scopes: Vec<crate::analysis::scope::Definition>,
 }
 
 /// Dispatches matched frames to `sink`: dissects under
@@ -552,6 +555,7 @@ where
         trailing_tcp_events: reassembly_dispatch.flush(),
         ip_reassembly: ip_dispatch.report().clone(),
         interfaces: reader.interfaces().to_vec(),
+        scopes: scopes.definitions().to_vec(),
     })
 }
 

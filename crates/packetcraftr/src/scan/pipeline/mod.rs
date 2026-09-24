@@ -94,8 +94,6 @@ impl Best {
         }
     }
 }
-/// Rejects an empty or out-of-budget pipeline configuration before any
-/// resource is armed, so a scan that cannot proceed arms no capture.
 /// One batch as the pipeline runs it: its only probe and the permit its
 /// evidence must carry. Every batch is checked for exactly one probe before
 /// anything is planned.
@@ -114,27 +112,58 @@ impl<'b> Planned<'b> {
     }
 }
 
+/// Rejects an empty or out-of-budget pipeline configuration before any
+/// resource is armed, so a scan that cannot proceed arms no capture. The
+/// refusal names the first bound that does not hold.
 fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), BoundaryError> {
-    if batches.is_empty()
-        || batches.len() > super::MAX_PROBES
-        || options.max_in_flight == 0
-        || options.max_in_flight > 1024
-        || options.max_prepared_bytes == 0
-        || options.max_prepared_bytes > 256 * 1024 * 1024
-        || options.max_evidence_frames == 0
-        || options.max_evidence_bytes == 0
-        || options.max_evidence_bytes > capture::MAX_CAPTURE_QUEUE_BYTES
-        || options.max_evidence_frames > capture::MAX_CAPTURE_QUEUE_FRAMES
-        || options
-            .probes_per_second
-            .is_some_and(|rate| rate == 0 || rate > super::MAX_RATE)
-        || options.max_undecoded > options.max_evidence_frames
-        || options.max_duration.is_zero()
-        || options.max_duration > super::MAX_DURATION
-    {
-        return Err(limit("pipeline configuration", 1024));
+    let within = |value: usize, maximum: usize| (1..=maximum).contains(&value);
+    let bounds = [
+        (
+            "probes",
+            super::MAX_PROBES,
+            within(batches.len(), super::MAX_PROBES),
+        ),
+        ("max_in_flight", 1024, within(options.max_in_flight, 1024)),
+        (
+            "max_prepared_bytes",
+            256 * 1024 * 1024,
+            within(options.max_prepared_bytes, 256 * 1024 * 1024),
+        ),
+        (
+            "max_evidence_frames",
+            capture::MAX_CAPTURE_QUEUE_FRAMES,
+            within(
+                options.max_evidence_frames,
+                capture::MAX_CAPTURE_QUEUE_FRAMES,
+            ),
+        ),
+        (
+            "max_evidence_bytes",
+            capture::MAX_CAPTURE_QUEUE_BYTES,
+            within(options.max_evidence_bytes, capture::MAX_CAPTURE_QUEUE_BYTES),
+        ),
+        (
+            "probes_per_second",
+            super::MAX_RATE as usize,
+            options
+                .probes_per_second
+                .is_none_or(|rate| (1..=super::MAX_RATE).contains(&rate)),
+        ),
+        (
+            "max_undecoded",
+            options.max_evidence_frames,
+            options.max_undecoded <= options.max_evidence_frames,
+        ),
+        (
+            "max_duration",
+            usize::try_from(super::MAX_DURATION.as_secs()).unwrap_or(usize::MAX),
+            !options.max_duration.is_zero() && options.max_duration <= super::MAX_DURATION,
+        ),
+    ];
+    match bounds.into_iter().find(|(_, _, holds)| !holds) {
+        Some((field, maximum, _)) => Err(limit(field, maximum)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Observes every pending probe a captured record could complete: interface,
@@ -644,4 +673,79 @@ fn pending_evidence(
                 .or_else(|| entry.last_response.clone()),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::probe::ProbeEndpoint;
+    use crate::scan::{MAX_DURATION, MAX_PROBES, MAX_RATE, Probe};
+
+    fn options() -> PipelineOptions {
+        PipelineOptions {
+            max_in_flight: 2,
+            probes_per_second: None,
+            max_duration: Duration::from_secs(1),
+            max_prepared_bytes: 1024,
+            max_evidence_frames: 8,
+            max_evidence_bytes: 1024,
+            max_undecoded: 8,
+        }
+    }
+
+    #[test]
+    fn an_invalid_pipeline_option_reports_its_own_bound() {
+        let batches = [Batch::single(
+            Probe {
+                sequence: 0,
+                address: IpAddr::from([192, 0, 2, 1]),
+                endpoint: ProbeEndpoint::Tcp { port: 80 },
+                attempt: 1,
+                udp_payload: bytes::Bytes::new(),
+                udp_profile: None,
+            },
+            Duration::from_millis(1),
+        )];
+        validate_options(&batches, &options()).expect("the baseline options hold");
+        let refusals = [
+            (
+                PipelineOptions {
+                    max_in_flight: 1025,
+                    ..options()
+                },
+                "max_in_flight=1024".to_owned(),
+            ),
+            (
+                PipelineOptions {
+                    probes_per_second: Some(0),
+                    ..options()
+                },
+                format!("probes_per_second={}", MAX_RATE),
+            ),
+            (
+                PipelineOptions {
+                    max_undecoded: 9,
+                    ..options()
+                },
+                "max_undecoded=8".to_owned(),
+            ),
+            (
+                PipelineOptions {
+                    max_duration: Duration::ZERO,
+                    ..options()
+                },
+                format!("max_duration={}", MAX_DURATION.as_secs()),
+            ),
+        ];
+        for (options, bound) in refusals {
+            let error = validate_options(&batches, &options).expect_err(&bound);
+            assert_eq!(error.to_string(), format!("scan pipeline exceeds {bound}"));
+        }
+        assert_eq!(
+            validate_options(&[], &options())
+                .expect_err("an empty pipeline is refused")
+                .to_string(),
+            format!("scan pipeline exceeds probes={}", MAX_PROBES)
+        );
+    }
 }

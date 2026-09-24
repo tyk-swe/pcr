@@ -7,6 +7,7 @@ use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
 use packetcraftr_core as core;
+use packetcraftr_core::budget::Interrupted;
 
 use packetcraftr_cli::output;
 
@@ -137,6 +138,28 @@ impl fmt::Display for CapturedFrameText<'_> {
 }
 
 pub(crate) fn write_stdout_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+    write_stdout_line_with_interrupt(arguments).map_err(HumanWriteError::into_cli_error)
+}
+
+pub(crate) enum HumanWriteError {
+    Interrupted(Interrupted),
+    Write(io::Error),
+}
+
+impl HumanWriteError {
+    fn into_cli_error(self) -> CliError {
+        match self {
+            Self::Interrupted(interrupted) => crate::invocation::interruption_error(interrupted),
+            Self::Write(source) => {
+                CliError::new(Kind::Io, format!("write stdout failed: {source}"))
+            }
+        }
+    }
+}
+
+pub(crate) fn write_stdout_line_with_interrupt(
+    arguments: fmt::Arguments<'_>,
+) -> Result<(), HumanWriteError> {
     let rendered = style_human_line(&terminal_safe(&arguments.to_string()));
     write_human_stdout(&rendered, true)
 }
@@ -147,7 +170,7 @@ pub(crate) fn write_stdout_line(arguments: fmt::Arguments<'_>) -> Result<(), Cli
 /// happens to start with.
 pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = style_summary_line(&terminal_safe(&arguments.to_string()));
-    write_human_stdout(&rendered, true)
+    write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
 pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
@@ -161,7 +184,7 @@ pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliE
 
 pub(crate) fn emit_stdout_document(message: &str) -> Result<(), CliError> {
     let rendered = style_document(&terminal_document(message));
-    write_human_stdout(&rendered, false)
+    write_human_stdout(&rendered, false).map_err(HumanWriteError::into_cli_error)
 }
 
 pub(crate) fn emit_stderr_document(message: &str) -> Result<(), CliError> {
@@ -203,12 +226,11 @@ pub(crate) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
     write_human_stderr(&rendered, true)
 }
 
-fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliError> {
-    crate::invocation::check()?;
+fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), HumanWriteError> {
+    crate::invocation::check_interrupted().map_err(HumanWriteError::Interrupted)?;
     let stdout = anstream::stdout();
     let mut stdout = stdout.lock();
-    write_terminated(&mut stdout, rendered, append_newline)
-        .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
+    write_terminated(&mut stdout, rendered, append_newline).map_err(HumanWriteError::Write)
 }
 
 fn write_human_stderr(rendered: &str, append_newline: bool) -> Result<(), CliError> {

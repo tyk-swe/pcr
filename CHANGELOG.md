@@ -536,6 +536,8 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Replay text output reports a stdout write failure even if the invocation
+  deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with
   `policy.exchange_duration_limit` whenever a request goes unanswered; events
   published after the collection window get their own finite allowance.

@@ -19,8 +19,9 @@ use packetcraftr_cli::output::stream::EncodeError;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats, finish_compressed_output,
-    spaced_hex, stream_capture_error, write_stdout_line, write_summary_line,
+    HumanWriteError, SourceCaptureWriter, StreamEncoder, emit_aggregate_with_stats,
+    finish_compressed_output, spaced_hex, stream_capture_error, write_stdout_line_with_interrupt,
+    write_summary_line,
 };
 
 type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
@@ -216,8 +217,15 @@ fn output_frame(
 fn render_record(
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<(), packetcraftr::replay::Error> {
+    render_record_with(evidence, write_stdout_line_with_interrupt)
+}
+
+fn render_record_with(
+    evidence: packetcraftr::replay::FrameEvidence,
+    write_line: impl FnOnce(std::fmt::Arguments<'_>) -> Result<(), HumanWriteError>,
+) -> Result<(), packetcraftr::replay::Error> {
     let result = output_frame(evidence)?;
-    write_stdout_line(format_args!(
+    write_line(format_args!(
         "{}: sent {} bytes via {} (index {}, {}) dlt={} {}",
         result.source_index,
         result.bytes_sent,
@@ -227,13 +235,14 @@ fn render_record(
         result.frame.link_type,
         spaced_hex(result.frame.bytes())
     ))
-    .map_err(|source| {
-        // The line writer checks the invocation deadline, whose interrupts are
-        // final; asking it again recovers the typed cause behind the failure.
-        match crate::invocation::deadline().and_then(|deadline| deadline.enforce().err()) {
-            Some(interrupted) => interrupted_error(result.source_index, interrupted),
-            None => output_error(result.source_index, source.message),
+    .map_err(|source| match source {
+        HumanWriteError::Interrupted(interrupted) => {
+            interrupted_error(result.source_index, interrupted)
         }
+        HumanWriteError::Write(source) => output_error(
+            result.source_index,
+            format!("write stdout failed: {source}"),
+        ),
     })
 }
 
@@ -659,6 +668,43 @@ mod tests {
 
             assert_eq!(error.classification.code, code);
         }
+    }
+
+    #[test]
+    fn replay_text_write_failure_wins_over_deadline_expiring_during_write() {
+        let expired = Arc::new(AtomicBool::new(false));
+        let started = Instant::now();
+        let expired_for_clock = Arc::clone(&expired);
+        let deadline = Deadline::with_time_source(Duration::from_secs(1), move || {
+            if expired_for_clock.load(Ordering::Relaxed) {
+                started + Duration::from_secs(2)
+            } else {
+                started
+            }
+        });
+        let _scope = crate::invocation::enter_deadline(Some(Arc::new(deadline)));
+        let options = options();
+        let error = Run {
+            reader: &mut reader(1),
+            options: &options,
+            selector: None,
+            authorizer: &mut FakeAuthorizer::default(),
+            transmitter: &mut FakeTransmitter,
+            clock: &mut FakeClock,
+        }
+        .drive(|evidence| {
+            render_record_with(evidence, |_| {
+                expired.store(true, Ordering::Relaxed);
+                Err(HumanWriteError::Write(io::Error::other(
+                    "fixture pipe closed",
+                )))
+            })
+        })
+        .expect_err("stdout write failure must fail replay");
+
+        assert_eq!(error.classification.code, "io.replay");
+        assert!(error.message.contains("source index 0"));
+        assert!(error.message.contains("fixture pipe closed"));
     }
 
     #[test]

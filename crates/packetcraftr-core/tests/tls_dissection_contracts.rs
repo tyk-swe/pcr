@@ -497,3 +497,17 @@ fn extra_tls_ports_are_additive_and_leave_the_defaults_bound() {
         Some("raw")
     );
 }
+
+#[test]
+fn extra_tls_ports_refuse_the_raw_fallback_and_ports_bound_elsewhere() {
+    for port in [0_u16, 53, 80] {
+        assert!(
+            matches!(
+                builtin::registry_with_tls_ports(&[port]),
+                Err(packetcraftr_core::registry::Error::BindingConflict { discriminator, .. })
+                    if discriminator == u64::from(port)
+            ),
+            "port {port}"
+        );
+    }
+}

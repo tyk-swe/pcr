@@ -136,6 +136,10 @@ where
 ///
 /// The built-in ports stay bound; `ports` adds to them. Re-binding a port that
 /// is already TLS is accepted, so a caller need not filter the default list.
+/// A port already bound to another protocol (DNS on 53, HTTP on 80 and 8080)
+/// fails with [`crate::registry::Error::BindingConflict`], as does port 0:
+/// TCP's discriminator 0 is the raw fallback every unbound port reaches, not a
+/// service port.
 ///
 /// ```
 /// use packetcraftr_core::protocol::builtin;

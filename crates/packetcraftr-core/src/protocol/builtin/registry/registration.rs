@@ -68,16 +68,28 @@ fn register_tls(builder: &mut crate::registry::Builder) -> Result<(), crate::reg
 }
 
 /// Binds extra TCP ports to the TLS codec, for callers remapping a service.
+///
+/// Port 0 is refused as a conflict: TCP's discriminator 0 is the raw
+/// fallback, and a higher-priority TLS binding there would claim every
+/// payload on an unbound port.
 pub(crate) fn bind_tls_ports(
     builder: &mut crate::registry::Builder,
     ports: &[u16],
 ) -> Result<(), crate::registry::Error> {
+    const TLS_PORT_PRIORITY: i32 = 100;
     for port in ports {
+        if *port == 0 {
+            return Err(crate::registry::Error::BindingConflict {
+                parent: BuiltinProtocol::Tcp.as_str().into(),
+                discriminator: 0,
+                priority: TLS_PORT_PRIORITY,
+            });
+        }
         builder.bind(
             BuiltinProtocol::Tcp.as_str(),
             u64::from(*port),
             BuiltinProtocol::Tls.as_str(),
-            100,
+            TLS_PORT_PRIORITY,
         )?;
     }
     Ok(())

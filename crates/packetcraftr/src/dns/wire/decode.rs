@@ -24,9 +24,9 @@ pub fn decode_tcp_frame(
     transaction_id: u16,
     limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
-    let prefix =
+    let (prefix, payload) =
         frame
-            .first_chunk::<2>()
+            .split_first_chunk::<2>()
             .ok_or(WireError::Decode(DecodeError::MessageTooShort {
                 actual: frame.len(),
                 minimum: 2,
@@ -41,12 +41,6 @@ pub fn decode_tcp_frame(
             maximum: limits.max_message_bytes,
         }));
     }
-    let payload = frame
-        .get(2..)
-        .ok_or(WireError::Decode(DecodeError::MessageTooShort {
-            actual: frame.len(),
-            minimum: 2,
-        }))?;
     if declared != payload.len() {
         return Err(WireError::TcpFrameLength {
             declared,

@@ -21,6 +21,8 @@ pub(super) fn build_request(
         request.interface_mac,
         &request.vlan_tags,
         ethernet::ETHERTYPE_ARP,
+        // the request is padded to the Ethernet minimum below
+        ethernet::MINIMUM_WITHOUT_FCS - ethernet::HEADER_LENGTH,
     );
     frame.extend_from_slice(&1_u16.to_be_bytes());
     frame.extend_from_slice(&0x0800_u16.to_be_bytes());

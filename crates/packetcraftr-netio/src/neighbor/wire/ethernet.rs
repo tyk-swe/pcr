@@ -19,14 +19,18 @@ pub(super) struct View<'a> {
     pub(super) payload: &'a [u8],
 }
 
+/// Starts a frame with room for the `payload_length` bytes the caller
+/// appends after the Ethernet and VLAN headers, padding included.
 pub(super) fn prefix(
     destination: MacAddress,
     source: MacAddress,
     tags: &[VlanTag],
     payload_type: u16,
+    payload_length: usize,
 ) -> Vec<u8> {
-    // tags is capped at MAX_VLAN_TAGS, so the capacity is a small constant sum
-    let capacity = HEADER_LENGTH + tags.len() * VLAN_HEADER_LENGTH + super::arp::PAYLOAD_LENGTH;
+    // tags is capped at MAX_VLAN_TAGS and callers pass a fixed payload length,
+    // so the capacity is a small constant sum
+    let capacity = HEADER_LENGTH + tags.len() * VLAN_HEADER_LENGTH + payload_length;
     let mut frame = Vec::with_capacity(capacity);
     frame.extend_from_slice(&destination.0);
     frame.extend_from_slice(&source.0);

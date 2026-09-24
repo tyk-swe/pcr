@@ -265,6 +265,7 @@ mod tests {
             MacAddress([0x02, 0, 0, 0, 0, 1]),
             &tags,
             ETHERTYPE_ARP,
+            0,
         );
 
         assert_eq!(&bytes[12..14], &ETHERTYPE_SERVICE_VLAN.to_be_bytes());
@@ -293,6 +294,7 @@ mod tests {
             sender,
             &request.vlan_tags,
             ETHERTYPE_ARP,
+            0,
         );
         frame.extend_from_slice(&[0, 1, 0x08, 0, 6, 4, 0, 2]);
         frame.extend_from_slice(&sender.0);
@@ -453,6 +455,7 @@ mod tests {
             sender,
             &request.vlan_tags,
             ETHERTYPE_IPV6,
+            0,
         );
         frame.extend_from_slice(&[0x60, 0, 0, 0]);
         frame.extend_from_slice(

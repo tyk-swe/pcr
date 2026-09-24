@@ -263,7 +263,11 @@ fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
         );
         if accepted {
             let summary = result.unwrap_or_else(|error| panic!("{requested:?}: {error:?}"));
-            assert_eq!(summary.interfaces_used, [resolved.clone()], "{requested:?}");
+            assert_eq!(
+                summary.interfaces_used,
+                std::slice::from_ref(&resolved),
+                "{requested:?}"
+            );
             assert_eq!(transmitter.transmission_calls, 1, "{requested:?}");
         } else {
             assert!(

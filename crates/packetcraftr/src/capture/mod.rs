@@ -123,7 +123,12 @@ impl Classified for Error {
         self.source_frame.map(Coordinate::SourceFrame)
     }
     fn causes(&self) -> Vec<String> {
-        let mut causes = packetcraftr_core::error::source_chain(self);
+        let mut causes = match self.cause.as_ref() {
+            // A boundary error carries a captured causes snapshot that its own
+            // source chain no longer holds.
+            Cause::Consumer(error) => error.causes(),
+            _ => packetcraftr_core::error::source_chain(self),
+        };
         causes.extend(self.cleanup.iter().map(ToString::to_string));
         causes
     }

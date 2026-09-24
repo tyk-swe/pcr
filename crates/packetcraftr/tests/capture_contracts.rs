@@ -246,7 +246,7 @@ fn each_interface_reports_its_own_loss_and_consumer_failure_stops_every_source()
                 Err(BoundaryError::new(
                     "fixture sink failed",
                     Classification::new("io.fixture", Kind::Io, None),
-                    Vec::new(),
+                    vec!["fixture disk is full".to_owned()],
                 ))
             } else {
                 Ok(Control::Continue)
@@ -255,6 +255,11 @@ fn each_interface_reports_its_own_loss_and_consumer_failure_stops_every_source()
     )
     .unwrap_err();
     assert_eq!(error.classification().code, "io.fixture");
+    assert_eq!(
+        error.causes(),
+        ["fixture disk is full"],
+        "the consumer's captured causes survive the capture error"
+    );
     assert_eq!(error.report.stats.packets_attempted, 1);
     assert!(
         provider

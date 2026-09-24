@@ -112,13 +112,7 @@ impl Classified for Error {
             Self::Wire(_) => policy::INVALID_PACKET_SEMANTICS,
             Self::Target(error) => error.classification(),
             Self::Plan(error) => error.classification(),
-            Self::Build(_) => Classification::new(
-                "packet.build",
-                Kind::Packet,
-                Some(
-                    "correct the packet fields or select permissive mode with the required live opt-ins",
-                ),
-            ),
+            Self::Build(error) => error.classification(),
             Self::Policy(error) => error.classification(),
             Self::PermissiveLiveOptInRequired => Classification::new(
                 "policy.permissive_live_opt_in",
@@ -211,7 +205,7 @@ impl Classified for Error {
             Self::Build(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
-            Self::ExchangeOutput { source } => source.causes(),
+            Self::ExchangeOutput { source } | Self::SendOutput { source } => source.causes(),
             Self::OperationAndCaptureShutdown {
                 operation,
                 shutdown,

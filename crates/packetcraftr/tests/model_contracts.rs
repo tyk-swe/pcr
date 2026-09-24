@@ -465,8 +465,38 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     let build_causes = codec.causes();
     assert_eq!(build_causes, ["invalid udp layer: port 53 is reserved"]);
 
+    let build_classification = codec.classification();
     let workflow = packetcraftr::Error::Build(codec);
     assert_eq!(workflow.causes(), build_causes);
+    assert_eq!(
+        workflow.classification(),
+        build_classification,
+        "a workflow keeps the build failure's own classification"
+    );
+    let over_budget = packetcraftr_core::build::Error::LayerLimit {
+        actual: 4,
+        limit: 3,
+    };
+    assert_eq!(
+        packetcraftr::Error::Build(over_budget)
+            .classification()
+            .code,
+        "policy.build_resource_limit"
+    );
+
+    let snapshot = || {
+        Box::new(packetcraftr_core::error::BoundaryError::new(
+            "progressive output failed",
+            packetcraftr_core::error::Classification::new("io.fixture", Kind::Io, None),
+            vec!["fixture disk is full".to_owned()],
+        ))
+    };
+    for workflow in [
+        packetcraftr::Error::SendOutput { source: snapshot() },
+        packetcraftr::Error::ExchangeOutput { source: snapshot() },
+    ] {
+        assert_eq!(workflow.causes(), ["fixture disk is full"], "{workflow}");
+    }
 
     // A hostname lookup keeps the system refusal instead of pasting it into
     // the message, so the message and the cause each say it once.

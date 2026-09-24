@@ -149,16 +149,20 @@ impl<'registry> DecodeSession<'registry> {
                 protocol: cursor.protocol,
             });
         }
+        let index = self.packet.len();
         append_raw(
             &mut self.packet,
             &mut self.layouts,
             slice_original(&self.original, cursor.bytes.start, cursor.bytes.len()),
             cursor.bytes.start,
         );
-        self.diagnostics.push(Diagnostic::warning(
-            "decode.missing_codec",
-            format!("no codec registered for {}", cursor.protocol),
-        ));
+        self.diagnostics.push(
+            Diagnostic::warning(
+                "decode.missing_codec",
+                format!("no codec registered for {}", cursor.protocol),
+            )
+            .at_layer(index),
+        );
         Ok(())
     }
 
@@ -333,7 +337,7 @@ impl<'registry> DecodeSession<'registry> {
             return Ok(None);
         }
         let Some(next_protocol) = child.protocol else {
-            self.preserve_unknown_child(&decoded_protocol, layer_end, decoded.payload_len)?;
+            self.preserve_unknown_child(index, &decoded_protocol, layer_end, decoded.payload_len)?;
             return Ok(None);
         };
         Ok(Some(DecodeCursor {
@@ -393,6 +397,7 @@ impl<'registry> DecodeSession<'registry> {
 
     fn preserve_unknown_child(
         &mut self,
+        parent_index: usize,
         parent: &crate::layer::Id,
         offset: usize,
         payload_len: usize,
@@ -404,10 +409,13 @@ impl<'registry> DecodeSession<'registry> {
             slice_original(&self.original, offset, payload_len),
             offset,
         );
-        self.diagnostics.push(Diagnostic::warning(
-            "decode.unknown_binding",
-            format!("unknown child discriminator after {parent}"),
-        ));
+        self.diagnostics.push(
+            Diagnostic::warning(
+                "decode.unknown_binding",
+                format!("unknown child discriminator after {parent}"),
+            )
+            .at_layer(parent_index),
+        );
         Ok(())
     }
 

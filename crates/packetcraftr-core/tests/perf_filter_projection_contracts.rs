@@ -855,6 +855,18 @@ fn projection_preserves_values_ordering_and_missing_columns() {
 }
 
 #[test]
+fn projection_columns_name_each_path_with_its_typed_slice() {
+    let columns = [
+        "raw.bytes",
+        "raw.bytes[0:1]",
+        "ethernet.source[1]",
+        "ipv4#2.source[2:]",
+    ];
+    let projection = Projection::compile(columns, &registry()).expect("projection compiles");
+    assert_eq!(projection.columns(), columns);
+}
+
+#[test]
 fn retained_projection_cells_release_large_source_allocations() {
     let backing = Bytes::from(vec![0x11; 65_536]);
     let mut dns = Dns::default();

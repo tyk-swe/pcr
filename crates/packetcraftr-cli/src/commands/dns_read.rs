@@ -28,8 +28,8 @@ pub(crate) struct Args {
     /// Keep one whole conversation: tcp:INDEX or udp:INDEX.
     #[arg(long)]
     pub(crate) stream: Option<String>,
-    /// DNS service ports; repeat for nonstandard services (default: 53).
-    #[arg(long = "dns-port", default_value = "53")]
+    /// Additional DNS service ports; standard port 53 is always inspected.
+    #[arg(long = "dns-port")]
     pub(crate) dns_ports: Vec<u16>,
     #[command(flatten)]
     pub(crate) application: crate::command_options::ApplicationLimitsArgs,
@@ -40,8 +40,11 @@ pub(crate) struct Args {
 }
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
-    let collector =
-        Collector::new(args.application.core(), args.dns_ports).map_err(CliError::classified)?;
+    let mut ports = args.dns_ports;
+    ports.push(53);
+    ports.sort_unstable();
+    ports.dedup();
+    let collector = Collector::new(args.application.core(), ports).map_err(CliError::classified)?;
     let selector = args
         .stream
         .as_deref()

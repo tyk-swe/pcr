@@ -241,6 +241,36 @@ fn invalid_input_has_a_structured_exit_code() {
 }
 
 #[test]
+fn parse_errors_keep_read_command_after_resource_preset_options() {
+    let cases: &[&[&str]] = &[
+        &["--resource-preset", "ci-v1", "read"],
+        &["--resource-preset=ci-v1", "read"],
+        &["read", "--resource-preset", "ci-v1"],
+        &["read", "--resource-preset=ci-v1"],
+    ];
+
+    for format in ["json", "ndjson"] {
+        for command_arguments in cases {
+            let mut arguments = vec!["--output", format];
+            arguments.extend_from_slice(command_arguments);
+            let output = run(&arguments);
+            assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+            let command = match format {
+                "json" => parse_json(&output)["command"].clone(),
+                "ndjson" => {
+                    let records = parse_ndjson(&output);
+                    assert_eq!(records.len(), 1, "{arguments:?}");
+                    assert_eq!(records[0]["event"], "error", "{arguments:?}");
+                    records[0]["command"].clone()
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(command, "read", "{arguments:?}");
+        }
+    }
+}
+
+#[test]
 fn explicit_packet_does_not_wait_for_an_open_stdin_pipe() {
     let output = run_with_open_stdin(&["--output", "hex", "build", "--packet", "raw(text=hello)"]);
     assert!(output.status.success(), "{:?}", output.stderr);

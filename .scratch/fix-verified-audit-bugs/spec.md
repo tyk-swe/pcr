@@ -190,4 +190,5 @@ Make each affected operation report and act on the facts it was given:
 ## Comments
 
 - Implementation is on [PR #209](https://github.com/tyk-swe/pcr/pull/209);
-  validation is complete and code review is pending.
+  validation and automated code review are complete. Reviewed native runtime
+  evidence remains required before merge.

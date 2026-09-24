@@ -24,5 +24,5 @@ resource preset value for the command.
 
 ## Comments
 
-- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); code review
-  is pending.
+- Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); automated
+  code review is complete and the fix is ready for human review.

@@ -29,12 +29,23 @@ where
         options: crate::probe::PipelineOptions,
         emit: &mut dyn FnMut(crate::probe::PipelineEvent<Execution>) -> Result<(), BoundaryError>,
     ) -> Result<crate::Stats, BoundaryError> {
+        self.execute_pipeline_with_cancellation(requests, options, None, emit)
+    }
+
+    fn execute_pipeline_with_cancellation(
+        &mut self,
+        requests: &[Batch],
+        options: crate::probe::PipelineOptions,
+        cancellation: Option<packetcraftr_core::budget::Cancellation>,
+        emit: &mut dyn FnMut(crate::probe::PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<crate::Stats, BoundaryError> {
         let registry = super::registry::configured(self.client.registry(), requests)?;
         let client = super::registry::client(self.client, registry);
         super::pipeline::run(
             &mut ExchangeExecutor::new(&client, self.options.clone()),
             requests,
             options,
+            cancellation,
             emit,
         )
     }

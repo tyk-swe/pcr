@@ -9,6 +9,7 @@ use packetcraftr::{
     target::Target,
 };
 use packetcraftr_core::{
+    budget::Cancellation,
     build::Builder,
     decode::Dissector,
     error::{BoundaryError, Classified},
@@ -45,6 +46,9 @@ struct State {
     /// Answers each probe at once with two equally ranked resets that share
     /// one ingress time and differ only in their IP identification.
     tied_resets: bool,
+    cancel_during_arm: Option<Cancellation>,
+    cancel_during_ready: Option<Cancellation>,
+    cancel_after_send: Option<(usize, Cancellation)>,
 }
 #[derive(Clone)]
 struct Io(Arc<Mutex<State>>);
@@ -134,6 +138,14 @@ impl transmit::Sender for Io {
             state.pending += 1;
         }
         state.sends += 1;
+        if state
+            .cancel_after_send
+            .as_ref()
+            .is_some_and(|(send_count, _)| state.sends >= *send_count)
+            && let Some((_, signal)) = state.cancel_after_send.take()
+        {
+            signal.cancel();
+        }
         state.peak = state.peak.max(state.pending);
         state.send_times.push(Instant::now());
         Ok(report)
@@ -148,7 +160,11 @@ impl capture::Session for Capture {
         &self.metadata
     }
     fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
-        self.state.lock().unwrap().ready = true;
+        let mut state = self.state.lock().unwrap();
+        state.ready = true;
+        if let Some(signal) = state.cancel_during_ready.take() {
+            signal.cancel();
+        }
         Ok(())
     }
     fn next_captured_frame(
@@ -192,7 +208,12 @@ impl capture::Session for Capture {
 impl capture::Provider for Io {
     type Capture = Capture;
     fn arm_capture(&self, request: &capture::Request) -> Result<Capture, net::Error> {
-        self.0.lock().unwrap().armed += 1;
+        let mut state = self.0.lock().unwrap();
+        state.armed += 1;
+        if let Some(signal) = state.cancel_during_arm.take() {
+            signal.cancel();
+        }
+        drop(state);
         Ok(Capture {
             state: self.0.clone(),
             metadata: capture::Metadata {
@@ -226,6 +247,13 @@ fn execute(
     request: &Request,
     state: Arc<Mutex<State>>,
 ) -> Result<scan::Report, packetcraftr::probe::Error> {
+    execute_with_clock(request, state, &mut SystemClock)
+}
+fn execute_with_clock<C: packetcraftr::clock::Clock>(
+    request: &Request,
+    state: Arc<Mutex<State>>,
+    clock: &mut C,
+) -> Result<scan::Report, packetcraftr::probe::Error> {
     let policy = Policy {
         max_packets_per_operation: 32,
         max_bytes_per_operation: 32 * 1500,
@@ -247,7 +275,7 @@ fn execute(
         &mut PolicyAuthorizer::for_packets(&policy),
         &registry,
         &mut ExchangeExecutor::new(&client, options),
-        &mut SystemClock,
+        clock,
     )
 }
 #[test]
@@ -368,6 +396,69 @@ fn send_failure_retains_confirmed_pending_wire_and_shuts_down() {
     assert_eq!(partial.pending[0].sent.sent.wire_bytes().len(), 40);
     assert_eq!(partial.failed_probe.as_ref().unwrap().sequence, 1);
     assert_eq!(state.lock().unwrap().shutdowns, 1);
+}
+
+#[test]
+fn clock_cancellation_during_capture_arming_stops_before_readiness_or_send() {
+    let signal = Cancellation::default();
+    let state = Arc::new(Mutex::new(State {
+        cancel_during_arm: Some(signal.clone()),
+        ..Default::default()
+    }));
+    let error = execute_with_clock(
+        &request(),
+        state.clone(),
+        &mut packetcraftr::clock::CancellableClock(signal),
+    )
+    .expect_err("clock cancellation during arming must stop the scan");
+
+    assert_eq!(error.classification().code, "io.cancelled");
+    let state = state.lock().unwrap();
+    assert_eq!(state.armed, 1);
+    assert!(!state.ready, "readiness must not begin after cancellation");
+    assert_eq!(state.sends, 0);
+    assert_eq!(state.shutdowns, 1);
+}
+
+#[test]
+fn clock_cancellation_after_readiness_stops_before_the_first_send() {
+    let signal = Cancellation::default();
+    let state = Arc::new(Mutex::new(State {
+        cancel_during_ready: Some(signal.clone()),
+        ..Default::default()
+    }));
+    let error = execute_with_clock(
+        &request(),
+        state.clone(),
+        &mut packetcraftr::clock::CancellableClock(signal),
+    )
+    .expect_err("clock cancellation during readiness must stop the scan");
+
+    assert_eq!(error.classification().code, "io.cancelled");
+    let state = state.lock().unwrap();
+    assert!(state.ready);
+    assert_eq!(state.sends, 0);
+    assert_eq!(state.shutdowns, 1);
+}
+
+#[test]
+fn clock_cancellation_after_one_send_prevents_later_sends_and_shuts_down() {
+    let signal = Cancellation::default();
+    let state = Arc::new(Mutex::new(State {
+        cancel_after_send: Some((1, signal.clone())),
+        ..Default::default()
+    }));
+    let error = execute_with_clock(
+        &request(),
+        state.clone(),
+        &mut packetcraftr::clock::CancellableClock(signal),
+    )
+    .expect_err("clock cancellation after a confirmed send must stop later sends");
+
+    assert_eq!(error.classification().code, "io.cancelled");
+    let state = state.lock().unwrap();
+    assert_eq!(state.sends, 1);
+    assert_eq!(state.shutdowns, 1);
 }
 
 #[test]

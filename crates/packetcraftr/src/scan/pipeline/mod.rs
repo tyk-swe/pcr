@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use packetcraftr_core::{
+    budget::Cancellation,
     decode::Dissector,
     diagnostic::Diagnostic,
     error::{BoundaryError, Classification as ErrorClassification, Classified, Kind},
@@ -186,12 +187,19 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
         Vec::new(),
     )
 }
-fn check<R, N, I>(client: &Client<R, N, I>, deadline: Instant) -> Result<(), BoundaryError>
+fn check<R, N, I>(
+    client: &Client<R, N, I>,
+    deadline: Instant,
+    cancellation: Option<&Cancellation>,
+) -> Result<(), BoundaryError>
 where
     R: route::Provider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
+    if let Some(signal) = cancellation {
+        signal.check().map_err(BoundaryError::from_error)?;
+    }
     client
         .check_cancelled()
         .map_err(BoundaryError::from_error)?;
@@ -208,6 +216,7 @@ pub(super) fn run<R, N, I>(
     executor: &mut ExchangeExecutor<'_, R, N, I>,
     batches: &[Batch],
     options: PipelineOptions,
+    cancellation: Option<Cancellation>,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
 ) -> Result<Stats, BoundaryError>
 where
@@ -224,7 +233,9 @@ where
         .iter()
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut plan = prepare::plan(executor, &planned, options, deadline)?;
+    check(executor.client, deadline, cancellation.as_ref())?;
+    let mut plan = prepare::plan(executor, &planned, options, deadline, cancellation.as_ref())?;
+    check(executor.client, deadline, cancellation.as_ref())?;
     let request = group::Request {
         interfaces: plan.interfaces.clone(),
         limits: executor.options.capture,
@@ -233,6 +244,7 @@ where
         native: Default::default(),
     };
     request.validate().map_err(BoundaryError::from_error)?;
+    check(executor.client, deadline, cancellation.as_ref())?;
     let mut group = group::Group::arm(
         &executor.client.io,
         &request,
@@ -248,10 +260,11 @@ where
     let mut seen_order = VecDeque::new();
     let mut diagnostics = HashSet::new();
     let result = (|| -> Result<(), BoundaryError> {
-        check(executor.client, deadline)?;
+        check(executor.client, deadline, cancellation.as_ref())?;
         group
             .wait_ready(deadline.saturating_duration_since(Instant::now()))
             .map_err(BoundaryError::from_error)?;
+        check(executor.client, deadline, cancellation.as_ref())?;
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
@@ -271,7 +284,7 @@ where
         let mut capture_drain_remaining = capture_drain_limit;
         let mut draining_expired = HashSet::new();
         while next < batches.len() || !pending.is_empty() {
-            check(executor.client, deadline)?;
+            check(executor.client, deadline, cancellation.as_ref())?;
             let now = Instant::now();
             let expired: Vec<_> = pending
                 .iter()
@@ -313,7 +326,7 @@ where
                     retained.saturating_add(probe.memory) <= options.max_prepared_bytes
                 })
             {
-                check(executor.client, deadline)?;
+                check(executor.client, deadline, cancellation.as_ref())?;
                 let batch = &batches[next];
                 let probe = planned[next].probe;
                 failed_probe = Some(probe.clone());
@@ -333,7 +346,7 @@ where
                         "preserve the planned endpoint and identity",
                     ));
                 }
-                check(executor.client, deadline)?;
+                check(executor.client, deadline, cancellation.as_ref())?;
                 stats.packets_attempted += 1;
                 let sent = Arc::new(
                     prepared

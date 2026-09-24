@@ -7,8 +7,9 @@ use crate::{
     errors::CliError,
     filtering::{FrameDecoder, FrameSelector},
     rendering::{
-        StreamEncoder, captured_frame_text, emit_aggregate_with_stats, render_diagnostics_stderr,
-        render_diagnostics_text, write_plain_line, write_stdout_line, write_summary_line,
+        StreamEncoder, captured_frame_text, document_spelling, emit_aggregate_with_stats,
+        render_diagnostics_stderr, render_diagnostics_text, write_plain_line, write_stdout_line,
+        write_summary_line,
     },
 };
 use packetcraftr::{
@@ -350,12 +351,12 @@ fn render_complete(
             .map_err(Into::into),
         CaptureFormat::Text => {
             write_summary_line(format_args!(
-                "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {:?}",
+                "captured {} frames ({} emitted), {} bytes across {} interfaces; stopped for {}",
                 stats.packets_attempted,
                 stats.packets_completed,
                 stats.bytes,
                 summary.sources.len(),
-                summary.stop_reason
+                document_spelling(&summary.stop_reason)
             ))?;
             for source in &summary.sources {
                 if let Some(settings) = &source.capture_settings {
@@ -377,8 +378,10 @@ fn render_complete(
                     ))?;
                 }
                 write_plain_line(format_args!(
-                    "  retention={:?}, retired files={}, retired frames={}",
-                    files.retention, files.discarded_files, files.discarded_frames
+                    "  retention={}, retired files={}, retired frames={}",
+                    document_spelling(&files.retention),
+                    files.discarded_files,
+                    files.discarded_frames
                 ))?;
             }
             render_diagnostics_text(&diagnostics)

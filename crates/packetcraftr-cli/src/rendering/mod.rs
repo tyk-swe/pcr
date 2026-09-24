@@ -17,8 +17,8 @@ pub(crate) use capture_writer::{LinkCaptureWriter, SourceCaptureWriter, finish_c
 pub(crate) use dns::render_dns_records;
 
 pub(crate) use human::{
-    captured_frame_text, comma_separated, emit_stderr_document, emit_stderr_error,
-    emit_stderr_message, emit_stdout_document, optional_debug, optional_display,
+    captured_frame_text, comma_separated, document_spelling, emit_stderr_document,
+    emit_stderr_error, emit_stderr_message, emit_stdout_document, optional_debug, optional_display,
     render_diagnostics_stderr, render_diagnostics_text, render_undecoded, spaced_hex,
     write_plain_line, write_stdout_line, write_summary_line,
 };

@@ -58,6 +58,16 @@ pub(crate) fn optional_debug<T: std::fmt::Debug>(value: Option<T>) -> String {
     render_optional(value, |value| format!("{value:?}"))
 }
 
+/// A unit enum value spelled exactly as the JSON document spells it, so text
+/// output never shows a Rust variant name.
+pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(name)) => name,
+        Ok(other) => other.to_string(),
+        Err(_) => "unknown".to_owned(),
+    }
+}
+
 /// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
 /// so the section's format string lives here alone while each command keeps
 /// its own row type.
@@ -251,6 +261,15 @@ mod tests {
                 Some(&serde_json::Value::from(severity)),
             );
         }
+    }
+
+    #[test]
+    fn document_spelling_matches_the_serialized_value() {
+        assert_eq!(
+            document_spelling(&packetcraftr::capture::StopReason::FrameBudget),
+            "frame_budget"
+        );
+        assert_eq!(document_spelling(&output::capture::Retention::Ring), "ring");
     }
 
     #[test]

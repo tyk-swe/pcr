@@ -91,4 +91,8 @@ fn documentation_reports_an_io_failure_for_an_unwritable_directory() {
         stderr.contains("io.documentation"),
         "stderr should carry the classification: {stderr}"
     );
+    assert!(
+        stderr.contains("caused by:"),
+        "stderr should carry the I/O cause: {stderr}"
+    );
 }

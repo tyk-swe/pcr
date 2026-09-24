@@ -43,8 +43,9 @@ where
     /// when its classification is final, and unanswered requests after capture
     /// shutdown. The callback runs on a one-event worker admitted by this
     /// client's [`Runtime`](crate::progress::Runtime); failure
-    /// aborts later work, and the timeout bounds publisher waiting, not
-    /// arbitrary callback execution. A callback may finish after this method
+    /// aborts later work. The timeout bounds publisher waiting, not arbitrary
+    /// callback execution: once for the collection window and once more for
+    /// the events published after it closes. A callback may finish after this method
     /// returns and holds one of that runtime's worker permits until then.
     pub fn exchange_with_events<F>(
         &self,
@@ -55,14 +56,27 @@ where
     where
         F: FnMut(crate::exchange::Event) -> Result<(), crate::BoundaryError> + Send + 'static,
     {
-        let deadline = Deadline::new(options.timeout).with_cancellation(self.cancellation.clone());
+        let collection =
+            Deadline::new(options.timeout).with_cancellation(self.cancellation.clone());
+        // Unanswered requests and the final best-effort drain are published
+        // only after the collection window closes, so they get one further
+        // finite allowance instead of the window they cannot fall inside.
+        let finalization_limit = options.timeout;
+        let mut finalization = None;
         let sink = crate::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
             Error::ExchangeOutput {
                 source: Box::new(source),
             }
         })?;
         self.exchange_streamed(template, options, None, None, &mut |event| {
-            sink.emit(event, &deadline).map_err(exchange_sink_error)
+            let deadline = if collection.check().is_ok() {
+                &collection
+            } else {
+                finalization.get_or_insert_with(|| {
+                    Deadline::new(finalization_limit).with_cancellation(self.cancellation.clone())
+                })
+            };
+            sink.emit(event, deadline).map_err(exchange_sink_error)
         })
     }
 

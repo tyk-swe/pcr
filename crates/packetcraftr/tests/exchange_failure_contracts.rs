@@ -212,6 +212,41 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
     }
 }
 
+/// Unanswered requests are only known once the collection window closes, so
+/// publishing them must not be charged to that already-spent window.
+#[test]
+fn an_unanswered_request_is_published_after_the_collection_window() {
+    let (client, state) = fixture(Fault::None);
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&events);
+    let mut options = layer3_options();
+    options.timeout = Duration::from_millis(100);
+    let summary = client
+        .exchange_with_events(&Template::new(query_packet()), options, move |event| {
+            observed.lock().unwrap().push(event);
+            Ok(())
+        })
+        .expect("an exchange without replies completes");
+
+    assert_eq!(summary.unanswered, [0]);
+    assert_eq!(summary.stats.packets_completed, 1);
+    let events = events.lock().unwrap();
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                exchange::Event::Sent {
+                    request_index: 0,
+                    ..
+                },
+                exchange::Event::Unanswered { request_index: 0 },
+            ]
+        ),
+        "{events:?}"
+    );
+    assert_eq!(state.lock().unwrap().shutdowns, 1);
+}
+
 /// An output failure stops the exchange before its next send, and a capture
 /// shutdown failure during that cleanup is reported alongside it rather than
 /// replacing it.

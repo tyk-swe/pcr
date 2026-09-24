@@ -182,7 +182,8 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         args.compression.writer(inner)?,
         pcap::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
-            max_interfaces: args.limits.reader.max_interfaces,
+            // --max-interfaces bounds each input section, not the one output section.
+            max_interfaces: pcap::DEFAULT_TOTAL_INTERFACE_LIMIT,
             stream_limits: limits,
             ..Default::default()
         },

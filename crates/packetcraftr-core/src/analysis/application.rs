@@ -23,8 +23,9 @@ pub struct Limits {
     /// streams over the whole run: HTTP counts a message when its first byte
     /// arrives, DNS when it emits a framed message.
     pub max_messages: usize,
-    /// Distinct transport streams the collector may track at once. HTTP
-    /// counts TCP conversations; DNS counts each UDP flow and TCP stream.
+    /// Distinct transport streams the collector may track over the whole run;
+    /// a closed stream still counts. HTTP counts TCP conversations; DNS counts
+    /// each UDP flow and TCP stream.
     pub max_streams: usize,
     /// Bytes held at once across all in-flight message parses: partial heads
     /// and body-decoder buffers for HTTP, TCP length prefixes and partial

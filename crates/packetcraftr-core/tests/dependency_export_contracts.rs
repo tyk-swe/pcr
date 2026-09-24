@@ -140,14 +140,16 @@ fn a_fragment_selector_and_derived_filter_expand_to_physical_dependencies() {
 #[test]
 fn every_selected_incomplete_group_scope_is_defined() {
     let (frames, _) = frames();
-    let mut options = analysis::Options::default();
-    options.time_bounds = Some(
-        packetcraftr_core::frame::TimeBounds::new(
-            Some(UNIX_EPOCH + std::time::Duration::from_secs(1)),
-            None,
-        )
-        .expect("ordered bounds"),
-    );
+    let options = analysis::Options {
+        time_bounds: Some(
+            packetcraftr_core::frame::TimeBounds::new(
+                Some(UNIX_EPOCH + std::time::Duration::from_secs(1)),
+                None,
+            )
+            .expect("ordered bounds"),
+        ),
+        ..analysis::Options::default()
+    };
     let plan = export::plan(
         &mut reader(&frames[1..2]),
         registry(),

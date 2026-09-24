@@ -171,8 +171,16 @@ fn version_is_available_without_network_access() {
         version.contains("native features:"),
         "missing native feature line in:\n{version}"
     );
+    // Layer 2 and Layer 3 providers compile route lookup in, so both report it.
     for (name, enabled) in [
-        ("native-route", cfg!(feature = "native-route")),
+        (
+            "native-route",
+            cfg!(any(
+                feature = "native-route",
+                feature = "native-layer2",
+                feature = "native-layer3"
+            )),
+        ),
         ("native-layer2", cfg!(feature = "native-layer2")),
         ("native-layer3", cfg!(feature = "native-layer3")),
     ] {

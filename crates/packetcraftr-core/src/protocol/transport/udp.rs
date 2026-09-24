@@ -14,6 +14,7 @@ use crate::{
     field::{FieldValue, WireValue},
     layer::{Layer, reflective_layer},
     protocol::BuiltinProtocol,
+    registry::Discriminator,
 };
 
 use super::ports::child_discriminators;
@@ -257,32 +258,55 @@ fn validate_child_selection(
     ) {
         return Ok(diagnostics);
     }
-    let Some(selected) = child_discriminators(preferred_ports(
+    let Some((selecting_port, selected)) = child_discriminators(preferred_ports(
         layer.source_port,
         layer.destination_port,
         payload,
     ))
     .into_iter()
-    .find_map(|discriminator| context.registry.child_for(NAME, discriminator)) else {
+    .find_map(|discriminator| {
+        context
+            .registry
+            .child_for(NAME, discriminator)
+            .map(|selected| (discriminator.0, selected))
+    }) else {
         return Ok(diagnostics);
     };
     if selected == *child.protocol_id() {
         return Ok(diagnostics);
     }
-    let message = match context
-        .registry
-        .discriminator_for(NAME, child.protocol_id().as_str())
-        .filter(|discriminator| discriminator.0 != 0)
-    {
-        Some(registered) => format!(
-            "{} dissects only from UDP port {}; set that port on one endpoint",
-            child.protocol_id(),
-            registered.0
-        ),
-        None => format!(
-            "these UDP ports dissect the payload as {selected}, not {}; move it off the registered port",
+    // An endpoint may already use a port bound to the child while the other
+    // endpoint's bound port takes precedence.
+    let child_port = [layer.source_port, layer.destination_port]
+        .into_iter()
+        .find(|port| {
+            *port != 0
+                && context
+                    .registry
+                    .child_for(NAME, Discriminator(u64::from(*port)))
+                    == Some(*child.protocol_id())
+        });
+    let message = if let Some(child_port) = child_port {
+        format!(
+            "UDP port {selecting_port} takes precedence over port {child_port}, so the payload dissects as {selected}, not {}; change the endpoint using port {selecting_port}",
             child.protocol_id()
-        ),
+        )
+    } else {
+        match context
+            .registry
+            .discriminator_for(NAME, child.protocol_id().as_str())
+            .filter(|discriminator| discriminator.0 != 0)
+        {
+            Some(registered) => format!(
+                "{} dissects only from UDP port {}; set that port on one endpoint",
+                child.protocol_id(),
+                registered.0
+            ),
+            None => format!(
+                "these UDP ports dissect the payload as {selected}, not {}; move it off the registered port",
+                child.protocol_id()
+            ),
+        }
     };
     strict_or_diagnostic(
         NAME,
@@ -293,4 +317,46 @@ fn validate_child_selection(
         &mut diagnostics,
     )?;
     Ok(diagnostics)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::build::{Builder, Options};
+    use crate::codec::Mode;
+
+    fn encapsulation_port_message(recipe: &str) -> String {
+        let registry = crate::protocol::builtin::registry();
+        let packet = crate::expression::parse(recipe, &registry, Default::default()).unwrap();
+        let options = Options {
+            mode: Mode::Permissive,
+            ..Options::default()
+        };
+        Builder::new(registry)
+            .build(packet, Default::default(), options)
+            .unwrap()
+            .diagnostics
+            .into_iter()
+            .find(|diagnostic| diagnostic.code == "build.udp_encapsulation_port")
+            .expect("the child does not dissect from these ports")
+            .message
+    }
+
+    #[test]
+    fn encapsulation_port_message_names_the_port_that_takes_precedence() {
+        let message = encapsulation_port_message(
+            "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=4789,destination_port=53)/vxlan()/ethernet()",
+        );
+        assert!(
+            message.contains("UDP port 53 takes precedence over port 4789"),
+            "{message}"
+        );
+
+        let message = encapsulation_port_message(
+            "ipv4(source=192.0.2.1,destination=192.0.2.2)/udp(source_port=9000,destination_port=9001)/vxlan()/ethernet()",
+        );
+        assert!(
+            message.contains("dissects only from UDP port 4789; set that port on one endpoint"),
+            "{message}"
+        );
+    }
 }

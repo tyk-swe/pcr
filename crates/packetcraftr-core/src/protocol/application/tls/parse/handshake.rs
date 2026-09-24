@@ -109,9 +109,9 @@ pub(super) fn parse_server_hello(body: &[u8]) -> Result<ServerHello, crate::code
     Ok(hello)
 }
 
-/// Rejects a hello that carries bytes after its extension block: the message
-/// length is declared, so anything left over is not a hello this parser read
-/// correctly.
+/// Rejects a hello or extension body that carries bytes after the fields this
+/// parser reads: the length is declared, so anything left over is not a body
+/// this parser read correctly. `what` names the body.
 fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
     let remaining = reader.remaining();
     if remaining == 0 {
@@ -119,7 +119,7 @@ fn trailing_bytes(reader: &Reader<'_>, what: &str) -> Result<(), Error> {
     }
     Err(invalid(
         NAME,
-        format!("{what} has {remaining} trailing bytes after its extension block"),
+        format!("{what} has {remaining} trailing bytes"),
     ))
 }
 
@@ -213,11 +213,16 @@ fn apply_client_extension(kind: u16, body: &[u8], hello: &mut ClientHello) -> Re
             Ok(())
         }
         extension::SUPPORTED_GROUPS => {
-            hello.supported_groups = parse_u16_vector16(body, "supported group")?;
+            hello.supported_groups =
+                parse_u16_vector16(body, "supported_groups extension", "supported group")?;
             Ok(())
         }
         extension::SIGNATURE_ALGORITHMS => {
-            hello.signature_algorithms = parse_u16_vector16(body, "signature algorithm")?;
+            hello.signature_algorithms = parse_u16_vector16(
+                body,
+                "signature_algorithms extension",
+                "signature algorithm",
+            )?;
             Ok(())
         }
         extension::KEY_SHARE => {
@@ -245,7 +250,7 @@ pub(super) fn apply_server_extension(
         extension::SUPPORTED_VERSIONS => {
             let mut reader = Reader::new(body);
             hello.selected_version = reader.u16()?;
-            trailing_bytes(&reader, "supported_versions")
+            trailing_bytes(&reader, "supported_versions extension")
         }
         extension::KEY_SHARE => {
             let mut reader = Reader::new(body);
@@ -253,7 +258,7 @@ pub(super) fn apply_server_extension(
             if !hello.is_hello_retry_request && reader.vector16()?.is_empty() {
                 return Err(invalid(NAME, "ServerHello key_exchange is empty"));
             }
-            trailing_bytes(&reader, "key_share")
+            trailing_bytes(&reader, "key_share extension")
         }
         extension::ALPN => {
             let protocols = parse_alpn(body)?;
@@ -281,7 +286,7 @@ fn parse_server_name(body: &[u8], hello: &mut ClientHello) -> Result<(), Error> 
     }
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
-    trailing_bytes(&reader, "extension")?;
+    trailing_bytes(&reader, "server_name extension")?;
     while !list.is_empty() {
         let name_type = list.u8()?;
         let name = list.vector16()?;
@@ -323,7 +328,7 @@ fn validated_host_name(name: &[u8]) -> Option<String> {
 fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
-    trailing_bytes(&reader, "extension")?;
+    trailing_bytes(&reader, "ALPN extension")?;
     let mut protocols = Vec::new();
     while !list.is_empty() {
         if protocols.len() >= MAX_ALPN {
@@ -344,21 +349,21 @@ fn parse_alpn(body: &[u8]) -> Result<Vec<Bytes>, Error> {
 fn parse_client_supported_versions(body: &[u8]) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let versions = reader.vector8()?;
-    trailing_bytes(&reader, "supported_versions")?;
+    trailing_bytes(&reader, "supported_versions extension")?;
     u16_list(versions, MAX_EXTENSION_LEN / 2, "supported version")
 }
 
-fn parse_u16_vector16(body: &[u8], what: &str) -> Result<Vec<u16>, Error> {
+fn parse_u16_vector16(body: &[u8], extension: &str, what: &str) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let values = reader.vector16()?;
-    trailing_bytes(&reader, what)?;
+    trailing_bytes(&reader, extension)?;
     u16_list(values, MAX_EXTENSION_LEN / 2, what)
 }
 
 fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
     let mut reader = Reader::new(body);
     let mut list = Reader::new(reader.vector16()?);
-    trailing_bytes(&reader, "extension")?;
+    trailing_bytes(&reader, "key_share extension")?;
     let mut groups = Vec::new();
     while !list.is_empty() {
         if groups.len() >= MAX_EXTENSIONS {
@@ -378,7 +383,7 @@ fn parse_client_key_share(body: &[u8]) -> Result<Vec<u16>, Error> {
 fn parse_ec_point_formats(body: &[u8]) -> Result<Vec<u8>, Error> {
     let mut reader = Reader::new(body);
     let formats = reader.vector8()?.to_vec();
-    trailing_bytes(&reader, "ec_point_formats")?;
+    trailing_bytes(&reader, "ec_point_formats extension")?;
     Ok(formats)
 }
 

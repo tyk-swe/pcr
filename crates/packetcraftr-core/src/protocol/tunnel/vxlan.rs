@@ -67,6 +67,18 @@ reflective_layer! {
     layout pub(crate) fn vxlan_layout();
 }
 
+/// The first reserved field holding a non-zero value, which a reserved-bits
+/// diagnostic names.
+fn nonzero_reserved_field(reserved1: u32, reserved2: u8) -> Option<&'static str> {
+    if reserved1 != 0 {
+        Some("reserved1")
+    } else if reserved2 != 0 {
+        Some("reserved2")
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VxlanCodec;
 
@@ -103,11 +115,11 @@ impl LayerCodec for VxlanCodec {
                 &mut diagnostics,
             )?;
         }
-        if layer.reserved1 != 0 || layer.reserved2 != 0 {
+        if let Some(field) = nonzero_reserved_field(layer.reserved1, layer.reserved2) {
             strict_or_diagnostic(
                 NAME,
                 "build.vxlan_reserved",
-                "reserved1",
+                field,
                 "VXLAN reserved fields must be zero on transmission",
                 context,
                 &mut diagnostics,
@@ -149,10 +161,10 @@ impl LayerCodec for VxlanCodec {
                 .at_field("flags"),
             );
         }
-        if reserved1 != 0 || reserved2 != 0 {
+        if let Some(field) = nonzero_reserved_field(reserved1, reserved2) {
             diagnostics.push(
                 Diagnostic::warning("decode.vxlan_reserved", "VXLAN reserved bits are non-zero")
-                    .at_field("reserved1"),
+                    .at_field(field),
             );
         }
         let layer = Vxlan {
@@ -180,5 +192,59 @@ impl LayerCodec for VxlanCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
         make_layer(Vxlan::default(), fields)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::Packet;
+
+    fn reserved_fields(diagnostics: &[Diagnostic]) -> Vec<&'static str> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code.ends_with(".vxlan_reserved"))
+            .filter_map(|diagnostic| diagnostic.field)
+            .collect()
+    }
+
+    #[test]
+    fn reserved_diagnostics_name_the_nonzero_field() {
+        let registry = crate::protocol::builtin::registry();
+        let packet = Packet::new();
+        let build_context = crate::codec::Context::default();
+        let encode_context = LayerEncodeContext {
+            packet: &packet,
+            index: 0,
+            build_context: &build_context,
+            mode: crate::codec::Mode::Permissive,
+            registry: &registry,
+            child: None,
+            remaining_packet_bytes: VXLAN_LEN,
+        };
+        let decode_context = LayerDecodeContext {
+            parent: None,
+            registry: &registry,
+            allow_trailing_padding: false,
+            network: None,
+            discriminator: None,
+        };
+        for (reserved1, reserved2, expected) in [
+            (0, 1, "reserved2"),
+            (1, 0, "reserved1"),
+            (1, 1, "reserved1"),
+        ] {
+            let layer = Vxlan {
+                reserved1,
+                reserved2,
+                ..Vxlan::default()
+            };
+            let encoded = VxlanCodec.encode(&layer, &[], &encode_context).unwrap();
+            assert_eq!(reserved_fields(&encoded.diagnostics), [expected]);
+            let decoded = VxlanCodec
+                .decode(Bytes::copy_from_slice(&encoded.prefix), &decode_context)
+                .unwrap();
+            assert_eq!(reserved_fields(&decoded.diagnostics), [expected]);
+        }
     }
 }

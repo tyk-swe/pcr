@@ -98,13 +98,17 @@ impl Classified for Error {
             Self::SizeLimit { .. }
             | Self::LayerLimit { .. }
             | Self::NestingLimit { .. }
-            | Self::ResourceLimit { .. }
-            | Self::InvalidLimit { .. } => Classification::new(
+            | Self::ResourceLimit { .. } => Classification::new(
                 "cli.document_limit",
                 Kind::Cli,
                 Some(
                     "shrink the packet document to stay inside its finite byte, node, and nesting bounds",
                 ),
+            ),
+            Self::InvalidLimit { .. } => Classification::new(
+                "cli.document_limit",
+                Kind::Cli,
+                Some("lower the configured document limit to at most its stable maximum"),
             ),
             Self::Parse { .. } => Classification::new(
                 "cli.document_syntax",

@@ -15,9 +15,11 @@ use packetcraftr_cli::output;
 
 pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
 
-/// Per-write ceiling; max-duration publishers clip it to their remaining budget.
-/// A terminal error may use this separate cleanup allowance.
-const OUTPUT_TIMEOUT: Duration = Duration::from_secs(1);
+/// Per-write ceiling when `--output-timeout-ms` is absent; max-duration
+/// publishers clip it to their remaining budget. A terminal error may use this
+/// separate cleanup allowance.
+pub(crate) const OUTPUT_TIMEOUT_MS: u64 = 1000;
+const OUTPUT_TIMEOUT: Duration = Duration::from_millis(OUTPUT_TIMEOUT_MS);
 
 pub(crate) fn stdout_stream(
     command: output::contract::Command,

@@ -16,6 +16,7 @@ use packetcraftr_cli::output::{
 };
 
 use crate::cli::Cli;
+use crate::rendering::OUTPUT_TIMEOUT_MS;
 
 struct Context {
     settings: Vec<Setting>,
@@ -120,7 +121,7 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
             .entry("--output-timeout-ms".to_owned())
             .or_insert(Setting {
                 name: "--output-timeout-ms".to_owned(),
-                value: Value::Number(1000),
+                value: Value::Number(OUTPUT_TIMEOUT_MS),
                 unit: "milliseconds".to_owned(),
                 stage: "output".to_owned(),
                 scope: "Per-write wait; clipped by the remaining operation deadline".to_owned(),
@@ -136,7 +137,7 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
             ),
             (
                 "terminal_error_timeout_ms",
-                1000,
+                OUTPUT_TIMEOUT_MS,
                 "milliseconds",
                 "Separate terminal-error cleanup wait; cannot repair a failed write",
             ),

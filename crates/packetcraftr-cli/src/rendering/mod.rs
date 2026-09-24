@@ -27,6 +27,8 @@ pub(crate) use machine::{
     bounded_json_len, bounded_pretty_json_len, emit_aggregate, emit_aggregate_with_stats, emit_json,
 };
 
-pub(crate) use ndjson::{StreamEncoder, stdout_stream, write_unattributed_error};
+pub(crate) use ndjson::{
+    OUTPUT_TIMEOUT_MS, StreamEncoder, stdout_stream, write_unattributed_error,
+};
 
 pub(crate) use style::terminal_document;

@@ -9,7 +9,7 @@ use bytes::Bytes;
 
 use super::Request as NeighborRequest;
 use super::error::invalid_request;
-use crate::link::MacAddress;
+use crate::link::{MacAddress, VlanTag};
 use packetcraftr_core::frame::{Frame, LinkType};
 
 mod arp;
@@ -37,7 +37,7 @@ use self::{
     },
 };
 #[cfg(test)]
-use crate::link::{MAX_VLAN_TAGS, VlanKind, VlanTag};
+use crate::link::{MAX_VLAN_TAGS, VlanKind};
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
@@ -84,7 +84,9 @@ pub(super) fn match_neighbor_response(
         return None;
     }
     let ethernet = ethernet::parse(frame.bytes())?;
-    if ethernet.destination != request.interface_mac || ethernet.vlan_tags != request.vlan_tags {
+    if ethernet.destination != request.interface_mac
+        || !same_vlan_link(&ethernet.vlan_tags, &request.vlan_tags)
+    {
         return None;
     }
     match (
@@ -100,6 +102,15 @@ pub(super) fn match_neighbor_response(
         }
         _ => None,
     }
+}
+
+/// VLAN kind and ID identify the logical link. Priority and drop eligibility
+/// are per-frame markings that a responder or switch may set independently.
+fn same_vlan_link(captured: &[VlanTag], requested: &[VlanTag]) -> bool {
+    captured.len() == requested.len()
+        && captured.iter().zip(requested).all(|(captured, requested)| {
+            captured.kind == requested.kind && captured.vlan_id == requested.vlan_id
+        })
 }
 
 #[cfg(test)]
@@ -365,6 +376,61 @@ mod tests {
             match_neighbor_response(&request, &capture(tagged_bytes)),
             None
         );
+    }
+
+    #[test]
+    fn neighbor_response_matches_the_vlan_link_not_its_per_frame_priority() {
+        let mut request = request(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+        );
+        request.vlan_tags.push(VlanTag {
+            kind: VlanKind::Ieee8021Q,
+            priority: 5,
+            drop_eligible: true,
+            vlan_id: 100,
+        });
+        let sender = MacAddress([0x02, 0, 0, 0, 0, 2]);
+        let reply_on = |tags: Vec<VlanTag>| {
+            let mut responder = request.clone();
+            responder.vlan_tags = tags;
+            capture(arp_response(&responder, sender))
+        };
+        let tag = request.vlan_tags[0];
+
+        let remarked = VlanTag {
+            priority: 0,
+            drop_eligible: false,
+            ..tag
+        };
+        assert_eq!(
+            match_neighbor_response(&request, &reply_on(vec![remarked])),
+            Some(sender),
+            "PCP and DEI are per-frame markings a responder may change"
+        );
+        for (other_link, field) in [
+            (
+                vec![VlanTag {
+                    vlan_id: 101,
+                    ..tag
+                }],
+                "VLAN ID",
+            ),
+            (
+                vec![VlanTag {
+                    kind: VlanKind::Ieee8021Ad,
+                    ..tag
+                }],
+                "TPID kind",
+            ),
+            (vec![tag, tag], "tag depth"),
+        ] {
+            assert_eq!(
+                match_neighbor_response(&request, &reply_on(other_link)),
+                None,
+                "{field} identifies the logical link"
+            );
+        }
     }
 
     fn neighbor_advertisement(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {

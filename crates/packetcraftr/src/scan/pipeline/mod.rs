@@ -47,6 +47,18 @@ pub struct Error {
     pub capture_sources: Vec<group::Source>,
     pub cleanup: Option<Box<group::Error>>,
 }
+
+enum PipelineSendError {
+    Check(BoundaryError),
+    Io(LiveIoError),
+}
+
+impl From<LiveIoError> for PipelineSendError {
+    fn from(error: LiveIoError) -> Self {
+        Self::Io(error)
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> ErrorClassification {
         self.source.classification()
@@ -350,8 +362,14 @@ where
                 stats.packets_attempted += 1;
                 let sent = Arc::new(
                     prepared
-                        .transmit(&executor.client.io, || Ok::<(), LiveIoError>(()))
-                        .map_err(BoundaryError::from_error)?,
+                        .transmit(&executor.client.io, || {
+                            check(executor.client, deadline, cancellation.as_ref())
+                                .map_err(PipelineSendError::Check)
+                        })
+                        .map_err(|error| match error {
+                            PipelineSendError::Check(error) => error,
+                            PipelineSendError::Io(error) => BoundaryError::from_error(error),
+                        })?,
                 );
                 stats.packets_completed += 1;
                 stats.bytes = stats

@@ -15,6 +15,7 @@ use packetcraftr_core::{
     error::{BoundaryError, Classified},
     frame::{Frame, LinkType},
     packet::Packet,
+    packet::link::MacAddress,
     protocol::{builtin, network::Ipv4, transport::Tcp},
 };
 use packetcraftr_netio::{
@@ -40,6 +41,7 @@ struct State {
     peak: usize,
     replies: VecDeque<capture::Captured>,
     fail_after: Option<usize>,
+    neighbor_calls: usize,
     send_times: Vec<Instant>,
     bad_ingress: Option<Option<Instant>>,
     suppress_replies: bool,
@@ -82,6 +84,48 @@ struct NoNeighbors;
 impl neighbor::Resolver for NoNeighbors {
     fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
         panic!("layer-3 fixture must not discover neighbors")
+    }
+}
+
+struct Layer2Routes;
+impl route::Provider for Layer2Routes {
+    type Error = Infallible;
+    fn lookup_with_preferences(
+        &self,
+        _: IpAddr,
+        _: Option<&Id>,
+        _: Option<IpAddr>,
+    ) -> Result<route::Decision, Infallible> {
+        Ok(route::Decision {
+            interface: Id {
+                index: 1,
+                name: "fixture0".to_owned(),
+            },
+            source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
+            selected_source: Some("192.0.2.1".parse().unwrap()),
+            preferred_source: None,
+            next_hop: None,
+            selection_reason: route::SelectionReason::OnLink,
+            destination_scope: route::Scope::Link,
+            mtu: 1500,
+            capability: Capability::Layer2,
+            link_type: LinkType::ETHERNET,
+        })
+    }
+}
+
+struct CountingNeighbors(Arc<Mutex<State>>);
+impl neighbor::Resolver for CountingNeighbors {
+    fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
+        self.0.lock().unwrap().neighbor_calls += 1;
+        Ok(neighbor::Resolution {
+            mac_address: MacAddress([0x02, 0, 0, 0, 0, 2]),
+            attempts: 1,
+            cache_hit: false,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: Default::default(),
+        })
     }
 }
 impl transmit::Sender for Io {
@@ -278,6 +322,36 @@ fn execute_with_clock<C: packetcraftr::clock::Clock>(
         clock,
     )
 }
+
+fn execute_layer2_with_clock<C: packetcraftr::clock::Clock>(
+    request: &Request,
+    state: Arc<Mutex<State>>,
+    clock: &mut C,
+) -> Result<scan::Report, packetcraftr::probe::Error> {
+    let policy = Policy {
+        max_packets_per_operation: 32,
+        max_bytes_per_operation: 32 * 1500,
+        ..Default::default()
+    };
+    let registry = builtin::registry();
+    let client = Client::new(
+        registry.clone(),
+        Layer2Routes,
+        CountingNeighbors(state.clone()),
+        Io(state),
+        policy.clone(),
+    );
+    let mut options = packetcraftr::exchange::Options::default();
+    options.send.plan.link_mode = Mode::Layer2;
+    options.capture.snap_length = 1500;
+    scan::run(
+        request,
+        &mut PolicyAuthorizer::for_packets(&policy),
+        &registry,
+        &mut ExchangeExecutor::new(&client, options),
+        clock,
+    )
+}
 #[test]
 fn pending_windows_overlap_refill_and_use_one_ready_capture() {
     let state = Arc::new(Mutex::new(State::default()));
@@ -427,7 +501,7 @@ fn clock_cancellation_after_readiness_stops_before_the_first_send() {
         cancel_during_ready: Some(signal.clone()),
         ..Default::default()
     }));
-    let error = execute_with_clock(
+    let error = execute_layer2_with_clock(
         &request(),
         state.clone(),
         &mut packetcraftr::clock::CancellableClock(signal),
@@ -438,6 +512,7 @@ fn clock_cancellation_after_readiness_stops_before_the_first_send() {
     let state = state.lock().unwrap();
     assert!(state.ready);
     assert_eq!(state.sends, 0);
+    assert_eq!(state.neighbor_calls, 0);
     assert_eq!(state.shutdowns, 1);
 }
 

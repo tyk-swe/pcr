@@ -187,7 +187,7 @@ where
             source: Some(source),
         })?;
         let packet_count = u64::try_from(expansion_len).unwrap_or(u64::MAX);
-        let mut admission = self.admission(&options.send, packet_count, deadline)?;
+        let mut admission = self.admission(&options.send, packet_count, deadline, None)?;
         if expansion_len == 0 {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),

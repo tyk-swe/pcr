@@ -196,6 +196,10 @@ mod tests {
 
     #[test]
     fn validator_accepts_only_numeric_operands() {
+        let interface = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        };
         let accepted = [
             "arp and ether dst 01:02:03:04:05:06",
             "ip6 and dst host 2001:db8::1",
@@ -222,33 +226,10 @@ mod tests {
 
         for filter in accepted {
             assert!(!has_symbolic_operand(filter), "{filter}");
+            validate(&interface, filter).unwrap_or_else(|error| panic!("{filter}: {error}"));
         }
         for filter in rejected {
             assert!(has_symbolic_operand(filter), "{filter}");
-        }
-    }
-
-    #[test]
-    fn validate_accepts_numeric_port_ranges_without_admitting_names() {
-        let interface = InterfaceId {
-            name: "fixture0".to_owned(),
-            index: 7,
-        };
-
-        for filter in [
-            "tcp src portrange 80-90",
-            "tcp dst portrange 80-90",
-            "udp src portrange 1000-2000",
-            "udp dst portrange 1000-2000",
-        ] {
-            validate(&interface, filter).unwrap_or_else(|error| panic!("{filter}: {error}"));
-        }
-
-        for filter in [
-            "host example.com",
-            "tcp port https",
-            "tcp portrange http-https",
-        ] {
             assert!(
                 validate(&interface, filter).is_err(),
                 "symbolic operands must remain rejected: {filter}"

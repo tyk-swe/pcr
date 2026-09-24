@@ -197,7 +197,7 @@ impl Selection {
             }
             let count = match target {
                 Specification::Target(_) => 1,
-                Specification::Network(network) => network.cardinality(remaining)?,
+                Specification::Network(network) => network.cardinality(MAX_CANDIDATES)?,
             };
             remaining = remaining.checked_sub(count).ok_or(SelectionError::Limit {
                 field: "target_candidates",
@@ -287,5 +287,37 @@ mod tests {
         assert!("192.0.2.0/+24".parse::<Network>().is_err());
         assert!("192.0.2.0/".parse::<Network>().is_err());
         assert!(!network.contains("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn a_selection_over_the_candidate_budget_reports_the_budget_itself() {
+        let selection = |include: &[&str]| Selection {
+            include: include
+                .iter()
+                .map(|value| Specification::Network(value.parse().unwrap()))
+                .collect(),
+            exclude: Vec::new(),
+        };
+        for include in [
+            &["10.0.0.0/8"][..],
+            &["10.0.0.0/16", "10.1.0.0/16"],
+            &["192.0.2.1/32", "10.0.0.0/8"],
+        ] {
+            assert!(
+                matches!(
+                    selection(include).validate(),
+                    Err(SelectionError::Limit {
+                        field: "target_candidates",
+                        limit: MAX_CANDIDATES,
+                    })
+                ),
+                "{include:?}"
+            );
+        }
+        assert!(
+            selection(&["10.0.0.0/17", "10.1.0.0/17"])
+                .validate()
+                .is_ok()
+        );
     }
 }

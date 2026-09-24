@@ -10,7 +10,8 @@
 
 /crates/packetcraftr/src/exchange/** @tyk-swe
 /crates/packetcraftr/src/policy/** @tyk-swe
-/crates/packetcraftr/src/materialize.rs @tyk-swe
+/crates/packetcraftr/src/preparation.rs @tyk-swe
+/crates/packetcraftr/src/preparation/** @tyk-swe
 
 /crates/packetcraftr-core/src/protocol/matcher/** @tyk-swe
 /crates/packetcraftr/src/probe/** @tyk-swe

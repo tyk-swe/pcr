@@ -214,6 +214,23 @@ fn byte_and_mac_comparisons_accept_every_spelling_of_a_byte_run() {
 }
 
 #[test]
+fn slices_past_the_last_byte_select_no_value() {
+    assert_filters(
+        &tunnelled(),
+        &[
+            ("ethernet.source[5]", true),
+            ("ethernet.source[6]", false),
+            ("ethernet.source[6:8]", false),
+            ("ethernet.source[7:]", false),
+            // A bounded end clamps once the start is inside the field, and an
+            // open range from the end selects the empty tail.
+            ("ethernet.source[4:9] == 0a:0b", true),
+            ("ethernet.source[6:] == \"\"", true),
+        ],
+    );
+}
+
+#[test]
 fn contains_searches_byte_text_and_mac_haystacks() {
     assert_filters(
         &tunnelled(),

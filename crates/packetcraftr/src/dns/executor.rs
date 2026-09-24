@@ -37,6 +37,20 @@ where
                 max_responses, self.options.max_responses
             )));
         }
+        // Everything the client captures is DNS evidence, which must fit the
+        // request's own bounds; refuse before any I/O rather than after.
+        let capture = &self.options.capture;
+        if capture.max_frames > max_responses
+            || capture.max_bytes > exchange.limits.max_evidence_bytes
+        {
+            return Err(EXECUTOR_FAULT.invalid(format!(
+                "the client captures up to {} frames and {} bytes but the DNS exchange retains at most {} frames and {} bytes",
+                capture.max_frames,
+                capture.max_bytes,
+                max_responses,
+                exchange.limits.max_evidence_bytes
+            )));
+        }
         let registry = std::sync::Arc::clone(self.client.registry());
         let stop_probe = exchange.probe.clone();
         let stop_limits = exchange.limits.message;

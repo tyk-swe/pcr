@@ -310,6 +310,55 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
     assert!(state.lock().unwrap().sent.is_empty());
 }
 
+/// A DNS request whose evidence bounds are narrower than what the client
+/// captures could only fail after I/O, so it is refused before transmission.
+#[test]
+fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
+    use packetcraftr::{
+        clock::SystemClock,
+        dns,
+        policy::PolicyAuthorizer,
+        probe::ExchangeExecutor,
+        target::{Family, Target},
+    };
+
+    let (client, state) = fixture(Fault::None);
+    let policy = Policy::default();
+    let mut authorizer = PolicyAuthorizer::for_packets(&policy);
+    let registry = Arc::clone(client.registry());
+    let mut executor = ExchangeExecutor::new(&client, layer3_options());
+    let request = dns::Request {
+        server: Target::Address("10.0.0.2".parse().unwrap()),
+        address_family: Family::Any,
+        server_port: 53,
+        source_port: 40_000,
+        query_name: "example.test".to_owned(),
+        query_type: dns::QueryType::A,
+        transaction_id: 0x1234,
+        recursion_desired: true,
+        edns: None,
+        transport: dns::TransportMode::Udp,
+        attempts: 1,
+        timeout: Duration::from_millis(50),
+        queries_per_second: None,
+        limits: dns::Limits {
+            max_evidence_frames: 1,
+            max_undecoded: 1,
+            ..dns::Limits::default()
+        },
+    };
+    let error = dns::run(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut SystemClock,
+    )
+    .expect_err("narrower DNS evidence bounds are refused");
+    assert_eq!(error.classification().code, "cli.dns_executor", "{error}");
+    assert!(state.lock().unwrap().sent.is_empty());
+}
+
 /// Each scan probe reaches the wire with its own destination port, sequence
 /// number, and IPv4 identification, so responses correlate to one probe.
 #[test]

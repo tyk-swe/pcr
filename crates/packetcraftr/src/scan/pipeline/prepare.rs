@@ -6,6 +6,7 @@ use crate::{
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
     probe::{ExchangeExecutor, PipelineOptions},
 };
+use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::{field::FieldValue, packet::Packet};
 use packetcraftr_netio::{capture::group::MAX_SOURCES, interface, neighbor, route, transmit};
 use std::{
@@ -36,6 +37,7 @@ pub(super) fn plan<'c, R, N, I>(
     planned: &[Planned<'_>],
     options: PipelineOptions,
     deadline: Instant,
+    cancellation: Option<&Cancellation>,
 ) -> Result<Plan<'c, R, N, I>, BoundaryError>
 where
     R: route::Provider,
@@ -61,7 +63,7 @@ where
         .admission(&executor.options.send, planned.len() as u64, deadline)
         .map_err(BoundaryError::from_error)?;
     for &Planned { probe, .. } in planned {
-        super::check(client, deadline)?;
+        super::check(client, deadline, cancellation)?;
         let packet = probe.packet();
         if !super::super::probe::sent_probe_matches(probe, &packet) {
             return Err(BoundaryError::from_error(super::super::profile::Error(
@@ -71,6 +73,7 @@ where
         let route = match routes.entry(probe.address) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
+                super::check(client, deadline, cancellation)?;
                 let route = admission
                     .route(&packet, *entry.key())
                     .map_err(BoundaryError::from_error)?;
@@ -89,6 +92,7 @@ where
                 entry.insert(route)
             }
         };
+        super::check(client, deadline, cancellation)?;
         let admitted = admission
             .admit_on(packet, route)
             .map_err(BoundaryError::from_error)?;

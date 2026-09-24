@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::progress::Runtime;
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
@@ -107,8 +107,9 @@ where
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
+    let cancellation = clock.cancellation();
     let mut deadline =
-        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
+        Deadline::new(request.limits.max_duration).with_cancellation(cancellation.clone());
     enforce_deadline(WORKFLOW, &deadline)?;
     if (2..=1024).contains(&request.max_in_flight)
         && request.max_in_flight > executor.pipeline_capacity()
@@ -159,6 +160,7 @@ where
             &deadline,
             batches,
             &approved,
+            cancellation,
         )
     };
     let stats = stats?;
@@ -188,6 +190,7 @@ fn run_pipelined<E, F, B>(
     deadline: &Deadline,
     batches: B,
     approved: &ApprovedScan,
+    cancellation: Option<Cancellation>,
 ) -> Result<crate::Stats, Error>
 where
     E: Executor<Batch>,
@@ -226,58 +229,64 @@ where
         max_evidence_bytes: request.limits.max_evidence_bytes,
         max_undecoded: request.limits.max_undecoded,
     };
-    let result = executor.execute_pipeline(&batches, settings, &mut |event| {
-        let invalid = |index| {
-            crate::BoundaryError::from_error(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidEvidence {
-                    sequence: index as u64,
-                    message: "pipeline returned an invalid or repeated request index".to_owned(),
-                },
-            ))
-        };
-        match event {
-            PipelineEvent::Sent { index, sent } => {
-                let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                let probe = batch.probe()?;
-                if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
-                    return Err(invalid(index));
+    let result = executor.execute_pipeline_with_cancellation(
+        &batches,
+        settings,
+        cancellation,
+        &mut |event| {
+            let invalid = |index| {
+                crate::BoundaryError::from_error(Error::new(
+                    WORKFLOW,
+                    ErrorKind::InvalidEvidence {
+                        sequence: index as u64,
+                        message: "pipeline returned an invalid or repeated request index"
+                            .to_owned(),
+                    },
+                ))
+            };
+            match event {
+                PipelineEvent::Sent { index, sent } => {
+                    let batch = batches.get(index).ok_or_else(|| invalid(index))?;
+                    let probe = batch.probe()?;
+                    if confirmed[index] || !sent_probe_matches(probe, &sent.built().packet) {
+                        return Err(invalid(index));
+                    }
+                    confirmed[index] = true;
+                    sent_bytes = sent_bytes
+                        .checked_add(sent.bytes_sent() as u64)
+                        .ok_or_else(|| invalid(index))?;
+                    evidence
+                        .emit(
+                            Event::Sent(super::SentProbe {
+                                probe: probe.clone(),
+                                sent,
+                            }),
+                            deadline,
+                        )
+                        .map_err(crate::BoundaryError::from_error)?;
                 }
-                confirmed[index] = true;
-                sent_bytes = sent_bytes
-                    .checked_add(sent.bytes_sent() as u64)
-                    .ok_or_else(|| invalid(index))?;
-                evidence
-                    .emit(
-                        Event::Sent(super::SentProbe {
-                            probe: probe.clone(),
-                            sent,
-                        }),
-                        deadline,
-                    )
-                    .map_err(crate::BoundaryError::from_error)?;
-            }
-            PipelineEvent::Completed { index, execution } => {
-                let batch = batches.get(index).ok_or_else(|| invalid(index))?;
-                if completed[index] || !confirmed[index] {
-                    return Err(invalid(index));
+                PipelineEvent::Completed { index, execution } => {
+                    let batch = batches.get(index).ok_or_else(|| invalid(index))?;
+                    if completed[index] || !confirmed[index] {
+                        return Err(invalid(index));
+                    }
+                    // Scan probe events never end the operation early.
+                    let _ = evidence
+                        .validate(batch, &execution)
+                        .and_then(|()| evidence.process(batch, execution, deadline))
+                        .map_err(crate::BoundaryError::from_error)?;
+                    completed[index] = true;
                 }
-                // Scan probe events never end the operation early.
-                let _ = evidence
-                    .validate(batch, &execution)
-                    .and_then(|()| evidence.process(batch, execution, deadline))
-                    .map_err(crate::BoundaryError::from_error)?;
-                completed[index] = true;
+                PipelineEvent::Undecoded { frame } => evidence
+                    .retain_undecoded(&[], vec![frame], deadline)
+                    .map_err(crate::BoundaryError::from_error)?,
+                PipelineEvent::Diagnostic(diagnostic) => evidence
+                    .record_diagnostics(vec![diagnostic], deadline)
+                    .map_err(crate::BoundaryError::from_error)?,
             }
-            PipelineEvent::Undecoded { frame } => evidence
-                .retain_undecoded(&[], vec![frame], deadline)
-                .map_err(crate::BoundaryError::from_error)?,
-            PipelineEvent::Diagnostic(diagnostic) => evidence
-                .record_diagnostics(vec![diagnostic], deadline)
-                .map_err(crate::BoundaryError::from_error)?,
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    );
     match result {
         Ok(stats) => {
             if completed.iter().any(|done| !*done)

@@ -60,6 +60,29 @@ pub trait Executor<Req: Request> {
             Vec::new(),
         ))
     }
+
+    /// Executes a rolling packet window with the workflow's operation stop
+    /// signal. Existing executors keep their current behavior by default;
+    /// executors that perform live work should override this method and check
+    /// the signal at their resource and transmission boundaries.
+    fn execute_pipeline_with_cancellation(
+        &mut self,
+        requests: &[Req],
+        options: PipelineOptions,
+        cancellation: Option<packetcraftr_core::budget::Cancellation>,
+        emit: &mut dyn FnMut(PipelineEvent<Req::Execution>) -> Result<(), BoundaryError>,
+    ) -> Result<crate::Stats, BoundaryError> {
+        if let Some(signal) = &cancellation {
+            signal.check().map_err(BoundaryError::from_error)?;
+        }
+        let result = self.execute_pipeline(requests, options, emit);
+        if result.is_ok()
+            && let Some(signal) = &cancellation
+        {
+            signal.check().map_err(BoundaryError::from_error)?;
+        }
+        result
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

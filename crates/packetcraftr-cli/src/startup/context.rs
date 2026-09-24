@@ -45,7 +45,12 @@ fn parse(arguments: &[OsString]) -> Context {
                 .split_once('=')
                 .map_or((argument, None), |(name, value)| (name, Some(value)))
         });
-        if matches!(name, "--output" | "--color" | "--output-timeout-ms") {
+        // Every global option that takes a value, so its value is never
+        // mistaken for the root positional.
+        if matches!(
+            name,
+            "--output" | "--color" | "--output-timeout-ms" | "--resource-preset"
+        ) {
             let value = inline.or_else(|| {
                 arguments
                     .next_if(|value| {
@@ -160,6 +165,34 @@ mod tests {
                 format: Some(MachineFormat::Ndjson),
                 color: "auto",
                 command: Some(output::contract::Command::Tls),
+            },
+            // Every global option that takes a value consumes it, so the
+            // value is never mistaken for the command.
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--output",
+                    "json",
+                    "--resource-preset",
+                    "ci-v1",
+                    "--output-timeout-ms",
+                    "5",
+                    "capture",
+                ],
+                format: Some(MachineFormat::Json),
+                color: "auto",
+                command: Some(output::contract::Command::Capture),
+            },
+            Case {
+                arguments: &[
+                    "packetcraftr",
+                    "--resource-preset=ci-v1",
+                    "--output=ndjson",
+                    "read",
+                ],
+                format: Some(MachineFormat::Ndjson),
+                color: "auto",
+                command: Some(output::contract::Command::Read),
             },
             Case {
                 arguments: &["packetcraftr", "--output=json", "invalid", "build"],

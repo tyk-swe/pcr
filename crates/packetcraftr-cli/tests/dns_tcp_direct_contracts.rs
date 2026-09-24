@@ -117,3 +117,77 @@ fn direct_tcp_rejects_incompatible_options_before_any_connection() {
         parse_json(&output);
     }
 }
+
+/// Answers `count` framed DNS-over-TCP queries by echoing each as a
+/// response, returning the framed response bytes written in total.
+fn answer_tcp_queries(listener: TcpListener, count: usize) -> usize {
+    listener.set_nonblocking(true).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut total = 0;
+    for _ in 0..count {
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(stream) => break stream,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("bounded DNS fixture did not accept: {error}"),
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut prefix = [0; 2];
+        stream.read_exact(&mut prefix).unwrap();
+        let mut message = vec![0; usize::from(u16::from_be_bytes(prefix))];
+        stream.read_exact(&mut message).unwrap();
+        message[2] = 0x81;
+        message[3] = 0x80;
+        stream.write_all(&prefix).unwrap();
+        stream.write_all(&message).unwrap();
+        total += prefix.len() + message.len();
+    }
+    total
+}
+
+/// Per-question counters are not retained in a batch, so a question's block
+/// must not report zeros for them; only the batch total carries counters.
+#[test]
+fn batch_text_reports_counters_only_in_the_batch_total() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let server = std::thread::spawn(move || answer_tcp_queries(listener, 2));
+    let output = run_success(&[
+        "--output",
+        "text",
+        "dns",
+        "127.0.0.1",
+        "first.example.test",
+        "second.example.test",
+        "--tcp",
+        "--port",
+        &port,
+        "--timeout-ms",
+        "1500",
+    ]);
+    let bytes = server.join().unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let responses = stdout
+        .lines()
+        .filter(|line| line.starts_with("dns response_code="))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 2, "{stdout}");
+    for line in responses {
+        assert!(!line.contains("udp_packets_completed="), "{line}");
+        assert!(!line.contains("bytes="), "{line}");
+    }
+    let total = stdout
+        .lines()
+        .find(|line| line.starts_with("dns batch "))
+        .unwrap_or_else(|| panic!("batch total line missing: {stdout}"));
+    assert!(total.ends_with(&format!(" bytes={bytes}")), "{total}");
+}

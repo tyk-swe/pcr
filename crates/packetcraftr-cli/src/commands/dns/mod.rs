@@ -87,7 +87,7 @@ pub(super) fn run(
                 render_text: Box::new(|report, _| {
                     let (result, diagnostics, stats) =
                         output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
-                    rendering::render_text(result, diagnostics, stats)
+                    rendering::render_text(result, diagnostics, Some(stats))
                 }),
                 complete: rendering::emit_complete,
             },

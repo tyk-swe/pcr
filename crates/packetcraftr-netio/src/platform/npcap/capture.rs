@@ -113,6 +113,15 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
             message: "the loaded Npcap runtime does not export pcap_list_tstamp_types".into(),
         });
     };
+    // The list is an allocation only pcap_free_tstamp_types releases, so a
+    // runtime without it cannot list types without leaking.
+    let Some(free) = handle.api.pcap_free_tstamp_types else {
+        return Err(Error::UnsupportedCaptureSetting {
+            setting: "timestamp_source",
+            interface: interface.name.clone(),
+            message: "the loaded Npcap runtime does not export pcap_free_tstamp_types".into(),
+        });
+    };
     let mut list: *mut c_int = null_mut();
     // SAFETY: handle is a live unactivated capture; Npcap fills the writable
     // out-pointer with an allocation pcap_free_tstamp_types owns.
@@ -133,12 +142,9 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
         return Ok(Vec::new());
     }
     let count = usize::try_from(count).unwrap_or(0);
-    let free = handle.api.pcap_free_tstamp_types;
     if count > MAX_TIMESTAMP_TYPES {
-        if let Some(free) = free {
-            // SAFETY: list is a live Npcap allocation released exactly once.
-            unsafe { free(list) };
-        }
+        // SAFETY: list is a live Npcap allocation released exactly once.
+        unsafe { free(list) };
         return Err(Error::Capture {
             message: format!(
                 "Npcap reported {count} timestamp types for {}, above the {MAX_TIMESTAMP_TYPES} bound",
@@ -150,10 +156,8 @@ pub(crate) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampTy
     // SAFETY: list points to `count` consecutive c_int values Npcap owns;
     // they are copied out before the single pcap_free_tstamp_types call.
     let values = unsafe { std::slice::from_raw_parts(list, count) }.to_vec();
-    if let Some(free) = free {
-        // SAFETY: list is the unchanged Npcap allocation from above.
-        unsafe { free(list) };
-    }
+    // SAFETY: list is the unchanged Npcap allocation from above.
+    unsafe { free(list) };
     Ok(values
         .into_iter()
         .map(|value| {

@@ -148,7 +148,10 @@ where
                 if changed.bytes().len() > frame.bytes().len().saturating_add(maximum_growth) {
                     return Err(MapError::Metadata("mapper exceeded declared frame growth"));
                 }
-                if changed.bytes() != frame.bytes() {
+                if changed.bytes() != frame.bytes()
+                    || changed.captured_length() != frame.captured_length()
+                    || changed.original_length() != frame.original_length()
+                {
                     report.frames_changed += 1;
                 }
                 if changed.interface.is_none() {

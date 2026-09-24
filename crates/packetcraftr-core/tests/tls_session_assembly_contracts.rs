@@ -291,6 +291,38 @@ fn wire_text_in_a_summary_is_escaped_the_way_the_per_frame_layer_escapes_it() {
 }
 
 #[test]
+fn summary_alpn_escapes_wire_octets_that_are_not_utf8() {
+    let mut client_record = handshake_record(&client_hello(&ClientHelloSpec {
+        alpn: vec!["Zh2".to_owned()],
+        ..ClientHelloSpec::default()
+    }));
+    let mut server_record = handshake_record(&server_hello(&ServerHelloSpec {
+        selected_version: Some(TLS_1_2),
+        cipher_suite: TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        key_share_group: None,
+        alpn: Some("Zh2".to_owned()),
+        ..ServerHelloSpec::default()
+    }));
+    for record in [&mut client_record, &mut server_record] {
+        let start = record
+            .windows(3)
+            .position(|window| window == b"Zh2")
+            .expect("ALPN marker");
+        record[start] = 0xff;
+    }
+    let mut capture = Capture::new();
+    let mut stream = Stream::new(40_000);
+    capture.open(&mut stream);
+    capture.client(&mut stream, &client_record);
+    capture.server(&mut stream, &server_record);
+    let (sessions, _) = assemble_default(&capture);
+    let client = sessions[0].client.as_ref().expect("client offer");
+    assert_eq!(client.alpn, ["\\255h2"]);
+    let server = sessions[0].server.as_ref().expect("server decision");
+    assert_eq!(server.alpn.as_deref(), Some("\\255h2"));
+}
+
+#[test]
 fn a_server_hello_timestamped_before_the_client_hello_reports_a_negative_round_trip() {
     let registry = registry();
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);

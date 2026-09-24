@@ -286,9 +286,9 @@ impl Tls {
         self.ja3_raw = Some(fingerprint.raw);
         self.ja4 = Some(ja4(hello, Transport::Tcp));
         self.alpn = hello
-            .alpn
+            .alpn_raw
             .iter()
-            .map(|name| escape_wire_text(name))
+            .map(|name| escape_wire_bytes(name))
             .collect();
         self.cipher_suites.clone_from(&hello.cipher_suites);
         self.supported_versions
@@ -310,9 +310,9 @@ impl Tls {
         self.selected_version = Some(hello.selected_version);
         self.key_share_group = hello.key_share_group;
         self.alpn = hello
-            .alpn
+            .alpn_raw
             .iter()
-            .map(|name| escape_wire_text(name))
+            .map(|name| escape_wire_bytes(name))
             .collect();
     }
 
@@ -348,8 +348,15 @@ impl Tls {
 /// DNS label, `.` is not a separator here and is kept verbatim.
 #[must_use]
 pub(crate) fn escape_wire_text(value: &str) -> String {
+    escape_wire_bytes(value.as_bytes())
+}
+
+/// Escapes raw wire bytes with the same rule as [`escape_wire_text`], so a
+/// value that is not UTF-8 keeps its exact octets instead of U+FFFD.
+#[must_use]
+pub(crate) fn escape_wire_bytes(value: &[u8]) -> String {
     let mut escaped = String::with_capacity(value.len());
-    for byte in value.bytes() {
+    for &byte in value {
         if (0x21..=0x7e).contains(&byte) && byte != b'\\' {
             escaped.push(char::from(byte));
         } else {

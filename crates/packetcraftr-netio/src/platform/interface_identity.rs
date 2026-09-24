@@ -35,8 +35,8 @@ pub(super) fn validate_current_interface_identity(
 }
 
 /// Checks the current name/index pair. Linux and macOS avoid a full native
-/// enumeration on each send; other targets fall back to
-/// [`validate_current_interface_identity`].
+/// enumeration on each send; other targets fall back to the enumeration in
+/// `validate_current_interface_identity`, which is not built on every profile.
 pub(super) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {

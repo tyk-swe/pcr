@@ -587,6 +587,55 @@ fn link_capture_and_raw_ip_roots_round_trip() {
     }
 }
 
+/// A PPPoE discovery code needs the discovery EtherType from whichever parent
+/// carries it, not only from an Ethernet or VLAN header.
+#[test]
+fn pppoe_stage_is_checked_against_every_ethertype_parent() {
+    let parents: Vec<(&str, Vec<Box<dyn Layer>>)> = vec![
+        ("ethernet", vec![Box::new(Ethernet::default())]),
+        (
+            "ipv4",
+            vec![
+                Box::new(ipv4([192, 0, 2, 1], [192, 0, 2, 2])),
+                Box::new(Gre::default()),
+            ],
+        ),
+        (
+            "ethernet",
+            vec![
+                Box::new(Ethernet::default()),
+                Box::new(Llc::default()),
+                Box::new(Snap::default()),
+            ],
+        ),
+    ];
+    for (root, layers) in parents {
+        let mut packet = Packet::new();
+        let parent = layers
+            .last()
+            .map(|layer| layer.protocol_id().as_str())
+            .expect("a parent layer");
+        for layer in layers {
+            packet.push_boxed(layer);
+        }
+        // PADI, a discovery stage, under a parent left to choose its EtherType.
+        packet.push(Pppoe {
+            code: 0x09,
+            ..Pppoe::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[0x01, 0x01, 0x00, 0x00])));
+        let error = build::Builder::new(rooted_registry(root))
+            .build(packet, codec::Context::default(), build::Options::default())
+            .expect_err("a discovery code under the session EtherType is refused");
+        assert!(
+            error
+                .to_string()
+                .contains("requires the enclosing EtherType 0x8863"),
+            "{parent}: {error}"
+        );
+    }
+}
+
 /// Linux cooked headers carry the sender's full address length while the slot
 /// keeps only its first eight bytes, as an IPoIB capture's 20-byte addresses do.
 #[test]

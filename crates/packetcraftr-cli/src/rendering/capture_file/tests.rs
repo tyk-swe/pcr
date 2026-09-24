@@ -22,30 +22,36 @@ fn empty_capture_is_rejected_before_spool_creation() {
             created = true;
             Ok(Cursor::new(Vec::new()))
         },
-        &mut Vec::new(),
+        || Ok(Vec::new()),
     )
     .expect_err("empty capture");
     assert_eq!(error.exit_code(), 2);
     assert!(!created);
 }
 
+/// An unrepresentable frame keeps the capture error's own classification, as
+/// the streaming writers do, and leaves stdout untouched.
 #[test]
 fn encoding_failure_emits_no_stdout_bytes() {
     let frames = vec![
         frame(LinkType::IPV4, vec![1]),
         frame(LinkType::IPV6, vec![2]),
     ];
-    let mut destination = Vec::new();
+    let mut opened = false;
     let error = write_capture_file_with(
         Format::Pcap,
         frames,
         || Ok(Cursor::new(Vec::new())),
-        &mut destination,
+        || {
+            opened = true;
+            Ok(Vec::new())
+        },
     )
     .expect_err("mixed classic pcap");
-    assert_eq!(error.classification.code, "io.runtime");
-    assert!(error.message.starts_with("write capture output failed:"));
-    assert!(destination.is_empty());
+    assert_eq!(error.classification.code, "packet.capture_file");
+    assert_eq!(error.exit_code(), 3);
+    assert!(error.classification.remediation.is_some());
+    assert!(!opened);
 }
 
 struct ScriptedSpool {
@@ -105,7 +111,7 @@ fn assert_spool_failure(operation: &str, create: impl FnOnce() -> io::Result<Scr
         Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
         create,
-        &mut Vec::new(),
+        || Ok(Vec::new()),
     )
     .expect_err(operation);
     assert_eq!(error.exit_code(), 5, "{operation}");
@@ -124,6 +130,29 @@ fn spool_create_write_flush_seek_and_read_failures_are_classified() {
     assert_spool_failure("read", || Ok(scripted(false, false, false, true)));
 }
 
+/// Dropping an unfinished gzip compressor still writes a complete, empty
+/// container, so a spool failure must leave no compressed bytes behind.
+#[test]
+fn spool_failure_writes_no_compressed_container() {
+    for (operation, spool) in [
+        ("write", scripted(true, false, false, false)),
+        ("flush", scripted(false, true, false, false)),
+        ("seek", scripted(false, false, true, false)),
+    ] {
+        let mut destination = Vec::new();
+        write_capture_file_with(
+            Format::Pcap,
+            [frame(LinkType::IPV4, vec![1])],
+            || Ok(spool),
+            || crate::command_options::Compression::Gzip.writer(&mut destination),
+        )
+        .map(drop)
+        .expect_err(operation);
+        assert!(destination.is_empty(), "{operation}");
+    }
+}
+
+#[derive(Debug)]
 struct FailingDestination;
 
 impl Write for FailingDestination {
@@ -145,7 +174,7 @@ fn stdout_write_failure_is_classified() {
         Format::Pcap,
         [frame(LinkType::IPV4, vec![1])],
         || Ok(Cursor::new(Vec::new())),
-        &mut FailingDestination,
+        || Ok(FailingDestination),
     )
     .expect_err("stdout fails");
     assert_eq!(error.classification.code, "io.stdout");
@@ -170,11 +199,13 @@ fn large_capture_is_spooled_and_copied_in_bounded_chunks() {
     }
 
     let frames = (0..512).map(|_| frame(LinkType::IPV4, vec![0x5a; 4_096]));
-    let mut destination = ObservedDestination {
-        total: 0,
-        largest_write: 0,
-    };
-    write_capture_file_with(Format::Pcap, frames, tempfile::tempfile, &mut destination).unwrap();
+    let destination = write_capture_file_with(Format::Pcap, frames, tempfile::tempfile, || {
+        Ok(ObservedDestination {
+            total: 0,
+            largest_write: 0,
+        })
+    })
+    .unwrap();
     assert!(destination.total > COPY_BUFFER_BYTES);
     assert!(destination.largest_write <= COPY_BUFFER_BYTES);
     assert!(destination.largest_write < destination.total);

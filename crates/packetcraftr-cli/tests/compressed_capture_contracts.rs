@@ -8,6 +8,7 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use std::{
     io::{Cursor, Read, Write},
     path::PathBuf,
+    process::Command,
     time::UNIX_EPOCH,
 };
 
@@ -69,6 +70,41 @@ fn invalid_compression_output_is_rejected_before_live_or_input_work() {
                 .unwrap()
                 .contains("--compression requires")
         );
+    }
+}
+
+/// Generated capture files are spooled before any stdout byte, so a spool
+/// failure must not leave even an empty compressed container behind.
+#[test]
+fn failed_capture_spool_emits_no_compressed_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing");
+    let packet = format!(
+        "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=40000,dport=40001)/raw(text={})",
+        "x".repeat(200)
+    );
+    for compression in ["none", "gzip", "zstd"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+            .args([
+                "--output",
+                "pcap",
+                "fragment",
+                "--mtu",
+                "128",
+                "--packet",
+                &packet,
+                "--compression",
+                compression,
+            ])
+            .env("TMPDIR", &missing)
+            .output()
+            .expect("CLI process must start");
+        assert_eq!(output.status.code(), Some(5), "{compression}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("io.capture_file"),
+            "{compression}: {output:?}"
+        );
+        assert!(output.stdout.is_empty(), "{compression}: {output:?}");
     }
 }
 

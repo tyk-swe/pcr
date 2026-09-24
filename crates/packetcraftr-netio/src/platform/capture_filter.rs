@@ -91,7 +91,8 @@ fn has_symbolic_operand(source: &str) -> bool {
 
 fn is_numeric_port_range(atom: &str) -> bool {
     let Some((start, end)) = atom.split_once('-') else {
-        return false;
+        // A lone port is a degenerate range; libpcap accepts it.
+        return atom.bytes().all(|byte| byte.is_ascii_digit()) && atom.parse::<u16>().is_ok();
     };
     if end.contains('-') {
         return false;
@@ -206,8 +207,10 @@ mod tests {
             "tcp dst port 443",
             "tcp src portrange 80-90",
             "tcp dst portrange 80-90",
+            "tcp dst portrange 80",
             "udp src portrange 1000-2000",
             "udp dst portrange 1000-2000",
+            "udp src portrange 8080",
             "ip net 192.0.2.0/24",
             "ether host 0011.2233.4455",
             "ip proto 0x11",
@@ -222,6 +225,7 @@ mod tests {
             "host 80-90",
             "tcp portrange 90-80",
             "tcp portrange 80-65536",
+            "tcp portrange 65536",
         ];
 
         for filter in accepted {

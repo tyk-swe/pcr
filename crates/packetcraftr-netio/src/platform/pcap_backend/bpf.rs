@@ -314,6 +314,16 @@ mod tests {
                 ipv4_ethernet_transport_packet(17, 40_000, 1500),
                 ipv4_ethernet_transport_packet(17, 40_000, 2001),
             ),
+            (
+                "tcp dst portrange 80",
+                ipv4_ethernet_transport_packet(6, 40_000, 80),
+                ipv4_ethernet_transport_packet(6, 40_000, 81),
+            ),
+            (
+                "udp src portrange 8080",
+                ipv4_ethernet_transport_packet(17, 8080, 40_000),
+                ipv4_ethernet_transport_packet(17, 8081, 40_000),
+            ),
         ];
         for (filter, matching, nonmatching) in cases {
             let program = compile_capture_filter(&capture, &interface.id, filter, u32::MAX)

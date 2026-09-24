@@ -25,3 +25,6 @@ names even though libpcap accepts them.
 - Implemented on [PR #209](https://github.com/tyk-swe/pcr/pull/209); automated
   code review is complete. Reviewed native runtime evidence remains required
   before merge.
+- Follow-up review found the `portrange` guard rejected libpcap's accepted
+  single-port operand; `is_numeric_port_range` now admits a standalone decimal
+  `u16` with validation and compiled-BPF regressions.

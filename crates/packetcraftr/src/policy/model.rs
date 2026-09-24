@@ -167,7 +167,7 @@ impl Classified for Error {
             // shares the `cli.live_target` code with target resolution.
             Self::InvalidAddressLimit { .. } => (
                 "cli.live_target",
-                "use a valid IP address or bounded ASCII DNS hostname",
+                "set the resolved-address limit to at least 1 and no more than the supported maximum",
             ),
             Self::PublicDestination { .. } => (
                 "policy.public_destination",
@@ -180,12 +180,14 @@ impl Classified for Error {
             // Malformed destination constraints and a constraint list beyond
             // its bound are caller request errors, like the resolved-address
             // bound, and share the `cli.live_target` code with target input.
-            Self::InvalidDestinationConstraint { .. } | Self::DestinationConstraintLimit { .. } => {
-                (
-                    "cli.live_target",
-                    "use an IP address or canonical CIDR network as the destination constraint",
-                )
-            }
+            Self::InvalidDestinationConstraint { .. } => (
+                "cli.live_target",
+                "use an IP address or canonical CIDR network as the destination constraint",
+            ),
+            Self::DestinationConstraintLimit { .. } => (
+                "cli.live_target",
+                "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
+            ),
             Self::InvalidPacketSemantics { .. } => return INVALID_PACKET_SEMANTICS,
             Self::HostnameResolution { .. } => (
                 "policy.hostname_resolution",

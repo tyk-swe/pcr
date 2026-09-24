@@ -17,7 +17,7 @@ use packetcraftr_core::diagnostic::{
 };
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Layer, Malformed, Raw};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::gre::Gre;
@@ -585,6 +585,56 @@ fn link_capture_and_raw_ip_roots_round_trip() {
             .expect("raw-IP root should sniff version");
         assert!(decoded.packet.get::<Ipv4>().is_some());
     }
+}
+
+/// Trailing paddings list the innermost coverage boundary first, as dissection
+/// orders them, so each layer's declared length excludes exactly its outside bytes.
+#[test]
+fn coverage_paddings_build_only_in_innermost_first_order() {
+    let packet = |paddings: [Padding; 2]| {
+        let mut packet = Packet::new();
+        packet.push(Ethernet::default());
+        packet.push(ipv4([192, 0, 2, 1], [192, 0, 2, 2]));
+        packet.push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        });
+        packet.push(Raw::new(Bytes::from_static(&[1, 2, 3, 4])));
+        for padding in paddings {
+            packet.push(padding);
+        }
+        packet
+    };
+    let outside_udp = || Padding::after_layer(vec![0xbb; 3], 2);
+    let outside_ipv4 = || Padding::after_layer(vec![0xaa; 2], 1);
+
+    let (_, decoded) = round_trip(packet([outside_udp(), outside_ipv4()]), "ethernet");
+    let paddings = decoded
+        .packet
+        .iter()
+        .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
+        .map(|padding| (padding.outside_layer, padding.bytes.len()))
+        .collect::<Vec<_>>();
+    assert_eq!(paddings, [(Some(2), 3), (Some(1), 2)]);
+
+    let error = build::Builder::new(rooted_registry("ethernet"))
+        .build(
+            packet([outside_ipv4(), outside_udp()]),
+            codec::Context::default(),
+            build::Options::default(),
+        )
+        .expect_err("an outer boundary listed first is refused");
+    assert!(
+        matches!(
+            error,
+            build::Error::InvalidPaddingBoundary {
+                index: 5,
+                outside_layer: 2
+            }
+        ),
+        "{error}"
+    );
 }
 
 /// Option bytes the IPv4 decoder cannot walk would dissect the whole header as

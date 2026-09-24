@@ -468,6 +468,35 @@ fn clap_failures_preserve_unambiguous_invocation_context() {
     assert_eq!(value["error"]["kind"], "cli");
 }
 
+// The write-failure case sinks stdout into /dev/full; the package build script
+// enables the gate on targets that provide it.
+#[cfg(packetcraftr_test_dev_full)]
+#[test]
+fn unwritable_parse_error_record_reports_the_write_failure_once() {
+    common::require_dev_full();
+    let failure = Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+        .args(["--output", "ndjson", "not-a-command"])
+        .stdout(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .expect("/dev/full must be writable for the write-failure contract"),
+        )
+        .output()
+        .expect("CLI process must start");
+    assert_eq!(failure.status.code(), Some(5), "{failure:?}");
+    let stderr = String::from_utf8(failure.stderr).expect("stderr is UTF-8");
+    assert!(
+        stderr.starts_with("error[io.stdout]: NDJSON stream is incomplete: "),
+        "{stderr}"
+    );
+    assert_eq!(
+        stderr.matches("NDJSON stream is incomplete").count(),
+        1,
+        "{stderr}"
+    );
+}
+
 #[test]
 fn runtime_stream_error_follows_every_preserved_record() {
     let capture = partial_capture();

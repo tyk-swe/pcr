@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::progress::{Runtime, Sink};
+use packetcraftr::progress::{EmitError, Runtime, Sink};
 use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
@@ -41,11 +41,13 @@ pub(crate) fn write_unattributed_error(
     })
     .map_err(CliError::classified)?;
     sink.emit(error, &Deadline::new(OUTPUT_TIMEOUT))
-        .map_err(|source| {
-            CliError::from(output::stream::EncodeError::Write {
+        .map_err(|source| match source {
+            // The callback already reported the classified write failure.
+            EmitError::Output(source) => CliError::classified(source),
+            source => CliError::from(output::stream::EncodeError::Write {
                 sequence: 0,
-                source: io::Error::other(format!("NDJSON stream is incomplete: {source}")),
-            })
+                source: io::Error::other(source),
+            }),
         })
 }
 

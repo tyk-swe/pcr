@@ -114,6 +114,16 @@ pub struct Source {
     pub emitted_frames: u64,
     pub late_frames: u64,
 }
+/// The machine-output enum value, which spells words with underscores where
+/// the `--overflow-policy` argument uses hyphens.
+fn overflow_policy_name(policy: packetcraftr_netio::capture::OverflowPolicy) -> &'static str {
+    use packetcraftr_netio::capture::OverflowPolicy;
+    match policy {
+        OverflowPolicy::Fail => "fail",
+        OverflowPolicy::DropNewest => "drop_newest",
+        OverflowPolicy::DropOldest => "drop_oldest",
+    }
+}
 impl From<&packetcraftr::capture::Source> for Source {
     fn from(source: &packetcraftr::capture::Source) -> Self {
         let native = &source.capture;
@@ -129,7 +139,7 @@ impl From<&packetcraftr::capture::Source> for Source {
                 .then_some(native.metadata.native),
             queue_frames: native.limits.max_frames,
             queue_bytes: native.limits.max_bytes,
-            overflow_policy: native.limits.overflow_policy.to_string(),
+            overflow_policy: overflow_policy_name(native.limits.overflow_policy).to_owned(),
             metadata_valid: native.metadata_valid,
             ready: native.ready,
             shutdown_confirmed: native.shutdown_confirmed,

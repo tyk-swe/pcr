@@ -31,6 +31,7 @@ pub const fn response_code_name(code: u16) -> &'static str {
         8 => "nx_rrset",
         9 => "not_authoritative",
         10 => "not_zone",
+        11 => "dso_type_not_implemented",
         16 => "bad_version",
         17 => "bad_key",
         18 => "bad_time",
@@ -389,4 +390,16 @@ pub(super) fn classify_tcp_response(
         },
         response: validated,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::response_code_name;
+
+    #[test]
+    fn response_code_names_include_the_dso_type_code() {
+        assert_eq!(response_code_name(10), "not_zone");
+        assert_eq!(response_code_name(11), "dso_type_not_implemented");
+        assert_eq!(response_code_name(12), "unknown");
+    }
 }

@@ -23,7 +23,9 @@ use packetcraftr_netio::{
 
 use crate::policy::decode_wire;
 use crate::replay::model::{Transmission, Transmitter};
-use crate::replay::wire::{map_replay_route_error, replay_network_envelope};
+use crate::replay::wire::{
+    map_replay_route_error, replay_network_envelope, requested_interface_matches,
+};
 
 /// System interface, route, and packet-I/O providers for replay. Caches only
 /// the validated interface; each transmission uses the plan returned by the
@@ -205,12 +207,6 @@ fn interface_owned_packet_source(
             .iter()
             .any(|address| address.address == source))
     .then_some(source)
-}
-
-fn requested_interface_matches(actual: &InterfaceId, requested: &InterfaceId) -> bool {
-    !(requested.index == 0 && requested.name.is_empty())
-        && (requested.index == 0 || actual.index == requested.index)
-        && (requested.name.is_empty() || actual.name == requested.name)
 }
 
 impl Default for SystemTransmitter {

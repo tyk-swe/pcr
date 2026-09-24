@@ -86,6 +86,9 @@ struct RecordingTransmitter {
     transmission_calls: usize,
     partial: bool,
     different_interface: bool,
+    /// Resolves every request to this complete identity, the way the system
+    /// transmitter resolves a name-only or index-only selector.
+    resolves_to: Option<InterfaceId>,
 }
 
 impl Transmitter for RecordingTransmitter {
@@ -96,6 +99,7 @@ impl Transmitter for RecordingTransmitter {
         frame: &Frame,
     ) -> Result<MaterializedRoute, LiveIoError> {
         self.validation_calls += 1;
+        let interface = self.resolves_to.as_ref().unwrap_or(interface);
         Ok(MaterializedRoute {
             plan: test_route(interface, mode, frame.link_type),
             neighbor_resolution: None,
@@ -202,6 +206,72 @@ fn replay_options(timing: Timing) -> Options {
         link_mode: LinkMode::Auto,
         timing,
         limits: Limits::default(),
+    }
+}
+
+#[test]
+fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
+    let resolved = test_interface();
+    for (requested, accepted) in [
+        (
+            InterfaceId {
+                name: resolved.name.clone(),
+                index: 0,
+            },
+            true,
+        ),
+        (
+            InterfaceId {
+                name: String::new(),
+                index: resolved.index,
+            },
+            true,
+        ),
+        (resolved.clone(), true),
+        (
+            InterfaceId {
+                name: "other0".to_owned(),
+                index: 0,
+            },
+            false,
+        ),
+        (
+            InterfaceId {
+                name: resolved.name.clone(),
+                index: resolved.index + 1,
+            },
+            false,
+        ),
+    ] {
+        let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[0; 60])]);
+        let mut authorizer = RecordingAuthorizer::default();
+        let mut transmitter = RecordingTransmitter {
+            resolves_to: Some(resolved.clone()),
+            ..RecordingTransmitter::default()
+        };
+        let mut clock = RecordingClock::default();
+        let mut options = replay_options(Timing::Immediate);
+        options.interface = Some(requested.clone());
+        let result = run_with_selector(
+            &mut reader,
+            &options,
+            None,
+            &mut authorizer,
+            &mut transmitter,
+            &mut clock,
+            |_| Ok(()),
+        );
+        if accepted {
+            let summary = result.unwrap_or_else(|error| panic!("{requested:?}: {error:?}"));
+            assert_eq!(summary.interfaces_used, [resolved.clone()], "{requested:?}");
+            assert_eq!(transmitter.transmission_calls, 1, "{requested:?}");
+        } else {
+            assert!(
+                matches!(result, Err(Error::InvalidEvidence { .. })),
+                "{requested:?}: {result:?}"
+            );
+            assert_eq!(transmitter.transmission_calls, 0, "{requested:?}");
+        }
     }
 }
 

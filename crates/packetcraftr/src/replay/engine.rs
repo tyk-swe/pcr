@@ -19,7 +19,7 @@ use super::error::Error;
 use super::model::{
     FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
-use super::wire::{replay_link_mode, validate_transmission_evidence};
+use super::wire::{replay_link_mode, requested_interface_matches, validate_transmission_evidence};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireBudget};
 
 #[derive(Default)]
@@ -580,7 +580,9 @@ fn plan_frame_route<T: Transmitter>(
         source_index,
         source,
     })?;
-    if &route.plan.decision.interface != interface {
+    // The caller's selector may name only the interface's name or index; the
+    // transmitter resolves it to the complete identity it will use.
+    if !requested_interface_matches(&route.plan.decision.interface, interface) {
         return Err(Error::InvalidEvidence {
             source_index,
             message: "planned route changed the selected output interface".to_owned(),

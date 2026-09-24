@@ -150,3 +150,56 @@ fn failed_read_finalizes_zstd_and_keeps_completed_frames() {
         );
     }
 }
+
+/// A read or replay that cannot write its input in the requested capture
+/// format fails before stdout is wrapped, so no empty compressed container is
+/// written. Replay fails before any interface lookup or transmission.
+#[test]
+fn rejected_capture_format_conversion_emits_no_compressed_bytes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/captures");
+    let (pcap, pcapng) = (
+        root.join("dns-response.pcap"),
+        root.join("tls-handshake.pcapng"),
+    );
+    let cases = [
+        (
+            vec!["--output", "pcapng", "read", path_text(&pcap)],
+            2,
+            "cli.capture_rewrite_format",
+        ),
+        (
+            vec!["--output", "pcap", "read", path_text(&pcapng)],
+            2,
+            "cli.capture_rewrite_format",
+        ),
+        (
+            vec![
+                "--output",
+                "pcap",
+                "replay",
+                path_text(&pcapng),
+                "--interface",
+                "missing-interface",
+            ],
+            3,
+            "packet.capture_file",
+        ),
+    ];
+    for (command, status, code) in cases {
+        for compression in ["gzip", "zstd"] {
+            let mut arguments = command.clone();
+            arguments.extend(["--compression", compression]);
+            let output = run(&arguments);
+            assert_eq!(
+                output.status.code(),
+                Some(status),
+                "{arguments:?}: {output:?}"
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(code),
+                "{arguments:?}: {output:?}"
+            );
+            assert!(output.stdout.is_empty(), "{arguments:?}: {output:?}");
+        }
+    }
+}

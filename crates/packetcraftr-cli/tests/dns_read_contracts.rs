@@ -49,6 +49,53 @@ fn offline_dns_output_preserves_records_and_scoped_transaction_evidence() {
 }
 
 #[test]
+fn dns_read_keeps_port_53_when_additional_ports_are_configured() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/dns-response.pcap");
+    let path = path.to_str().unwrap();
+    let port_arguments: &[&[&str]] = &[
+        &[],
+        &["--dns-port", "5353"],
+        &["--dns-port", "53", "--dns-port", "5353", "--dns-port", "53"],
+    ];
+
+    for ports in port_arguments {
+        for format in ["text", "json", "ndjson"] {
+            let mut arguments = vec!["--output", format, "dns-read", path];
+            arguments.extend_from_slice(ports);
+            let output = run_success(&arguments);
+            match format {
+                "text" => assert!(
+                    String::from_utf8(output.stdout)
+                        .unwrap()
+                        .contains("1 DNS messages;"),
+                    "ports {ports:?}"
+                ),
+                "json" => {
+                    let report = parse_json(&output);
+                    assert_eq!(report["result"]["summary"]["complete_messages"], 1);
+                    assert_eq!(report["result"]["messages"].as_array().unwrap().len(), 1);
+                }
+                "ndjson" => {
+                    let records = parse_ndjson(&output);
+                    assert_eq!(
+                        records
+                            .iter()
+                            .filter(|record| record["event"] == "dns_message")
+                            .count(),
+                        1,
+                        "ports {ports:?}"
+                    );
+                    assert_eq!(records.last().unwrap()["event"], "complete");
+                    assert_eq!(records.last().unwrap()["result"]["summary"]["messages"], 1);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
 fn application_output_budget_counts_only_compact_event_payloads() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/dns-response.pcap");

@@ -7,8 +7,6 @@ use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
 
-use std::time::SystemTime;
-
 use packetcraftr_core as core;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
@@ -72,7 +70,7 @@ pub(super) fn run(
     };
     let decoded = core::decode::Dissector::new(registry)
         .decode(
-            Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
+            Frame::without_timestamp(LinkType(arguments.link_type), bytes)
                 .map_err(CliError::classified)?,
             arguments.budget.decode_options(),
         )

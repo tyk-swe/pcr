@@ -73,6 +73,42 @@ fn repeated_layers_are_arrays_and_occurrence_selection_is_scalar() {
 }
 
 #[test]
+fn raw_dissect_reports_missing_capture_time_and_rejects_time_filters() {
+    let report = parse_json(&run_success(&[
+        "--output",
+        "json",
+        "dissect",
+        "--link-type",
+        "228",
+        "--hex",
+        IP,
+        "--field",
+        "frame.time_epoch",
+    ]));
+    assert_eq!(
+        report["result"]["rows"][0]["values"][0],
+        serde_json::Value::Null
+    );
+
+    let output = run(&[
+        "--output",
+        "json",
+        "dissect",
+        "--link-type",
+        "228",
+        "--hex",
+        IP,
+        "--filter",
+        "frame.time_epoch >= 0",
+    ]);
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(
+        parse_json(&output)["error"]["code"],
+        "packet.timestamp_unavailable"
+    );
+}
+
+#[test]
 fn capture_projection_retains_positions_indexes_and_resource_failures() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/tls-handshake.pcapng");

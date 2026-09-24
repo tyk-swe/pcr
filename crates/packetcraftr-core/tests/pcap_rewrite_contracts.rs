@@ -8,10 +8,10 @@ use std::io::{self, Cursor, Write};
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::analysis::pcap::{
-    Endianness, Error, Format, Limits, PcapOptions, Reader, Writer, rewrite,
+    Endianness, Error, Format, Limits, PcapOptions, Reader, Writer, map_frames, rewrite,
 };
 use packetcraftr_core::error::{Classified, Kind};
-use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
 #[derive(Debug)]
 struct FailAfter {
@@ -121,6 +121,96 @@ fn rewrite_is_same_format_and_enforces_stream_bounds() {
         rewrite(&mut source, Vec::new(), Limits::default()).expect("pcapng rewrite remains pcapng");
     assert_eq!(copy, pcapng);
     assert_eq!(report.format, Format::PcapNg);
+}
+
+#[test]
+fn map_frames_counts_length_changes_and_keeps_unchanged_frames_out_of_the_count() {
+    let frames = [
+        Frame::try_with_lengths(
+            SystemTime::UNIX_EPOCH,
+            LinkType::ETHERNET,
+            Lengths {
+                captured: 2,
+                original: 2,
+            },
+            b"ab".as_slice(),
+        )
+        .expect("first frame lengths are valid"),
+        Frame::try_with_lengths(
+            SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+            LinkType::ETHERNET,
+            Lengths {
+                captured: 2,
+                original: 2,
+            },
+            b"cd".as_slice(),
+        )
+        .expect("second frame lengths are valid"),
+    ];
+    let mut input = Writer::pcapng(Vec::new()).expect("pcapng input initializes");
+    for frame in &frames {
+        input.write_frame(frame).expect("input frame writes");
+    }
+    let mut reader = Reader::new(Cursor::new(input.into_inner())).expect("input opens");
+    let mut output = Writer::pcapng(Vec::new()).expect("pcapng output initializes");
+
+    let report = map_frames(
+        &mut reader,
+        &mut output,
+        Limits::default(),
+        0,
+        |number, frame| {
+            let original = if number == 1 {
+                frame.original_length() + 1
+            } else {
+                frame.original_length()
+            };
+            let mut mapped = Frame::try_with_optional_timestamp(
+                frame.timestamp,
+                frame.link_type,
+                Lengths {
+                    captured: frame.captured_length(),
+                    original,
+                },
+                frame.bytes().clone(),
+            )
+            .expect("mapped lengths are valid");
+            mapped.interface = frame.interface;
+            mapped.direction = frame.direction;
+            Ok(mapped)
+        },
+    )
+    .expect("length-only mapping succeeds");
+
+    assert_eq!(report.frames_read, 2);
+    assert_eq!(report.frames_changed, 1);
+
+    let mut output_reader = Reader::new(Cursor::new(output.into_inner())).expect("output opens");
+    let mapped_frames = [
+        output_reader
+            .next_frame()
+            .expect("first output frame is valid")
+            .expect("first output frame exists"),
+        output_reader
+            .next_frame()
+            .expect("second output frame is valid")
+            .expect("second output frame exists"),
+    ];
+    assert_eq!(mapped_frames[0].bytes(), frames[0].bytes());
+    assert_eq!(
+        mapped_frames[0].captured_length(),
+        frames[0].captured_length()
+    );
+    assert_eq!(mapped_frames[0].original_length(), 3);
+    assert_eq!(mapped_frames[1].bytes(), frames[1].bytes());
+    assert_eq!(
+        mapped_frames[1].captured_length(),
+        frames[1].captured_length()
+    );
+    assert_eq!(
+        mapped_frames[1].original_length(),
+        frames[1].original_length()
+    );
 }
 
 #[test]

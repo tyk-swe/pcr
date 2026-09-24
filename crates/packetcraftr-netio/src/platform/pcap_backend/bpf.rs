@@ -180,7 +180,7 @@ mod tests {
     use crate::{
         interface::{self, Id as InterfaceId},
         link::Capability,
-        platform::{capture_filter, dispatch},
+        platform::dispatch,
     };
 
     fn interface(addresses: &[(Ipv4Addr, u8)]) -> interface::Info {
@@ -214,6 +214,31 @@ mod tests {
         packet[23] = 17;
         packet[26..30].copy_from_slice(&Ipv4Addr::new(192, 0, 2, 10).octets());
         packet[30..34].copy_from_slice(&destination.octets());
+        packet
+    }
+
+    fn ipv4_ethernet_transport_packet(
+        protocol: u8,
+        source_port: u16,
+        destination_port: u16,
+    ) -> Vec<u8> {
+        let transport_length = if protocol == 6 { 20 } else { 8 };
+        let mut packet = vec![0; 14 + 20 + transport_length];
+        packet[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+        packet[14] = 0x45;
+        packet[16..18]
+            .copy_from_slice(&u16::try_from(20 + transport_length).unwrap().to_be_bytes());
+        packet[22] = 64;
+        packet[23] = protocol;
+        packet[26..30].copy_from_slice(&Ipv4Addr::new(192, 0, 2, 10).octets());
+        packet[30..34].copy_from_slice(&Ipv4Addr::new(192, 0, 2, 20).octets());
+        packet[34..36].copy_from_slice(&source_port.to_be_bytes());
+        packet[36..38].copy_from_slice(&destination_port.to_be_bytes());
+        if protocol == 6 {
+            packet[46] = 0x50;
+        } else {
+            packet[38..40].copy_from_slice(&8_u16.to_be_bytes());
+        }
         packet
     }
 
@@ -264,30 +289,42 @@ mod tests {
     }
 
     #[test]
-    fn numeric_tcp_and_udp_port_ranges_validate_and_compile() {
+    fn numeric_tcp_and_udp_port_ranges_compile_and_match_packets() {
         let capture = Capture::dead(pcap::Linktype::ETHERNET).expect("dead Ethernet capture");
         let interface = interface(&[]);
 
-        for filter in [
-            "tcp src portrange 80-90",
-            "tcp dst portrange 80-90",
-            "udp src portrange 1000-2000",
-            "udp dst portrange 1000-2000",
-        ] {
-            capture_filter::validate(&interface.id, filter)
-                .unwrap_or_else(|error| panic!("validation failed for {filter}: {error}"));
-            compile_capture_filter(&capture, &interface.id, filter, u32::MAX)
+        let cases = [
+            (
+                "tcp src portrange 80-90",
+                ipv4_ethernet_transport_packet(6, 85, 40_000),
+                ipv4_ethernet_transport_packet(6, 91, 40_000),
+            ),
+            (
+                "tcp dst portrange 80-90",
+                ipv4_ethernet_transport_packet(6, 40_000, 85),
+                ipv4_ethernet_transport_packet(6, 40_000, 91),
+            ),
+            (
+                "udp src portrange 1000-2000",
+                ipv4_ethernet_transport_packet(17, 1500, 40_000),
+                ipv4_ethernet_transport_packet(17, 2001, 40_000),
+            ),
+            (
+                "udp dst portrange 1000-2000",
+                ipv4_ethernet_transport_packet(17, 40_000, 1500),
+                ipv4_ethernet_transport_packet(17, 40_000, 2001),
+            ),
+        ];
+        for (filter, matching, nonmatching) in cases {
+            let program = compile_capture_filter(&capture, &interface.id, filter, u32::MAX)
                 .unwrap_or_else(|error| panic!("BPF compilation failed for {filter}: {error}"));
-        }
-
-        for filter in [
-            "host example.com",
-            "tcp port https",
-            "udp portrange dns-https",
-        ] {
             assert!(
-                capture_filter::validate(&interface.id, filter).is_err(),
-                "symbolic operands must be rejected: {filter}"
+                program.matches(&matching),
+                "{filter} must match in-range ports"
+            );
+            assert!(
+                !program.matches(&nonmatching),
+                "{filter} must reject out-of-range ports"
             );
         }
     }

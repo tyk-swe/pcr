@@ -60,7 +60,12 @@ where
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
     let mut admission = client
-        .admission(&executor.options.send, planned.len() as u64, deadline)
+        .admission(
+            &executor.options.send,
+            planned.len() as u64,
+            deadline,
+            cancellation.cloned(),
+        )
         .map_err(BoundaryError::from_error)?;
     for &Planned { probe, .. } in planned {
         super::check(client, deadline, cancellation)?;

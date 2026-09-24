@@ -585,8 +585,9 @@ where
         options: &'c send::Options,
         packets: u64,
         deadline: Instant,
+        cancellation: Option<Cancellation>,
     ) -> Result<Admission<'c, R, N, I>, Error> {
-        let (stages, budget) = self.open_stages(options, packets, Some(deadline), None)?;
+        let (stages, budget) = self.open_stages(options, packets, Some(deadline), cancellation)?;
         Ok(Admission { stages, budget })
     }
 
@@ -621,14 +622,18 @@ where
 mod tests {
     use std::convert::Infallible;
     use std::net::Ipv4Addr;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use std::time::Duration;
 
     use bytes::Bytes;
-    use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::builtin;
     use packetcraftr_core::protocol::network::Ipv4;
     use packetcraftr_core::protocol::transport::Udp;
+    use packetcraftr_core::{error::Classified, frame::LinkType, packet::link::MacAddress};
     use packetcraftr_netio::link::{Capability, Mode};
 
     use super::*;
@@ -661,6 +666,51 @@ mod tests {
                 mtu: 1_500,
                 capability: Capability::Layer3,
                 link_type: LinkType::RAW,
+            })
+        }
+    }
+
+    struct Layer2Routes;
+
+    impl route::Provider for Layer2Routes {
+        type Error = Infallible;
+
+        fn lookup_with_preferences(
+            &self,
+            _destination: IpAddr,
+            _interface_hint: Option<&interface::Id>,
+            _preferred_source: Option<IpAddr>,
+        ) -> Result<route::Decision, Self::Error> {
+            Ok(route::Decision {
+                interface: interface::Id {
+                    index: 1,
+                    name: "fixture0".to_owned(),
+                },
+                source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
+                selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: route::SelectionReason::OnLink,
+                destination_scope: route::Scope::Link,
+                mtu: 1_500,
+                capability: Capability::Layer2,
+                link_type: LinkType::ETHERNET,
+            })
+        }
+    }
+
+    struct CountingNeighbors(Arc<AtomicUsize>);
+
+    impl neighbor::Resolver for CountingNeighbors {
+        fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(neighbor::Resolution {
+                mac_address: MacAddress([0x02, 0, 0, 0, 0, 2]),
+                attempts: 1,
+                cache_hit: false,
+                captured: Vec::new(),
+                evidence_truncated: false,
+                capture_statistics: Default::default(),
             })
         }
     }
@@ -711,7 +761,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         let admitted_packet = datagram(b"four");
         let mut admission = client
-            .admission(&options, 2, deadline)
+            .admission(&options, 2, deadline, None)
             .expect("two packets fit the default budget");
         let route = admission
             .route(&admitted_packet, IpAddr::V4(DESTINATION))
@@ -742,6 +792,42 @@ mod tests {
             ),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn clock_cancellation_after_admission_stops_before_neighbor_resolution() {
+        let neighbor_calls = Arc::new(AtomicUsize::new(0));
+        let client = Client::new(
+            builtin::registry(),
+            Layer2Routes,
+            CountingNeighbors(Arc::clone(&neighbor_calls)),
+            NoTransmit,
+            Policy::default(),
+        );
+        let mut options = send::Options::default();
+        options.plan.link_mode = Mode::Layer2;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let signal = Cancellation::default();
+        let packet = datagram(b"four");
+        let mut admission = client
+            .admission(&options, 1, deadline, Some(signal.clone()))
+            .expect("one packet fits the default budget");
+        let route = admission
+            .route(&packet, IpAddr::V4(DESTINATION))
+            .expect("documentation destination is authorized");
+        let admitted = admission
+            .admit_on(packet, &route)
+            .expect("packet is admitted before discovery");
+        let discovery = admission.discover();
+
+        signal.cancel();
+        let error = match discovery.materialize(admitted) {
+            Ok(_) => panic!("cancelled materialization must stop before neighbor resolution"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.classification().code, "io.cancelled");
+        assert_eq!(neighbor_calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]

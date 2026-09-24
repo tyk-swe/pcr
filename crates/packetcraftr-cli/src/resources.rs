@@ -70,7 +70,7 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
                 "milliseconds"
             } else if id.contains("bytes") || id == "snap_length" {
                 "bytes"
-            } else if matches!(id, "overflow_policy" | "ip_overlap") {
+            } else if matches!(id, "overflow_policy" | "ip_overlap" | "retention") {
                 "policy"
             } else {
                 "count"

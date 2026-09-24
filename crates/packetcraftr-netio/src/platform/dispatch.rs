@@ -214,13 +214,13 @@ pub(crate) fn system_send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Re
 }
 
 #[cfg(native_layer2)]
-fn capture_netmask(interface: &interface::Info) -> Option<u32> {
+pub(super) fn capture_netmask(interface: &interface::Info) -> Option<u32> {
     let assigned = interface
         .addresses
         .iter()
         .find(|assigned| assigned.address.is_ipv4())?;
     let shift = u32::BITS.checked_sub(u32::from(assigned.prefix_length))?;
-    Some(u32::MAX.checked_shl(shift).unwrap_or(0).to_be())
+    Some(u32::MAX.checked_shl(shift).unwrap_or(0))
 }
 
 /// A diagnostic read never creates native workers or starts the reaper.
@@ -243,7 +243,7 @@ pub(crate) fn native_resource_snapshot() -> crate::resources::NativeSnapshot {
 
 #[cfg(all(test, native_layer2))]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv6Addr};
 
     use packetcraftr_core::frame::LinkType;
 
@@ -251,7 +251,7 @@ mod tests {
     use crate::link::Capability;
 
     #[test]
-    fn capture_netmask_uses_the_first_ipv4_assignment() {
+    fn capture_netmask_returns_none_without_an_ipv4_assignment() {
         let interface = interface::Info {
             id: InterfaceId {
                 name: "fixture0".to_owned(),
@@ -259,30 +259,17 @@ mod tests {
             },
             description: None,
             mac_address: None,
-            addresses: vec![
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-                    prefix_length: 8,
-                },
-                interface::Address {
-                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
-                    prefix_length: 24,
-                },
-            ],
+            addresses: vec![interface::Address {
+                address: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                prefix_length: 128,
+            }],
             flags: interface::Flags::default(),
             mtu: None,
             capability: Capability::Layer2AndLayer3,
             link_type: LinkType::ETHERNET,
         };
 
-        assert_eq!(capture_netmask(&interface), Some((u32::MAX << 24).to_be()));
-
-        let mut ipv6_only = interface;
-        ipv6_only.addresses = vec![interface::Address {
-            address: IpAddr::V6(Ipv6Addr::LOCALHOST),
-            prefix_length: 128,
-        }];
-        assert_eq!(capture_netmask(&ipv6_only), None);
+        assert_eq!(capture_netmask(&interface), None);
     }
 }
 

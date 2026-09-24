@@ -21,6 +21,7 @@ fn has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;
     let mut ethernet_operand = false;
+    let mut port_range_operand = false;
     while offset < bytes.len() {
         if bytes[offset] == b'\\' {
             return true;
@@ -67,6 +68,17 @@ fn has_symbolic_operand(source: &str) -> bool {
             }
             let allow_ethernet_mac = ethernet_operand;
             ethernet_operand = false;
+            if port_range_operand {
+                if is_numeric_port_range(atom) {
+                    port_range_operand = false;
+                    continue;
+                }
+                return true;
+            }
+            if atom == "portrange" {
+                port_range_operand = true;
+                continue;
+            }
             if !is_bpf_keyword(atom) && !is_numeric_bpf_atom(atom, allow_ethernet_mac) {
                 return true;
             }
@@ -74,7 +86,27 @@ fn has_symbolic_operand(source: &str) -> bool {
         }
         offset += 1;
     }
-    false
+    port_range_operand
+}
+
+fn is_numeric_port_range(atom: &str) -> bool {
+    let Some((start, end)) = atom.split_once('-') else {
+        return false;
+    };
+    if end.contains('-') {
+        return false;
+    }
+    if start.is_empty()
+        || end.is_empty()
+        || !start.bytes().all(|byte| byte.is_ascii_digit())
+        || !end.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let (Ok(start), Ok(end)) = (start.parse::<u16>(), end.parse::<u16>()) else {
+        return false;
+    };
+    start <= end
 }
 
 fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
@@ -168,6 +200,10 @@ mod tests {
             "arp and ether dst 01:02:03:04:05:06",
             "ip6 and dst host 2001:db8::1",
             "tcp dst port 443",
+            "tcp src portrange 80-90",
+            "tcp dst portrange 80-90",
+            "udp src portrange 1000-2000",
+            "udp dst portrange 1000-2000",
             "ip net 192.0.2.0/24",
             "ether host 0011.2233.4455",
             "ip proto 0x11",
@@ -175,9 +211,13 @@ mod tests {
         let rejected = [
             "host example.com",
             "tcp port https",
+            "tcp portrange http-https",
             "gateway router-1",
             "host 0011.2233.4455",
             r"ip host \resolver-name",
+            "host 80-90",
+            "tcp portrange 90-80",
+            "tcp portrange 80-65536",
         ];
 
         for filter in accepted {
@@ -185,6 +225,34 @@ mod tests {
         }
         for filter in rejected {
             assert!(has_symbolic_operand(filter), "{filter}");
+        }
+    }
+
+    #[test]
+    fn validate_accepts_numeric_port_ranges_without_admitting_names() {
+        let interface = InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        };
+
+        for filter in [
+            "tcp src portrange 80-90",
+            "tcp dst portrange 80-90",
+            "udp src portrange 1000-2000",
+            "udp dst portrange 1000-2000",
+        ] {
+            validate(&interface, filter).unwrap_or_else(|error| panic!("{filter}: {error}"));
+        }
+
+        for filter in [
+            "host example.com",
+            "tcp port https",
+            "tcp portrange http-https",
+        ] {
+            assert!(
+                validate(&interface, filter).is_err(),
+                "symbolic operands must remain rejected: {filter}"
+            );
         }
     }
 

@@ -28,6 +28,23 @@ unsafe extern "C" {
     fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
 }
 
+#[cfg(test)]
+#[repr(C)]
+struct PcapPacketHeader {
+    timestamp: libc::timeval,
+    captured_length: u32,
+    original_length: u32,
+}
+
+#[cfg(test)]
+unsafe extern "C" {
+    fn pcap_offline_filter(
+        program: *const c_void,
+        header: *const PcapPacketHeader,
+        packet: *const u8,
+    ) -> c_uint;
+}
+
 /// Owns the kernel-format program `pcap_compile` allocates.
 ///
 /// A value of this type only ever exists after a successful `pcap_compile`,
@@ -65,8 +82,8 @@ pub(super) fn install_capture_filter(
     Ok(())
 }
 
-fn compile_capture_filter(
-    capture: &Capture<Active>,
+fn compile_capture_filter<T: pcap::State>(
+    capture: &Capture<T>,
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
@@ -97,6 +114,32 @@ fn compile_capture_filter(
     Ok(unsafe { program.assume_init() })
 }
 
+#[cfg(test)]
+impl PcapBpfProgram {
+    fn matches(&self, packet: &[u8]) -> bool {
+        let length = u32::try_from(packet.len()).expect("synthetic packet is within BPF limits");
+        let header = PcapPacketHeader {
+            timestamp: libc::timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            captured_length: length,
+            original_length: length,
+        };
+
+        // SAFETY: `self` is a fully initialized libpcap BPF program that remains
+        // alive for this call. `header` has libpcap's `pcap_pkthdr` C layout, and
+        // `packet` remains readable for its captured length while libpcap runs.
+        unsafe {
+            pcap_offline_filter(
+                (&raw const *self).cast(),
+                &raw const header,
+                packet.as_ptr(),
+            ) != 0
+        }
+    }
+}
+
 fn read_pcap_error(handle: *mut c_void) -> String {
     if handle.is_null() {
         return "unknown libpcap error".to_owned();
@@ -124,5 +167,128 @@ fn map_filter_install_error(interface: &InterfaceId, error: impl std::fmt::Displ
     Error::CaptureFilterInstallation {
         interface: interface.name.clone(),
         message: format!("libpcap installation failed: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use packetcraftr_core::frame::LinkType;
+
+    use super::*;
+    use crate::{
+        interface::{self, Id as InterfaceId},
+        link::Capability,
+        platform::{capture_filter, dispatch},
+    };
+
+    fn interface(addresses: &[(Ipv4Addr, u8)]) -> interface::Info {
+        interface::Info {
+            id: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: addresses
+                .iter()
+                .map(|(address, prefix_length)| interface::Address {
+                    address: IpAddr::V4(*address),
+                    prefix_length: *prefix_length,
+                })
+                .collect(),
+            flags: interface::Flags::default(),
+            mtu: None,
+            capability: Capability::Layer2AndLayer3,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    fn ipv4_ethernet_packet(destination: Ipv4Addr) -> [u8; 34] {
+        let mut packet = [0; 34];
+        packet[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+        packet[14] = 0x45;
+        packet[16..18].copy_from_slice(&20_u16.to_be_bytes());
+        packet[22] = 64;
+        packet[23] = 17;
+        packet[26..30].copy_from_slice(&Ipv4Addr::new(192, 0, 2, 10).octets());
+        packet[30..34].copy_from_slice(&destination.octets());
+        packet
+    }
+
+    #[test]
+    fn ip_broadcast_matches_directed_broadcast_for_slash_16_and_slash_24() {
+        let capture = Capture::dead(pcap::Linktype::ETHERNET).expect("dead Ethernet capture");
+        let cases = [
+            (
+                interface(&[(Ipv4Addr::new(198, 51, 10, 7), 16)]),
+                Ipv4Addr::new(198, 51, 255, 255),
+                Ipv4Addr::new(198, 51, 10, 255),
+            ),
+            (
+                interface(&[(Ipv4Addr::new(203, 0, 113, 7), 24)]),
+                Ipv4Addr::new(203, 0, 113, 255),
+                Ipv4Addr::new(203, 0, 113, 254),
+            ),
+        ];
+
+        for (interface, broadcast, unicast) in cases {
+            let netmask = dispatch::capture_netmask(&interface).expect("IPv4 assignment mask");
+            let program = compile_capture_filter(&capture, &interface.id, "ip broadcast", netmask)
+                .expect("compile broadcast filter");
+
+            assert!(
+                program.matches(&ipv4_ethernet_packet(broadcast)),
+                "directed broadcast {broadcast} must match"
+            );
+            assert!(
+                !program.matches(&ipv4_ethernet_packet(unicast)),
+                "unicast {unicast} must not match"
+            );
+        }
+    }
+
+    #[test]
+    fn ip_broadcast_keeps_using_the_first_ipv4_assignment() {
+        let capture = Capture::dead(pcap::Linktype::ETHERNET).expect("dead Ethernet capture");
+        let interface = interface(&[
+            (Ipv4Addr::new(198, 51, 10, 7), 16),
+            (Ipv4Addr::new(198, 51, 10, 7), 24),
+        ]);
+        let netmask = dispatch::capture_netmask(&interface).expect("IPv4 assignment mask");
+        let program = compile_capture_filter(&capture, &interface.id, "ip broadcast", netmask)
+            .expect("compile broadcast filter");
+
+        assert!(!program.matches(&ipv4_ethernet_packet(Ipv4Addr::new(198, 51, 10, 255))));
+    }
+
+    #[test]
+    fn numeric_tcp_and_udp_port_ranges_validate_and_compile() {
+        let capture = Capture::dead(pcap::Linktype::ETHERNET).expect("dead Ethernet capture");
+        let interface = interface(&[]);
+
+        for filter in [
+            "tcp src portrange 80-90",
+            "tcp dst portrange 80-90",
+            "udp src portrange 1000-2000",
+            "udp dst portrange 1000-2000",
+        ] {
+            capture_filter::validate(&interface.id, filter)
+                .unwrap_or_else(|error| panic!("validation failed for {filter}: {error}"));
+            compile_capture_filter(&capture, &interface.id, filter, u32::MAX)
+                .unwrap_or_else(|error| panic!("BPF compilation failed for {filter}: {error}"));
+        }
+
+        for filter in [
+            "host example.com",
+            "tcp port https",
+            "udp portrange dns-https",
+        ] {
+            assert!(
+                capture_filter::validate(&interface.id, filter).is_err(),
+                "symbolic operands must be rejected: {filter}"
+            );
+        }
     }
 }

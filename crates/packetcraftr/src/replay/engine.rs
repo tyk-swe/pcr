@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Streams, authorizes, schedules, and transmits without retaining more than one frame.
+//! Streams, authorizes, schedules, and transmits without retaining more than one frame.
+
 use std::io::{Read, Seek};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -114,7 +115,7 @@ where
         });
     }
     let source_format = reader.format();
-    Run {
+    let end_index = Run {
         options,
         selector,
         authorizer,
@@ -125,6 +126,7 @@ where
     .pass(reader, &mut session)?;
     finish_summary(
         &session.deadline,
+        end_index,
         session.progress,
         source_format,
         options.timing,
@@ -163,6 +165,7 @@ where
         clock,
         emit,
     };
+    let mut end_index = 0;
     for pass in 1..=options.repeat {
         session.pass = pass;
         if pass > 1 {
@@ -212,10 +215,11 @@ where
                 session.progress.previous_timestamp = None;
             }
         }
-        run.pass(reader, &mut session)?;
+        end_index = run.pass(reader, &mut session)?;
     }
     finish_summary(
         &session.deadline,
+        end_index,
         session.progress,
         source_format,
         options.timing,
@@ -225,11 +229,13 @@ where
 impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<(), Error>>
     Run<'_, '_, '_, '_, '_, A, T, C, F>
 {
+    /// Replays one pass and returns the source index one past its last
+    /// frame, the coordinate its end-of-capture deadline gate reports.
     fn pass<R: Read>(
         &mut self,
         reader: &mut Reader<R>,
         session: &mut Session,
-    ) -> Result<(), Error> {
+    ) -> Result<u64, Error> {
         let limits = self.options.limits;
         let timing = self.options.timing;
         let mut source_index = 0u64;
@@ -358,7 +364,7 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
         }
 
         session.progress.passes_completed += 1;
-        Ok(())
+        Ok(source_index)
     }
 }
 
@@ -675,11 +681,12 @@ fn transmit_frame<T: Transmitter>(
 
 fn finish_summary(
     deadline: &Deadline,
+    end_index: u64,
     progress: Progress,
     source_format: Format,
     timing: Timing,
 ) -> Result<Summary, Error> {
-    enforce_deadline(deadline, progress.frames_read)?;
+    enforce_deadline(deadline, end_index)?;
     Ok(Summary {
         passes_completed: progress.passes_completed,
         interfaces_used: progress.interfaces_used,

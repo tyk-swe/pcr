@@ -11,9 +11,11 @@ use packetcraftr_core::analysis::pcap::Format;
 use packetcraftr_core::analysis::pcap::Limits;
 use packetcraftr_core::analysis::pcap::Reader;
 use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::budget::{Cancelled, Interrupted};
 use packetcraftr_netio as net;
 
 use packetcraftr_cli::output;
+use packetcraftr_cli::output::stream::EncodeError;
 
 use crate::errors::CliError;
 use crate::rendering::{
@@ -26,7 +28,6 @@ type Selector<'a> = Option<&'a mut dyn packetcraftr::replay::Selector>;
 pub(super) struct CaptureSettings {
     pub(super) compression: crate::command_options::Compression,
     pub(super) format: Format,
-    pub(super) max_interfaces: usize,
 }
 
 /// One replay, borrowed for the length of one render: the source, the frame
@@ -161,6 +162,15 @@ where
     C: packetcraftr::clock::Clock,
     W: Write,
 {
+    // Rejected before the destination is wrapped, so no compressed container is written.
+    if settings.format == Format::Pcap && run.reader.format() != Format::Pcap {
+        return Err(CliError::classified(
+            capture::Error::MetadataNotRepresentable {
+                format: settings.format,
+                field: "pcapng replay evidence",
+            },
+        ));
+    }
     let mut destination = settings.compression.writer(destination)?;
     let result = (|| {
         let mut writer = capture_writer(
@@ -168,7 +178,6 @@ where
             &mut destination,
             settings.format,
             run.options.limits,
-            settings.max_interfaces,
         )?;
         run.drive(|evidence| render_capture_record(&mut writer, evidence))?;
         writer
@@ -180,6 +189,20 @@ where
 
 fn output_error(source_index: u64, message: impl Into<String>) -> packetcraftr::replay::Error {
     packetcraftr::replay::Error::output_at_source_index(source_index, message)
+}
+
+/// An interrupt observed while emitting a record fails the replay as the engine
+/// fails one it observes itself, rather than as an output-sink failure.
+fn interrupted_error(source_index: u64, interrupted: Interrupted) -> packetcraftr::replay::Error {
+    match interrupted {
+        Interrupted::Exceeded(exceeded) => packetcraftr::replay::Error::DurationLimit {
+            source_index,
+            actual: exceeded.actual,
+            limit: exceeded.limit,
+        },
+        Interrupted::Cancelled(cancelled) => cancelled.into(),
+        _ => Cancelled.into(),
+    }
 }
 
 fn output_frame(
@@ -204,7 +227,14 @@ fn render_record(
         result.frame.link_type,
         spaced_hex(result.frame.bytes())
     ))
-    .map_err(|source| output_error(result.source_index, source.message))
+    .map_err(|source| {
+        // The line writer checks the invocation deadline, whose interrupts are
+        // final; asking it again recovers the typed cause behind the failure.
+        match crate::invocation::deadline().and_then(|deadline| deadline.enforce().err()) {
+            Some(interrupted) => interrupted_error(result.source_index, interrupted),
+            None => output_error(result.source_index, source.message),
+        }
+    })
 }
 
 fn render_stream_record(
@@ -215,7 +245,11 @@ fn render_stream_record(
     let result = output_frame(evidence)?;
     stream
         .emit_data(result, Vec::new())
-        .map_err(|error| output_error(source_index, error.to_string()))
+        .map_err(|error| match error {
+            EncodeError::Cancelled(cancelled) => interrupted_error(source_index, cancelled.into()),
+            EncodeError::Deadline { source, .. } => interrupted_error(source_index, source.into()),
+            error => output_error(source_index, error.to_string()),
+        })
 }
 
 fn capture_writer<R: Read + std::io::Seek, W: Write>(
@@ -223,16 +257,16 @@ fn capture_writer<R: Read + std::io::Seek, W: Write>(
     destination: W,
     format: Format,
     limits: packetcraftr::replay::Limits,
-    max_interfaces: usize,
 ) -> Result<SourceCaptureWriter<W>, CliError> {
     let writer = match format {
-        Format::Pcap => classic_writer(reader, destination, format, limits)?,
+        Format::Pcap => classic_writer(reader, destination, limits)?,
         Format::PcapNg => Writer::pcapng_with_options(
             destination,
             capture::PcapNgOptions {
                 endianness: reader.endianness(),
                 max_size: limits.max_frame_bytes,
-                max_interfaces,
+                // --max-interfaces bounds each input section, not the one output section.
+                max_interfaces: capture::DEFAULT_TOTAL_INTERFACE_LIMIT,
                 stream_limits: stream_limits(limits),
             },
         )
@@ -244,18 +278,10 @@ fn capture_writer<R: Read + std::io::Seek, W: Write>(
 fn classic_writer<R: Read + std::io::Seek, W: Write>(
     reader: &Reader<R>,
     destination: W,
-    format: Format,
     limits: packetcraftr::replay::Limits,
 ) -> Result<Writer<W>, CliError> {
-    if reader.format() != Format::Pcap {
-        return Err(CliError::classified(
-            capture::Error::MetadataNotRepresentable {
-                format,
-                field: "pcapng replay evidence",
-            },
-        ));
-    }
-    // the format is checked to be classic pcap above, which always exposes its single global interface
+    // render_capture_to admits only a classic pcap source, which always
+    // exposes its single global interface
     let interface = reader.interfaces()[0].clone();
     let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
         CliError::new(
@@ -313,8 +339,11 @@ mod tests {
 
     use std::convert::Infallible;
     use std::io::{self, Cursor, Read};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::UNIX_EPOCH;
 
+    use packetcraftr_core::budget::{Cancellation, Deadline};
     use packetcraftr_core::error::{Classification, Kind};
     use packetcraftr_core::frame::{Frame, LinkType};
     use packetcraftr_core::packet::link::MacAddress;
@@ -566,6 +595,72 @@ mod tests {
         assert!(!stream.is_terminal());
     }
 
+    /// A deadline whose clock jumps past its one-second limit after the
+    /// baseline sample, so the first check made through it fails.
+    fn expired_deadline() -> Deadline {
+        let start = Instant::now();
+        let sampled = AtomicBool::new(false);
+        Deadline::with_time_source(Duration::from_secs(1), move || {
+            if sampled.swap(true, Ordering::Relaxed) {
+                start + Duration::from_secs(2)
+            } else {
+                start
+            }
+        })
+    }
+
+    fn cancelled_deadline() -> Deadline {
+        let cancellation = Cancellation::default();
+        cancellation.cancel();
+        Deadline::new(Duration::from_secs(60)).with_cancellation(Some(cancellation))
+    }
+
+    fn interrupts() -> [(Deadline, &'static str); 2] {
+        [
+            (cancelled_deadline(), "io.cancelled"),
+            (expired_deadline(), "policy.replay_limit"),
+        ]
+    }
+
+    #[test]
+    fn replay_stream_interrupt_during_emission_is_not_an_output_failure() {
+        for (deadline, code) in interrupts() {
+            let (stream, _) = stream(output::contract::Command::Replay);
+            let stream = stream.with_deadline(Arc::new(deadline));
+            let error = render_fixture(
+                &mut reader(1),
+                None,
+                &mut FakeAuthorizer::default(),
+                &stream,
+            )
+            .expect_err("interrupted replay emission fails");
+
+            assert_eq!(error.classification.code, code);
+        }
+    }
+
+    #[test]
+    fn replay_text_interrupt_during_emission_is_not_an_output_failure() {
+        for (deadline, code) in interrupts() {
+            let _scope = crate::invocation::enter_deadline(Some(Arc::new(deadline)));
+            let options = options();
+            let error = render_text(
+                Run {
+                    reader: &mut reader(1),
+                    options: &options,
+                    selector: None,
+                    authorizer: &mut FakeAuthorizer::default(),
+                    transmitter: &mut FakeTransmitter,
+                    clock: &mut FakeClock,
+                },
+                false,
+            )
+            .expect_err("interrupted replay emission fails");
+
+            assert_eq!(error.classification.code, code);
+        }
+    }
+
     #[test]
     fn failed_replay_finalizes_zstd_and_keeps_completed_frames() {
         let mut source = reader(2);
@@ -590,7 +685,6 @@ mod tests {
             CaptureSettings {
                 compression: crate::command_options::Compression::Zstd,
                 format: Format::Pcap,
-                max_interfaces: 1,
             },
             &mut compressed,
         )
@@ -609,5 +703,45 @@ mod tests {
         let mut output = Reader::new(Cursor::new(bytes)).expect("capture header must survive");
         assert_eq!(output.next_frame().unwrap().unwrap().bytes().as_ref(), [0]);
         assert!(output.next_frame().unwrap().is_none());
+    }
+
+    /// Each input section holds one interface; the single output section
+    /// carries both, since a per-section input bound does not apply to it.
+    #[test]
+    fn pcapng_capture_output_gathers_interfaces_from_every_source_section() {
+        let mut bytes = Vec::new();
+        for value in 0..2u8 {
+            let mut section = capture::Writer::pcapng(Vec::new()).unwrap();
+            let mut frame = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![value]).unwrap();
+            frame.interface = Some(section.add_interface(LinkType::RAW).unwrap());
+            section.write_frame(&frame).unwrap();
+            bytes.extend(section.into_inner());
+        }
+        let mut source = Reader::new(Cursor::new(bytes)).unwrap();
+        let options = options();
+        let mut output = Vec::new();
+
+        render_capture_to(
+            Run {
+                reader: &mut source,
+                options: &options,
+                selector: None,
+                authorizer: &mut FakeAuthorizer::default(),
+                transmitter: &mut FakeTransmitter,
+                clock: &mut FakeClock,
+            },
+            CaptureSettings {
+                compression: crate::command_options::Compression::None,
+                format: Format::PcapNg,
+            },
+            &mut output,
+        )
+        .expect("two-section replay capture succeeds");
+
+        let mut output = Reader::new(Cursor::new(output)).unwrap();
+        let first = output.next_frame().unwrap().unwrap();
+        let second = output.next_frame().unwrap().unwrap();
+        assert_ne!(first.interface, second.interface);
+        assert_eq!(output.interfaces().len(), 2);
     }
 }

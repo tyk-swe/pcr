@@ -75,7 +75,8 @@ const CIPHER_SUITES: &[(u16, &str)] = &[
 
 /// Named groups from the IANA TLS Supported Groups registry.
 const NAMED_GROUPS: &[(u16, &str)] = &[
-    (0x0013, "secp192k1"),
+    (0x0012, "secp192k1"),
+    (0x0013, "secp192r1"),
     (0x0014, "secp224k1"),
     (0x0015, "secp224r1"),
     (0x0016, "secp256k1"),
@@ -207,6 +208,8 @@ mod tests {
         );
         assert_eq!(cipher_suite_name(0x0a0a), None);
         assert_eq!(named_group_name(0x001d), Some("x25519"));
+        assert_eq!(named_group_name(0x0012), Some("secp192k1"));
+        assert_eq!(named_group_name(0x0013), Some("secp192r1"));
         assert_eq!(named_group_name(0xdead), None);
         assert_eq!(version_name(0x0303), Some("TLS 1.2"));
         assert_eq!(version_name(0x0305), None);

@@ -490,4 +490,22 @@ fn ipv4_wire_with_truncated_options_may_hide_a_destination() {
         ),
         "{error:?}"
     );
+
+    // A hand-built layer naming the protocol in another case is held to the
+    // same check the registry's case-insensitive lookup would apply.
+    for spelling in ["IPv4", " IPV6 "] {
+        let mut packet = packetcraftr_core::packet::Packet::new();
+        packet.push(Malformed::new(
+            Some(spelling.to_owned()),
+            vec![0x45, 0],
+            "hand-built",
+        ));
+        assert!(
+            matches!(
+                live_destinations(&packet),
+                Err(SemanticsError::MalformedMayHideDestination { .. })
+            ),
+            "{spelling:?}"
+        );
+    }
 }

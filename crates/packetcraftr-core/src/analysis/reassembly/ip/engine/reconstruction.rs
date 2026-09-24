@@ -97,6 +97,34 @@ pub(super) fn reconstruction_retained_bytes(
     }
 }
 
+/// Bytes [`materialize_reconstruction`] newly copies for this fragment while
+/// the datagram's current reconstruction is still retained; a retained header
+/// or prefix is shared, not copied.
+pub(super) fn reconstruction_copied_bytes(
+    existing: Option<&DatagramState>,
+    incoming: &Incoming,
+) -> usize {
+    let established = existing.map(|state| &state.reconstruction);
+    match (&incoming.reconstruction, established) {
+        (
+            IncomingReconstruction::Ipv4 { header },
+            None
+            | Some(Reconstruction::Ipv4 {
+                first_header: None, ..
+            }),
+        ) if incoming.offset == 0 => header.len(),
+        (IncomingReconstruction::Ipv6 { prefix, .. }, None) => prefix.len(),
+        (
+            IncomingReconstruction::Ipv6 { prefix, .. },
+            Some(Reconstruction::Ipv6 {
+                from_offset_zero: false,
+                ..
+            }),
+        ) if incoming.offset == 0 => prefix.len(),
+        _ => 0,
+    }
+}
+
 pub(super) fn materialize_reconstruction(
     existing: Option<&DatagramState>,
     incoming: &Incoming,

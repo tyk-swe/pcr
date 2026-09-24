@@ -20,7 +20,7 @@ mod validation;
 use merge::{MergePlan, RangeUpdate, UpdateKind, apply_range_update, merge_affected, plan_merge};
 use reconstruction::{
     materialize_reconstruction, reconstruct_bytes, reconstructed_length,
-    reconstruction_retained_bytes,
+    reconstruction_copied_bytes, reconstruction_retained_bytes,
 };
 use validation::{
     Incoming, accumulated_ecn, plan_final_length, validate_family_wire_extent, validate_fragment,
@@ -107,10 +107,10 @@ impl Reassembler {
                 limit: self.limits.max_bytes_per_datagram,
             })?;
         let reconstruction_bytes = reconstruction_retained_bytes(existing, incoming)?;
-        // Only the bytes this fragment newly retains are charged as an
-        // allocation; anything the datagram already held is already counted.
-        let reconstruction_allocation = reconstruction_bytes
-            .saturating_sub(existing.map_or(0, |state| state.reconstruction.retained_bytes()));
+        // Only the bytes this fragment newly copies are charged as an
+        // allocation; a shared header or prefix is already counted, while a
+        // replaced provisional IPv6 prefix stays retained beside its copy.
+        let reconstruction_allocation = reconstruction_copied_bytes(existing, incoming);
         let last_update = existing.map_or(now, |state| state.last_update.max(now));
         let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
             ResourceError::IdleExpiryRange {

@@ -221,6 +221,15 @@ class ConsumerTests(unittest.TestCase):
         with self.assertRaisesRegex(consumer.ContractError, "requested checks were not all evaluated"):
             self.consume(invalid)
 
+    def test_rule_declarations_are_bounded_before_descriptor_expansion(self):
+        invalid = copy.deepcopy(FIXTURE)
+        report = invalid["result"]
+        report["rules"]["preserve"] = ["x"] * consumer.MAX_RULE_DECLARATIONS
+        report["matches"] = []
+        report["omitted"]["matches"] = report["summary"]["unique_matches"]
+        with self.assertRaisesRegex(consumer.ContractError, "rule declarations exceed producer budget"):
+            self.consume(invalid)
+
     def test_oversized_record_and_duplicate_keys_rejected(self):
         for invalid in (b" " * (consumer.MAX_RECORD + 1),
                         encoded(FIXTURE).replace(b'"sequence": 0', b'"sequence": 0, "sequence": 0')):

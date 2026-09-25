@@ -17,6 +17,8 @@ from typing import BinaryIO, Any
 SCHEMA = "packetcraftr.output/v6"
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
+MAX_RULE_DECLARATIONS = 256
+MAX_RULE_DECLARATION_BYTES = 64 * 1024
 STATES = {"observed", "absent", "truncated", "decode_incomplete", "field_budget"}
 
 
@@ -81,6 +83,27 @@ def declared_checks(rules: dict[str, Any]) -> list[dict[str, Any]]:
     return checks
 
 
+def validate_rule_budget(rules: dict[str, Any]) -> None:
+    """Reject declarations beyond the producer's count and byte budgets."""
+    names = ("identity", "preserve", "preserve_presence", "expect", "expect_absent")
+    require(sum(len(rules[name]) for name in names) <= MAX_RULE_DECLARATIONS,
+            "rule declarations exceed producer budget")
+
+    byte_count = 0
+    for name in ("identity", "preserve", "preserve_presence", "expect_absent"):
+        for field in rules[name]:
+            require(isinstance(field, str), f"rules.{name} entries must be strings")
+            byte_count += len(field.encode("utf-8"))
+    for rule in rules["expect"]:
+        require(isinstance(rule, dict), "rules.expect entries must be objects")
+        field, value = rule["field"], rule["value"]
+        require(isinstance(field, str) and isinstance(value, str),
+                "expectation field and literal must be strings")
+        byte_count += len(field.encode("utf-8")) + 1 + len(value.encode("utf-8"))
+    require(byte_count <= MAX_RULE_DECLARATION_BYTES,
+            "rule declarations exceed producer byte budget")
+
+
 def check_difference(index: int, pair: dict[str, Any],
                      declared: list[dict[str, Any]]) -> str | None:
     """The first divergence between a retained match's checks and the declared
@@ -132,6 +155,7 @@ def validate_report(report: dict[str, Any]) -> str:
     rules = report["rules"]
     for name in ("identity", "preserve", "preserve_presence", "expect", "expect_absent", "warnings"):
         require(isinstance(rules[name], list), f"rules.{name} must be a list")
+    validate_rule_budget(rules)
     require(bool(rules["identity"]), "empty identity")
     has_checks = any(rules[name] for name in ("preserve", "preserve_presence", "expect", "expect_absent"))
     require(rules["comparison"] == ("property_checks" if has_checks else "correspondence_only"),

@@ -96,7 +96,11 @@ fn failed_capture_spool_emits_no_compressed_bytes() {
                 "--compression",
                 compression,
             ])
+            // tempdir() honours TMPDIR on Unix and TMP/TEMP on Windows; point
+            // both resolution paths at the missing directory.
             .env("TMPDIR", &missing)
+            .env("TMP", &missing)
+            .env("TEMP", &missing)
             .output()
             .expect("CLI process must start");
         assert_eq!(output.status.code(), Some(5), "{compression}: {output:?}");

@@ -17,6 +17,8 @@ from typing import BinaryIO, Any
 SCHEMA = "packetcraftr.output/v6"
 MAX_RECORD = 16 * 1024 * 1024
 MAX_STREAM = 64 * 1024 * 1024
+MAX_RULE_DECLARATIONS = 256
+MAX_RULE_DECLARATION_BYTES = 64 * 1024
 STATES = {"observed", "absent", "truncated", "decode_incomplete", "field_budget"}
 
 
@@ -57,6 +59,68 @@ def decode(data: bytes) -> dict[str, Any]:
     return value
 
 
+def check_descriptor(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """A check's semantic identity: kind, field, and the declared literal."""
+    check = evaluation["check"]
+    return {"kind": check["kind"], "field": check["field"], "value": check.get("value")}
+
+
+def declared_checks(rules: dict[str, Any]) -> list[dict[str, Any]]:
+    """The checks every retained match must evidence, in the producer's
+    declaration order: preservations first, then expectations."""
+    checks = [{"kind": "preserve", "field": field, "value": None} for field in rules["preserve"]]
+    checks += [{"kind": "preserve_presence", "field": field, "value": None}
+               for field in rules["preserve_presence"]]
+    checks += [{"kind": "expect", "field": rule["field"], "value": rule["value"]}
+               for rule in rules["expect"]]
+    checks += [{"kind": "expect_absent", "field": field, "value": None}
+               for field in rules["expect_absent"]]
+    for descriptor in checks:
+        require(isinstance(descriptor["field"], str) and descriptor["field"],
+                "rule check field must be a non-empty string")
+        require(descriptor["kind"] != "expect" or isinstance(descriptor["value"], str),
+                "expectation literal must be a string")
+    return checks
+
+
+def validate_rule_budget(rules: dict[str, Any]) -> None:
+    """Reject declarations beyond the producer's count and byte budgets."""
+    names = ("identity", "preserve", "preserve_presence", "expect", "expect_absent")
+    require(sum(len(rules[name]) for name in names) <= MAX_RULE_DECLARATIONS,
+            "rule declarations exceed producer budget")
+
+    byte_count = 0
+    for name in ("identity", "preserve", "preserve_presence", "expect_absent"):
+        for field in rules[name]:
+            require(isinstance(field, str), f"rules.{name} entries must be strings")
+            byte_count += len(field.encode("utf-8"))
+    for rule in rules["expect"]:
+        require(isinstance(rule, dict), "rules.expect entries must be objects")
+        field, value = rule["field"], rule["value"]
+        require(isinstance(field, str) and isinstance(value, str),
+                "expectation field and literal must be strings")
+        byte_count += len(field.encode("utf-8")) + 1 + len(value.encode("utf-8"))
+    require(byte_count <= MAX_RULE_DECLARATION_BYTES,
+            "rule declarations exceed producer byte budget")
+
+
+def check_difference(index: int, pair: dict[str, Any],
+                     declared: list[dict[str, Any]]) -> str | None:
+    """The first divergence between a retained match's checks and the declared
+    rule set, or None when the evidence matches the rules exactly."""
+    descriptors = [check_descriptor(evaluation) for evaluation in pair["checks"]]
+    if descriptors == declared:
+        return None
+    prefix = f"match {index} (ingress frame {pair['ingress']['frame']})"
+    for position, (descriptor, want) in enumerate(zip(descriptors, declared)):
+        if descriptor != want:
+            return (f"{prefix}: check {position} {json.dumps(descriptor, separators=(',', ':'))}"
+                    f" does not match declared check {json.dumps(want, separators=(',', ':'))}")
+    if len(descriptors) < len(declared):
+        return f"{prefix}: missing check {json.dumps(declared[len(descriptors)], separators=(',', ':'))}"
+    return f"{prefix}: additional check {json.dumps(descriptors[len(declared)], separators=(',', ':'))}"
+
+
 def validate_check(check: dict[str, Any]) -> None:
     kind = check["check"]["kind"]
     outcome = check["outcome"]
@@ -91,6 +155,7 @@ def validate_report(report: dict[str, Any]) -> str:
     rules = report["rules"]
     for name in ("identity", "preserve", "preserve_presence", "expect", "expect_absent", "warnings"):
         require(isinstance(rules[name], list), f"rules.{name} must be a list")
+    validate_rule_budget(rules)
     require(bool(rules["identity"]), "empty identity")
     has_checks = any(rules[name] for name in ("preserve", "preserve_presence", "expect", "expect_absent"))
     require(rules["comparison"] == ("property_checks" if has_checks else "correspondence_only"),
@@ -141,8 +206,13 @@ def validate_report(report: dict[str, Any]) -> str:
         omitted_name = "ambiguous_groups" if name == "ambiguous" else name
         omitted = integer(report["omitted"][omitted_name], omitted_name)
         require(len(report[name]) + omitted == summary[total], f"{name} omission count does not sum")
+    declared = declared_checks(rules)
     retained_outcomes = {"satisfied": 0, "violated": 0, "unevaluable": 0}
-    for pair in report["matches"]:
+    for index, pair in enumerate(report["matches"]):
+        require(isinstance(pair["checks"], list), f"match {index}: checks must be a list")
+        difference = check_difference(index, pair, declared)
+        if difference is not None:
+            raise ContractError(difference)
         for check in pair["checks"]:
             validate_check(check)
             retained_outcomes[check["outcome"]] += 1

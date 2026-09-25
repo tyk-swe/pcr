@@ -220,7 +220,11 @@ impl Collector {
                 let end = start
                     .saturating_add(expected)
                     .min(view.decoded.original.len());
-                let wire = view.decoded.original.slice(start.min(end)..end);
+                // The emitted wire and every decoded name/rdata slice derived
+                // from it must own their bytes; slicing the record would pin
+                // the entire frame allocation behind a few DNS bytes.
+                let start = start.min(end);
+                let wire = Bytes::copy_from_slice(&view.decoded.original[start..end]);
                 let sources = record
                     .udp_sources()
                     .ok_or(Error::Sources {

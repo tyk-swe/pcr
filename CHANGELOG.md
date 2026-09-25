@@ -723,6 +723,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   failures: a value that fails to serialize now reports an internal error with
   the original source instead of the `--max-application-output-bytes` policy
   error, which remains reserved for actual limit exceedances.
+- Offline DNS analysis no longer retains an entire capture-record allocation
+  behind each emitted UDP message wire and the decoded name/rdata slices
+  derived from it. Retained messages now own only their DNS payload, so the
+  resource charge tracks the visible evidence instead of the source frame.
+- The v6 forwarding consumer requires every retained match to carry the exact
+  check set its declared rules produced: missing, additional, reordered, or
+  substituted check descriptors (kind, field, declared literal) are rejected
+  instead of only validating the checks that happen to be present.
 
 ## [0.5.0-beta.3] - 2026-09-08
 

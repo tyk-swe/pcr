@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod common;
+use bytes::Bytes;
 use common::{
     CLIENT, SERVER, reader, registry,
     tls_capture::{Capture, Stream},
@@ -12,8 +13,10 @@ use packetcraftr_core::{
         dns::{Collector, Event, Message, Status, Summary, Transaction, TransactionStatus},
     },
     error::BoundaryError,
+    field::FieldValue,
     frame::Frame,
-    protocol::application::dns::{Dns, Question},
+    layer::Layer,
+    protocol::application::dns::{Dns, Question, Record, RecordValue},
     transform::{FragmentOptions, fragment},
 };
 use std::time::{Duration, UNIX_EPOCH};
@@ -59,6 +62,25 @@ fn message(id: u16, response: bool, name: &str) -> Vec<u8> {
             name: name.parse().unwrap(),
             query_type: 1,
             class: 1,
+        }];
+    });
+    dns.to_wire().unwrap().to_vec()
+}
+fn txt_response(id: u16, name: &str, text: &[u8]) -> Vec<u8> {
+    let mut dns = Dns::default();
+    dns.edit(|dns| {
+        dns.id = id;
+        dns.response = true;
+        dns.questions = vec![Question {
+            name: name.parse().unwrap(),
+            query_type: 16,
+            class: 1,
+        }];
+        dns.answers = vec![Record {
+            owner: name.parse().unwrap(),
+            class: 1,
+            ttl: 60,
+            value: RecordValue::Txt(vec![Bytes::copy_from_slice(text)]),
         }];
     });
     dns.to_wire().unwrap().to_vec()
@@ -416,6 +438,103 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
     assert_eq!(summary.matched_transactions, 0);
     assert_eq!(summary.unanswered_transactions, 1);
     assert_eq!(summary.orphan_responses, 1);
+}
+
+#[test]
+fn udp_dns_evidence_does_not_retain_the_frame_allocation() {
+    // The DNS payload is carved out of a much larger frame record. A `Bytes`
+    // slice into the record's backing would keep the entire frame alive per
+    // emitted message and reflected byte field. The detached copy the
+    // collector must make is allocated while the record is still alive, so it
+    // can never share that backing's pointer range: pointer-range membership
+    // is a deterministic probe, no RSS sampling.
+    let registry = registry();
+    let payload = txt_response(6, "example.test", b"fixture");
+    let frame = udp_frame(&registry, UNIX_EPOCH, CLIENT, SERVER, 40000, 53, &payload);
+    let mut oversized = frame.bytes().to_vec();
+    oversized.resize(oversized.len() + 8192, 0);
+    let frame = Frame::new(UNIX_EPOCH, frame.link_type, oversized).unwrap();
+    let mut collector = Collector::new(Limits::default(), vec![53]).unwrap();
+    let mut events = Vec::new();
+    let mut backing = 0usize..0usize;
+    let run = analysis::run(
+        &mut reader(&[frame]),
+        registry,
+        &analysis::Options {
+            tcp_events: true,
+            track_sources: true,
+            ..Default::default()
+        },
+        |record| {
+            if let Some(view) = record.udp {
+                let original = &view.decoded.original;
+                backing = original.as_ptr() as usize..original.as_ptr() as usize + original.len();
+            }
+            events.extend(
+                collector
+                    .observe(&record)
+                    .map_err(BoundaryError::from_error)?,
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
+    let (trailing, _) = collector.finish(&run).unwrap();
+    events.extend(trailing);
+    let message = events
+        .iter()
+        .find_map(|event| match event {
+            Event::Message(message) => Some(message.as_ref()),
+            _ => None,
+        })
+        .expect("one DNS message event");
+    assert_eq!(message.status, Status::Complete);
+    assert_eq!(message.wire.as_ref(), payload.as_slice());
+    assert!(
+        backing.len() >= payload.len() + 8192,
+        "the oversized fixture must dwarf the DNS payload"
+    );
+    assert!(
+        !backing.contains(&(message.wire.as_ptr() as usize)),
+        "emitted wire aliases the oversized frame allocation"
+    );
+    let dns = message.dns.as_ref().expect("a decoded DNS message");
+    let RecordValue::Txt(strings) = &dns.answers[0].value else {
+        panic!("expected a TXT answer")
+    };
+    assert_eq!(strings[0].as_ref(), b"fixture");
+    let wire = message.wire.as_ptr() as usize..message.wire.as_ptr() as usize + message.wire.len();
+    for string in strings {
+        assert!(
+            wire.contains(&(string.as_ptr() as usize)),
+            "decoded TXT bytes share the detached message wire"
+        );
+        assert!(
+            !backing.contains(&(string.as_ptr() as usize)),
+            "decoded TXT bytes alias the frame allocation"
+        );
+    }
+    // The reflected field carries the exact `Bytes` the aggregate JSON output
+    // serializes as dns.answers[].value.strings.
+    let Some(FieldValue::List(records)) = dns.field("answers") else {
+        panic!("answers must project as a list")
+    };
+    let FieldValue::Object(record) = &records[0] else {
+        panic!("answer record must project as an object")
+    };
+    let Some(FieldValue::Object(value)) = record.get("value") else {
+        panic!("answer value must project as an object")
+    };
+    let Some(FieldValue::List(strings)) = value.get("strings") else {
+        panic!("TXT value must project a strings list")
+    };
+    let FieldValue::Bytes(string) = &strings[0] else {
+        panic!("TXT strings project as bytes")
+    };
+    assert!(
+        !backing.contains(&(string.as_ptr() as usize)),
+        "reflected TXT bytes alias the frame allocation"
+    );
 }
 
 #[test]

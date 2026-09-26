@@ -70,10 +70,17 @@ pub(crate) struct WorkflowOverrides {
     pub(crate) timeout: std::time::Duration,
     pub(crate) max_template_packets: usize,
     pub(crate) destination: std::net::IpAddr,
-    /// Caps both retained responses and retained unattributed frames for this
-    /// one exchange, or `None` to keep the executor's own ceilings. A workflow
-    /// that bounds how many responses it will accept never needs to retain
-    /// more unattributed evidence than that.
+    /// The workflow's own evidence limit for this one exchange, or `None` to
+    /// keep the executor's ceilings. The workflow validates it against the
+    /// executor's `max_responses` before calling, so it never raises a
+    /// ceiling.
+    ///
+    /// It also sets this exchange's unattributed-frame budget, a derived
+    /// running allowance rather than a configured limit: every frame the
+    /// exchange retains, attributed or not, is evidence charged against the
+    /// workflow's limit, so the budget is the smaller of the executor's
+    /// `max_unmatched_frames` and this limit. No configured limit is lowered;
+    /// the caller's settings stay as they were for later exchanges.
     pub(crate) max_responses: Option<usize>,
 }
 
@@ -96,6 +103,8 @@ where
         let mut collection = self.collection.clone();
         if let Some(max_responses) = overrides.max_responses {
             collection.max_responses = max_responses;
+            // The derived unattributed-frame budget documented on
+            // `WorkflowOverrides::max_responses`, charged to this copy only.
             collection.max_unmatched_frames = collection.max_unmatched_frames.min(max_responses);
         }
         self.client

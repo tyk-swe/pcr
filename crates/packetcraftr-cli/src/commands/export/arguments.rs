@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use packetcraftr_core::analysis::StreamRef;
 
 use crate::command_options::{
-    CompressionArgs, DecodeArgs, Destination, OfflineLimitsArgs, stream_selector,
+    CompressionArgs, DecodeArgs, Destination, OfflineLimitsArgs, Selector, stream_selector,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Export selects whole conversations (--stream), IP datagrams by a physical frame they contain (--datagram-frame), or frames a --filter matches, and writes the selected physical frames together with every frame they depend on, such as the other fragments of a reassembled datagram. The destination keeps the source capture format and metadata and is published only after every frame was written.
@@ -25,7 +25,7 @@ pub(crate) struct Args {
     pub(crate) write: PathBuf,
     /// Whole conversations, as tcp:INDEX or udp:INDEX. Repeat to select several.
     #[arg(long = "stream", value_name = "TRANSPORT:INDEX", value_parser = stream_selector)]
-    pub(crate) streams: Vec<StreamRef>,
+    pub(crate) streams: Vec<Selector<StreamRef>>,
     /// Include complete or incomplete IP datagrams containing this physical frame.
     #[arg(long = "datagram-frame")]
     pub(crate) datagram_frames: Vec<u64>,

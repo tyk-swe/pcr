@@ -666,7 +666,7 @@ fn unsupported_output_formats_fail_before_command_work() {
             ],
         ),
         ("pcap", &["expert", missing]),
-        ("pcap", &["follow", missing, "--stream", "tcp:0"]),
+        ("pcap", &["follow", missing, "--stream", "invalid"]),
         (
             "raw",
             &["replay", missing, "--interface", "missing-interface"],
@@ -1186,53 +1186,181 @@ fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
     }
 }
 
-/// Selectors and durations are typed arguments: a malformed value fails as a
-/// usage error while arguments are parsed, before any input is opened, any
-/// policy is checked, or any provider is reached.
+/// Out-of-range durations and windows, and malformed selectors, publish the
+/// code each command published before these arguments were shared and typed.
+/// A malformed `--interface` still loses to a policy denial.
 #[test]
-fn malformed_selectors_and_durations_fail_while_parsing() {
+fn bounded_and_selector_arguments_keep_their_published_codes() {
+    const PACKET: &str = "ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)";
+    let capture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/captures/http-stream.pcap");
+    let capture = capture.to_str().expect("fixture path is UTF-8");
     let directory = tempfile::tempdir().expect("temporary directory must open");
-    let missing = directory.path().join("missing.pcapng");
-    let missing = missing.to_str().expect("temporary path is UTF-8");
-    let cases: &[&[&str]] = &[
-        &["capture", "--interface", "0"],
-        &["interfaces", "--interface", ""],
-        &["replay", missing, "--interface", "4294967296"],
-        &["send", "--packet", "raw(hex=\"00\")", "--interface", "0"],
-        &["http", missing, "--stream", "sctp:0"],
-        &["export", missing, "--write", missing, "--stream", "tcp"],
-        &["stats", missing, "--max-duration-ms", "3600001"],
-        &["scan", "192.0.2.1", "--max-duration-ms", "0"],
-        &[
-            "rewrite",
-            missing,
-            "--write",
-            missing,
-            "--max-duration-ms",
-            "0",
-        ],
-        &[
-            "exchange",
-            "--packet",
-            "raw(hex=\"00\")",
-            "--timeout-ms",
-            "3600001",
-        ],
-        &[
-            "capture",
-            "--interface",
-            "lo",
-            "--timeout-ms",
-            "18446744073709551615",
-        ],
+    let written = directory.path().join("written.pcapng");
+    let written = written.to_str().expect("temporary path is UTF-8");
+    let cases: &[(&[&str], u8, &str)] = &[
+        (
+            &["scan", "192.0.2.1", "--max-duration-ms", "0"],
+            2,
+            "cli.scan_limit",
+        ),
+        (
+            &["scan", "192.0.2.1", "--max-duration-ms", "3600001"],
+            2,
+            "cli.scan_limit",
+        ),
+        (
+            &["traceroute", "192.0.2.1", "--max-duration-ms", "0"],
+            2,
+            "cli.traceroute_limit",
+        ),
+        (
+            &[
+                "dns",
+                "192.0.2.53",
+                "example.test",
+                "--max-duration-ms",
+                "3600001",
+            ],
+            2,
+            "cli.dns_limit",
+        ),
+        (
+            &["fuzz", "--packet", PACKET, "--max-duration-ms", "0"],
+            2,
+            "cli.fuzz_limit",
+        ),
+        (
+            &[
+                "replay",
+                capture,
+                "--interface",
+                "lo",
+                "--max-duration-ms",
+                "0",
+            ],
+            2,
+            "cli.replay_limit",
+        ),
+        (
+            &[
+                "rewrite",
+                capture,
+                "--write",
+                written,
+                "--set",
+                "ipv4.ttl=1",
+                "--max-duration-ms",
+                "0",
+            ],
+            2,
+            "cli.error",
+        ),
+        (
+            &["stats", capture, "--max-duration-ms", "0"],
+            2,
+            "cli.analysis_limit",
+        ),
+        (
+            &["http", capture, "--max-duration-ms", "0"],
+            2,
+            "cli.analysis_limit",
+        ),
+        (
+            &["capture", "--interface", "lo", "--timeout-ms", "3600001"],
+            2,
+            "cli.capture_timeout",
+        ),
+        (
+            &["exchange", "--packet", PACKET, "--timeout-ms", "3600001"],
+            2,
+            "cli.exchange_limit",
+        ),
+        (
+            &["scan", "192.0.2.1", "--timeout-ms", "0"],
+            2,
+            "cli.scan_limit",
+        ),
+        (
+            &["scan", "192.0.2.1", "--timeout-ms", "3600001"],
+            2,
+            "cli.exchange_limit",
+        ),
+        (
+            &["traceroute", "192.0.2.1", "--timeout-ms", "3600001"],
+            2,
+            "cli.traceroute_limit",
+        ),
+        (
+            &["dns", "192.0.2.53", "example.test", "--timeout-ms", "0"],
+            2,
+            "cli.dns_limit",
+        ),
+        (
+            &[
+                "fuzz",
+                "--packet",
+                PACKET,
+                "--live",
+                "--destination",
+                "192.0.2.1",
+                "--timeout-ms",
+                "0",
+            ],
+            2,
+            "cli.fuzz_limit",
+        ),
+        (
+            &[
+                "send",
+                "--packet",
+                "ipv4(dst=10.0.0.2)/udp(dport=9000)",
+                "--allow-destination",
+                "192.0.2.0/24",
+                "--interface",
+                "0",
+            ],
+            6,
+            "policy.destination_not_allowed",
+        ),
+        (&["interfaces", "--interface", ""], 2, "cli.error"),
+        (
+            &["replay", capture, "--interface", "4294967296"],
+            2,
+            "cli.error",
+        ),
+        (&["http", capture, "--stream", "sctp:0"], 2, "cli.error"),
+        (&["tls", capture, "--stream", "udp:0"], 2, "cli.error"),
+        (
+            &["export", capture, "--write", written, "--stream", "tcp:"],
+            2,
+            "cli.error",
+        ),
     ];
-    for &command in cases {
+    for &(command, exit, code) in cases {
         let mut arguments = vec!["--output", "json"];
         arguments.extend_from_slice(command);
         let output = run(&arguments);
-        assert_eq!(output.status.code(), Some(2), "{arguments:?}: {output:?}");
-        let error = parse_json(&output);
-        assert_eq!(error["error"]["code"], "cli.error", "{arguments:?}");
-        assert_eq!(error["error"]["kind"], "cli", "{arguments:?}");
+        assert_eq!(
+            output.status.code(),
+            Some(i32::from(exit)),
+            "{arguments:?}: {output:?}"
+        );
+        assert_eq!(parse_json(&output)["error"]["code"], code, "{arguments:?}");
+    }
+    // The messages stay those the untyped arguments published.
+    for (command, message) in [
+        (
+            &["interfaces", "--interface", ""][..],
+            "--interface cannot be empty".to_owned(),
+        ),
+        (
+            &["http", capture, "--stream", "sctp:0"],
+            "invalid --stream 'sctp:0': expected tcp:INDEX or udp:INDEX".to_owned(),
+        ),
+    ] {
+        let mut arguments = vec!["--output", "json"];
+        arguments.extend_from_slice(command);
+        assert_eq!(parse_json(&run(&arguments))["error"]["message"], message);
     }
 }

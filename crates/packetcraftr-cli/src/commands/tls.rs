@@ -143,7 +143,11 @@ pub(super) fn run(
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let selected_stream = arguments.stream.map(tcp_stream_index).transpose()?;
+    let selected_stream = arguments
+        .stream
+        .as_ref()
+        .map(tcp_stream_index)
+        .transpose()?;
     let selector = Selector {
         sni: arguments
             .sni
@@ -246,15 +250,18 @@ fn buffer_floor_error(value: usize) -> CliError {
 
 /// The TCP index `--stream` selects, rejecting the transports this command
 /// cannot assemble.
-fn tcp_stream_index(selected: analysis::StreamRef) -> Result<u64, CliError> {
+fn tcp_stream_index(
+    selector: &crate::command_options::Selector<analysis::StreamRef>,
+) -> Result<u64, CliError> {
+    let selected = selector.get()?;
     match selected.transport {
         StreamTransport::Tcp => Ok(selected.index),
         StreamTransport::Udp => Err(CliError::new(
             Kind::Usage,
             format!(
-                "invalid --stream '{}:{}': TLS sessions are assembled from TCP streams only; \
+                "invalid --stream '{}': TLS sessions are assembled from TCP streams only; \
                  UDP port 443 is QUIC, which this command does not read",
-                selected.transport, selected.index
+                selector.text()
             ),
         )),
     }

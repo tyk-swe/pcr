@@ -30,7 +30,11 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
-    let selector = arguments.interface;
+    let selector = arguments
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
     let mut result = output::interfaces::Report::new(interfaces);
     if arguments.timestamp_types {

@@ -21,25 +21,21 @@ pub(crate) enum InterfaceSelector {
 impl InterfaceSelector {
     /// Validates a selector without consulting a platform provider.
     pub(crate) fn parse(selector: &str) -> Result<Self, CliError> {
-        Self::from_argument(selector)
-            .map_err(|reason| CliError::new(Kind::Usage, format!("--interface {reason}")))
-    }
-
-    /// The `--interface` value parser, so a malformed selector fails while
-    /// arguments are parsed, before any policy check or provider access.
-    pub(crate) fn from_argument(selector: &str) -> Result<Self, String> {
         if selector.is_empty() {
-            return Err("cannot be empty".to_owned());
+            return Err(CliError::new(Kind::Usage, "--interface cannot be empty"));
         }
         if !selector.bytes().all(|byte| byte.is_ascii_digit()) {
             return Ok(Self::Name(selector.to_owned()));
         }
-        let index = selector
-            .parse::<u32>()
-            .map_err(|_| format!("index must be within 1..={}", u32::MAX))?;
+        let index = selector.parse::<u32>().map_err(|_| {
+            CliError::new(
+                Kind::Usage,
+                format!("--interface index must be within 1..={}", u32::MAX),
+            )
+        })?;
         NonZeroU32::new(index)
             .map(Self::Index)
-            .ok_or_else(|| "index must be non-zero".to_owned())
+            .ok_or_else(|| CliError::new(Kind::Usage, "--interface index must be non-zero"))
     }
 
     /// Whether a discovered interface is the one this selector names: an

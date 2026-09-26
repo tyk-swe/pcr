@@ -56,10 +56,12 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
     ports.extend([80, 8080]);
     let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
-    if args
+    let selector = args
         .stream
-        .is_some_and(|selected| selected.transport != StreamTransport::Tcp)
-    {
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
+    if selector.is_some_and(|selected| selected.transport != StreamTransport::Tcp) {
         return Err(CliError::new(
             Kind::Usage,
             "HTTP/1 inspection requires --stream tcp:INDEX",
@@ -72,7 +74,7 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             limits: args.limits,
             decode: &args.decode,
             application: args.application,
-            selector: args.stream,
+            selector,
         },
         collector,
         format,

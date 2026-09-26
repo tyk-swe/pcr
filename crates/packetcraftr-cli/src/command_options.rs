@@ -40,10 +40,13 @@ pub(crate) use compression::{
 };
 
 mod duration;
-pub(crate) use duration::{MaxDurationArgs, ProbeWindow, Probing, RunTime, TimeoutArgs, Window};
+pub(crate) use duration::{
+    MAX_MILLISECONDS as MAX_DURATION_MILLISECONDS, MaxDurationArgs, ProbeWindow, Probing, RunTime,
+    TimeoutArgs, Window,
+};
 
 mod stream;
-pub(crate) use stream::stream_selector;
+pub(crate) use stream::{Selector, interface_selector, stream_selector};
 
 mod timestamp;
 pub(crate) use timestamp::parse_timestamp;

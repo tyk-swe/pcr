@@ -32,7 +32,7 @@ impl super::Spec for Args {
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention]);
         // A UDP conversation never runs TCP reassembly.
-        let tcp = self.stream.transport != packetcraftr_core::analysis::StreamTransport::Udp;
+        let tcp = !self.stream.text().starts_with("udp:");
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages::with_tcp(tcp),
@@ -54,7 +54,7 @@ pub(super) fn run(
     format: FollowFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let selector = arguments.stream;
+    let selector = arguments.stream.get()?;
     if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             Kind::Usage,

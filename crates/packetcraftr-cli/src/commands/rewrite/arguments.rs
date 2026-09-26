@@ -92,4 +92,6 @@ pub(crate) struct RewriteRunTime;
 
 impl RunTime for RewriteRunTime {
     const HELP: &'static str = "Maximum rewrite run time in milliseconds";
+    const PARSED: std::ops::RangeInclusive<u64> =
+        1..=crate::command_options::MAX_DURATION_MILLISECONDS;
 }

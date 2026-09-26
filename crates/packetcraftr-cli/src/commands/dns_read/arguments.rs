@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use packetcraftr_core::analysis::StreamRef;
 
 use crate::command_options::{
-    ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, stream_selector,
+    ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"DNS messages are read offline from a capture file; nothing is transmitted. UDP datagrams and reassembled TCP streams on port 53 and every --dns-port are framed into messages, and each query is paired with its response by flow and DNS ID into a transaction that is matched, unanswered, an orphan response, or a duplicate response.
@@ -24,7 +24,7 @@ pub(crate) struct Args {
     pub(crate) path: PathBuf,
     /// Keep one whole conversation: tcp:INDEX or udp:INDEX.
     #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = stream_selector)]
-    pub(crate) stream: Option<StreamRef>,
+    pub(crate) stream: Option<Selector<StreamRef>>,
     /// Additional DNS service ports; repeat to add services. Port 53 is always analyzed.
     #[arg(long = "dns-port")]
     pub(crate) dns_ports: Vec<u16>,

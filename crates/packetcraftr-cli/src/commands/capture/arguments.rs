@@ -77,10 +77,10 @@ pub(crate) struct Args {
     #[arg(
         long,
         value_name = "NAME_OR_INDEX",
-        value_parser = InterfaceSelector::from_argument,
+        value_parser = crate::command_options::interface_selector,
         required = true
     )]
-    pub(crate) interface: Vec<InterfaceSelector>,
+    pub(crate) interface: Vec<crate::command_options::Selector<InterfaceSelector>>,
     /// Save PCAPNG files; existing paths are never overwritten.
     #[arg(long)]
     pub(crate) write: Option<std::path::PathBuf>,

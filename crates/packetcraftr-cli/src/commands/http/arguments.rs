@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use packetcraftr_core::analysis::StreamRef;
 
 use crate::command_options::{
-    ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, stream_selector,
+    ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, Selector, stream_selector,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"HTTP/1 messages are read offline from reassembled TCP streams on ports 80 and 8080 and every --http-port; nothing is transmitted. Bodies are counted against --max-http-body-bytes and discarded, and each response names the request it answers when both were captured.
@@ -24,7 +24,7 @@ pub(crate) struct Args {
     pub(crate) path: PathBuf,
     /// Select a whole TCP conversation, using tcp:INDEX.
     #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = stream_selector)]
-    pub(crate) stream: Option<StreamRef>,
+    pub(crate) stream: Option<Selector<StreamRef>>,
     /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
     /// 8080 are always inspected.
     #[arg(long = "http-port")]

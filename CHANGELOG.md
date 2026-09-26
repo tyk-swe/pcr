@@ -596,15 +596,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   `dns-read` prints each message's questions and records. DNS records print
   in one line shape across `read`, `dissect`, `capture`, `dns-read`, and
   `dns`. These six commands also gain `--help` examples.
-- `--max-duration-ms` accepts 1 to 3600000 and `--timeout-ms` 0 to 3600000
-  on every command, checked while arguments are parsed. Offline analysis
-  commands previously accepted any duration, including ones no deadline
-  could represent. An out-of-range value now fails with `cli.error` (exit 2)
-  before any input is read, instead of a command-specific `cli.*` limit code
-  after setup.
-- `--interface` and `--stream` values are validated while arguments are
-  parsed, so a malformed selector (`--interface 0`, `--stream sctp:1`) fails
-  as a usage error before any input is opened or any policy is checked.
+- Offline analysis commands (`stats`, `expert`, `follow`, `tls`, `dns-read`,
+  `http`, `export`, `verify-forwarding`) reject a `--max-duration-ms` above
+  one hour with `cli.analysis_limit`, the code they already publish for a
+  zero duration. They previously accepted any duration, including ones no
+  deadline could represent, while every live workflow was capped at one hour.
 - Replay text output reports a stdout write failure even if the invocation
   deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with

@@ -99,6 +99,9 @@ fn resolve_route(
     let destination = resolve_destination(destination, &packet, &policy)?;
     let interface = route
         .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?
         .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))
         .transpose()?;
     Ok(RoutedPacket {

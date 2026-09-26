@@ -81,7 +81,8 @@ pub(crate) struct Args {
     /// Assemble only one conversation, as `tcp:INDEX`, using the same indices
     /// stats reports and stream filters match.
     #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = crate::command_options::stream_selector)]
-    pub(crate) stream: Option<packetcraftr_core::analysis::StreamRef>,
+    pub(crate) stream:
+        Option<crate::command_options::Selector<packetcraftr_core::analysis::StreamRef>>,
     /// Keep sessions whose server name matches, case-insensitively; `*` is
     /// accepted as a leading or trailing wildcard.
     #[arg(long, value_name = "PATTERN")]

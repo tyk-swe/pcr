@@ -131,7 +131,12 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
             "replay permits at most 256 interface rules",
         ));
     }
-    let requested_interface = arguments.interface.clone().map(InterfaceSelector::into_id);
+    let requested_interface = arguments
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?
+        .map(InterfaceSelector::into_id);
     let mut rules = Vec::new();
     for mapping in &arguments.interface_maps {
         let (source, destination) = mapping.split_once('=').ok_or_else(|| {

@@ -57,7 +57,11 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
             limits: args.limits,
             decode: &args.decode,
             application: args.application,
-            selector: args.stream,
+            selector: args
+                .stream
+                .as_ref()
+                .map(crate::command_options::Selector::get)
+                .transpose()?,
         },
         collector,
         format,

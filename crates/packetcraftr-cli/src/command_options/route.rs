@@ -7,14 +7,15 @@ use clap::{Args, ValueEnum};
 use packetcraftr_netio as net;
 
 use super::recipe::RecipeArgs;
+use super::{Selector, interface_selector};
 use crate::system::InterfaceSelector;
 
 /// Route-selection constraints shared by live commands.
 #[derive(Debug, Args)]
 pub(crate) struct RouteSelectionArgs {
     /// Interface name or numeric index used as an exact route constraint.
-    #[arg(long, value_name = "NAME_OR_INDEX", value_parser = InterfaceSelector::from_argument)]
-    pub(crate) interface: Option<InterfaceSelector>,
+    #[arg(long, value_name = "NAME_OR_INDEX", value_parser = interface_selector)]
+    pub(crate) interface: Option<Selector<InterfaceSelector>>,
     /// Interface-owned source preference used only for route selection.
     #[arg(long)]
     pub(crate) source: Option<IpAddr>,

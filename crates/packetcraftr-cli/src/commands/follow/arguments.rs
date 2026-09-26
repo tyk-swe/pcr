@@ -45,7 +45,7 @@ pub(crate) struct Args {
     /// Conversation to follow, as `tcp:INDEX` or `udp:INDEX`, using the
     /// same indices stats reports and stream filters match.
     #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = crate::command_options::stream_selector)]
-    pub(crate) stream: packetcraftr_core::analysis::StreamRef,
+    pub(crate) stream: crate::command_options::Selector<packetcraftr_core::analysis::StreamRef>,
     /// Which sender's bytes to emit.
     #[arg(long, value_enum, default_value_t = Direction::Both)]
     pub(crate) direction: Direction,

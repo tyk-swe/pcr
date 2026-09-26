@@ -135,7 +135,12 @@ fn prepare_live(
     options.validate().map_err(CliError::classified)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
-    let interface = arguments.route.interface.clone();
+    let interface = arguments
+        .route
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: arguments.destination,

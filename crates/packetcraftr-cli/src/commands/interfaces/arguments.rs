@@ -11,8 +11,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Only list the interface with this name or numeric index.
-    #[arg(long, value_name = "NAME_OR_INDEX", value_parser = InterfaceSelector::from_argument)]
-    pub(crate) interface: Option<InterfaceSelector>,
+    #[arg(long, value_name = "NAME_OR_INDEX", value_parser = crate::command_options::interface_selector)]
+    pub(crate) interface: Option<crate::command_options::Selector<InterfaceSelector>>,
     /// List the packet timestamp types the capture backend advertises for each
     /// interface; types without a source are not selectable for capture.
     #[arg(long)]

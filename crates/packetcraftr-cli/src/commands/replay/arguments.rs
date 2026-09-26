@@ -51,10 +51,10 @@ pub(crate) struct Args {
     #[arg(
         long,
         value_name = "NAME_OR_INDEX",
-        value_parser = InterfaceSelector::from_argument,
+        value_parser = crate::command_options::interface_selector,
         required_unless_present_any = ["interface_maps", "filter_maps"]
     )]
-    pub(crate) interface: Option<InterfaceSelector>,
+    pub(crate) interface: Option<crate::command_options::Selector<InterfaceSelector>>,
     /// Map a capture-global input interface ID (classic PCAP uses 0).
     #[arg(long = "map-interface", value_name = "SOURCE_ID=OUTPUT_INTERFACE")]
     pub(crate) interface_maps: Vec<String>,

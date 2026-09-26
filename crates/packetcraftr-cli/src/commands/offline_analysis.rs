@@ -61,6 +61,7 @@ pub(super) fn prepare(
     decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
     let capture = limits.capture;
+    let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
     validate_capture_stream_limits(capture)?;
@@ -88,6 +89,13 @@ pub(super) fn prepare(
         max_duration: limits.duration.max_duration(),
     };
     limits.validate().map_err(CliError::classified)?;
+    duration.within_ceiling(|value| {
+        CliError::classified(analysis::Error::InvalidLimit {
+            field: "max_duration",
+            value,
+            reason: "exceeds the one-hour ceiling",
+        })
+    })?;
 
     Ok(AnalysisSetup {
         registry,

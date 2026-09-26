@@ -21,7 +21,10 @@ use crate::{
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 use self::files::Files;
 use crate::command_options::Compression;
@@ -73,8 +76,13 @@ pub(super) fn run(
     format: CaptureFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    // Parsing bounded the window to the capture ceiling.
     let timeout = args.timeout.timeout();
+    if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
+        return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
+            timeout,
+            maximum: net::capture::MAX_TIMEOUT,
+        }));
+    }
     if args.interface.len() > 256 {
         return Err(CliError::new(
             Kind::Usage,
@@ -185,7 +193,7 @@ pub(super) fn run(
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for source in args.interface {
-        let interface = resolve(source, &net::interface::SystemProvider)?;
+        let interface = resolve(source.get()?, &net::interface::SystemProvider)?;
         if seen.insert(interface.index) {
             interfaces.push(interface);
         }

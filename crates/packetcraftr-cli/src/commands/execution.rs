@@ -165,7 +165,11 @@ pub(super) fn prepare(
 ) -> Result<Providers, CliError> {
     let policy = Arc::new(policy.into_policy());
     policy.validate().map_err(CliError::classified)?;
-    let interface = route.interface;
+    let interface = route
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let exchange = exchange::options(
         packetcraftr::send::Options {

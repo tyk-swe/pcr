@@ -45,10 +45,15 @@ impl super::Spec for Args {
 }
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
+    let streams = args
+        .streams
+        .iter()
+        .map(crate::command_options::Selector::get)
+        .collect::<Result<Vec<_>, _>>()?;
     let setup =
         super::offline_analysis::prepare(args.limits, args.filter.as_deref(), &args.decode)?;
     let selection = analysis::export::Selection {
-        streams: args.streams,
+        streams,
         datagram_frames: args.datagram_frames,
         filter: setup.filter.as_ref(),
         max_selected_frames: args.max_selected_frames,

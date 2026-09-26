@@ -451,6 +451,15 @@ fn public_errors_retain_stable_policy_and_target_classification() {
             Kind::Policy,
         ),
         (
+            Box::new(policy::Error::WireFrame {
+                source: packetcraftr_core::frame::Error::CapturedLengthTooLarge {
+                    actual: usize::MAX,
+                },
+            }),
+            "policy.invalid_packet_semantics",
+            Kind::Policy,
+        ),
+        (
             Box::new(policy::Error::UndecodableWire {
                 source: packetcraftr_core::decode::Error::LayerLimit { limit: 1 },
             }),

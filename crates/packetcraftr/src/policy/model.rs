@@ -137,6 +137,13 @@ pub enum Error {
         #[source]
         source: Option<packetcraftr_core::protocol::semantics::Error>,
     },
+    /// The exact wire bytes do not form a frame the trusted built-in
+    /// registry could decode.
+    #[error("traffic policy cannot authorize wire bytes that do not form a frame")]
+    WireFrame {
+        #[source]
+        source: packetcraftr_core::frame::Error,
+    },
     /// The exact wire bytes did not decode with the trusted built-in
     /// registry, so their routing semantics cannot be authorized.
     #[error("traffic policy cannot authorize undecodable packet routing semantics")]
@@ -207,7 +214,9 @@ impl Classified for Error {
                 "cli.live_target",
                 "declare fewer destination constraints, covering adjacent hosts with one CIDR network where possible",
             ),
-            Self::InvalidPacketSemantics { .. } | Self::UndecodableWire { .. } => {
+            Self::InvalidPacketSemantics { .. }
+            | Self::WireFrame { .. }
+            | Self::UndecodableWire { .. } => {
                 return INVALID_PACKET_SEMANTICS;
             }
             Self::UnsupportedOperation { .. } => {

@@ -851,6 +851,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A live packet whose routing headers cannot be read is refused as
+  `traffic policy cannot authorize packet routing semantics: its live
+  destinations cannot be read` (or `its outer IP source cannot be read`) with
+  the packet's own failure as its first cause, instead of repeating that
+  failure in the message. Wire bytes that do not form a frame are refused
+  with the new `policy::Error::WireFrame`, which keeps the frame error as its
+  typed source. Codes are unchanged (`policy.invalid_packet_semantics`).
 - A `rewrite --rules-file` document that is not valid JSON of its schema's shape
   reads `invalid rewrite rules` with the parser's reason as its first cause,
   instead of repeating that reason in the message. An unsupported schema and

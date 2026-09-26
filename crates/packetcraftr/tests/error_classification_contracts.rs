@@ -322,12 +322,19 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
             &error,
             send::Error::Preparation(Error::Policy(policy::Error::InvalidPacketSemantics {
                 reason,
-                ..
+                source: Some(_),
             }))
-                if reason.contains("destination cannot be determined")
-                    && reason.contains("truncated ipv4 layer")
+                if reason == "its live destinations cannot be read"
         ),
         "{error:?}"
+    );
+    let causes = error.causes();
+    assert!(
+        causes
+            .iter()
+            .any(|cause| cause.contains("destination cannot be determined")
+                && cause.contains("truncated ipv4 layer")),
+        "{causes:?}"
     );
     assert_eq!(
         error.classification().code,

@@ -114,7 +114,7 @@ impl Policy {
     pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), Error> {
         let destinations = semantics::live_destinations(packet).map_err(|source| {
             Error::InvalidPacketSemantics {
-                reason: source.to_string(),
+                reason: "its live destinations cannot be read".to_owned(),
                 source: Some(source),
             }
         })?;
@@ -133,7 +133,7 @@ impl Policy {
         let decision = &plan.decision;
         let packet_source = semantics::outer_ip_path(packet)
             .map_err(|source| Error::InvalidPacketSemantics {
-                reason: source.to_string(),
+                reason: "its outer IP source cannot be read".to_owned(),
                 source: Some(source),
             })?
             .map(|path| path.source)

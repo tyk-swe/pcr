@@ -18,7 +18,6 @@ use packetcraftr_netio::{
     capture::{self, Session as _},
     deadline,
     link::{Capability, Mode},
-    neighbor,
     route::{Decision, Scope, SelectionReason},
     transmit::{
         Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, ModeSender, Report, Route,
@@ -390,60 +389,4 @@ fn send_reports_validate_counts_bytes_and_provider_timing() {
         Report::committed(expected.len(), Bytes::from_static(&[3, 2, 1])).validate_exact(&expected),
         Err(Error::InvalidSendEvidence { .. })
     ));
-}
-
-#[test]
-fn neighbor_options_reject_every_unbounded_value() {
-    let defaults = neighbor::Options::default();
-    defaults.validate().expect("defaults are valid");
-
-    let invalid = [
-        neighbor::Options {
-            max_attempts: 0,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            max_attempts: 11,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            attempt_timeout: Duration::ZERO,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            attempt_timeout: Duration::from_secs(31),
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            cache_ttl: Duration::ZERO,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            cache_ttl: Duration::from_secs(3_601),
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            max_cache_entries: 0,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            max_cache_entries: 65_537,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            snap_length: 127,
-            ..defaults.clone()
-        },
-        neighbor::Options {
-            max_capture_queue_frames: 0,
-            ..defaults.clone()
-        },
-    ];
-
-    for options in invalid {
-        assert!(matches!(
-            options.validate(),
-            Err(neighbor::Error::InvalidOptions { .. })
-        ));
-    }
 }

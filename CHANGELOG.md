@@ -235,6 +235,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   `Frame::route()` returns it; build one with `Materialized::transmit_route`.
   `Materialized::for_prepared_layer2_frame` is removed. See
   `docs/migration-unreleased.md`.
+- Neighbor resolution moved from `packetcraftr_netio::neighbor` to
+  `packetcraftr::neighbor` (ADR 0001): `Error`, `Request`, `Resolution`, and
+  `Options`. The `Client` now resolves neighbors itself over its transmit and
+  capture providers, so `Client<R, N, I>` is `Client<R, I>`, `Client::new`
+  takes no resolver, and `probe::ExchangeExecutor<'a, R, N, I>` is
+  `ExchangeExecutor<'a, R, I>`. `neighbor::Resolver`, `ActiveResolver`, and
+  `SystemResolver` are removed; set the bounds with
+  `Client::with_neighbor_options`, which validates them. `Client::send` and the
+  send-set methods now require `I: capture::Provider` as well, since a Layer 2
+  send may resolve a neighbor. `route::materialize` is no longer public: the
+  client materializes admitted plans. `link::MAX_VLAN_TAGS` moved to
+  `packetcraftr::route::MAX_VLAN_TAGS`. Error messages and codes are unchanged.
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -760,6 +773,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `neighbor::Options::validate` keeps the capture-limit refusal as the
+  `source` of `neighbor::Error::InvalidOptions` (a new field) instead of
+  flattening it into the message, so it is reported once, as a cause. The
+  message now reads "capture bounds are invalid"; the code stays
+  `cli.neighbor_limit`.
 - DHCP limits above 65535 message bytes, 4096 options, or nesting depth 8 are
   refused with `dhcp::Error::InvalidLimit` (`policy.dhcp_limit`) instead of
   being silently lowered to those ceilings, which are now public as

@@ -21,8 +21,6 @@ mod error;
 pub mod interface;
 #[forbid(unsafe_code)]
 pub mod link;
-#[forbid(unsafe_code)]
-pub mod neighbor;
 mod platform;
 #[forbid(unsafe_code)]
 pub mod resources;

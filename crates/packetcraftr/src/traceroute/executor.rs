@@ -15,10 +15,9 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
+impl<R, I> Executor<Batch> for ExchangeExecutor<'_, R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {

@@ -1,12 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Link-layer transmission capabilities, modes, and VLAN header limits.
+//! Link-layer transmission capabilities and modes.
 
-pub(crate) use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
-
-/// Maximum explicit VLAN headers carried by one planned link-layer route.
-pub const MAX_VLAN_TAGS: usize = 8;
+pub(crate) use packetcraftr_core::packet::MacAddress;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

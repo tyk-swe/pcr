@@ -14,10 +14,9 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
 
-impl<R, N, I> Executor<ExecutionCase> for ExchangeExecutor<'_, R, N, I>
+impl<R, I> Executor<ExecutionCase> for ExchangeExecutor<'_, R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {

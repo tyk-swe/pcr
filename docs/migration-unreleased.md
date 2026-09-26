@@ -1001,7 +1001,7 @@ and materializes routes over it.
 |---|---|
 | `packetcraftr_netio::route::plan` | `packetcraftr::route::plan` |
 | `packetcraftr_netio::route::{Plan, Options, Error}` | `packetcraftr::route::{Plan, Options, Error}` |
-| `packetcraftr_netio::route::{materialize, Materialized}` | `packetcraftr::route::{materialize, Materialized}` |
+| `packetcraftr_netio::route::{materialize, Materialized}` | `packetcraftr::route::Materialized`; the `Client` materializes admitted plans (see below) |
 | `Materialized::for_prepared_layer2_frame(..)` | build a `route::Decision` and a `transmit::Route` view directly |
 | `transmit::{Frame, Layer2Frame, Layer3Frame}::try_new(bytes, &materialized)` | `try_new(bytes, materialized.transmit_route())` |
 | `frame.route().plan.decision`, `.plan.mode`, `.plan.lookup_destination` | `frame.route().decision`, `.mode`, `.lookup_destination` |
@@ -1014,3 +1014,32 @@ use the `packetcraftr::route` types.
 `SystemProvider` checks a preferred source's address family once, before any
 native backend runs, and still reports `SystemError::SourceFamilyMismatch`
 (`io.route_selection`).
+
+## Neighbor resolution in packetcraftr
+
+Neighbor resolution is active discovery composed from transmission and
+capture, so it moved out of netio (ADR 0001). The `Client` resolves neighbors
+itself, over the transmit and capture providers it already holds, and only
+while materializing a route that policy has admitted. The CLI no longer
+composes a second I/O stack for it.
+
+| Removed | Use instead |
+|---|---|
+| `packetcraftr_netio::neighbor::{Error, Request, Resolution, Options}` | `packetcraftr::neighbor::{Error, Request, Resolution, Options}` |
+| `packetcraftr_netio::neighbor::{Resolver, ActiveResolver, SystemResolver}` | nothing: the `Client` resolves over its own I/O |
+| `Client<R, N, I>`, `Client::new(registry, routes, neighbors, io, policy)` | `Client<R, I>`, `Client::new(registry, routes, io, policy)` |
+| `ActiveResolver::try_new(layer2, capture, options)` | `client.with_neighbor_options(options)?` |
+| `probe::ExchangeExecutor<'a, R, N, I>` | `probe::ExchangeExecutor<'a, R, I>` |
+| `packetcraftr::route::materialize(plan, &resolver, deadline)` | none; `Client` send and exchange methods materialize admitted plans |
+| `packetcraftr_netio::link::MAX_VLAN_TAGS` | `packetcraftr::route::MAX_VLAN_TAGS` |
+
+`I` must implement both `transmit::Sender` and `capture::Provider` for
+`Client::send` and the send-set methods too, since a Layer 2 send may resolve
+a neighbor. `PacketIo::new(sender, capture)` composes the two. An I/O fake
+for Layer 3 sends only can implement `arm_capture` as unreachable; a fake that
+scripts resolution answers the ARP or NDP request it is sent through the
+capture session armed for it.
+
+`with_neighbor_options` validates the options (`cli.neighbor_limit` on
+failure) and starts a fresh cache. Every operation of one client shares that
+cache. Variant names, messages, and classification codes are unchanged.

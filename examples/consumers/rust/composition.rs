@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Composes local route, resolver, and recording-sender providers with an
-//! explicit destination policy and finite budgets. No network traffic is sent.
+//! Composes local route and recording-I/O providers with an explicit
+//! destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production uses the
-//! `SystemProvider`/`SystemResolver`/`SystemLayer*`/`PacketIo` adapters under
-//! the same policy contract. Run with scripts/check-external-consumer.py.
+//! Production uses the `SystemProvider`/`SystemLayer*`/`PacketIo` adapters
+//! under the same policy contract; the client resolves neighbors over that
+//! I/O itself. Run with scripts/check-external-consumer.py.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
@@ -22,8 +22,9 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
+use packetcraftr_netio::capture;
 use packetcraftr_netio::transmit;
-use packetcraftr_netio::{Error as LiveIoError, neighbor};
+use packetcraftr_netio::Error as LiveIoError;
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
@@ -58,19 +59,6 @@ impl Provider for DocumentationRoutes {
     }
 }
 
-/// Neighbor discovery must never run in this example: the sender observes
-/// Layer 3 frames only, so resolution would prove the wiring wrong.
-struct NeverNeighbors;
-
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("Layer 3 sends never resolve neighbors")
-    }
-}
-
 /// Retains submitted bytes for inspection without transmitting them.
 #[derive(Clone, Default)]
 struct RecordingSender {
@@ -84,6 +72,16 @@ impl transmit::Sender for RecordingSender {
             .expect("sent lock")
             .push(frame.bytes().to_vec());
         Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+impl capture::Provider for RecordingSender {
+    type Capture = capture::SystemSession;
+
+    /// The client arms capture only to resolve a neighbor; this example's
+    /// Layer 3 sends never need one, so arming would prove the wiring wrong.
+    fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        unreachable!("Layer 3 sends never resolve neighbors")
     }
 }
 
@@ -117,13 +115,12 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new(
         builtin::registry(),
         DocumentationRoutes,
-        NeverNeighbors,
         sender,
         policy,
     );
 
-    // Layer 3 planning skips link materialization entirely, so the composed
-    // client is fully exercised without capture or neighbor providers.
+    // Layer 3 planning skips neighbor resolution entirely, so the composed
+    // client never arms capture on the recording I/O.
     let options = send::Options {
         plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,

@@ -3,18 +3,17 @@
 
 mod common;
 
-use common::{FixedRoutes, NeverNeighbors, NeverTransmit};
+use common::{FixedRoutes, NeverTransmit};
 use packetcraftr::{
     Client,
     policy::Policy,
     progress::{Runtime, Sink},
 };
 
-fn client() -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
+fn client() -> Client<FixedRoutes, NeverTransmit> {
     Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         Policy::default(),
     )

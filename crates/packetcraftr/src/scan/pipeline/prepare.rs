@@ -7,7 +7,10 @@ use crate::{
     probe::{ExchangeExecutor, PipelineOptions},
 };
 use packetcraftr_core::{field::FieldValue, packet::Packet};
-use packetcraftr_netio::{capture::group::MAX_SOURCES, interface, neighbor, route, transmit};
+use packetcraftr_netio::{
+    capture::{self, group::MAX_SOURCES},
+    interface, route, transmit,
+};
 use std::{
     collections::{HashMap, hash_map::Entry},
     net::IpAddr,
@@ -16,8 +19,8 @@ use std::{
 /// What the pipeline keeps after every probe was admitted: the discovery
 /// phase that rebuilds each probe at send time, one route per probe address,
 /// each probe's [`AdmittedProbe`] in send order, and the capture interfaces.
-pub(super) struct Plan<'c, R, N, I> {
-    pub discovery: Discovery<'c, R, N, I>,
+pub(super) struct Plan<'c, R, I> {
+    pub discovery: Discovery<'c, R, I>,
     pub routes: HashMap<IpAddr, AuthorizedRoute>,
     pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
@@ -31,16 +34,15 @@ pub(super) struct AdmittedProbe {
 }
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
-pub(super) fn plan<'c, R, N, I>(
-    executor: &'c ExchangeExecutor<'_, R, N, I>,
+pub(super) fn plan<'c, R, I>(
+    executor: &'c ExchangeExecutor<'_, R, I>,
     planned: &[Planned<'_>],
     options: PipelineOptions,
     deadline: Instant,
-) -> Result<Plan<'c, R, N, I>, BoundaryError>
+) -> Result<Plan<'c, R, I>, BoundaryError>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     executor
         .options

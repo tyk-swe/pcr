@@ -9,6 +9,7 @@ use std::fmt;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 
+use packetcraftr::neighbor::Error as NeighborError;
 use packetcraftr::route::{Error as RouteError, Options, Plan, plan as plan_route};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::LinkType;
@@ -17,7 +18,6 @@ use packetcraftr_core::packet::{MacAddress, Packet};
 use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::{Capability, Mode};
-use packetcraftr_netio::neighbor::Error as NeighborError;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 
 struct Routes(Decision);

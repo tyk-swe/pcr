@@ -9,13 +9,84 @@ use std::sync::{
 };
 use std::time::{Duration, SystemTime};
 
-use crate::interface::Id as InterfaceId;
-use crate::link::{MacAddress, Mode};
-use crate::route::Decision;
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::MacAddress;
+use packetcraftr_netio::interface::Id as InterfaceId;
+use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::route::Decision;
 
 use super::*;
-use crate::error::test_support::same_failure;
+
+/// Composes a Layer 2 fake and a capture fake into the one I/O value a
+/// client resolves over.
+struct FixtureIo<L, C> {
+    layer2: L,
+    capture: C,
+}
+
+impl<L: transmit::Layer2Sender, C: Send + Sync> transmit::Sender for FixtureIo<L, C> {
+    fn send(
+        &self,
+        frame: transmit::Frame<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
+        match frame {
+            transmit::Frame::Layer2(frame) => self.layer2.send_layer2(frame),
+            transmit::Frame::Layer3(_) => panic!("neighbor discovery transmits only at Layer 2"),
+        }
+    }
+}
+
+impl<L: Send + Sync, C: capture::Provider> capture::Provider for FixtureIo<L, C> {
+    type Capture = C::Capture;
+
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        self.capture.arm_capture(request)
+    }
+}
+
+/// Client-owned resolution state over one fixture I/O pair.
+struct ActiveResolver<L, C> {
+    io: FixtureIo<L, C>,
+    state: State,
+}
+
+impl<L, C> ActiveResolver<L, C>
+where
+    L: transmit::Layer2Sender,
+    C: capture::Provider,
+{
+    fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
+        Ok(Self {
+            io: FixtureIo { layer2, capture },
+            state: State::try_new(options)?,
+        })
+    }
+
+    fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
+        self.state.over(&self.io).resolve(request)
+    }
+
+    fn exchange<S: Session>(
+        &self,
+        request: &Request,
+        request_bytes: &Bytes,
+        route: transmit::Route<'_>,
+        capture: &mut S,
+    ) -> Result<ExchangeOutcome, Error> {
+        self.state
+            .over(&self.io)
+            .exchange(request, request_bytes, route, capture)
+    }
+}
+
+/// Compares every field through `Debug`, including the non-comparable
+/// platform source a netio failure retains.
+fn same_failure(left: &packetcraftr_netio::Error, right: &packetcraftr_netio::Error) -> bool {
+    format!("{left:?}") == format!("{right:?}")
+}
 
 #[derive(Clone)]
 struct SlowLayer2 {
@@ -23,7 +94,10 @@ struct SlowLayer2 {
 }
 
 impl transmit::Layer2Sender for SlowLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<transmit::Report, crate::Error> {
+    fn send_layer2(
+        &self,
+        frame: Layer2Frame<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         std::thread::sleep(self.delay);
         Ok(transmit::Report::committed(
             frame.bytes().len(),
@@ -42,14 +116,14 @@ impl Session for ObservedCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
         timeout: Duration,
-    ) -> Result<Option<capture::Captured>, crate::Error> {
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
         self.timeouts
             .lock()
             .expect("timeout observations")
@@ -57,7 +131,7 @@ impl Session for ObservedCapture {
         Ok(None)
     }
 
-    fn shutdown(&mut self) -> Result<(), crate::Error> {
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
@@ -82,7 +156,7 @@ struct SentRoute {
 #[derive(Default)]
 struct FixtureLayer2State {
     sent: Mutex<Vec<(Bytes, SentRoute)>>,
-    failure: Mutex<Option<crate::Error>>,
+    failure: Mutex<Option<packetcraftr_netio::Error>>,
     operations: Option<Arc<Mutex<Vec<&'static str>>>>,
 }
 
@@ -108,7 +182,10 @@ impl FixtureLayer2 {
 }
 
 impl transmit::Layer2Sender for FixtureLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<transmit::Report, crate::Error> {
+    fn send_layer2(
+        &self,
+        frame: Layer2Frame<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         if let Some(operations) = &self.state.operations {
             operations
                 .lock()
@@ -146,7 +223,10 @@ struct SilentCaptureProvider;
 impl capture::Provider for SilentCaptureProvider {
     type Capture = SilentCapture;
 
-    fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, crate::Error> {
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         Ok(SilentCapture {
             metadata: capture::Metadata {
                 interface: request().interface,
@@ -167,19 +247,19 @@ impl Session for SilentCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
         timeout: Duration,
-    ) -> Result<Option<capture::Captured>, crate::Error> {
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
         std::thread::sleep(timeout);
         Ok(None)
     }
 
-    fn shutdown(&mut self) -> Result<(), crate::Error> {
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
@@ -192,11 +272,11 @@ enum CaptureStep {
     Frame(Frame),
     MissingIngress(Frame),
     End,
-    Error(crate::Error),
+    Error(packetcraftr_netio::Error),
 }
 
 impl CaptureStep {
-    fn deliver(self) -> Result<Option<capture::Captured>, crate::Error> {
+    fn deliver(self) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
         match self {
             Self::Frame(frame) => Ok(Some(capture::Captured::new(frame, Instant::now()))),
             Self::MissingIngress(frame) => Ok(Some(capture::Captured::without_ingress_time(frame))),
@@ -208,10 +288,10 @@ impl CaptureStep {
 
 struct FixtureCapture {
     metadata: capture::Metadata,
-    readiness: Result<(), crate::Error>,
+    readiness: Result<(), packetcraftr_netio::Error>,
     pre_request: VecDeque<CaptureStep>,
     responses: VecDeque<CaptureStep>,
-    cleanup: Result<(), crate::Error>,
+    cleanup: Result<(), packetcraftr_netio::Error>,
     statistics: capture::Statistics,
     shutdowns: Arc<AtomicUsize>,
 }
@@ -240,14 +320,14 @@ impl Session for FixtureCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), crate::Error> {
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
         self.readiness.clone()
     }
 
     fn next_captured_frame(
         &mut self,
         timeout: Duration,
-    ) -> Result<Option<capture::Captured>, crate::Error> {
+    ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
         if timeout.is_zero() {
             self.pre_request.pop_front().unwrap_or(CaptureStep::End)
         } else {
@@ -256,7 +336,7 @@ impl Session for FixtureCapture {
         .deliver()
     }
 
-    fn shutdown(&mut self) -> Result<(), crate::Error> {
+    fn shutdown(&mut self) -> Result<(), packetcraftr_netio::Error> {
         self.shutdowns.fetch_add(1, Ordering::SeqCst);
         self.cleanup.clone()
     }
@@ -273,7 +353,7 @@ struct FixtureCaptureProvider {
 
 struct FixtureCaptureProviderState {
     capture: Mutex<Option<FixtureCapture>>,
-    failure: Option<crate::Error>,
+    failure: Option<packetcraftr_netio::Error>,
     requests: Mutex<Vec<capture::Request>>,
     arms: AtomicUsize,
     operations: Option<Arc<Mutex<Vec<&'static str>>>>,
@@ -307,7 +387,7 @@ impl FixtureCaptureProvider {
         }
     }
 
-    fn failing(error: crate::Error) -> Self {
+    fn failing(error: packetcraftr_netio::Error) -> Self {
         Self {
             state: Arc::new(FixtureCaptureProviderState {
                 capture: Mutex::new(None),
@@ -323,7 +403,10 @@ impl FixtureCaptureProvider {
 impl capture::Provider for FixtureCaptureProvider {
     type Capture = FixtureCapture;
 
-    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, crate::Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         if let Some(operations) = &self.state.operations {
             operations
                 .lock()
@@ -582,7 +665,7 @@ fn capture_loss_and_invalid_statistics_fail_after_confirmed_cleanup() {
 #[test]
 fn resolver_preserves_arm_operation_and_cleanup_failure_boundaries() {
     let request = request();
-    let arm_failure = crate::Error::Capture {
+    let arm_failure = packetcraftr_netio::Error::Capture {
         message: "arm failed".to_owned(),
         source: None,
     };
@@ -601,7 +684,7 @@ fn resolver_preserves_arm_operation_and_cleanup_failure_boundaries() {
         }) if same_failure(&source, &arm_failure)
     ));
 
-    let cleanup_failure = crate::Error::Capture {
+    let cleanup_failure = packetcraftr_netio::Error::Capture {
         message: "cleanup failed".to_owned(),
         source: None,
     };
@@ -618,7 +701,7 @@ fn resolver_preserves_arm_operation_and_cleanup_failure_boundaries() {
         Err(Error::Cleanup { source, .. }) if same_failure(&source, &cleanup_failure)
     ));
 
-    let readiness_failure = crate::Error::CaptureReadiness {
+    let readiness_failure = packetcraftr_netio::Error::CaptureReadiness {
         message: "not ready".to_owned(),
     };
     let mut capture = FixtureCapture::empty();
@@ -655,7 +738,7 @@ fn pre_request_and_receive_errors_report_distinct_operations() {
     let request = request();
     for (pre_request, responses, operation) in [
         (
-            VecDeque::from([CaptureStep::Error(crate::Error::Capture {
+            VecDeque::from([CaptureStep::Error(packetcraftr_netio::Error::Capture {
                 message: "drain failed".to_owned(),
                 source: None,
             })]),
@@ -664,7 +747,7 @@ fn pre_request_and_receive_errors_report_distinct_operations() {
         ),
         (
             VecDeque::new(),
-            VecDeque::from([CaptureStep::Error(crate::Error::Capture {
+            VecDeque::from([CaptureStep::Error(packetcraftr_netio::Error::Capture {
                 message: "receive failed".to_owned(),
                 source: None,
             })]),
@@ -690,7 +773,7 @@ fn pre_request_and_receive_errors_report_distinct_operations() {
         ));
     }
 
-    let send_failure = crate::Error::Send {
+    let send_failure = packetcraftr_netio::Error::Send {
         message: "send failed".to_owned(),
         source: None,
     };

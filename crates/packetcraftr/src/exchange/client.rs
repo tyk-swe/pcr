@@ -12,7 +12,7 @@ use packetcraftr_netio::{
     transmit::Sender as PacketIo,
 };
 
-use packetcraftr_netio::{neighbor, route, transmit};
+use packetcraftr_netio::{route, transmit};
 
 use super::model::Options;
 use crate::Client;
@@ -23,10 +23,9 @@ use crate::exchange::{Collector, Transaction, WorkflowResponseMatcher, WorkflowS
 use crate::planning::ensure_preparation_deadline;
 use crate::preparation::{Admitted, PreparedPacket};
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     pub fn exchange(
@@ -179,11 +178,10 @@ pub(crate) struct Prepared {
     pub(crate) total_bytes: u64,
 }
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + CaptureProvider,
 {
     pub(super) fn prepare_exchange(
         &self,

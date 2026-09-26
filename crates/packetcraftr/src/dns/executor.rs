@@ -20,10 +20,9 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 
-impl<R, N, I> Executor<Exchange> for ExchangeExecutor<'_, R, N, I>
+impl<R, I> Executor<Exchange> for ExchangeExecutor<'_, R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
@@ -112,14 +111,14 @@ where
 }
 
 /// A client exchange with an explicitly selected DNS TCP provider.
-pub struct TcpExchangeExecutor<'a, R, N, I, P> {
-    udp: ExchangeExecutor<'a, R, N, I>,
+pub struct TcpExchangeExecutor<'a, R, I, P> {
+    udp: ExchangeExecutor<'a, R, I>,
     tcp: P,
 }
 
-impl<'a, R, N, I> ExchangeExecutor<'a, R, N, I> {
+impl<'a, R, I> ExchangeExecutor<'a, R, I> {
     /// Enables direct DNS TCP queries and fallback using only the supplied provider.
-    pub fn with_dns_tcp<P>(self, provider: P) -> TcpExchangeExecutor<'a, R, N, I, P> {
+    pub fn with_dns_tcp<P>(self, provider: P) -> TcpExchangeExecutor<'a, R, I, P> {
         TcpExchangeExecutor {
             udp: self,
             tcp: provider,
@@ -128,12 +127,11 @@ impl<'a, R, N, I> ExchangeExecutor<'a, R, N, I> {
 }
 
 // A packet provider alone never implicitly selects system TCP.
-impl<R, N, I> TcpExecutor for ExchangeExecutor<'_, R, N, I> {}
+impl<R, I> TcpExecutor for ExchangeExecutor<'_, R, I> {}
 
-impl<R, N, I, P> Executor<Exchange> for TcpExchangeExecutor<'_, R, N, I, P>
+impl<R, I, P> Executor<Exchange> for TcpExchangeExecutor<'_, R, I, P>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
@@ -141,9 +139,7 @@ where
     }
 }
 
-impl<R, N, I, P: packetcraftr_netio::tcp::Provider> TcpExecutor
-    for TcpExchangeExecutor<'_, R, N, I, P>
-{
+impl<R, I, P: packetcraftr_netio::tcp::Provider> TcpExecutor for TcpExchangeExecutor<'_, R, I, P> {
     fn execute_tcp(&mut self, exchange: &TcpExchange) -> Result<TcpExecution, super::tcp::Error> {
         validate_tcp_route_options(&self.udp.options.send.plan)?;
         let response = super::tcp::exchange(
@@ -205,8 +201,8 @@ mod tests {
         let client = crate::Client {
             registry: packetcraftr_core::protocol::builtin::registry(),
             routes: (),
-            neighbors: (),
             io: (),
+            neighbors: crate::neighbor::State::default(),
             policy: std::sync::Arc::new(crate::policy::Policy::default()),
             runtime: crate::progress::Runtime::default(),
             cancellation: None,

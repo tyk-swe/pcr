@@ -9,8 +9,8 @@ use bytes::Bytes;
 
 use super::Request as NeighborRequest;
 use super::error::invalid_request;
-use crate::link::{MacAddress, VlanTag};
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::packet::{MacAddress, VlanTag};
 
 mod arp;
 mod ethernet;
@@ -37,7 +37,9 @@ use self::{
     },
 };
 #[cfg(test)]
-use crate::link::{MAX_VLAN_TAGS, VlanKind};
+use crate::route::MAX_VLAN_TAGS;
+#[cfg(test)]
+use packetcraftr_core::packet::VlanKind;
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
@@ -118,7 +120,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
-    use crate::interface::Id as InterfaceId;
+    use packetcraftr_netio::interface::Id as InterfaceId;
 
     fn request(source: IpAddr, target: IpAddr) -> NeighborRequest {
         NeighborRequest {

@@ -11,12 +11,12 @@ use super::Request as NeighborRequest;
 use super::error::{invalid_request, map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
-use crate::link::MAX_VLAN_TAGS;
-use crate::transmit;
+use crate::route::MAX_VLAN_TAGS;
 use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_netio::transmit;
 
 #[cfg(test)]
-use crate::Error;
+use packetcraftr_netio::Error;
 
 pub(super) fn validate_request(request: &NeighborRequest) -> Result<(), crate::neighbor::Error> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
@@ -174,10 +174,8 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::*;
-    use crate::{
-        interface::Id as InterfaceId,
-        link::{MacAddress, VlanKind, VlanTag},
-    };
+    use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
+    use packetcraftr_netio::interface::Id as InterfaceId;
 
     fn request() -> NeighborRequest {
         NeighborRequest {

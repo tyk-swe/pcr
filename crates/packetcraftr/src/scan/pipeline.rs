@@ -20,7 +20,7 @@ use packetcraftr_core::{
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{self, group},
-    neighbor, route, transmit,
+    route, transmit,
 };
 use prepare::AdmittedProbe;
 use std::{
@@ -215,10 +215,9 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
         Vec::new(),
     )
 }
-fn check<R, N, I>(client: &Client<R, N, I>, deadline: Instant) -> Result<(), BoundaryError>
+fn check<R, I>(client: &Client<R, I>, deadline: Instant) -> Result<(), BoundaryError>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
     I: transmit::Sender,
 {
     client
@@ -233,15 +232,14 @@ where
     }
     Ok(())
 }
-pub(super) fn run<R, N, I>(
-    executor: &mut ExchangeExecutor<'_, R, N, I>,
+pub(super) fn run<R, I>(
+    executor: &mut ExchangeExecutor<'_, R, I>,
     batches: &[Batch],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
 ) -> Result<Stats, BoundaryError>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
     I: transmit::Sender + capture::Provider,
 {
     validate_options(batches, &options)?;

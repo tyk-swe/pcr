@@ -35,10 +35,9 @@ pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error
     Ok(())
 }
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
     I: PacketIo,
 {
     /// Passive dry planning: route/source/interface lookup only.

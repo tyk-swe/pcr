@@ -38,7 +38,7 @@ use packetcraftr_netio::{
 
 mod common;
 
-use common::{FixedRoutes, NeverNeighbors, NeverTransmit};
+use common::{FixedRoutes, NeverTransmit};
 
 fn assert_message_is_stable(message: &str, variant: &str) {
     assert!(!message.is_empty(), "{variant} must render a message");
@@ -347,7 +347,6 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
     let client = Client::new(
         protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         policy::Policy::default(),
     );

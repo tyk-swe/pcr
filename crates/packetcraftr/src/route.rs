@@ -6,8 +6,9 @@
 //!
 //! [`plan`] asks a `packetcraftr_netio::route::Provider` for the route and
 //! checks its answer against the packet and the caller's [`Options`]; it
-//! performs no discovery, capture, or transmission. [`materialize()`] then runs
-//! any neighbor resolution the plan still needs.
+//! performs no discovery, capture, or transmission. The client then
+//! materializes an admitted plan into a [`Materialized`] route, running any
+//! neighbor resolution the plan still needs.
 
 mod cache;
 mod error;
@@ -18,6 +19,7 @@ mod planner;
 
 pub(crate) use cache::CachedProvider;
 pub use error::Error;
-pub use materialize::{Materialized, materialize};
-pub use model::{Options, Plan};
+pub use materialize::Materialized;
+pub(crate) use materialize::materialize;
+pub use model::{MAX_VLAN_TAGS, Options, Plan};
 pub use planner::plan;

@@ -277,13 +277,6 @@ fn classified_cli(code: &'static str, remediation: &'static str) -> Classificati
 pub(crate) mod test_support {
     use super::Error;
 
-    /// Compares every field through `Debug`, including the non-comparable
-    /// [`SystemFault`](super::SystemFault) source.
-    #[must_use]
-    pub(crate) fn same_failure(left: &Error, right: &Error) -> bool {
-        format!("{left:?}") == format!("{right:?}")
-    }
-
     #[track_caller]
     pub(crate) fn assert_same_failure(actual: &Error, expected: &Error) {
         assert_eq!(format!("{actual:?}"), format!("{expected:?}"));

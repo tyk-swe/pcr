@@ -6,11 +6,8 @@ use std::time::Instant;
 
 use packetcraftr_core::frame::{Frame, LinkType};
 
-use crate::{
-    capture::Statistics,
-    interface::Id,
-    link::{MacAddress, VlanTag},
-};
+use packetcraftr_core::packet::{MacAddress, VlanTag};
+use packetcraftr_netio::{capture::Statistics, interface::Id};
 
 /// Interface-owned context for one active ARP/NDP lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]

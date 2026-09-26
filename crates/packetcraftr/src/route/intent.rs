@@ -3,13 +3,13 @@
 
 use std::net::IpAddr;
 
+use super::model::MAX_VLAN_TAGS;
 use packetcraftr_core::{
     packet::{MacAddress, Packet, VlanTag},
     protocol::BuiltinProtocol,
     protocol::link::{Arp, Ethernet},
     protocol::semantics,
 };
-use packetcraftr_netio::link::MAX_VLAN_TAGS;
 
 use super::error::Error;
 

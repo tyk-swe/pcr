@@ -3,10 +3,8 @@
 
 use std::time::Instant;
 
+use crate::neighbor::{self, Request as NeighborRequest, Resolution as NeighborResolution};
 use packetcraftr_netio::link::Mode;
-use packetcraftr_netio::neighbor::{
-    self, Request as NeighborRequest, Resolution as NeighborResolution,
-};
 use packetcraftr_netio::transmit;
 
 use super::error::Error;
@@ -14,7 +12,7 @@ use super::model::Plan;
 
 /// Materializes a route, passing `deadline` to neighbor resolution so the
 /// operation budget bounds every discovery attempt.
-pub fn materialize<N: neighbor::Resolver>(
+pub(crate) fn materialize<N: neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
     deadline: Option<Instant>,

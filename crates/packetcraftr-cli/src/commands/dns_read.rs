@@ -5,7 +5,7 @@ use super::application_output::EventOutput;
 use crate::output::{
     self,
     contract::{Command, ToolFormat},
-    dns_analysis as wire,
+    dns_read as wire,
 };
 use crate::{
     command_options::{DecodeArgs, OfflineLimitsArgs},

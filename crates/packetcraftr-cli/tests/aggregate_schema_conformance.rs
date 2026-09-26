@@ -1393,7 +1393,7 @@ fn routes_case() -> Value {
 }
 
 fn verify_forwarding_case() -> Value {
-    use packetcraftr_cli::output::forwarding as forwarding_output;
+    use packetcraftr_cli::output::verify_forwarding as forwarding_output;
     use packetcraftr_core::analysis::forwarding;
     use packetcraftr_core::{analysis, capture_file};
 
@@ -1790,7 +1790,7 @@ fn fixture_scope() -> packetcraftr_core::analysis::scope::Definition {
 }
 
 fn dns_read_case() -> Value {
-    use packetcraftr_cli::output::dns_analysis::{Complete, Report};
+    use packetcraftr_cli::output::dns_read::{Complete, Report};
     envelope(
         Command::DnsRead,
         Report {

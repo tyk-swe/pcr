@@ -18,7 +18,7 @@ use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
-use crate::output::forwarding::CaptureSource;
+use crate::output::verify_forwarding::CaptureSource;
 use crate::rendering::StreamEncoder;
 
 /// The process status when the comparison completed and published its report

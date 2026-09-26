@@ -1,6 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Scan reports: packet probes, plus socket-only TCP connect scans in
+//! [`connect`].
+
+pub mod connect;
+
 use std::net::IpAddr;
 use std::time::Duration;
 

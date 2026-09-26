@@ -63,19 +63,19 @@ pub(super) fn run(
             }),
             on_event: emit_event,
             into_result: Box::new(|report| {
-                output::scan_connect::Report::try_from(report)
+                output::scan::connect::Report::try_from(report)
                     .map(|report| (report, Vec::new(), None))
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {
                 render_text(
-                    &output::scan_connect::Report::try_from(report)
+                    &output::scan::connect::Report::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             }),
             complete: |summary, stream| {
                 stream
-                    .complete(output::scan_connect::Summary::from(summary), Vec::new())
+                    .complete(output::scan::connect::Summary::from(summary), Vec::new())
                     .map_err(CliError::from)
             },
         },
@@ -86,11 +86,11 @@ fn emit_event(
     probe: packetcraftr::scan::connect::Probe,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let event = output::scan_connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
+    let event = output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
     Ok(stream.emit_data(event, Vec::new())?)
 }
 
-fn render_text(report: &output::scan_connect::Report) -> Result<(), CliError> {
+fn render_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
     for endpoint in &report.endpoints {
         write_stdout_line(format_args!(
             "{} tcp-connect/{} classification={}",

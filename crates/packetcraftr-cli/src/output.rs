@@ -10,7 +10,7 @@ pub mod capture;
 pub mod contract;
 pub mod dissect;
 pub mod dns;
-pub mod dns_analysis;
+pub mod dns_read;
 pub mod envelope;
 pub mod exchange;
 pub mod expert;
@@ -38,12 +38,10 @@ pub mod stream;
 pub mod tls;
 pub mod traceroute;
 
-pub mod forwarding;
+pub mod verify_forwarding;
 
 pub mod fragment;
 
 pub mod merge;
 
 pub mod projection;
-
-pub mod scan_connect;

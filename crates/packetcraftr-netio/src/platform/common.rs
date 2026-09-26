@@ -58,7 +58,7 @@ pub(in crate::platform) fn refused(exhausted: crate::workers::Exhausted) -> rout
 /// caller waits at most until its deadline; calls still running then finish
 /// on their pooled thread, which keeps its slot, reported as retained
 /// cleanup, until they return. `query` receives what the deadline allows.
-#[cfg(all(native_route, any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(native_route, any(test, target_os = "macos", target_os = "windows")))]
 pub(in crate::platform) fn on_worker<T: Send + 'static>(
     deadline: &packetcraftr_core::budget::Deadline,
     operation: &'static str,
@@ -67,6 +67,10 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     use crate::workers::{Class, Waited};
 
     let detached = crate::deadline::detach(deadline)
+        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
+    // Native calls spend wall time even when the caller's clock is frozen.
+    // Both sides keep the initial allowance and the caller's stop signal.
+    let wait = crate::deadline::detach(&detached)
         .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     let permit = crate::workers::shared()
         .admit(Class::Native)
@@ -80,7 +84,7 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
                 source: Some(Source::new(error)),
             })?;
     drop(permit);
-    match task.wait(deadline) {
+    match task.wait(&wait) {
         Waited::Finished(Ok(result)) => result,
         Waited::Finished(Err(_)) => Err(route::Error::InvalidResponse {
             message: "native route worker panicked".to_owned(),
@@ -95,8 +99,8 @@ pub(in crate::platform) fn on_worker<T: Send + 'static>(
     }
 }
 
-#[cfg(all(test, native_route, any(target_os = "macos", target_os = "windows")))]
-mod pooled_tests {
+#[cfg(all(test, native_route))]
+mod tests {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
@@ -125,6 +129,19 @@ mod pooled_tests {
         }
         assert!(started.elapsed() < Duration::from_secs(5));
         drop(release);
+    }
+
+    #[test]
+    fn a_frozen_caller_clock_still_bounds_the_native_wait() {
+        let (release, blocked) = mpsc::channel::<()>();
+        let frozen = Instant::now();
+        let deadline = Deadline::with_time_source(Duration::from_millis(25), move || frozen);
+        let result = on_worker(&deadline, "testing a frozen route deadline", move |_| {
+            let _ = blocked.recv_timeout(Duration::from_millis(200));
+            Ok(())
+        });
+        drop(release);
+        assert!(matches!(result, Err(route::Error::DeadlineExceeded { .. })));
     }
 
     #[test]

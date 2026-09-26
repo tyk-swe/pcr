@@ -594,8 +594,11 @@ pub trait Provider: Send + Sync {
     fn timestamp_types(
         &self,
         _interface: &InterfaceId,
-        _deadline: &Deadline,
+        deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
+        crate::deadline::remaining(deadline).map_err(|interrupted| {
+            Error::interrupted(interrupted, "discovering timestamp types")
+        })?;
         Err(crate::Unsupported::new(
             crate::NativeCapability::Capture,
             "this capture provider cannot enumerate timestamp types",

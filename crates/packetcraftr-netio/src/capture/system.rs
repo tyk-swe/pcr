@@ -10,8 +10,8 @@ use packetcraftr_core::budget::Deadline;
 use super::{Request, Session, TimestampType};
 use crate::{Error, interface::Id as InterfaceId};
 
-/// Opening and activating a native source does not wait on the network, so
-/// the caller's deadline is checked once, before any native work starts.
+/// Checks the caller's deadline before discovery and again before opening
+/// and activating the native source.
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
@@ -22,6 +22,8 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
     crate::deadline::remaining(deadline)
         .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
     let interface = crate::platform::current_interface(&request.interface, deadline)?;
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
     let parts = crate::platform::open_capture(
         &interface.id,
         limits,
@@ -36,8 +38,10 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
 }
 
 #[cfg(not(native_layer2))]
-pub(super) fn open(request: &Request, _deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
+pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
     Err(crate::platform::unsupported(
         crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),
@@ -52,15 +56,21 @@ pub(super) fn timestamp_types(
     interface: &InterfaceId,
     deadline: &Deadline,
 ) -> Result<Vec<TimestampType>, Error> {
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
     let interface = crate::platform::current_interface(interface, deadline)?;
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
     crate::platform::timestamp_types(&interface.id)
 }
 
 #[cfg(not(native_layer2))]
 pub(super) fn timestamp_types(
     _interface: &InterfaceId,
-    _deadline: &Deadline,
+    deadline: &Deadline,
 ) -> Result<Vec<TimestampType>, Error> {
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "discovering timestamp types"))?;
     Err(crate::platform::unsupported(
         crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),

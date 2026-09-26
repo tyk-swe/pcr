@@ -316,7 +316,6 @@ impl Classified for Error {
 impl Error {
     /// The failure a provider reports when its caller's deadline stopped it
     /// while `operation` was in progress.
-    #[cfg(native_layer2)]
     pub(crate) fn interrupted(
         interrupted: packetcraftr_core::budget::Interrupted,
         operation: &'static str,

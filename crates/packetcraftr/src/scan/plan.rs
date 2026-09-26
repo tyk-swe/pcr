@@ -11,9 +11,9 @@ use packetcraftr_core::packet::Packet;
 use super::Error;
 use super::Request;
 use super::error::Probes;
-use crate::BoundaryError;
 use crate::execution::rate_delay;
 use crate::probe::{Batch, ProbeEndpoint};
+use packetcraftr_core::error::BoundaryError;
 
 /// One planned scan probe: an authorized address and endpoint, the attempt
 /// it belongs to, and the exact UDP payload it carries.

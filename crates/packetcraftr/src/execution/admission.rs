@@ -3,9 +3,9 @@
 
 //! The one path through which a client's workflows are admitted.
 
-use crate::BoundaryError;
 use crate::policy::{self, Authorizer, Operation, Policy};
 use crate::target::{Authorized, ResolveTarget, Resolver, Target};
+use packetcraftr_core::error::BoundaryError;
 
 /// A client's policy together with the resolver its declared targets resolve
 /// through. [`Client::admission`](crate::Client) vends it; staged preparation

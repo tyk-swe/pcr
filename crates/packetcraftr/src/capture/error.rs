@@ -3,7 +3,7 @@
 
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use crate::BoundaryError;
+use packetcraftr_core::error::BoundaryError;
 
 use super::Report;
 

@@ -22,6 +22,7 @@ use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::transmit::Report as TransmissionReport;
 use packetcraftr_netio::{Error as LiveIoError, capture, interface, route, tcp, transmit};
 
+use crate::StatsOverflow;
 use crate::clock::Clock;
 use crate::evidence::SentPacket;
 use crate::execution::ExchangeEvidenceError;
@@ -34,7 +35,7 @@ use crate::target::Hostname;
 use crate::target::ResolveTarget;
 use crate::target::Resolver;
 use crate::target::Target;
-use crate::{BoundaryError, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 /// One provider call a [`FakeProviders`] recorded, in call order.
 #[derive(Clone, Debug, PartialEq, Eq)]

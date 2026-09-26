@@ -10,11 +10,11 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, Receipt};
 use crate::providers::Providers;
+use packetcraftr_core::error::BoundaryError;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "internal.fuzz_executor",

@@ -12,13 +12,14 @@ use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 use crate::deadline::DeadlineExt as _;
 use crate::providers::Providers;
 use crate::{
-    BoundaryError, Client, Sink,
+    Client, Sink,
     clock::Clock,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Transport, enforce_deadline},
     target::ResolveTarget,
     target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
 };
+use packetcraftr_core::error::BoundaryError;
 
 use super::super::error::Probes;
 use super::super::report::RttAccumulator;

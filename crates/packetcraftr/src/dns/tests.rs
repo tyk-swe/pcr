@@ -19,6 +19,7 @@ use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{decode::DecodedPacket, frame::Frame, frame::LinkType, packet::Packet};
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::execution::Executor;
 use crate::policy::Authorizer;
@@ -28,8 +29,8 @@ use crate::target::Family;
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::NoopClock;
-use crate::{BoundaryError, Stats};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 use super::executor::{Exchange, ExchangeEvidence, TcpEvidence, TcpQuerier, TcpQuery};

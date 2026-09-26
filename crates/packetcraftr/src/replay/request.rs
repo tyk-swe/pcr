@@ -220,19 +220,27 @@ impl<R> Source<R> {
 /// policy totals nor timing. Selected frames retain capture spacing.
 pub trait Selector {
     /// Decides whether this frame proceeds to authorization and transmission.
-    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError>;
+    fn select(
+        &mut self,
+        number: u64,
+        frame: &Frame,
+    ) -> Result<bool, packetcraftr_core::error::BoundaryError>;
     /// Selects an output interface after filtering. None uses the explicit fallback.
     fn interface(
         &mut self,
         _number: u64,
         _frame: &Frame,
-    ) -> Result<Option<InterfaceId>, crate::BoundaryError> {
+    ) -> Result<Option<InterfaceId>, packetcraftr_core::error::BoundaryError> {
         Ok(None)
     }
 }
 
 impl<T: Selector + ?Sized> Selector for &mut T {
-    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError> {
+    fn select(
+        &mut self,
+        number: u64,
+        frame: &Frame,
+    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
         (**self).select(number, frame)
     }
 
@@ -240,7 +248,7 @@ impl<T: Selector + ?Sized> Selector for &mut T {
         &mut self,
         number: u64,
         frame: &Frame,
-    ) -> Result<Option<InterfaceId>, crate::BoundaryError> {
+    ) -> Result<Option<InterfaceId>, packetcraftr_core::error::BoundaryError> {
         (**self).interface(number, frame)
     }
 }
@@ -250,7 +258,11 @@ impl<T: Selector + ?Sized> Selector for &mut T {
 pub struct AllFrames;
 
 impl Selector for AllFrames {
-    fn select(&mut self, _number: u64, _frame: &Frame) -> Result<bool, crate::BoundaryError> {
+    fn select(
+        &mut self,
+        _number: u64,
+        _frame: &Frame,
+    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
         Ok(true)
     }
 }

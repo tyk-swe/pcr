@@ -11,7 +11,8 @@ use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
 use crate::policy::CaptureBudget;
 use crate::providers::Providers;
-use crate::{BoundaryError, Client, Sink, Stats};
+use crate::{Client, Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::{Cause, Control, Error, Event, Report, Request, Source, StopReason};
 

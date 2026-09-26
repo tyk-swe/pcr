@@ -9,8 +9,9 @@ use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 
+use crate::Sink;
 use crate::execution::Shared;
-use crate::{BoundaryError, Sink};
+use packetcraftr_core::error::BoundaryError;
 
 use super::super::{Classification, Error, Rtt};
 

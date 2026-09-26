@@ -12,12 +12,13 @@ use bytes::Bytes;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::evidence::ExecutionPermit;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
 use crate::providers::Providers;
-use crate::{BoundaryError, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::Limits;
 use super::classification::{ResponseClassification, classify_response};

@@ -27,12 +27,12 @@ pub enum Error {
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz authorization failed: {0}")]
-    Authorization(#[from] crate::BoundaryError),
+    Authorization(#[from] packetcraftr_core::error::BoundaryError),
     #[error("fuzz execution failed at case {case_index}: {source}")]
     Execution {
         case_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     #[error("fuzz rate clock failed before case {case_index}")]
     Clock {
@@ -55,7 +55,7 @@ pub enum Error {
     #[error("fuzz progressive output failed: {source}")]
     Output {
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
 }
 
@@ -111,7 +111,7 @@ impl Classified for Error {
     /// carries a captured `causes` snapshot its own source chain no longer
     /// holds.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Campaign(error) => error.causes(),
@@ -145,7 +145,7 @@ impl crate::execution::Errors for CaseErrors {
         }
     }
 
-    fn authorization(&self, source: crate::BoundaryError) -> Error {
+    fn authorization(&self, source: packetcraftr_core::error::BoundaryError) -> Error {
         Error::Authorization(source)
     }
 
@@ -161,7 +161,7 @@ impl crate::execution::Errors for CaseErrors {
         Error::Clock { case_index, source }
     }
 
-    fn execution(&self, case_index: u64, source: crate::BoundaryError) -> Error {
+    fn execution(&self, case_index: u64, source: packetcraftr_core::error::BoundaryError) -> Error {
         Error::Execution { case_index, source }
     }
 

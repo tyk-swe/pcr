@@ -12,12 +12,12 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
-use crate::BoundaryError;
 use crate::execution::Admission;
 use crate::policy::{
     Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
     authorize_wire_sources, unsupported_operation,
 };
+use packetcraftr_core::error::BoundaryError;
 
 use super::evidence::network_envelope;
 

@@ -9,13 +9,13 @@ use bytes::Bytes;
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
 use super::*;
-use crate::BoundaryError;
 use crate::evidence::ExecutionPermit;
 use crate::execution::ExchangeEvidenceError;
 use crate::execution::limits::EvidenceLimits;
 use crate::probe::Workflow;
 use crate::test_support::{Failure, RecordingClock, TestErrors};
 use crate::test_support::{decoded_packet, evidence_frame};
+use packetcraftr_core::error::BoundaryError;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestProbe(u64);

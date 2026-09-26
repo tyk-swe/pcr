@@ -38,8 +38,9 @@ use crate::target::Target;
 use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 /// Runs a serial fixture executor where the engine takes a pipeline-capable

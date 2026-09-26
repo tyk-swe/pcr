@@ -23,7 +23,8 @@ use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::Providers;
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
-use crate::{BoundaryError, Client, Sink, Stats, StatsOverflow};
+use crate::{Client, Sink, Stats, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{

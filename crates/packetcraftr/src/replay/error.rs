@@ -92,13 +92,13 @@ pub enum Error {
     Selection {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     #[error("replay policy denied source index {source_index}: {source}")]
     Authorization {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     #[error("replay transmission failed at source index {source_index}: {source}")]
     Transmission {
@@ -121,7 +121,7 @@ pub enum Error {
     Output {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     /// A collector saw events that disagree with the report.
     #[error("replay events are incoherent: {message}")]
@@ -240,7 +240,7 @@ impl Classified for Error {
     /// carries a captured `causes` snapshot its own source chain no longer
     /// holds.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Selection { source, .. }

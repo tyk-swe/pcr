@@ -38,8 +38,9 @@ use crate::target::Authorized;
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 /// Runs the engine as the client does under the request's duration limit,

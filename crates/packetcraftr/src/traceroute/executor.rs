@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::BoundaryError;
 use crate::execution::{ExchangeExecutor, Executor};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
 use crate::probe::{Batch, Evidence, Transport};
+use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
 use crate::providers::Providers;

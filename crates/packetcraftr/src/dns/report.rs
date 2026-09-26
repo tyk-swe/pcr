@@ -12,7 +12,8 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::execution::Shared;
-use crate::{BoundaryError, Sink, Stats};
+use crate::{Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::error::Error;
 use super::request::QueryType;

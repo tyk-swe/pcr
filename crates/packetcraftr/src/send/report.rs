@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::execution::Shared;
-use crate::{BoundaryError, SentPacket, Sink, Stats};
+use crate::{SentPacket, Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::Error;
 

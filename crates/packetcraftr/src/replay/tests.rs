@@ -27,11 +27,11 @@ use super::executor::{Executor, map_route_error};
 use super::plan::link_mode;
 use super::report::Report;
 use super::request::{AllFrames, Limits, Options, Request, Selector, Source, Timing};
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::policy::{Authorizer, Operation};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
+use packetcraftr_core::error::BoundaryError;
 
 #[derive(Default)]
 struct RecordingAuthorizer {

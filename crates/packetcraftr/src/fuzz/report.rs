@@ -4,7 +4,8 @@
 use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
 
 use crate::execution::Shared;
-use crate::{BoundaryError, Sink, Stats};
+use crate::{Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 /// What became of one transmitted case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

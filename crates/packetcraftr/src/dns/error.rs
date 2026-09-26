@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::BoundaryError;
 use crate::execution::ExchangeEvidenceError;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -221,7 +221,7 @@ impl Classified for Error {
     /// variants delegate instead: a [`BoundaryError`] carries a captured
     /// `causes` snapshot its own source chain does not hold.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(error) => error.causes(),

@@ -7,7 +7,7 @@ use std::time::Duration;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture::GroupRequest;
 
-use crate::BoundaryError;
+use packetcraftr_core::error::BoundaryError;
 
 /// The boxed frame selector a request carries.
 type SelectFrame = Box<dyn FnMut(u64, &Frame) -> Result<bool, BoundaryError> + Send>;

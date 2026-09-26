@@ -90,7 +90,7 @@ where
         overrides: WorkflowOverrides,
         matches_request: &mut crate::exchange::WorkflowResponseMatcher<'_>,
         stop_after_response: Option<&mut crate::exchange::WorkflowStopPredicate<'_>>,
-    ) -> Result<crate::exchange::Aggregate, crate::BoundaryError> {
+    ) -> Result<crate::exchange::Aggregate, packetcraftr_core::error::BoundaryError> {
         let mut send = self.send.clone();
         send.destination = Some(overrides.destination);
         let mut collection = self.collection.clone();
@@ -110,6 +110,6 @@ where
                 Some(matches_request),
                 stop_after_response,
             )
-            .map_err(crate::BoundaryError::from_error)
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)
     }
 }

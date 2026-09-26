@@ -7,9 +7,10 @@ use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::WORKFLOW;
+use crate::StatsOverflow;
 use crate::execution::ExchangeEvidenceError;
 use crate::target::{Family, SelectionError};
-use crate::{BoundaryError, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 /// Why a scan stopped.
 #[derive(Debug, thiserror::Error)]

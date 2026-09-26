@@ -4,7 +4,8 @@
 use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 
 use super::ExchangeEvidenceError;
-use crate::{BoundaryError, StatsOverflow};
+use crate::StatsOverflow;
+use packetcraftr_core::error::BoundaryError;
 
 /// How a workflow names every failure the shared admission gates, pacing, and
 /// execution context raise, in its own typed error.

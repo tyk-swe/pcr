@@ -13,7 +13,8 @@ use crate::clock::Clock;
 use crate::execution::{Context, Executor, Shared};
 use crate::policy::{Authorizer, Operation};
 use crate::target::{ResolveTarget, approve_operation};
-use crate::{BoundaryError, Sink, Stats};
+use crate::{Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::engine::{Attempts, PreparedOperation};
 use super::executor::{Exchange, TcpQuerier};

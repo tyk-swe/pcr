@@ -46,8 +46,6 @@
 
 #![forbid(unsafe_code)]
 
-use packetcraftr_core::error::BoundaryError;
-
 mod address;
 pub mod capture;
 mod client;

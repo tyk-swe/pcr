@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::BoundaryError;
 use crate::execution::{Executor, Step};
+use packetcraftr_core::error::BoundaryError;
 
 pub(crate) fn private_policy() -> crate::policy::Policy {
     crate::policy::Policy {

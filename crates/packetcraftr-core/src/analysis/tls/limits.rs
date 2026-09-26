@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::analysis::Error;
+use crate::analysis::{Constraint, Error};
 
 /// Per-direction handshake-buffer ceiling: one maximum message plus record
 /// framing. Exceeding it stops buffering and marks the session
@@ -62,7 +62,7 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value: 0,
-                    reason: "must be non-zero",
+                    reason: Constraint::NonZero,
                 });
             }
         }

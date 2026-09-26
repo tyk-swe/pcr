@@ -10,7 +10,7 @@ use crate::{
     protocol::semantics::ipv4_source_route_destination,
 };
 
-use crate::protocol::common::{invalid, network_from_addresses};
+use crate::protocol::common::{invalid, network_from_addresses, rejected};
 
 use super::{Ipv4, Ipv6, ip_protocol};
 
@@ -76,7 +76,7 @@ pub(crate) fn resolve_envelope(
             };
             let pseudo_header_destination =
                 ipv4_source_route_destination(destination, &ipv4.options)
-                    .map_err(|error| invalid(BuiltinProtocol::Ipv4.as_str(), error.to_string()))?;
+                    .map_err(|error| rejected(BuiltinProtocol::Ipv4.as_str(), error))?;
             return Ok(network_from_addresses(
                 source.into(),
                 pseudo_header_destination.into(),

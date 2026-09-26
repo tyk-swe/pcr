@@ -310,7 +310,7 @@ impl Collector {
                         &data.flow,
                         &mut direction,
                         Status::Limit,
-                        Some(http::Error::Limit("header bytes")),
+                        Some(http::Error::Limit(http::Limit::HeaderBytes)),
                         output,
                     )?;
                     direction.disabled = true;
@@ -412,7 +412,7 @@ impl Collector {
                         &data.flow,
                         &mut direction,
                         Status::Limit,
-                        Some(http::Error::Limit("body bytes")),
+                        Some(http::Error::Limit(http::Limit::BodyBytes)),
                         output,
                     )?;
                     direction.disabled = true;
@@ -921,7 +921,7 @@ mod tests {
         assert_eq!(message.header_wire.len(), http::MAX_HEADER_BYTES + 1);
         assert!(matches!(
             message.error,
-            Some(http::Error::Limit("header bytes"))
+            Some(http::Error::Limit(http::Limit::HeaderBytes))
         ));
     }
 
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(message.status, Status::Limit);
         assert!(matches!(
             message.error,
-            Some(http::Error::Limit("header count"))
+            Some(http::Error::Limit(http::Limit::HeaderCount))
         ));
     }
 

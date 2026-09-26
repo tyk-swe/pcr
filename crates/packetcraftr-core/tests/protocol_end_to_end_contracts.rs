@@ -773,11 +773,12 @@ fn pppoe_stage_is_checked_against_every_ethertype_parent() {
         let error = build::Builder::new(rooted_registry(root))
             .build(packet, codec::Context::default(), build::Options::default())
             .expect_err("a discovery code under the session EtherType is refused");
+        let causes = packetcraftr_core::error::source_chain(&error);
         assert!(
-            error
-                .to_string()
-                .contains("requires the enclosing EtherType 0x8863"),
-            "{parent}: {error}"
+            causes
+                .iter()
+                .any(|cause| cause.contains("requires the enclosing EtherType 0x8863")),
+            "{parent}: {error}: {causes:?}"
         );
     }
 }
@@ -988,10 +989,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_name.extend_from_slice(&[3, b'w', b'w']);
     assert!(matches!(
         Dns::try_from(truncated_name),
-        Err(dns::Error::Name(dns::name::Error::TruncatedLabel {
-            end: 16,
-            ..
-        }))
+        Err(dns::Error::TruncatedLabel { end: 16, .. })
     ));
     let mut truncated_question_type = vec![0; 12];
     truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
@@ -1026,10 +1024,7 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     pointer_loop[13] = 12;
     let looped = Dns::try_from(pointer_loop).expect_err("self-referential name pointer");
     assert!(
-        matches!(
-            looped,
-            dns::Error::Name(dns::name::Error::SelfPointer { .. })
-        ),
+        matches!(looped, dns::Error::SelfPointer { .. }),
         "{looped:?}"
     );
 
@@ -1433,10 +1428,12 @@ fn pseudo_header_failures_name_the_calling_protocol() {
             .build(packet, codec::Context::default(), build::Options::default())
             .err()
             .unwrap_or_else(|| panic!("{protocol} without an IP envelope must not build"));
-        let message = error.to_string();
+        let causes = packetcraftr_core::error::source_chain(&error);
         assert!(
-            message.contains(&format!("invalid {protocol} layer")),
-            "{protocol}: {message}"
+            causes
+                .iter()
+                .any(|cause| cause.contains(&format!("invalid {protocol} layer"))),
+            "{protocol}: {error}: {causes:?}"
         );
     }
 }

@@ -16,7 +16,7 @@ use crate::{
     layer::Layer,
     protocol::{
         BuiltinProtocol,
-        common::{ensure_encode_budget, invalid, protocol, truncated, typed_layer},
+        common::{ensure_encode_budget, invalid, protocol, rejected, truncated, typed_layer},
     },
 };
 
@@ -108,7 +108,7 @@ fn layer_error(error: Error, available: usize) -> crate::codec::Error {
     match error {
         Error::Encode(error) => error,
         error => error.truncation_needed().map_or_else(
-            || invalid(NAME, error.to_string()),
+            || rejected(NAME, error),
             |needed| truncated(NAME, needed, available),
         ),
     }
@@ -306,9 +306,20 @@ mod tests {
         let mut too_many = vec![0; 12];
         too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
         let error = layer_from_wire(too_many.into()).unwrap_err();
-        assert_eq!(
-            error,
-            invalid(NAME, "DNS question count 65 exceeds limit 64")
+        assert!(
+            matches!(
+                &error,
+                crate::codec::Error::Rejected { protocol, source }
+                    if protocol.as_str() == NAME
+                        && matches!(
+                            source.downcast_ref::<Error>(),
+                            Some(Error::QuestionLimit {
+                                actual: 65,
+                                limit: 64
+                            })
+                        )
+            ),
+            "{error:?}"
         );
     }
 }

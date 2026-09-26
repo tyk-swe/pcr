@@ -6,7 +6,7 @@ use std::io;
 use thiserror::Error;
 
 use super::model::Format;
-use crate::error::{Classification, Classified, Kind};
+use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -25,7 +25,7 @@ pub enum Error {
     },
     #[error(transparent)]
     Frame(#[from] crate::frame::Error),
-    #[error("capture I/O failed: {0}")]
+    #[error("capture I/O failed")]
     Io(#[from] io::Error),
     #[error("capture input is empty")]
     EmptyInput,
@@ -104,6 +104,38 @@ pub enum Error {
     StreamByteLimitExceeded { actual: u64, limit: u64 },
     #[error("capture timestamp resolution {base}^{exponent} cannot be represented")]
     InvalidTimestampResolution { base: u8, exponent: u8 },
+    /// A [`select`](super::select) predicate failed on frame `number`.
+    #[error("selection failed at frame {number}")]
+    Predicate {
+        number: u64,
+        #[source]
+        source: BoundaryError,
+    },
+    /// A [`map_frames`](super::map_frames) mapper failed on frame `number`.
+    #[error("capture frame {number} transformation failed")]
+    Transform {
+        number: u64,
+        #[source]
+        source: BoundaryError,
+    },
+    #[error("capture transformation cannot retain {0}")]
+    TransformMetadata(&'static str),
+    #[error("capture transformation changed frame {number} identity or time")]
+    TransformIdentity { number: u64 },
+    #[error("capture merge requires 1..={maximum} sources with names of at most 4096 bytes")]
+    MergeSources { maximum: usize },
+    /// Reading merge input `input` failed at its frame `frame`.
+    #[error("merge source {input}, frame {frame} failed")]
+    MergeSource {
+        input: usize,
+        frame: u64,
+        #[source]
+        source: Box<Self>,
+    },
+    #[error("merge source {input}, frame {frame} has a timestamp before its preceding frame")]
+    MergeClockRegression { input: usize, frame: u64 },
+    #[error("merge source {input} has unsupported metadata: {field}")]
+    MergeMetadata { input: usize, field: &'static str },
 }
 
 impl Classified for Error {
@@ -115,6 +147,33 @@ impl Classified for Error {
                 Some("reduce input or raise the finite invocation duration"),
             ),
             Self::Cancelled(source) => source.classification(),
+            Self::Predicate { source, .. } | Self::Transform { source, .. } => {
+                source.classification()
+            }
+            Self::MergeSource { source, .. } => source.classification(),
+            Self::TransformMetadata(_) => {
+                Classification::new("packet.capture_transform_metadata", Kind::Packet, None)
+            }
+            Self::TransformIdentity { .. } => {
+                Classification::new("internal.capture_transform_identity", Kind::Internal, None)
+            }
+            Self::MergeSources { .. } => Classification::new(
+                "cli.capture_merge_sources",
+                Kind::Usage,
+                Some("select a bounded set of named capture sources"),
+            ),
+            Self::MergeClockRegression { .. } => Classification::new(
+                "packet.capture_merge_order",
+                Kind::Packet,
+                Some("each merge input must already be ordered by timestamp"),
+            ),
+            Self::MergeMetadata { .. } => Classification::new(
+                "packet.capture_merge_metadata",
+                Kind::Packet,
+                Some(
+                    "use faithful source-record export for metadata the normalized merge cannot preserve",
+                ),
+            ),
             Self::Io(source)
                 if source
                     .get_ref()
@@ -169,45 +228,21 @@ impl Classified for Error {
             ),
         }
     }
-}
 
-/// A capture selection failure, retaining the predicate's classification.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum SelectionError {
-    #[error(transparent)]
-    Capture(#[from] Error),
-    #[error("selection failed at frame {number}: {source}")]
-    Predicate {
-        number: u64,
-        #[source]
-        source: crate::error::BoundaryError,
-    },
-}
-
-impl Classified for SelectionError {
-    fn classification(&self) -> Classification {
+    fn context(&self) -> Option<Coordinate> {
         match self {
-            Self::Capture(source) => source.classification(),
-            Self::Predicate { source, .. } => source.classification(),
+            Self::Predicate { number, .. } => Some(Coordinate::SourceFrame(*number)),
+            Self::MergeSource { source, .. } => source.context(),
+            _ => None,
         }
     }
 
-    fn context(&self) -> Option<crate::error::Coordinate> {
-        match self {
-            Self::Capture(source) => source.context(),
-            Self::Predicate { number, .. } => Some(crate::error::Coordinate::SourceFrame(*number)),
-        }
-    }
-
+    /// A caller's [`BoundaryError`] carries a captured `causes` snapshot that
+    /// its own source chain no longer holds, so it leads the causes itself.
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Capture(source) => source.causes(),
-            Self::Predicate { source, .. } => {
-                let mut causes = vec![source.to_string()];
-                causes.extend(source.causes());
-                causes
-            }
+            Self::Predicate { source, .. } | Self::Transform { source, .. } => source.as_causes(),
+            error => crate::error::source_chain(error),
         }
     }
 }

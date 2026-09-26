@@ -10,11 +10,11 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use super::reflection::reflective_layer;
-use super::{FieldError, Id, Layer};
+use super::{Id, Layer};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field::{self, FieldValue},
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -94,12 +94,12 @@ reflective_layer! {
             get |layer| layer.outside_layer.map(FieldValue::from),
             set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => {
-                    layer.outside_layer = Some(usize::try_from(value).map_err(|_| FieldError::OutOfRange {
+                    layer.outside_layer = Some(usize::try_from(value).map_err(|_| field::Error::OutOfRange {
                         protocol: Padding::ID, field: name.to_owned(),
                     })?);
                     Ok(())
                 }
-                _ => Err(FieldError::WrongType {
+                _ => Err(field::Error::WrongType {
                     protocol: Padding::ID, field: name.to_owned(), expected: "unsigned",
                 }),
             }
@@ -140,7 +140,7 @@ reflective_layer! {
             get |layer| layer.intended_protocol.clone().map(FieldValue::Text),
             set |layer, value, name| match value {
                 FieldValue::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
-                _ => Err(FieldError::WrongType { protocol: Malformed::ID, field: name.to_owned(), expected: "text" }),
+                _ => Err(field::Error::WrongType { protocol: Malformed::ID, field: name.to_owned(), expected: "text" }),
             }
         },
         "bytes" => {

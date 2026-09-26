@@ -53,5 +53,5 @@ mod run;
 pub use decode::{dissect_built, packet_link_type};
 pub use error::Error;
 pub use report::{Case, CaseFailure, CaseOutcome, Mutation, Report, Stats, Summary};
-pub use request::{Limits, Request, Strategy, Target, TargetParseError};
+pub use request::{Limits, Request, Strategy, Target};
 pub use run::{Campaign, run, run_observed};

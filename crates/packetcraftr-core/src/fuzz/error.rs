@@ -28,6 +28,16 @@ pub enum Error {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("fuzz target {target} is invalid: {message}")]
     InvalidTarget { target: Target, message: String },
+    #[error("invalid fuzz target {target:?}; expected LAYER.FIELD")]
+    TargetSeparator { target: String },
+    #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
+    TargetLayer { target: String },
+    #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
+    TargetField {
+        target: String,
+        #[source]
+        source: crate::field::Error,
+    },
     #[error("fuzz base packet is invalid: {message}")]
     InvalidBasePacket { message: String },
     #[error("packet has no field compatible with the selected fuzz strategies")]
@@ -40,7 +50,7 @@ pub enum Error {
     ValueTooLarge { limit: usize },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("fuzz progressive output failed: {source}")]
+    #[error("fuzz progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -62,6 +72,15 @@ impl Classified for Error {
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),
             ),
+            Self::TargetSeparator { .. } | Self::TargetLayer { .. } | Self::TargetField { .. } => {
+                Classification::new(
+                    "cli.fuzz_limit",
+                    Kind::Usage,
+                    Some(
+                        "use LAYER.FIELD targets naming a layer index and a reflective field path",
+                    ),
+                )
+            }
             Self::InvalidBasePacket { .. } => Classification::new(
                 "packet.fuzz_recipe",
                 Kind::Packet,
@@ -98,7 +117,7 @@ impl Classified for Error {
     /// captured `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Output { source } => source.causes(),
+            Self::Output { source } => source.as_causes(),
             error => crate::error::source_chain(error),
         }
     }

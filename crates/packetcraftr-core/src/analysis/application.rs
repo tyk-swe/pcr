@@ -64,7 +64,7 @@ pub enum Error {
     Limit { field: &'static str, limit: usize },
     #[error("application stream lacks physical source evidence at frame {number}")]
     Sources { number: u64 },
-    #[error("application event output failed: {0}")]
+    #[error("application event output failed")]
     Output(#[source] crate::error::BoundaryError),
 }
 impl Classified for Error {
@@ -83,6 +83,16 @@ impl Classified for Error {
                 Kind::Internal,
                 Some("enable sourced analysis and preserve contributing transport frames"),
             ),
+        }
+    }
+
+    /// A [`BoundaryError`](crate::error::BoundaryError) carries a captured
+    /// `causes` snapshot its own source chain no longer holds.
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Analysis(source) => source.causes(),
+            Self::Output(source) => source.as_causes(),
+            error => crate::error::source_chain(error),
         }
     }
 }

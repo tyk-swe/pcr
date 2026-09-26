@@ -175,6 +175,9 @@ fn resolve_recipe(
             .map_err(CliError::classified),
         Err(error) => {
             expression_error.causes.push(error.to_string());
+            expression_error
+                .causes
+                .extend(core::error::source_chain(&error));
             Err(expression_error)
         }
     }

@@ -9,11 +9,11 @@ use std::time::{Duration, SystemTime};
 
 use crate::protocol::network::{Ipv4, Ipv6};
 
-use crate::analysis::Error;
 use crate::analysis::StreamTransport;
 use crate::analysis::conversation_index::CanonicalFlow;
 use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
 use crate::analysis::reassembly::tcp::ScopedFlowKey;
+use crate::analysis::{Constraint, Error};
 
 mod report;
 pub use report::{ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, Report};
@@ -96,7 +96,7 @@ impl Collector {
             return Err(Error::InvalidLimit {
                 field: "interval",
                 value: 0,
-                reason: "must be non-zero",
+                reason: Constraint::NonZero,
             });
         }
         Ok(Self {

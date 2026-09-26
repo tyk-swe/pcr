@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use super::{Error, ResourceError};
+use super::{Error, Resource};
 
 pub(super) const PAGE_BYTES: usize = 4096;
 pub(super) const PAGE_CHARGE: usize = PAGE_BYTES + 64;
@@ -28,7 +28,7 @@ pub(super) fn allocate() -> Result<Page, Error> {
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(PAGE_BYTES)
-        .map_err(|_| ResourceError::AllocationFailed {
+        .map_err(|_| Resource::AllocationFailed {
             requested: PAGE_BYTES,
         })?;
     bytes.resize(PAGE_BYTES, 0);

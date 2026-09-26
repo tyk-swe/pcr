@@ -4,7 +4,7 @@
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::layer::FieldError;
+use crate::field;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -20,19 +20,19 @@ pub enum Error {
         index: usize,
         protocol: crate::layer::Id,
     },
-    #[error("layer {protocol} at index {index} violates its reflective schema: {source}")]
+    #[error("layer {protocol} at index {index} violates its reflective schema")]
     InvalidLayer {
         index: usize,
         protocol: crate::layer::Id,
         #[source]
-        source: FieldError,
+        source: field::Error,
     },
     #[error("layer {parent} cannot contain adjacent layer {child}")]
     UnboundLayers {
         parent: crate::layer::Id,
         child: crate::layer::Id,
     },
-    #[error("failed to encode layer {protocol} at index {index}: {source}")]
+    #[error("failed to encode layer {protocol} at index {index}")]
     Codec {
         index: usize,
         protocol: crate::layer::Id,

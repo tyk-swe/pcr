@@ -6,9 +6,8 @@ use std::borrow::Borrow;
 use std::fmt;
 
 use serde::Serialize;
-use thiserror::Error;
 
-use crate::field::{FieldKind, FieldValue, Path};
+use crate::field::{self, FieldKind, FieldValue, Path};
 
 /// Static protocol/codec name, cheaply copied. Runtime names from documents,
 /// filters, and command lines resolve through
@@ -81,25 +80,6 @@ pub struct Schema {
     pub fields: &'static [FieldSchema],
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum FieldError {
-    #[error("layer {protocol} has no field named {field}")]
-    UnknownField { protocol: Id, field: String },
-    #[error("field {field} on layer {protocol} expected {expected}")]
-    WrongType {
-        protocol: Id,
-        field: String,
-        expected: &'static str,
-    },
-    #[error("field {field} on layer {protocol} is outside the allowed range")]
-    OutOfRange { protocol: Id, field: String },
-    #[error("field {field} on layer {protocol} cannot be edited reflectively")]
-    ReadOnly { protocol: Id, field: String },
-    #[error("required field {field} is absent from layer {protocol} after defaults")]
-    MissingRequired { protocol: Id, field: String },
-}
-
 /// Object-safe packet layer interface used by built-in and external protocols.
 ///
 /// `dyn Layer` upcasts to `dyn Any`; its inherent `is`, `downcast_ref`, and
@@ -111,7 +91,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     /// needs this method to implement `Clone`.
     fn clone_box(&self) -> Box<dyn Layer>;
     fn field(&self, name: &str) -> Option<FieldValue>;
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error>;
 
     /// Reads a field, or a registered nested object member or zero-based
     /// list element, through a path parsed once by the caller.
@@ -125,8 +105,8 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
 
     /// Edits a field, or a nested value through its owning field's validated
     /// setter.
-    fn set_field_path(&mut self, path: &Path, value: FieldValue) -> Result<(), FieldError> {
-        let unknown = || FieldError::UnknownField {
+    fn set_field_path(&mut self, path: &Path, value: FieldValue) -> Result<(), field::Error> {
+        let unknown = || field::Error::UnknownField {
             protocol: *self.protocol_id(),
             field: path.to_string(),
         };
@@ -143,10 +123,10 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
 
     /// Validates the stable required-field contract after codec defaults,
     /// materialization, or decoding.
-    fn validate_required_fields(&self) -> Result<(), FieldError> {
+    fn validate_required_fields(&self) -> Result<(), field::Error> {
         for field in self.schema().fields.iter().filter(|field| field.required) {
             if self.field(field.name).is_none() {
-                return Err(FieldError::MissingRequired {
+                return Err(field::Error::MissingRequired {
                     protocol: *self.protocol_id(),
                     field: field.name.to_owned(),
                 });

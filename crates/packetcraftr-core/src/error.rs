@@ -3,6 +3,8 @@
 
 //! Stable failure taxonomy shared by the Rust API and command-line renderer.
 
+use std::sync::Arc;
+
 use serde::Serialize;
 
 mod boundary;
@@ -79,6 +81,53 @@ impl Classification {
     }
 }
 
+/// A shared, type-erased error source: the one way core stores a source whose
+/// type it does not name, so the error holding it stays `Clone`.
+///
+/// It is the source's handle, not a link of its own: a `#[source]` field of
+/// this type exposes the wrapped error itself, so `downcast_ref` reaches it.
+/// Two handles are equal when they share the error or render the same chain.
+#[derive(Clone)]
+pub struct Source(Arc<dyn std::error::Error + Send + Sync>);
+
+impl Source {
+    pub fn new(error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Arc::new(error))
+    }
+}
+
+impl<E: std::error::Error + Send + Sync + 'static> From<E> for Source {
+    fn from(error: E) -> Self {
+        Self::new(error)
+    }
+}
+
+impl std::ops::Deref for Source {
+    type Target = dyn std::error::Error + Send + Sync;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl std::fmt::Debug for Source {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl std::fmt::Display for Source {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || render(&**self) == render(&**other)
+    }
+}
+
 /// Every distinct `#[source]` in an error's chain, outermost first.
 ///
 /// The one derivation of [`Classified::causes`] for an error that retains its
@@ -118,6 +167,32 @@ pub fn source_chain(error: &(impl std::error::Error + ?Sized)) -> Vec<String> {
         above = rendered;
     }
     causes
+}
+
+/// Renders an error and every distinct source as one `": "`-joined line.
+///
+/// Only for the text records a failure is published into, such as
+/// diagnostics and malformed-layer reasons, which cannot hold a source chain.
+/// An error that crosses a boundary keeps its sources instead.
+///
+/// ```
+/// use packetcraftr_core::error::render;
+///
+/// #[derive(Debug, thiserror::Error)]
+/// #[error("invalid dns layer")]
+/// struct Outer(#[source] std::io::Error);
+///
+/// let error = Outer(std::io::Error::other("label too long"));
+/// assert_eq!(render(&error), "invalid dns layer: label too long");
+/// ```
+#[must_use]
+pub fn render(error: &(dyn std::error::Error + '_)) -> String {
+    let mut text = error.to_string();
+    for cause in source_chain(error) {
+        text.push_str(": ");
+        text.push_str(&cause);
+    }
+    text
 }
 
 /// Implemented by public errors that cross a live-workflow or CLI boundary.

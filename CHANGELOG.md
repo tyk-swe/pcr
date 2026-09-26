@@ -55,8 +55,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `ReadFormat`, `FollowFormat`) instead of `()`, so a command that cannot
   emit a format fails at dispatch rather than re-checking `Format` inside
   rendering.
-- `document::Error::Parse.source` is `Box<dyn Error + Send + Sync>` (was
-  `String`), retaining the packet parser's typed error in the chain.
+- `document::Error::Parse.source` is an `error::Source` (was `String`),
+  retaining the packet parser's typed error in the chain.
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
   listing the arriving segment's actual retransmitted sequence spans, which
   need not form a contiguous prefix.
@@ -155,6 +155,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`, `SEGMENTS_LEFT`,
   `LAST_ENTRY`, `TARGET_PROTOCOL`, and `IPV4_OPTIONS`. Read the typed layer's
   fields instead.
+- Core errors follow one convention: each module has one `Error`, sources stay
+  typed, messages do not repeat their source, and every public error implements
+  `Classified` (classification codes are unchanged). `packet::PacketError` is
+  `packet::Error`; `layer::FieldError` and `field::PathError` merge into
+  `field::Error`; `layer::ReflectiveFieldError` is `layer::Refusal`;
+  `capture_file::{SelectionError, MapError, MergeError}`,
+  `analysis::SessionError`, `filter::ProjectionError`, and
+  `fuzz::TargetParseError` merge into their module's `Error`; `dns::name::Error`
+  merges into `dns::Error`; and the reassembly `ResourceError`/`MalformedError`
+  categories are `Resource`/`Malformed`. `codec::Error` gains `Rejected`, which
+  keeps a protocol's typed error as its source, and drops `Eq`, as do
+  `dns::Error` and `tls::Error`. `dhcp::Error::Limit`, `http::Error::Limit`,
+  and `analysis::Error::InvalidLimit` carry typed reasons. Type-erased sources
+  are the new `error::Source`. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -415,6 +429,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   Messages for malformed link and IP headers come from the header walker (for
   example "truncated IPv6 extension header" instead of "invalid packet
   transform input: truncated IPv6 extension").
+- Error messages no longer repeat their source's text; the source moves to the
+  published `causes` (for example "analysis consumer failed at frame 7" with
+  cause "application output exceeds --max-application-output-bytes"). Rejected
+  fuzz cases publish "mutation was rejected" or "mutated packet was rejected"
+  with the refusal as a cause. Malformed-layer reasons and diagnostics keep
+  their full text, and classification codes are unchanged.
 - `protocol::semantics::Error` (formerly `packet::semantics::Error`) messages
   describe the packet instead of a transmission denial (for example
   "destination cannot be determined because the ipv4 layer is malformed: …"

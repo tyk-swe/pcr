@@ -223,7 +223,7 @@ impl IpDispatch {
     }
 
     fn aggregate_memory_error(&self) -> ip::Error {
-        ip::ResourceError::AggregateMemoryLimit {
+        ip::Resource::AggregateMemoryLimit {
             limit: self.max_aggregate_bytes,
         }
         .into()

@@ -5,9 +5,6 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use crate::error::{Classification, Classified, Kind};
 
 use crate::layout::DEFAULT_MAX_PACKET_SIZE;
 
@@ -54,50 +51,27 @@ impl fmt::Display for Target {
 }
 
 impl FromStr for Target {
-    type Err = TargetParseError;
+    type Err = Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let (layer, field) =
-            value
-                .split_once('.')
-                .ok_or_else(|| TargetParseError::MissingSeparator {
-                    target: value.to_owned(),
-                })?;
-        let layer = layer
-            .parse::<usize>()
-            .map_err(|_| TargetParseError::InvalidLayer {
+        let (layer, field) = value
+            .split_once('.')
+            .ok_or_else(|| Error::TargetSeparator {
                 target: value.to_owned(),
             })?;
-        if field.parse::<crate::field::Path>().is_err() {
-            return Err(TargetParseError::InvalidField {
+        let layer = layer.parse::<usize>().map_err(|_| Error::TargetLayer {
+            target: value.to_owned(),
+        })?;
+        field
+            .parse::<crate::field::Path>()
+            .map_err(|source| Error::TargetField {
                 target: value.to_owned(),
-            });
-        }
+                source,
+            })?;
         Ok(Self {
             layer,
             field: field.to_owned(),
         })
-    }
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TargetParseError {
-    #[error("invalid fuzz target {target:?}; expected LAYER.FIELD")]
-    MissingSeparator { target: String },
-    #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
-    InvalidLayer { target: String },
-    #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
-    InvalidField { target: String },
-}
-
-impl Classified for TargetParseError {
-    fn classification(&self) -> Classification {
-        Classification::new(
-            "cli.fuzz_limit",
-            Kind::Usage,
-            Some("use LAYER.FIELD targets naming a layer index and a reflective field path"),
-        )
     }
 }
 

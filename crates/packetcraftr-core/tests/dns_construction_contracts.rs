@@ -223,13 +223,13 @@ fn borrowed_dns_wire_enforces_message_byte_limit() {
 
     wire.push(0);
     let error = Dns::try_from(wire.as_slice()).unwrap_err();
-    assert_eq!(
+    assert!(matches!(
         error,
         dns::Error::MessageTooLarge {
             actual: 65_536,
             maximum: 65_535
         }
-    );
+    ));
     assert_eq!(
         error.to_string(),
         "DNS message is 65536 bytes; maximum is 65535"

@@ -96,7 +96,7 @@ impl<'registry> DecodeSession<'registry> {
             let decoded = match self.decode_layer(codec.as_ref(), &cursor, allow_link_padding) {
                 Ok(decoded) => decoded,
                 Err(source) => {
-                    self.preserve_malformed_layer(&cursor, source.to_string());
+                    self.preserve_malformed_layer(&cursor, crate::error::render(&source));
                     break;
                 }
             };

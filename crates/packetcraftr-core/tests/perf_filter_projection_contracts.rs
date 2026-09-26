@@ -20,12 +20,12 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_core::decode::{self, DecodedPacket};
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field::{self, FieldValue};
 use packetcraftr_core::filter::{
-    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection, ProjectionError,
+    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{FieldError, Layer, Malformed, Raw, Schema};
+use packetcraftr_core::layer::{Layer, Malformed, Raw, Schema};
 use packetcraftr_core::layout::PacketLayout;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::application::dns::{Dns, Question, Record, RecordValue};
@@ -236,7 +236,7 @@ impl Layer for CountedLayer {
         self.reads.lock().expect("reads lock").push(name.to_owned());
         self.inner.field(name)
     }
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
         self.inner.set_field(name, value)
     }
 }
@@ -896,7 +896,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(single.values(&tunnelled_context, 1).is_ok());
     assert!(matches!(
         single.values(&tunnelled_context, 0),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Two repeated IPv4 addresses: `"192.0.2.1"` is 11, `"10.0.0.1"` is 10,
@@ -905,7 +905,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(list.values(&tunnelled_context, 24).is_ok());
     assert!(matches!(
         list.values(&tunnelled_context, 23),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // A missing column accounts for a `null` cell: exactly four bytes.
@@ -913,7 +913,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(missing.values(&tunnelled_context, 4).is_ok());
     assert!(matches!(
         missing.values(&tunnelled_context, 3),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Escaped text counts escape bytes, not runes: `a"b\n` encodes as the
@@ -930,7 +930,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert_eq!(row, vec![Some(FieldValue::Text("a\"b\n".to_owned()))]);
     assert!(matches!(
         escaped.values(&context(&text), 7),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Raw bytes cost two hex digits each plus quotes.
@@ -939,7 +939,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(raw.values(&context(&bytes), 8).is_ok());
     assert!(matches!(
         raw.values(&context(&bytes), 7),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 }
 
@@ -1004,7 +1004,7 @@ fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
     assert!(v6_projection.values(&context(&v6), 28).is_ok());
     assert!(matches!(
         v6_projection.values(&context(&v6), 27),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 }
 

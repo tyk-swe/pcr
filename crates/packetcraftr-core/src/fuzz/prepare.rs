@@ -224,9 +224,9 @@ fn new_case(
     }
 }
 
-fn mutation_failure(source: impl std::fmt::Display) -> CaseFailure {
-    CaseFailure::new(
-        format!("mutation was rejected: {source}"),
+fn mutation_failure(source: crate::field::Error) -> CaseFailure {
+    CaseFailure::with_source(
+        "mutation was rejected",
         Classification::new(
             "packet.fuzz_mutation",
             Kind::Packet,
@@ -234,7 +234,7 @@ fn mutation_failure(source: impl std::fmt::Display) -> CaseFailure {
                 "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
             ),
         ),
-        Vec::new(),
+        source,
     )
 }
 
@@ -283,8 +283,8 @@ fn build_case(
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
-            case.error = Some(CaseFailure::new(
-                format!("mutated packet was rejected: {source}"),
+            case.error = Some(CaseFailure::with_source(
+                "mutated packet was rejected",
                 Classification::new(
                     "packet.fuzz_build",
                     Kind::Packet,
@@ -292,7 +292,7 @@ fn build_case(
                         "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
                     ),
                 ),
-                Vec::new(),
+                source,
             ));
         }
     }
@@ -464,9 +464,9 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
         let path = target
             .field
             .parse::<Path>()
-            .map_err(|source| Error::InvalidTarget {
-                target: target.clone(),
-                message: source.to_string(),
+            .map_err(|source| Error::TargetField {
+                target: target.to_string(),
+                source,
             })?;
         let schema = path
             .schema(layer.schema())

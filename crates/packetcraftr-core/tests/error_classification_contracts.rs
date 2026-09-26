@@ -9,8 +9,9 @@ use std::net::Ipv6Addr;
 use packetcraftr_core::codec;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::field;
 use packetcraftr_core::frame::{Error as FrameError, Frame, LinkType};
-use packetcraftr_core::layer::{FieldError, Id, Malformed};
+use packetcraftr_core::layer::{Id, Malformed};
 use packetcraftr_core::protocol::semantics::{Error as SemanticsError, live_destinations};
 use packetcraftr_core::{build, decode, registry};
 
@@ -22,8 +23,8 @@ fn tcp() -> Id {
     Id::new("tcp")
 }
 
-fn field_error() -> FieldError {
-    FieldError::MissingRequired {
+fn field_error() -> field::Error {
+    field::Error::MissingRequired {
         protocol: ipv4(),
         field: "destination".to_owned(),
     }
@@ -301,6 +302,73 @@ fn analysis_keeps_the_classification_of_the_decode_failure_it_reports() {
             assert_eq!(classification.code, code, "{error}");
             assert_eq!(classification.kind, kind, "{error}");
         }
+    }
+}
+
+#[test]
+fn model_layer_errors_classify_without_a_wrapper() {
+    let cases: Vec<(Box<dyn Classified>, &str, Kind)> = vec![
+        (
+            Box::new(field_error()),
+            "packet.invalid_layer",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::Field(field_error())),
+            "packet.invalid_layer",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::rejected(tcp(), field_error())),
+            "packet.codec",
+            Kind::Packet,
+        ),
+        (
+            Box::new(codec::Error::WrongLayer {
+                expected: tcp(),
+                actual: ipv4(),
+            }),
+            "internal.codec_contract",
+            Kind::Internal,
+        ),
+        (
+            Box::new(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 2, len: 1 }),
+            "cli.layer_index",
+            Kind::Usage,
+        ),
+        (
+            Box::new(registry::Error::DuplicateMatcher { protocol: tcp() }),
+            "internal.registry",
+            Kind::Internal,
+        ),
+        (
+            Box::new(SemanticsError::LayerIndexOutOfRange),
+            "packet.semantics",
+            Kind::Packet,
+        ),
+        (
+            Box::new(packetcraftr_core::protocol::UnknownProtocolName(
+                "mystery".to_owned(),
+            )),
+            "cli.protocol",
+            Kind::Usage,
+        ),
+        (
+            Box::new(packetcraftr_core::budget::DeadlineExceeded {
+                actual: std::time::Duration::from_secs(2),
+                limit: std::time::Duration::from_secs(1),
+            }),
+            "policy.duration_limit",
+            Kind::Policy,
+        ),
+    ];
+    for (error, code, kind) in cases {
+        let classification = error.classification();
+        assert_eq!(
+            (classification.code, classification.kind),
+            (code, kind),
+            "{error}"
+        );
     }
 }
 

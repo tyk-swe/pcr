@@ -357,14 +357,14 @@ fn analysis_limits_reach_every_tcp_reassembly_budget() {
                 max_tcp_bytes_per_flow: 4,
                 ..Limits::default()
             },
-            tcp::ResourceError::FlowByteLimit { limit: 4 }.into(),
+            tcp::Resource::FlowByteLimit { limit: 4 }.into(),
         ),
         (
             Limits {
                 max_tcp_reassembly_bytes: 8,
                 ..Limits::default()
             },
-            tcp::ResourceError::AggregateByteLimit { limit: 8 }.into(),
+            tcp::Resource::AggregateByteLimit { limit: 8 }.into(),
         ),
     ];
     for (limits, expected) in bounded {

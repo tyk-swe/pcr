@@ -142,7 +142,7 @@ fn capture_errors_expose_stable_classifications_and_causes() {
 
 #[test]
 fn selection_validates_rejected_input_and_preserves_predicate_failures() {
-    use packetcraftr_core::capture_file::{SelectionError, select};
+    use packetcraftr_core::capture_file::select;
     use packetcraftr_core::error::{BoundaryError, Classification, Coordinate};
     let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one");
     let frames = [frame.clone(), frame];
@@ -171,10 +171,7 @@ fn selection_validates_rejected_input_and_preserves_predicate_failures() {
     malformed.push(0);
     let mut reader = Reader::new(Cursor::new(malformed)).unwrap();
     let error = select(&mut reader, Vec::new(), Limits::default(), |_, _| Ok(false)).unwrap_err();
-    assert!(matches!(
-        error,
-        SelectionError::Capture(Error::Truncated { .. })
-    ));
+    assert!(matches!(error, Error::Truncated { .. }));
     let mut reader = Reader::new(Cursor::new(input)).unwrap();
     let error = select(&mut reader, Vec::new(), Limits::default(), |number, _| {
         if number == 1 {
@@ -230,5 +227,12 @@ fn selection_stops_on_write_and_flush_failures() {
     })
     .unwrap_err();
     assert_eq!(error.classification().kind, Kind::Io);
-    assert!(error.to_string().contains("flush failed"));
+    assert!(
+        error
+            .causes()
+            .iter()
+            .any(|cause| cause.contains("flush failed")),
+        "{:?}",
+        error.causes()
+    );
 }

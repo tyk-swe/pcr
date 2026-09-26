@@ -34,15 +34,15 @@ fn fuzz_targets_have_an_unambiguous_layer_field_grammar() {
     assert_eq!(target.field, "destination_port");
     assert!(matches!(
         fuzz::Target::from_str("3.bad-field"),
-        Err(fuzz::TargetParseError::InvalidField { .. })
+        Err(fuzz::Error::TargetField { .. })
     ));
     assert!(matches!(
         fuzz::Target::from_str("destination_port"),
-        Err(fuzz::TargetParseError::MissingSeparator { .. })
+        Err(fuzz::Error::TargetSeparator { .. })
     ));
     assert!(matches!(
         fuzz::Target::from_str("x.destination_port"),
-        Err(fuzz::TargetParseError::InvalidLayer { .. })
+        Err(fuzz::Error::TargetLayer { .. })
     ));
 }
 

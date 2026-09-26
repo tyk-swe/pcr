@@ -278,17 +278,17 @@ fn dhcp_documents_and_nested_fuzz_targets_preserve_wire_and_enforce_limits() {
 
 #[test]
 fn borrowed_dhcp_wire_enforces_message_byte_limit() {
-    use packetcraftr_core::protocol::application::dhcp::Error;
+    use packetcraftr_core::protocol::application::dhcp::{Error, Limit};
 
     // DHCPv4 retains trailing bytes after the end option.
     let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
     v4.resize(65_535, 0);
     assert_eq!(Dhcpv4::try_from(v4.as_slice()).unwrap().wire().as_ref(), v4);
     v4.push(0);
-    assert_eq!(
-        Dhcpv4::try_from(v4.as_slice()).unwrap_err(),
-        Error::Limit("message bytes")
-    );
+    assert!(matches!(
+        Dhcpv4::try_from(v4.as_slice()),
+        Err(Error::Limit(Limit::MessageBytes))
+    ));
 
     // One unknown DHCPv6 option fills the remaining message bytes.
     let mut v6 = vec![1, 0, 0, 0, 0xfd, 0xe8];
@@ -296,8 +296,46 @@ fn borrowed_dhcp_wire_enforces_message_byte_limit() {
     v6.resize(65_535, 0);
     assert_eq!(Dhcpv6::try_from(v6.as_slice()).unwrap().wire().as_ref(), v6);
     v6.push(0);
-    assert_eq!(
-        Dhcpv6::try_from(v6.as_slice()).unwrap_err(),
-        Error::Limit("message bytes")
-    );
+    assert!(matches!(
+        Dhcpv6::try_from(v6.as_slice()),
+        Err(Error::Limit(Limit::MessageBytes))
+    ));
+}
+
+#[test]
+fn dhcp_codec_failures_keep_the_dhcp_error_as_their_source() {
+    use packetcraftr_core::codec;
+    use packetcraftr_core::error::{Classified, source_chain};
+    use packetcraftr_core::protocol::application::dhcp::Error;
+    use std::collections::BTreeMap;
+    use std::error::Error as _;
+
+    let mut v4 = Dhcpv4::default().to_wire().unwrap().to_vec();
+    v4[236..240].fill(0);
+    let mut v6 = Dhcpv6::default().to_wire().unwrap().to_vec();
+    v6.truncate(3);
+    let registry = builtin::registry();
+    for (protocol, wire) in [("dhcpv4", v4), ("dhcpv6", v6)] {
+        let direct = match protocol {
+            "dhcpv4" => Dhcpv4::try_from(wire.as_slice()).map(|_| ()),
+            _ => Dhcpv6::try_from(wire.as_slice()).map(|_| ()),
+        }
+        .expect_err("the wire is refused");
+        let fields = BTreeMap::from([("wire".to_owned(), FieldValue::Bytes(Bytes::from(wire)))]);
+        let error = registry
+            .codec(protocol)
+            .expect("built-in DHCP codec")
+            .make_layer(&fields)
+            .expect_err("the codec refuses the wire");
+        assert!(matches!(error, codec::Error::Rejected { .. }), "{error:?}");
+        assert_eq!(error.to_string(), format!("invalid {protocol} layer"));
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<Error>())
+            .expect("the DHCP error is the codec error's source");
+        assert_eq!(source, &direct);
+        assert_eq!(source_chain(&error), [direct.to_string()]);
+        assert_eq!(error.classification().code, "packet.codec");
+        assert_eq!(source.classification().code, "packet.dhcp");
+    }
 }

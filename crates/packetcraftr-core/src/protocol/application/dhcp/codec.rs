@@ -7,13 +7,13 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
-use super::{Error, Limits};
+use super::{Error, Limit, Limits};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
     field::FieldValue,
     layer::{Layer, Raw, raw_layout},
     layout::FieldLayout,
-    protocol::common::{invalid, typed_layer},
+    protocol::common::{invalid, rejected, typed_layer},
 };
 
 /// A complete DHCP message that fills its UDP payload and retains its wire.
@@ -41,9 +41,8 @@ pub(super) fn encode<M: Message>(
             max_message_bytes: context.remaining_packet_bytes,
             ..Default::default()
         })
-        .map_err(|error| invalid(M::NAME, error.to_string()))?;
-    let normalized =
-        M::decode_wire(wire.clone()).map_err(|error| invalid(M::NAME, error.to_string()))?;
+        .map_err(|error| rejected(M::NAME, error))?;
+    let normalized = M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?;
     Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
 }
 
@@ -55,8 +54,7 @@ pub(super) fn raw(input: Bytes) -> DecodedLayer {
 }
 
 pub(super) fn decode<M: Message>(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
-    let layer =
-        M::decode_wire(input.clone()).map_err(|error| invalid(M::NAME, error.to_string()))?;
+    let layer = M::decode_wire(input.clone()).map_err(|error| rejected(M::NAME, error))?;
     let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
     decoded.fields = M::layout();
     Ok(decoded)
@@ -67,7 +65,7 @@ pub(super) fn make_layer<M: Message>(
 ) -> Result<Box<dyn Layer>, crate::codec::Error> {
     let mut layer = match fields.get("wire") {
         Some(FieldValue::Bytes(wire)) => {
-            M::decode_wire(wire.clone()).map_err(|error| invalid(M::NAME, error.to_string()))?
+            M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?
         }
         Some(_) => return Err(invalid(M::NAME, "wire must be retained bytes")),
         None => M::default(),
@@ -102,16 +100,16 @@ impl Budget {
             max_nesting: limits.max_nesting.min(8),
         };
         if length > limits.max_message_bytes {
-            return Err(Error::Limit("message bytes"));
+            return Err(Error::Limit(Limit::MessageBytes));
         }
         Ok(Self { limits, options: 0 })
     }
     pub(super) fn option(&mut self, depth: usize) -> Result<(), Error> {
         if depth > self.limits.max_nesting {
-            return Err(Error::Limit("option nesting"));
+            return Err(Error::Limit(Limit::OptionNesting));
         }
         if self.options >= self.limits.max_options {
-            return Err(Error::Limit("option count"));
+            return Err(Error::Limit(Limit::OptionCount));
         }
         self.options += 1;
         Ok(())
@@ -138,7 +136,7 @@ pub(super) fn u32_at(bytes: &[u8], offset: usize) -> Result<u32, Error> {
 }
 pub(super) fn extend(output: &mut Vec<u8>, bytes: &[u8], maximum: usize) -> Result<(), Error> {
     if output.len().saturating_add(bytes.len()) > maximum {
-        return Err(Error::Limit("encoded bytes"));
+        return Err(Error::Limit(Limit::EncodedBytes));
     }
     output.extend_from_slice(bytes);
     Ok(())

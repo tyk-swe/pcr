@@ -68,7 +68,7 @@ impl Projector {
         self.remaining
     }
     fn limit(&self) -> CliError {
-        CliError::classified(core::filter::ProjectionError::Limit {
+        CliError::classified(core::filter::Error::ProjectionLimit {
             field: "projection_bytes",
             limit: self.maximum,
         })

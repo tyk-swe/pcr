@@ -53,11 +53,29 @@ pub enum Error {
         path: String,
         protocol: crate::layer::Id,
     },
+    /// A [`Projection`](super::Projection) column is not one field path.
+    #[error("invalid projection field")]
+    ProjectionField {
+        #[source]
+        source: Box<Self>,
+    },
+    #[error("projection exceeds {field}={limit}")]
+    ProjectionLimit { field: &'static str, limit: usize },
 }
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::ProjectionField { .. } => Classification::new(
+                "cli.projection_field",
+                Kind::Usage,
+                Some("select registered field paths"),
+            ),
+            Self::ProjectionLimit { .. } => Classification::new(
+                "policy.projection_limit",
+                Kind::Policy,
+                Some("select fewer or smaller fields within the finite projection budget"),
+            ),
             Self::TimestampUnavailable => Classification::new(
                 "packet.timestamp_unavailable",
                 Kind::Packet,

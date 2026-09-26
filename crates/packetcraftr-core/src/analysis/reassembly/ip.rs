@@ -16,7 +16,7 @@ mod model;
 pub use model::{
     CompletedDatagram, DatagramKey, Error, Family, Fragment, FragmentDisposition, FragmentOutcome,
     IncompleteDatagram, IncompleteReason, Ipv4DatagramKey, Ipv4Fragment, Ipv6DatagramKey,
-    Ipv6Fragment, MalformedError, OverlapPolicy, PushOutcome, ResourceError, RetiredDatagrams,
+    Ipv6Fragment, Malformed, OverlapPolicy, PushOutcome, Resource, RetiredDatagrams,
 };
 
 mod engine;
@@ -117,14 +117,12 @@ impl Ecn {
     /// ECN-capable marking into CE, and CE alongside Not-ECT cannot be
     /// reassembled. The RFC leaves the remaining mixtures unspecified; they
     /// resolve to the lower marking — Not-ECT when present, otherwise ECT(0).
-    fn merge(self, incoming: Self) -> Result<Self, MalformedError> {
+    fn merge(self, incoming: Self) -> Result<Self, Malformed> {
         if self == incoming {
             return Ok(self);
         }
         match (self, incoming) {
-            (Self::Ce, Self::NotEct) | (Self::NotEct, Self::Ce) => {
-                Err(MalformedError::InconsistentEcn)
-            }
+            (Self::Ce, Self::NotEct) | (Self::NotEct, Self::Ce) => Err(Malformed::InconsistentEcn),
             (Self::Ce, _) | (_, Self::Ce) => Ok(Self::Ce),
             (Self::NotEct, _) | (_, Self::NotEct) => Ok(Self::NotEct),
             _ => Ok(Self::Ect0),
@@ -259,9 +257,7 @@ mod tests {
             } else {
                 assert_eq!(
                     result,
-                    Err(Error::Resource(ResourceError::AggregateMemoryLimit {
-                        limit
-                    }))
+                    Err(Error::Resource(Resource::AggregateMemoryLimit { limit }))
                 );
                 assert_eq!(reassembler.aggregate_memory_charge(), retained);
             }

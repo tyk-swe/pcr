@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use packetcraftr_core::analysis::reassembly::tcp::{
-    Error as TcpError, Event as TcpEvent, FlowKey, Limits, MalformedError as TcpMalformedError,
-    Reassembler as TcpReassembler, ResourceError as TcpResourceError, ScopedFlowKey, Segment,
+    Error as TcpError, Event as TcpEvent, FlowKey, Limits, Malformed as TcpMalformed,
+    Reassembler as TcpReassembler, Resource as TcpResource, ScopedFlowKey, Segment,
 };
 use packetcraftr_core::analysis::scope::ScopeId;
 
@@ -107,14 +107,14 @@ fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
     });
     assert_eq!(
         open(&mut invalid, key.clone(), 1, now),
-        Err(TcpResourceError::InvalidWindowLimit {
+        Err(TcpResource::InvalidWindowLimit {
             limit: 1usize << 31
         }
         .into())
     );
     assert_eq!(
         invalid.push(segment(key, 1, b"x", false, false, false), now),
-        Err(TcpResourceError::InvalidWindowLimit {
+        Err(TcpResource::InvalidWindowLimit {
             limit: 1usize << 31
         }
         .into())
@@ -145,7 +145,7 @@ fn tcp_flow_opening_replacement_and_limits_have_stable_queries() {
     assert_eq!(reassembler.flow_base_sequence(&first), Some(200));
     assert_eq!(
         open(&mut reassembler, second, 1, now),
-        Err(TcpResourceError::FlowLimit { limit: 1 }.into())
+        Err(TcpResource::FlowLimit { limit: 1 }.into())
     );
     assert!(reassembler.evict_flow(&flow(65_000)).is_empty());
     let evicted = reassembler.evict_flow(&first);
@@ -178,7 +178,7 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
         .expect("replacement reuses the existing flow's metadata budget");
     assert_eq!(
         open(&mut reassembler, second.clone(), 200, now),
-        Err(TcpResourceError::AggregateByteLimit { limit: 256 }.into())
+        Err(TcpResource::AggregateByteLimit { limit: 256 }.into())
     );
     assert_eq!(reassembler.flow_count(), 1);
     assert_eq!(reassembler.flow_base_sequence(&first), Some(101));
@@ -472,7 +472,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
         .expect("first pending segment fits");
     assert_eq!(
         segment_limit.push(segment(key.clone(), 106, b"b", false, false, false), now),
-        Err(TcpResourceError::SegmentLimit { limit: 1 }.into())
+        Err(TcpResource::SegmentLimit { limit: 1 }.into())
     );
     assert_eq!(segment_limit.flow_next_sequence(&key), Some(100));
 
@@ -483,14 +483,14 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     open(&mut window, key.clone(), 100, now).expect("flow opens");
     assert_eq!(
         window.push(segment(key.clone(), 105, b"x", false, false, false), now),
-        Err(TcpResourceError::FlowByteLimit { limit: 4 }.into())
+        Err(TcpResource::FlowByteLimit { limit: 4 }.into())
     );
     assert_eq!(
         window.push(
             segment(key.clone(), 100, b"abcde", false, false, false),
             now
         ),
-        Err(TcpResourceError::FlowByteLimit { limit: 4 }.into())
+        Err(TcpResource::FlowByteLimit { limit: 4 }.into())
     );
     assert_eq!(window.flow_next_sequence(&key), Some(100));
 
@@ -500,7 +500,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     });
     assert_eq!(
         aggregate.push(segment(key, 100, b"x", false, false, false), now),
-        Err(TcpResourceError::AggregateByteLimit { limit: 0 }.into())
+        Err(TcpResource::AggregateByteLimit { limit: 0 }.into())
     );
     assert_eq!(aggregate.flow_count(), 0);
     assert_eq!(aggregate.aggregate_bytes(), 0);
@@ -544,7 +544,7 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
         .expect("out-of-order FIN pins final offset");
     assert_eq!(
         bounded.push(segment(key.clone(), 106, b"", false, true, false), now),
-        Err(TcpMalformedError::ConflictingFinalSequence {
+        Err(TcpMalformed::ConflictingFinalSequence {
             existing_offset: 5,
             new_offset: 6
         }
@@ -552,7 +552,7 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
     );
     assert_eq!(
         bounded.push(segment(key, 104, b"zz", false, false, false), now),
-        Err(TcpMalformedError::BeyondFinalSequence { final_offset: 5 }.into())
+        Err(TcpMalformed::BeyondFinalSequence { final_offset: 5 }.into())
     );
 }
 

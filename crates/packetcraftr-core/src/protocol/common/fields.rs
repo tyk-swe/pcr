@@ -7,8 +7,8 @@ use std::fmt;
 use crate::{
     codec::LayerEncodeContext,
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
-    layer::{FieldError, Layer},
+    field::{self, FieldValue, WireValue},
+    layer::Layer,
     registry::Discriminator,
 };
 
@@ -220,13 +220,13 @@ pub(crate) fn set_document_field<L>(
     layer: &mut L,
     name: &str,
     value: FieldValue,
-) -> Result<(), FieldError>
+) -> Result<(), field::Error>
 where
     L: Layer,
 {
     let path = name
-        .parse::<crate::field::Path>()
-        .map_err(|_| FieldError::UnknownField {
+        .parse::<field::Path>()
+        .map_err(|_| field::Error::UnknownField {
             protocol: *layer.protocol_id(),
             field: name.to_owned(),
         })?;

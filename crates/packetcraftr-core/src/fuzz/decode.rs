@@ -29,7 +29,10 @@ pub fn dissect_built(
         Err(source) => {
             diagnostics.push(Diagnostic::warning(
                 "fuzz.decode_frame",
-                format!("could not form bounded decode evidence: {source}"),
+                format!(
+                    "could not form bounded decode evidence: {}",
+                    crate::error::render(&source)
+                ),
             ));
             return None;
         }
@@ -48,7 +51,10 @@ pub fn dissect_built(
         Err(source) => {
             diagnostics.push(Diagnostic::warning(
                 "fuzz.decode_rejected",
-                format!("bounded dissection rejected the built case: {source}"),
+                format!(
+                    "bounded dissection rejected the built case: {}",
+                    crate::error::render(&source)
+                ),
             ));
             None
         }

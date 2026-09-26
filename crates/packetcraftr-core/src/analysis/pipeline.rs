@@ -20,9 +20,7 @@ use crate::analysis::adapter::{
     tcp_segment, transports, udp_flow,
 };
 use crate::analysis::conversation_index::StreamIndex;
-use crate::analysis::reassembly::ip::{
-    CompletedDatagram, DatagramKey, ResourceError as IpResourceError,
-};
+use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey, Resource as IpResource};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::scope::{Interner, Limits as ScopeLimits, ScopeId};
 use crate::frame::{Frame, LinkType};
@@ -160,7 +158,7 @@ impl FrameRecord<'_> {
         &self,
         projection: &crate::filter::Projection,
         max_bytes: usize,
-    ) -> Result<Vec<Option<crate::field::FieldValue>>, crate::filter::ProjectionError> {
+    ) -> Result<Vec<Option<crate::field::FieldValue>>, crate::filter::Error> {
         self.with_filter_context(|context| projection.values(context, max_bytes))
     }
 
@@ -761,7 +759,7 @@ fn decode_derived(
             {
                 Error::IpReassembly {
                     number,
-                    source: IpResourceError::AggregateMemoryLimit {
+                    source: IpResource::AggregateMemoryLimit {
                         limit: memory_limit,
                     }
                     .into(),

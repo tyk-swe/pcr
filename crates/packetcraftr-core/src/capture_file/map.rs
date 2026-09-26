@@ -9,41 +9,8 @@ use super::{
     CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption, Reader,
     RecordKind, Writer,
 };
-use crate::{
-    error::{BoundaryError, Classification, Classified, Kind},
-    frame::Frame,
-};
+use crate::{error::BoundaryError, frame::Frame};
 use std::io::{Read, Write};
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum MapError {
-    #[error(transparent)]
-    Capture(#[from] Error),
-    #[error("capture frame {number} transformation failed: {source}")]
-    Transform {
-        number: u64,
-        #[source]
-        source: BoundaryError,
-    },
-    #[error("capture transformation cannot retain {0}")]
-    Metadata(&'static str),
-    #[error("capture transformation changed frame {number} identity or time")]
-    Identity { number: u64 },
-}
-impl Classified for MapError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Capture(e) => e.classification(),
-            Self::Transform { source, .. } => source.classification(),
-            Self::Metadata(_) => {
-                Classification::new("packet.capture_transform_metadata", Kind::Packet, None)
-            }
-            Self::Identity { .. } => {
-                Classification::new("internal.capture_transform_identity", Kind::Internal, None)
-            }
-        }
-    }
-}
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct MapReport {
     pub frames_read: u64,
@@ -65,7 +32,7 @@ pub fn map_frames<R: Read, W: Write, F>(
     limits: Limits,
     maximum_growth: usize,
     mut map: F,
-) -> Result<MapReport, MapError>
+) -> Result<MapReport, Error>
 where
     F: FnMut(u64, &Frame) -> Result<Frame, BoundaryError>,
 {
@@ -73,22 +40,23 @@ where
         return Err(Error::WrongWriterFormat {
             expected: Format::PcapNg,
             actual: output.format(),
-        }
-        .into());
+        });
     }
     if maximum_growth > 256 {
-        return Err(MapError::Metadata("more than 256 growth bytes per frame"));
+        return Err(Error::TransformMetadata(
+            "more than 256 growth bytes per frame",
+        ));
     }
     let mut report = MapReport::default();
     let mut endianness = reader.endianness();
     if let CaptureHeader::Pcap(header) = reader.header() {
         if header.network & 0xffff0000 != 0 {
-            return Err(MapError::Metadata("classic link/FCS flags"));
+            return Err(Error::TransformMetadata("classic link/FCS flags"));
         }
         for interface in reader.interfaces() {
             let id = add_interface(output, interface.clone(), &[], maximum_growth)?;
             if id as usize != report.interfaces {
-                return Err(MapError::Metadata("nonempty output interface table"));
+                return Err(Error::TransformMetadata("nonempty output interface table"));
             }
             report.interfaces += 1;
         }
@@ -109,11 +77,13 @@ where
                             .iter()
                             .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN)
                         {
-                            return Err(MapError::Metadata("interface FCS length"));
+                            return Err(Error::TransformMetadata("interface FCS length"));
                         }
                         let id = add_interface(output, interface, &options, maximum_growth)?;
                         if id != global_id {
-                            return Err(MapError::Metadata("nonempty output interface table"));
+                            return Err(Error::TransformMetadata(
+                                "nonempty output interface table",
+                            ));
                         }
                         report.interfaces += 1;
                     }
@@ -122,17 +92,17 @@ where
             }
             RecordKind::Packet { options, .. } => {
                 validate_rewritable_packet_flags(&options, endianness, "malformed packet flags")
-                    .map_err(MapError::Metadata)?;
+                    .map_err(Error::TransformMetadata)?;
                 let frame = record
                     .frame
-                    .ok_or(MapError::Metadata("packet record without frame"))?;
+                    .ok_or(Error::TransformMetadata("packet record without frame"))?;
                 (report.frames_read, report.captured_bytes_read) = limits.advance(
                     report.frames_read,
                     report.captured_bytes_read,
                     frame.captured_length(),
                 )?;
                 let mut changed =
-                    map(report.frames_read, &frame).map_err(|source| MapError::Transform {
+                    map(report.frames_read, &frame).map_err(|source| Error::Transform {
                         number: report.frames_read,
                         source,
                     })?;
@@ -141,12 +111,14 @@ where
                     || changed.link_type != frame.link_type
                     || changed.direction != frame.direction
                 {
-                    return Err(MapError::Identity {
+                    return Err(Error::TransformIdentity {
                         number: report.frames_read,
                     });
                 }
                 if changed.bytes().len() > frame.bytes().len().saturating_add(maximum_growth) {
-                    return Err(MapError::Metadata("mapper exceeded declared frame growth"));
+                    return Err(Error::TransformMetadata(
+                        "mapper exceeded declared frame growth",
+                    ));
                 }
                 if changed.bytes() != frame.bytes() {
                     report.frames_changed += 1;

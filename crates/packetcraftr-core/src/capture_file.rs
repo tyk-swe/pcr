@@ -19,7 +19,7 @@ mod error;
 mod link_type;
 mod map;
 mod merge;
-pub use map::{MapError, MapReport, map_frames};
+pub use map::{MapReport, map_frames};
 mod model;
 mod pcapng;
 mod reader;
@@ -27,8 +27,8 @@ mod rewrite;
 mod wire;
 mod writer;
 
-pub use error::{Error, SelectionError};
-pub use merge::{MergeError, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
+pub use error::Error;
+pub use merge::{MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
 pub use model::{
     CaptureHeader, CaptureRecord, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
     DEFAULT_METADATA_BYTE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,

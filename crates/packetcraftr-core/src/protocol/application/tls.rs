@@ -41,7 +41,7 @@ pub use model::{
 };
 
 /// A TLS record, handshake, or hello that breaks a wire rule or a bound.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     /// The bytes break a TLS wire rule or exceed a TLS bound.
@@ -56,6 +56,19 @@ impl Error {
     fn invalid(message: impl Into<String>) -> Self {
         Self::Invalid {
             message: message.into(),
+        }
+    }
+}
+
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        match self {
+            Self::Invalid { .. } => crate::error::Classification::new(
+                "packet.tls",
+                crate::error::Kind::Packet,
+                Some("inspect the TLS record or handshake that breaks a wire rule or bound"),
+            ),
+            Self::Encode(source) => source.classification(),
         }
     }
 }

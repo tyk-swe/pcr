@@ -4,7 +4,7 @@
 use bytes::Bytes;
 use std::net::Ipv6Addr;
 
-use super::super::Error;
+use super::super::{Error, Limit};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dhcpv6 {
@@ -70,7 +70,7 @@ impl Duid {
             return Err(Error::Invalid("empty DUID identifier"));
         }
         if prefix.len().saturating_add(identifier.len()) > 65_533 {
-            return Err(Error::Limit("DUID bytes"));
+            return Err(Error::Limit(Limit::DuidBytes));
         }
         let mut data = prefix.to_vec();
         data.extend_from_slice(identifier);

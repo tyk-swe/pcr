@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use super::{
     Error,
-    name::{self, MAX_LABEL_LEN, MAX_NAME_LEN},
+    name::{MAX_LABEL_LEN, MAX_NAME_LEN},
 };
 use crate::field::WireValue;
 
@@ -84,9 +84,9 @@ impl Name {
             }
             wire_length = wire_length
                 .checked_add(label.len() + 1)
-                .ok_or(name::Error::NameTooLong)?;
+                .ok_or(Error::NameTooLong)?;
             if wire_length > MAX_NAME_LEN {
-                return Err(name::Error::NameTooLong.into());
+                return Err(Error::NameTooLong);
             }
             bounded.push(label);
         }

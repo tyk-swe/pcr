@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::super::{Body, Error, Header, MAX_HEADER_BYTES, MAX_START_LINE};
+use super::super::{Body, Error, Header, Limit, MAX_HEADER_BYTES, MAX_START_LINE};
 use super::parse_headers;
 use bytes::Bytes;
 
@@ -132,7 +132,7 @@ impl BodyDecoder {
                     let byte = input[offset];
                     offset += 1;
                     if self.line.len() >= MAX_START_LINE {
-                        return Err(Error::Limit("chunk or trailer line"));
+                        return Err(Error::Limit(Limit::ChunkLine));
                     }
                     if self.line.last() == Some(&b'\r') && byte != b'\n'
                         || byte == b'\n' && self.line.last() != Some(&b'\r')
@@ -150,7 +150,7 @@ impl BodyDecoder {
                                 State::Chunk(length)
                             };
                             if length > self.maximum.saturating_sub(self.bytes) {
-                                return Err(Error::Limit("body bytes"));
+                                return Err(Error::Limit(Limit::BodyBytes));
                             }
                         } else if self.line.len() == 2 {
                             self.trailers =
@@ -169,7 +169,7 @@ impl BodyDecoder {
                             if self.trailer_lines.len().saturating_add(self.line.len())
                                 > MAX_HEADER_BYTES
                             {
-                                return Err(Error::Limit("trailer bytes"));
+                                return Err(Error::Limit(Limit::TrailerBytes));
                             }
                             self.trailer_lines.append(&mut self.line);
                         }
@@ -187,7 +187,7 @@ impl BodyDecoder {
             .bytes
             .checked_add(bytes as u64)
             .filter(|n| *n <= self.maximum)
-            .ok_or(Error::Limit("body bytes"))?;
+            .ok_or(Error::Limit(Limit::BodyBytes))?;
         Ok(())
     }
 }

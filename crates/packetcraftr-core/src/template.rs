@@ -7,8 +7,7 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::field::{FieldValue, Path};
-use crate::layer::FieldError;
+use crate::field::{self, FieldValue, Path};
 use crate::packet::Packet;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
@@ -150,7 +149,7 @@ impl Template {
                 // Nonempty expansions validate every axis first, so each
                 // path parsed.
                 let path = axis.path.as_ref().ok_or_else(|| {
-                    axis.error(FieldError::UnknownField {
+                    axis.error(field::Error::UnknownField {
                         protocol: *layer.protocol_id(),
                         field: axis.field.clone(),
                     })
@@ -171,7 +170,7 @@ impl Template {
                 len: self.base.len(),
             })?;
             let unknown = || {
-                axis.error(FieldError::UnknownField {
+                axis.error(field::Error::UnknownField {
                     protocol: *layer.protocol_id(),
                     field: axis.field.clone(),
                 })
@@ -205,7 +204,7 @@ impl Template {
 }
 
 impl TemplateAxis {
-    fn error(&self, source: FieldError) -> Error {
+    fn error(&self, source: field::Error) -> Error {
         Error::Field {
             layer: self.layer,
             field: self.field.clone(),
@@ -229,12 +228,12 @@ pub enum Error {
     ReversedRange { start: u64, end: u64 },
     #[error("template layer index {index} is outside packet length {len}")]
     LayerIndex { index: usize, len: usize },
-    #[error("could not set template field {field} on layer {layer}: {source}")]
+    #[error("could not set template field {field} on layer {layer}")]
     Field {
         layer: usize,
         field: String,
         #[source]
-        source: FieldError,
+        source: field::Error,
     },
 }
 

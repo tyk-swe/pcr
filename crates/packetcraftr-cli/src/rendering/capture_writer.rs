@@ -175,13 +175,13 @@ mod tests {
         assert_eq!(error.classification.kind, Kind::Policy);
         assert_eq!(
             error.message,
-            "processing failed; output finalization also failed: None capture compression I/O failed: fixture flush failed"
+            "processing failed; output finalization also failed: None capture compression I/O failed"
         );
         assert_eq!(
             error.causes,
             [
                 "processing cause",
-                "None capture compression I/O failed: fixture flush failed",
+                "None capture compression I/O failed",
                 "fixture flush failed"
             ]
         );

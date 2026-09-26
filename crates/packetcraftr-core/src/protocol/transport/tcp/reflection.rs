@@ -8,8 +8,8 @@ use super::model::{
 };
 use super::{SackBlock, Tcp, TcpOption};
 use crate::{
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, Schema, reflective_layer},
+    field::{self, FieldKind, FieldValue},
+    layer::{FieldSchema, Schema, reflective_layer},
     protocol::common::{
         out_of_range, protocol,
         structured::{Object, list, member, object},
@@ -104,7 +104,7 @@ fn sack_blocks(
     value: FieldValue,
     schema: &'static Schema,
     field: &str,
-) -> Result<Vec<SackBlock>, FieldError> {
+) -> Result<Vec<SackBlock>, field::Error> {
     list(value, 31, schema, field)?
         .into_iter()
         .map(|value| {
@@ -125,7 +125,7 @@ fn parse_field(
     value: FieldValue,
     schema: &'static Schema,
     field: &str,
-) -> Result<Vec<TcpOption>, FieldError> {
+) -> Result<Vec<TcpOption>, field::Error> {
     if let FieldValue::Bytes(bytes) = value {
         // Decoded input is bounded by the data offset, but a constructed value
         // carries no header, so bound it here rather than allocating an entry
@@ -148,7 +148,7 @@ fn parse_option(
     value: FieldValue,
     schema: &'static Schema,
     field: &str,
-) -> Result<TcpOption, FieldError> {
+) -> Result<TcpOption, field::Error> {
     let mut option = Object::new(value, schema, field)?;
     if let Some(trailing) = option.take("trailing") {
         let bytes = match trailing {

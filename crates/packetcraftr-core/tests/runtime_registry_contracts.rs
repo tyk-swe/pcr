@@ -101,15 +101,15 @@ fn assert_failed_packet_lookups(decoded: decode::DecodedPacket) {
     assert!(failed_lookups.layer_mut(99).is_none());
     assert!(matches!(
         failed_lookups.insert(99, Probe::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.replace(99, Probe::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.remove(99),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert_eq!(
         structure(&failed_lookups),

@@ -13,7 +13,7 @@ use crate::analysis::pipeline::Limits;
 use crate::analysis::pipeline::clock::CaptureClock;
 use crate::analysis::reassembly::tcp::{
     Error as ReassemblyTcpError, Event as TcpEvent, Reassembler as TcpReassembler,
-    ResourceError as TcpResourceError, ScopedFlowKey, Segment,
+    Resource as TcpResource, ScopedFlowKey, Segment,
 };
 use crate::analysis::serial::serial_range_contains;
 
@@ -192,9 +192,9 @@ fn push_with_retry(
     match reassembler.push(segment.clone(), now) {
         Ok(produced) => events.extend(produced),
         Err(ReassemblyTcpError::Resource(
-            TcpResourceError::FlowByteLimit { .. }
-            | TcpResourceError::SegmentLimit { .. }
-            | TcpResourceError::AggregateByteLimit { .. },
+            TcpResource::FlowByteLimit { .. }
+            | TcpResource::SegmentLimit { .. }
+            | TcpResource::AggregateByteLimit { .. },
         )) => {
             events.extend(reassembler.evict_flow(&segment.flow));
             events.extend(

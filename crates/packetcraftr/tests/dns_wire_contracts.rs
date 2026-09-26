@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::application::dns::{Error as DecodeError, name};
+use packetcraftr_core::protocol::application::dns::Error as DecodeError;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -170,7 +170,7 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
         (
             (0..4).map(|_| Bytes::from(vec![b'a'; 63])).collect(),
             "256-octet name",
-            |error| matches!(error, DecodeError::Name(name::Error::NameTooLong)),
+            |error| matches!(error, DecodeError::NameTooLong),
         ),
     ];
     for (labels, description, is_expected) in cases {
@@ -912,9 +912,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
             ID,
             pointer_limit
         ),
-        Err(WireError::Decode(DecodeError::Name(
-            name::Error::PointerLimit { limit: 0 }
-        )))
+        Err(WireError::Decode(DecodeError::PointerLimit { limit: 0 }))
     ));
 
     for (question, expected) in [

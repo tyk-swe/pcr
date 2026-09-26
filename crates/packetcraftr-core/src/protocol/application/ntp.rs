@@ -16,8 +16,8 @@ use bytes::Bytes;
 
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
-    layer::{FieldError, Layer, Raw, raw_layout, reflective_layer},
+    field::{self, FieldValue},
+    layer::{Layer, Raw, raw_layout, reflective_layer},
 };
 
 use crate::protocol::common::{
@@ -82,7 +82,7 @@ impl Default for Ntp {
 impl Ntp {
     /// Edits `reference_id`: exactly four bytes, or a four-character ASCII
     /// kiss-code string such as `RATE`.
-    fn set_reference_id(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+    fn set_reference_id(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let bytes = match value {
             FieldValue::Bytes(value) => value,
             FieldValue::Text(value) if value.is_ascii() => Bytes::from(value.into_bytes()),

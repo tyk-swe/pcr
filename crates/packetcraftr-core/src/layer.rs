@@ -8,8 +8,7 @@ mod model;
 mod opaque;
 mod reflection;
 
-pub use model::{FieldError, FieldSchema};
-pub use model::{Id, Layer, Schema};
+pub use model::{FieldSchema, Id, Layer, Schema};
 pub use opaque::{Malformed, Padding, Raw, parse_hex};
 // Codecs outside core call `raw_layout` to describe an opaque `Raw` layer; it
 // stays out of the documented API.
@@ -18,6 +17,4 @@ pub use opaque::raw_layout;
 pub(crate) use opaque::{MalformedCodec, PaddingCodec, RawCodec};
 pub(crate) use reflection::reflective_layer;
 #[doc(hidden)]
-pub use reflection::{
-    ReflectiveField, ReflectiveFieldError, reflect_get, reflect_set, reflect_set_bounded,
-};
+pub use reflection::{ReflectiveField, Refusal, reflect_get, reflect_set, reflect_set_bounded};

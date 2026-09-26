@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::analysis::scope::ScopeId;
+use crate::error::{Classification, Classified};
 
 /// Directional four-tuple identifying a TCP flow.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -96,7 +97,7 @@ pub enum Event {
 /// Resource failures, all detected before mutating retained flow state.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ResourceError {
+pub enum Resource {
     #[error("TCP flow table reached flow limit {limit}")]
     FlowLimit { limit: usize },
     #[error("TCP flow reached pending segment limit {limit}")]
@@ -114,7 +115,7 @@ pub enum ResourceError {
 /// Mutually inconsistent stream input.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum MalformedError {
+pub enum Malformed {
     #[error(
         "TCP FIN sequence {new_offset} conflicts with established final offset {existing_offset}"
     )]
@@ -135,7 +136,31 @@ pub enum MalformedError {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
-    Resource(#[from] ResourceError),
+    Resource(#[from] Resource),
     #[error(transparent)]
-    Malformed(#[from] MalformedError),
+    Malformed(#[from] Malformed),
+}
+
+const RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
+                                    relevant finite --max-tcp-* analysis budget";
+
+impl Classified for Resource {
+    fn classification(&self) -> Classification {
+        crate::analysis::error::resource_limit(RESOURCE_REMEDIATION)
+    }
+}
+
+impl Classified for Malformed {
+    fn classification(&self) -> Classification {
+        crate::analysis::error::malformed_reassembly()
+    }
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Resource(source) => source.classification(),
+            Self::Malformed(source) => source.classification(),
+        }
+    }
 }

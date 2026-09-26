@@ -10,6 +10,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{Classification, Classified, Kind};
 use crate::frame::GlobalInterfaceId;
 
 /// One semantic identifier in the ordered encapsulation path enclosing a flow.
@@ -96,6 +97,21 @@ pub enum Error {
     Limit { limit: usize },
     #[error("capture scope metadata needs {actual} charged bytes, exceeding {limit}")]
     Bytes { actual: usize, limit: usize },
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Capacity | Self::Limit { .. } | Self::Bytes { .. } => {
+                super::error::resource_limit(super::error::GENERAL_RESOURCE_REMEDIATION)
+            }
+            Self::Unknown { .. } | Self::ReplayMismatch { .. } => Classification::new(
+                "internal.scope_composition",
+                Kind::Internal,
+                Some("report the capture and command as an internal scope-composition failure"),
+            ),
+        }
+    }
 }
 
 /// Finite entry-count and retained-byte ceilings for [`Interner`].

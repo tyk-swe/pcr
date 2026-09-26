@@ -18,7 +18,7 @@ use crate::input::read_recipe;
 pub(crate) struct RoutedPacket {
     pub(crate) packet: Packet,
     pub(crate) destination: Option<IpAddr>,
-    pub(crate) options: net::route::Options,
+    pub(crate) options: packetcraftr::route::Options,
     pub(crate) policy: packetcraftr::policy::Policy,
 }
 
@@ -108,7 +108,7 @@ fn resolve_route(
     Ok(RoutedPacket {
         packet,
         destination,
-        options: net::route::Options {
+        options: packetcraftr::route::Options {
             link_mode: route.link_mode.into(),
             interface,
             preferred_source: route.source,

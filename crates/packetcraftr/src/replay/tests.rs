@@ -15,10 +15,7 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{
-        Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
-        SystemError as RouteSystemError,
-    },
+    route::{Decision, Scope, SelectionReason, SystemError as RouteSystemError},
     transmit::Submission,
 };
 
@@ -31,6 +28,7 @@ use super::wire::{
 };
 use crate::BoundaryError;
 use crate::policy::{Authorizer, Operation};
+use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
 
 #[derive(Default)]

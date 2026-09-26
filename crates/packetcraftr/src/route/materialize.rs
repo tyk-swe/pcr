@@ -3,18 +3,18 @@
 
 use std::time::Instant;
 
-use packetcraftr_core::frame::LinkType;
-
-use crate::interface::Id as InterfaceId;
-use crate::link::{Capability, MacAddress, Mode};
-use crate::neighbor::{Request as NeighborRequest, Resolution as NeighborResolution};
+use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::neighbor::{
+    self, Request as NeighborRequest, Resolution as NeighborResolution,
+};
+use packetcraftr_netio::transmit;
 
 use super::error::Error;
-use super::models::{Decision, Plan, Scope, SelectionReason};
+use super::model::Plan;
 
 /// Materializes a route, passing `deadline` to neighbor resolution so the
 /// operation budget bounds every discovery attempt.
-pub fn materialize<N: crate::neighbor::Resolver>(
+pub fn materialize<N: neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
     deadline: Option<Instant>,
@@ -68,42 +68,13 @@ pub struct Materialized {
 }
 
 impl Materialized {
-    /// Uses the caller's fixed Layer 2 interface and envelope without route
-    /// lookup or neighbor resolution. Route-derived fields remain empty.
-    pub fn for_prepared_layer2_frame(
-        interface: InterfaceId,
-        source_mac: MacAddress,
-        destination_mac: MacAddress,
-        mtu: u32,
-        link_type: LinkType,
-    ) -> Self {
-        Self {
-            plan: Plan {
-                decision: Decision {
-                    interface,
-                    source_mac: Some(source_mac),
-                    selected_source: None,
-                    preferred_source: None,
-                    next_hop: None,
-                    selection_reason: SelectionReason::InterfaceOnly,
-                    destination_scope: Scope::Unspecified,
-                    mtu,
-                    capability: Capability::Layer2,
-                    link_type,
-                },
-                mode: Mode::Layer2,
-                lookup_destination: None,
-                final_destination: None,
-                visited_destinations: Vec::new(),
-                packet_source: None,
-                neighbor_source: None,
-                neighbor_target: None,
-                destination_mac: Some(destination_mac),
-                source_mac: Some(source_mac),
-                neighbor_vlan_tags: Vec::new(),
-                synthesized_ethernet: false,
-            },
-            neighbor_resolution: None,
+    /// The route facts a transmission backend checks before sending this
+    /// route's frame.
+    pub fn transmit_route(&self) -> transmit::Route<'_> {
+        transmit::Route {
+            decision: &self.plan.decision,
+            mode: self.plan.mode,
+            lookup_destination: self.plan.lookup_destination,
         }
     }
 }
@@ -115,15 +86,15 @@ mod tests {
         sync::Mutex,
     };
 
-    use packetcraftr_core::frame::LinkType;
-
     use packetcraftr_core::error::Classified;
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
+    use packetcraftr_netio::capture::Statistics;
+    use packetcraftr_netio::interface::Id as InterfaceId;
+    use packetcraftr_netio::link::Capability;
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
 
     use super::*;
-    use crate::{
-        capture::Statistics,
-        link::{VlanKind, VlanTag},
-    };
 
     const INTERFACE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
     const RESOLVED_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 9]);
@@ -173,11 +144,11 @@ mod tests {
         requests: Mutex<Vec<NeighborRequest>>,
     }
 
-    impl crate::neighbor::Resolver for RecordingResolver {
+    impl neighbor::Resolver for RecordingResolver {
         fn resolve(
             &self,
             request: &NeighborRequest,
-        ) -> Result<NeighborResolution, crate::neighbor::Error> {
+        ) -> Result<NeighborResolution, neighbor::Error> {
             self.requests
                 .lock()
                 .expect("request recorder lock")
@@ -317,31 +288,16 @@ mod tests {
     }
 
     #[test]
-    fn a_prepared_layer2_route_invents_no_route_lookup_field() {
-        let route = Materialized::for_prepared_layer2_frame(
-            InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 7,
-            },
-            INTERFACE_MAC,
-            RESOLVED_MAC,
-            1_400,
-            LinkType::ETHERNET,
-        );
+    fn the_transmit_route_carries_the_planned_interface_mode_and_lookup_destination() {
+        let mut plan = unresolved_plan();
+        plan.destination_mac = Some(RESOLVED_MAC);
+        let materialized =
+            materialize(plan.clone(), &RecordingResolver::default(), None).expect("resolved plan");
 
-        assert_eq!(route.plan.mode, Mode::Layer2);
-        assert_eq!(route.plan.decision.interface.name, "fixture0");
-        assert_eq!(route.plan.source_mac, Some(INTERFACE_MAC));
-        assert_eq!(route.plan.destination_mac, Some(RESOLVED_MAC));
-        assert_eq!(route.plan.decision.selected_source, None);
-        assert_eq!(route.plan.lookup_destination, None);
-        assert_eq!(route.plan.final_destination, None);
-        assert_eq!(route.plan.packet_source, None);
-        assert_eq!(route.plan.neighbor_source, None);
-        assert_eq!(route.plan.neighbor_target, None);
-        assert!(route.plan.visited_destinations.is_empty());
-        assert!(route.plan.neighbor_vlan_tags.is_empty());
-        assert_eq!(route.neighbor_resolution, None);
-        assert!(!route.plan.needs_neighbor_resolution());
+        let route = materialized.transmit_route();
+
+        assert_eq!(route.decision, &plan.decision);
+        assert_eq!(route.mode, Mode::Layer2);
+        assert_eq!(route.lookup_destination, Some(address(9)));
     }
 }

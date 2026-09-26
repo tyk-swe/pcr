@@ -145,13 +145,15 @@ fn built_packet(packet: Packet) -> BuiltPacket {
         .expect("sent-packet fixture must build")
 }
 
-fn materialized_route() -> packetcraftr_netio::route::Materialized {
+fn materialized_route() -> crate::route::Materialized {
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::{
         interface::Id as InterfaceId,
         link::{Capability, Mode},
-        route::{Decision, Materialized, Plan},
+        route::Decision,
     };
+
+    use crate::route::{Materialized, Plan};
 
     Materialized {
         plan: Plan {

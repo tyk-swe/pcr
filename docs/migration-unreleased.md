@@ -218,7 +218,7 @@ packet/v2 field contract.
 
 ## Typed netio validation errors
 
-`packetcraftr_netio::route::Error::InvalidSourceRouting` and
+`packetcraftr::route::Error::InvalidSourceRouting` (formerly in netio) and
 `InvalidSegmentRouting` now carry
 `source: Option<Box<dyn std::error::Error + Send + Sync>>`.
 When constructing a local route failure, provide `source: None`. Conversions
@@ -990,3 +990,27 @@ unchanged. `protocol::transport_tuple_reversed` is documented as well.
 
 Every typed reason renders the text the message carried before, so error
 messages, classification codes, and published output are unchanged.
+
+## Route planning in packetcraftr
+
+Route planning interprets packets, so it moved out of netio (ADR 0001). netio
+keeps the route contract a provider implements; `packetcraftr::route` plans
+and materializes routes over it.
+
+| Removed | Use instead |
+|---|---|
+| `packetcraftr_netio::route::plan` | `packetcraftr::route::plan` |
+| `packetcraftr_netio::route::{Plan, Options, Error}` | `packetcraftr::route::{Plan, Options, Error}` |
+| `packetcraftr_netio::route::{materialize, Materialized}` | `packetcraftr::route::{materialize, Materialized}` |
+| `Materialized::for_prepared_layer2_frame(..)` | build a `route::Decision` and a `transmit::Route` view directly |
+| `transmit::{Frame, Layer2Frame, Layer3Frame}::try_new(bytes, &materialized)` | `try_new(bytes, materialized.transmit_route())` |
+| `frame.route().plan.decision`, `.plan.mode`, `.plan.lookup_destination` | `frame.route().decision`, `.mode`, `.lookup_destination` |
+
+`packetcraftr_netio::route::{Provider, Decision, Scope, SelectionReason,
+SystemProvider, SystemError}` are unchanged, and so are variant names,
+messages, and classification codes. `Client::plan` and `send::Options::plan`
+use the `packetcraftr::route` types.
+
+`SystemProvider` checks a preferred source's address family once, before any
+native backend runs, and still reports `SystemError::SourceFamilyMismatch`
+(`io.route_selection`).

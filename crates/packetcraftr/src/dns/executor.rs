@@ -159,9 +159,7 @@ impl<R, N, I, P: packetcraftr_netio::tcp::Provider> TcpExecutor
     }
 }
 
-fn validate_tcp_route_options(
-    plan: &packetcraftr_netio::route::Options,
-) -> Result<(), crate::dns::tcp::Error> {
+fn validate_tcp_route_options(plan: &crate::route::Options) -> Result<(), crate::dns::tcp::Error> {
     if plan.interface.is_some()
         || plan.preferred_source.is_some()
         || !matches!(plan.link_mode, packetcraftr_netio::link::Mode::Auto)
@@ -240,7 +238,7 @@ mod tests {
 
     #[test]
     fn tcp_route_validation_rejects_every_packet_oriented_override() {
-        let defaults = packetcraftr_netio::route::Options::default();
+        let defaults = crate::route::Options::default();
         assert!(validate_tcp_route_options(&defaults).is_ok());
 
         let mut source = defaults.clone();

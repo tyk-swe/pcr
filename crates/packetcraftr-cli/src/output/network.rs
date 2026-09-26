@@ -260,8 +260,8 @@ pub struct Plan {
     pub synthesized_ethernet: bool,
 }
 
-impl From<route::Plan> for Plan {
-    fn from(value: route::Plan) -> Self {
+impl From<packetcraftr::route::Plan> for Plan {
+    fn from(value: packetcraftr::route::Plan) -> Self {
         Self {
             decision: value.decision.into(),
             mode: value.mode.into(),

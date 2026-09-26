@@ -13,7 +13,7 @@ pub const MAX_SEND_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub destination: Option<IpAddr>,
-    pub plan: packetcraftr_netio::route::Options,
+    pub plan: crate::route::Options,
     pub build: packetcraftr_core::build::Options,
     /// Second explicit opt-in required in addition to policy approval.
     pub allow_permissive_live: bool,

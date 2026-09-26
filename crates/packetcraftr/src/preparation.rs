@@ -47,11 +47,13 @@ use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::{Error as LiveIoError, interface, neighbor, route, transmit};
+use packetcraftr_netio::route::Provider as RouteProvider;
+use packetcraftr_netio::{Error as LiveIoError, interface, neighbor, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
 use crate::policy::{Operation, Policy, WireBudget};
+use crate::route;
 use crate::{Client, Error, SentPacket, send};
 use materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
@@ -150,7 +152,7 @@ impl PreparedPacket {
         E: From<LiveIoError>,
     {
         let report = {
-            let frame = transmit::Frame::try_new(&self.built.bytes, &self.route)?;
+            let frame = transmit::Frame::try_new(&self.built.bytes, self.route.transmit_route())?;
             check()?;
             io.send(frame)?
         };
@@ -282,7 +284,7 @@ struct Stages<'c, R, N, I> {
 
 impl<'c, R, N, I> Stages<'c, R, N, I>
 where
-    R: route::Provider,
+    R: RouteProvider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
@@ -321,7 +323,7 @@ where
 
     /// Stage 2: plans `packet` toward `destination` through `routes`,
     /// authorizing the destination and the packet's endpoints.
-    fn plan<P: route::Provider>(
+    fn plan<P: RouteProvider>(
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
@@ -340,7 +342,7 @@ where
     }
 
     /// Stages 2–4 for one packet, planning its route through `routes`.
-    fn admit<P: route::Provider>(
+    fn admit<P: RouteProvider>(
         &self,
         budget: &mut Budget,
         packet: Packet,
@@ -421,7 +423,7 @@ pub(crate) struct Admission<'c, R, N, I> {
 
 impl<'c, R, N, I> Admission<'c, R, N, I>
 where
-    R: route::Provider,
+    R: RouteProvider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
@@ -432,7 +434,7 @@ where
 
     /// Plans `packet` through `routes`, checks its preliminary build, and
     /// charges its exact wire bytes to the cumulative budget.
-    pub(crate) fn admit<P: route::Provider>(
+    pub(crate) fn admit<P: RouteProvider>(
         &mut self,
         packet: Packet,
         routes: &P,
@@ -490,7 +492,7 @@ pub(crate) struct Discovery<'c, R, N, I> {
 
 impl<R, N, I> Discovery<'_, R, N, I>
 where
-    R: route::Provider,
+    R: RouteProvider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
@@ -547,7 +549,7 @@ pub(crate) struct Streaming<'c, R, N, I> {
 
 impl<R, N, I> Streaming<'_, R, N, I>
 where
-    R: route::Provider,
+    R: RouteProvider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
@@ -574,7 +576,7 @@ where
 
 impl<R, N, I> Client<R, N, I>
 where
-    R: route::Provider,
+    R: RouteProvider,
     N: neighbor::Resolver,
     I: transmit::Sender,
 {
@@ -630,6 +632,7 @@ mod tests {
     use packetcraftr_core::protocol::network::Ipv4;
     use packetcraftr_core::protocol::transport::Udp;
     use packetcraftr_netio::link::{Capability, Mode};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
 
     use super::*;
 
@@ -638,7 +641,7 @@ mod tests {
     /// Puts every destination on-link over one Layer 3 interface.
     struct Layer3Routes;
 
-    impl route::Provider for Layer3Routes {
+    impl RouteProvider for Layer3Routes {
         type Error = Infallible;
 
         fn lookup_with_preferences(
@@ -646,8 +649,8 @@ mod tests {
             _destination: IpAddr,
             _interface_hint: Option<&interface::Id>,
             _preferred_source: Option<IpAddr>,
-        ) -> Result<route::Decision, Self::Error> {
-            Ok(route::Decision {
+        ) -> Result<Decision, Self::Error> {
+            Ok(Decision {
                 interface: interface::Id {
                     index: 1,
                     name: "fixture0".to_owned(),
@@ -656,8 +659,8 @@ mod tests {
                 selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
                 preferred_source: None,
                 next_hop: None,
-                selection_reason: route::SelectionReason::OnLink,
-                destination_scope: route::Scope::Link,
+                selection_reason: SelectionReason::OnLink,
+                destination_scope: Scope::Link,
                 mtu: 1_500,
                 capability: Capability::Layer3,
                 link_type: LinkType::RAW,

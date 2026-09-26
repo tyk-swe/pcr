@@ -296,8 +296,9 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
 }
 
 fn sent_packet() -> packetcraftr::SentPacket {
+    use packetcraftr::route::{Materialized, Plan};
     use packetcraftr_netio::link::{Capability, Mode};
-    use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
 
     let mut packet = core::packet::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));

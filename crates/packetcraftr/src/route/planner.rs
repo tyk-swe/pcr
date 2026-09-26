@@ -5,14 +5,16 @@ use std::net::IpAddr;
 
 use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::semantics};
 
+use packetcraftr_core::packet::{MacAddress, VlanTag};
+use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::route::{Decision, Provider};
+
 use super::error::Error;
 use super::intent::{
     arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_macs,
     packet_has_link_layer_intent,
 };
-use crate::link::{MacAddress, Mode, VlanTag};
-
-use super::models::{Decision, Options, Plan, Provider};
+use super::model::{Options, Plan, is_ipv4_broadcast};
 
 /// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
 pub fn plan<P: Provider>(
@@ -26,7 +28,7 @@ pub fn plan<P: Provider>(
     validate_route_contract(&route, options)?;
     let mode = select_link_mode(&intent, &route, options.link_mode)?;
     let sources = select_sources(&intent, &route)?;
-    let ipv4_broadcast = route.is_ipv4_broadcast(intent.lookup_destination);
+    let ipv4_broadcast = is_ipv4_broadcast(&route, intent.lookup_destination);
     let link = select_link(
         packet,
         &intent,
@@ -370,10 +372,11 @@ mod tests {
         network::{Ipv4, Ipv6},
     };
 
+    use packetcraftr_netio::interface::Id as InterfaceId;
+    use packetcraftr_netio::link::Capability;
+    use packetcraftr_netio::route::{Scope, SelectionReason};
+
     use super::*;
-    use crate::interface::Id as InterfaceId;
-    use crate::link::Capability;
-    use crate::route::{Scope, SelectionReason};
 
     #[derive(Clone, Copy, Debug)]
     struct RouteFailure;

@@ -15,9 +15,9 @@ use packetcraftr_netio::{
 use packetcraftr_netio::{neighbor, route, transmit};
 
 use super::model::Options;
-use super::route_cache::CachedProvider;
 use crate::Client;
 use crate::Error;
+use crate::route::CachedProvider;
 
 use crate::exchange::{Collector, Transaction, WorkflowResponseMatcher, WorkflowStopPredicate};
 use crate::planning::ensure_preparation_deadline;

@@ -188,7 +188,7 @@ pub(crate) fn capture_timestamp_types(
 
 #[cfg(native_layer2)]
 pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    super::interface_identity::verify_interface_identity(&frame.route().plan.decision.interface)?;
+    super::interface_identity::verify_interface_identity(&frame.route().decision.interface)?;
     layer2_backend::send_layer2(frame)
 }
 
@@ -203,7 +203,7 @@ pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Re
 
 #[cfg(native_layer3)]
 pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
-    super::interface_identity::verify_interface_identity(&frame.route().plan.decision.interface)?;
+    super::interface_identity::verify_interface_identity(&frame.route().decision.interface)?;
     super::raw_ip::send_layer3(frame)
 }
 

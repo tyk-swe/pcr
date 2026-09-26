@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
+use packetcraftr::route::Materialized;
+use packetcraftr::route::Plan;
 use packetcraftr_cli::output::contract::{Command, Format};
 use packetcraftr_cli::output::envelope::{Envelope, Published, Stats as OutputStats};
 use packetcraftr_cli::output::{
@@ -53,8 +55,6 @@ use packetcraftr_netio::interface::Info;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::link::Mode as LinkMode;
 use packetcraftr_netio::route::Decision;
-use packetcraftr_netio::route::Materialized;
-use packetcraftr_netio::route::Plan;
 use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
 use serde_json::Value;

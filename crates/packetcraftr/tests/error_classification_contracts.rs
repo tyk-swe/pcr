@@ -19,6 +19,7 @@ use packetcraftr::replay::{
     Error as ReplayError, Limits, Options as ReplayOptions, Timing, Transmission, Transmitter,
     run_with_selector,
 };
+use packetcraftr::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use packetcraftr::send;
 use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::error::BoundaryError;
@@ -31,9 +32,7 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{
-        Decision, Materialized as MaterializedRoute, Plan as RoutePlan, Scope, SelectionReason,
-    },
+    route::{Decision, Scope, SelectionReason},
     transmit::Submission,
 };
 

@@ -6,12 +6,11 @@ use std::time::Instant;
 
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::deadline::remaining_before;
-use packetcraftr_netio::{
-    Error as LiveIoError, route::plan as plan_route, transmit::Sender as PacketIo,
-};
+use packetcraftr_netio::{Error as LiveIoError, transmit::Sender as PacketIo};
 
 use crate::Client;
 use crate::Error;
+use crate::route::{Options, Plan, plan as plan_route};
 
 /// Whether `deadline` has arrived.
 ///
@@ -47,8 +46,8 @@ where
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
-        options: &packetcraftr_netio::route::Options,
-    ) -> Result<packetcraftr_netio::route::Plan, Error> {
+        options: &Options,
+    ) -> Result<Plan, Error> {
         self.plan_with_provider(packet, destination, options, &self.routes, None)
     }
 
@@ -56,10 +55,10 @@ where
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
-        options: &packetcraftr_netio::route::Options,
+        options: &Options,
         provider: &P,
         deadline: Option<Instant>,
-    ) -> Result<packetcraftr_netio::route::Plan, Error> {
+    ) -> Result<Plan, Error> {
         self.policy.validate()?;
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;

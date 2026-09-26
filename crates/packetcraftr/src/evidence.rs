@@ -118,7 +118,7 @@ impl Budget {
 #[derive(Clone, Debug)]
 pub struct SentPacket {
     built: BuiltPacket,
-    route: packetcraftr_netio::route::Materialized,
+    route: crate::route::Materialized,
     report: TransmissionReport,
     frame: Frame,
 }
@@ -133,7 +133,7 @@ impl SentPacket {
     /// complete exact transmission or the route has no resolved link mode.
     pub fn try_new(
         built: BuiltPacket,
-        route: packetcraftr_netio::route::Materialized,
+        route: crate::route::Materialized,
         report: TransmissionReport,
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
@@ -162,7 +162,7 @@ impl SentPacket {
         &self.built
     }
 
-    pub fn route(&self) -> &packetcraftr_netio::route::Materialized {
+    pub fn route(&self) -> &crate::route::Materialized {
         &self.route
     }
 

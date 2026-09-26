@@ -111,7 +111,7 @@ pub(crate) fn authorize_wire_destinations(
 pub(crate) fn authorize_wire_sources(
     policy: &crate::policy::Policy,
     decoded: &packetcraftr_core::decode::DecodedPacket,
-    route: &packetcraftr_netio::route::Plan,
+    route: &crate::route::Plan,
 ) -> Result<(), WireAuthorizationError> {
     policy
         .authorize_packet_sources(&decoded.packet, route)
@@ -126,7 +126,7 @@ pub(crate) fn authorize_wire(
     policy: &crate::policy::Policy,
     link_type: LinkType,
     bytes: &Bytes,
-    route: Option<&packetcraftr_netio::route::Plan>,
+    route: Option<&crate::route::Plan>,
 ) -> Result<(), WireAuthorizationError> {
     let decoded = authorize_wire_destinations(policy, link_type, bytes)?;
     if let Some(route) = route {
@@ -155,7 +155,7 @@ impl Policy {
     pub(crate) fn authorize_built_wire(
         &self,
         built: &BuiltPacket,
-        route: &packetcraftr_netio::route::Plan,
+        route: &crate::route::Plan,
     ) -> Result<(), Error> {
         let link_type = match route.mode {
             LinkMode::Layer2 => route.decision.link_type,

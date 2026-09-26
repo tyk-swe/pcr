@@ -11,9 +11,7 @@ use packetcraftr_core::{
 
 use crate::Error;
 
-pub(super) fn build_context(
-    plan: &packetcraftr_netio::route::Plan,
-) -> packetcraftr_core::codec::Context {
+pub(super) fn build_context(plan: &crate::route::Plan) -> packetcraftr_core::codec::Context {
     packetcraftr_core::codec::Context {
         source: plan.packet_source,
         destination: plan.final_destination,
@@ -22,7 +20,7 @@ pub(super) fn build_context(
 
 pub(super) fn materialize_link_structure(
     packet: &mut Packet,
-    plan: &packetcraftr_netio::route::Plan,
+    plan: &crate::route::Plan,
 ) -> Result<(), Error> {
     if !plan.synthesized_ethernet
         || semantics::outer_layers(packet)
@@ -43,7 +41,7 @@ pub(super) fn materialize_link_structure(
 
 pub(super) fn materialize_network_fields(
     packet: &mut Packet,
-    plan: &packetcraftr_netio::route::Plan,
+    plan: &crate::route::Plan,
 ) -> Result<(), Error> {
     let Some(index) =
         semantics::outer_layers(packet).position(|layer| layer.is::<Ipv4>() || layer.is::<Ipv6>())
@@ -107,7 +105,7 @@ fn planned_address(
 
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
-    route: &packetcraftr_netio::route::Materialized,
+    route: &crate::route::Materialized,
 ) -> Result<bool, Error> {
     if route.plan.mode != packetcraftr_netio::link::Mode::Layer2 {
         return Ok(false);
@@ -181,7 +179,9 @@ mod tests {
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, network::Ipv6};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::{Capability, Mode};
-    use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
+
+    use crate::route::{Materialized, Plan};
 
     use super::*;
 

@@ -8,6 +8,7 @@
 //!
 //! `packetcraftr-core` owns packets and offline analysis;
 //! `packetcraftr-netio` owns provider contracts and native resources.
+//! [`route`] plans each packet's route over a netio route provider.
 //! Live entry points such as [`scan`], [`dns`], and [`send`] require a
 //! [`policy::Policy`] and finite resource budgets.
 //!
@@ -48,6 +49,7 @@ mod preparation;
 pub mod probe;
 pub mod progress;
 pub mod replay;
+pub mod route;
 pub mod scan;
 pub mod send;
 mod stats;

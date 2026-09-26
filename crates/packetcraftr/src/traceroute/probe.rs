@@ -4,8 +4,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::{Tcp, Udp},
 };
 use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol};

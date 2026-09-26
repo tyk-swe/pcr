@@ -46,5 +46,10 @@ pub fn encode_query(
             }),
         });
     }
-    Ok(message.to_wire()?)
+    message.to_wire().map_err(|error| match error {
+        packetcraftr_core::protocol::application::dns::Error::Encode(source) => {
+            crate::dns::error::WireError::Encode(source)
+        }
+        error => crate::dns::error::WireError::Decode(error),
+    })
 }

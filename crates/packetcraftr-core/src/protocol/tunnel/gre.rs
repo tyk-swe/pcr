@@ -15,7 +15,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::common::{
+use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, expected_discriminator,
     invalid, make_layer, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic,
     truncated, typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
@@ -25,7 +25,7 @@ use crate::protocol::BuiltinProtocol;
 
 const NAME: &str = BuiltinProtocol::Gre.as_str();
 
-pub(crate) const GRE_BASE_LEN: usize = 4;
+const GRE_BASE_LEN: usize = 4;
 const GRE_OPTION_LEN: usize = 4;
 const CHECKSUM_PRESENT: u16 = 0x8000;
 const ROUTING_PRESENT: u16 = 0x4000;

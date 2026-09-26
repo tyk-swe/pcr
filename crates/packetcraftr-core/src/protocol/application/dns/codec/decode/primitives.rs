@@ -1,21 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::protocol::application::dns::Error;
+
 /// Reads the big-endian `u16` at `offset`.
 ///
-/// Fails with [`DecodeError::TruncatedField`] naming `field` when the message
+/// Fails with [`Error::TruncatedField`] naming `field` when the message
 /// ends before the value does.
-///
-/// [`DecodeError::TruncatedField`]: super::super::DecodeError::TruncatedField
-pub fn read_u16(
-    message: &[u8],
-    offset: usize,
-    field: &'static str,
-) -> Result<u16, super::super::DecodeError> {
+pub fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
     let bytes: [u8; 2] = message
         .get(offset..offset.saturating_add(2))
         .and_then(|slice| <[u8; 2]>::try_from(slice).ok())
-        .ok_or(super::super::DecodeError::TruncatedField {
+        .ok_or(Error::TruncatedField {
             field,
             offset,
             needed: offset.saturating_add(2),
@@ -25,19 +21,13 @@ pub fn read_u16(
 
 /// Reads the big-endian `u32` at `offset`.
 ///
-/// Fails with [`DecodeError::TruncatedField`] naming `field` when the message
+/// Fails with [`Error::TruncatedField`] naming `field` when the message
 /// ends before the value does.
-///
-/// [`DecodeError::TruncatedField`]: super::super::DecodeError::TruncatedField
-pub(super) fn read_u32(
-    message: &[u8],
-    offset: usize,
-    field: &'static str,
-) -> Result<u32, super::super::DecodeError> {
+pub(super) fn read_u32(message: &[u8], offset: usize, field: &'static str) -> Result<u32, Error> {
     let bytes: [u8; 4] = message
         .get(offset..offset.saturating_add(4))
         .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
-        .ok_or(super::super::DecodeError::TruncatedField {
+        .ok_or(Error::TruncatedField {
             field,
             offset,
             needed: offset.saturating_add(4),
@@ -54,7 +44,7 @@ mod tests {
         let error = read_u16(&[0; 4], 3, "test field").unwrap_err();
         assert!(matches!(
             error,
-            super::super::super::DecodeError::TruncatedField {
+            Error::TruncatedField {
                 offset: 3,
                 needed: 5,
                 ..

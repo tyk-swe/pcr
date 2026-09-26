@@ -2,12 +2,39 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Cleartext HTTP/1 header dissection and bounded streaming body framing.
-mod body;
+//!
+//! The [`Http`] layer and its head live in `model`, head parsing, body
+//! framing, and the layer codec in `codec`, and field reflection in
+//! `reflection`. Every wire API returns [`Error`].
+
+use crate::error::{Classification, Classified, Kind};
+
 mod codec;
-mod head;
-pub use body::{BodyDecoder, Progress};
-pub use codec::Http;
+mod model;
+mod reflection;
+
 pub(crate) use codec::HttpCodec;
-pub use head::{
-    Body, Error, Head, Header, MAX_HEADER_BYTES, MAX_HEADERS, MAX_START_LINE, StartLine, parse_head,
-};
+pub use codec::{BodyDecoder, Progress, parse_head};
+pub use model::{Body, Head, Header, Http, StartLine};
+
+pub const MAX_HEADER_BYTES: usize = 65_536;
+pub const MAX_HEADERS: usize = 256;
+pub const MAX_START_LINE: usize = 8192;
+
+/// An HTTP/1 head or body framing that breaks a wire rule or a bound.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("HTTP/1 {0}")]
+    Invalid(&'static str),
+    #[error("HTTP/1 exceeds its {0} limit")]
+    Limit(&'static str),
+}
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Invalid(_) => Classification::new("packet.http", Kind::Packet, None),
+            Self::Limit(_) => Classification::new("policy.http_limit", Kind::Policy, None),
+        }
+    }
+}

@@ -9,12 +9,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use packetcraftr_core::layer::{Malformed, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
-use packetcraftr_core::protocol::gre::Gre;
-use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
-use packetcraftr_core::protocol::ipv6::{Fragment, HopByHop};
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{Fragment, HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
-use packetcraftr_core::protocol::tunnel::Ah;
+use packetcraftr_core::protocol::tunnel::{Ah, Gre};
 use packetcraftr_core::protocol::{
     BuiltinProtocol, QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind,
     transport_tuple_reversed,

@@ -19,7 +19,7 @@ use crate::{
     error::BoundaryError,
     field::WireValue,
     protocol::{
-        application::dns::{DecodeError, DecodeLimits, Dns},
+        application::dns::{self, DecodeLimits, Dns},
         transport::Udp,
     },
 };
@@ -65,7 +65,7 @@ pub struct Message {
     pub declared_length: Option<u16>,
     pub framing_bytes: Bytes,
     pub dns: Option<Dns>,
-    pub error: Option<DecodeError>,
+    pub error: Option<dns::Error>,
     pub sources: SourceSet,
 }
 /// What the collector reports for each processed record.

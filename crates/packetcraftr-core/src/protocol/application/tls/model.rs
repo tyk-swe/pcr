@@ -1,10 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded TLS record and handshake models. [`super::parse`] rejects lists
-//! exceeding `MAX_*` limits as malformed instead of truncating them.
+//! Bounded TLS record, handshake, and hello models, and the per-segment
+//! [`Tls`] layer. The parser rejects lists exceeding `MAX_*` limits as
+//! malformed instead of truncating them.
 
 use bytes::Bytes;
+
+pub(super) mod fingerprint;
+pub(super) mod names;
 
 /// Bytes in a TLS record header: content type, legacy version, length.
 pub const RECORD_HEADER_LEN: usize = 5;
@@ -196,5 +200,104 @@ impl ServerHello {
     /// Returns the extension identifiers in the order the server sent them.
     pub fn extension_kinds(&self) -> impl Iterator<Item = u16> + '_ {
         self.extensions.iter().map(|extension| extension.kind)
+    }
+}
+
+/// The complete TLS records carried by one TCP segment.
+///
+/// The layer covers only whole records. A record continuing into the next
+/// segment, a malformed tail, and records past the per-segment record cap all
+/// stay outside it, as a `raw` child.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tls {
+    /// Content type of the first record in the segment.
+    pub content_type: u8,
+    /// Legacy record version of the first record in the segment.
+    pub version: u16,
+    /// Complete records covered by this layer.
+    pub record_count: u16,
+    /// Handshake message type, when a whole handshake message is present.
+    pub handshake_type: Option<u8>,
+    /// Cipher suite chosen by a ServerHello.
+    pub cipher_suite: Option<u16>,
+    /// Version chosen by a ServerHello, after `supported_versions`.
+    pub selected_version: Option<u16>,
+    /// Named group of a ServerHello key share.
+    pub key_share_group: Option<u16>,
+    /// Whether a record continues past the end of this segment.
+    pub incomplete: bool,
+    /// Whether a ClientHello offered encrypted client hello.
+    pub ech: bool,
+    /// Validated server name offered by a ClientHello.
+    pub sni: Option<String>,
+    /// Verbatim server name bytes, whether or not they validated.
+    pub sni_raw: Option<Bytes>,
+    /// JA3 fingerprint of a ClientHello, as its MD5 digest.
+    pub ja3: Option<String>,
+    /// JA3 fingerprint of a ClientHello, before hashing.
+    pub ja3_raw: Option<String>,
+    /// JA4 fingerprint of a ClientHello.
+    pub ja4: Option<String>,
+    /// Application protocols offered by a ClientHello or chosen by a ServerHello.
+    pub alpn: Vec<String>,
+    /// Cipher suites offered by a ClientHello.
+    pub cipher_suites: Vec<u16>,
+    /// Versions offered by a ClientHello.
+    pub supported_versions: Vec<u16>,
+    /// Named groups offered by a ClientHello.
+    pub supported_groups: Vec<u16>,
+    /// A single complete editable hello, when it accounts for this layer.
+    pub hello: Option<Hello>,
+    pub(super) wire: Bytes,
+}
+
+impl Tls {
+    /// The complete records this layer covers, byte for byte.
+    #[must_use]
+    pub fn wire(&self) -> &Bytes {
+        &self.wire
+    }
+}
+
+/// Which hello a [`Hello`] fixture constructs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HelloKind {
+    Client,
+    Server,
+}
+
+/// One ordered extension with an exact body; helpers construct common bodies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelloExtension {
+    pub kind: u16,
+    pub data: Bytes,
+}
+
+/// A bounded ClientHello or ServerHello fixture, without cryptographic state.
+/// Server fixtures require exactly one cipher suite and compression method.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hello {
+    pub kind: HelloKind,
+    pub record_version: u16,
+    pub legacy_version: u16,
+    pub random: [u8; 32],
+    pub session_id: Bytes,
+    pub cipher_suites: Vec<u16>,
+    pub compression: Vec<u8>,
+    pub extensions: Vec<HelloExtension>,
+}
+
+impl Default for Hello {
+    fn default() -> Self {
+        Self {
+            kind: HelloKind::Client,
+            record_version: 0x0303,
+            legacy_version: 0x0303,
+            random: [0; 32],
+            session_id: Bytes::new(),
+            cipher_suites: vec![0xc02f],
+            compression: vec![0],
+            extensions: Vec::new(),
+        }
     }
 }

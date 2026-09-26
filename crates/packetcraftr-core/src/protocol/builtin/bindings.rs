@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Built-in child, capture link-type, and TLS port bindings.
+
 use crate::{
     frame::LinkType,
     protocol::BuiltinProtocol,
@@ -47,7 +49,7 @@ pub(super) fn register(
         ],
     )?;
     register_tls(builder)?;
-    crate::protocol::builtin::filter::register_filter_fields(builder)
+    super::filter_fields::register_filter_fields(builder)
 }
 
 /// TCP ports whose payload the default registry dissects as TLS.

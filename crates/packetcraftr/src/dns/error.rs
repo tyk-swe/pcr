@@ -17,7 +17,7 @@ pub enum WireError {
     Encode(#[from] packetcraftr_core::codec::Error),
 
     #[error("{0}")]
-    Decode(#[from] packetcraftr_core::protocol::application::dns::DecodeError),
+    Decode(#[from] packetcraftr_core::protocol::application::dns::Error),
 
     #[error("DNS name is invalid: {message}")]
     InvalidName { message: String },

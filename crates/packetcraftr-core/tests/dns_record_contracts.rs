@@ -9,7 +9,7 @@ use packetcraftr_core::{
     layer::{Layer, Malformed, Raw},
     packet::Packet,
     protocol::{
-        application::dns::{DecodeError, DecodeLimits, Dns, Name, RecordValue, name},
+        application::dns::{DecodeLimits, Dns, Error as DecodeError, Name, RecordValue, name},
         builtin,
         network::Ipv4,
         transport::Udp,

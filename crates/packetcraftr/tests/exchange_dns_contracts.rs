@@ -20,7 +20,11 @@ use packetcraftr_core::{
     layer::Raw,
     packet::Packet,
     protocol::{
-        BuiltinProtocol, application::dns::Dns, builtin, icmp::Icmpv4, network::Ipv4, semantics,
+        BuiltinProtocol,
+        application::dns::Dns,
+        builtin,
+        network::{Icmpv4, Ipv4},
+        semantics,
         transport::Udp,
     },
     template::Template,

@@ -4,6 +4,7 @@
 //! Network-layer protocol models.
 
 mod envelope;
+mod icmp;
 mod igmp;
 mod ipv4;
 mod ipv6;
@@ -23,10 +24,14 @@ pub mod ip_protocol {
 pub(crate) use envelope::{
     ipv6_extension_header_length, is_walkable_ipv6_extension, resolve_envelope,
 };
+pub use icmp::{Icmpv4, Icmpv6};
+pub(crate) use icmp::{Icmpv4Codec, Icmpv6Codec};
 pub use igmp::Igmp;
 pub(crate) use igmp::IgmpCodec;
 pub use ipv4::Ipv4;
 pub(crate) use ipv4::Ipv4Codec;
-pub use ipv6::Ipv6;
-pub(crate) use ipv6::Ipv6Codec;
+pub use ipv6::{DestinationOptions, Fragment, HopByHop, Ipv6, SegmentRoutingHeader};
+pub(crate) use ipv6::{
+    DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Ipv6Codec, SegmentRoutingHeaderCodec,
+};
 pub(crate) use raw_ip::RawIpCodec;

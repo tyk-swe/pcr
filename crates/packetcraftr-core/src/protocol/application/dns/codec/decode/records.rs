@@ -5,11 +5,13 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use super::super::DecodeError as WireError;
-use super::super::{DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record, RecordValue};
 use super::advance;
 use super::decode_name;
 use super::primitives::{read_u16, read_u32};
+use crate::protocol::application::dns::Error as WireError;
+use crate::protocol::application::dns::{
+    DecodeLimits as MessageLimits, Edns, EdnsOption, Name, Record, RecordValue,
+};
 
 const TYPE_OPT: u16 = 41;
 

@@ -14,8 +14,7 @@ use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::tunnel::Geneve;
 use packetcraftr_core::protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::{Tcp, Udp},
 };
 use packetcraftr_core::registry::Registry;

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{Dns, NAME, Name, Record, RecordValue};
+use super::super::{Dns, Name, Record, RecordValue};
+use super::NAME;
 use crate::codec::{Error, Mode};
 use crate::diagnostic::Diagnostic;
 use crate::protocol::common::structured::Encoder;

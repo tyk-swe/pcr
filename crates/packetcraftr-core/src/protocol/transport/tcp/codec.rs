@@ -1,89 +1,208 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Standard TCP options typed over the option area.
-//!
-//! End-of-list and no-op markers, MSS, window scale, SACK-permitted/SACK, and
-//! timestamps decode into variants; every other kind and every nonstandard
-//! length stays byte-exact as [`TcpOption::Raw`]. A tail that cannot be a TLV
-//! at all — a missing length byte, a length below two, or a length that runs
-//! past the option area — becomes [`TcpOption::Trailing`] so decode never
-//! loses wire bytes and re-encoding reproduces them exactly. EOL terminates
-//! parsing; any remaining padding is preserved as `Trailing` too.
+use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
+use super::model::{
+    KIND_END, KIND_MSS, KIND_NOP, KIND_SACK, KIND_SACK_PERMITTED, KIND_TIMESTAMPS,
+    KIND_WINDOW_SCALE,
+};
+use super::reflection::{tcp_layout, tcp_schema};
+use super::{SackBlock, Tcp, TcpOption};
 use crate::{
-    codec,
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, Schema},
-    protocol::common::{
-        invalid, out_of_range,
-        structured::{Object, list, member, object},
-        wrong_type,
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    diagnostic::{Diagnostic, TCP_CHECKSUM},
+    field::{FieldValue, WireValue},
+    layer::Layer,
+    protocol::{
+        BuiltinProtocol,
+        common::{
+            ValueExpectation, invalid, make_layer, pad_options_to_four_bytes,
+            payload_without_padding, resolve_u16, transport_checksum, transport_checksum_parts,
+            truncated, typed_layer,
+        },
+        network::{ip_protocol, resolve_envelope},
+        transport::ports::child_discriminators,
     },
 };
 
+pub(super) const NAME: &str = BuiltinProtocol::Tcp.as_str();
+
+const TCP_MIN_LEN: usize = 20;
+
 /// The option area the four-bit TCP data offset can address.
-const MAX_OPTION_BYTES: usize = 40;
+pub(super) const MAX_OPTION_BYTES: usize = 40;
 
-const KIND_END: u8 = 0;
-const KIND_NOP: u8 = 1;
-const KIND_MSS: u8 = 2;
-const KIND_WINDOW_SCALE: u8 = 3;
-const KIND_SACK_PERMITTED: u8 = 4;
-const KIND_SACK: u8 = 5;
-const KIND_TIMESTAMPS: u8 = 8;
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TcpCodec;
 
-/// One SACK block's inclusive sequence edge pair.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SackBlock {
-    pub left_edge: u32,
-    pub right_edge: u32,
-}
+impl LayerCodec for TcpCodec {
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &tcp_schema().protocol
+    }
 
-/// A parsed TCP option, preserving declaration order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TcpOption {
-    /// End of option list (kind 0, a single byte).
-    End,
-    /// No-operation padding (kind 1, a single byte).
-    Nop,
-    /// Maximum segment size (kind 2, length 4).
-    Mss(u16),
-    /// Window scale shift count (kind 3, length 3).
-    WindowScale(u8),
-    /// SACK-permitted marker (kind 4, length 2).
-    SackPermitted,
-    /// Selective acknowledgment blocks (kind 5, length 2 + 8n).
-    Sack(Vec<SackBlock>),
-    /// Timestamps option (kind 8, length 10): TSval and TSecr.
-    Timestamps { value: u32, echo_reply: u32 },
-    /// Any other kind, or a standard kind with a nonstandard length;
-    /// `data` is the option body after the kind and length bytes.
-    Raw { kind: u8, data: Bytes },
-    /// Padding after EOL, or bytes that cannot decode as a TLV; always last.
-    Trailing(Bytes),
-}
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        payload: &[u8],
+        context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, crate::codec::Error> {
+        let layer = typed_layer::<Tcp>(NAME, layer)?;
+        if layer.flags > 0x01ff {
+            return Err(invalid(NAME, "flags exceed nine bits"));
+        }
+        if layer.reserved_bits > 7 {
+            return Err(invalid(NAME, "reserved bits exceed three bits"));
+        }
+        let serialized = serialize(&layer.options)?;
+        let mut diagnostics = Vec::new();
+        if layer.reserved_bits != 0 {
+            let message = "reserved TCP header bits are non-zero";
+            if context.mode == crate::codec::Mode::Strict {
+                return Err(invalid(NAME, message));
+            }
+            diagnostics.push(
+                Diagnostic::warning("build.tcp_reserved_bits", message).at_field("reserved_bits"),
+            );
+        }
+        let options = pad_options_to_four_bytes(
+            &serialized,
+            "build.tcp_options_padded",
+            "TCP",
+            &mut diagnostics,
+        );
+        let header_len = TCP_MIN_LEN.saturating_add(options.len());
+        let data_offset =
+            u8::try_from(header_len / 4).map_err(|_| invalid(NAME, "header length overflow"))?;
+        // the 9-bit flags field is split deliberately: bit 8 goes into the byte at offset 12 below
+        // and the low 8 bits are this byte
+        let flags_low = layer.flags as u8;
+        let mut prefix = Vec::with_capacity(header_len);
+        prefix.extend_from_slice(&layer.source_port.to_be_bytes());
+        prefix.extend_from_slice(&layer.destination_port.to_be_bytes());
+        prefix.extend_from_slice(&layer.sequence.to_be_bytes());
+        prefix.extend_from_slice(&layer.acknowledgment.to_be_bytes());
+        prefix.push(
+            (data_offset << 4) | ((layer.reserved_bits & 7) << 1) | ((layer.flags >> 8) as u8 & 1),
+        );
+        prefix.push(flags_low);
+        prefix.extend_from_slice(&layer.window.to_be_bytes());
+        // The checksum bytes stay zero while the segment checksum is computed.
+        prefix.extend_from_slice(&[0, 0]);
+        prefix.extend_from_slice(&layer.urgent_pointer.to_be_bytes());
+        prefix.extend_from_slice(&options);
+        let covered_payload = payload_without_padding(NAME, payload, context)?;
+        let network = resolve_envelope(NAME, context)?;
+        let checksum_expected =
+            transport_checksum_parts(NAME, network, ip_protocol::TCP, &[&prefix, covered_payload])?;
+        let (checksum, materialized_checksum) = resolve_u16(
+            NAME,
+            "checksum",
+            &layer.checksum,
+            ValueExpectation::Required(checksum_expected),
+            context.mode,
+            &mut diagnostics,
+        )?;
+        // the fixed twenty-byte prefix above always reserves bytes 16..18 for the checksum
+        {
+            prefix[16..18].copy_from_slice(&checksum.to_be_bytes());
+        }
+        let mut materialized = layer.clone();
+        materialized.checksum = materialized_checksum;
+        materialized.options = parse(&Bytes::copy_from_slice(&options));
+        Ok(EncodedLayer::header(prefix, Box::new(materialized))
+            .with_fields(tcp_layout(header_len))
+            .with_diagnostics(diagnostics))
+    }
 
-impl TcpOption {
-    /// Wire kind byte; `Trailing` has none.
-    pub fn kind(&self) -> Option<u8> {
-        Some(match self {
-            Self::End => KIND_END,
-            Self::Nop => KIND_NOP,
-            Self::Mss(_) => KIND_MSS,
-            Self::WindowScale(_) => KIND_WINDOW_SCALE,
-            Self::SackPermitted => KIND_SACK_PERMITTED,
-            Self::Sack(_) => KIND_SACK,
-            Self::Timestamps { .. } => KIND_TIMESTAMPS,
-            Self::Raw { kind, .. } => *kind,
-            Self::Trailing(_) => return None,
+    fn decode(
+        &self,
+        input: Bytes,
+        context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        let Some(header) = input.first_chunk::<TCP_MIN_LEN>() else {
+            return Err(truncated(NAME, TCP_MIN_LEN, input.len()));
+        };
+        let data_offset = usize::from(header[12] >> 4);
+        if data_offset < 5 {
+            return Err(invalid(
+                NAME,
+                format!("data offset {data_offset} is below 5"),
+            ));
+        }
+        let header_len = data_offset
+            .checked_mul(4)
+            .ok_or_else(|| invalid(NAME, "data offset overflow"))?;
+        let Some(options) = input.get(TCP_MIN_LEN..header_len) else {
+            return Err(truncated(NAME, header_len, input.len()));
+        };
+        let checksum_value = u16::from_be_bytes([header[16], header[17]]);
+        let mut diagnostics = Vec::new();
+        let reserved_bits = (header[12] >> 1) & 7;
+        if reserved_bits != 0 {
+            diagnostics.push(
+                Diagnostic::warning(
+                    "decode.tcp_reserved_bits",
+                    "reserved TCP header bits are non-zero",
+                )
+                .at_field("reserved_bits"),
+            );
+        }
+        if let Some(network) = context.network
+            && transport_checksum(NAME, network, ip_protocol::TCP, &input)? != 0
+        {
+            diagnostics.push(
+                Diagnostic::warning(TCP_CHECKSUM, "TCP checksum mismatch").at_field("checksum"),
+            );
+        }
+        let payload_len = input.len().saturating_sub(header_len);
+        let source_port = u16::from_be_bytes([header[0], header[1]]);
+        let destination_port = u16::from_be_bytes([header[2], header[3]]);
+        Ok(DecodedLayer {
+            layer: Box::new(Tcp {
+                source_port,
+                destination_port,
+                sequence: u32::from_be_bytes([header[4], header[5], header[6], header[7]]),
+                acknowledgment: u32::from_be_bytes([header[8], header[9], header[10], header[11]]),
+                reserved_bits,
+                flags: (u16::from(header[12] & 1) << 8) | u16::from(header[13]),
+                window: u16::from_be_bytes([header[14], header[15]]),
+                checksum: WireValue::Exact(checksum_value),
+                urgent_pointer: u16::from_be_bytes([header[18], header[19]]),
+                options: parse(&input.slice_ref(options)),
+            }),
+            consumed: header_len,
+            payload_len,
+            // Both endpoints are offered before the raw fallback so a payload
+            // protocol bound to a well-known TCP port dissects in either
+            // direction. Unlike UDP there is no content preference between
+            // them: a TLS segment looks the same in both directions and the
+            // codec gates on the payload itself.
+            next: if payload_len == 0 {
+                Vec::new()
+            } else {
+                child_discriminators([destination_port, source_port])
+            },
+            fields: tcp_layout(header_len),
+            diagnostics,
+            stop: payload_len == 0,
+            network: None,
         })
     }
 
-    fn serialize(&self, output: &mut Vec<u8>) -> Result<(), codec::Error> {
-        let invalid = |message: &str| invalid(super::NAME, message);
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        make_layer(Tcp::default(), fields)
+    }
+}
+
+impl TcpOption {
+    fn serialize(&self, output: &mut Vec<u8>) -> Result<(), crate::codec::Error> {
+        let invalid = |message: &str| invalid(NAME, message);
         match self {
             Self::End => output.push(KIND_END),
             Self::Nop => output.push(KIND_NOP),
@@ -138,8 +257,8 @@ impl TcpOption {
 }
 
 /// Serializes options in order into the TCP option area (at most 40 bytes).
-pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, codec::Error> {
-    let invalid = |message: &str| invalid(super::NAME, message);
+pub(super) fn serialize(options: &[TcpOption]) -> Result<Vec<u8>, crate::codec::Error> {
+    let invalid = |message: &str| invalid(NAME, message);
     let mut output = Vec::with_capacity(MAX_OPTION_BYTES);
     let mut seen_end = false;
     let mut seen_trailing = false;
@@ -244,149 +363,10 @@ fn typed(kind: u8, body: Bytes) -> TcpOption {
     }
 }
 
-const SACK_EDGE_FIELDS: &[FieldSchema] = &[
-    member("left_edge", FieldKind::Unsigned, &[]),
-    member("right_edge", FieldKind::Unsigned, &[]),
-];
-
-pub(crate) const OPTION_FIELDS: &[FieldSchema] = &[
-    member("kind", FieldKind::Unsigned, &[]),
-    member("mss", FieldKind::Unsigned, &[]),
-    member("window_scale", FieldKind::Unsigned, &[]),
-    member("sack", FieldKind::List, SACK_EDGE_FIELDS),
-    member("tsval", FieldKind::Unsigned, &[]),
-    member("tsecr", FieldKind::Unsigned, &[]),
-    member("data", FieldKind::Bytes, &[]),
-    member("trailing", FieldKind::Bytes, &[]),
-];
-
-fn option_value(option: &TcpOption) -> FieldValue {
-    let mut fields = Vec::with_capacity(3);
-    if let Some(kind) = option.kind() {
-        fields.push(("kind", FieldValue::Unsigned(u64::from(kind))));
-    }
-    match option {
-        TcpOption::Mss(value) => fields.push(("mss", (*value).into())),
-        TcpOption::WindowScale(shift) => fields.push(("window_scale", (*shift).into())),
-        TcpOption::Sack(blocks) => fields.push((
-            "sack",
-            FieldValue::List(
-                blocks
-                    .iter()
-                    .map(|block| {
-                        object([
-                            ("left_edge", block.left_edge.into()),
-                            ("right_edge", block.right_edge.into()),
-                        ])
-                    })
-                    .collect(),
-            ),
-        )),
-        TcpOption::Timestamps { value, echo_reply } => {
-            fields.push(("tsval", (*value).into()));
-            fields.push(("tsecr", (*echo_reply).into()));
-        }
-        TcpOption::Raw { data, .. } => fields.push(("data", data.clone().into())),
-        TcpOption::Trailing(bytes) => fields.push(("trailing", bytes.clone().into())),
-        TcpOption::End | TcpOption::Nop | TcpOption::SackPermitted => {}
-    }
-    FieldValue::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
-}
-
-pub(crate) fn options_value(options: &[TcpOption]) -> FieldValue {
-    FieldValue::List(options.iter().map(option_value).collect())
-}
-
-fn sack_blocks(
-    value: FieldValue,
-    schema: &'static Schema,
-    field: &str,
-) -> Result<Vec<SackBlock>, FieldError> {
-    list(value, 31, schema, field)?
-        .into_iter()
-        .map(|value| {
-            let mut block = Object::new(value, schema, field)?;
-            let parsed = SackBlock {
-                left_edge: block.required_value("left_edge")?,
-                right_edge: block.required_value("right_edge")?,
-            };
-            block.finish()?;
-            Ok(parsed)
-        })
-        .collect()
-}
-
-/// Parses a constructed `options` field value: either verbatim bytes, which
-/// are parsed like the wire form, or a list of typed option objects.
-pub(crate) fn parse_field(
-    value: FieldValue,
-    schema: &'static Schema,
-    field: &str,
-) -> Result<Vec<TcpOption>, FieldError> {
-    if let FieldValue::Bytes(bytes) = value {
-        // Decoded input is bounded by the data offset, but a constructed value
-        // carries no header, so bound it here rather than allocating an entry
-        // per byte and only rejecting the size at encode time.
-        if bytes.len() > MAX_OPTION_BYTES {
-            return Err(out_of_range(schema, field));
-        }
-        return Ok(parse(&bytes));
-    }
-    let values = list(value, 64, schema, field)?;
-    let mut options = Vec::with_capacity(values.len());
-    for value in values {
-        options.push(parse_option(value, schema, field)?);
-    }
-    serialize(&options).map_err(|_| out_of_range(schema, field))?;
-    Ok(options)
-}
-
-fn parse_option(
-    value: FieldValue,
-    schema: &'static Schema,
-    field: &str,
-) -> Result<TcpOption, FieldError> {
-    let mut option = Object::new(value, schema, field)?;
-    if let Some(trailing) = option.take("trailing") {
-        let bytes = match trailing {
-            FieldValue::Bytes(bytes) => bytes,
-            _ => return Err(wrong_type(schema, field, "trailing bytes")),
-        };
-        option.finish()?;
-        return Ok(TcpOption::Trailing(bytes));
-    }
-    let kind: u8 = option.required_value("kind")?;
-    let data = match option.take("data") {
-        Some(FieldValue::Bytes(bytes)) => Some(bytes),
-        Some(_) => return Err(wrong_type(schema, field, "option data bytes")),
-        None => None,
-    };
-    // `option_value` writes `data` for `Raw` alone, so its presence decides the
-    // variant ahead of the typed arms: a standard kind whose wire length was
-    // nonstandard decodes to `Raw` and has to round-trip back to `Raw`.
-    let parsed = match (kind, data) {
-        (KIND_END, None) => TcpOption::End,
-        (KIND_NOP, None) => TcpOption::Nop,
-        (KIND_MSS, None) => TcpOption::Mss(option.required_value("mss")?),
-        (KIND_WINDOW_SCALE, None) => TcpOption::WindowScale(option.required_value("window_scale")?),
-        (KIND_SACK_PERMITTED, None) => TcpOption::SackPermitted,
-        (KIND_SACK, None) => TcpOption::Sack(sack_blocks(option.required("sack")?, schema, field)?),
-        (KIND_TIMESTAMPS, None) => TcpOption::Timestamps {
-            value: option.required_value("tsval")?,
-            echo_reply: option.required_value("tsecr")?,
-        },
-        (kind, data) => TcpOption::Raw {
-            kind,
-            data: data.unwrap_or_default(),
-        },
-    };
-    option.finish()?;
-    Ok(parsed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::Discriminator;
 
     fn wire(options: &[TcpOption]) -> Vec<u8> {
         serialize(options).expect("options serialize")
@@ -465,33 +445,25 @@ mod tests {
         assert!(serialize(&[TcpOption::End, TcpOption::Mss(1460)]).is_err());
     }
 
+    fn ports(source_port: u16, destination_port: u16) -> Vec<u64> {
+        child_discriminators([destination_port, source_port])
+            .into_iter()
+            .map(|Discriminator(value)| value)
+            .collect()
+    }
+
     #[test]
-    fn constructed_options_enforce_the_wire_limit_before_encoding() {
-        for options in [
-            vec![TcpOption::Trailing(Bytes::from(vec![0; 65_536]))],
-            vec![TcpOption::Nop; 41],
-            vec![TcpOption::Sack(Vec::new())],
-            vec![TcpOption::Sack(vec![
-                SackBlock {
-                    left_edge: 1,
-                    right_edge: 2,
-                };
-                5
-            ])],
-        ] {
-            assert!(serialize(&options).is_err());
-            assert!(
-                parse_field(
-                    options_value(&options),
-                    super::super::tcp_schema(),
-                    "options"
-                )
-                .is_err()
-            );
-        }
-        assert_eq!(wire(&vec![TcpOption::Nop; 40]), vec![1; 40]);
-        // A malformed zero-block SACK remains representable as raw wire data.
-        let raw = parse(&Bytes::from_static(&[5, 2]));
-        assert_eq!(wire(&raw), [5, 2]);
+    fn the_destination_port_is_offered_before_the_source_port_and_the_fallback() {
+        assert_eq!(ports(40_000, 443), vec![443, 40_000, 0]);
+    }
+
+    #[test]
+    fn a_repeated_port_is_offered_once() {
+        assert_eq!(ports(443, 443), vec![443, 0]);
+    }
+
+    #[test]
+    fn a_zero_port_never_shadows_the_raw_fallback() {
+        assert_eq!(ports(0, 0), vec![0]);
     }
 }

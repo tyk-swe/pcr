@@ -8,6 +8,17 @@
 //! [`builtin::registry`] provides the immutable default registry, and
 //! [`semantics`] interprets the routing fields of built-in layers.
 //!
+//! Protocol models are grouped by layer: [`capture`] link headers, [`link`],
+//! [`network`] (IPv4, IPv6 and its extension headers, ICMP, IGMP),
+//! [`transport`], [`tunnel`] (including GRE), and [`application`].
+//!
+//! Each protocol is one `<proto>.rs` holding its model, its
+//! `reflective_layer!`, and its codec. A large protocol becomes a directory:
+//! `<proto>.rs` keeps the docs, the protocol's `Error` and limits, and the
+//! re-exports, with `model`, `codec`, and `reflection` submodules (TCP, DNS,
+//! HTTP, TLS, and DHCPv4/DHCPv6, which share DHCP's `Error` and limits). Wire
+//! APIs return the protocol's own `Error`.
+//!
 //! Codecs preserve unknown and malformed bytes. SCTP chunks remain validated
 //! opaque bytes; unrecognized application payloads use [`crate::layer::Raw`].
 
@@ -16,9 +27,6 @@ pub mod builtin;
 pub mod capture;
 mod catalog;
 mod common;
-pub mod gre;
-pub mod icmp;
-pub mod ipv6;
 pub mod link;
 mod matcher;
 pub mod network;

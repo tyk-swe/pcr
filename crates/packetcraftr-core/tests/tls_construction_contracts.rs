@@ -6,7 +6,7 @@ use packetcraftr_core::{
     expression,
     layer::Layer,
     protocol::{
-        application::tls::{Hello, HelloExtension, HelloKind, codec::Tls},
+        application::tls::{Hello, HelloExtension, HelloKind, Tls},
         builtin,
     },
     template::Template,

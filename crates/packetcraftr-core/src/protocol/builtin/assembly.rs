@@ -1,26 +1,26 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Portable built-in Internet protocol layers and their deterministic registry module.
+//! Assembly of the deterministic default registry from the built-in codecs,
+//! matchers, and bindings.
 
 use std::sync::{Arc, OnceLock};
 
 use crate::protocol::{
-    application, capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher,
-    network as ip, transport, tunnel,
+    application, capture as capture_link, link, matcher, network as ip, transport, tunnel,
 };
 
 use crate::layer::{MalformedCodec, PaddingCodec, RawCodec};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
-use gre::GreCodec;
-use icmp::{Icmpv4Codec, Icmpv6Codec};
-use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
-use ipv6_ext::{DestinationOptionsCodec, FragmentCodec, HopByHopCodec, SegmentRoutingHeaderCodec};
+use ip::{
+    DestinationOptionsCodec, FragmentCodec, HopByHopCodec, Icmpv4Codec, Icmpv6Codec, IgmpCodec,
+    Ipv4Codec, Ipv6Codec, RawIpCodec, SegmentRoutingHeaderCodec,
+};
 use link::{ArpCodec, EthernetCodec, LlcCodec, SnapCodec, Vlan8021adCodec, VlanCodec};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    AhCodec, ErspanCodec, EspCodec, GeneveCodec, L2tpv3Codec, MplsCodec, PppCodec, PppoeCodec,
-    VxlanCodec,
+    AhCodec, ErspanCodec, EspCodec, GeneveCodec, GreCodec, L2tpv3Codec, MplsCodec, PppCodec,
+    PppoeCodec, VxlanCodec,
 };
 
 use crate::protocol::BuiltinProtocol;
@@ -28,7 +28,7 @@ use crate::protocol::catalog::builtin_protocol_catalog;
 
 use application::{Dhcpv4Codec, Dhcpv6Codec, DnsCodec, HttpCodec, NtpCodec, TlsCodec};
 
-pub(crate) mod registration;
+use super::bindings;
 
 fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
     macro_rules! register_matcher {
@@ -127,7 +127,7 @@ where
 {
     let mut builder = crate::registry::Registry::builder();
     register_catalog(&mut builder)?;
-    registration::register(&mut builder)?;
+    bindings::register(&mut builder)?;
     extra(&mut builder)?;
     builder.build()
 }
@@ -155,5 +155,5 @@ where
 pub fn registry_with_tls_ports(
     ports: &[u16],
 ) -> Result<crate::registry::Registry, crate::registry::Error> {
-    registry_with(|builder| registration::bind_tls_ports(builder, ports))
+    registry_with(|builder| bindings::bind_tls_ports(builder, ports))
 }

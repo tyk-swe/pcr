@@ -9,8 +9,7 @@ use packetcraftr_core::{
     packet::Packet,
     protocol::{
         builtin,
-        ipv6::{DestinationOptions, HopByHop},
-        network::{Ipv4, Ipv6},
+        network::{DestinationOptions, HopByHop, Ipv4, Ipv6},
         transport::Udp,
     },
     transform::{FragmentOptions, fragment},

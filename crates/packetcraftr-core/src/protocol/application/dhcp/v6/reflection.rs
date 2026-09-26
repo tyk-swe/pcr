@@ -627,7 +627,7 @@ const OPTIONS_8: &[FieldSchema] = &[
 ];
 
 reflective_layer! {
-    pub(in super::super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}
+    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}
     impl Dhcpv6 {
         "message_type" => {kind:Unsigned,derived:false,required:false,description:"DHCPv6 message type",reflect:message_type,layout:(0,1)},
         "transaction_id" | "xid" => {kind:Unsigned,derived:false,required:false,description:"24-bit identity in ordinary messages",get |layer| (!layer.is_relay()).then(||layer.transaction_id.into()),set |layer,value,name| reflect_set(&mut layer.transaction_id,schema(),name,value)},
@@ -637,5 +637,5 @@ reflective_layer! {
         "options" => {kind:List,derived:false,required:false,description:"Ordered nested DHCP options",children:OPTIONS_8,get |layer| Some(options_value(&layer.options)),set |layer,value,name| {layer.options=parse_options(value,name,0,&mut 0)?;Ok(())}},
         "wire" => {kind:Bytes,derived:false,required:false,description:"Retained complete DHCP wire",get |layer| (!layer.wire.is_empty()).then(||layer.wire.clone().into()),set |_layer,_value,name| read_only(schema(),name)}
     }
-    layout pub(in super::super) fn layout();
+    layout pub(super) fn layout();
 }

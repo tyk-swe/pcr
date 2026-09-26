@@ -15,7 +15,9 @@ use packetcraftr_core::analysis::tls::ServerSummary;
 use packetcraftr_core::analysis::tls::Session as AnalysisSession;
 use packetcraftr_core::analysis::tls::Status;
 use packetcraftr_core::analysis::tls::Summary as AnalysisSummary;
-use packetcraftr_core::protocol::application::tls::names;
+use packetcraftr_core::protocol::application::tls::{
+    alert_description_name, cipher_suite_name, named_group_name, version_name,
+};
 
 use super::envelope::is_zero;
 use super::hex::compact_hex;
@@ -36,7 +38,7 @@ impl From<AnalysisAlert> for Alert {
         Self {
             level: value.level,
             description: value.description,
-            description_name: names::alert_description_name(value.description),
+            description_name: alert_description_name(value.description),
         }
     }
 }
@@ -75,7 +77,7 @@ impl From<ClientSummary> for Client {
     fn from(value: ClientSummary) -> Self {
         Self {
             legacy_version: value.legacy_version,
-            legacy_version_name: names::version_name(value.legacy_version),
+            legacy_version_name: version_name(value.legacy_version),
             sni: value.sni,
             sni_raw_hex: value.sni_raw.map(|bytes| compact_hex(&bytes)),
             sni_is_outer: value.sni_is_outer,
@@ -116,12 +118,12 @@ impl From<ServerSummary> for Server {
     fn from(value: ServerSummary) -> Self {
         Self {
             selected_version: value.selected_version,
-            selected_version_name: names::version_name(value.selected_version),
+            selected_version_name: version_name(value.selected_version),
             cipher_suite: value.cipher_suite,
-            cipher_suite_name: names::cipher_suite_name(value.cipher_suite),
+            cipher_suite_name: cipher_suite_name(value.cipher_suite),
             alpn: value.alpn,
             key_share_group: value.key_share_group,
-            key_share_group_name: value.key_share_group.and_then(names::named_group_name),
+            key_share_group_name: value.key_share_group.and_then(named_group_name),
             ja3s: value.ja3s,
             ja3s_raw: value.ja3s_raw,
         }

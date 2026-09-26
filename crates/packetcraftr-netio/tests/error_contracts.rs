@@ -659,7 +659,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
     use packetcraftr_core::{
         field::WireValue,
         packet::Packet,
-        packet::semantics::Error as SemanticsError,
+        protocol::semantics::Error as SemanticsError,
         protocol::{
             ipv6::SegmentRoutingHeader,
             network::{Ipv4, Ipv6},

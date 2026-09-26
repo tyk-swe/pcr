@@ -1,14 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ordered layer stacks and the canonical interpretation of their outer scope.
+//! Ordered layer stacks.
 
 use std::fmt;
 
 use crate::layer::{Layer, Padding};
 
 pub mod link;
-pub mod semantics;
 
 /// Exactly one ordered, arbitrary wire stack.
 ///

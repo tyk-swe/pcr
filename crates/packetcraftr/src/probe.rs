@@ -29,7 +29,7 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{
     budget::Deadline, decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet,
-    packet::semantics, protocol::BuiltinProtocol, registry::Registry,
+    protocol::BuiltinProtocol, protocol::semantics, registry::Registry,
 };
 
 use crate::target::GateErrors;

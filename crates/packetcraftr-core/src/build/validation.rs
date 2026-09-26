@@ -26,7 +26,15 @@ pub(super) fn validate_bindings(
             previous_padding = None;
             continue;
         };
-        validate_padding(packet, protocols, index, padding, mode, diagnostics)?;
+        validate_padding(
+            registry,
+            packet,
+            protocols,
+            index,
+            padding,
+            mode,
+            diagnostics,
+        )?;
         // Covered lengths trim trailing padding from the end, so a run must
         // list the innermost boundary first and link padding last, the order
         // dissection produces.
@@ -63,12 +71,12 @@ fn validate_adjacent_bindings(
                 discriminator
             }
         };
+        // Raw bytes carry no binding to their child, and padding or malformed
+        // bytes may follow any layer.
         if discriminator.is_some()
-            || BuiltinProtocol::from_id(*parent) == Some(BuiltinProtocol::Raw)
-            || matches!(
-                BuiltinProtocol::from_id(*child),
-                Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-            )
+            || *parent == Raw::ID
+            || *child == Padding::ID
+            || *child == Malformed::ID
         {
             continue;
         }
@@ -90,6 +98,7 @@ fn validate_adjacent_bindings(
 }
 
 fn validate_padding(
+    registry: &Registry,
     packet: &Packet,
     protocols: &[crate::layer::Id],
     index: usize,
@@ -98,7 +107,7 @@ fn validate_padding(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
     let Some(outside_layer) = padding.outside_layer else {
-        return validate_link_padding(protocols, index, mode, diagnostics);
+        return validate_link_padding(registry, protocols, index, mode, diagnostics);
     };
     let Some(outside) = packet
         .layer(outside_layer)
@@ -144,10 +153,10 @@ fn validate_padding(
         Some(FieldValue::Bytes(value)) if value.len() == 2 => {
             u16::from_be_bytes([value[0], value[1]]) <= 1500
         }
-        _ => matches!(
-            BuiltinProtocol::from_name(child_protocol),
-            Some(BuiltinProtocol::Llc | BuiltinProtocol::Padding)
-        ),
+        _ => {
+            child_protocol == Padding::ID.as_str()
+                || BuiltinProtocol::from_name(child_protocol) == Some(BuiltinProtocol::Llc)
+        }
     };
     let has_declared_boundary = match outside_builtin {
         Some(
@@ -190,23 +199,16 @@ fn validate_padding(
 }
 
 fn validate_link_padding(
+    registry: &Registry,
     protocols: &[crate::layer::Id],
     index: usize,
     mode: crate::codec::Mode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), Error> {
-    let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
-        matches!(
-            BuiltinProtocol::from_id(*protocol),
-            Some(
-                BuiltinProtocol::Ethernet
-                    | BuiltinProtocol::BsdNull
-                    | BuiltinProtocol::BsdLoop
-                    | BuiltinProtocol::LinuxSll
-                    | BuiltinProtocol::LinuxSll2
-            )
-        )
-    });
+    let enclosed_by_link = protocols
+        .iter()
+        .take(index)
+        .any(|protocol| registry.allows_trailing_padding(protocol.as_str()));
     if enclosed_by_link {
         return Ok(());
     }

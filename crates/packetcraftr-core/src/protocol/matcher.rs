@@ -8,8 +8,8 @@ mod reverse_flow;
 mod sctp;
 
 use crate::{
-    codec::NetworkEnvelope, layer::Layer, packet::Packet, packet::semantics,
-    protocol::BuiltinProtocol,
+    codec::NetworkEnvelope, layer::Layer, packet::Packet, protocol::BuiltinProtocol,
+    protocol::semantics,
 };
 
 pub(crate) use dns::DnsMatcher;

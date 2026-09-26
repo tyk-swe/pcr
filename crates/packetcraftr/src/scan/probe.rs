@@ -545,7 +545,7 @@ mod tests {
             .decode(frame, decode::Options::default())
             .unwrap();
         let destinations =
-            packetcraftr_core::packet::semantics::live_destinations(&decoded.packet).unwrap();
+            packetcraftr_core::protocol::semantics::live_destinations(&decoded.packet).unwrap();
         assert!(destinations.contains(&"192.0.2.10".parse().unwrap()));
         assert!(destinations.contains(&"10.0.0.2".parse().unwrap()));
     }

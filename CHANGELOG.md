@@ -110,8 +110,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   `output::capture::Retention` no longer implement `clap::ValueEnum`; the CLI
   parses its own selectors and converts them with `From`. See
   `docs/migration-unreleased.md`.
+- Core modules form acyclic layers (model, protocols, engines, workflows;
+  see the crate docs). `packet::semantics` moves to `protocol::semantics`
+  with the same items. `protocol::raw` is removed: the `Raw`, `Padding`, and
+  `Malformed` layers and their codecs belong to `layer`, and `parse_hex` moves
+  to `layer::parse_hex`. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- `registry::Builder::allow_trailing_padding` records that a link protocol's
+  frames may carry trailing padding after the network payload, and
+  `Registry::allows_trailing_padding` reports it. Decoding and building read
+  this property instead of a fixed list of built-in link protocols, so a
+  custom link protocol registered with it behaves like Ethernet.
 
 - Independent forwarding detail-byte and comparison-scratch budgets, input
   fingerprints, decode/filter context, correspondence-only and identity-overlap
@@ -344,10 +355,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
-- `packet::semantics::Error` messages describe the packet instead of a
-  transmission denial (for example "destination cannot be determined because
-  the ipv4 layer is malformed: …" instead of "malformed ipv4 layer may hide a
-  live destination: …"). Live commands still refuse such packets with
+- `protocol::semantics::Error` (formerly `packet::semantics::Error`) messages
+  describe the packet instead of a transmission denial (for example
+  "destination cannot be determined because the ipv4 layer is malformed: …"
+  instead of "malformed ipv4 layer may hide a live destination: …"). Live commands still refuse such packets with
   `policy.invalid_packet_semantics`; only the reason text changes.
 - `dns-read --dns-port` adds ports to 53 instead of replacing it, as README
   documents and `http --http-port` already behaves.
@@ -576,6 +587,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- A strict build accepts link padding inside a packet rooted at `vlan` or
+  `vlan8021ad`, as decoding already produces it, instead of failing with
+  `PaddingWithoutLinkLayer`.
 - Replay text output reports a stdout write failure even if the invocation
   deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with

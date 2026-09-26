@@ -223,7 +223,7 @@ packet/v2 field contract.
 `source: Option<Box<dyn std::error::Error + Send + Sync>>`.
 When constructing a local route failure, provide `source: None`. Conversions
 from packet-semantics validation retain the original error as `Some`, so
-`source().downcast_ref::<packetcraftr_core::packet::semantics::Error>()`
+`source().downcast_ref::<packetcraftr_core::protocol::semantics::Error>()`
 recovers the typed cause.
 
 Wrapped errors display route context; inspect `std::error::Error::source()` or
@@ -589,7 +589,7 @@ Core keeps packet facts; `packetcraftr` owns what they mean for live traffic.
 `BuiltPacket` now records the codec `mode` it was built with and exposes
 `contains_malformed()` and `contains_network_trailer()`; the published
 `requires_live_opt_in` output field is unchanged. `Deadline` gains `limit()`
-and `cancellation()` getters. `packet::semantics::Error` messages now read
+and `cancellation()` getters. `protocol::semantics::Error` messages now read
 "destination cannot be determined because …"; match on the variant, not the
 text.
 
@@ -695,3 +695,20 @@ behavior, flags, exit codes, and output documents are unchanged.
 `output::capture::Retention` are plain output types and no longer implement
 `clap::ValueEnum`. Code that parsed them with clap declares its own value enum
 and converts it with `From`, as the CLI does.
+
+## Acyclic core layers
+
+Core modules now depend only on their own layer or a lower one (see the
+`packetcraftr_core` crate docs). Only paths change; items and behavior do not.
+
+| Removed path | Import instead |
+|---|---|
+| `packetcraftr_core::packet::semantics` | `packetcraftr_core::protocol::semantics` |
+| `packetcraftr_core::protocol::raw::parse_hex` | `packetcraftr_core::layer::parse_hex` |
+
+`protocol::raw` exported only `parse_hex`; the `Raw`, `Padding`, and
+`Malformed` layers stay at `packetcraftr_core::layer`. A custom link protocol
+whose frames may end in padding after the network payload (as Ethernet frames
+do) calls `Builder::allow_trailing_padding(protocol)` when it registers its
+codec, so decoding reports those bytes as padding and strict builds accept
+link padding inside it.

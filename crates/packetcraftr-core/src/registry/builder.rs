@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use super::binding::{ChildBinding, Discriminator, FilterFieldBinding};
@@ -18,6 +18,7 @@ pub struct Builder {
     pub(super) roots: HashMap<LinkType, crate::layer::Id>,
     pub(super) bindings: HashMap<crate::layer::Id, HashMap<Discriminator, Vec<ChildBinding>>>,
     pub(super) matchers: BTreeMap<crate::layer::Id, Arc<dyn ResponseMatcher>>,
+    pub(super) trailing_padding: BTreeSet<crate::layer::Id>,
     pub(super) filter_fields: BTreeMap<String, FilterFieldBinding>,
 }
 
@@ -58,6 +59,19 @@ impl Builder {
         }
         self.codecs.insert(protocol, codec);
         Ok(self)
+    }
+
+    /// Records that frames of a link protocol may carry trailing padding after
+    /// the payload its network layer declares, as Ethernet does to reach its
+    /// minimum frame size.
+    ///
+    /// Decoding a link scope rooted at `protocol` preserves bytes past the
+    /// network layer's declared length as link [`Padding`](crate::layer::Padding),
+    /// and building accepts link padding inside it. Call it when registering
+    /// the protocol's codec; [`Self::build`] rejects an unregistered protocol.
+    pub fn allow_trailing_padding(&mut self, protocol: impl Into<crate::layer::Id>) -> &mut Self {
+        self.trailing_padding.insert(protocol.into());
+        self
     }
 
     pub fn bind_link_type(

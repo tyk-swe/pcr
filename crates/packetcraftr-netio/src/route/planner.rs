@@ -3,7 +3,7 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core::{packet::Packet, packet::semantics, protocol::BuiltinProtocol};
+use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::semantics};
 
 use super::error::Error;
 use super::intent::{

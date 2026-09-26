@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::{
-    field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
+    field::FieldValue, packet::Packet, protocol::BuiltinProtocol, protocol::semantics,
 };
 
 use crate::Error;

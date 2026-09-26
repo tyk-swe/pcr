@@ -119,8 +119,7 @@ fn ipv4_source_route_decode_accepts_known_transport_checksums() {
     ];
 
     for (transport, checksum_code, vector) in vectors {
-        let bytes =
-            packetcraftr_core::protocol::raw::parse_hex(vector).expect("known vector is valid hex");
+        let bytes = packetcraftr_core::layer::parse_hex(vector).expect("known vector is valid hex");
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes)
             .expect("known DLT_RAW vector is a valid frame");
         let decoded = decode::Dissector::new(registry())
@@ -1485,7 +1484,7 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
             .iter()
             .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
     );
-    let path = packetcraftr_core::packet::semantics::outer_ip_path(&decoded.packet)
+    let path = packetcraftr_core::protocol::semantics::outer_ip_path(&decoded.packet)
         .unwrap()
         .unwrap();
     assert_eq!(

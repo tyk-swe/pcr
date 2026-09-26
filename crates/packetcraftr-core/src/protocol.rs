@@ -5,7 +5,8 @@
 //! reports construction, round-trip, and matcher support;
 //! [`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS) lists
 //! capture bindings.
-//! [`builtin::registry`] provides the immutable default registry.
+//! [`builtin::registry`] provides the immutable default registry, and
+//! [`semantics`] interprets the routing fields of built-in layers.
 //!
 //! Codecs preserve unknown and malformed bytes. SCTP chunks remain validated
 //! opaque bytes; unrecognized application payloads use [`crate::layer::Raw`].
@@ -21,7 +22,7 @@ pub mod ipv6;
 pub mod link;
 mod matcher;
 pub mod network;
-pub mod raw;
+pub mod semantics;
 pub mod transport;
 pub mod tunnel;
 

@@ -322,7 +322,10 @@ mod tests {
     }
 
     impl net::interface::Provider for FlakyProvider {
-        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::interface::Error> {
+        fn interfaces(
+            &self,
+            _deadline: &packetcraftr_core::budget::Deadline,
+        ) -> Result<Vec<net::interface::Info>, net::interface::Error> {
             let call = self
                 .calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

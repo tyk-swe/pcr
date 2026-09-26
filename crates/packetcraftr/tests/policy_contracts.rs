@@ -14,6 +14,7 @@ use packetcraftr::policy::Authorizer;
 use packetcraftr::target::Hostname;
 use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::{
     layer::Raw,
@@ -26,6 +27,11 @@ use packetcraftr_netio::{
     route::{Decision, Provider},
     transmit,
 };
+
+/// A deadline no fixture here comes close to spending.
+fn live() -> Deadline {
+    Deadline::new(std::time::Duration::from_secs(5))
+}
 
 struct CountingResolver {
     calls: AtomicUsize,
@@ -44,6 +50,7 @@ impl Provider for CountingRoutes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         unreachable!("denied resolved addresses must not reach route lookup")
@@ -67,6 +74,7 @@ impl capture::Provider for NeverTransmit {
     fn arm_capture(
         &self,
         _request: &capture::Request,
+        _deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         unreachable!("denied targets must not reach neighbor discovery")
     }
@@ -158,6 +166,7 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
             &packet,
             Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
             &packetcraftr::route::Options::default(),
+            &live(),
         )
         .expect_err("public destination must be denied");
     assert!(error.to_string().contains("denies public destination"));
@@ -179,6 +188,7 @@ impl Provider for FixedRoutes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -246,6 +256,7 @@ fn only_non_interface_owned_sources_require_the_spoofing_opt_in() {
             &sourced_packet(source_mac, source),
             Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
             &packetcraftr::route::Options::default(),
+            &live(),
         );
         match result {
             Ok(_) => assert!(expect_ok, "{source_mac:?}/{source} must be denied"),
@@ -269,6 +280,7 @@ fn unspecified_final_wire_ip_source_requires_the_spoofing_opt_in() {
             &packet,
             Some(destination),
             &packetcraftr::route::Options::default(),
+            &live(),
         )
         .expect("unspecified authored source must use the planned source");
     plan.packet_source = None;
@@ -537,6 +549,8 @@ fn passive_planning_validates_the_destination_constraint_count() {
         destination: Ipv4Addr::new(10, 0, 0, 2),
         ..Default::default()
     });
-    let error = client.plan(&packet, None, &Default::default()).unwrap_err();
+    let error = client
+        .plan(&packet, None, &Default::default(), &live())
+        .unwrap_err();
     assert_eq!(code(&error), "cli.live_target");
 }

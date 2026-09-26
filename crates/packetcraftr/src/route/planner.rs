@@ -5,6 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::semantics};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::link::Mode;
@@ -17,14 +18,16 @@ use super::intent::{
 use super::model::{Options, Plan, is_ipv4_broadcast};
 
 /// Passively selects route, source, and link without ARP/NDP, capture, or transmission.
+/// The route lookup receives the caller's `deadline`.
 pub fn plan<P: Provider>(
     packet: &Packet,
     destination: Option<IpAddr>,
     options: &Options,
     provider: &P,
+    deadline: &Deadline,
 ) -> Result<Plan, Error> {
     let intent = PacketIntent::from_packet(packet, destination, options)?;
-    let route = lookup_route(&intent, options, provider)?;
+    let route = lookup_route(&intent, options, provider, deadline)?;
     validate_route_contract(&route, options)?;
     let mode = select_link_mode(&intent, &route, options.link_mode)?;
     let sources = select_sources(&intent, &route)?;
@@ -197,6 +200,7 @@ fn lookup_route<P: Provider>(
     intent: &PacketIntent,
     options: &Options,
     provider: &P,
+    deadline: &Deadline,
 ) -> Result<Decision, Error> {
     Ok(match intent.lookup_destination {
         Some(lookup_destination) => provider
@@ -204,6 +208,7 @@ fn lookup_route<P: Provider>(
                 lookup_destination,
                 options.interface.as_ref(),
                 options.preferred_source,
+                deadline,
             )
             .map_err(|source| Error::RouteLookup {
                 destination: lookup_destination,
@@ -216,7 +221,7 @@ fn lookup_route<P: Provider>(
                 .as_ref()
                 .ok_or(Error::MissingLayer2Interface)?;
             provider
-                .lookup_interface(interface)
+                .lookup_interface(interface, deadline)
                 .map_err(|source| Error::InterfaceLookup {
                     interface: interface.name.clone(),
                     failure: source.classification(),
@@ -362,6 +367,8 @@ fn select_link(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::live;
+    use packetcraftr_core::budget::Deadline;
 
     use std::fmt;
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -421,6 +428,7 @@ mod tests {
             _destination: IpAddr,
             _interface_hint: Option<&InterfaceId>,
             _preferred_source: Option<IpAddr>,
+            _deadline: &Deadline,
         ) -> Result<Decision, Self::Error> {
             self.lookup_calls.fetch_add(1, Ordering::SeqCst);
             self.decision.clone()
@@ -429,6 +437,7 @@ mod tests {
         fn lookup_interface(
             &self,
             _interface: &InterfaceId,
+            _deadline: &Deadline,
         ) -> Result<Option<Decision>, Self::Error> {
             self.interface_calls.fetch_add(1, Ordering::SeqCst);
             self.interface_decision.clone()
@@ -498,6 +507,7 @@ mod tests {
             None,
             &Options::default(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("an IP root on a Layer 3 capable route plans");
         assert_eq!(plan.mode, Mode::Layer3);
@@ -528,6 +538,7 @@ mod tests {
             None,
             &Options::default(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("an explicit link header plans on Layer 2");
         assert_eq!(plan.mode, Mode::Layer2);
@@ -546,6 +557,7 @@ mod tests {
             None,
             &layer2(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("an IP packet plans on Layer 2");
         assert!(plan.synthesized_ethernet);
@@ -564,6 +576,7 @@ mod tests {
                     ..Options::default()
                 },
                 &routes(Ok(decision(Capability::Layer2))),
+                &live(),
             ),
             Err(Error::Layer3Unsupported)
         ));
@@ -572,7 +585,8 @@ mod tests {
                 &packet,
                 None,
                 &layer2(),
-                &routes(Ok(decision(Capability::Layer3)))
+                &routes(Ok(decision(Capability::Layer3))),
+                &live()
             ),
             Err(Error::Layer2Unsupported)
         ));
@@ -586,6 +600,7 @@ mod tests {
             None,
             &layer2(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("limited broadcast plans");
         assert_eq!(plan.destination_mac, Some(MacAddress([0xff; 6])));
@@ -595,8 +610,14 @@ mod tests {
         let mut directed_route = decision(Capability::Layer2AndLayer3);
         directed_route.selection_reason = SelectionReason::Broadcast;
         let directed = ipv4_packet(Ipv4Addr::new(10, 23, 0, 2), Ipv4Addr::new(10, 23, 0, 255));
-        let plan = super::plan(&directed, None, &layer2(), &routes(Ok(directed_route)))
-            .expect("subnet-directed broadcast plans");
+        let plan = super::plan(
+            &directed,
+            None,
+            &layer2(),
+            &routes(Ok(directed_route)),
+            &live(),
+        )
+        .expect("subnet-directed broadcast plans");
         assert_eq!(plan.destination_mac, Some(MacAddress([0xff; 6])));
         assert_eq!(plan.neighbor_target, None);
         assert!(!plan.needs_neighbor_resolution());
@@ -607,6 +628,7 @@ mod tests {
             None,
             &layer2(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("IPv4 multicast plans");
         assert_eq!(
@@ -631,8 +653,14 @@ mod tests {
         let mut ipv6_route = decision(Capability::Layer2AndLayer3);
         ipv6_route.selected_source = Some(IpAddr::V6(source));
         ipv6_route.destination_scope = Scope::Multicast;
-        let plan = super::plan(&ipv6_multicast, None, &layer2(), &routes(Ok(ipv6_route)))
-            .expect("IPv6 multicast plans");
+        let plan = super::plan(
+            &ipv6_multicast,
+            None,
+            &layer2(),
+            &routes(Ok(ipv6_route)),
+            &live(),
+        )
+        .expect("IPv6 multicast plans");
         assert_eq!(
             plan.destination_mac,
             Some(MacAddress([0x33, 0x33, 0, 0, 0, 1]))
@@ -649,7 +677,7 @@ mod tests {
         route.selection_reason = SelectionReason::Gateway;
         let packet = ipv4_packet(Ipv4Addr::new(10, 23, 0, 2), Ipv4Addr::new(192, 0, 2, 9));
 
-        let plan = super::plan(&packet, None, &layer2(), &routes(Ok(route)))
+        let plan = super::plan(&packet, None, &layer2(), &routes(Ok(route)), &live())
             .expect("an off-link destination plans through the gateway");
         assert_eq!(plan.destination_mac, None);
         assert_eq!(plan.neighbor_target, Some(gateway));
@@ -665,6 +693,7 @@ mod tests {
             None,
             &layer2(),
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("an on-link destination plans");
         assert_eq!(plan.destination_mac, None);
@@ -686,6 +715,7 @@ mod tests {
                     ..Options::default()
                 },
                 &provider,
+                &live(),
             ),
             Err(Error::MissingDestination)
         ));
@@ -699,6 +729,7 @@ mod tests {
                     ..Options::default()
                 },
                 &provider,
+                &live(),
             ),
             Err(Error::PreferredSourceFamilyMismatch { .. })
         ));
@@ -718,6 +749,7 @@ mod tests {
                     ..Options::default()
                 },
                 &provider,
+                &live(),
             ),
             Err(Error::EthernetInLayer3)
         ));
@@ -731,7 +763,7 @@ mod tests {
         });
         offline.push(Raw::new(vec![1_u8]));
         assert!(matches!(
-            super::plan(&offline, None, &Options::default(), &provider),
+            super::plan(&offline, None, &Options::default(), &provider, &live()),
             Err(Error::OfflineOnlyLinkHeader { .. })
         ));
 
@@ -749,6 +781,7 @@ mod tests {
             Some(destination),
             &Options::default(),
             &routes(Err(RouteFailure)),
+            &live(),
         )
         .expect_err("a lookup failure is reported as a route error");
         assert!(matches!(
@@ -771,6 +804,7 @@ mod tests {
                     ..Options::default()
                 },
                 &routes(Ok(wrong_interface)),
+                &live(),
             ),
             Err(Error::InterfaceMismatch { .. })
         ));
@@ -784,6 +818,7 @@ mod tests {
                     ..Options::default()
                 },
                 &routes(Ok(decision(Capability::Layer2AndLayer3))),
+                &live(),
             ),
             Err(Error::PreferredSourceNotSelected { .. })
         ));
@@ -799,6 +834,7 @@ mod tests {
                 None,
                 &layer2(),
                 &routes(Ok(decision(Capability::Layer2AndLayer3))),
+                &live(),
             ),
             Err(Error::MissingLayer2Interface)
         ));
@@ -811,7 +847,7 @@ mod tests {
 
         let provider = routes(Err(RouteFailure));
         assert!(matches!(
-            super::plan(&raw, None, &options, &provider),
+            super::plan(&raw, None, &options, &provider, &live()),
             Err(Error::InterfaceLookup { .. })
         ));
         assert_eq!(provider.lookup_calls.load(Ordering::SeqCst), 0);
@@ -824,7 +860,7 @@ mod tests {
             interface_calls: Arc::new(AtomicUsize::new(0)),
         };
         assert!(matches!(
-            super::plan(&raw, None, &options, &unsupported),
+            super::plan(&raw, None, &options, &unsupported, &live()),
             Err(Error::InterfaceLookupUnsupported { .. })
         ));
 
@@ -834,6 +870,7 @@ mod tests {
                 None,
                 &options,
                 &routes(Ok(decision(Capability::Layer2AndLayer3))),
+                &live(),
             ),
             Err(Error::MissingLayer2DestinationMac)
         ));
@@ -849,6 +886,7 @@ mod tests {
             None,
             &options,
             &routes(Ok(decision(Capability::Layer2AndLayer3))),
+            &live(),
         )
         .expect("an addressed frame with no IP layer plans on the named interface");
         assert_eq!(plan.lookup_destination, None);
@@ -866,7 +904,8 @@ mod tests {
                 &packet,
                 None,
                 &Options::default(),
-                &routes(Ok(sourceless.clone()))
+                &routes(Ok(sourceless.clone())),
+                &live()
             ),
             Err(Error::MissingPacketSource)
         ));
@@ -878,7 +917,8 @@ mod tests {
                 &packet,
                 None,
                 &Options::default(),
-                &routes(Ok(wrong_family))
+                &routes(Ok(wrong_family)),
+                &live()
             ),
             Err(Error::SourceFamilyMismatch { .. })
         ));
@@ -892,7 +932,7 @@ mod tests {
         let packet = ipv4_packet(Ipv4Addr::new(10, 23, 0, 2), Ipv4Addr::new(10, 23, 0, 9));
 
         assert!(matches!(
-            super::plan(&packet, None, &layer2(), &routes(Ok(no_source))),
+            super::plan(&packet, None, &layer2(), &routes(Ok(no_source)), &live()),
             Err(Error::MissingNeighborSource { .. })
         ));
     }

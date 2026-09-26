@@ -2,21 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
-    Error,
-    capture::{self, Session as _},
-    deadline,
+    Error, capture,
     link::{Capability, Mode},
     route::{Decision, Scope, SelectionReason},
     transmit::{Layer2Frame, Layer3Frame, Outbound, Report, Route},
@@ -217,69 +209,6 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
         }),
         None
     );
-}
-
-#[derive(Debug)]
-struct EmptySession {
-    metadata: capture::Metadata,
-    polls: Arc<AtomicUsize>,
-}
-
-impl capture::Session for EmptySession {
-    fn metadata(&self) -> &capture::Metadata {
-        &self.metadata
-    }
-
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn next_captured_frame(
-        &mut self,
-        _timeout: Duration,
-    ) -> Result<Option<capture::Captured>, Error> {
-        self.polls.fetch_add(1, Ordering::SeqCst);
-        Ok(None)
-    }
-
-    fn shutdown(&mut self) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
-    }
-}
-
-#[test]
-fn cancellable_capture_backs_off_after_early_empty_polls() {
-    for (timeout, maximum_polls) in [
-        (Duration::ZERO, 1),
-        (deadline::POLL_INTERVAL / 5, 1),
-        (deadline::POLL_INTERVAL * 4, 4),
-    ] {
-        let polls = Arc::new(AtomicUsize::new(0));
-        let mut session = capture::Cancellable::new(
-            EmptySession {
-                metadata: capture::Metadata {
-                    interface: interface(),
-                    link_type: LinkType::IPV4,
-                    snap_length: 128,
-                    native: Default::default(),
-                },
-                polls: polls.clone(),
-            },
-            Some(Cancellation::default()),
-        );
-        let started = Instant::now();
-        assert!(session.next_captured_frame(timeout).unwrap().is_none());
-        assert!(started.elapsed() >= timeout);
-        let polls = polls.load(Ordering::SeqCst);
-        assert!(
-            (1..=maximum_polls).contains(&polls),
-            "{polls} polls in {timeout:?}"
-        );
-    }
 }
 
 #[test]

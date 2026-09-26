@@ -21,6 +21,7 @@ use packetcraftr::replay::{
 };
 use packetcraftr::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use packetcraftr::send;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
@@ -201,6 +202,7 @@ impl Transmitter for CountingTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
+        _deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError> {
         let source_mac = MacAddress([0x02, 0, 0, 0, 0, 3]);
         Ok(MaterializedRoute {

@@ -11,7 +11,7 @@ use super::{
     Session, Statistics,
 };
 use crate::{Error, interface::Id};
-use packetcraftr_core::{budget::Cancellation, frame::LinkType};
+use packetcraftr_core::{budget::Deadline, frame::LinkType};
 use std::{
     collections::HashSet,
     fmt,
@@ -164,7 +164,9 @@ static UNARMED: Metadata = Metadata {
 
 /// A composite [`Session`] over one provider session per interface.
 ///
-/// Create it with [`Group::new`], then [`Group::arm`] it. Any failure shuts
+/// Create it with [`Group::new`], then [`Group::arm`] it. Arming and every
+/// wait take the caller's [`Deadline`], whose cancellation stops the group
+/// (see the [deadline convention](crate::deadline)). Any failure shuts
 /// down every admitted source at once; [`Group::snapshot`] stays readable
 /// afterwards, including after an arming failure, and [`Session::shutdown`]
 /// then reports the cleanup failures. Every admitted session is shut down
@@ -178,12 +180,11 @@ pub struct Group<C: Session> {
     armed: bool,
     ready: bool,
     closed: bool,
-    cancellation: Option<Cancellation>,
 }
 
 impl<C: Session> Group<C> {
     /// Validates `request` and partitions its limits; arms nothing yet.
-    pub fn new(request: &GroupRequest, cancellation: Option<Cancellation>) -> Result<Self, Error> {
+    pub fn new(request: &GroupRequest) -> Result<Self, Error> {
         request.validate()?;
         let requests = request.partition();
         Ok(Self {
@@ -194,24 +195,28 @@ impl<C: Session> Group<C> {
             armed: false,
             ready: false,
             closed: false,
-            cancellation,
         })
     }
 
     /// Arms one provider session per interface, in request order, and checks
-    /// each one's activation metadata against its request. A failure shuts
-    /// down every source admitted so far.
-    pub fn arm<P: Provider<Capture = C>>(&mut self, provider: &P) -> Result<(), Error> {
+    /// each one's activation metadata against its request. Every provider call
+    /// receives the caller's `deadline`. A failure shuts down every source
+    /// admitted so far.
+    pub fn arm<P: Provider<Capture = C>>(
+        &mut self,
+        provider: &P,
+        deadline: &Deadline,
+    ) -> Result<(), Error> {
         if self.armed || self.closed {
             return Err(self.fail(Error::CaptureGroupState));
         }
         self.armed = true;
         for index in 0..self.requests.len() {
-            if let Err(error) = self.check_cancelled() {
+            if let Err(error) = check_cancelled(deadline) {
                 return Err(self.fail(error));
             }
             let request = &self.requests[index];
-            let capture = match provider.arm_capture(request) {
+            let capture = match provider.arm_capture(request, deadline) {
                 Ok(capture) => capture,
                 Err(source) => {
                     let failure = Error::CaptureSource {
@@ -310,8 +315,13 @@ impl<C: Session> Group<C> {
             .collect()
     }
 
-    fn poll(&mut self, index: usize, timeout: Duration) -> Result<Option<Captured>, Error> {
-        let mut captured = match self.sources[index].capture.next_captured_frame(timeout) {
+    fn poll(
+        &mut self,
+        index: usize,
+        wait: &Deadline,
+        caller: &Deadline,
+    ) -> Result<Option<Captured>, Error> {
+        let mut captured = match self.sources[index].capture.next_captured_frame(wait) {
             Ok(Some(captured)) => captured,
             Ok(None) => return Ok(None),
             Err(source) => {
@@ -319,7 +329,7 @@ impl<C: Session> Group<C> {
                 return Err(self.fail(failure));
             }
         };
-        if let Err(error) = self.check_cancelled() {
+        if let Err(error) = check_cancelled(caller) {
             return Err(self.fail(error));
         }
         let source = &mut self.sources[index].source;
@@ -359,12 +369,6 @@ impl<C: Session> Group<C> {
             phase,
             source: Box::new(source),
         }
-    }
-
-    fn check_cancelled(&self) -> Result<(), Error> {
-        self.cancellation
-            .as_ref()
-            .map_or(Ok(()), |signal| signal.check().map_err(Error::from))
     }
 
     /// Shuts every source down, keeps the cleanup failures for
@@ -417,25 +421,23 @@ impl<C: Session> Session for Group<C> {
         self.sources.get(source).map(|owned| &owned.source.metadata)
     }
 
-    /// Waits for every source in order under one shared deadline.
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
+    /// Waits for every source in order; all must be ready by the caller's
+    /// deadline.
+    fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
         if !self.armed || self.closed || self.ready {
             return Err(self.fail(Error::CaptureGroupState));
         }
-        let deadline = match Instant::now().checked_add(timeout) {
-            Some(deadline) if !timeout.is_zero() && timeout <= super::MAX_TIMEOUT => deadline,
-            _ => {
-                return Err(self.fail(invalid("readiness timeout must be finite and positive")));
-            }
+        if let Err(error) = check_cancelled(caller) {
+            return Err(self.fail(error));
+        }
+        let Some(deadline) = wait_end(caller) else {
+            return Err(self.fail(invalid("readiness timeout must be finite and positive")));
         };
         for index in 0..self.sources.len() {
-            if let Err(error) = self.check_cancelled() {
+            if let Err(error) = check_cancelled(caller) {
                 return Err(self.fail(error));
             }
-            let Some(remaining) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
-            else {
+            if crate::deadline::remaining_before(deadline).is_none() {
                 let failure = self.failure(
                     index,
                     Phase::Ready,
@@ -444,8 +446,8 @@ impl<C: Session> Session for Group<C> {
                     },
                 );
                 return Err(self.fail(failure));
-            };
-            if let Err(source) = self.sources[index].capture.wait_ready(remaining) {
+            }
+            if let Err(source) = self.sources[index].capture.wait_ready(caller) {
                 let failure = self.failure(index, Phase::Ready, source);
                 return Err(self.fail(failure));
             }
@@ -461,7 +463,7 @@ impl<C: Session> Session for Group<C> {
             }
             self.sources[index].source.ready = true;
         }
-        if let Err(error) = self.check_cancelled() {
+        if let Err(error) = check_cancelled(caller) {
             return Err(self.fail(error));
         }
         self.ready = true;
@@ -471,36 +473,40 @@ impl<C: Session> Session for Group<C> {
     /// Check all sources without waiting before taking one short blocking wait.
     /// Rotation after every returned record prevents a busy interface starving
     /// the others. An empty individual source never ends the group operation.
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
+    ///
+    /// A spent `deadline` polls every source once without waiting.
+    fn next_captured_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
         if !self.ready || self.closed {
             return Err(self.fail(Error::CaptureGroupState));
         }
-        let deadline = match Instant::now().checked_add(timeout) {
-            Some(deadline) if timeout <= super::MAX_TIMEOUT => deadline,
-            _ => return Err(self.fail(invalid("capture wait exceeds its finite range"))),
+        let deadline = match caller.remaining() {
+            Ok(remaining) if remaining > super::MAX_TIMEOUT => {
+                return Err(self.fail(invalid("capture wait exceeds its finite range")));
+            }
+            _ => wait_end(caller),
         };
+        // Sources are first polled without waiting.
+        let immediate = Deadline::new(Duration::ZERO);
         loop {
-            if let Err(error) = self.check_cancelled() {
+            if let Err(error) = check_cancelled(caller) {
                 return Err(self.fail(error));
             }
             for _ in 0..self.sources.len() {
                 let index = self.cursor;
                 self.cursor = (self.cursor + 1) % self.sources.len();
-                if let Some(captured) = self.poll(index, Duration::ZERO)? {
+                if let Some(captured) = self.poll(index, &immediate, caller)? {
                     return Ok(Some(captured));
                 }
             }
-            let Some(remaining) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
-            else {
+            let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
                 return Ok(None);
             };
             let index = self.cursor;
             self.cursor = (self.cursor + 1) % self.sources.len();
             let wait = remaining.min(POLL_SLICE);
+            let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
             let started = Instant::now();
-            if let Some(captured) = self.poll(index, wait)? {
+            if let Some(captured) = self.poll(index, &slice, caller)? {
                 return Ok(Some(captured));
             }
             // Test/injected providers may return early. Keep an empty source
@@ -545,6 +551,20 @@ impl<C: Session> Session for Group<C> {
                 }
             })
     }
+}
+
+fn check_cancelled(deadline: &Deadline) -> Result<(), Error> {
+    deadline.check_cancelled().map_err(Error::from)
+}
+
+/// The instant a group wait ends, or `None` once the caller's deadline is
+/// spent or its remainder exceeds the public maximum.
+fn wait_end(deadline: &Deadline) -> Option<Instant> {
+    let remaining = deadline
+        .remaining()
+        .ok()
+        .filter(|remaining| !remaining.is_zero() && *remaining <= super::MAX_TIMEOUT)?;
+    Instant::now().checked_add(remaining)
 }
 
 impl<C: Session> Drop for Group<C> {

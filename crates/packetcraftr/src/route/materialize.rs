@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Instant;
+use packetcraftr_core::budget::Deadline;
 
 use crate::neighbor::{self, Request as NeighborRequest, Resolution as NeighborResolution};
 use packetcraftr_netio::link::Mode;
@@ -15,7 +15,7 @@ use super::model::Plan;
 pub(crate) fn materialize<N: neighbor::Resolver>(
     mut plan: Plan,
     resolver: &N,
-    deadline: Option<Instant>,
+    deadline: &Deadline,
 ) -> Result<Materialized, Error> {
     let mut neighbor_resolution = None;
     if plan.needs_neighbor_resolution() {
@@ -35,16 +35,18 @@ pub(crate) fn materialize<N: neighbor::Resolver>(
             .ok_or_else(|| Error::MissingSourceMac {
                 interface: plan.decision.interface.name.clone(),
             })?;
-        let resolution = resolver.resolve(&NeighborRequest {
-            interface: plan.decision.interface.clone(),
-            interface_source: source,
-            interface_mac,
-            target,
-            vlan_tags: plan.neighbor_vlan_tags.clone(),
-            mtu: plan.decision.mtu,
-            link_type: plan.decision.link_type,
+        let resolution = resolver.resolve(
+            &NeighborRequest {
+                interface: plan.decision.interface.clone(),
+                interface_source: source,
+                interface_mac,
+                target,
+                vlan_tags: plan.neighbor_vlan_tags.clone(),
+                mtu: plan.decision.mtu,
+                link_type: plan.decision.link_type,
+            },
             deadline,
-        })?;
+        )?;
         plan.destination_mac = Some(resolution.mac_address);
         neighbor_resolution = Some(resolution);
     }
@@ -79,11 +81,13 @@ impl Materialized {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::live;
     use std::{
         net::{IpAddr, Ipv4Addr},
         sync::Mutex,
     };
 
+    use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::error::Classified;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
@@ -146,6 +150,7 @@ mod tests {
         fn resolve(
             &self,
             request: &NeighborRequest,
+            _deadline: &Deadline,
         ) -> Result<NeighborResolution, neighbor::Error> {
             self.requests
                 .lock()
@@ -173,12 +178,11 @@ mod tests {
             vlan_tags: plan.neighbor_vlan_tags.clone(),
             mtu: 1_400,
             link_type: LinkType::ETHERNET,
-            deadline: None,
         };
         let resolver = RecordingResolver::default();
 
         let materialized =
-            materialize(plan, &resolver, None).expect("complete plan must materialize");
+            materialize(plan, &resolver, &live()).expect("complete plan must materialize");
 
         assert_eq!(materialized.plan.destination_mac, Some(RESOLVED_MAC));
         assert_eq!(
@@ -200,7 +204,7 @@ mod tests {
         plan.destination_mac = Some(RESOLVED_MAC);
         let resolver = RecordingResolver::default();
 
-        let materialized = materialize(plan.clone(), &resolver, None).expect("resolved plan");
+        let materialized = materialize(plan.clone(), &resolver, &live()).expect("resolved plan");
 
         assert_eq!(materialized.plan, plan);
         assert_eq!(materialized.neighbor_resolution, None);
@@ -225,7 +229,7 @@ mod tests {
         plan.destination_mac = Some(MacAddress([0xff; 6]));
         let resolver = RecordingResolver::default();
 
-        let materialized = materialize(plan.clone(), &resolver, None).expect("broadcast plan");
+        let materialized = materialize(plan.clone(), &resolver, &live()).expect("broadcast plan");
 
         assert_eq!(materialized.plan, plan);
         assert_eq!(materialized.neighbor_resolution, None);
@@ -268,7 +272,7 @@ mod tests {
             remove_input(&mut plan);
             let resolver = RecordingResolver::default();
 
-            let error = materialize(plan, &resolver, None).expect_err("incomplete Layer 2 plan");
+            let error = materialize(plan, &resolver, &live()).expect_err("incomplete Layer 2 plan");
             assert!(expected(&error), "{error}");
             assert_eq!(
                 error.classification().code,
@@ -289,8 +293,8 @@ mod tests {
     fn the_transmit_route_carries_the_planned_interface_mode_and_lookup_destination() {
         let mut plan = unresolved_plan();
         plan.destination_mac = Some(RESOLVED_MAC);
-        let materialized =
-            materialize(plan.clone(), &RecordingResolver::default(), None).expect("resolved plan");
+        let materialized = materialize(plan.clone(), &RecordingResolver::default(), &live())
+            .expect("resolved plan");
 
         let route = materialized.transmit_route();
 

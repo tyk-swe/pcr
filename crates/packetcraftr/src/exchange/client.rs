@@ -122,10 +122,7 @@ where
     fn arm_capture(
         &self,
         prepared: Prepared,
-    ) -> Result<
-        Transaction<packetcraftr_netio::capture::Cancellable<<I as CaptureProvider>::Capture>>,
-        Error,
-    > {
+    ) -> Result<Transaction<<I as CaptureProvider>::Capture>, Error> {
         let Some(first_packet) = prepared.packets.first() else {
             return Err(Error::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -135,16 +132,19 @@ where
         let first_route = &first_packet.route().plan;
         ensure_preparation_deadline(prepared.deadline)?;
         self.check_cancelled()?;
-        let capture = self.io.arm_capture(&CaptureRequest {
-            interface: first_route.decision.interface.clone(),
-            limits: prepared.options.capture,
-            filter: None,
-            promiscuous: false,
-            native: Default::default(),
-        })?;
+        let capture = self.io.arm_capture(
+            &CaptureRequest {
+                interface: first_route.decision.interface.clone(),
+                limits: prepared.options.capture,
+                filter: None,
+                promiscuous: false,
+                native: Default::default(),
+            },
+            &crate::deadline::until(prepared.deadline, prepared.cancellation.clone()),
+        )?;
         Ok(Transaction::new(
             Arc::clone(&self.registry),
-            packetcraftr_netio::capture::Cancellable::new(capture, self.cancellation.clone()),
+            capture,
             prepared,
         ))
     }

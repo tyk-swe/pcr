@@ -10,6 +10,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use packetcraftr::neighbor::Error as NeighborError;
 use packetcraftr::route::{Error as RouteError, Options, Plan, plan as plan_route};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::{Id as LayerId, Raw};
@@ -18,6 +19,11 @@ use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::{Capability, Mode};
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
+
+/// A deadline no fixture here comes close to spending.
+fn live() -> Deadline {
+    Deadline::new(std::time::Duration::from_secs(5))
+}
 
 struct Routes(Decision);
 
@@ -29,6 +35,7 @@ impl Provider for Routes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(self.0.clone())
     }
@@ -135,6 +142,7 @@ fn planner_preserves_explicit_ethernet_destination_for_broadcast() {
             ..Options::default()
         },
         &Routes(explicit_route),
+        &live(),
     )
     .expect("explicit broadcast envelope plans");
     assert_eq!(explicit.destination_mac, Some(explicit_mac));
@@ -351,6 +359,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
             _: IpAddr,
             _: Option<&interface::Id>,
             _: Option<IpAddr>,
+            _deadline: &Deadline,
         ) -> Result<Decision, Self::Error> {
             panic!("invalid route must fail before provider I/O")
         }
@@ -388,7 +397,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
             },
         ),
     ] {
-        let error = plan_route(&packet, None, &Options::default(), &NoIo).unwrap_err();
+        let error = plan_route(&packet, None, &Options::default(), &NoIo, &live()).unwrap_err();
         assert!(matches!(
             (&error, &expected),
             (
@@ -416,7 +425,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
         options: vec![131, 7, 4, 192, 0, 2, 2].into(),
         ..Ipv4::default()
     });
-    let error = plan_route(&local_failure, None, &Options::default(), &NoIo).unwrap_err();
+    let error = plan_route(&local_failure, None, &Options::default(), &NoIo, &live()).unwrap_err();
     assert!(matches!(
         error,
         RouteError::InvalidSourceRouting { source: None, .. }
@@ -424,4 +433,56 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
     assert!(error.source().is_none());
     assert!(error.causes().is_empty());
     assert_eq!(error.classification().code, "packet.plan");
+}
+
+/// A backend that stalls until its caller's deadline passes, as a hung native
+/// query does, and then reports the deadline the way every system backend
+/// does.
+struct StalledBackend;
+
+impl Provider for StalledBackend {
+    type Error = packetcraftr_netio::route::SystemError;
+
+    fn lookup_with_preferences(
+        &self,
+        _destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<Decision, Self::Error> {
+        while let Ok(remaining) = packetcraftr_netio::deadline::remaining(deadline) {
+            std::thread::sleep(remaining.min(packetcraftr_netio::deadline::POLL_INTERVAL));
+        }
+        Err(Self::Error::DeadlineExceeded {
+            operation: "looking up a route",
+        })
+    }
+}
+
+#[test]
+fn route_lookup_fails_with_the_deadline_classification_when_the_callers_deadline_passes() {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        destination: "192.0.2.9".parse().unwrap(),
+        ..Ipv4::default()
+    });
+    let allowance = std::time::Duration::from_millis(50);
+    let started = std::time::Instant::now();
+
+    let error = plan_route(
+        &packet,
+        None,
+        &Options::default(),
+        &StalledBackend,
+        &Deadline::new(allowance),
+    )
+    .expect_err("a stalled backend cannot answer before the deadline");
+
+    assert!(matches!(error, RouteError::RouteLookup { .. }), "{error:?}");
+    let classification = error.classification();
+    assert_eq!(classification.code, "io.deadline_exceeded");
+    assert_eq!(classification.kind, Kind::Io);
+    let elapsed = started.elapsed();
+    assert!(elapsed >= allowance, "{elapsed:?}");
+    assert!(elapsed < std::time::Duration::from_secs(5), "{elapsed:?}");
 }

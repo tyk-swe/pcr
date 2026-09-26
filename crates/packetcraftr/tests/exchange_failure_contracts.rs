@@ -5,6 +5,7 @@
 mod common;
 
 use packetcraftr::{Client, exchange, policy::Policy};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     budget::Cancellation,
     error::{BoundaryError, Classification, Classified, Kind},
@@ -70,7 +71,11 @@ impl transmit::Provider for Io {
 }
 impl capture::Provider for Io {
     type Capture = Capture;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Capture, Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Capture, Error> {
         if self.fault == Fault::Start {
             return Err(injected());
         }
@@ -91,7 +96,7 @@ impl capture::Session for Capture {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), Error> {
         if self.fault == Fault::Ready {
             return Err(injected());
         }
@@ -103,8 +108,9 @@ impl capture::Session for Capture {
     }
     fn next_captured_frame(
         &mut self,
-        timeout: Duration,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, Error> {
+        let timeout = deadline.remaining().unwrap_or_default();
         let mut state = self.state.lock().unwrap();
         state.reads += 1;
         if self.fault == Fault::Receive && !state.sent.is_empty() {

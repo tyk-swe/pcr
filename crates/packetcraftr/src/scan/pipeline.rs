@@ -12,6 +12,7 @@ use crate::{
     },
 };
 use packetcraftr_core::{
+    budget::Deadline,
     decode::Dissector,
     diagnostic::Diagnostic,
     error::{BoundaryError, Classification as ErrorClassification, Classified, Kind},
@@ -260,10 +261,13 @@ where
         promiscuous: false,
         native: Default::default(),
     };
-    let mut group = Group::new(&request, executor.client.cancellation.clone())
-        .map_err(BoundaryError::from_error)?;
+    let cancellation = executor.client.cancellation.clone();
+    let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
     group
-        .arm(&executor.client.io)
+        .arm(
+            &executor.client.io,
+            &crate::deadline::until(deadline, cancellation.clone()),
+        )
         .map_err(BoundaryError::from_error)?;
     let mut stats = Stats::default();
     let mut pending = BTreeMap::new();
@@ -276,7 +280,7 @@ where
     let result = (|| -> Result<(), BoundaryError> {
         check(executor.client, deadline)?;
         group
-            .wait_ready(deadline.saturating_duration_since(Instant::now()))
+            .wait_ready(&crate::deadline::until(deadline, cancellation.clone()))
             .map_err(BoundaryError::from_error)?;
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
@@ -423,8 +427,9 @@ where
                 capture_drain_remaining -= 1;
                 wait = Duration::ZERO;
             }
+            let wait = Deadline::new(wait).with_cancellation(cancellation.clone());
             let Some(captured) = group
-                .next_captured_frame(wait)
+                .next_captured_frame(&wait)
                 .map_err(BoundaryError::from_error)?
             else {
                 if draining_captures {

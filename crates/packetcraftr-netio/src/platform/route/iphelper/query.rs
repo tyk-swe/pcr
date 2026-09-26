@@ -26,14 +26,21 @@ use crate::{
     interface::Id as InterfaceId,
     route::{Decision, SelectionReason, SystemError},
 };
+use packetcraftr_core::budget::Deadline;
 
+/// IP Helper calls are synchronous and take no timeout, so the caller's
+/// deadline is checked between them rather than bounding each one.
 pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
+    deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
     let available = adapter_snapshots()?;
     let constrained_interface = constrain_interface(&available, interface_hint, preferred_source)?;
+    crate::deadline::remaining(deadline).map_err(|interrupted| {
+        SystemError::interrupted(interrupted, "selecting the Windows best route")
+    })?;
     let BestRoute {
         row: best_route,
         source: best_source,
@@ -173,8 +180,11 @@ fn query_best_route(
     Ok(BestRoute { row, source })
 }
 
+/// One synchronous `GetAdaptersAddresses` snapshot; the interface capability
+/// has already checked the caller's deadline.
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
+    _deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)

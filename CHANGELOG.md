@@ -267,10 +267,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   requires `Send`. See `docs/migration-unreleased.md`.
 - A capture group is a `capture::Session`. `capture::group` is private; its
   types are `capture::{Group, GroupRequest, Source, Phase, MAX_SOURCES}`.
-  `Group::new(&request, cancellation)` validates and `group.arm(&provider)`
-  arms, and the group reads and stops through `Session`
-  (`next_captured_frame`, `shutdown`). `Record` is gone: `Captured::source`
-  names the source, and `Session::source_count`/`source_metadata` describe
+  `Group::new(&request)` validates and `group.arm(&provider, &deadline)`
+  arms, and the group waits, reads, and stops through `Session`
+  (`wait_ready`, `next_captured_frame`, `shutdown`). `Record` is gone:
+  `Captured::source` names the source, and `Session::source_count`/`source_metadata` describe
   every source. `group::{Error, Cause, Failure}` fold into
   `packetcraftr_netio::Error` (`InvalidCaptureGroup`, `CaptureSource`,
   `CaptureSourceContract`, `CaptureGroupState`, `CaptureCleanup`) with the
@@ -279,12 +279,33 @@ All notable changes to PacketcraftR are documented here. The format follows
   the cleanup failures. `packetcraftr::capture::{Cause::Native, Error::cleanup}`
   and `scan::PipelineError::cleanup` carry `packetcraftr_netio::Error`. See
   `docs/migration-unreleased.md`.
+- Every provider call that can block takes the caller's core
+  `budget::Deadline` by reference, which also carries its cancellation:
+  `route::Provider::{lookup_with_preferences, lookup_interface}`,
+  `interface::Provider::interfaces`,
+  `capture::Provider::{arm_capture, timestamp_types}`,
+  `capture::Session::{wait_ready, next_captured_frame}`, `tcp::Provider::connect`,
+  `tcp::start_connect`, and `capture::Group::arm` (a group waits and reads
+  through the same `Session` methods). `capture::Cancellable` is removed:
+  native capture waits honor the deadline's cancellation themselves. `packetcraftr::route::plan`,
+  `Client::plan`, and `replay::Transmitter::plan_frame` take the deadline their
+  lookups receive, and `neighbor::Request` loses its `deadline` field.
+  `route::SystemError` and `interface::Error` gain `Cancelled` and
+  `DeadlineExceeded` variants, and `tcp::ConnectError` gains
+  `DeadlineExceeded` (`io.deadline_exceeded`). See
+  `docs/migration-unreleased.md`.
 
 ### Added
 
 - `packetcraftr_core::error::Classified` is implemented for
   `std::convert::Infallible`, so a provider that cannot fail satisfies a
   `Classified` error bound.
+- `packetcraftr_netio::deadline` states the provider deadline convention and
+  adds `remaining`, `expires_at`, and `detach` for providers that follow it.
+  `packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT` is the allowance a passive
+  route or interface lookup gets when its operation has no deadline; the CLI
+  gives `routes`, `interfaces`, and `plan` lookups that allowance within the
+  invocation deadline.
 
 - `packetcraftr::fuzz::Totals` checks a live or offline campaign's case counts
   and cases for coherence (`TryFrom<&Report>`, `TryFrom<&Stats>`, and their
@@ -835,6 +856,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- Route lookup honors the caller's deadline and cancellation instead of the
+  backends' own timeouts (2 seconds per operation and 3 seconds per response
+  on Linux netlink, 2 seconds on macOS routing sockets). A lookup the deadline
+  stops fails with `io.deadline_exceeded`; a netlink timeout was reported as
+  `io.route` before. Interface enumeration and the capture interface check
+  over netlink follow the same deadline.
 - `neighbor::Options::validate` keeps the capture-limit refusal as the
   `source` of `neighbor::Error::InvalidOptions` (a new field) instead of
   flattening it into the message, so it is reported once, as a cause. The

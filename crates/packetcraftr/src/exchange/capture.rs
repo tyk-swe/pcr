@@ -3,7 +3,7 @@
 
 //! Capture readiness, bounded draining, and post-send collection.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
@@ -47,8 +47,9 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         if !self.correlation_stopped {
-            while let Some(remaining) = remaining_before(self.deadline) {
-                let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
+            let deadline = crate::deadline::until(self.deadline, self.cancellation.clone());
+            while remaining_before(self.deadline).is_some() {
+                let Some(frame) = self.capture.inner.next_captured_frame(&deadline)? else {
                     break;
                 };
                 match self.process_frame(frame, workflow_matcher, stop_predicate, emit)? {
@@ -77,11 +78,12 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
+        let queued = crate::deadline::immediate(self.cancellation.clone());
         for _ in 0..self.options.capture.max_frames {
             if policy.expired() {
                 return Err(drain_deadline_error().into());
             }
-            let Some(frame) = self.capture.inner.next_captured_frame(Duration::ZERO)? else {
+            let Some(frame) = self.capture.inner.next_captured_frame(&queued)? else {
                 return Ok(ProcessOutcome::Continue);
             };
             let outcome = self.process_frame(frame, workflow_matcher, stop_predicate, emit)?;
@@ -200,6 +202,9 @@ fn drain_deadline_error() -> LiveIoError {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use packetcraftr_core::budget::Deadline;
 
     use crate::preparation::PreparedPacket;
 
@@ -238,14 +243,15 @@ mod tests {
             &self.metadata
         }
 
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), LiveIoError> {
             Ok(())
         }
 
         fn next_captured_frame(
             &mut self,
-            timeout: Duration,
+            deadline: &Deadline,
         ) -> Result<Option<Captured>, LiveIoError> {
+            let timeout = deadline.remaining().unwrap_or_default();
             self.state.reads.lock().expect("read log").push(timeout);
             if self.state.sends.load(Ordering::SeqCst) == 0
                 || (self.state.deliver_only_when_blocking && timeout.is_zero())

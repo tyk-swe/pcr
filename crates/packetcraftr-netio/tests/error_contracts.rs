@@ -3,6 +3,7 @@
 
 use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
 
+use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_netio::{
     Error, SendEvidenceFault, capture, interface, link::Mode, route::SystemError,
@@ -61,8 +62,14 @@ fn interface_errors_keep_live_io_classes_and_their_source() {
     };
     assert_row(&discovery, "io.interface_discovery", Kind::Io);
     assert_eq!(discovery.causes(), ["operation not permitted"]);
+    let expired = interface::Error::DeadlineExceeded {
+        operation: "enumerating interfaces",
+    };
+    assert_row(&expired, "io.deadline_exceeded", Kind::Io);
+    let cancelled = interface::Error::Cancelled(Cancelled);
+    assert_row(&cancelled, "io.cancelled", Kind::Io);
 
-    for error in [unsupported, discovery] {
+    for error in [unsupported, discovery, expired, cancelled] {
         let live = Error::from(error.clone());
         assert_eq!(live.to_string(), error.to_string());
         assert_eq!(live.causes(), error.causes());
@@ -92,7 +99,7 @@ fn assert_row(
     assert!(!error.to_string().is_empty());
 }
 
-/// `route::SystemError` is `#[non_exhaustive]`; the table lists all 8
+/// `route::SystemError` is `#[non_exhaustive]`; the table lists all 10
 /// variants exactly once, so a new variant must add a row here.
 #[test]
 fn system_route_errors_keep_stable_provider_classes() {
@@ -161,6 +168,14 @@ fn system_route_errors_keep_stable_provider_classes() {
             "io.route",
             Kind::Io,
         ),
+        (
+            SystemError::DeadlineExceeded {
+                operation: "fixture operation",
+            },
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (SystemError::Cancelled(Cancelled), "io.cancelled", Kind::Io),
     ];
 
     for (error, code, kind) in cases {

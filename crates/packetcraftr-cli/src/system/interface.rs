@@ -76,7 +76,9 @@ pub(crate) fn select_interfaces<I: net::interface::Provider>(
     provider: &I,
     selector: Option<&InterfaceSelector>,
 ) -> Result<Vec<net::interface::Info>, CliError> {
-    let interfaces = provider.interfaces().map_err(CliError::classified)?;
+    let interfaces = provider
+        .interfaces(&crate::invocation::passive_lookup())
+        .map_err(CliError::classified)?;
     let Some(selector) = selector else {
         return Ok(interfaces);
     };

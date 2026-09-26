@@ -5,6 +5,7 @@
 use super::Batch;
 use crate::Client;
 use packetcraftr_core::{
+    budget::Deadline,
     error::BoundaryError,
     layer::Id,
     registry::{Discriminator, Registry},
@@ -78,9 +79,10 @@ impl<R: route::Provider> route::Provider for Routes<'_, R> {
         destination: IpAddr,
         interface: Option<&packetcraftr_netio::interface::Id>,
         source: Option<IpAddr>,
+        deadline: &Deadline,
     ) -> Result<route::Decision, Self::Error> {
         self.0
-            .lookup_with_preferences(destination, interface, source)
+            .lookup_with_preferences(destination, interface, source, deadline)
     }
 }
 impl<I: transmit::Provider> transmit::Provider for Io<'_, I> {
@@ -96,8 +98,9 @@ impl<I: capture::Provider> capture::Provider for Io<'_, I> {
     fn arm_capture(
         &self,
         request: &capture::Request,
+        deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
-        self.0.arm_capture(request)
+        self.0.arm_capture(request, deadline)
     }
 }
 pub(super) fn client<R, I>(

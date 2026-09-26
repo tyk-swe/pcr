@@ -4,7 +4,7 @@
 //! Process-wide admission for portable TCP connection workers and their sockets.
 
 use crate::tcp::{ConnectError, ConnectOutcome, Connection, Provider};
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::{Deadline, Interrupted};
 use std::{
     net::SocketAddr,
     sync::{
@@ -13,7 +13,7 @@ use std::{
         mpsc,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant, SystemTime},
+    time::{Instant, SystemTime},
 };
 
 #[derive(Default)]
@@ -138,22 +138,21 @@ impl<S> Drop for Pending<S> {
 pub(super) fn start<P>(
     provider: Arc<P>,
     endpoint: SocketAddr,
-    timeout: Duration,
-    cancellation: Option<Cancellation>,
+    caller: &Deadline,
 ) -> Result<Pending<P::Stream>, ConnectError>
 where
     P: Provider + 'static,
     P::Stream: 'static,
 {
-    if timeout.is_zero() || timeout > crate::capture::MAX_TIMEOUT {
+    let deadline = crate::deadline::detach(caller).map_err(|interrupted| match interrupted {
+        Interrupted::Cancelled(cancelled) => ConnectError::Cancelled(cancelled),
+        _ => ConnectError::DeadlineExceeded,
+    })?;
+    if deadline.limit() > crate::capture::MAX_TIMEOUT {
         return Err(ConnectError::Timeout);
-    }
-    if let Some(signal) = &cancellation {
-        signal.check()?;
     }
     let started = Instant::now();
     let started_at = SystemTime::now();
-    let deadline = started.checked_add(timeout).ok_or(ConnectError::Timeout)?;
     let lease = reserve()?;
     let marker = Arc::downgrade(&lease);
     let cancel = Arc::new(Mutex::new(CancelState::default()));
@@ -166,37 +165,31 @@ where
             // including unwinding and receiver cancellation paths.
             let admission = lease;
             let connection_provider = provider;
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let attempted = {
+            let admitted = {
                 let mut state = cancelled
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if state.cancelled
-                    || remaining.is_zero()
-                    || cancellation
-                        .as_ref()
-                        .is_some_and(|signal| signal.check().is_err())
-                {
-                    false
+                let admitted = if state.cancelled {
+                    Err(not_started(std::io::ErrorKind::Interrupted))
                 } else {
-                    state.attempted = true;
-                    true
-                }
+                    crate::deadline::remaining(&deadline)
+                        .map(drop)
+                        .map_err(|interrupted| {
+                            not_started(match interrupted {
+                                Interrupted::Cancelled(_) => std::io::ErrorKind::Interrupted,
+                                _ => std::io::ErrorKind::TimedOut,
+                            })
+                        })
+                };
+                state.attempted = admitted.is_ok();
+                admitted
             };
-            let result = if attempted {
+            let attempted = admitted.is_ok();
+            let result = admitted.and_then(|()| {
                 connection_provider
-                    .connect(endpoint, remaining)
+                    .connect(endpoint, &deadline)
                     .map(|stream| Connection::new(stream, Arc::clone(&admission)))
-            } else {
-                Err(std::io::Error::new(
-                    if remaining.is_zero() {
-                        std::io::ErrorKind::TimedOut
-                    } else {
-                        std::io::ErrorKind::Interrupted
-                    },
-                    "connection stopped before provider execution",
-                ))
-            };
+            });
             let outcome = ConnectOutcome {
                 attempted,
                 started_at,
@@ -216,4 +209,9 @@ where
         lease: marker,
         complete: false,
     })
+}
+
+/// The outcome of a connection the worker never handed to its provider.
+fn not_started(kind: std::io::ErrorKind) -> std::io::Error {
+    std::io::Error::new(kind, "connection stopped before provider execution")
 }

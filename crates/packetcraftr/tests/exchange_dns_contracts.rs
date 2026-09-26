@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use packetcraftr::{Client, exchange, policy::Policy};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
@@ -89,7 +90,11 @@ impl transmit::Provider for Io {
 
 impl capture::Provider for Io {
     type Capture = Capture;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Capture, net::Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Capture, net::Error> {
         Ok(Capture {
             state: self.state.clone(),
             metadata: capture::Metadata {
@@ -106,12 +111,12 @@ impl capture::Session for Capture {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
     fn next_captured_frame(
         &mut self,
-        _: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         Ok(self
             .state

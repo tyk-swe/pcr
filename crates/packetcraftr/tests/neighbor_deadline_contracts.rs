@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use packetcraftr::{Client, neighbor, policy};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
@@ -39,7 +40,11 @@ impl transmit::Provider for SilentLink {
 impl capture::Provider for SilentLink {
     type Capture = SilentCapture;
 
-    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
         Ok(SilentCapture {
             metadata: capture::Metadata {
                 interface: request.interface.clone(),
@@ -62,15 +67,17 @@ impl capture::Session for SilentCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), LiveIoError> {
+        let timeout = deadline.remaining().unwrap_or_default();
         self.waits.lock().unwrap().push(timeout);
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
-        timeout: Duration,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, LiveIoError> {
+        let timeout = deadline.remaining().unwrap_or_default();
         self.waits.lock().unwrap().push(timeout);
         std::thread::sleep(timeout);
         Ok(None)

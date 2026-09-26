@@ -15,16 +15,17 @@ use std::sync::{Arc, Mutex};
 use packetcraftr::Client;
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::send;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
+use packetcraftr_netio::Error as LiveIoError;
+use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
-use packetcraftr_netio::capture;
 use packetcraftr_netio::transmit;
-use packetcraftr_netio::Error as LiveIoError;
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
@@ -40,6 +41,7 @@ impl Provider for DocumentationRoutes {
         destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -80,7 +82,11 @@ impl capture::Provider for RecordingSender {
 
     /// The client arms capture only to resolve a neighbor; this example's
     /// Layer 3 sends never need one, so arming would prove the wiring wrong.
-    fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
         unreachable!("Layer 3 sends never resolve neighbors")
     }
 }
@@ -112,12 +118,7 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    let client = Client::new(
-        builtin::registry(),
-        DocumentationRoutes,
-        sender,
-        policy,
-    );
+    let client = Client::new(builtin::registry(), DocumentationRoutes, sender, policy);
 
     // Layer 3 planning skips neighbor resolution entirely, so the composed
     // client never arms capture on the recording I/O.

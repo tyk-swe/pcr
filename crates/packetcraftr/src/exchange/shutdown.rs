@@ -62,8 +62,8 @@ impl<C: Session> Drop for CaptureGuard<C> {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
 
+    use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_netio::capture::{Captured, Metadata, Statistics};
     use packetcraftr_netio::interface::Id as InterfaceId;
@@ -106,13 +106,13 @@ mod tests {
             &self.metadata
         }
 
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), LiveIoError> {
             Ok(())
         }
 
         fn next_captured_frame(
             &mut self,
-            _timeout: Duration,
+            _deadline: &Deadline,
         ) -> Result<Option<Captured>, LiveIoError> {
             Ok(None)
         }

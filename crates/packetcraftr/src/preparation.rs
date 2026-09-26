@@ -43,7 +43,7 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use bytes::Bytes;
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
@@ -310,6 +310,26 @@ where
         }
     }
 
+    /// The signal providers honor: the operation's own, else the client's.
+    /// Both are checked between stages.
+    fn provider_cancellation(&self) -> Option<Cancellation> {
+        self.cancellation
+            .clone()
+            .or_else(|| self.client.cancellation.clone())
+    }
+
+    /// What neighbor discovery may spend: the operation deadline, or with
+    /// none, the longest wait a provider accepts, leaving the resolver's own
+    /// options as the bound.
+    fn discovery_deadline(&self) -> Deadline {
+        match self.deadline {
+            Some(deadline) => crate::deadline::until(deadline, self.provider_cancellation()),
+            None => {
+                Deadline::new(capture::MAX_TIMEOUT).with_cancellation(self.provider_cancellation())
+            }
+        }
+    }
+
     fn check(&self) -> Result<(), Error> {
         self.client.check_cancelled()?;
         if let Some(signal) = &self.cancellation {
@@ -336,6 +356,7 @@ where
             &self.options.plan,
             routes,
             self.deadline,
+            self.provider_cancellation(),
         )?;
         self.check()?;
         Ok(plan)
@@ -398,7 +419,7 @@ where
         let route = match route::materialize(
             plan,
             &self.client.neighbors.over(&self.client.io),
-            self.deadline,
+            &self.discovery_deadline(),
         ) {
             Ok(route) => route,
             Err(error) => {
@@ -649,6 +670,7 @@ mod tests {
             _destination: IpAddr,
             _interface_hint: Option<&interface::Id>,
             _preferred_source: Option<IpAddr>,
+            _deadline: &Deadline,
         ) -> Result<Decision, Self::Error> {
             Ok(Decision {
                 interface: interface::Id {
@@ -679,7 +701,11 @@ mod tests {
     impl capture::Provider for NoTransmit {
         type Capture = capture::SystemSession;
 
-        fn arm_capture(&self, _: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        fn arm_capture(
+            &self,
+            _: &capture::Request,
+            _deadline: &Deadline,
+        ) -> Result<Self::Capture, LiveIoError> {
             panic!("a Layer 3 route needs no neighbor discovery")
         }
     }

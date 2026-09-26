@@ -11,6 +11,7 @@ use std::time::Duration;
 use packetcraftr::Client;
 use packetcraftr::clock::Clock;
 use packetcraftr::send;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::builtin;
@@ -50,6 +51,7 @@ impl capture::Provider for RecordingSender {
     fn arm_capture(
         &self,
         _request: &capture::Request,
+        _deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         unreachable!("Layer 3 sends never resolve neighbors")
     }

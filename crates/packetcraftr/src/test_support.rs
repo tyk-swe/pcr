@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::BuiltPacket;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::packet::Packet;
@@ -24,6 +25,11 @@ use crate::target::Error as TargetError;
 use crate::target::Hostname;
 use crate::target::Resolver;
 use crate::target::Target;
+
+/// A deadline no fixture comes close to spending.
+pub(crate) fn live() -> Deadline {
+    Deadline::new(Duration::from_secs(5))
+}
 
 #[derive(Default)]
 pub(crate) struct NoopClock;

@@ -14,6 +14,7 @@ use packetcraftr::policy::{Policy, PolicyAuthorizer};
 use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
 use packetcraftr::target::{Family, Target};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{MAX_PENDING_CONNECTIONS, Provider, Stream};
 
 struct Socket;
@@ -54,7 +55,8 @@ struct Silent;
 
 impl Provider for Silent {
     type Stream = Socket;
-    fn connect(&self, _: SocketAddr, timeout: Duration) -> io::Result<Socket> {
+    fn connect(&self, _: SocketAddr, deadline: &Deadline) -> io::Result<Socket> {
+        let timeout = deadline.remaining().unwrap_or_default();
         std::thread::sleep(timeout + Duration::from_millis(30));
         Err(io::Error::from(io::ErrorKind::TimedOut))
     }

@@ -8,10 +8,16 @@ mod enumeration;
 mod parser;
 mod query;
 
+use packetcraftr_core::budget::Deadline;
+
 use crate::interface;
 
 pub(in crate::platform) use query::{interface_route, route};
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+/// `getifaddrs(3)` answers without waiting; the interface capability has
+/// already checked the caller's deadline.
+pub(in crate::platform) fn interfaces(
+    _deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
     enumeration::interfaces().map_err(interface::Error::native)
 }

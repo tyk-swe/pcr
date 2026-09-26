@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use packetcraftr_core::{
-    budget::Cancellation,
+    budget::{Cancellation, Deadline},
     error::{Classified, Kind},
     frame::{Frame, LinkType},
 };
@@ -18,6 +18,10 @@ use std::{
     },
     time::{Duration, Instant, UNIX_EPOCH},
 };
+/// A deadline no fixture here comes close to spending.
+fn live() -> Deadline {
+    Deadline::new(Duration::from_secs(5))
+}
 #[derive(Default)]
 struct Script {
     frames: VecDeque<capture::Captured>,
@@ -35,7 +39,7 @@ impl capture::Session for Session {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _: &Deadline) -> Result<(), net::Error> {
         if let Some(signal) = &self.script.cancel_on_ready {
             signal.cancel();
         }
@@ -49,7 +53,7 @@ impl capture::Session for Session {
     }
     fn next_captured_frame(
         &mut self,
-        _: Duration,
+        _: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         Ok(self.script.frames.pop_front())
     }
@@ -108,7 +112,7 @@ fn realized(native: &capture::NativeSettings) -> capture::RealizedSettings {
 }
 impl capture::Provider for Provider {
     type Capture = Session;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Session, net::Error> {
+    fn arm_capture(&self, request: &capture::Request, _: &Deadline) -> Result<Session, net::Error> {
         let mut requests = self.requests.lock().unwrap();
         let index = requests.len();
         requests.push(request.clone());
@@ -139,10 +143,10 @@ impl capture::Provider for Provider {
 fn arm(
     provider: &Provider,
     request: &GroupRequest,
-    cancellation: Option<Cancellation>,
+    deadline: &Deadline,
 ) -> (Group<Session>, Result<(), net::Error>) {
-    let mut group = Group::new(request, cancellation).expect("fixture request is valid");
-    let armed = group.arm(provider);
+    let mut group = Group::new(request).expect("fixture request is valid");
+    let armed = group.arm(provider, deadline);
     (group, armed)
 }
 fn request(count: usize) -> GroupRequest {
@@ -194,7 +198,7 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
             ..Default::default()
         },
     ]);
-    let (mut group, armed) = arm(&provider, &request(2), None);
+    let (mut group, armed) = arm(&provider, &request(2), &live());
     armed.unwrap();
     let requests = provider.requests.lock().unwrap();
     assert_eq!(
@@ -209,13 +213,18 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
     assert_eq!(group.source_count(), 2);
     assert_eq!(group.source_metadata(1).map(|m| m.interface.index), Some(8));
     assert!(group.source_metadata(2).is_none());
-    group.wait_ready(Duration::from_secs(1)).unwrap();
-    let first = group.next_captured_frame(Duration::ZERO).unwrap().unwrap();
+    group
+        .wait_ready(&Deadline::new(Duration::from_secs(1)))
+        .unwrap();
+    let first = group
+        .next_captured_frame(&Deadline::new(Duration::ZERO))
+        .unwrap()
+        .unwrap();
     assert_eq!(first.source, 0);
     assert_eq!(first.identity(), identity);
     assert_eq!(
         group
-            .next_captured_frame(Duration::ZERO)
+            .next_captured_frame(&Deadline::new(Duration::ZERO))
             .unwrap()
             .unwrap()
             .source,
@@ -223,7 +232,7 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
     );
     assert_eq!(
         group
-            .next_captured_frame(Duration::ZERO)
+            .next_captured_frame(&Deadline::new(Duration::ZERO))
             .unwrap()
             .unwrap()
             .source,
@@ -261,7 +270,7 @@ fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
         Script::default(),
     ]);
     provider.fail_arm = Some(1);
-    let (mut group, armed) = arm(&provider, &request(2), None);
+    let (mut group, armed) = arm(&provider, &request(2), &live());
     let error = armed.unwrap_err();
     assert!(matches!(
         error,
@@ -296,9 +305,11 @@ fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
             ..Default::default()
         },
     ]);
-    let (mut group, armed) = arm(&provider, &request(3), None);
+    let (mut group, armed) = arm(&provider, &request(3), &live());
     armed.unwrap();
-    let error = group.wait_ready(Duration::from_secs(1)).unwrap_err();
+    let error = group
+        .wait_ready(&Deadline::new(Duration::from_secs(1)))
+        .unwrap_err();
     assert!(matches!(
         error,
         net::Error::CaptureSource {
@@ -359,14 +370,16 @@ fn native_settings_reach_every_partitioned_request_and_report_per_source() {
         timestamp_source: Some(capture::TimestampSource::Host),
         timestamp_precision: Some(capture::TimestampPrecision::Nano),
     };
-    let (mut group, armed) = arm(&provider, &request, None);
+    let (mut group, armed) = arm(&provider, &request, &live());
     armed.unwrap();
     {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests.iter().all(|r| r.native == request.native));
     }
-    group.wait_ready(Duration::from_secs(1)).unwrap();
+    group
+        .wait_ready(&Deadline::new(Duration::from_secs(1)))
+        .unwrap();
     group.shutdown().unwrap();
     for source in &group.snapshot() {
         let native = &source.metadata.native;
@@ -390,7 +403,7 @@ fn a_provider_that_ignores_native_settings_fails_activation_metadata() {
     provider.ignores_native = true;
     let mut request = request(1);
     request.native.buffer_size = Some(2 * 1024 * 1024);
-    let (group, armed) = arm(&provider, &request, None);
+    let (group, armed) = arm(&provider, &request, &live());
     let error = armed.expect_err("an ignored native setting must fail the contract check");
     assert!(matches!(
         error,
@@ -404,17 +417,17 @@ fn a_provider_that_ignores_native_settings_fails_activation_metadata() {
 fn invalid_native_settings_are_rejected_before_arming() {
     let mut invalid = request(1);
     invalid.native.buffer_size = Some(0);
-    assert!(Group::<Session>::new(&invalid, None).is_err());
+    assert!(Group::<Session>::new(&invalid).is_err());
     let mut invalid = request(1);
     // Smaller than one configured snapshot cannot hold a frame.
     invalid.native.buffer_size = Some(16);
-    assert!(Group::<Session>::new(&invalid, None).is_err());
+    assert!(Group::<Session>::new(&invalid).is_err());
 }
 #[test]
 fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_readiness() {
     let mut invalid = request(2);
     invalid.limits.max_bytes = 40;
-    let error = Group::<Session>::new(&invalid, None)
+    let error = Group::<Session>::new(&invalid)
         .err()
         .expect("each source needs room for one snapshot");
     assert_eq!(error.classification().code, "cli.capture_group");
@@ -424,10 +437,11 @@ fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_rea
         cancel_on_ready: Some(signal.clone()),
         ..Default::default()
     }]);
-    let (mut group, armed) = arm(&provider, &request(1), Some(signal));
+    let deadline = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal));
+    let (mut group, armed) = arm(&provider, &request(1), &deadline);
     armed.unwrap();
     assert!(matches!(
-        group.wait_ready(Duration::from_secs(1)),
+        group.wait_ready(&deadline),
         Err(net::Error::Cancelled(_))
     ));
     drop(group);
@@ -436,13 +450,15 @@ fn invalid_shared_capacity_is_rejected_before_arming_and_cancellation_blocks_rea
 #[test]
 fn an_empty_source_does_not_pretend_the_wait_or_capture_has_ended() {
     let provider = Provider::new(vec![Script::default(), Script::default()]);
-    let (mut group, armed) = arm(&provider, &request(2), None);
+    let (mut group, armed) = arm(&provider, &request(2), &live());
     armed.unwrap();
-    group.wait_ready(Duration::from_secs(1)).unwrap();
+    group
+        .wait_ready(&Deadline::new(Duration::from_secs(1)))
+        .unwrap();
     let started = Instant::now();
     assert!(
         group
-            .next_captured_frame(Duration::from_millis(3))
+            .next_captured_frame(&Deadline::new(Duration::from_millis(3)))
             .unwrap()
             .is_none()
     );
@@ -467,7 +483,7 @@ fn single_sessions_and_groups_share_the_filter_limit() {
     single(&at_limit).validate().unwrap();
     // The system provider refuses before it touches an interface, in every
     // build profile.
-    let error = match capture::SystemProvider.arm_capture(&single(&over_limit)) {
+    let error = match capture::SystemProvider.arm_capture(&single(&over_limit), &live()) {
         Err(error) => error,
         Ok(_) => panic!("an oversized filter must not arm"),
     };
@@ -486,7 +502,7 @@ fn single_sessions_and_groups_share_the_filter_limit() {
     grouped.filter = Some(at_limit);
     grouped.validate().unwrap();
     grouped.filter = Some(over_limit);
-    let error = Group::<Session>::new(&grouped, None)
+    let error = Group::<Session>::new(&grouped)
         .err()
         .expect("groups apply the same limit");
     assert!(matches!(error, net::Error::CaptureFilterTooLong { .. }));

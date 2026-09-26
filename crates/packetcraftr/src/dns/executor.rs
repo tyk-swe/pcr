@@ -174,6 +174,8 @@ mod tests {
 
     use super::validate_tcp_route_options;
 
+    use packetcraftr_core::budget::Deadline;
+
     struct RefusingTcp(std::sync::atomic::AtomicUsize);
 
     impl packetcraftr_netio::tcp::Provider for RefusingTcp {
@@ -182,8 +184,9 @@ mod tests {
         fn connect(
             &self,
             endpoint: std::net::SocketAddr,
-            timeout: std::time::Duration,
+            deadline: &Deadline,
         ) -> std::io::Result<Self::Stream> {
+            let timeout = deadline.remaining().unwrap_or_default();
             assert_eq!(endpoint, "127.0.0.1:53".parse().unwrap());
             assert!(!timeout.is_zero());
             assert!(timeout <= std::time::Duration::from_secs(1));

@@ -127,11 +127,11 @@ impl<C: Session> Transaction<C> {
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
-        let readiness_timeout =
-            remaining_before(self.deadline).ok_or(LiveIoError::DeadlineExceeded {
-                operation: "waiting for capture readiness",
-            })?;
-        self.capture.inner.wait_ready(readiness_timeout)
+        remaining_before(self.deadline).ok_or(LiveIoError::DeadlineExceeded {
+            operation: "waiting for capture readiness",
+        })?;
+        let deadline = crate::deadline::until(self.deadline, self.cancellation.clone());
+        self.capture.inner.wait_ready(&deadline)
     }
 }
 

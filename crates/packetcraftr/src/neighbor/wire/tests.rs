@@ -82,7 +82,6 @@ fn request(source: IpAddr, target: IpAddr) -> NeighborRequest {
         vlan_tags: Vec::new(),
         mtu: 1_500,
         link_type: LinkType::ETHERNET,
-        deadline: None,
     }
 }
 

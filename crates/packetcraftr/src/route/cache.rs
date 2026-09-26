@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::interface::Id as InterfaceId;
 
 type Decision = packetcraftr_netio::route::Decision;
@@ -65,6 +66,7 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         let key = PreferenceKey {
             destination,
@@ -72,25 +74,35 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
             preferred_source,
         };
         cached(&self.by_preference, key, || {
-            self.inner
-                .lookup_with_preferences(destination, interface_hint, preferred_source)
+            self.inner.lookup_with_preferences(
+                destination,
+                interface_hint,
+                preferred_source,
+                deadline,
+            )
         })
     }
 
-    fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
+    fn lookup_interface(
+        &self,
+        interface: &InterfaceId,
+        deadline: &Deadline,
+    ) -> Result<Option<Decision>, Self::Error> {
         cached(&self.by_interface, interface.clone(), || {
-            self.inner.lookup_interface(interface)
+            self.inner.lookup_interface(interface, deadline)
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::live;
     use std::fmt;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
+    use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::error::{Classification, Classified, Kind};
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::MacAddress;
@@ -140,6 +152,7 @@ mod tests {
             destination: IpAddr,
             interface_hint: Option<&InterfaceId>,
             preferred_source: Option<IpAddr>,
+            _deadline: &Deadline,
         ) -> Result<packetcraftr_netio::route::Decision, Self::Error> {
             self.lookups.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
@@ -155,6 +168,7 @@ mod tests {
         fn lookup_interface(
             &self,
             _interface: &InterfaceId,
+            _deadline: &Deadline,
         ) -> Result<Option<packetcraftr_netio::route::Decision>, Self::Error> {
             self.interfaces.fetch_add(1, Ordering::SeqCst);
             if self.fail.load(Ordering::SeqCst) {
@@ -194,25 +208,26 @@ mod tests {
         let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
 
         let first = cache
-            .lookup_with_preferences(destination, None, None)
+            .lookup_with_preferences(destination, None, None, &live())
             .expect("first lookup");
         let second = cache
-            .lookup_with_preferences(destination, None, None)
+            .lookup_with_preferences(destination, None, None, &live())
             .expect("cached lookup");
         assert_eq!(first, second);
         assert_eq!(provider.lookups.load(Ordering::SeqCst), 1);
 
         cache
-            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), None, None)
+            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), None, None, &live())
             .expect("distinct destination");
         cache
-            .lookup_with_preferences(destination, Some(&interface()), None)
+            .lookup_with_preferences(destination, Some(&interface()), None, &live())
             .expect("distinct interface hint");
         cache
             .lookup_with_preferences(
                 destination,
                 None,
                 Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
+                &live(),
             )
             .expect("distinct source preference");
         assert_eq!(provider.lookups.load(Ordering::SeqCst), 4);
@@ -223,11 +238,15 @@ mod tests {
         let provider = CountingProvider::new(Some(decision()));
         let cache = CachedProvider::new(&provider);
         assert_eq!(
-            cache.lookup_interface(&interface()).expect("first lookup"),
+            cache
+                .lookup_interface(&interface(), &live())
+                .expect("first lookup"),
             Some(decision())
         );
         assert_eq!(
-            cache.lookup_interface(&interface()).expect("cached lookup"),
+            cache
+                .lookup_interface(&interface(), &live())
+                .expect("cached lookup"),
             Some(decision())
         );
         assert_eq!(provider.interfaces.load(Ordering::SeqCst), 1);
@@ -235,12 +254,14 @@ mod tests {
         let none_provider = CountingProvider::new(None);
         let none_cache = CachedProvider::new(&none_provider);
         assert_eq!(
-            none_cache.lookup_interface(&interface()).expect("none"),
+            none_cache
+                .lookup_interface(&interface(), &live())
+                .expect("none"),
             None
         );
         assert_eq!(
             none_cache
-                .lookup_interface(&interface())
+                .lookup_interface(&interface(), &live())
                 .expect("cached none"),
             None
         );
@@ -255,11 +276,11 @@ mod tests {
         let destination = IpAddr::V6(Ipv6Addr::LOCALHOST);
         assert!(
             cache
-                .lookup_with_preferences(destination, None, None)
+                .lookup_with_preferences(destination, None, None, &live())
                 .is_err()
         );
         let error = cache
-            .lookup_with_preferences(destination, None, None)
+            .lookup_with_preferences(destination, None, None, &live())
             .expect_err("errors are not cached");
         assert_eq!(provider.lookups.load(Ordering::SeqCst), 2);
         assert_eq!(
@@ -279,7 +300,7 @@ mod tests {
 
         assert_eq!(
             cache
-                .lookup_interface(&interface())
+                .lookup_interface(&interface(), &live())
                 .expect("recovered lookup"),
             Some(decision())
         );

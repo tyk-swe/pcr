@@ -8,9 +8,10 @@ use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::{self, Builder};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::decode::{self, Dissector};
@@ -49,6 +50,7 @@ impl Provider for FixedRoutes {
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -82,7 +84,11 @@ impl transmit::Provider for NeverTransmit {
 impl capture::Provider for NeverTransmit {
     type Capture = IdleCapture;
 
-    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
         Ok(IdleCapture(capture::Metadata {
             interface: request.interface.clone(),
             link_type: LinkType::ETHERNET,
@@ -173,7 +179,11 @@ impl transmit::Provider for RecordingTransmit {
 impl capture::Provider for RecordingTransmit {
     type Capture = ReplyCapture;
 
-    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
         self.armed.fetch_add(1, Ordering::SeqCst);
         let replies = Replies::default();
         *self.replies.lock().expect("replies lock") = Arc::clone(&replies);
@@ -239,13 +249,13 @@ impl capture::Session for ReplyCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), LiveIoError> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
-        _timeout: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, LiveIoError> {
         Ok(self.replies.lock().expect("reply queue lock").pop_front())
     }
@@ -267,13 +277,13 @@ impl capture::Session for IdleCapture {
         &self.0
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), LiveIoError> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
-        _timeout: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, LiveIoError> {
         Ok(None)
     }

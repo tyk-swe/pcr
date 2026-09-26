@@ -11,7 +11,7 @@ use std::os::unix::fs::MetadataExt;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_netio::{
     Error,
     capture::{self, Provider, Session},
@@ -40,7 +40,7 @@ fn isolated() {
     assert_eq!(native_snapshot().active, 0);
     // Warm the persistent route service before measuring capture admission.
     // Its thread and socket remain owned while every capture must be released.
-    interface::SystemProvider.interfaces().unwrap();
+    interface::SystemProvider.interfaces(&live()).unwrap();
     assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS);
 }
 fn ip(args: &[&str]) -> String {
@@ -69,9 +69,18 @@ fn request() -> capture::Request {
         native: Default::default(),
     }
 }
+/// A deadline no isolated operation here comes close to spending.
+fn live() -> Deadline {
+    Deadline::new(Duration::from_secs(5))
+}
+fn within(timeout: Duration) -> Deadline {
+    Deadline::new(timeout)
+}
 fn ready(request: &capture::Request) -> capture::SystemSession {
-    let mut session = capture::SystemProvider.arm_capture(request).unwrap();
-    session.wait_ready(Duration::from_secs(2)).unwrap();
+    let mut session = capture::SystemProvider
+        .arm_capture(request, &live())
+        .unwrap();
+    session.wait_ready(&within(Duration::from_secs(2))).unwrap();
     assert_eq!(native_snapshot().active, SHARED_ROUTE_WORKERS + 1);
     session
 }
@@ -101,7 +110,7 @@ fn readiness_and_repeated_cleanup() {
             .send_to(b"isolated-readiness", receiver.local_addr().unwrap())
             .unwrap();
         let frame = capture
-            .next_captured_frame(Duration::from_secs(2))
+            .next_captured_frame(&within(Duration::from_secs(2)))
             .unwrap()
             .unwrap();
         assert!(
@@ -128,14 +137,14 @@ fn idle_deadline_and_cancellation() {
     let started = Instant::now();
     assert!(
         capture
-            .next_captured_frame(Duration::from_millis(50))
+            .next_captured_frame(&within(Duration::from_millis(50)))
             .unwrap()
             .is_none()
     );
     assert!(started.elapsed() >= Duration::from_millis(40));
     assert!(started.elapsed() < Duration::from_secs(2));
     let signal = Cancellation::default();
-    let mut capture = capture::Cancellable::new(capture, Some(signal.clone()));
+    let caller = within(Duration::from_secs(5)).with_cancellation(Some(signal.clone()));
     std::thread::scope(|scope| {
         scope.spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
@@ -143,7 +152,7 @@ fn idle_deadline_and_cancellation() {
         });
         let started = Instant::now();
         assert!(matches!(
-            capture.next_captured_frame(Duration::from_secs(5)),
+            capture.next_captured_frame(&caller),
             Err(Error::Cancelled(_))
         ));
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -194,7 +203,9 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
         name: "lo".to_owned(),
         index: 1,
     };
-    let types = capture::SystemProvider.timestamp_types(&interface).unwrap();
+    let types = capture::SystemProvider
+        .timestamp_types(&interface, &live())
+        .unwrap();
     assert!(
         types
             .iter()
@@ -207,7 +218,7 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
     // request must be rejected typed before any activation.
     let mut unsupported = request();
     unsupported.native.timestamp_source = Some(capture::TimestampSource::Adapter);
-    let error = match capture::SystemProvider.arm_capture(&unsupported) {
+    let error = match capture::SystemProvider.arm_capture(&unsupported, &live()) {
         Ok(_) => panic!("an unadvertised timestamp source was silently ignored"),
         Err(error) => error,
     };
@@ -247,7 +258,7 @@ fn native_settings_apply_before_activation_and_report_realized_values() {
         .send_to(b"isolated-native-settings", receiver.local_addr().unwrap())
         .unwrap();
     let frame = capture
-        .next_captured_frame(Duration::from_secs(2))
+        .next_captured_frame(&within(Duration::from_secs(2)))
         .unwrap()
         .unwrap();
     // A nanosecond fraction misread as microseconds either fails the fraction
@@ -271,7 +282,7 @@ fn native_filter_error_preserves_diagnostic_and_releases_admission() {
     isolated();
     let mut request = request();
     request.filter = Some("udp and (".to_owned());
-    let error = match capture::SystemProvider.arm_capture(&request) {
+    let error = match capture::SystemProvider.arm_capture(&request, &live()) {
         Ok(_) => panic!("invalid BPF unexpectedly installed"),
         Err(error) => error,
     };
@@ -320,7 +331,7 @@ fn interface_disappearance_reports_driver_failure_and_cleans_up() {
     let mut failed = false;
     while Instant::now() < deadline {
         if capture
-            .next_captured_frame(Duration::from_millis(50))
+            .next_captured_frame(&within(Duration::from_millis(50)))
             .is_err()
         {
             failed = true;

@@ -1,11 +1,34 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Clipping live boundary waits to an operation [`Deadline`].
+//! Clipping live boundary waits to an operation [`Deadline`], and the
+//! deadlines workflows hand to providers.
+//!
+//! Providers take a core [`Deadline`] by reference (see
+//! [`packetcraftr_netio::deadline`]). Workflows that track their operation
+//! deadline as an [`Instant`] build that argument from the instant and the
+//! operation's cancellation signal.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded};
+
+/// The allowance a passive route or interface lookup gets when its operation
+/// has no deadline of its own.
+pub const PASSIVE_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// The provider deadline for work bounded by the wall-clock `deadline`,
+/// carrying the operation's `cancellation`.
+pub(crate) fn until(deadline: Instant, cancellation: Option<Cancellation>) -> Deadline {
+    Deadline::new(deadline.saturating_duration_since(Instant::now()))
+        .with_cancellation(cancellation)
+}
+
+/// A spent deadline: a capture read given it takes only what is already
+/// queued, while still honoring `cancellation`.
+pub(crate) fn immediate(cancellation: Option<Cancellation>) -> Deadline {
+    Deadline::new(Duration::ZERO).with_cancellation(cancellation)
+}
 
 /// Boundary waits bounded by what remains of an operation [`Deadline`].
 pub trait DeadlineExt {

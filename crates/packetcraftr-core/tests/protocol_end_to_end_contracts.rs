@@ -119,8 +119,7 @@ fn ipv4_source_route_decode_accepts_known_transport_checksums() {
     ];
 
     for (transport, checksum_code, vector) in vectors {
-        let bytes =
-            packetcraftr_core::protocol::raw::parse_hex(vector).expect("known vector is valid hex");
+        let bytes = packetcraftr_core::layer::parse_hex(vector).expect("known vector is valid hex");
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes)
             .expect("known DLT_RAW vector is a valid frame");
         let decoded = decode::Dissector::new(registry())

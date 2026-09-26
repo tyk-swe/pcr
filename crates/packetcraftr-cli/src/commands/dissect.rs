@@ -63,7 +63,7 @@ pub(super) fn run(
         .map(|source| filtering::compile(source, &registry, Capabilities::frames_only()))
         .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
-        (Some(value), None) => core::protocol::raw::parse_hex(&value)
+        (Some(value), None) => core::layer::parse_hex(&value)
             .map_err(|source| CliError::caused(Kind::Usage, &source))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,

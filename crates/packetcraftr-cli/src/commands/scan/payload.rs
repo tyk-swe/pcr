@@ -41,7 +41,7 @@ pub(super) fn read(
                 "UDP payload exceeds 65507 bytes or its bounded hex representation",
             ));
         }
-        return packetcraftr_core::protocol::raw::parse_hex(hex)
+        return packetcraftr_core::layer::parse_hex(hex)
             .map_err(|source| CliError::caused(Kind::Usage, &source));
     }
     if let Some(path) = path {

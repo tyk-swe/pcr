@@ -7,16 +7,16 @@ use std::sync::{Arc, OnceLock};
 
 use crate::protocol::{
     application, capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher,
-    network as ip, raw, transport, tunnel,
+    network as ip, transport, tunnel,
 };
 
+use crate::layer::{MalformedCodec, PaddingCodec, RawCodec};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 use gre::GreCodec;
 use icmp::{Icmpv4Codec, Icmpv6Codec};
 use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
 use ipv6_ext::{DestinationOptionsCodec, FragmentCodec, HopByHopCodec, SegmentRoutingHeaderCodec};
 use link::{ArpCodec, EthernetCodec, LlcCodec, SnapCodec, Vlan8021adCodec, VlanCodec};
-use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
     AhCodec, ErspanCodec, EspCodec, GeneveCodec, L2tpv3Codec, MplsCodec, PppCodec, PppoeCodec,

@@ -364,13 +364,11 @@ where
         max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
     };
 
-    let mut frames_read = 0_u64;
+    let mut input = limits.capture_budget()?;
     let mut frames_matched = 0_u64;
-    let mut bytes_read = 0_u64;
     loop {
         enforce_deadline(&deadline)?;
-        let Some((number, frame)) = next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
-        else {
+        let Some((number, frame)) = next_frame(reader, &mut input)? else {
             break;
         };
         let timestamp = match frame.timestamp {
@@ -528,6 +526,7 @@ where
     }
 
     enforce_deadline(&deadline)?;
+    let (frames_read, bytes_read) = (input.frames(), input.captured_bytes());
     for event in ip_dispatch.flush() {
         enforce_deadline(&deadline)?;
         ip_sink(IpEventRecord {
@@ -779,29 +778,23 @@ fn decode_derived(
     })
 }
 
-/// Reads one physical frame and charges it against the aggregate frame and
-/// captured-byte ceilings, which the capture reader's own
-/// [`capture_file::Limits`](crate::capture_file::Limits) enforces.
+/// Reads one physical frame and charges it against the input
+/// [`capture_file::Budget`](crate::capture_file::Budget).
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
-    frames_read: &mut u64,
-    bytes_read: &mut u64,
-    limits: &Limits,
+    input: &mut crate::capture_file::Budget,
 ) -> Result<Option<(u64, crate::frame::Frame)>, Error> {
-    let number = frames_read.saturating_add(1);
+    let number = input.frames().saturating_add(1);
     let Some(frame) = reader
         .next_frame()
         .map_err(|source| Error::Capture { number, source })?
     else {
         return Ok(None);
     };
-    let (number, bytes) = limits
-        .capture()
-        .advance(*frames_read, *bytes_read, frame.captured_length())
+    input
+        .charge(frame.captured_length())
         .map_err(|source| Error::Capture { number, source })?;
-    *frames_read = number;
-    *bytes_read = bytes;
-    Ok(Some((number, frame)))
+    Ok(Some((input.frames(), frame)))
 }
 
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {

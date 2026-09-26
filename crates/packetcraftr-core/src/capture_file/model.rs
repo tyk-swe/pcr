@@ -38,39 +38,122 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Charges one frame, returning updated frame/byte totals or the exceeded
-    /// ceiling.
-    pub fn advance(
-        self,
-        frames: u64,
-        captured_bytes: u64,
-        frame_bytes: u32,
-    ) -> Result<(u64, u64), Error> {
-        let frames = frames.checked_add(1).ok_or(Error::FrameLimitExceeded {
-            actual: u64::MAX,
-            limit: self.max_frames,
-        })?;
-        if frames > self.max_frames {
+    /// Rejects a zero ceiling, which would refuse every frame of the stream.
+    pub fn validate(&self) -> Result<(), Error> {
+        for (field, value) in [
+            ("max_frames", self.max_frames),
+            ("max_bytes", self.max_bytes),
+        ] {
+            if value == 0 {
+                return Err(Error::InvalidLimit { field, value });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The frames and captured bytes one stream has charged against its
+/// [`Limits`].
+///
+/// A charge that would exceed either ceiling fails and leaves the budget
+/// unchanged.
+///
+/// ```rust
+/// use packetcraftr_core::capture_file::{Budget, Error, Limits};
+///
+/// let mut budget = Budget::new(Limits { max_frames: 1, max_bytes: 64 })?;
+/// budget.charge(60)?;
+/// assert!(matches!(budget.charge(1), Err(Error::FrameLimitExceeded { .. })));
+/// assert_eq!((budget.frames(), budget.captured_bytes()), (1, 60));
+/// # Ok::<(), Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Budget {
+    limits: Limits,
+    frames: u64,
+    captured_bytes: u64,
+}
+
+impl Budget {
+    /// An empty budget for `limits`, after [`Limits::validate`] accepts them.
+    pub fn new(limits: Limits) -> Result<Self, Error> {
+        limits.validate()?;
+        Ok(Self {
+            limits,
+            frames: 0,
+            captured_bytes: 0,
+        })
+    }
+
+    #[must_use]
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// Frames charged so far.
+    #[must_use]
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// Captured payload bytes charged so far.
+    #[must_use]
+    pub fn captured_bytes(&self) -> u64 {
+        self.captured_bytes
+    }
+
+    /// A budget that has already charged `frames` and `captured_bytes`.
+    #[cfg(test)]
+    pub(super) fn charged(limits: Limits, frames: u64, captured_bytes: u64) -> Self {
+        Self {
+            limits,
+            frames,
+            captured_bytes,
+        }
+    }
+
+    /// Charges one frame of `frame_bytes` captured bytes.
+    pub fn charge(&mut self, frame_bytes: u32) -> Result<(), Error> {
+        *self = self.after(frame_bytes)?;
+        Ok(())
+    }
+
+    /// The budget after charging one frame, without changing this one, so a
+    /// caller can check a frame before committing its output.
+    pub fn after(&self, frame_bytes: u32) -> Result<Self, Error> {
+        let frames = self
+            .frames
+            .checked_add(1)
+            .ok_or(Error::FrameLimitExceeded {
+                actual: u64::MAX,
+                limit: self.limits.max_frames,
+            })?;
+        if frames > self.limits.max_frames {
             return Err(Error::FrameLimitExceeded {
                 actual: frames,
-                limit: self.max_frames,
+                limit: self.limits.max_frames,
             });
         }
 
-        let captured_bytes = captured_bytes.checked_add(u64::from(frame_bytes)).ok_or(
-            Error::StreamByteLimitExceeded {
+        let captured_bytes = self
+            .captured_bytes
+            .checked_add(u64::from(frame_bytes))
+            .ok_or(Error::StreamByteLimitExceeded {
                 actual: u64::MAX,
-                limit: self.max_bytes,
-            },
-        )?;
-        if captured_bytes > self.max_bytes {
+                limit: self.limits.max_bytes,
+            })?;
+        if captured_bytes > self.limits.max_bytes {
             return Err(Error::StreamByteLimitExceeded {
                 actual: captured_bytes,
-                limit: self.max_bytes,
+                limit: self.limits.max_bytes,
             });
         }
 
-        Ok((frames, captured_bytes))
+        Ok(Self {
+            frames,
+            captured_bytes,
+            ..*self
+        })
     }
 }
 

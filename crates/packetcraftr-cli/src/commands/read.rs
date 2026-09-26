@@ -41,11 +41,25 @@ struct Decoding {
     publish_layers: bool,
 }
 
-#[derive(Default)]
 struct StreamState {
-    frames_read: u64,
+    budget: capture::Budget,
     frames_matched: u64,
-    captured_bytes_read: u64,
+}
+
+impl StreamState {
+    /// Charges frames against the same two aggregate ceilings the rewrite copy
+    /// and the analysis loop charge against.
+    fn new(limits: OfflineCaptureLimitsArgs) -> Result<Self, CliError> {
+        let budget = capture::Budget::new(Limits {
+            max_frames: limits.max_frames,
+            max_bytes: limits.max_bytes,
+        })
+        .map_err(CliError::classified)?;
+        Ok(Self {
+            budget,
+            frames_matched: 0,
+        })
+    }
 }
 
 impl super::Spec for Args {
@@ -252,9 +266,9 @@ fn read_records(
     format: ReadFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let mut state = StreamState::default();
+    let mut state = StreamState::new(limits)?;
     while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-        let source_frame = account_frame(&mut state, &frame, limits)?;
+        let source_frame = account_frame(&mut state, &frame)?;
         if !kept_by_time(bounds, &frame) {
             continue;
         }
@@ -267,9 +281,9 @@ fn read_records(
     if format == ReadFormat::Ndjson {
         stream.complete(
             output::read::Event::Complete {
-                frames_read: state.frames_read,
+                frames_read: state.budget.frames(),
                 frames_matched: state.frames_matched,
-                captured_bytes_read: state.captured_bytes_read,
+                captured_bytes_read: state.budget.captured_bytes(),
             },
             Vec::new(),
         )?;
@@ -298,9 +312,9 @@ fn normalize_capture(
     )
     .map_err(CliError::classified)?;
     let mut interfaces = BTreeMap::new();
-    let mut state = StreamState::default();
+    let mut state = StreamState::new(limits)?;
     while let Some(mut frame) = reader.next_frame().map_err(CliError::classified)? {
-        let source_frame = account_frame(&mut state, &frame, limits)?;
+        let source_frame = account_frame(&mut state, &frame)?;
         if !kept_by_time(bounds, &frame) {
             continue;
         }
@@ -337,28 +351,15 @@ fn normalize_capture(
     writer.flush().map_err(CliError::classified)
 }
 
-/// Charges one frame against the same two aggregate ceilings the rewrite copy
-/// and the analysis loop charge against, and answers with its source number.
-fn account_frame(
-    state: &mut StreamState,
-    frame: &core::frame::Frame,
-    limits: OfflineCaptureLimitsArgs,
-) -> Result<u64, CliError> {
+/// Charges one frame against the stream budget and answers with its source
+/// number.
+fn account_frame(state: &mut StreamState, frame: &core::frame::Frame) -> Result<u64, CliError> {
     crate::cancellation::check()?;
-    let stream_limits = Limits {
-        max_frames: limits.max_frames,
-        max_bytes: limits.max_bytes,
-    };
-    let (frames_read, captured_bytes_read) = stream_limits
-        .advance(
-            state.frames_read,
-            state.captured_bytes_read,
-            frame.captured_length(),
-        )
+    state
+        .budget
+        .charge(frame.captured_length())
         .map_err(CliError::classified)?;
-    state.frames_read = frames_read;
-    state.captured_bytes_read = captured_bytes_read;
-    Ok(state.frames_read)
+    Ok(state.budget.frames())
 }
 
 fn convert_frame(

@@ -7,7 +7,10 @@ use crate::analysis::reassembly::ip::{Limits as IpReassemblyLimits, OverlapPolic
 use crate::analysis::reassembly::tcp::{
     Limits as TcpReassemblyLimits, MAX_BYTES_PER_FLOW as MAX_TCP_BYTES_PER_FLOW,
 };
-use crate::capture_file::{DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as CaptureLimits};
+use crate::capture_file::{
+    Budget as CaptureBudget, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError,
+    Limits as CaptureLimits,
+};
 use crate::filter::Filter;
 use crate::frame::DEFAULT_SIZE_LIMIT;
 
@@ -174,11 +177,21 @@ impl Limits {
         Ok(())
     }
 
-    pub(super) fn capture(&self) -> CaptureLimits {
-        CaptureLimits {
+    /// The input frame and byte budget. Its limits are this struct's
+    /// `max_frames` and `max_bytes`, so a refusal names those fields.
+    pub(super) fn capture_budget(&self) -> Result<CaptureBudget, Error> {
+        CaptureBudget::new(CaptureLimits {
             max_frames: self.max_frames,
             max_bytes: self.max_bytes,
-        }
+        })
+        .map_err(|error| match error {
+            CaptureError::InvalidLimit { field, value } => Error::InvalidLimit {
+                field,
+                value,
+                reason: Constraint::NonZero,
+            },
+            source => Error::Capture { number: 0, source },
+        })
     }
 
     pub(super) fn ip_reassembly(&self) -> IpReassemblyLimits {

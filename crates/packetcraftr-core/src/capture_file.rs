@@ -28,9 +28,9 @@ mod wire;
 mod writer;
 
 pub use error::Error;
-pub use merge::{MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
+pub use merge::{MAX_MERGE_SOURCES, MergeLimits, MergeReport, MergeSource, MergedInterface, merge};
 pub use model::{
-    CaptureHeader, CaptureRecord, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
+    Budget, CaptureHeader, CaptureRecord, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
     DEFAULT_METADATA_BYTE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,
     DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, MetadataBlockKind,
     PacketBlockKind, PcapHeader, PcapNgOption, PcapNgOptions, PcapOptions, ReaderLimits,

@@ -102,6 +102,9 @@ pub enum Error {
     FrameLimitExceeded { actual: u64, limit: u64 },
     #[error("capture stream payload bytes {actual} exceed the configured limit of {limit}")]
     StreamByteLimitExceeded { actual: u64, limit: u64 },
+    /// A stream ceiling that would refuse every frame.
+    #[error("invalid capture stream limit {field}={value}: must be non-zero")]
+    InvalidLimit { field: &'static str, value: u64 },
     #[error("capture timestamp resolution {base}^{exponent} cannot be represented")]
     InvalidTimestampResolution { base: u8, exponent: u8 },
     /// A [`select`](super::select) predicate failed on frame `number`.
@@ -192,6 +195,11 @@ impl Classified for Error {
                 Some(
                     "inspect the capture input/output stream and retry from a known record boundary",
                 ),
+            ),
+            Self::InvalidLimit { .. } => Classification::new(
+                "cli.capture_limit",
+                Kind::Usage,
+                Some("use finite non-zero capture frame and byte limits"),
             ),
             Self::InvalidTimestampResolution { .. } => Classification::new(
                 "cli.capture_option",

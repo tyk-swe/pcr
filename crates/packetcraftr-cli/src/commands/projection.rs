@@ -312,13 +312,16 @@ pub(super) fn read(
             filter,
             args.limits.reader.max_frame_bytes,
         );
+        let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
+            max_frames: args.limits.max_frames,
+            max_bytes: args.limits.max_bytes,
+        })
+        .map_err(CliError::classified)?;
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-            (frames, bytes) = core::capture_file::Limits {
-                max_frames: args.limits.max_frames,
-                max_bytes: args.limits.max_bytes,
-            }
-            .advance(frames, bytes, frame.captured_length())
-            .map_err(CliError::classified)?;
+            budget
+                .charge(frame.captured_length())
+                .map_err(CliError::classified)?;
+            (frames, bytes) = (budget.frames(), budget.captured_bytes());
             if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
                 continue;
             }

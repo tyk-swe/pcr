@@ -6,8 +6,8 @@
 use super::pcapng::validate_rewritable_packet_flags;
 use super::wire::{PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_IF_FCSLEN};
 use super::{
-    CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
-    Reader, RecordKind, Writer,
+    Budget, CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind,
+    PcapNgOption, Reader, RecordKind, Writer,
 };
 use crate::frame::Frame;
 use serde::Serialize;
@@ -22,19 +22,40 @@ pub struct MergeSource<R> {
     pub name: String,
     pub reader: Reader<R>,
 }
-#[derive(Clone, Copy, Debug)]
+/// Most capture sources one [`merge`] accepts.
+pub const MAX_MERGE_SOURCES: usize = 64;
+
+/// Ceilings for one [`merge`]: the merged output stream, the number of
+/// sources, and the interfaces they declare together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MergeLimits {
     pub streams: Limits,
+    /// Sources accepted, within `1..=`[`MAX_MERGE_SOURCES`].
     pub max_sources: usize,
+    /// Interfaces declared across every source. Zero accepts only sources
+    /// that declare none.
     pub max_interfaces: usize,
 }
 impl Default for MergeLimits {
     fn default() -> Self {
         Self {
             streams: Limits::default(),
-            max_sources: 64,
+            max_sources: MAX_MERGE_SOURCES,
             max_interfaces: super::DEFAULT_TOTAL_INTERFACE_LIMIT,
         }
+    }
+}
+impl MergeLimits {
+    /// Rejects stream ceilings [`Limits::validate`] refuses and a source
+    /// ceiling outside `1..=`[`MAX_MERGE_SOURCES`].
+    pub fn validate(&self) -> Result<(), Error> {
+        self.streams.validate()?;
+        if !(1..=MAX_MERGE_SOURCES).contains(&self.max_sources) {
+            return Err(Error::MergeSources {
+                maximum: MAX_MERGE_SOURCES,
+            });
+        }
+        Ok(())
     }
 }
 #[derive(Clone, Debug, Serialize)]
@@ -78,14 +99,14 @@ pub fn merge<R: Read, W: Write>(
     output: &mut Writer<W>,
     limits: MergeLimits,
 ) -> Result<MergeReport, Error> {
-    if limits.max_sources == 0
-        || limits.max_sources > 64
-        || sources.is_empty()
+    limits.validate()?;
+    let mut budget = Budget::new(limits.streams)?;
+    if sources.is_empty()
         || sources.len() > limits.max_sources
         || sources.iter().any(|source| source.name.len() > 4096)
     {
         return Err(Error::MergeSources {
-            maximum: limits.max_sources.min(64),
+            maximum: limits.max_sources,
         });
     }
     if output.format() != Format::PcapNg {
@@ -139,6 +160,7 @@ pub fn merge<R: Read, W: Write>(
             &mut states[index],
             &mut interface_count,
             &mut report,
+            &mut budget,
             limits,
         )? {
             heap.push(Reverse((
@@ -195,6 +217,7 @@ pub fn merge<R: Read, W: Write>(
             &mut states[index],
             &mut interface_count,
             &mut report,
+            &mut budget,
             limits,
         )? {
             heap.push(Reverse((
@@ -215,6 +238,7 @@ fn advance<R: Read>(
     state: &mut State,
     interfaces: &mut usize,
     report: &mut MergeReport,
+    budget: &mut Budget,
     limits: MergeLimits,
 ) -> Result<Option<Pending>, Error> {
     let next = report.source_frames[index]
@@ -296,11 +320,8 @@ fn advance<R: Read>(
             });
         }
         state.previous = Some(time);
-        (report.frames, report.captured_bytes) = limits.streams.advance(
-            report.frames,
-            report.captured_bytes,
-            frame.captured_length(),
-        )?;
+        budget.charge(frame.captured_length())?;
+        (report.frames, report.captured_bytes) = (budget.frames(), budget.captured_bytes());
         report.source_frames[index] = next;
         let global = frame.interface.unwrap_or(0);
         let description = source

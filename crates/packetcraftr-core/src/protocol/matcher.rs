@@ -7,8 +7,14 @@ mod quoted_icmp;
 mod reverse_flow;
 mod sctp;
 
+use bytes::Bytes;
+
 use crate::{
-    codec::NetworkEnvelope, layer::Layer, packet::Packet, protocol::BuiltinProtocol,
+    codec::NetworkEnvelope,
+    layer::{Layer, Malformed, Padding, Raw},
+    packet::Packet,
+    protocol::BuiltinProtocol,
+    protocol::network::{Icmpv4, Icmpv6},
     protocol::semantics,
 };
 
@@ -171,11 +177,42 @@ fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option
     })
 }
 
-fn unsigned_field<T>(layer: &dyn Layer, field: &str) -> Option<T>
-where
-    T: TryFrom<u64>,
-{
-    T::try_from(layer.field(field)?.as_u64()?).ok()
+/// The type, code, and body the built-in ICMPv4 and ICMPv6 layers share.
+struct IcmpMessage<'a> {
+    icmp_type: u8,
+    code: u8,
+    body: &'a Bytes,
+}
+
+impl<'a> IcmpMessage<'a> {
+    fn of(layer: &'a dyn Layer) -> Option<Self> {
+        if let Some(icmp) = layer.downcast_ref::<Icmpv4>() {
+            return Some(Self {
+                icmp_type: icmp.icmp_type,
+                code: icmp.code,
+                body: &icmp.body,
+            });
+        }
+        let icmp = layer.downcast_ref::<Icmpv6>()?;
+        Some(Self {
+            icmp_type: icmp.icmp_type,
+            code: icmp.code,
+            body: &icmp.body,
+        })
+    }
+}
+
+/// The bytes an opaque built-in layer carries verbatim.
+fn opaque_bytes(layer: &dyn Layer) -> Option<&Bytes> {
+    if let Some(raw) = layer.downcast_ref::<Raw>() {
+        return Some(&raw.bytes);
+    }
+    if let Some(padding) = layer.downcast_ref::<Padding>() {
+        return Some(&padding.bytes);
+    }
+    layer
+        .downcast_ref::<Malformed>()
+        .map(|malformed| &malformed.bytes)
 }
 
 fn response_source(response: &Packet, protocol: BuiltinProtocol) -> Option<std::net::IpAddr> {

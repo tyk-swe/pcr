@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::protocol::transport::Tcp;
+use crate::protocol::transport::{Sctp, Tcp};
 use crate::{
-    field::FieldValue,
+    layer::{Padding, Raw},
     matcher::{Match, ResponseMatcher},
     packet::Packet,
     protocol::BuiltinProtocol,
@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     QuotedProbeTransport, ReversedProtocolLayers, quoted_icmp_error_kind, response_source,
-    reversed_protocol_layers, sctp::sctp_initiate_tag, unsigned_field,
+    reversed_protocol_layers, sctp::sctp_initiate_tag,
 };
 
 #[derive(Clone, Debug)]
@@ -57,11 +57,11 @@ impl ResponseMatcher for ReverseFlowMatcher {
 
 fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> Option<Match> {
     for layers in layers {
-        let request_layer = layers.request;
-        let response_layer = layers.response;
-        let request_flags = unsigned_field::<u16>(request_layer, "flags")?;
-        let request_sequence = unsigned_field::<u32>(request_layer, "sequence")?;
-        let response_flags = unsigned_field::<u16>(response_layer, "flags")?;
+        let request_tcp = layers.request.downcast_ref::<Tcp>()?;
+        let response_tcp = layers.response.downcast_ref::<Tcp>()?;
+        let request_flags = request_tcp.flags;
+        let request_sequence = request_tcp.sequence;
+        let response_flags = response_tcp.flags;
         let request_payload_length = tcp_payload_length(request, layers.request_index)?;
         let expected_acknowledgment = request_sequence
             .wrapping_add(request_payload_length)
@@ -70,14 +70,11 @@ fn match_tcp(request: &Packet, layers: &[ReversedProtocolLayers<'_, '_>]) -> Opt
         let has_ack = response_flags & Tcp::ACK != 0;
         let has_rst = response_flags & Tcp::RST != 0;
         if has_ack {
-            let response_acknowledgment = unsigned_field::<u32>(response_layer, "acknowledgment")?;
-            if response_acknowledgment != expected_acknowledgment {
+            if response_tcp.acknowledgment != expected_acknowledgment {
                 return None;
             }
         } else if has_rst && request_flags & Tcp::ACK != 0 {
-            let request_acknowledgment = unsigned_field::<u32>(request_layer, "acknowledgment")?;
-            let response_sequence = unsigned_field::<u32>(response_layer, "sequence")?;
-            if response_sequence != request_acknowledgment {
+            if response_tcp.sequence != request_tcp.acknowledgment {
                 return None;
             }
         } else {
@@ -96,22 +93,15 @@ fn match_sctp(
     layers: &[ReversedProtocolLayers<'_, '_>],
 ) -> Option<Match> {
     for layers in layers {
-        if layers
-            .request
-            .field("verification_tag")
-            .and_then(|value| value.as_u64())
-            != Some(0)
-        {
+        let request_sctp = layers.request.downcast_ref::<Sctp>()?;
+        let response_sctp = layers.response.downcast_ref::<Sctp>()?;
+        if request_sctp.verification_tag != 0 {
             return None;
         }
         let (request_initiate_tag, _) = sctp_initiate_tag(request, layers.request_index, 1)?;
         if request_initiate_tag == 0
             || sctp_initiate_tag(response, layers.response_index, 2).is_none()
-            || layers
-                .response
-                .field("verification_tag")
-                .and_then(|value| value.as_u64())
-                != Some(u64::from(request_initiate_tag))
+            || response_sctp.verification_tag != request_initiate_tag
         {
             return None;
         }
@@ -126,38 +116,28 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
             .iter()
             .skip(first_child_index)
             .rev()
-            .take_while(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Padding))
-            .filter(|layer| {
-                layer
-                    .field("outside_layer")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| usize::try_from(value).ok())
+            .map_while(|layer| layer.downcast_ref::<Padding>())
+            .filter(|padding| {
+                padding
+                    .outside_layer
                     .is_none_or(|outside_layer| tcp_layer_index >= outside_layer)
             })
-            .try_fold(0_usize, |total, layer| {
-                let FieldValue::Bytes(bytes) = layer.field("bytes")? else {
-                    return None;
-                };
-                total.checked_add(bytes.len())
+            .try_fold(0_usize, |total, padding| {
+                total.checked_add(padding.bytes.len())
             })?;
         return u32::try_from(encoded_length.checked_sub(trailing_padding)?).ok();
     }
 
     let mut payload_length = 0_u32;
     for layer in packet.iter().skip(first_child_index) {
-        match BuiltinProtocol::of(layer) {
-            Some(BuiltinProtocol::Padding) => break,
-            Some(BuiltinProtocol::Raw) => {
-                let FieldValue::Bytes(bytes) = layer.field("bytes")? else {
-                    return None;
-                };
-                payload_length = payload_length.checked_add(u32::try_from(bytes.len()).ok()?)?;
-            }
-            // The built-in TCP binding decodes its opaque payload as Raw. An
-            // unknown child cannot be assigned a sequence-space length from
-            // reflective fields without guessing its encoded representation.
-            _ => return None,
+        if layer.is::<Padding>() {
+            break;
         }
+        // The built-in TCP binding decodes its opaque payload as Raw. An
+        // unknown child cannot be assigned a sequence-space length from
+        // reflective fields without guessing its encoded representation.
+        let raw = layer.downcast_ref::<Raw>()?;
+        payload_length = payload_length.checked_add(u32::try_from(raw.bytes.len()).ok()?)?;
     }
     Some(payload_length)
 }

@@ -21,7 +21,8 @@ pub fn decode_name(
     offset: usize,
     limits: DecodeLimits,
 ) -> Result<(Name, usize), Error> {
-    let expanded = super::name::decompress(message, offset, limits.max_name_pointers.min(128))?;
+    limits.validate()?;
+    let expanded = super::name::decompress(message, offset, limits.max_name_pointers)?;
     Ok((
         Name {
             labels: expanded.labels,
@@ -31,8 +32,9 @@ pub fn decode_name(
 }
 
 pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, Error> {
+    limits.validate()?;
     let message = wire.as_ref();
-    let maximum = limits.max_message_bytes.min(u16::MAX as usize);
+    let maximum = limits.max_message_bytes;
     if message.len() > maximum {
         return Err(Error::MessageTooLarge {
             actual: message.len(),
@@ -58,7 +60,7 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, Error> {
     }
     let count =
         usize::from(answer_count) + usize::from(authority_count) + usize::from(additional_count);
-    let limit = limits.max_records.min(4096);
+    let limit = limits.max_records;
     if count > limit {
         return Err(Error::RecordLimit {
             actual: count,
@@ -80,11 +82,6 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, Error> {
         });
         offset = advance(next, 4, "question")?;
     }
-    let limits = DecodeLimits {
-        max_txt_strings: limits.max_txt_strings.min(4096),
-        max_txt_bytes: limits.max_txt_bytes.min(u16::MAX as usize),
-        ..limits
-    };
     let (answers, next) =
         records::decode_records(&wire, offset, usize::from(answer_count), limits)?;
     let (authorities, next) =

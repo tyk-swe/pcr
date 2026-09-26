@@ -27,9 +27,9 @@ use crate::{
     },
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{
-        canonical_link_type, check_setting_status, is_missing_device, is_permission_denied,
-        realize_settings, timestamp_precision_value, timestamp_source_of_value,
-        timestamp_source_value, validate_effective_snapshot_length,
+        Diagnostic, canonical_link_type, check_setting_status, is_missing_device,
+        is_permission_denied, realize_settings, timestamp_precision_value,
+        timestamp_source_of_value, timestamp_source_value, validate_effective_snapshot_length,
     },
 };
 use packetcraftr_core::error::Source;
@@ -207,11 +207,10 @@ pub(in crate::platform) fn timestamp_types(
     if count < 0 {
         return Err(Error::Capture {
             message: format!(
-                "libpcap could not enumerate timestamp types for {}: {}",
-                interface.name,
-                inactive_error_message(handle)
+                "libpcap could not enumerate timestamp types for {}",
+                interface.name
             ),
-            source: None,
+            source: Diagnostic::new(Some(count), inactive_error_message(handle)).into_source(),
         });
     }
     // A zero count means only the default timestamp type is supported;

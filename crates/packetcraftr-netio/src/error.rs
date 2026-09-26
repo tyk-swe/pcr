@@ -30,8 +30,8 @@ pub enum SendEvidenceFault {
 ///
 /// A native failure keeps the platform's own error as its `source`, a shared
 /// [`Source`] handle so capture sessions can return a terminal failure
-/// repeatedly. An absent source means a PacketcraftR check of a provider's
-/// answer failed rather than a platform call.
+/// repeatedly. An absent source means one of PacketcraftR's own checks failed
+/// (an invariant, a limit, or a provider's answer) rather than a platform call.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {

@@ -98,7 +98,10 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
     Err(SystemError::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
-        source: None,
+        // Every read ended with the buffer-overflow status.
+        source: Some(Source::new(std::io::Error::from_raw_os_error(
+            ERROR_BUFFER_OVERFLOW.0.cast_signed(),
+        ))),
     })
 }
 

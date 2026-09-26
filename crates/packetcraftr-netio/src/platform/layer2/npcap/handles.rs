@@ -23,7 +23,7 @@ use crate::{
     capture::NativeSettings,
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{
-        check_setting_status, timestamp_precision_value, timestamp_source_value,
+        Diagnostic, check_setting_status, timestamp_precision_value, timestamp_source_value,
     },
 };
 
@@ -208,12 +208,8 @@ fn set_integer_option(
         Ok(())
     } else {
         Err(Error::Capture {
-            message: format!(
-                "{operation} failed for {} with status {result}: {}",
-                interface.name,
-                handle.error_message()
-            ),
-            source: None,
+            message: format!("{operation} failed for {}", interface.name),
+            source: Diagnostic::new(Some(result), handle.error_message()).into_source(),
         })
     }
 }

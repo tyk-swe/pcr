@@ -36,7 +36,7 @@ use super::{
     },
     error::{error_buffer_message, interface_conversion_error},
 };
-use crate::{Error, interface::Id as InterfaceId};
+use crate::{Error, interface::Id as InterfaceId, platform::layer2::pcap_common::Diagnostic};
 use packetcraftr_core::error::Source;
 
 pub(super) struct NpcapApi {
@@ -130,11 +130,9 @@ impl NpcapApi {
         if initialization != 0 {
             return Err(Error::MissingDependency {
                 dependency: NPCAP_DEPENDENCY,
-                message: format!(
-                    "pcap_init rejected UTF-8 mode: {}",
-                    error_buffer_message(&error_buffer)
-                ),
-                source: None,
+                message: "pcap_init rejected UTF-8 mode".to_owned(),
+                source: Diagnostic::new(Some(initialization), error_buffer_message(&error_buffer))
+                    .into_source(),
             });
         }
 
@@ -228,7 +226,9 @@ fn npcap_library_path() -> Result<PathBuf, Error> {
             dependency: NPCAP_DEPENDENCY,
             message: "Windows did not return a valid system directory for secure DLL lookup"
                 .to_owned(),
-            source: None,
+            // A zero length is the call's failure, whose reason is the thread's
+            // last error; an oversized answer is a check of our own.
+            source: (length == 0).then(|| Source::new(std::io::Error::last_os_error())),
         });
     }
     windows_directory.truncate(length);

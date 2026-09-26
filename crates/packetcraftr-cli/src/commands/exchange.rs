@@ -12,9 +12,10 @@ use packetcraftr_core::error::Kind;
 use crate::output;
 
 use self::arguments::Args;
-use super::{execution, preparation};
+use super::execution;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
+use crate::system::preparation;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ExchangeFormat;

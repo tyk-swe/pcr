@@ -7,6 +7,7 @@
 mod client;
 pub(crate) mod exchange;
 mod interface;
+pub(crate) mod preparation;
 mod route;
 
 pub(crate) use interface::{InterfaceSelector, resolve, select_interfaces};

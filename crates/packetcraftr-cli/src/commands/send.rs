@@ -12,12 +12,12 @@ use packetcraftr_core::capture_file as capture;
 use crate::output;
 
 use self::arguments::Args;
-use super::preparation::{self, Prepared};
 use crate::errors::CliError;
 use crate::rendering::{
     emit_published, render_diagnostics_text, write_capture_file, write_hex_line, write_raw,
     write_summary_line,
 };
+use crate::system::preparation::{self, Prepared};
 
 fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, CliError> {
     let Args {

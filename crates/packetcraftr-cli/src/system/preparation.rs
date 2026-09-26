@@ -18,7 +18,7 @@ use crate::system::{Client, client, prepare_expanded_route};
 /// A live command's request, as the shared preparation sees it. A command
 /// builds it before the recipe is read, with a placeholder template the
 /// preparation replaces.
-pub(super) trait LiveRequest {
+pub(crate) trait LiveRequest {
     /// Checks the command's options before the recipe is read.
     fn validate(&self) -> Result<(), CliError>;
     /// Installs the packet set read from the recipe.
@@ -81,21 +81,21 @@ impl LiveRequest for packetcraftr::exchange::Request {
 }
 
 /// The template a command's request carries until the recipe is read.
-pub(super) fn placeholder() -> core::template::Template {
+pub(crate) fn placeholder() -> core::template::Template {
     core::template::Template::new(core::packet::Packet::new())
 }
 
 /// The command's request, holding the packet set and resolved send options,
 /// and a client bound to the validated policy.
-pub(super) struct Prepared<R> {
-    pub(super) request: R,
-    pub(super) client: Client,
+pub(crate) struct Prepared<R> {
+    pub(crate) request: R,
+    pub(crate) client: Client,
 }
 
 /// Validates `request`, reads the recipe into its template, validates policy,
 /// authorizes the budget count and every expanded destination, then prepares
 /// the first packet's route.
-pub(super) fn prepare<R: LiveRequest>(
+pub(crate) fn prepare<R: LiveRequest>(
     send: SendArgs,
     template: TemplateArgs,
     mut request: R,

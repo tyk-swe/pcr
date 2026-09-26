@@ -274,7 +274,7 @@ fn classified_cli(code: &'static str, remediation: &'static str) -> Classificati
 }
 
 #[cfg(test)]
-pub(crate) mod testing {
+pub(crate) mod test_support {
     use super::Error;
 
     /// Compares every field through `Debug`, including the non-comparable

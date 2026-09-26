@@ -307,16 +307,15 @@ const fn output_classification() -> Classification {
     )
 }
 
-/// Generous bound on fixture release waits so a broken test fails instead of
-/// blocking a worker forever; far above the deadlines under test.
-#[cfg(test)]
-const FIXTURE_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(30);
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use packetcraftr_core::{budget::Cancellation, error::Classified};
     use std::time::{Duration, Instant};
+
+    /// Generous bound on fixture release waits so a broken test fails instead
+    /// of blocking a worker forever; far above the deadlines under test.
+    const FIXTURE_WATCHDOG: Duration = Duration::from_secs(30);
 
     fn wait_for_cleanup(runtime: &Runtime) {
         let until = Instant::now() + Duration::from_secs(2);

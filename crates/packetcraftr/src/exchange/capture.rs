@@ -316,7 +316,7 @@ mod tests {
         let server = Ipv4Addr::new(192, 0, 2, 53);
         let request = udp_packet(client, server, 40_000, 9);
         let response = udp_packet(server, client, 9, 40_000);
-        let prepared_evidence = crate::evidence::test_sent_packet(request);
+        let prepared_evidence = crate::test_support::sent_packet(request);
         let prepared_packets = (0..request_count)
             .map(|_| {
                 PreparedPacket::fixture(
@@ -325,7 +325,7 @@ mod tests {
                 )
             })
             .collect();
-        let response_frame = crate::evidence::test_sent_packet(response).frame().clone();
+        let response_frame = crate::test_support::sent_packet(response).frame().clone();
         let options = crate::exchange::Options {
             max_responses,
             ..crate::exchange::Options::default()

@@ -484,7 +484,7 @@ fn materialize_pending_merge(
         })?;
     output.resize(plan.emitted_segment_bytes, 0);
     #[cfg(test)]
-    pages::work::record(|work| {
+    pages::test_support::record(|work| {
         work.output_allocations += 1;
         work.incoming_copies += payload.len();
     });

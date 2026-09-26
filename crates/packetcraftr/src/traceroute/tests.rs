@@ -87,7 +87,7 @@ impl Executor<Batch> for NoResponseExecutor {
             if let Some(ipv4) = packet.get_mut::<Ipv4>() {
                 ipv4.source = Ipv4Addr::new(10, 0, 0, 1);
             }
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
@@ -125,7 +125,7 @@ impl Executor<Batch> for MixedHopExecutor {
         for probe in &batch.probes {
             let mut packet = probe_packet(probe);
             packet.get_mut::<Ipv4>().expect("IPv4 probe").source = local;
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }

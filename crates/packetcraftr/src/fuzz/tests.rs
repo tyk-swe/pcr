@@ -96,7 +96,7 @@ struct RebuildingExecutor;
 
 impl Executor<ExecutionCase> for RebuildingExecutor {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
-        let sent = crate::evidence::test_sent_packet(case.packet.clone());
+        let sent = crate::test_support::sent_packet(case.packet.clone());
         Ok(Execution {
             permit: case.permit,
             stats: ExecutionStats {
@@ -225,7 +225,7 @@ impl Executor<ExecutionCase> for BudgetSpendingExecutor {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
         let first = self.executions == 0;
         self.executions += 1;
-        let sent = crate::evidence::test_sent_packet(case.packet.clone());
+        let sent = crate::test_support::sent_packet(case.packet.clone());
         let responses = if first {
             Vec::new()
         } else {
@@ -468,7 +468,7 @@ struct SubstitutingFuzzExecutor;
 
 impl Executor<ExecutionCase> for SubstitutingFuzzExecutor {
     fn execute(&mut self, _case: &ExecutionCase) -> Result<Execution, BoundaryError> {
-        let sent = crate::evidence::test_sent_packet(packet());
+        let sent = crate::test_support::sent_packet(packet());
         Ok(Execution {
             permit: _case.permit,
             stats: ExecutionStats {

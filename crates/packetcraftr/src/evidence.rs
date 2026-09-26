@@ -184,77 +184,6 @@ impl SentPacket {
 }
 
 #[cfg(test)]
-pub(crate) fn test_sent_packet(packet: packetcraftr_core::packet::Packet) -> SentPacket {
-    use packetcraftr_netio::transmit::Submission;
-
-    let built = test_built_packet(packet);
-    let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
-    SentPacket::try_new(built, test_materialized_route(), report)
-        .expect("valid trusted sent fixture")
-}
-
-#[cfg(test)]
-pub(crate) fn test_sent_packet_with_report(
-    packet: packetcraftr_core::packet::Packet,
-    report: TransmissionReport,
-) -> SentPacket {
-    SentPacket::try_new(test_built_packet(packet), test_materialized_route(), report)
-        .expect("valid trusted sent fixture")
-}
-
-#[cfg(test)]
-fn test_built_packet(packet: packetcraftr_core::packet::Packet) -> BuiltPacket {
-    use packetcraftr_core::build::{Builder, Options};
-    use packetcraftr_core::codec::Context;
-
-    Builder::new(packetcraftr_core::protocol::builtin::registry())
-        .build(packet, Context::default(), Options::default())
-        .expect("sent-packet fixture must build")
-}
-
-#[cfg(test)]
-fn test_materialized_route() -> packetcraftr_netio::route::Materialized {
-    use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::{
-        interface::Id as InterfaceId,
-        link::{Capability, Mode},
-        route::{Decision, Materialized, Plan},
-    };
-
-    Materialized {
-        plan: Plan {
-            decision: Decision {
-                interface: InterfaceId {
-                    name: "fixture0".to_owned(),
-                    index: 1,
-                },
-                source_mac: None,
-                selected_source: None,
-                preferred_source: None,
-                next_hop: None,
-                selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
-                destination_scope: packetcraftr_netio::route::Scope::Link,
-                mtu: u32::MAX,
-                capability: Capability::Layer3,
-                link_type: LinkType::RAW,
-            },
-            mode: Mode::Layer3,
-            lookup_destination: None,
-            final_destination: None,
-            visited_destinations: Vec::new(),
-            packet_source: None,
-            neighbor_source: None,
-            neighbor_target: None,
-            destination_mac: None,
-            source_mac: None,
-            neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: false,
-        },
-        neighbor_resolution: None,
-    }
-}
-
-#[cfg(test)]
 mod tests {
     use bytes::Bytes;
     use packetcraftr_core::{layer::Raw, packet::Packet};
@@ -321,7 +250,7 @@ mod tests {
     fn sent_receipt_rejects_semantic_build_with_different_accepted_bytes() {
         let mut packet = Packet::new();
         packet.push(Raw::new(Bytes::from_static(&[1, 2, 3])));
-        let fixture = test_sent_packet(packet);
+        let fixture = crate::test_support::sent_packet(packet);
         let built = fixture.built.clone();
         let route = fixture.route.clone();
         let report = Submission::start().complete(3, Bytes::from_static(&[3, 2, 1]));

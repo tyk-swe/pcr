@@ -100,7 +100,7 @@ fn current_name(index: u32) -> Option<String> {
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
-    use crate::error::testing::assert_same_failure;
+    use crate::error::test_support::assert_same_failure;
 
     const ABSENT_NAME: &str = "pcr-absent0";
     const ABSENT_INDEX: u32 = u32::MAX - 1;

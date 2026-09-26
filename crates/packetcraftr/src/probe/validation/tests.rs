@@ -124,7 +124,7 @@ fn validate(execution: &Execution, sent_matches: bool) -> Result<(), (u64, Strin
 fn execution(sent: &'static [u8], bytes: u64) -> Execution {
     Execution {
         permit: crate::evidence::ExecutionPermit::new(),
-        sent: vec![crate::evidence::test_sent_packet(raw_packet(sent))],
+        sent: vec![crate::test_support::sent_packet(raw_packet(sent))],
         responses: Vec::new(),
         unsolicited: Vec::new(),
         undecoded: Vec::new(),

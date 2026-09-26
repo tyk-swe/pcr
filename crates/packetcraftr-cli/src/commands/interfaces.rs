@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use crate::output::contract::AggregateFormat;
 
 use packetcraftr_netio as net;
@@ -10,24 +14,7 @@ use crate::output;
 use packetcraftr_netio::capture::Provider as _;
 
 use crate::errors::CliError;
-use crate::rendering::optional_display;
-use crate::system::{InterfaceSelector, select_interfaces};
-
-pub(super) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr interfaces
-  packetcraftr interfaces --interface lo
-  packetcraftr --output json interfaces";
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Only list the interface with this name or numeric index.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: Option<String>,
-    /// List the packet timestamp types the capture backend advertises for each
-    /// interface; types without a source are not selectable for capture.
-    #[arg(long)]
-    pub(crate) timestamp_types: bool,
-}
+use crate::system::select_interfaces;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::AggregateFormat;
@@ -43,7 +30,11 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
-    let selector = InterfaceSelector::parse_optional(arguments.interface.as_deref())?;
+    let selector = arguments
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
     let mut result = output::interfaces::Report::new(interfaces);
     if arguments.timestamp_types {
@@ -65,77 +56,14 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         format,
         &result,
         &result.interfaces,
-        interface_line,
+        rendering::interface_line,
     )
-}
-
-/// One text row per interface, spelling every field the JSON document carries.
-fn interface_line(interface: &output::network::Interface) -> String {
-    let timestamp_types = interface.timestamp_types.as_deref().map(|types| {
-        if types.is_empty() {
-            return "none".to_owned();
-        }
-        types
-            .iter()
-            .map(|timestamp_type| {
-                let name = timestamp_type.name.as_deref().unwrap_or("<unnamed>");
-                // Types outside the representable clock domains cannot be
-                // selected for capture.
-                if timestamp_type.source.is_some() {
-                    name.to_owned()
-                } else {
-                    format!("{name}(unselectable)")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(",")
-    });
-    let types_field = timestamp_types
-        .map(|types| format!(" timestamp_types={types}"))
-        .unwrap_or_default();
-    format!(
-        "{} (index {}): {} mtu={} capability={} link_type={} mac={} flags={} description={}{}",
-        interface.name,
-        interface.index,
-        interface.addresses.join(", "),
-        optional_display(interface.mtu),
-        interface.capability,
-        interface.link_type,
-        optional_display(interface.mac.as_deref()),
-        interface_flags(&interface.flags),
-        optional_display(interface.description.as_deref()),
-        types_field,
-    )
-}
-
-/// The set flags as one comma-separated word, so text stays greppable while
-/// JSON keeps the structured object.
-fn interface_flags(flags: &packetcraftr_netio::interface::Flags) -> String {
-    let mut set = Vec::new();
-    if flags.up {
-        set.push("up");
-    }
-    if flags.broadcast {
-        set.push("broadcast");
-    }
-    if flags.loopback {
-        set.push("loopback");
-    }
-    if flags.point_to_point {
-        set.push("point_to_point");
-    }
-    if flags.multicast {
-        set.push("multicast");
-    }
-    if set.is_empty() {
-        return "none".to_owned();
-    }
-    set.join(",")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::InterfaceSelector;
 
     struct FixtureProvider;
 
@@ -177,7 +105,8 @@ mod tests {
     }
 
     fn selected(selector: Option<&str>) -> Vec<String> {
-        let selector = InterfaceSelector::parse_optional(selector).expect("fixture selector");
+        let selector =
+            selector.map(|selector| InterfaceSelector::parse(selector).expect("fixture selector"));
         select_interfaces(&FixtureProvider, selector.as_ref())
             .expect("fixture enumeration succeeds")
             .into_iter()
@@ -198,9 +127,8 @@ mod tests {
 
     #[test]
     fn an_unknown_selector_fails_before_rendering() {
-        let selector =
-            InterfaceSelector::parse_optional(Some("fixture9")).expect("fixture selector");
-        let error = select_interfaces(&FixtureProvider, selector.as_ref())
+        let selector = InterfaceSelector::parse("fixture9").expect("fixture selector");
+        let error = select_interfaces(&FixtureProvider, Some(&selector))
             .expect_err("unknown names must fail");
         assert_eq!(error.exit_code(), 5);
         assert!(error.message.contains("no interface matches"));

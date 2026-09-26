@@ -6,8 +6,6 @@ mod rendering;
 
 use crate::output::contract::ExchangeFormat;
 
-use std::time::Duration;
-
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::error::Kind;
 
@@ -26,10 +24,10 @@ impl super::Spec for Args {
         self.send.resources(settings);
         self.template.resources(settings);
         crate::resources::declare!(settings, self, [
-            timeout_ms: Milliseconds @ Operation,
             max_responses: Count @ ResultRetention,
             max_unmatched_frames: Count @ ResultRetention,
         ]);
+        self.timeout.resources(settings);
         self.limits.resources(settings);
     }
 
@@ -47,19 +45,18 @@ pub(super) fn run(
     format: ExchangeFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let compression = arguments.send.compression;
-    compression.validate(format.as_format())?;
+    let compression = arguments.send.compression.for_output(format.as_format())?;
     let Args {
         send,
         template,
-        timeout_ms,
+        timeout,
         max_responses,
         max_unmatched_frames,
         limits,
     } = arguments;
     let limits = limits.into_limits();
     let mut options = packetcraftr::exchange::Options {
-        timeout: Duration::from_millis(timeout_ms),
+        timeout: timeout.timeout(),
         max_template_packets: template.max_template_packets,
         max_responses,
         max_unmatched_frames,

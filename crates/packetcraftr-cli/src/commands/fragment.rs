@@ -1,41 +1,23 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! `fragment`: builds one IPv4 or IPv6 recipe and splits it into bounded
+//! fragments at an explicit MTU.
+
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use crate::output::{self, contract::CaptureFormat};
 use crate::{
-    command_options::{PacketBudgetArgs, RecipeArgs},
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_plain_line},
+    rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_hex_line},
 };
 use packetcraftr_core::{
     self as core,
     frame::{Frame, LinkType},
     protocol::BuiltinProtocol,
 };
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
-
-    #[command(flatten)]
-    pub(crate) recipe: RecipeArgs,
-    /// IP MTU, excluding the link header. Fragmentation is always explicit.
-    #[arg(long)]
-    pub(crate) mtu: usize,
-    /// Fragment identification; required when splitting IPv6.
-    #[arg(long)]
-    pub(crate) identification: Option<u32>,
-    /// Maximum fragments produced from the datagram; at most 8192.
-    #[arg(long, default_value_t = 1024)]
-    pub(crate) max_fragments: usize,
-    /// Maximum bytes across all produced fragment frames.
-    #[arg(long, default_value_t = 256 * 1024 * 1024)]
-    pub(crate) max_output_bytes: usize,
-    #[command(flatten)]
-    pub(crate) budget: PacketBudgetArgs,
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::CaptureFormat;
@@ -63,7 +45,7 @@ pub(crate) fn run(
     format: CaptureFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    args.compression.validate(format.as_format())?;
+    let compression = args.compression.for_output(format.as_format())?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
     crate::cancellation::check()?;
@@ -106,7 +88,7 @@ pub(crate) fn run(
                 core::capture_file::Format::PcapNg
             },
             frames,
-            args.compression,
+            compression,
         );
     }
     let summary = output::fragment::Complete {
@@ -124,12 +106,8 @@ pub(crate) fn run(
         match format {
             CaptureFormat::Json => records.push(record),
             CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
-            CaptureFormat::Hex => write_plain_line(format_args!("{}", record.frame.bytes_hex()))?,
-            CaptureFormat::Text => write_plain_line(format_args!(
-                "fragment {index}: {} bytes {}",
-                record.frame.captured_length,
-                record.frame.bytes_hex()
-            ))?,
+            CaptureFormat::Hex => write_hex_line(record.frame.bytes())?,
+            CaptureFormat::Text => rendering::render_fragment(&record)?,
             CaptureFormat::Pcap | CaptureFormat::PcapNg => {
                 return Err(CliError::new(
                     core::error::Kind::Internal,

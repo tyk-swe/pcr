@@ -98,7 +98,11 @@ fn resolve_route(
     policy: packetcraftr::policy::Policy,
 ) -> Result<RoutedPacket, CliError> {
     let destination = resolve_destination(destination, &packet, &policy)?;
-    let interface = interface::InterfaceSelector::parse_optional(route.interface.as_deref())?
+    let interface = route
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?
         .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))
         .transpose()?;
     Ok(RoutedPacket {

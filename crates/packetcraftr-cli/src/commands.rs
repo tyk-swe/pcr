@@ -3,12 +3,16 @@
 
 //! One module per CLI command, plus the pieces several of them share.
 //!
-//! Each command owns its `Args`: compact commands keep them beside `run` in a
-//! single file (`interfaces.rs`, `routes.rs`), while larger commands split
-//! into `arguments.rs`, `rendering.rs`, and sometimes `conversion.rs` — most
-//! of the live and capture-reading commands. Clap groups several commands
-//! share live under `command_options` instead (`SendArgs` serves `send` and
-//! `exchange`).
+//! Every command has the same shape: `commands/<cmd>.rs` drives the command
+//! (validation, composition, the workflow run, and the format dispatch),
+//! `commands/<cmd>/arguments.rs` holds its clap `Args` and `--help` text, and
+//! `commands/<cmd>/rendering.rs` formats text from the command's output
+//! types and never runs a workflow. A command may add helper modules beside
+//! them (`capture/files.rs`, `replay/selection.rs`). Clap groups several
+//! commands share live under `command_options` (`SendArgs` serves `send` and
+//! `exchange`; `--max-duration-ms`, `--timeout-ms`, and `--compression` are
+//! one group each); a group only one command uses lives in that command's
+//! `arguments`.
 //!
 //! Every command's `Args` implements [`Spec`], and the `commands!` declaration
 //! below lists each command once. Dispatch, the output contract, presets, and
@@ -191,9 +195,11 @@ macro_rules! commands {
 
 commands! {
     /// Merge time-ordered captures into scoped PCAPNG.
-    Merge(merge::Args) = "merge",
+    #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
+    Merge(merge::arguments::Args) = "merge",
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
-    Fragment(fragment::Args) = "fragment",
+    #[command(after_long_help = fragment::arguments::AFTER_LONG_HELP)]
+    Fragment(fragment::arguments::Args) = "fragment",
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
     Build(build::arguments::Args) = "build",
@@ -207,8 +213,8 @@ commands! {
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
     Read(read::arguments::Args) = "read",
     /// Enumerate local interfaces.
-    #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args) = "interfaces",
+    #[command(after_long_help = interfaces::arguments::AFTER_LONG_HELP)]
+    Interfaces(interfaces::arguments::Args) = "interfaces",
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
     Plan(plan::arguments::Args) = "plan",
@@ -252,24 +258,28 @@ commands! {
     )]
     Dns(dns::arguments::Args) = "dns",
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
-    DnsRead(dns_read::Args) = "dns-read",
+    #[command(after_long_help = dns_read::arguments::AFTER_LONG_HELP)]
+    DnsRead(dns_read::arguments::Args) = "dns-read",
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
-    Http(http::Args) = "http",
+    #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
+    Http(http::arguments::Args) = "http",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
-    Export(export::Args) = "export",
+    #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
+    Export(export::arguments::Args) = "export",
     /// Rewrite capture headers with checked lengths and transport checksums.
-    Rewrite(rewrite::Args) = "rewrite",
+    #[command(after_long_help = rewrite::arguments::AFTER_LONG_HELP)]
+    Rewrite(rewrite::arguments::Args) = "rewrite",
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
     Fuzz(fuzz::arguments::Args) = "fuzz",
     /// Enumerate passive interface-bound route decisions.
-    #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args) = "routes",
+    #[command(after_long_help = routes::arguments::AFTER_LONG_HELP)]
+    Routes(routes::arguments::Args) = "routes",
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
-    Documentation(documentation::Args),
+    Documentation(documentation::arguments::Args),
 }
 
 /// Runs one contract command: enters its publication deadline, rejects an
@@ -344,6 +354,7 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
+    use crate::command_options::Budget as _;
 
     /// A command line, and the check of its command's bound declarations.
     type Case = (&'static [&'static str], fn(&[&str]) -> Vec<String>);
@@ -380,11 +391,11 @@ mod tests {
         let cases: &[Case] = &[
             (
                 &["merge", "--write", "m.pcapng", CAPTURE, CAPTURE],
-                undeclared_bounds::<merge::Args>,
+                undeclared_bounds::<merge::arguments::Args>,
             ),
             (
                 &["fragment", "--mtu", "576", "--packet", PACKET],
-                undeclared_bounds::<fragment::Args>,
+                undeclared_bounds::<fragment::arguments::Args>,
             ),
             (
                 &["build", "--packet", PACKET],
@@ -402,7 +413,10 @@ mod tests {
                 &["read", CAPTURE],
                 undeclared_bounds::<read::arguments::Args>,
             ),
-            (&["interfaces"], undeclared_bounds::<interfaces::Args>),
+            (
+                &["interfaces"],
+                undeclared_bounds::<interfaces::arguments::Args>,
+            ),
             (
                 &["plan", "--destination", "192.0.2.1"],
                 undeclared_bounds::<plan::arguments::Args>,
@@ -448,21 +462,27 @@ mod tests {
                 &["dns", "192.0.2.53", "example.com"],
                 undeclared_bounds::<dns::arguments::Args>,
             ),
-            (&["dns-read", CAPTURE], undeclared_bounds::<dns_read::Args>),
-            (&["http", CAPTURE], undeclared_bounds::<http::Args>),
+            (
+                &["dns-read", CAPTURE],
+                undeclared_bounds::<dns_read::arguments::Args>,
+            ),
+            (
+                &["http", CAPTURE],
+                undeclared_bounds::<http::arguments::Args>,
+            ),
             (
                 &["export", "--write", "e.pcapng", CAPTURE],
-                undeclared_bounds::<export::Args>,
+                undeclared_bounds::<export::arguments::Args>,
             ),
             (
                 &["rewrite", "--write", "r.pcapng", CAPTURE],
-                undeclared_bounds::<rewrite::Args>,
+                undeclared_bounds::<rewrite::arguments::Args>,
             ),
             (
                 &["fuzz", "--packet", PACKET],
                 undeclared_bounds::<fuzz::arguments::Args>,
             ),
-            (&["routes"], undeclared_bounds::<routes::Args>),
+            (&["routes"], undeclared_bounds::<routes::arguments::Args>),
             (
                 &[
                     "verify-forwarding",
@@ -486,5 +506,75 @@ mod tests {
             .map(|kind| kind.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(covered, published);
+    }
+
+    /// The budget a command ends up with is the one the policy enforces, so
+    /// this walks the real clap parse rather than reading the trait back.
+    fn budgets_for(arguments: &[&str]) -> (u64, u64) {
+        let cli = <Cli as clap::Parser>::try_parse_from(arguments)
+            .expect("command must parse with defaults");
+        let policy = match cli.command {
+            Command::Send(send) => send.send.policy.into_policy(),
+            Command::Exchange(exchange) => exchange.send.policy.into_policy(),
+            Command::Scan(scan) => scan.policy.into_policy(),
+            Command::Fuzz(fuzz) => fuzz.policy.into_policy(),
+            Command::Replay(replay) => replay.policy.into_policy(),
+            Command::Capture(capture) => capture.budgets.into_policy(),
+            other => panic!("unbudgeted command {other:?}"),
+        };
+        (
+            policy.max_packets_per_operation,
+            policy.max_bytes_per_operation,
+        )
+    }
+
+    #[test]
+    fn each_command_starts_from_the_budget_its_operation_calls_for() {
+        let transmitted = (
+            crate::command_options::Transmitted::max_packets(),
+            crate::command_options::Transmitted::max_bytes(),
+        );
+        let captured = (
+            capture::arguments::Captured::max_packets(),
+            capture::arguments::Captured::max_bytes(),
+        );
+
+        assert_eq!(
+            budgets_for(&[
+                "packetcraftr",
+                "replay",
+                "capture.pcapng",
+                "--interface",
+                "7"
+            ]),
+            (
+                packetcraftr_core::capture_file::DEFAULT_STREAM_FRAMES,
+                packetcraftr_core::capture_file::DEFAULT_STREAM_BYTES
+            ),
+        );
+        assert_eq!(
+            budgets_for(&["packetcraftr", "send", "--packet", "raw(hex=00)"]),
+            transmitted,
+        );
+        assert_eq!(
+            budgets_for(&["packetcraftr", "exchange", "--packet", "raw(hex=00)"]),
+            transmitted,
+        );
+        assert_eq!(
+            budgets_for(&["packetcraftr", "scan", "192.0.2.1"]),
+            transmitted,
+        );
+        assert_eq!(
+            budgets_for(&["packetcraftr", "fuzz", "--packet", "raw(hex=00)"]),
+            transmitted,
+        );
+        assert_eq!(
+            budgets_for(&["packetcraftr", "capture", "--interface", "7"]),
+            captured,
+        );
+        assert_eq!(
+            captured,
+            (capture::arguments::DEFAULT_CAPTURED_FRAMES, transmitted.1)
+        );
     }
 }

@@ -801,6 +801,7 @@ names.
 to the built-in layer and read its field: `layer.field(semantics::DESTINATION)`
 on an Ethernet layer becomes
 `layer.downcast_ref::<Ethernet>().map(|ethernet| ethernet.destination)`.
+
 ## Core error convention
 
 Each core module has one `Error`, used module-qualified. Errors keep typed
@@ -852,3 +853,15 @@ Messages that ended in `: {source}` now end before it, and the source
 appears in `Classified::causes()` (and the published `causes`). Code that
 searched `to_string()` for a source's text reads `causes()` or
 `error::source_chain`, or `error::render` for one line.
+
+## CLI output modules named after commands
+
+Each `packetcraftr_cli::output` module is named after the command whose
+output it describes. Update imports; the types, their fields, and their JSON
+are unchanged:
+
+| Before | After |
+| --- | --- |
+| `output::dns_analysis` | `output::dns_read` |
+| `output::forwarding` | `output::verify_forwarding` |
+| `output::scan_connect` | `output::scan::connect` |

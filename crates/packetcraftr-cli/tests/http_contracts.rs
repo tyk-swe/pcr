@@ -68,7 +68,15 @@ fn application_output_budget_counts_only_compact_event_payloads() {
         ("http_message", "messages"),
         ("http_stream_issue", "issues"),
     ];
-    let expected_text = "HTTP tcp:0 message=1 Complete GET /example body_bytes=0 request=None frames=[4, 5]\n  Host: example.test\n  X-Test: one\n  X-Test: two\nHTTP tcp:0 message=2 Complete 200 OK body_bytes=5 request=Some(1) frames=[6, 7]\n  Transfer-Encoding: chunked\n2 HTTP/1 messages, 2 complete, 0 incomplete, 0 malformed; 0 requests without a captured final response\n";
+    let expected_text = concat!(
+        "HTTP tcp:0 message=1 status=complete GET /example body_bytes=0 request=none frames=4,5\n",
+        "  Host: example.test\n",
+        "  X-Test: one\n",
+        "  X-Test: two\n",
+        "HTTP tcp:0 message=2 status=complete 200 OK body_bytes=5 request=1 frames=6,7\n",
+        "  Transfer-Encoding: chunked\n",
+        "2 HTTP/1 messages, 2 complete, 0 incomplete, 0 malformed; 0 requests without a captured final response\n",
+    );
     let error_message = "analysis consumer failed at frame 7";
     let error_cause = "application output exceeds --max-application-output-bytes";
     let exact = total.to_string();

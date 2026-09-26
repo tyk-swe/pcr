@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use crate::output::contract::AggregateFormat;
 
 use crate::output;
@@ -9,19 +13,6 @@ use packetcraftr_netio::interface::Provider as _;
 use packetcraftr_netio::route::Provider as _;
 
 use crate::errors::CliError;
-use crate::rendering::optional_display;
-
-pub(super) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr routes
-  packetcraftr routes --all
-  packetcraftr --output json routes";
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Report all interfaces with a usable MTU, including ones that are not up.
-    #[arg(long)]
-    pub(crate) all: bool,
-}
 
 impl Args {
     fn includes(&self, interface: &net::interface::Info) -> bool {
@@ -69,20 +60,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         format,
         &result,
         &result.routes,
-        route_line,
-    )
-}
-
-/// One text row per route.
-fn route_line(route: &output::network::Decision) -> String {
-    format!(
-        "{} (index {}): source={} mtu={} capability={} link_type={}",
-        route.interface.name,
-        route.interface.index,
-        optional_display(route.selected_source.or(route.preferred_source)),
-        route.mtu,
-        route.capability,
-        route.link_type
+        rendering::route_line,
     )
 }
 

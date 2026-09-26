@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
 use crate::output::contract::AggregateFormat;
 
@@ -11,7 +12,7 @@ use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::rendering::{emit_aggregate, optional_display, write_stdout_line};
+use crate::rendering::emit_aggregate;
 use crate::system::{client, prepare_route};
 
 impl super::Spec for Args {
@@ -41,31 +42,9 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         .map_err(CliError::classified)?;
     let result = output::plan::Report { plan: route.into() };
     match format {
-        AggregateFormat::Text => render_text(&result.plan),
+        AggregateFormat::Text => rendering::render_text(&result.plan),
         AggregateFormat::Json => {
             emit_aggregate(output::contract::Command::Plan, result, Vec::new())
         }
     }
-}
-
-fn render_text(route: &output::network::Plan) -> Result<(), CliError> {
-    write_stdout_line(format_args!(
-        "interface={} index={} mode={} mtu={} link_type={}",
-        route.decision.interface.name,
-        route.decision.interface.index,
-        route.mode,
-        route.decision.mtu,
-        route.decision.link_type
-    ))?;
-    write_stdout_line(format_args!(
-        "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
-        optional_display(route.lookup_destination),
-        optional_display(route.final_destination),
-        optional_display(route.packet_source),
-        optional_display(route.decision.next_hop),
-        route
-            .destination_mac
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "unresolved".to_owned())
-    ))
 }

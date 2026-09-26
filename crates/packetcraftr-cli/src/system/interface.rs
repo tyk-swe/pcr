@@ -38,10 +38,6 @@ impl InterfaceSelector {
             .ok_or_else(|| CliError::new(Kind::Usage, "--interface index must be non-zero"))
     }
 
-    pub(crate) fn parse_optional(selector: Option<&str>) -> Result<Option<Self>, CliError> {
-        selector.map(Self::parse).transpose()
-    }
-
     /// Whether a discovered interface is the one this selector names: an
     /// index selector ignores the name, and a name selector ignores the index.
     pub(crate) fn matches(&self, id: &net::interface::Id) -> bool {
@@ -119,7 +115,6 @@ mod tests {
 
     #[test]
     fn interface_selectors_distinguish_names_and_numeric_indexes() {
-        assert_eq!(InterfaceSelector::parse_optional(None).unwrap(), None);
         assert_eq!(
             InterfaceSelector::parse("ethernet0").unwrap(),
             InterfaceSelector::Name("ethernet0".to_owned())

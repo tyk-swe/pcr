@@ -3,7 +3,7 @@
 
 //! Socket-only scan evidence; no packet counts or fabricated capture frames.
 
-use super::{contract::Error, frame::Timestamp, stream::StreamRecord};
+use crate::output::{contract::Error, frame::Timestamp, stream::StreamRecord};
 use packetcraftr::scan::connect;
 use serde::Serialize;
 use std::{

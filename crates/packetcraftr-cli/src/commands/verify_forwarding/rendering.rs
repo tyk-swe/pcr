@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::contract::ToolFormat;
-use crate::output::{self, forwarding::Report};
+use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
 
@@ -16,7 +16,7 @@ pub(super) fn render(
     stream: &StreamEncoder,
     report: &analysis::Report,
     arguments: &Args,
-    sources: analysis::Sided<output::forwarding::CaptureSource>,
+    sources: analysis::Sided<output::verify_forwarding::CaptureSource>,
 ) -> Result<(), CliError> {
     match format {
         ToolFormat::Text => {
@@ -41,7 +41,7 @@ pub(super) fn render(
             document.captures.egress.source = Some(sources.egress);
             document.captures.ingress.selection_filter = arguments.ingress_filter.clone();
             document.captures.egress.selection_filter = arguments.egress_filter.clone();
-            document.decode = Some(output::forwarding::DecodeContext {
+            document.decode = Some(output::verify_forwarding::DecodeContext {
                 tls_ports: arguments.decode.ports.clone(),
                 bindings: arguments.decode.bindings.clone(),
             });

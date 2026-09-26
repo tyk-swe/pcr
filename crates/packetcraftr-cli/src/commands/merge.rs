@@ -1,29 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! `merge`: merges time-ordered captures into one scoped PCAPNG file.
+
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use crate::output::{self, contract::ToolFormat};
 use crate::{
-    command_options::{Compression, OfflineCaptureLimitsArgs},
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_plain_line},
+    rendering::{StreamEncoder, emit_aggregate},
 };
 use packetcraftr_core::{capture_file, error::Kind};
-use std::path::{Path, PathBuf};
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Captures in stable tie-breaking order; at most one may read stdin with -.
-    #[arg(required = true, num_args = 2..)]
-    pub(crate) paths: Vec<PathBuf>,
-    /// New PCAPNG destination. Existing files are never overwritten.
-    #[arg(long)]
-    pub(crate) write: PathBuf,
-    /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
-    #[command(flatten)]
-    pub(crate) limits: OfflineCaptureLimitsArgs,
-}
+use std::path::Path;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -63,10 +53,12 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         })
         .collect::<Result<Vec<_>, CliError>>()?;
     let mut writer = capture_file::Writer::pcapng_with_options(
-        args.compression.writer(std::io::BufWriter::with_capacity(
-            64 * 1024,
-            staged.as_file_mut(),
-        ))?,
+        args.compression
+            .for_file()
+            .writer(std::io::BufWriter::with_capacity(
+                64 * 1024,
+                staged.as_file_mut(),
+            ))?,
         capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
@@ -99,12 +91,6 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     match format {
         ToolFormat::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
         ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => write_plain_line(format_args!(
-            "merged {} frames ({} bytes) across {} interfaces into {}",
-            report.frames,
-            report.captured_bytes,
-            report.interfaces.len(),
-            report.path
-        )),
+        ToolFormat::Text => rendering::render_text(&report),
     }
 }

@@ -9,8 +9,6 @@ use std::io::{self, Write};
 use packetcraftr_core as core;
 use packetcraftr_core::budget::Interrupted;
 
-use crate::output;
-
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
     terminal_safe,
@@ -69,24 +67,6 @@ pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {
     }
 }
 
-/// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
-/// so the section's format string lives here alone while each command keeps
-/// its own row type.
-pub(crate) fn render_undecoded<'a>(
-    rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
-) -> Result<(), CliError> {
-    for (label, frame) in rows {
-        match label {
-            Some(label) => write_stdout_line(format_args!(
-                "undecoded {label} {}",
-                captured_frame_text(frame)
-            ))?,
-            None => write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?,
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn comma_separated<I, T>(values: I) -> String
 where
     I: IntoIterator<Item = T>,
@@ -114,26 +94,6 @@ impl fmt::Display for SpacedHex<'_> {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
-    }
-}
-
-pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
-    CapturedFrameText(frame)
-}
-
-struct CapturedFrameText<'a>(&'a output::frame::Captured);
-
-impl fmt::Display for CapturedFrameText<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let frame = self.0;
-        write!(
-            formatter,
-            "dlt={} caplen={} wirelen={} {}",
-            frame.link_type,
-            frame.captured_length,
-            frame.original_length,
-            spaced_hex(frame.bytes())
-        )
     }
 }
 
@@ -173,10 +133,15 @@ pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), Cl
     write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
-pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+/// One `--output hex` line: the bytes as contiguous lowercase hex.
+///
+/// Every other stdout line goes through terminal sanitization; this one
+/// holds only hex digits by construction, so it is written unstyled and
+/// byte-exact.
+pub(crate) fn write_hex_line(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
-        .write_fmt(arguments)
+        .write_fmt(format_args!("{}", crate::output::hex::CompactHex(bytes)))
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))
@@ -256,6 +221,8 @@ fn write_terminated(
 mod tests {
 
     use packetcraftr_core::error::{Classification, Kind};
+
+    use crate::output;
 
     use super::*;
 

@@ -18,7 +18,7 @@ use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
-use crate::output::forwarding::CaptureSource;
+use crate::output::verify_forwarding::CaptureSource;
 use crate::rendering::StreamEncoder;
 
 /// The process status when the comparison completed and published its report
@@ -32,9 +32,7 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(
-            self.limits.max_duration_ms,
-        ))
+        Some(self.limits.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

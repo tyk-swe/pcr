@@ -14,7 +14,7 @@ use crate::output;
 use crate::errors::CliError;
 use crate::rendering::{
     captured_frame_text, comma_separated, optional_debug, optional_display,
-    render_diagnostics_text, render_undecoded, write_stdout_line,
+    render_diagnostics_text, render_dns_record, render_undecoded, write_stdout_line,
 };
 
 /// Renders each batch question in input order: a status line first, then the
@@ -142,15 +142,26 @@ pub(super) fn render_text(
     render_diagnostics_text(&diagnostics)
 }
 
+/// A decoded record in the shared DNS record line; its data is the record's
+/// JSON form without the type tag the line already names.
 fn render_record(
     section: packetcraftr::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
-    let data = serde_json::to_string(&record.data).map_err(serialization_failure)?;
-    write_stdout_line(format_args!(
-        "record section={} owner={} class={} ttl={} data={}",
-        section, record.owner, record.class, record.ttl, data,
-    ))
+    let mut data = serde_json::to_value(&record.data).map_err(serialization_failure)?;
+    let record_type = data
+        .as_object_mut()
+        .and_then(|fields| fields.remove("type"))
+        .and_then(|tag| tag.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    render_dns_record(
+        section,
+        &record.owner,
+        record_type,
+        record.class,
+        record.ttl,
+        data,
+    )
 }
 
 /// Record data that already survived decoding cannot fail to serialize, so a

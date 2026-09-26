@@ -11,8 +11,6 @@ mod rendering;
 
 use crate::output::contract::ToolFormat;
 
-use std::time::Duration;
-
 use crate::output;
 
 use self::arguments::Args;
@@ -25,20 +23,20 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
             max_in_flight: Count @ Operation,
             max_targets: Count @ Operation,
-            timeout_ms: Milliseconds @ Operation,
             max_ports: Count @ Operation,
             max_probes: Count @ Operation,
-            max_duration_ms: Milliseconds @ Operation,
             max_undecoded: Count @ ResultRetention,
             max_prepared_bytes: Bytes @ Preparation,
         ]);
+        self.timeout.resources(settings);
+        self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);
     }
@@ -88,11 +86,11 @@ pub(super) fn run(
         family,
         ports,
         attempts,
-        timeout_ms,
+        timeout,
         rate,
         max_ports,
         max_probes,
-        max_duration_ms,
+        duration,
         max_undecoded,
         route,
         limits,
@@ -119,7 +117,7 @@ pub(super) fn run(
         max_targets,
         max_ports,
         max_probes,
-        max_duration: Duration::from_millis(max_duration_ms),
+        max_duration: duration.max_duration(),
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded,
@@ -136,7 +134,7 @@ pub(super) fn run(
         address_family: family.into(),
         ports,
         attempts,
-        timeout: Duration::from_millis(timeout_ms),
+        timeout: timeout.timeout(),
         probes_per_second: rate,
         limits: scan_limits,
     };

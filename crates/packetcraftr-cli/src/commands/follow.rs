@@ -12,7 +12,7 @@ mod write;
 use packetcraftr_core::analysis;
 
 use self::arguments::{Args, Direction};
-use super::offline_analysis::{parse_stream_selector, prepare};
+use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
@@ -26,15 +26,13 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(
-            self.limits.max_duration_ms,
-        ))
+        Some(self.limits.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention]);
         // A UDP conversation never runs TCP reassembly.
-        let tcp = !self.stream.starts_with("udp:");
+        let tcp = !self.stream.text().starts_with("udp:");
         self.limits.resources(
             settings,
             crate::command_options::AnalysisStages::with_tcp(tcp),
@@ -56,7 +54,7 @@ pub(super) fn run(
     format: FollowFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let selector = parse_stream_selector(&arguments.stream)?;
+    let selector = arguments.stream.get()?;
     if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
             Kind::Usage,

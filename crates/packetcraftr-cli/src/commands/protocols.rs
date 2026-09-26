@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
 use crate::output::contract::AggregateFormat;
 
@@ -13,7 +14,7 @@ use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
-use crate::rendering::{emit_aggregate, write_stdout_line};
+use crate::rendering::emit_aggregate;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::AggregateFormat;
@@ -48,21 +49,7 @@ fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
         format,
         &result,
         &result.protocols,
-        protocol_line,
-    )
-}
-
-/// One text row per protocol.
-fn protocol_line(protocol: &output::protocols::Summary) -> String {
-    format!(
-        "{} aliases=[{}] build={} dissect={} exact_round_trip={} matcher={} decode_only={}",
-        protocol.protocol,
-        protocol.aliases.join(", "),
-        protocol.build,
-        protocol.dissect,
-        protocol.exact_round_trip,
-        protocol.matcher,
-        protocol.decode_only
+        rendering::protocol_line,
     )
 }
 
@@ -104,52 +91,13 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
         output::protocols::FilterField::for_protocol(&registry, protocol.as_str()),
     );
     match format {
-        AggregateFormat::Text => render_detail(&detail),
+        AggregateFormat::Text => rendering::render_detail(&detail),
         AggregateFormat::Json => emit_aggregate(
             output::contract::Command::Protocols,
             output::protocols::DetailResult { protocol: detail },
             Vec::new(),
         ),
     }
-}
-
-fn render_detail(protocol: &output::protocols::Detail) -> Result<(), CliError> {
-    write_stdout_line(format_args!("protocol: {}", protocol.protocol))?;
-    write_stdout_line(format_args!("aliases: [{}]", protocol.aliases.join(", ")))?;
-    write_stdout_line(format_args!("build: {}", protocol.build))?;
-    write_stdout_line(format_args!("dissect: {}", protocol.dissect))?;
-    write_stdout_line(format_args!(
-        "exact_round_trip: {}",
-        protocol.exact_round_trip
-    ))?;
-    write_stdout_line(format_args!("matcher: {}", protocol.matcher))?;
-    write_stdout_line(format_args!("decode_only: {}", protocol.decode_only))?;
-    write_stdout_line(format_args!("bindings:"))?;
-    for binding in &protocol.bindings {
-        write_stdout_line(format_args!(
-            "  {} discriminator={}",
-            binding.parent, binding.discriminator
-        ))?;
-    }
-    write_stdout_line(format_args!("fields:"))?;
-    for field in &protocol.fields {
-        write_stdout_line(format_args!(
-            "  {} kind={} required={} derived={} description={}",
-            field.name,
-            field.kind.as_str(),
-            field.required,
-            field.derived,
-            field.description
-        ))?;
-    }
-    if !protocol.filter_fields.is_empty() {
-        let fields = &protocol.filter_fields;
-        write_stdout_line(format_args!("filter_fields:"))?;
-        for field in fields {
-            write_stdout_line(format_args!("  {}: {}", field.path, field.description))?;
-        }
-    }
-    Ok(())
 }
 
 fn unknown_protocol(name: &str) -> CliError {

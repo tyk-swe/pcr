@@ -10,8 +10,6 @@ use packetcraftr_core::error::Kind;
 pub(super) mod arguments;
 mod rendering;
 
-use std::time::Duration;
-
 use packetcraftr_netio as net;
 
 use crate::output;
@@ -27,17 +25,17 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
             max_hops: Count @ Operation,
-            timeout_ms: Milliseconds @ Operation,
             max_probes: Count @ Operation,
-            max_duration_ms: Milliseconds @ Operation,
             max_undecoded: Count @ ResultRetention,
         ]);
+        self.timeout.resources(settings);
+        self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);
     }
@@ -138,7 +136,7 @@ fn prepare_request(
     };
     let trace_limits = packetcraftr::traceroute::Limits {
         max_probes: arguments.max_probes,
-        max_duration: Duration::from_millis(arguments.max_duration_ms),
+        max_duration: arguments.duration.max_duration(),
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded: arguments.max_undecoded,
@@ -152,7 +150,7 @@ fn prepare_request(
         first_hop: arguments.first_hop,
         max_hops: arguments.max_hops,
         probes_per_hop: arguments.attempts,
-        timeout: Duration::from_millis(arguments.timeout_ms),
+        timeout: arguments.timeout.timeout(),
         probes_per_second: arguments.rate,
         limits: trace_limits,
     };

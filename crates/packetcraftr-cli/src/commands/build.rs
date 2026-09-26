@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod capture_output;
+mod rendering;
 
 use crate::output::contract::BuildFormat;
 
@@ -14,10 +16,7 @@ use packetcraftr_core::error::Kind;
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::read_recipe;
-use crate::rendering::{
-    StreamEncoder, emit_aggregate, render_diagnostics_stderr, render_diagnostics_text, spaced_hex,
-    stream_capture_error, write_plain_line, write_raw, write_stdout_line, write_summary_line,
-};
+use crate::rendering::{StreamEncoder, render_diagnostics_stderr, stream_capture_error};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::BuildFormat;
@@ -64,7 +63,7 @@ pub(super) fn run(
     let builder = core::build::Builder::new(registry);
     let mut writer = capture
         .as_ref()
-        .map(crate::command_options::CaptureOutput::writer)
+        .map(capture_output::CaptureOutput::writer)
         .transpose()?;
     let mut summary = output::build::Complete::default();
     let mut diagnostics = Vec::new();
@@ -108,7 +107,7 @@ pub(super) fn run(
                     packet_diagnostics,
                 )?;
             } else {
-                render_packet(built, format)?;
+                rendering::render_packet(built, format)?;
             }
             summary.packets_built =
                 super::increment_counter(summary.packets_built, "built packets")?;
@@ -140,28 +139,6 @@ pub(super) fn run(
         stream.complete(summary, Vec::new())?;
     }
     Ok(())
-}
-
-fn render_packet(built: core::build::BuiltPacket, format: BuildFormat) -> Result<(), CliError> {
-    match format {
-        BuildFormat::Text => {
-            write_summary_line(format_args!("built {} bytes", built.bytes.len()))?;
-            write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
-            render_diagnostics_text(&built.diagnostics)
-        }
-        BuildFormat::Hex => {
-            write_plain_line(format_args!("{}", output::hex::CompactHex(&built.bytes)))
-        }
-        BuildFormat::Raw => write_raw(&built.bytes),
-        BuildFormat::Json => {
-            let (result, diagnostics) = output::build::Report::from_built(built);
-            emit_aggregate(output::contract::Command::Build, result, diagnostics)
-        }
-        BuildFormat::Ndjson | BuildFormat::Pcap | BuildFormat::PcapNg => Err(CliError::new(
-            Kind::Internal,
-            "streaming and capture build output returned before packet rendering",
-        )),
-    }
 }
 
 fn build_error(error: core::build::Error) -> CliError {

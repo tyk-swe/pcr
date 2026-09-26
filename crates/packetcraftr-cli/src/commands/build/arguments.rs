@@ -1,9 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{
-    BuildMode, CaptureOutputArgs, PacketBudgetArgs, RecipeArgs, TemplateArgs,
-};
+use super::capture_output::CaptureOutputArgs;
+use crate::command_options::{BuildMode, PacketBudgetArgs, RecipeArgs, TemplateArgs};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr build --packet 'raw(text=hello)'

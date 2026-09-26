@@ -3,8 +3,6 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
-use packetcraftr_core::error::Kind;
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,12 +11,17 @@ use packetcraftr_core::analysis;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::registry::Registry;
 
-use analysis::{StreamRef, StreamTransport};
+use std::path::Path;
 
-use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
+use analysis::StreamRef;
+use packetcraftr_core::error::Kind;
+
+use super::application_output::EventOutput;
+use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::validate_capture_stream_limits;
+use crate::output::contract::ToolFormat;
 use crate::rendering::StreamEncoder;
 
 /// Validated, I/O-free analysis state.
@@ -58,6 +61,7 @@ pub(super) fn prepare(
     decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
     let capture = limits.capture;
+    let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
     validate_capture_stream_limits(capture)?;
@@ -82,9 +86,16 @@ pub(super) fn prepare(
         max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
         max_ip_outcomes: limits.max_ip_outcomes,
         ip_idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
-        max_duration: Duration::from_millis(limits.max_duration_ms),
+        max_duration: limits.duration.max_duration(),
     };
     limits.validate().map_err(CliError::classified)?;
+    duration.within_ceiling(|value| {
+        CliError::classified(analysis::Error::InvalidLimit {
+            field: "max_duration",
+            value,
+            reason: "exceeds the one-hour ceiling",
+        })
+    })?;
 
     Ok(AnalysisSetup {
         registry,
@@ -93,6 +104,56 @@ pub(super) fn prepare(
         ip_overlap,
         limits,
     })
+}
+
+/// What one application-layer inspection (`dns-read`, `http`) reads: the
+/// capture, its bounds and decoding, and the one conversation it may keep.
+pub(super) struct Inspection<'a> {
+    pub(super) path: &'a Path,
+    pub(super) limits: OfflineLimitsArgs,
+    pub(super) decode: &'a DecodeArgs,
+    pub(super) application: ApplicationLimitsArgs,
+    pub(super) selector: Option<StreamRef>,
+}
+
+/// Runs one collector over a capture file, publishing each event through
+/// `publish` under the shared `--max-application-output-bytes` budget, and
+/// fails when a selected conversation is absent.
+///
+/// The selector narrows the pass through the stream filter it names; IP
+/// reassembly events reach the NDJSON stream only.
+pub(super) fn inspect<C: analysis::Collector>(
+    inspection: Inspection<'_>,
+    collector: C,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+    mut publish: impl FnMut(&mut EventOutput<'_>, C::Event) -> Result<(), CliError>,
+) -> Result<analysis::Outcome<C>, CliError> {
+    let Inspection {
+        path,
+        limits,
+        decode,
+        application,
+        selector,
+    } = inspection;
+    let filter =
+        selector.map(|selected| format!("{}.stream == {}", selected.transport, selected.index));
+    let setup = prepare(limits, filter.as_deref(), decode)?;
+    // The session narrows the plan and raises the TCP/source-tracking flags
+    // from the collector's declared needs.
+    let session =
+        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
+    let mut reader = crate::input::open_capture(path, limits.capture.reader)?;
+    let mut output = EventOutput::new(format, stream, application.max_application_output_bytes);
+    let outcome = session
+        .run(&mut reader, ip_event_sink(format, stream), |event| {
+            publish(&mut output, event).map_err(CliError::into_boundary_error)
+        })
+        .map_err(CliError::classified)?;
+    if outcome.selected_absent() {
+        return Err(CliError::new(Kind::Usage, "selected stream is not present"));
+    }
+    Ok(outcome)
 }
 
 /// Retains output items under a finite ceiling while counting omissions.
@@ -145,28 +206,6 @@ pub(super) fn omitted_diagnostic(
         code,
         format!("{omitted} {subject} omitted from this document by the {ceiling} ceiling"),
     )]
-}
-
-/// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
-///
-/// Parsing admits both transports so each command states its own
-/// restriction: `follow` follows either, while a TCP-only command rejects a
-/// `udp:` selector with a message that says so.
-pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
-    let invalid = || {
-        CliError::new(
-            Kind::Usage,
-            format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
-        )
-    };
-    let (transport, index) = spec.split_once(':').ok_or_else(invalid)?;
-    let transport = match transport {
-        "tcp" => StreamTransport::Tcp,
-        "udp" => StreamTransport::Udp,
-        _ => return Err(invalid()),
-    };
-    let index = index.parse::<u64>().map_err(|_| invalid())?;
-    Ok(StreamRef { transport, index })
 }
 
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream

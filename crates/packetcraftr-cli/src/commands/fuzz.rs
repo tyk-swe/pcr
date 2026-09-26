@@ -9,7 +9,6 @@ pub(super) mod arguments;
 mod rendering;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
@@ -36,20 +35,20 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            timeout_ms: Milliseconds @ Operation,
             max_cases: Count @ Operation,
             max_packet_bytes: Bytes @ Operation,
             max_total_bytes: Bytes @ Operation,
             max_field_bytes: Bytes @ ObservationCollection,
             max_list_items: Count @ Operation,
             max_shrink_steps: Count @ Operation,
-            max_duration_ms: Milliseconds @ Operation,
         ]);
+        self.timeout.resources(settings);
+        self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);
     }
@@ -108,7 +107,7 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
             max_field_bytes: arguments.max_field_bytes,
             max_list_items: arguments.max_list_items,
             max_shrink_steps: arguments.max_shrink_steps,
-            max_duration: Duration::from_millis(arguments.max_duration_ms),
+            max_duration: arguments.duration.max_duration(),
         },
     };
     request.validate().map_err(CliError::classified)?;
@@ -124,7 +123,7 @@ fn prepare_live(
     }
     let queue_limits = arguments.limits.clone().into_limits();
     let options = packetcraftr::fuzz::LiveOptions {
-        timeout: Duration::from_millis(arguments.timeout_ms),
+        timeout: arguments.timeout.timeout(),
         cases_per_second: arguments.rate,
         destination: arguments.destination,
         allow_malformed_live: arguments.allow_permissive_live,
@@ -136,7 +135,12 @@ fn prepare_live(
     options.validate().map_err(CliError::classified)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
-    let interface = InterfaceSelector::parse_optional(arguments.route.interface.as_deref())?;
+    let interface = arguments
+        .route
+        .interface
+        .as_ref()
+        .map(crate::command_options::Selector::get)
+        .transpose()?;
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: arguments.destination,
@@ -148,7 +152,7 @@ fn prepare_live(
             build: request.build.clone(),
             allow_permissive_live: arguments.allow_permissive_live,
         },
-        Duration::from_millis(arguments.timeout_ms),
+        arguments.timeout.timeout(),
         1,
         queue_limits,
     )?;

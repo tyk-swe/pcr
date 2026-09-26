@@ -1,94 +1,32 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+
+//! `rewrite`: rewrites capture headers and fields with checked lengths and
+//! transport checksums into a new PCAPNG file.
+
+pub(super) mod arguments;
+mod rendering;
 mod rules;
+
+use self::arguments::Args;
 use crate::output::{
     self,
     contract::{Command, ToolFormat},
     rewrite::MAX_REPORTED_CHANGES,
 };
 use crate::{
-    command_options::{Compression, DecodeArgs, OfflineCaptureLimitsArgs},
     commands::offline_analysis::Retained,
     errors::CliError,
     filtering::FrameSelector,
-    rendering::{StreamEncoder, emit_aggregate, write_plain_line},
+    rendering::{StreamEncoder, emit_aggregate},
 };
 use packetcraftr_core::{
     budget::Deadline,
     capture_file,
     decode::Dissector,
     error::{BoundaryError, Kind},
-    transform::{self, ChecksumMode, FieldAssignment, FieldEdits, HeaderRewrite, VlanRewrite},
+    transform::{self, ChecksumMode, FieldEdits, HeaderRewrite},
 };
-use std::{net::IpAddr, path::PathBuf, time::Duration};
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Source capture; - reads redirected stdin. gzip and Zstd are detected.
-    pub(crate) path: PathBuf,
-    /// New PCAPNG destination, published only when all frames are valid.
-    /// With --dry-run the destination is only named, never created.
-    #[arg(long)]
-    pub(crate) write: PathBuf,
-    /// Match original frame fields; unmatched frames are retained unchanged.
-    #[arg(long)]
-    pub(crate) filter: Option<String>,
-    /// Ordered JSON rules under packetcraftr.rewrite/v1 (header patches) or
-    /// /v2 (field assignments); at most 1 MiB and 64 rules.
-    #[arg(long)]
-    pub(crate) rules_file: Option<PathBuf>,
-    /// Assign one fixed-width field in place, <protocol>[#occurrence].<field>=
-    /// <value>; repeatable. Supports ipv4.ttl, ipv6.hop_limit, tcp.sequence,
-    /// tcp.acknowledgment, tcp/udp ports, and dns.id. Header edits apply first
-    /// when combined with them; conflicts with --rules-file.
-    #[arg(long = "set", value_name = "FIELD=VALUE", value_parser = rules::assignment)]
-    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
-    #[allow(rustdoc::invalid_html_tags)]
-    pub(crate) sets: Vec<FieldAssignment>,
-    /// Checksum behavior for field assignments: repair recomputes covering
-    /// checksums; preserve keeps checksum bytes exactly.
-    #[arg(long, value_enum)]
-    pub(crate) checksum_mode: Option<rules::ChecksumArg>,
-    /// Report the field-edit changes --set or v2 rules would make, without
-    /// creating or replacing the destination. Requires assignments only.
-    #[arg(long)]
-    pub(crate) dry_run: bool,
-    /// Replace the outer Ethernet source MAC address.
-    #[arg(long, value_parser = rules::mac)]
-    pub(crate) source_mac: Option<[u8; 6]>,
-    /// Replace the outer Ethernet destination MAC address.
-    #[arg(long, value_parser = rules::mac)]
-    pub(crate) destination_mac: Option<[u8; 6]>,
-    /// Replace the IP source address.
-    #[arg(long)]
-    pub(crate) source_ip: Option<IpAddr>,
-    /// Replace the IP destination address.
-    #[arg(long)]
-    pub(crate) destination_ip: Option<IpAddr>,
-    /// Replace the TCP or UDP source port.
-    #[arg(long)]
-    pub(crate) source_port: Option<u16>,
-    /// Replace the TCP or UDP destination port.
-    #[arg(long)]
-    pub(crate) destination_port: Option<u16>,
-    /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
-    #[arg(long = "vlan", value_parser = rules::vlan, conflicts_with = "strip_vlans")]
-    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
-    #[allow(rustdoc::broken_intra_doc_links)]
-    pub(crate) vlans: Vec<VlanRewrite>,
-    /// Remove the outer VLAN stack.
-    #[arg(long)]
-    pub(crate) strip_vlans: bool,
-    /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
-    /// Maximum rewrite run time in milliseconds.
-    #[arg(long, default_value_t = 3_600_000, value_parser = clap::value_parser!(u64).range(1..=3_600_000))]
-    pub(crate) max_duration_ms: u64,
-    #[command(flatten)]
-    pub(crate) decode: DecodeArgs,
-    #[command(flatten)]
-    pub(crate) limits: OfflineCaptureLimitsArgs,
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -96,11 +34,11 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        self.duration.resources(settings);
         self.limits.resources(settings);
     }
 
@@ -201,7 +139,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     } else {
         Some(crate::staged_output::StagedFile::stage(&args.write)?)
     };
-    let deadline = Deadline::new(Duration::from_millis(args.max_duration_ms))
+    let deadline = Deadline::new(args.duration.max_duration())
         .with_cancellation(Some(crate::cancellation::signal().clone()));
     let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
     let limits = capture_file::Limits {
@@ -216,7 +154,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         None => Box::new(std::io::sink()),
     };
     let mut writer = capture_file::Writer::pcapng_with_options(
-        args.compression.writer(inner)?,
+        args.compression.for_file().writer(inner)?,
         capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
@@ -295,27 +233,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     match format {
         ToolFormat::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
         ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => {
-            if args.dry_run {
-                write_plain_line(format_args!(
-                    "dry-run: {} of {} frames would change across {} interfaces; \
-                     {} changes reported, {} omitted",
-                    report.capture.frames_changed,
-                    report.capture.frames_read,
-                    report.capture.interfaces,
-                    report.changes.len(),
-                    report.changes_omitted
-                ))
-            } else {
-                write_plain_line(format_args!(
-                    "rewrote {} of {} frames across {} interfaces into {}",
-                    report.capture.frames_changed,
-                    report.capture.frames_read,
-                    report.capture.interfaces,
-                    report.path
-                ))
-            }
-        }
+        ToolFormat::Text => rendering::render_text(&report),
     }
 }
 

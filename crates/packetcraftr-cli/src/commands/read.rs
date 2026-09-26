@@ -72,7 +72,7 @@ pub(super) fn run(
     format: ReadFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    arguments.compression.validate(format.as_format())?;
+    let compression = arguments.compression.for_output(format.as_format())?;
     if !arguments.fields.is_empty() {
         return super::projection::read(arguments, format.as_format(), stream);
     }
@@ -82,7 +82,7 @@ pub(super) fn run(
     let Args {
         fields: _,
         max_projection_bytes: _,
-        compression,
+        compression: _,
         path,
         limits,
         epoch,

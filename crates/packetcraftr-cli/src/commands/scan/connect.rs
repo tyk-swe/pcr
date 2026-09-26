@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::output::{self, contract::ToolFormat};
-use crate::{
-    errors::CliError,
-    rendering::{StreamEncoder, write_stdout_line},
-};
+use crate::{errors::CliError, rendering::StreamEncoder};
 use std::sync::Arc;
 
 /// The pieces both connect entry points drive: the policy authorizer, the
@@ -63,19 +60,19 @@ pub(super) fn run(
             }),
             on_event: emit_event,
             into_result: Box::new(|report| {
-                output::scan_connect::Report::try_from(report)
+                output::scan::connect::Report::try_from(report)
                     .map(|report| (report, Vec::new(), None))
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {
-                render_text(
-                    &output::scan_connect::Report::try_from(report)
+                super::rendering::render_connect_text(
+                    &output::scan::connect::Report::try_from(report)
                         .map_err(CliError::classified)?,
                 )
             }),
             complete: |summary, stream| {
                 stream
-                    .complete(output::scan_connect::Summary::from(summary), Vec::new())
+                    .complete(output::scan::connect::Summary::from(summary), Vec::new())
                     .map_err(CliError::from)
             },
         },
@@ -86,33 +83,6 @@ fn emit_event(
     probe: packetcraftr::scan::connect::Probe,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let event = output::scan_connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
+    let event = output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
     Ok(stream.emit_data(event, Vec::new())?)
-}
-
-fn render_text(report: &output::scan_connect::Report) -> Result<(), CliError> {
-    for endpoint in &report.endpoints {
-        write_stdout_line(format_args!(
-            "{} tcp-connect/{} classification={}",
-            endpoint.address,
-            endpoint.port,
-            endpoint.classification.as_str()
-        ))?;
-    }
-    write_stdout_line(format_args!(
-        "{} socket connections attempted; {} succeeded; elapsed {:?}",
-        report.summary.socket_stats.connections_attempted,
-        report.summary.socket_stats.connections_succeeded,
-        report.summary.socket_stats.elapsed
-    ))?;
-    let rtt = &report.summary.socket_stats.rtt;
-    write_stdout_line(format_args!(
-        "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
-        rtt.sent,
-        rtt.received,
-        rtt.lost,
-        crate::rendering::optional_debug(rtt.min),
-        crate::rendering::optional_debug(rtt.avg),
-        crate::rendering::optional_debug(rtt.max),
-    ))
 }

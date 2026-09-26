@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Arguments that write generated packets to a capture stream.
+//! `build`'s arguments that write generated packets to a capture stream.
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use clap::Args;
 use packetcraftr_core::error::Kind;
@@ -12,6 +12,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{capture_file, protocol::builtin};
 
+use crate::command_options::{CompressionArgs, Destination, parse_timestamp};
 use crate::errors::CliError;
 
 /// Capture-file options shared by commands that emit generated frames.
@@ -29,9 +30,8 @@ pub(crate) struct CaptureOutputArgs {
     /// generated captures stay byte-deterministic.
     #[arg(long, value_name = "SECONDS")]
     pub(crate) timestamp: Option<String>,
-    /// Compress binary capture output.
-    #[arg(long, value_enum, default_value_t = super::Compression::None)]
-    pub(crate) compression: super::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<GeneratedCapture>,
 }
 
 /// The validated capture-stream destination for generated frames.
@@ -39,7 +39,7 @@ pub(crate) struct CaptureOutput {
     pub(crate) link_type: LinkType,
     pub(crate) timestamp: SystemTime,
     format: capture_file::Format,
-    compression: super::Compression,
+    compression: crate::command_options::Compression,
 }
 
 impl CaptureOutputArgs {
@@ -49,7 +49,7 @@ impl CaptureOutputArgs {
         self,
         format: crate::output::contract::Format,
     ) -> Result<Option<CaptureOutput>, CliError> {
-        self.compression.validate(format)?;
+        let compression = self.compression.for_output(format)?;
         let captures = match format {
             crate::output::contract::Format::Pcap => Some(capture_file::Format::Pcap),
             crate::output::contract::Format::PcapNg => Some(capture_file::Format::PcapNg),
@@ -85,7 +85,7 @@ impl CaptureOutputArgs {
             link_type: parse_link_type(&link_type)?,
             timestamp,
             format: capture_format,
-            compression: self.compression,
+            compression,
         }))
     }
 }
@@ -213,50 +213,12 @@ fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
     })
 }
 
-/// Parses a non-negative Unix timestamp in decimal seconds, carrying up to
-/// nanosecond fractional precision without rounding.
-pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
-    let invalid = || {
-        CliError::new(
-            Kind::Usage,
-            format!(
-                "invalid timestamp {input:?}; use non-negative Unix seconds with optional nanosecond fraction"
-            ),
-        )
-    };
-    let input = input.trim();
-    let (seconds, fraction) = input.split_once('.').unwrap_or((input, ""));
-    if seconds.is_empty()
-        || !seconds.bytes().all(|byte| byte.is_ascii_digit())
-        || (input.contains('.') && fraction.is_empty())
-        || fraction.contains('.')
-    {
-        return Err(invalid());
-    }
-    let seconds = seconds.parse::<u64>().map_err(|_| invalid())?;
-    let nanos = if fraction.is_empty() {
-        0
-    } else {
-        if fraction.len() > 9 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(invalid());
-        }
-        let mut digits = fraction.to_owned();
-        digits.extend(std::iter::repeat_n('0', 9 - fraction.len()));
-        digits.parse::<u32>().map_err(|_| invalid())?
-    };
-    let offset = Duration::new(seconds, nanos);
-    let timestamp = SystemTime::UNIX_EPOCH
-        .checked_add(offset)
-        .ok_or_else(invalid)?;
-    // SystemTime may be coarser than Duration (100 ns on Windows). Never
-    // silently move an inclusive bound or a generated frame's timestamp.
-    if timestamp.duration_since(SystemTime::UNIX_EPOCH).ok() != Some(offset) {
-        return Err(CliError::new(
-            Kind::Usage,
-            format!("timestamp {input:?} has precision this platform cannot represent exactly"),
-        ));
-    }
-    Ok(timestamp)
+/// Generated frames written to stdout as a capture stream.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct GeneratedCapture;
+
+impl Destination for GeneratedCapture {
+    const HELP: &'static str = "Compress binary capture output";
 }
 
 #[cfg(test)]
@@ -270,45 +232,5 @@ mod tests {
         assert_eq!(parse_link_type("228").unwrap(), LinkType::IPV4);
         assert!(parse_link_type("fddi").is_err());
         assert!(parse_link_type("12x").is_err());
-    }
-
-    #[test]
-    fn timestamps_parse_decimal_seconds() {
-        let epoch = parse_timestamp("0").unwrap();
-        assert_eq!(epoch, SystemTime::UNIX_EPOCH);
-        let stamped = parse_timestamp("1700000000.5").unwrap();
-        assert_eq!(
-            stamped,
-            SystemTime::UNIX_EPOCH + Duration::new(1_700_000_000, 500_000_000)
-        );
-        assert!(parse_timestamp("-1").is_err());
-        assert!(parse_timestamp("1.0000000001").is_err());
-        assert!(parse_timestamp("soon").is_err());
-        assert!(parse_timestamp("+1").is_err());
-        assert!(parse_timestamp("1.").is_err());
-    }
-
-    #[test]
-    fn timestamps_are_exact_or_rejected_on_coarser_platforms() {
-        for (input, nanos) in [("1.123456700", 123_456_700), ("1.123456789", 123_456_789)] {
-            let offset = Duration::new(1, nanos);
-            let representable = (SystemTime::UNIX_EPOCH + offset)
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                == offset;
-            match parse_timestamp(input) {
-                Ok(timestamp) => {
-                    assert!(representable);
-                    assert_eq!(
-                        timestamp.duration_since(SystemTime::UNIX_EPOCH).unwrap(),
-                        offset
-                    );
-                }
-                Err(error) => {
-                    assert!(!representable);
-                    assert!(error.message.contains("cannot represent exactly"));
-                }
-            }
-        }
     }
 }

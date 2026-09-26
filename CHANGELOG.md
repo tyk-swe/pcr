@@ -170,6 +170,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   `analysis::Error::InvalidLimit`, and `protocol::semantics::Error::Field`
   carry typed reasons. Type-erased sources are the new `error::Source`. See
   `docs/migration-unreleased.md`.
+- CLI output modules are named after their commands: `output::dns_analysis`
+  is `output::dns_read`, `output::forwarding` is `output::verify_forwarding`,
+  and `output::scan_connect` is `output::scan::connect`. The types and their
+  JSON are unchanged. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -672,6 +676,20 @@ All notable changes to PacketcraftR are documented here. The format follows
 - A strict build accepts link padding inside a packet rooted at `vlan` or
   `vlan8021ad`, as decoding already produces it, instead of failing with
   `PaddingWithoutLinkLayer`.
+- `dns-read`, `http`, `fragment`, `merge`, `export`, and `rewrite` print text
+  output through the terminal-sanitizing writer, as every other command does,
+  and `capture` no longer prints interface names and saved-file paths in its
+  text summary unsanitized. `dns-read` and `http` text spells statuses,
+  optional values, and frame lists as the JSON document does instead of Rust
+  `Debug` formatting, HTTP header names are escaped like their values, and
+  `dns-read` prints each message's questions and records. DNS records print
+  in one line shape across `read`, `dissect`, `capture`, `dns-read`, and
+  `dns`. These six commands also gain `--help` examples.
+- Offline analysis commands (`stats`, `expert`, `follow`, `tls`, `dns-read`,
+  `http`, `export`, `verify-forwarding`) reject a `--max-duration-ms` above
+  one hour with `cli.analysis_limit`, the code they already publish for a
+  zero duration. They previously accepted any duration, including ones no
+  deadline could represent, while every live workflow was capped at one hour.
 - Replay text output reports a stdout write failure even if the invocation
   deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with

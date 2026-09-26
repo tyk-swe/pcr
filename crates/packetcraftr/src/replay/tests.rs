@@ -21,11 +21,11 @@ use packetcraftr_netio::{
 
 use super::engine::run_with_selector;
 use super::error::Error;
-use super::model::{Limits, Options, Selector, Timing, Transmission, Transmitter};
-use super::wire::{
+use super::evidence::{
     map_replay_route_error, replay_link_mode, replay_network_envelope,
     validate_transmission_evidence,
 };
+use super::request::{Limits, Options, Selector, Timing, Transmission, Transmitter};
 use crate::BoundaryError;
 use crate::policy::{Authorizer, Operation};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};

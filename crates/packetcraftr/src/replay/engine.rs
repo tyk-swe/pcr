@@ -16,10 +16,12 @@ use crate::execution::{self, Paused};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 
 use super::error::Error;
-use super::model::{
+use super::evidence::{
+    replay_link_mode, requested_interface_matches, validate_transmission_evidence,
+};
+use super::request::{
     FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
-use super::wire::{replay_link_mode, requested_interface_matches, validate_transmission_evidence};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
 
 #[derive(Default)]

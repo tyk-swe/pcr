@@ -17,7 +17,7 @@ use crate::policy::{
     authorize_wire_sources, unsupported_operation,
 };
 
-use crate::replay::wire::replay_network_envelope;
+use crate::replay::evidence::replay_network_envelope;
 
 /// Validates complete capture evidence, applies policy to raw routing destinations
 /// before I/O, and requires an exact decode/build round trip.

@@ -4,19 +4,19 @@
 //! Policy-gated, bounded capture replay. Every frame is individually authorized;
 //! malformed traffic requires explicit opt-in.
 
-mod authorizer;
+mod admission;
 mod engine;
 mod error;
-mod model;
+mod evidence;
+mod executor;
+mod request;
 #[cfg(test)]
 mod tests;
-mod transmitter;
-mod wire;
 
-pub use authorizer::SystemAuthorizer;
+pub use admission::SystemAuthorizer;
 pub use engine::{run_repeated_with_selector, run_with_selector};
 pub use error::Error;
-pub use model::{
+pub use executor::SystemTransmitter;
+pub use request::{
     FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
 };
-pub use transmitter::SystemTransmitter;

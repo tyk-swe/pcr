@@ -20,10 +20,10 @@ use packetcraftr_netio::{
 };
 
 use crate::policy::decode_wire;
-use crate::replay::model::{Transmission, Transmitter};
-use crate::replay::wire::{
+use crate::replay::evidence::{
     map_replay_route_error, replay_network_envelope, requested_interface_matches,
 };
+use crate::replay::request::{Transmission, Transmitter};
 
 /// System interface, route, and packet-I/O providers for replay. Caches only
 /// the validated interface; each transmission uses the plan returned by the

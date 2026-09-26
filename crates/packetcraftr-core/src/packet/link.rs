@@ -32,6 +32,16 @@ impl VlanKind {
             Self::Ieee8021Ad => 0x88a8,
         }
     }
+
+    /// The tag kind an EtherType announces, or `None` when it announces no
+    /// VLAN tag.
+    pub const fn from_ether_type(ether_type: u16) -> Option<Self> {
+        match ether_type {
+            0x8100 => Some(Self::Ieee8021Q),
+            0x88a8 => Some(Self::Ieee8021Ad),
+            _ => None,
+        }
+    }
 }
 
 /// One fixed-width VLAN tag.
@@ -41,4 +51,25 @@ pub struct VlanTag {
     pub priority: u8,
     pub drop_eligible: bool,
     pub vlan_id: u16,
+}
+
+impl VlanTag {
+    /// Splits a wire Tag Control Information word into priority (PCP), drop
+    /// eligibility (DEI), and VLAN ID.
+    pub const fn from_tci(kind: VlanKind, tci: u16) -> Self {
+        Self {
+            kind,
+            priority: (tci >> 13) as u8,
+            drop_eligible: tci & 0x1000 != 0,
+            vlan_id: tci & 0x0fff,
+        }
+    }
+
+    /// The wire Tag Control Information word. Out-of-range priority and VLAN
+    /// ID bits are masked, so check them before encoding untrusted values.
+    pub const fn tci(self) -> u16 {
+        ((self.priority as u16 & 7) << 13)
+            | if self.drop_eligible { 1 << 12 } else { 0 }
+            | (self.vlan_id & 0x0fff)
+    }
 }

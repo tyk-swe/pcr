@@ -143,6 +143,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `protocol::headers` is a public, bounded walker over raw link, VLAN, and IP
+  header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,
+  `Ipv6Header` with its extension chain, and option iterators). Code that
+  edits or inspects bytes a codec round trip would not reproduce uses it
+  instead of parsing headers by hand (ADR 0004); `transform::rewrite` and
+  `transform::fragment` now share it, and field edits use it for checksum
+  coverage. `transform::Error::Header` carries its typed error, classified as
+  before (`packet.transform_input`, `packet.transform_unsupported` for a
+  jumbogram, `policy.transform_limit` for VLAN or extension depth).
+  `packet::link::VlanTag::{from_tci, tci}`, `VlanKind::from_ether_type`, and
+  the `ip_protocol::{ESP, ICMPV6, NO_NEXT_HEADER}` numbers support it.
+
 - `registry::Builder::allow_trailing_padding` records that a link protocol's
   frames may carry trailing padding after the network payload, and
   `Registry::allows_trailing_padding` reports it. Decoding and building read
@@ -380,6 +392,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `rewrite` and `fragment` validate every IPv6 extension header and IP option
+  they step over. A malformed length in a source-route, Home Address,
+  routing, fragment, or AH header now reports `packet.transform_input` where
+  it was refused as `packet.transform_unsupported` without reading its length.
+  Messages for malformed link and IP headers come from the header walker (for
+  example "truncated IPv6 extension header" instead of "invalid packet
+  transform input: truncated IPv6 extension").
 - `protocol::semantics::Error` (formerly `packet::semantics::Error`) messages
   describe the packet instead of a transmission denial (for example
   "destination cannot be determined because the ipv4 layer is malformed: …"

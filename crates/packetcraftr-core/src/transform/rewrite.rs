@@ -4,10 +4,17 @@
 use super::Error;
 use crate::{
     frame::{Frame, LinkType},
-    protocol::{checksum, checksum_parts},
+    packet::link::{VlanKind, VlanTag},
+    protocol::{
+        BuiltinProtocol, checksum,
+        headers::MAX_VLAN_DEPTH,
+        headers::{EthernetHeader, IpHeader, Ipv4Header, Ipv6Header, LinkHeader},
+        network::ip_protocol,
+        network_from_addresses, transport_checksum,
+    },
 };
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{net::IpAddr, ops::Range};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,19 +28,20 @@ pub struct VlanRewrite {
 }
 impl VlanRewrite {
     fn tci(self) -> Result<u16, Error> {
-        if !matches!(self.ether_type, 0x8100 | 0x88a8)
-            || self.identifier > 4095
-            || self.priority > 7
-        {
-            return Err(Error::Invalid("invalid VLAN rewrite tag"));
+        let kind = VlanKind::from_ether_type(self.ether_type)
+            .filter(|_| self.identifier <= 4095 && self.priority <= 7)
+            .ok_or(Error::Invalid("invalid VLAN rewrite tag"))?;
+        Ok(VlanTag {
+            kind,
+            priority: self.priority,
+            drop_eligible: self.drop_eligible,
+            vlan_id: self.identifier,
         }
-        Ok((u16::from(self.priority) << 13)
-            | (u16::from(self.drop_eligible) << 12)
-            | self.identifier)
+        .tci())
     }
 }
-impl From<crate::packet::link::VlanTag> for VlanRewrite {
-    fn from(tag: crate::packet::link::VlanTag) -> Self {
+impl From<VlanTag> for VlanRewrite {
+    fn from(tag: VlanTag) -> Self {
         Self {
             ether_type: tag.kind.ether_type(),
             identifier: tag.vlan_id,
@@ -66,10 +74,10 @@ impl HeaderRewrite {
     }
     pub fn validate(&self) -> Result<(), Error> {
         if let Some(tags) = &self.vlans {
-            if tags.len() > 64 {
+            if tags.len() > MAX_VLAN_DEPTH {
                 return Err(Error::Limit {
                     field: "VLAN depth",
-                    limit: 64,
+                    limit: MAX_VLAN_DEPTH,
                 });
             }
             for tag in tags {
@@ -104,6 +112,10 @@ impl Default for RewriteLimits {
 /// metadata. IP fragments needing reconstruction, source-routing options, IPv6
 /// routing/home-address headers, AH/ESP, and unknown upper layers are rejected
 /// for network/port edits. MAC/VLAN-only edits do not interpret the IP payload.
+///
+/// The output is the captured frame with only the named header bytes and the
+/// checksums covering them changed, so link trailers and malformed or unknown
+/// bytes survive byte for byte. A codec round trip would re-encode them.
 pub fn rewrite(
     frame: &Frame,
     patch: &HeaderRewrite,
@@ -122,48 +134,39 @@ pub fn rewrite(
     if frame.captured_length() != frame.original_length() {
         return Err(Error::Invalid("cannot rewrite a truncated capture"));
     }
-    let ethernet = frame.link_type == LinkType::ETHERNET;
-    if !ethernet
-        && (patch.source_mac.is_some() || patch.destination_mac.is_some() || patch.vlans.is_some())
-    {
+    let link_edits =
+        patch.source_mac.is_some() || patch.destination_mac.is_some() || patch.vlans.is_some();
+    if link_edits && frame.link_type != LinkType::ETHERNET {
         return Err(Error::Unsupported("MAC/VLAN edits require Ethernet"));
     }
-    let (old_offset, kind) = if ethernet {
-        super::ethernet_payload(frame.bytes(), u16_at)?
-    } else if frame.link_type.is_raw_ip() {
-        (0, 0)
-    } else {
-        return Err(Error::Unsupported("rewrite requires Ethernet or raw IP"));
-    };
-    let new_offset = patch
-        .vlans
-        .as_ref()
-        .map_or(old_offset, |tags| 14 + 4 * tags.len());
-    let new_length = frame
+    let link = LinkHeader::walk(frame.link_type, frame.bytes())?
+        .ok_or(Error::Unsupported("rewrite requires Ethernet or raw IP"))?;
+    let old_offset = link.network_offset();
+    let new_offset = patch.vlans.as_ref().map_or(old_offset, |tags| {
+        EthernetHeader::LENGTH + EthernetHeader::VLAN_TAG_LENGTH * tags.len()
+    });
+    let length = frame
         .bytes()
         .len()
         .checked_sub(old_offset)
         .and_then(|n| n.checked_add(new_offset))
+        .filter(|length| *length <= limits.max_output_bytes)
         .ok_or(Error::Limit {
             field: "max_output_bytes",
             limit: limits.max_output_bytes,
         })?;
-    let length = new_length;
-    if length > limits.max_output_bytes {
-        return Err(Error::Limit {
-            field: "max_output_bytes",
-            limit: limits.max_output_bytes,
-        });
-    }
     let mut bytes = Vec::with_capacity(length);
-    if ethernet {
+    if let LinkHeader::Ethernet(ethernet) = &link {
+        // The addresses are copied and then overwritten in place, and a
+        // replaced VLAN stack is spliced in as bytes: the payload behind the
+        // link header is carried over exactly as captured.
         bytes.extend_from_slice(&frame.bytes()[..12]);
         if let Some(tags) = &patch.vlans {
             for tag in tags {
                 bytes.extend_from_slice(&tag.ether_type.to_be_bytes());
                 bytes.extend_from_slice(&tag.tci()?.to_be_bytes());
             }
-            bytes.extend_from_slice(&kind.to_be_bytes());
+            bytes.extend_from_slice(&ethernet.ether_type().to_be_bytes());
         } else {
             bytes.extend_from_slice(&frame.bytes()[12..old_offset]);
         }
@@ -180,25 +183,14 @@ pub fn rewrite(
         || patch.source_port.is_some()
         || patch.destination_port.is_some()
     {
-        if ethernet && !matches!(kind, 0x0800 | 0x86dd) {
-            return Err(Error::Unsupported(
-                "network edits require an outer IPv4/IPv6 datagram",
-            ));
-        }
+        // The IP bytes moved with the link header only, so offsets walked in
+        // the captured frame hold in the output.
+        let header = link.walk_ip(frame.bytes())?.ok_or(Error::Unsupported(
+            "network edits require an outer IPv4/IPv6 datagram",
+        ))?;
         let ip = &mut bytes[new_offset..];
-        let version = ip.first().map(|b| b >> 4);
-        if (frame.link_type == LinkType::IPV4 || ethernet && kind == 0x0800) && version != Some(4)
-            || (frame.link_type == LinkType::IPV6 || ethernet && kind == 0x86dd)
-                && version != Some(6)
-        {
-            return Err(Error::Invalid("link type disagrees with IP version"));
-        }
-        let end = match version {
-            Some(4) => ipv4(ip, patch)?,
-            Some(6) => ipv6(ip, patch)?,
-            _ => return Err(Error::Invalid("unknown IP version")),
-        };
-        if !ethernet && end != ip.len() {
+        network(ip, &header, patch)?;
+        if matches!(link, LinkHeader::RawIp { .. }) && header.datagram_length() != ip.len() {
             return Err(Error::Unsupported(
                 "raw IP has uninterpreted trailing bytes",
             ));
@@ -210,184 +202,106 @@ pub fn rewrite(
     output.direction = frame.direction;
     Ok(output)
 }
-fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, Error> {
-    let value = bytes
-        .get(offset..offset + 2)
-        .ok_or(Error::Invalid("truncated rewrite header"))?;
-    Ok(u16::from_be_bytes([value[0], value[1]]))
+
+const AUTHENTICATED_OR_UNKNOWN: &str = "unknown or authenticated upper-layer checksum semantics";
+
+/// Writes the patched addresses and ports into `ip` in place and regenerates
+/// the checksums that cover them. IPv4 options, IPv6 extension headers, and
+/// the upper-layer payload keep their captured encoding, which a codec
+/// re-encode could normalize.
+fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<(), Error> {
+    super::ensure_checksum_coverage(ip, header)?;
+    let (source, destination) = match header {
+        IpHeader::V4(_) => (Ipv4Header::SOURCE, Ipv4Header::DESTINATION),
+        IpHeader::V6(_) => (Ipv6Header::SOURCE, Ipv6Header::DESTINATION),
+    };
+    for (value, range) in [
+        (patch.source_ip, source.clone()),
+        (patch.destination_ip, destination.clone()),
+    ] {
+        match (header, value) {
+            (_, None) => {}
+            (IpHeader::V4(_), Some(IpAddr::V4(value))) => {
+                ip[range].copy_from_slice(&value.octets());
+            }
+            (IpHeader::V6(_), Some(IpAddr::V6(value))) => {
+                ip[range].copy_from_slice(&value.octets());
+            }
+            _ => return Err(Error::Invalid("cannot change IP address family")),
+        }
+    }
+    // AH authenticates the rewritten bytes. The walk steps over it, so it is
+    // refused here like an upper layer `transport` does not know.
+    if let IpHeader::V6(ipv6) = header
+        && ipv6
+            .extensions()
+            .iter()
+            .any(|extension| extension.protocol() == ip_protocol::AH)
+    {
+        return Err(Error::Unsupported(AUTHENTICATED_OR_UNKNOWN));
+    }
+    let address = |ip: &[u8], range: Range<usize>| {
+        match header {
+            IpHeader::V4(_) => <[u8; 4]>::try_from(&ip[range]).map(IpAddr::from),
+            IpHeader::V6(_) => <[u8; 16]>::try_from(&ip[range]).map(IpAddr::from),
+        }
+        .expect("fixed-width IP address range")
+    };
+    let addresses = (address(ip, source), address(ip, destination));
+    let (protocol, start) = header.upper_layer();
+    let end = header.datagram_length();
+    transport(&mut ip[start..end], patch, protocol, addresses)?;
+    if let IpHeader::V4(ipv4) = header {
+        // The header checksum covers the rewritten addresses.
+        ip[Ipv4Header::CHECKSUM].fill(0);
+        let value = checksum(&ip[..ipv4.header_length()]);
+        ip[Ipv4Header::CHECKSUM].copy_from_slice(&value.to_be_bytes());
+    }
+    Ok(())
 }
-fn ipv4(ip: &mut [u8], patch: &HeaderRewrite) -> Result<usize, Error> {
-    if ip.len() < 20 {
-        return Err(Error::Invalid("truncated IPv4 header"));
-    }
-    let header = usize::from(ip[0] & 15) * 4;
-    let length = usize::from(u16_at(ip, 2)?);
-    if header < 20 || length < header || length > ip.len() {
-        return Err(Error::Invalid("invalid IPv4 lengths"));
-    }
-    if u16_at(ip, 6)? & 0x3fff != 0 {
-        return Err(Error::Unsupported(
-            "IP address/port edits require reassembly of IPv4 fragments",
-        ));
-    }
-    let mut option = 20;
-    while option < header {
-        match ip[option] {
-            0 => break,
-            1 => option += 1,
-            131 | 137 => {
-                return Err(Error::Unsupported(
-                    "IPv4 source routing changes checksum destinations",
-                ));
-            }
-            _ => {
-                let n = usize::from(
-                    *ip.get(option + 1)
-                        .ok_or(Error::Invalid("truncated IPv4 option"))?,
-                );
-                if n < 2 || option + n > header {
-                    return Err(Error::Invalid("invalid IPv4 option length"));
-                }
-                option += n;
-            }
-        }
-    }
-    for (value, start) in [(patch.source_ip, 12), (patch.destination_ip, 16)] {
-        if let Some(value) = value {
-            let IpAddr::V4(value) = value else {
-                return Err(Error::Invalid("cannot change IP address family"));
-            };
-            ip[start..start + 4].copy_from_slice(&value.octets());
-        }
-    }
-    let protocol = ip[9];
-    let addresses: [u8; 8] = ip[12..20].try_into().expect("IPv4 addresses");
-    transport(&mut ip[header..length], patch, false, protocol, &addresses)?;
-    ip[10..12].fill(0);
-    let value = checksum(&ip[..header]);
-    ip[10..12].copy_from_slice(&value.to_be_bytes());
-    Ok(length)
-}
-fn ipv6(ip: &mut [u8], patch: &HeaderRewrite) -> Result<usize, Error> {
-    if ip.len() < 40 {
-        return Err(Error::Invalid("truncated IPv6 header"));
-    }
-    let payload = usize::from(u16_at(ip, 4)?);
-    let length = 40 + payload;
-    if length > ip.len() {
-        return Err(Error::Invalid("truncated IPv6 payload"));
-    }
-    if payload == 0 && ip[6] != 59 {
-        return Err(Error::Unsupported("IPv6 jumbograms are not rewritten"));
-    }
-    let (mut protocol, mut position, mut extensions) = (ip[6], 40, 0);
-    while matches!(protocol, 0 | 43 | 44 | 60) {
-        extensions += 1;
-        if extensions > 64 {
-            return Err(Error::Limit {
-                field: "IPv6 extensions",
-                limit: 64,
-            });
-        }
-        if position + 8 > length {
-            return Err(Error::Invalid("truncated IPv6 extension"));
-        }
-        if protocol == 43 {
-            return Err(Error::Unsupported(
-                "IPv6 routing header changes checksum destinations",
-            ));
-        }
-        let next = ip[position];
-        if protocol == 44 {
-            if u16_at(ip, position + 2)? & 0xfff9 != 0 {
-                return Err(Error::Unsupported(
-                    "IP address/port edits require reassembly of IPv6 fragments",
-                ));
-            }
-            position += 8;
-        } else {
-            let end = position + (usize::from(ip[position + 1]) + 1) * 8;
-            if end > length {
-                return Err(Error::Invalid("invalid IPv6 option-header length"));
-            }
-            let mut option = position + 2;
-            while option < end {
-                if ip[option] == 0 {
-                    option += 1;
-                    continue;
-                }
-                if ip[option] == 201 {
-                    return Err(Error::Unsupported(
-                        "IPv6 Home Address option changes checksum sources",
-                    ));
-                }
-                let n = usize::from(
-                    *ip.get(option + 1)
-                        .ok_or(Error::Invalid("truncated IPv6 option"))?,
-                ) + 2;
-                if option + n > end {
-                    return Err(Error::Invalid("invalid IPv6 option length"));
-                }
-                option += n;
-            }
-            position = end;
-        }
-        protocol = next;
-    }
-    for (value, start) in [(patch.source_ip, 8), (patch.destination_ip, 24)] {
-        if let Some(value) = value {
-            let IpAddr::V6(value) = value else {
-                return Err(Error::Invalid("cannot change IP address family"));
-            };
-            ip[start..start + 16].copy_from_slice(&value.octets());
-        }
-    }
-    let addresses: [u8; 32] = ip[8..40].try_into().expect("IPv6 addresses");
-    transport(&mut ip[position..length], patch, true, protocol, &addresses)?;
-    Ok(length)
-}
+
+/// Writes the patched ports and regenerates the transport checksum over the
+/// captured segment, whose options and payload stay as captured.
 fn transport(
     segment: &mut [u8],
     patch: &HeaderRewrite,
-    ipv6: bool,
     protocol: u8,
-    addresses: &[u8],
+    (source, destination): (IpAddr, IpAddr),
 ) -> Result<(), Error> {
+    let ipv6 = source.is_ipv6();
     let ports = patch.source_port.is_some() || patch.destination_port.is_some();
-    if ports && !matches!(protocol, 6 | 17) {
+    if ports && !matches!(protocol, ip_protocol::TCP | ip_protocol::UDP) {
         return Err(Error::Unsupported("port edits require TCP or UDP"));
     }
-    let (length, checksum_offset) = match protocol {
-        6 => {
-            if segment.len() < 20
-                || usize::from(segment[12] >> 4) * 4 < 20
-                || usize::from(segment[12] >> 4) * 4 > segment.len()
-            {
+    let (name, length, checksum_offset) = match protocol {
+        ip_protocol::TCP => {
+            let header = segment.get(12).map(|byte| usize::from(byte >> 4) * 4);
+            if !header.is_some_and(|header| (20..=segment.len()).contains(&header)) {
                 return Err(Error::Invalid("invalid TCP header length"));
             }
-            (segment.len(), 16)
+            (BuiltinProtocol::Tcp, segment.len(), 16)
         }
-        17 => {
-            let length = usize::from(u16_at(segment, 4)?);
+        ip_protocol::UDP => {
+            let length = segment
+                .get(4..6)
+                .map(|length| usize::from(u16::from_be_bytes([length[0], length[1]])))
+                .ok_or(Error::Invalid("invalid UDP length"))?;
             if length < 8 || length > segment.len() {
                 return Err(Error::Invalid("invalid UDP length"));
             }
-            (length, 6)
+            (BuiltinProtocol::Udp, length, 6)
         }
-        58 if ipv6 => {
+        ip_protocol::ICMPV6 if ipv6 => {
             if segment.len() < 4 {
                 return Err(Error::Invalid("truncated ICMPv6"));
             }
-            (segment.len(), 2)
+            (BuiltinProtocol::Icmpv6, segment.len(), 2)
         }
-        1 | 2 | 4 | 41 | 47 | 59 | 132 => return Ok(()),
-        _ => {
-            return Err(Error::Unsupported(
-                "unknown or authenticated upper-layer checksum semantics",
-            ));
-        }
+        1 | 2 | 4 | 41 | 47 | ip_protocol::NO_NEXT_HEADER | 132 => return Ok(()),
+        _ => return Err(Error::Unsupported(AUTHENTICATED_OR_UNKNOWN)),
     };
-    let disabled_udp = protocol == 17 && !ipv6 && u16_at(segment, 6)? == 0;
+    let checksum = checksum_offset..checksum_offset + 2;
+    let disabled_udp = protocol == ip_protocol::UDP && !ipv6 && segment[checksum.clone()] == [0, 0];
     if let Some(port) = patch.source_port {
         segment[..2].copy_from_slice(&port.to_be_bytes());
     }
@@ -397,25 +311,17 @@ fn transport(
     if disabled_udp {
         return Ok(());
     }
-    segment[checksum_offset..checksum_offset + 2].fill(0);
-    let mut value = if ipv6 {
-        checksum_parts(&[
-            addresses,
-            &(length as u32).to_be_bytes(),
-            &[0, 0, 0, protocol],
-            &segment[..length],
-        ])
-    } else {
-        checksum_parts(&[
-            addresses,
-            &[0, protocol],
-            &(length as u16).to_be_bytes(),
-            &segment[..length],
-        ])
-    };
-    if protocol == 17 && value == 0 {
+    segment[checksum.clone()].fill(0);
+    let mut value = transport_checksum(
+        name.as_str(),
+        network_from_addresses(source, destination),
+        protocol,
+        &segment[..length],
+    )
+    .map_err(Error::Checksum)?;
+    if protocol == ip_protocol::UDP && value == 0 {
         value = 0xffff;
     }
-    segment[checksum_offset..checksum_offset + 2].copy_from_slice(&value.to_be_bytes());
+    segment[checksum].copy_from_slice(&value.to_be_bytes());
     Ok(())
 }

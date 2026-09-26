@@ -163,6 +163,50 @@ fn vlan_stack_replacement_and_disabled_ipv4_udp_checksum_are_faithful() {
     assert_eq!(stripped.bytes().len(), rewritten.bytes().len() - 8);
 }
 #[test]
+fn a_malformed_link_trailer_survives_a_network_rewrite_byte_for_byte() {
+    let trailer = [0xde, 0xad, 0xbe, 0xef, 0x01];
+    for ipv6 in [false, true] {
+        let datagram = frame(ipv6, false, true, false);
+        let mut bytes = datagram.bytes().to_vec();
+        bytes.extend_from_slice(&trailer);
+        let original = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
+        let patch = HeaderRewrite {
+            source_ip: Some(
+                if ipv6 { "2001:db8::9" } else { "192.0.2.9" }
+                    .parse()
+                    .unwrap(),
+            ),
+            source_port: Some(48000),
+            ..Default::default()
+        };
+        let rewritten = transform::rewrite(&original, &patch, Default::default()).unwrap();
+        let (before, after) = (original.bytes(), rewritten.bytes());
+        assert_eq!(after.len(), before.len());
+        assert_eq!(&after[after.len() - trailer.len()..], &trailer);
+        // Ethernet 14 + VLAN 4, then the IP header and UDP.
+        let ip = 18;
+        let udp = ip + if ipv6 { 40 } else { 20 };
+        let mut edited = vec![udp..udp + 2, udp + 6..udp + 8];
+        edited.push(if ipv6 {
+            ip + 8..ip + 24
+        } else {
+            ip + 12..ip + 16
+        });
+        if !ipv6 {
+            edited.push(ip + 10..ip + 12);
+        }
+        for (offset, (old, new)) in before.iter().zip(after.as_ref()).enumerate() {
+            if !edited.iter().any(|range| range.contains(&offset)) {
+                assert_eq!(old, new, "byte {offset} changed outside the edited fields");
+            }
+        }
+        let decoded = Dissector::new(builtin::registry())
+            .decode(rewritten, Default::default())
+            .unwrap();
+        assert_eq!(decoded.packet.get::<Udp>().unwrap().source_port, 48000);
+    }
+}
+#[test]
 fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
     let original = frame(false, false, true, false);
     let fragments = transform::fragment(

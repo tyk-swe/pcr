@@ -25,6 +25,12 @@ Captured or decoded bytes that no codec could interpret, kept exactly as
 they were received.
 _Avoid_: permissive (for received bytes)
 
+**Header walk**:
+Locating link, VLAN, and IP headers directly in raw bytes, for edits and
+checks a codec round trip would not reproduce faithfully (ADR 0004). Core has
+one walker, `protocol::headers`; every such caller uses it.
+_Avoid_: hand parsing, ad-hoc offsets
+
 **Classification**:
 The stable code, kind, and remediation that identify a failure in machine
 output. Kinds are neutral (usage, packet, capability, I/O, policy, internal);

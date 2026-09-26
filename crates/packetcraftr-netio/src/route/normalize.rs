@@ -259,11 +259,12 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::packet::MacAddress;
 
     use super::*;
     use crate::{
         interface::{self, Id as InterfaceId},
-        link::{Capability, MacAddress},
+        link::Capability,
     };
 
     fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {

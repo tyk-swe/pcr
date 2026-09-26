@@ -23,10 +23,11 @@ use windows::Win32::{
 
 use crate::{
     interface::{self, Id as InterfaceId},
-    link::{Capability, MacAddress},
+    link::Capability,
     route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::MacAddress;
 
 #[derive(Clone)]
 pub(super) struct WindowsAdapter {

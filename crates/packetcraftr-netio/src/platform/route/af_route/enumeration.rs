@@ -14,11 +14,12 @@ use std::ptr;
 use super::parser::{netmask_prefix, sockaddr_ip};
 use crate::{
     interface::{self, Id as InterfaceId},
-    link::{Capability, MacAddress},
+    link::Capability,
     platform::route::os_error,
     route::SystemError,
 };
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::MacAddress;
 
 pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     let mut head = ptr::null_mut();

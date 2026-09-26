@@ -10,8 +10,9 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::packet::MacAddress;
 
-use super::link::{Capability, MacAddress};
+use super::link::Capability;
 
 pub use error::Error;
 

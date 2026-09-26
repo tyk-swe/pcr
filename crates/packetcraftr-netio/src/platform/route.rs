@@ -179,7 +179,8 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
-    use crate::link::{Capability, MacAddress};
+    use crate::link::Capability;
+    use packetcraftr_core::packet::MacAddress;
 
     fn interface() -> interface::Info {
         interface::Info {

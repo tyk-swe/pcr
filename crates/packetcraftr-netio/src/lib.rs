@@ -46,7 +46,6 @@ pub struct PacketIo<S, C> {
     pub capture: C,
 }
 
-#[forbid(unsafe_code)]
 impl<S, C> PacketIo<S, C> {
     pub fn new(sender: S, capture: C) -> Self {
         Self { sender, capture }

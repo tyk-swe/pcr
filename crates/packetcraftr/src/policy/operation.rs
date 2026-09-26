@@ -38,6 +38,18 @@ impl WireLimits {
         }
     }
 
+    /// Checks the declaration. Every count is legal as a declaration: zero
+    /// declares no traffic, and policy compares any other value with its own
+    /// per-operation ceilings when it authorizes the operation, so this always
+    /// succeeds. It exists so every limits type validates the same way.
+    ///
+    /// # Errors
+    ///
+    /// None today.
+    pub const fn validate(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     #[must_use]
     pub const fn packets(&self) -> u64 {
         self.packets
@@ -53,8 +65,8 @@ impl WireLimits {
 /// live operation declares. Kernel-managed TCP packets cannot be counted as
 /// exact [`WireLimits`]. The workflow enforces its own deadline.
 ///
-/// [`SocketLimits::none`] declares no socket use; otherwise all three counts
-/// are required.
+/// [`SocketLimits::none`] declares no socket use; a connect-only operation
+/// declares connections without messages or application bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SocketLimits {
     connections: u64,
@@ -75,6 +87,19 @@ impl SocketLimits {
     #[must_use]
     pub const fn none() -> Self {
         Self::new(0, 0, 0)
+    }
+
+    /// Checks the declaration. Every count is legal as a declaration: zero
+    /// declares none of that unit, and policy compares the aggregate with its
+    /// own per-operation ceilings when it authorizes the operation, so this
+    /// always succeeds. It exists so every limits type validates the same
+    /// way.
+    ///
+    /// # Errors
+    ///
+    /// None today.
+    pub const fn validate(&self) -> Result<(), Error> {
+        Ok(())
     }
 
     #[must_use]
@@ -419,6 +444,20 @@ mod tests {
     use packetcraftr_core::error::Classified;
 
     use super::*;
+
+    #[test]
+    fn every_wire_and_socket_declaration_is_a_valid_limit() {
+        for (packets, bytes) in [(0, 0), (1, 0), (u64::MAX, u64::MAX)] {
+            assert!(WireLimits::new(packets, bytes).validate().is_ok());
+        }
+        for limits in [
+            SocketLimits::none(),
+            SocketLimits::new(3, 0, 0),
+            SocketLimits::new(u64::MAX, u64::MAX, u64::MAX),
+        ] {
+            assert!(limits.validate().is_ok());
+        }
+    }
 
     fn documentation_packet() -> Packet {
         let mut packet = Packet::new();

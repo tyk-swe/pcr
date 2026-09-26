@@ -12,9 +12,10 @@ use super::evaluate::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Viola
 /// Finite comparison limits. Input observations have their own collection
 /// limits; these ceilings account for the additional index and report work.
 ///
-/// Every value is honored as given, so there is nothing to validate: zero
-/// `max_details` or `max_detail_bytes` retains no details, and zero
-/// `max_scratch_bytes` refuses any comparison that needs scratch space.
+/// Every value is honored as given, so [`validate`](Self::validate) has
+/// nothing to refuse: zero `max_details` or `max_detail_bytes` retains no
+/// details, and zero `max_scratch_bytes` refuses any comparison that needs
+/// scratch space.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerifyLimits {
     pub max_details: usize,
@@ -31,6 +32,18 @@ impl Default for VerifyLimits {
             max_detail_bytes: 4 * 1024 * 1024,
             max_scratch_bytes: 128 * 1024 * 1024,
         }
+    }
+}
+
+impl VerifyLimits {
+    /// Checks the ceilings. Every value is honored as given, so this always
+    /// succeeds; it exists so every limits type validates the same way.
+    ///
+    /// # Errors
+    ///
+    /// None today.
+    pub const fn validate(&self) -> Result<(), super::Error> {
+        Ok(())
     }
 }
 
@@ -187,6 +200,17 @@ mod tests {
     use crate::error::Classified;
     use serde::ser::SerializeSeq;
     use std::cell::Cell;
+
+    #[test]
+    fn every_ceiling_is_a_valid_verify_limit() {
+        let zero = VerifyLimits {
+            max_details: 0,
+            max_detail_bytes: 0,
+            max_scratch_bytes: 0,
+        };
+        assert!(zero.validate().is_ok());
+        assert!(VerifyLimits::default().validate().is_ok());
+    }
 
     #[test]
     fn scratch_json_preserves_canonical_bytes_and_previous_charges() {

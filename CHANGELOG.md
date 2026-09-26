@@ -181,7 +181,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   is replaced by `capture_file::Budget` (`new`, `charge`, `after`, `frames`,
   `captured_bytes`). `capture_file::Limits`, `MergeLimits` (whose source
   ceiling is the new `capture_file::MAX_MERGE_SOURCES`), `compression::Limits`, `scope::Limits`, the IP and TCP reassembly `Limits`,
-  `dhcp::Limits`, and `dns::DecodeLimits` gain `validate()`, and
+  `dhcp::Limits`, `dns::DecodeLimits`, `packet::Limits`, and
+  `forwarding::VerifyLimits` gain `validate()` (packetcraftr's
+  `policy::WireLimits` and `policy::SocketLimits` too; for the last four every
+  value is legal, so it always succeeds), and
   `application::Limits::validate` is public. Writers, `rewrite`, `select`,
   `map_frames`, and `merge` refuse a zero stream limit with
   `capture_file::Error::InvalidLimit` (`cli.capture_limit`).

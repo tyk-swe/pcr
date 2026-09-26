@@ -11,11 +11,12 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::execution::Errors as _;
 use crate::execution::sink_observer;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
-use crate::target::{GateErrors, admit_operation, wire_limits};
+use crate::target::{FamilyGate, admit_operation, wire_limits};
 
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
@@ -78,7 +79,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| WORKFLOW.duration_limit(error.actual, error.limit),
+        |error| WORKFLOW.duration_limit(0, error),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
@@ -196,7 +197,7 @@ fn approve_traceroute<A: Authorizer>(
         deadline,
         &WORKFLOW,
         &request.target,
-        request.address_family,
+        FamilyGate::new(request.address_family, |family| WORKFLOW.family(family)),
         |_| {
             let total_probes = request.total_probe_count()?;
             validate_probe_plan(request, total_probes)?;

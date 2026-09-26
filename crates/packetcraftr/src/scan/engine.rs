@@ -13,11 +13,12 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::execution::Errors as _;
 use crate::execution::sink_observer;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
-use crate::target::{DeclaredTargets, GateErrors, admit_selection, wire_limits};
+use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 
 use super::WORKFLOW;
 use super::evidence::ProbeClassifier;
@@ -88,7 +89,7 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| WORKFLOW.duration_limit(error.actual, error.limit),
+        |error| WORKFLOW.duration_limit(0, error),
         |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
@@ -217,7 +218,7 @@ where
     let mut sent_bytes = 0u64;
     let remaining = deadline
         .remaining()
-        .map_err(|error| WORKFLOW.duration_limit(error.actual, error.limit))?;
+        .map_err(|error| WORKFLOW.duration_limit(0, error))?;
     let settings = PipelineOptions {
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,
@@ -392,7 +393,7 @@ fn approve_scan<A: Authorizer>(
         &WORKFLOW,
         DeclaredTargets {
             selection: &request.targets,
-            family: request.address_family,
+            family: FamilyGate::new(request.address_family, |family| WORKFLOW.family(family)),
             max_targets: request.limits.max_targets,
         },
         |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),

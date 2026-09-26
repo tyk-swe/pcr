@@ -12,7 +12,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::link::Mode as LinkMode;
 
 use crate::clock::Clock;
-use crate::execution;
+use crate::execution::{self, Paused};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 
 use super::error::Error;
@@ -620,30 +620,14 @@ fn pace<C: Clock>(
     source_index: u64,
     delay: Duration,
 ) -> Result<(), Error> {
-    execution::pause(deadline, clock, &SourceFrames, source_index, delay)
-}
-
-/// Names pacing failures as replay errors at a source index.
-struct SourceFrames;
-
-impl execution::PacingErrors for SourceFrames {
-    type Error = Error;
-    type Step = u64;
-
-    fn duration_limit(&self, source_index: u64, source: DeadlineExceeded) -> Error {
-        duration_limit(source_index, source)
-    }
-
-    fn interrupted(&self, source_index: u64, source: Interrupted) -> Error {
-        interrupted(source_index, source)
-    }
-
-    fn clock(&self, source_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
-        Error::Clock {
+    execution::pause(deadline, clock, delay).map_err(|paused| match paused {
+        Paused::DurationLimit(source) => duration_limit(source_index, source),
+        Paused::Interrupted(source) => interrupted(source_index, source),
+        Paused::Clock(source) => Error::Clock {
             source_index,
             source,
-        }
-    }
+        },
+    })
 }
 
 fn transmit_frame<T: Transmitter>(

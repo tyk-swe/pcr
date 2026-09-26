@@ -17,17 +17,55 @@ use std::net::IpAddr;
 use packetcraftr_core::budget::Deadline;
 
 use super::selection::MAX_CANDIDATES;
-use super::workflow::{GateErrors, SelectedTargets, approve_operation, resolve_selected};
+use super::workflow::{SelectedTargets, approve_operation, resolve_selected};
 use super::{Family, Selection, SelectionError, Specification, Target};
+use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation};
+
+/// The address family every admitted address must belong to, and how the
+/// workflow names an authorized resolution that holds none.
+pub(crate) struct FamilyGate<E> {
+    family: Family,
+    unavailable: fn(Family) -> E,
+}
+
+impl<E> FamilyGate<E> {
+    pub(crate) const fn new(family: Family, unavailable: fn(Family) -> E) -> Self {
+        Self {
+            family,
+            unavailable,
+        }
+    }
+
+    pub(crate) const fn family(&self) -> Family {
+        self.family
+    }
+
+    /// The empty/family gate every admitted resolution passes before budget
+    /// planning: an authorized set holding no address of the family fails
+    /// the operation.
+    pub(crate) fn require(&self, addresses: &[IpAddr]) -> Result<(), E> {
+        if addresses.is_empty() {
+            return Err((self.unavailable)(self.family));
+        }
+        Ok(())
+    }
+}
+
+impl<E> Clone for FamilyGate<E> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<E> Copy for FamilyGate<E> {}
 
 /// The declared set [`admit_selection`] resolves and admits: the selection to
 /// expand, the family every admitted address must match, and the bound on
 /// admitted addresses.
-#[derive(Clone, Copy)]
-pub(crate) struct DeclaredTargets<'a> {
+pub(crate) struct DeclaredTargets<'a, E> {
     pub(crate) selection: &'a Selection,
-    pub(crate) family: Family,
+    pub(crate) family: FamilyGate<E>,
     pub(crate) max_targets: usize,
 }
 
@@ -46,17 +84,17 @@ pub(crate) fn admit_operation<A, G, P, Plan, Build>(
     deadline: &Deadline,
     gates: &G,
     target: &Target,
-    family: Family,
+    family: FamilyGate<G::Error>,
     plan: Plan,
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
 {
-    let selected = resolve_selected(authorizer, target, family, deadline, gates)?;
+    let selected = resolve_selected(authorizer, target, family.family(), deadline, gates)?;
     admit_selected(
         authorizer, deadline, gates, family, selected, plan, operation,
     )
@@ -75,44 +113,22 @@ pub(crate) fn admit_selection<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
     gates: &G,
-    targets: DeclaredTargets<'_>,
+    targets: DeclaredTargets<'_, G::Error>,
     invalid: impl Fn(SelectionError) -> G::Error,
     plan: Plan,
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
 {
+    let family = targets.family;
     let selected = resolve_selection(authorizer, targets, deadline, gates, invalid)?;
     admit_selected(
-        authorizer,
-        deadline,
-        gates,
-        targets.family,
-        selected,
-        plan,
-        operation,
+        authorizer, deadline, gates, family, selected, plan, operation,
     )
-}
-
-/// The empty/family gate every admitted resolution passes before budget
-/// planning: an authorized set holding no address `family` accepts fails the
-/// operation.
-pub(crate) fn require_family<G>(
-    addresses: &[IpAddr],
-    family: Family,
-    gates: &G,
-) -> Result<(), G::Error>
-where
-    G: GateErrors,
-{
-    if addresses.is_empty() {
-        return Err(gates.family(family));
-    }
-    Ok(())
 }
 
 /// Gate → plan → approve over an already-authorized selection.
@@ -120,18 +136,18 @@ fn admit_selected<A, G, P, Plan, Build>(
     authorizer: &mut A,
     deadline: &Deadline,
     gates: &G,
-    family: Family,
+    family: FamilyGate<G::Error>,
     selected: SelectedTargets,
     plan: Plan,
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
 {
-    require_family(&selected.addresses, family, gates)?;
+    family.require(&selected.addresses)?;
     let plan = plan(&selected)?;
     let operation = operation(&plan)?;
     approve_operation(authorizer, operation, deadline, gates)?;
@@ -142,20 +158,21 @@ where
 /// deadline's cooperative `enforce` gate inside both loops.
 fn resolve_selection<A, G>(
     authorizer: &mut A,
-    targets: DeclaredTargets<'_>,
+    targets: DeclaredTargets<'_, G::Error>,
     deadline: &Deadline,
     gates: &G,
     invalid: impl Fn(SelectionError) -> G::Error,
 ) -> Result<SelectedTargets, G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
 {
     let DeclaredTargets {
         selection,
         family,
         max_targets,
     } = targets;
+    let family = family.family();
     let mut selected = Vec::new();
     let mut seen = HashSet::new();
     let mut specifications = HashSet::new();
@@ -176,7 +193,7 @@ where
         for target in expanded {
             deadline
                 .enforce()
-                .map_err(|source| gates.interrupted(source))?;
+                .map_err(|source| gates.interrupted(G::Step::default(), source))?;
             candidates = candidates
                 .checked_add(1)
                 .filter(|count| *count <= MAX_CANDIDATES)
@@ -197,7 +214,7 @@ where
             for address in resolved.addresses {
                 deadline
                     .enforce()
-                    .map_err(|source| gates.interrupted(source))?;
+                    .map_err(|source| gates.interrupted(G::Step::default(), source))?;
                 if selection.excludes(address) || !seen.insert(address) {
                     continue;
                 }
@@ -223,15 +240,14 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use packetcraftr_core::budget::{Cancellation, Deadline, Interrupted};
+    use packetcraftr_core::budget::{Cancellation, Deadline, DeadlineExceeded, Interrupted};
     use packetcraftr_core::error::{Classification, Kind};
 
-    use super::{DeclaredTargets, admit_operation, admit_selection, require_family};
-    use crate::BoundaryError;
+    use super::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
+    use crate::execution::{Errors, ExchangeEvidenceError};
     use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
-    use crate::target::{
-        Authorized, Family, GateErrors, Selection, SelectionError, Target, wire_limits,
-    };
+    use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
+    use crate::{BoundaryError, StatsOverflow};
 
     /// One authorizer boundary call, in order.
     #[derive(Debug, PartialEq, Eq)]
@@ -308,26 +324,46 @@ mod tests {
         Selection(&'static str),
         Plan,
         Operation,
+        /// A step failure, which admission never raises.
+        Step,
     }
 
-    impl GateErrors for StubGates {
+    impl Errors for StubGates {
         type Error = StubError;
-
-        fn duration_limit(&self, _: Duration, _: Duration) -> StubError {
-            StubError::DurationLimit
-        }
+        type Step = ();
 
         fn authorization(&self, _: BoundaryError) -> StubError {
             StubError::Authorization
         }
 
-        fn interrupted(&self, _: Interrupted) -> StubError {
+        fn duration_limit(&self, (): (), _: DeadlineExceeded) -> StubError {
+            StubError::DurationLimit
+        }
+
+        fn interrupted(&self, (): (), _: Interrupted) -> StubError {
             StubError::Interrupted
         }
 
-        fn family(&self, family: Family) -> StubError {
-            StubError::Family(family.label())
+        fn clock(&self, (): (), _: Box<dyn std::error::Error + Send + Sync>) -> StubError {
+            StubError::Step
         }
+
+        fn execution(&self, (): (), _: BoundaryError) -> StubError {
+            StubError::Step
+        }
+
+        fn invalid_evidence(&self, (): (), _: ExchangeEvidenceError) -> StubError {
+            StubError::Step
+        }
+
+        fn stats_overflow(&self, (): (), _: StatsOverflow) -> StubError {
+            StubError::Step
+        }
+    }
+
+    /// The family gate naming a miss as the stub's marker error.
+    fn gate(family: Family) -> FamilyGate<StubError> {
+        FamilyGate::new(family, |family| StubError::Family(family.label()))
     }
 
     /// Selection-expansion failures surface as their bounded `field` name.
@@ -356,7 +392,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |selected| Ok(u64::try_from(selected.addresses.len()).unwrap_or(u64::MAX)),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -385,7 +421,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Ok(1_u64),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -408,7 +444,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &hostname(),
-            Family::Ipv4,
+            gate(Family::Ipv4),
             |_| {
                 planned.set(true);
                 Ok(1_u64)
@@ -430,7 +466,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Err(StubError::Plan),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -449,7 +485,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Ok(1_u64),
             |_| Err(StubError::Operation),
         )
@@ -468,7 +504,7 @@ mod tests {
             &Deadline::new(Duration::from_secs(60)),
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| {
                 Ok(vec![SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
@@ -500,12 +536,20 @@ mod tests {
                 answers: vec![IpAddr::V6(Ipv6Addr::LOCALHOST)],
                 ..Default::default()
             };
+            let unavailable: fn(Family) -> crate::probe::Error = match workflow {
+                crate::probe::Workflow::Scan => {
+                    |family| crate::probe::Workflow::Scan.family(family)
+                }
+                crate::probe::Workflow::Traceroute => {
+                    |family| crate::probe::Workflow::Traceroute.family(family)
+                }
+            };
             let error = admit_operation(
                 &mut authorizer,
                 &Deadline::new(Duration::from_secs(60)),
                 &workflow,
                 &hostname(),
-                Family::Ipv4,
+                FamilyGate::new(Family::Ipv4, unavailable),
                 |_| Ok(1_u64),
                 |probes| Ok(wire_limits(*probes, 0)),
             )
@@ -530,7 +574,7 @@ mod tests {
             &deadline,
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Ok(1_u64),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -559,7 +603,7 @@ mod tests {
             &deadline,
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Ok(1_u64),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -589,7 +633,7 @@ mod tests {
             &deadline,
             &StubGates,
             &target(),
-            Family::Any,
+            gate(Family::Any),
             |_| Ok(1_u64),
             |probes| Ok(wire_limits(*probes, 0)),
         )
@@ -626,7 +670,7 @@ mod tests {
             &StubGates,
             DeclaredTargets {
                 selection: &selection,
-                family: Family::Ipv4,
+                family: gate(Family::Ipv4),
                 max_targets: 16,
             },
             selection_error,
@@ -677,7 +721,7 @@ mod tests {
             &StubGates,
             DeclaredTargets {
                 selection: &selection,
-                family: Family::Any,
+                family: gate(Family::Any),
                 max_targets: 1,
             },
             selection_error,
@@ -703,7 +747,7 @@ mod tests {
             &StubGates,
             DeclaredTargets {
                 selection: &selection,
-                family: Family::Any,
+                family: gate(Family::Any),
                 max_targets: 16,
             },
             selection_error,
@@ -737,7 +781,7 @@ mod tests {
             &StubGates,
             DeclaredTargets {
                 selection: &selection,
-                family: Family::Any,
+                family: gate(Family::Any),
                 max_targets: 16,
             },
             selection_error,
@@ -749,20 +793,16 @@ mod tests {
         assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
     }
 
-    /// `require_family` is the shared empty-selection gate for workflows that
+    /// The family gate is the shared empty-selection gate for workflows that
     /// compose the lower-level pieces directly.
     #[test]
-    fn require_family_rejects_an_empty_address_set() {
+    fn the_family_gate_rejects_an_empty_address_set() {
         assert_eq!(
-            require_family(&[], Family::Ipv6, &StubGates),
+            gate(Family::Ipv6).require(&[]),
             Err(StubError::Family("IPv6"))
         );
         assert_eq!(
-            require_family(
-                &[IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))],
-                Family::Ipv4,
-                &StubGates
-            ),
+            gate(Family::Ipv4).require(&[IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))]),
             Ok(())
         );
     }

@@ -15,7 +15,7 @@ use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
-use super::engine::{Attempts, Gates, PreparedOperation};
+use super::engine::{Attempts, PreparedOperation};
 use super::plan::batch_limits;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
@@ -222,7 +222,7 @@ where
     let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
     let mut stop = deadline.enforce().is_err();
     if !stop {
-        approve_operation(authorizer, Operation::Dns(limits), deadline, &Gates)?;
+        approve_operation(authorizer, Operation::Dns(limits), deadline, &Attempts)?;
     }
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();

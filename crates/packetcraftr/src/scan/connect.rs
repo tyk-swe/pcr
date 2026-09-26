@@ -10,7 +10,7 @@ use crate::{
     clock::Clock,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Error, ErrorKind, Transport, enforce_deadline},
-    target::{DeclaredTargets, admit_selection, approve_operation},
+    target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
 };
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
@@ -239,7 +239,7 @@ fn planned<A: Authorizer>(
         &WORKFLOW,
         DeclaredTargets {
             selection: &request.targets,
-            family: request.address_family,
+            family: FamilyGate::new(request.address_family, |family| WORKFLOW.family(family)),
             max_targets: request.limits.max_targets,
         },
         |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),

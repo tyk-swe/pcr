@@ -28,7 +28,7 @@ use std::collections::hash_map::Entry;
 
 use packetcraftr_core::budget::Deadline;
 
-use crate::target::GateErrors;
+use crate::execution::Errors as _;
 
 /// Fails the workflow when its finite duration budget is exhausted. Scan and
 /// traceroute share this gate; the workflow tag keeps the code and remediation
@@ -36,7 +36,7 @@ use crate::target::GateErrors;
 pub(crate) fn enforce_deadline(workflow: Workflow, deadline: &Deadline) -> Result<(), Error> {
     deadline
         .enforce()
-        .map_err(|interrupted| workflow.interrupted(interrupted))
+        .map_err(|interrupted| workflow.interrupted(0, interrupted))
 }
 
 /// Returns the live collector entry for `key`, pushing `make()` first when

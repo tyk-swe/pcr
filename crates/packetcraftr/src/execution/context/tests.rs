@@ -8,6 +8,7 @@ use packetcraftr_core::budget::{Cancellation, Cancelled};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::*;
+use crate::StatsOverflow;
 use crate::test_support::RecordingClock;
 
 #[derive(Debug)]
@@ -15,17 +16,21 @@ enum Failure {
     DurationLimit(u64, DeadlineExceeded),
     Interrupted(u64, Interrupted),
     Clock(u64, Box<dyn std::error::Error + Send + Sync>),
+    Authorization,
     Execution(u64, BoundaryError),
-    InvalidEvidence(u64, String),
+    InvalidEvidence(u64, ExchangeEvidenceError),
     StatsOverflow(u64, StatsOverflow),
 }
 
 struct TestErrors;
 
-impl PacingErrors for TestErrors {
+impl Errors for TestErrors {
     type Error = Failure;
     type Step = u64;
 
+    fn authorization(&self, _: BoundaryError) -> Failure {
+        Failure::Authorization
+    }
     fn duration_limit(&self, step: u64, source: DeadlineExceeded) -> Failure {
         Failure::DurationLimit(step, source)
     }
@@ -35,14 +40,11 @@ impl PacingErrors for TestErrors {
     fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
         Failure::Clock(step, source)
     }
-}
-
-impl Errors for TestErrors {
     fn execution(&self, step: u64, source: BoundaryError) -> Failure {
         Failure::Execution(step, source)
     }
-    fn invalid_evidence(&self, step: u64, message: String) -> Failure {
-        Failure::InvalidEvidence(step, message)
+    fn invalid_evidence(&self, step: u64, source: ExchangeEvidenceError) -> Failure {
+        Failure::InvalidEvidence(step, source)
     }
     fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {
         Failure::StatsOverflow(step, source)
@@ -392,7 +394,7 @@ fn a_permit_mismatch_fails_before_validation_or_accounting() {
 
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(3, message) if message.contains("different execution permit")
+        Failure::InvalidEvidence(3, ExchangeEvidenceError::PermitMismatch)
     ));
     assert!(!validated);
     assert_eq!(context.into_stats(), Stats::default());

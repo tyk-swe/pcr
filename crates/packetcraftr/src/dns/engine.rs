@@ -15,14 +15,14 @@ use packetcraftr_core::registry::Registry;
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
 use crate::execution::Context;
-use crate::execution::Executor;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
 };
 use crate::execution::sink_observer;
+use crate::execution::{ExchangeEvidenceError, Executor};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
-use crate::target::{Family, approve_operation, require_family, resolve_selected};
+use crate::target::{FamilyGate, approve_operation, resolve_selected};
 use crate::{BoundaryError, Stats, StatsOverflow};
 
 use super::EVIDENCE_DIAGNOSTICS;
@@ -151,7 +151,7 @@ where
         authorizer,
         AuthorizedOperation::Dns(prepared.limits),
         deadline,
-        &Gates,
+        &Attempts,
     )?;
     prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
     Ok(prepared.summary)
@@ -393,13 +393,16 @@ where
             &self.request.server,
             self.request.address_family,
             self.execution.deadline(),
-            &Gates,
+            &Attempts,
         );
         self.execution.enforce(attempt)?;
         let resolved = resolved?;
         self.summary.server = resolved.declared;
         let addresses = resolved.addresses;
-        require_family(&addresses, self.request.address_family, &Gates)?;
+        FamilyGate::new(self.request.address_family, |family| Error::Family {
+            family: family.label(),
+        })
+        .require(&addresses)?;
         for address in &addresses {
             if !self.summary.resolved_addresses.contains(address) {
                 self.summary.resolved_addresses.push(*address);
@@ -620,38 +623,18 @@ fn select_response<'a>(
     )
 }
 
-pub(super) struct Gates;
+/// Names admission and execution-context failures as DNS errors at the retry
+/// attempt they concern. The DNS batch runner's wait between questions
+/// concerns the next question's first attempt.
+pub(super) struct Attempts;
 
-impl crate::target::GateErrors for Gates {
+impl crate::execution::Errors for Attempts {
     type Error = Error;
-
-    fn duration_limit(&self, actual: Duration, limit: Duration) -> Error {
-        Error::DurationLimit { actual, limit }
-    }
+    type Step = u32;
 
     fn authorization(&self, source: BoundaryError) -> Error {
         Error::from(source)
     }
-
-    fn interrupted(&self, source: Interrupted) -> Error {
-        Error::from(source)
-    }
-
-    fn family(&self, family: Family) -> Error {
-        Error::Family {
-            family: family.label(),
-        }
-    }
-}
-
-/// Names execution-context failures as DNS errors at the retry attempt they
-/// concern. The DNS batch runner's wait between questions concerns the next
-/// question's first attempt.
-pub(super) struct Attempts;
-
-impl crate::execution::PacingErrors for Attempts {
-    type Error = Error;
-    type Step = u32;
 
     fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
         Error::from(source)
@@ -664,15 +647,16 @@ impl crate::execution::PacingErrors for Attempts {
     fn clock(&self, attempt: u32, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { attempt, source }
     }
-}
 
-impl crate::execution::Errors for Attempts {
     fn execution(&self, attempt: u32, source: BoundaryError) -> Error {
         Error::Execution { attempt, source }
     }
 
-    fn invalid_evidence(&self, attempt: u32, message: String) -> Error {
-        Error::InvalidEvidence { attempt, message }
+    fn invalid_evidence(&self, attempt: u32, source: ExchangeEvidenceError) -> Error {
+        Error::InvalidEvidence {
+            attempt,
+            message: source.describe("DNS exchange", "DNS"),
+        }
     }
 
     fn stats_overflow(&self, attempt: u32, _: StatsOverflow) -> Error {

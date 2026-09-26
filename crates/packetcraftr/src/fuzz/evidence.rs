@@ -11,13 +11,12 @@ use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
 use crate::execution::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
-use crate::execution::validation::{
-    format_exchange_evidence_error, validate_response_frames_and_deadlines,
-};
+use crate::execution::validation::validate_response_frames_and_deadlines;
 
-use super::error::{Error, duration_limit};
+use super::error::{CaseErrors, Error, duration_limit};
 use super::execution::Execution;
 use super::{Case, CaseOutcome, LiveLimits};
+use crate::execution::Errors as _;
 
 /// Fuzz keeps undecodable frames as case evidence under the frame budget
 /// alone, so its undecoded-limit code is never raised.
@@ -147,12 +146,8 @@ pub(super) fn validate_execution(
             message: format!("invalid capture statistics: {source}"),
         })?;
     deadline.check().map_err(duration_limit)?;
-    validate_response_frames_and_deadlines(&execution.responses, &[], timeout).map_err(
-        |error| Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: format_exchange_evidence_error(error, "case", "fuzz"),
-        },
-    )?;
+    validate_response_frames_and_deadlines(&execution.responses, &[], timeout)
+        .map_err(|error| CaseErrors.invalid_evidence(case.prepared.index, error))?;
     deadline.check().map_err(duration_limit)?;
     Ok(())
 }

@@ -10,6 +10,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
+use crate::execution::ExchangeEvidenceError;
 use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 use crate::{BoundaryError, StatsOverflow};
 
@@ -324,28 +325,11 @@ impl Classified for Error {
     }
 }
 
-impl crate::target::GateErrors for Workflow {
-    type Error = Error;
-
-    fn duration_limit(&self, actual: Duration, limit: Duration) -> Error {
-        Error::new(*self, ErrorKind::DurationLimit { actual, limit })
-    }
-
-    fn authorization(&self, source: BoundaryError) -> Error {
-        Error::new(*self, ErrorKind::Authorization(source))
-    }
-
-    fn interrupted(&self, source: Interrupted) -> Error {
-        match source {
-            Interrupted::Cancelled(source) => Error::new(*self, ErrorKind::Cancelled(source)),
-            Interrupted::Exceeded(error) => self.duration_limit(error.actual, error.limit),
-            _ => Error::new(*self, ErrorKind::Cancelled(Cancelled)),
-        }
-    }
-
-    fn family(&self, family: crate::target::Family) -> Error {
+impl Workflow {
+    /// Names an authorized resolution holding no address of `family`.
+    pub(crate) fn family(self, family: crate::target::Family) -> Error {
         Error::new(
-            *self,
+            self,
             ErrorKind::Family {
                 family: family.label(),
             },
@@ -353,32 +337,50 @@ impl crate::target::GateErrors for Workflow {
     }
 }
 
-/// Names execution-context failures at the probe sequence of the batch they
-/// concern.
-impl crate::execution::PacingErrors for Workflow {
+/// Names shared admission and execution failures at the probe sequence of
+/// the batch they concern.
+impl crate::execution::Errors for Workflow {
     type Error = Error;
     type Step = u64;
 
-    fn duration_limit(&self, _sequence: u64, source: DeadlineExceeded) -> Error {
-        crate::target::GateErrors::duration_limit(self, source.actual, source.limit)
+    fn authorization(&self, source: BoundaryError) -> Error {
+        Error::new(*self, ErrorKind::Authorization(source))
     }
 
-    fn interrupted(&self, _sequence: u64, source: Interrupted) -> Error {
-        crate::target::GateErrors::interrupted(self, source)
+    fn duration_limit(&self, _sequence: u64, source: DeadlineExceeded) -> Error {
+        Error::new(
+            *self,
+            ErrorKind::DurationLimit {
+                actual: source.actual,
+                limit: source.limit,
+            },
+        )
+    }
+
+    fn interrupted(&self, sequence: u64, source: Interrupted) -> Error {
+        match source {
+            Interrupted::Cancelled(source) => Error::new(*self, ErrorKind::Cancelled(source)),
+            Interrupted::Exceeded(source) => self.duration_limit(sequence, source),
+            _ => Error::new(*self, ErrorKind::Cancelled(Cancelled)),
+        }
     }
 
     fn clock(&self, sequence: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::new(*self, ErrorKind::Clock { sequence, source })
     }
-}
 
-impl crate::execution::Errors for Workflow {
     fn execution(&self, sequence: u64, source: BoundaryError) -> Error {
         Error::new(*self, ErrorKind::Execution { sequence, source })
     }
 
-    fn invalid_evidence(&self, sequence: u64, message: String) -> Error {
-        Error::new(*self, ErrorKind::InvalidEvidence { sequence, message })
+    fn invalid_evidence(&self, sequence: u64, source: ExchangeEvidenceError) -> Error {
+        Error::new(
+            *self,
+            ErrorKind::InvalidEvidence {
+                sequence,
+                message: source.describe(self.batch_noun(), self.as_str()),
+            },
+        )
     }
 
     fn stats_overflow(&self, sequence: u64, _source: StatsOverflow) -> Error {

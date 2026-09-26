@@ -18,13 +18,14 @@ use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Execution, Sequenced};
 use crate::SentPacket;
+use crate::execution::Errors as _;
 use crate::execution::evidence::{EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector};
 use crate::execution::validation::{
-    ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
+    ExchangeEvidenceError, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
-use crate::probe::{Error, ErrorKind, Workflow, enforce_deadline};
+use crate::probe::{Error, Workflow, enforce_deadline};
 
 /// The reason both probe workflows report for a probe without a winner.
 pub(crate) const NO_RESPONSE_REASON: &str =
@@ -168,14 +169,9 @@ where
             stats: _,
         } = execution;
         if permit != batch.permit {
-            return Err(Error::new(
-                self.workflow,
-                ErrorKind::InvalidEvidence {
-                    sequence: batch.sequence,
-                    message: "executor returned evidence for a different execution permit"
-                        .to_owned(),
-                },
-            ));
+            return Err(self
+                .workflow
+                .invalid_evidence(batch.sequence, ExchangeEvidenceError::PermitMismatch));
         }
         self.record_diagnostics(diagnostics, deadline)?;
         self.enforce(deadline)?;
@@ -382,17 +378,7 @@ pub(crate) fn validate_batch_evidence<P: Sequenced>(
             .and_then(|index| probes.get(index))
             .or_else(|| probes.first())
             .map_or(0, Sequenced::sequence);
-        Error::new(
-            workflow,
-            ErrorKind::InvalidEvidence {
-                sequence,
-                message: format_exchange_evidence_error(
-                    error,
-                    workflow.batch_noun(),
-                    workflow.as_str(),
-                ),
-            },
-        )
+        workflow.invalid_evidence(sequence, error)
     })
 }
 

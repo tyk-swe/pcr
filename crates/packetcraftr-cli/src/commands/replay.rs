@@ -374,7 +374,7 @@ where
                 {
                     Some(writer) => render_capture_record(writer, evidence),
                     None => Err(output_failure(
-                        "replay capture output is already finished".to_owned(),
+                        "replay capture output is already finished",
                         io::Error::other("capture writer closed"),
                     )),
                 },
@@ -392,18 +392,22 @@ where
     finish_compressed_output(result, destination)
 }
 
-/// An output failure the replay reports at the frame it failed on.
+/// An output failure the replay reports at the frame it failed on: `message`
+/// names what failed, and the error it carries is the first cause.
 fn output_failure(
-    message: String,
+    message: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> BoundaryError {
-    let classification = CliError::new(Kind::Io, message.clone()).classification;
-    BoundaryError::with_source(message, classification, Vec::new(), source)
+    let classification = CliError::new(Kind::Io, message).classification;
+    let causes = std::iter::once(source.to_string())
+        .chain(packetcraftr_core::error::source_chain(&source))
+        .collect();
+    BoundaryError::with_source(message, classification, causes, source)
 }
 
 fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, BoundaryError> {
     output::replay::Frame::try_from(evidence)
-        .map_err(|source| output_failure(source.to_string(), source))
+        .map_err(|source| output_failure("replay frame output failed", source))
 }
 
 /// Writes one frame line. An interrupt observed while writing fails the
@@ -416,7 +420,7 @@ fn text_record_with(
     write_line(format_args!("{}", rendering::frame_line(&result))).map_err(|source| match source {
         HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
         HumanWriteError::Write(source) => {
-            output_failure(format!("write stdout failed: {source}"), source)
+            output_failure("write stdout failed", source)
         }
     })
 }
@@ -431,7 +435,7 @@ fn render_stream_record(
         .map_err(|error| match error {
             EncodeError::Cancelled(cancelled) => BoundaryError::from_error(cancelled),
             EncodeError::Deadline { source, .. } => BoundaryError::from_error(source),
-            error => output_failure(error.to_string(), error),
+            error => output_failure("write replay record failed", error),
         })
 }
 
@@ -503,5 +507,5 @@ fn render_capture_record<W: Write>(
             evidence.capture_interface,
             evidence.frame,
         )
-        .map_err(|source| output_failure(source.to_string(), source))
+        .map_err(|source| output_failure("write capture output failed", source))
 }

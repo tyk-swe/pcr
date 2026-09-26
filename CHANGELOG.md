@@ -851,6 +851,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A `replay` output failure names what failed (`write stdout failed`,
+  `write replay record failed`, `write capture output failed`, or `replay
+  frame output failed`) and lists the error it carries as its first cause,
+  instead of repeating that error's text in the message. Codes are unchanged.
 - A live packet whose routing headers cannot be read is refused as
   `traffic policy cannot authorize packet routing semantics: its live
   destinations cannot be read` (or `its outer IP source cannot be read`) with

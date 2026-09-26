@@ -7,8 +7,10 @@ use std::time::Duration;
 
 use thiserror::Error as ThisError;
 
+use super::capture::Phase as CapturePhase;
+use super::interface::Id as InterfaceId;
 use super::link::Mode;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind, source_chain};
 
 /// Shared native error source. Sharing keeps [`Error`] cloneable so capture
 /// sessions can return terminal failures repeatedly. An absent source on an
@@ -107,6 +109,8 @@ pub enum Error {
     },
     #[error("native capture filter was rejected for {interface}: {message}")]
     InvalidCaptureFilter { interface: String, message: String },
+    #[error("capture filter is {length} bytes; the maximum is {maximum}")]
+    CaptureFilterTooLong { length: usize, maximum: usize },
     #[error("native capture filter installation failed for {interface}: {message}")]
     CaptureFilterInstallation { interface: String, message: String },
     #[error("capture did not become ready: {message}")]
@@ -155,6 +159,30 @@ pub enum Error {
     },
     #[error("capture backend returned invalid statistics: {message}")]
     InvalidCaptureStatistics { message: String },
+    #[error("invalid capture group: {reason}")]
+    InvalidCaptureGroup { reason: &'static str },
+    /// One source of a capture group failed; `source` is that session's own
+    /// failure and decides the classification.
+    #[error("capture source {index} ({}) failed during {phase}", .interface.name)]
+    CaptureSource {
+        index: usize,
+        interface: InterfaceId,
+        phase: CapturePhase,
+        #[source]
+        source: Box<Self>,
+    },
+    #[error("capture source {index} broke its provider contract: {reason}")]
+    CaptureSourceContract { index: usize, reason: &'static str },
+    #[error("capture group is not armed, not ready, or has been shut down")]
+    CaptureGroupState,
+    /// Stopping a capture group failed for more than one source: `first` in
+    /// source order, then every `remaining` failure.
+    #[error("capture group cleanup failed for {} sources", .remaining.len() + 1)]
+    CaptureCleanup {
+        #[source]
+        first: Box<Self>,
+        remaining: Vec<Self>,
+    },
 }
 
 impl Classified for Error {
@@ -205,6 +233,10 @@ impl Classified for Error {
                 "cli.capture_filter",
                 "use a valid libpcap/Npcap BPF capture-filter expression",
             ),
+            Self::CaptureFilterTooLong { .. } => classified_cli(
+                "cli.capture_filter",
+                "shorten the capture filter to the documented 64 KiB maximum",
+            ),
             Self::CaptureFilterInstallation { .. } => classified(
                 "io.capture_filter",
                 Kind::Io,
@@ -252,6 +284,17 @@ impl Classified for Error {
                 Kind::Packet,
                 "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
             ),
+            Self::InvalidCaptureGroup { .. } => classified_cli(
+                "cli.capture_group",
+                "select 1 to 16 distinct interfaces whose shared queue limits hold one full snapshot each",
+            ),
+            Self::CaptureSourceContract { .. } | Self::CaptureGroupState => classified(
+                "internal.capture_group",
+                Kind::Internal,
+                "report the inconsistent capture provider or call order; do not treat the capture as complete",
+            ),
+            Self::CaptureSource { source, .. } => source.classification(),
+            Self::CaptureCleanup { first, .. } => first.classification(),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
@@ -262,6 +305,19 @@ impl Classified for Error {
                 "report the inconsistent provider result; do not reinterpret it as a successful operation",
             ),
         }
+    }
+
+    /// A multi-source cleanup failure lists every remaining failure after the
+    /// first one's source chain.
+    fn causes(&self) -> Vec<String> {
+        let mut causes = source_chain(self);
+        if let Self::CaptureCleanup { remaining, .. } = self {
+            for failure in remaining {
+                causes.push(failure.to_string());
+                causes.extend(failure.causes());
+            }
+        }
+        causes
     }
 }
 

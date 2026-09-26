@@ -61,7 +61,7 @@ impl native::Provider for Provider {
         Ok(self.captures.lock().unwrap().pop_front().unwrap())
     }
 }
-fn fixture(fail: bool) -> (Provider, group::Request, Vec<Arc<AtomicUsize>>) {
+fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
     let interfaces: Vec<_> = (0..2)
         .map(|index| Id {
             index: index + 7,
@@ -95,7 +95,7 @@ fn fixture(fail: bool) -> (Provider, group::Request, Vec<Arc<AtomicUsize>>) {
         Provider {
             captures: Mutex::new(captures),
         },
-        group::Request {
+        GroupRequest {
             interfaces,
             limits: native::Limits {
                 max_frames: 8,
@@ -192,7 +192,11 @@ fn runtime_failure_finalizes_saved_capture_and_retains_partial_evidence() {
         },
     )
     .unwrap_err();
-    assert!(error.message.contains("fixture receive failure"));
+    assert_eq!(
+        error.message,
+        "capture source 0 (fixture0) failed during receive"
+    );
+    assert_eq!(error.causes, ["capture failed: fixture receive failure"]);
     assert!(
         stopped
             .iter()
@@ -216,7 +220,7 @@ fn runtime_failure_finalizes_saved_capture_and_retains_partial_evidence() {
 fn single_session(
     link_type: LinkType,
     frames: Vec<Vec<u8>>,
-) -> (Provider, group::Request, Vec<Arc<AtomicUsize>>) {
+) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
     let interface = Id {
         index: 7,
         name: "fixture0".to_owned(),
@@ -244,7 +248,7 @@ fn single_session(
         Provider {
             captures: Mutex::new(VecDeque::from([session])),
         },
-        group::Request {
+        GroupRequest {
             interfaces: vec![interface],
             limits: native::Limits {
                 max_frames: 8,

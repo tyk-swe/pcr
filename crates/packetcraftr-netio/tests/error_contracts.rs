@@ -346,6 +346,58 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             "internal.live_io_invariant",
             Kind::Internal,
         ),
+        (
+            Error::CaptureFilterTooLong {
+                length: capture::MAX_FILTER_BYTES + 1,
+                maximum: capture::MAX_FILTER_BYTES,
+            },
+            "cli.capture_filter",
+            Kind::Usage,
+        ),
+        (
+            Error::InvalidCaptureGroup { reason: "fixture" },
+            "cli.capture_group",
+            Kind::Usage,
+        ),
+        (
+            Error::CaptureSourceContract {
+                index: 0,
+                reason: "fixture",
+            },
+            "internal.capture_group",
+            Kind::Internal,
+        ),
+        (
+            Error::CaptureGroupState,
+            "internal.capture_group",
+            Kind::Internal,
+        ),
+        (
+            Error::CaptureSource {
+                index: 1,
+                interface: interface::Id {
+                    name: "fixture1".to_owned(),
+                    index: 8,
+                },
+                phase: capture::Phase::Receive,
+                source: Box::new(Error::CaptureReadiness {
+                    message: "fixture".to_owned(),
+                }),
+            },
+            "io.capture_readiness",
+            Kind::Io,
+        ),
+        (
+            Error::CaptureCleanup {
+                first: Box::new(Error::Capture {
+                    message: "fixture".to_owned(),
+                    source: None,
+                }),
+                remaining: vec![Error::CaptureGroupState],
+            },
+            "io.capture",
+            Kind::Io,
+        ),
     ];
 
     for (error, code, kind) in cases {

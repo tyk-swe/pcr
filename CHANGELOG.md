@@ -48,8 +48,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `Malformed::new` takes `Option<String>`, analysis HTTP/DNS collectors take
   `impl IntoIterator<Item = u16>`, `transform::VlanTag` is renamed
   `VlanRewrite` (with `From<link::VlanTag>`), `analysis::follow::Direction` is
-  renamed `PeerDirection`, and `budget::Interrupted` plus the capture-group
-  `Failure`/`Error` structs are `#[non_exhaustive]`.
+  renamed `PeerDirection`, and `budget::Interrupted` is `#[non_exhaustive]`.
 - CLI `output::contract::Command::require_format` is generic and returns a
   narrowed proof enum (`AggregateFormat`, `ToolFormat`, `BuildFormat`,
   `CaptureFormat`, `DissectFormat`, `SendFormat`, `ExchangeFormat`,
@@ -266,6 +265,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   provider's `Error` must implement `Classified`, which the planner and route
   errors now read. `tcp::Provider` requires `Send + Sync` and `tcp::Stream`
   requires `Send`. See `docs/migration-unreleased.md`.
+- A capture group is a `capture::Session`. `capture::group` is private; its
+  types are `capture::{Group, GroupRequest, Source, Phase, MAX_SOURCES}`.
+  `Group::new(&request, cancellation)` validates and `group.arm(&provider)`
+  arms, and the group reads and stops through `Session`
+  (`next_captured_frame`, `shutdown`). `Record` is gone: `Captured::source`
+  names the source, and `Session::source_count`/`source_metadata` describe
+  every source. `group::{Error, Cause, Failure}` fold into
+  `packetcraftr_netio::Error` (`InvalidCaptureGroup`, `CaptureSource`,
+  `CaptureSourceContract`, `CaptureGroupState`, `CaptureCleanup`) with the
+  same `cli.capture_group`/`internal.capture_group` codes. After any failure,
+  `Group::snapshot` still reports every admitted source and `shutdown` reports
+  the cleanup failures. `packetcraftr::capture::{Cause::Native, Error::cleanup}`
+  and `scan::PipelineError::cleanup` carry `packetcraftr_netio::Error`. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -563,6 +576,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   the codecs type (Hop-by-Hop, Destination Options, Segment Routing, AH) and
   refused behind any other routing header type or a malformed AH header, which
   the hand-written walk used to step over.
+- Single capture sessions apply the 64 KiB capture-filter limit that capture
+  groups applied: `capture::Request::validate` checks it and
+  `capture::SystemProvider` refuses a longer filter before opening an
+  interface, with `cli.capture_filter`. A group's oversized filter now reports
+  `cli.capture_filter` too, instead of `cli.capture_group`, and the
+  `cli.capture_group` and `internal.capture_group` failures publish a
+  remediation. A group source failure's message names the source and phase
+  ("capture source 0 (eth0) failed during receive") and publishes the
+  source's own failure as a cause.
 - `packetcraftr_netio::route::SystemProvider` rejects a preferred source of
   the other address family (`io.route_selection`) in builds without
   `native-route` too, before reporting the missing capability

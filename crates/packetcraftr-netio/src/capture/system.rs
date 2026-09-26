@@ -10,10 +10,7 @@ use crate::{Error, interface::Id as InterfaceId};
 
 #[cfg(native_layer2)]
 pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
-    request
-        .limits
-        .validate()
-        .and_then(|()| request.native.validate(&request.limits))?;
+    request.validate()?;
     let limits = request.limits;
     if let Some(filter) = request.filter.as_deref() {
         super::filter::validate(&request.interface, filter)?;
@@ -33,7 +30,8 @@ pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
 }
 
 #[cfg(not(native_layer2))]
-pub(super) fn open(_request: &Request) -> Result<Box<dyn Session>, Error> {
+pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
+    request.validate()?;
     Err(crate::platform::unsupported(
         cfg!(feature = "native-layer2"),
         "native-layer2",

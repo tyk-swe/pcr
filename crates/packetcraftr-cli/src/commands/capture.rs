@@ -40,7 +40,7 @@ use packetcraftr_core::{
     frame::Frame,
     registry::Registry,
 };
-use packetcraftr_netio::capture::{Provider, group};
+use packetcraftr_netio::capture::{GroupRequest, Provider};
 use std::cell::RefCell;
 use std::io;
 use std::sync::Arc;
@@ -204,7 +204,7 @@ pub(super) fn run(
             "multiple interfaces require PCAPNG capture output",
         ));
     }
-    let request = net::capture::group::Request {
+    let request = net::capture::GroupRequest {
         interfaces,
         limits,
         filter: args.capture_filter,
@@ -294,7 +294,7 @@ struct Output<'a> {
 /// interfaces all exercise the same workflow and finalization path.
 fn drive<P: Provider>(
     provider: &P,
-    request: &group::Request,
+    request: &GroupRequest,
     options: workflow::Options,
     mut rendering: Output<'_>,
 ) -> Result<(), CliError> {

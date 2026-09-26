@@ -19,7 +19,7 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{self, group},
+    capture::{self, Group, GroupRequest, Session as _},
     route, transmit,
 };
 use prepare::AdmittedProbe;
@@ -43,8 +43,9 @@ pub struct Error {
     pub stats: Stats,
     pub pending: Vec<PendingEvidence>,
     pub failed_probe: Option<super::Probe>,
-    pub capture_sources: Vec<group::Source>,
-    pub cleanup: Option<Box<group::Error>>,
+    pub capture_sources: Vec<capture::Source>,
+    /// Capture shutdown failure that followed the primary failure.
+    pub cleanup: Option<Box<LiveIoError>>,
 }
 impl Classified for Error {
     fn classification(&self) -> ErrorClassification {
@@ -252,20 +253,18 @@ where
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
     let mut plan = prepare::plan(executor, &planned, options, deadline)?;
-    let request = group::Request {
+    let request = GroupRequest {
         interfaces: plan.interfaces.clone(),
         limits: executor.options.capture,
         filter: None,
         promiscuous: false,
         native: Default::default(),
     };
-    request.validate().map_err(BoundaryError::from_error)?;
-    let mut group = group::Group::arm(
-        &executor.client.io,
-        &request,
-        executor.client.cancellation.clone(),
-    )
-    .map_err(BoundaryError::from_error)?;
+    let mut group = Group::new(&request, executor.client.cancellation.clone())
+        .map_err(BoundaryError::from_error)?;
+    group
+        .arm(&executor.client.io)
+        .map_err(BoundaryError::from_error)?;
     let mut stats = Stats::default();
     let mut pending = BTreeMap::new();
     let mut failed_probe = None;
@@ -424,22 +423,25 @@ where
                 capture_drain_remaining -= 1;
                 wait = Duration::ZERO;
             }
-            let Some(record) = group.next_record(wait).map_err(BoundaryError::from_error)? else {
+            let Some(captured) = group
+                .next_captured_frame(wait)
+                .map_err(BoundaryError::from_error)?
+            else {
                 if draining_captures {
                     capture_drain_remaining = 0;
                 }
                 continue;
             };
-            if !seen.insert(record.captured.identity()) {
+            if !seen.insert(captured.identity()) {
                 continue;
             }
-            seen_order.push_back(record.captured.identity());
+            seen_order.push_back(captured.identity());
             if seen_order.len() > options.max_evidence_frames
                 && let Some(old) = seen_order.pop_front()
             {
                 seen.remove(&old);
             }
-            let captured = record.captured;
+            let source = captured.source;
             let raw = captured.frame.clone();
             let decoded = match decoder.decode(captured.frame, executor.options.decode.clone()) {
                 Ok(decoded) => decoded,
@@ -484,7 +486,7 @@ where
                 &planned,
                 &executor.client.registry,
                 &decoded,
-                &plan.interfaces[record.source],
+                &plan.interfaces[source],
                 received,
             );
             if candidates.len() != 1 {
@@ -537,22 +539,16 @@ where
     })();
     let mut cleanup = None;
     let mut result = result;
-    let capture_sources = if group.shutdown_attempted() {
-        group.snapshot()
-    } else {
-        match group.shutdown() {
-            Ok(sources) => sources,
-            Err(error) => {
-                let sources = error.sources.clone();
-                if result.is_ok() {
-                    result = Err(BoundaryError::from_error(error));
-                } else {
-                    cleanup = Some(Box::new(error));
-                }
-                sources
-            }
+    // A group failure already shut every source down; this reports that
+    // cleanup, or performs it after any other exit.
+    if let Err(error) = group.shutdown() {
+        if result.is_ok() {
+            result = Err(BoundaryError::from_error(error));
+        } else {
+            cleanup = Some(Box::new(error));
         }
-    };
+    }
+    let capture_sources = group.snapshot();
     for source in &capture_sources {
         if let Some(sum) = stats.capture.checked_add(source.statistics) {
             stats.capture = sum;

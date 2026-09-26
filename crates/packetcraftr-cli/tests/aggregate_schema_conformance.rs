@@ -1868,7 +1868,7 @@ fn rewrite_case() -> Value {
 }
 
 fn capture_case() -> Value {
-    use packetcraftr_netio::capture::{Limits, Metadata, OverflowPolicy, group};
+    use packetcraftr_netio::capture::{Limits, Metadata, OverflowPolicy, Source};
     let sources = [
         OverflowPolicy::Fail,
         OverflowPolicy::DropNewest,
@@ -1878,7 +1878,7 @@ fn capture_case() -> Value {
     .enumerate()
     .map(|(index, overflow_policy)| {
         let source = packetcraftr::capture::Source {
-            capture: group::Source {
+            capture: Source {
                 index,
                 metadata: Metadata {
                     interface: packetcraftr_netio::interface::Id {

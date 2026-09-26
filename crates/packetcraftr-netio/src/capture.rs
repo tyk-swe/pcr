@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Owned live-capture sessions and bounded queue configuration.
+//!
+//! A [`Session`] reads one or more sources. A provider arms a single-interface
+//! session; a [`Group`] composes up to [`MAX_SOURCES`] of them into one
+//! session, and each [`Captured`] record names the source that delivered it.
 
 #[cfg(native_layer2)]
 mod filter;
-pub mod group;
+mod group;
 #[cfg(native_layer2)]
 pub(crate) mod live;
 mod system;
@@ -17,6 +21,8 @@ use super::Error;
 use super::interface::Id as InterfaceId;
 use crate::deadline::POLL_INTERVAL;
 use packetcraftr_core::frame::{Frame as CaptureFrame, LinkType};
+
+pub use group::{Group, GroupRequest, MAX_SOURCES, Phase, Source};
 
 /// Aggregate backend capture-queue frame ceiling; also the value
 /// [`Limits::default`] uses.
@@ -31,6 +37,10 @@ pub const MAX_SNAP_LENGTH: usize = 16 * 1024 * 1024;
 
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// Longest native capture filter, in bytes, that a single session or a group
+/// accepts.
+pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
@@ -99,13 +109,27 @@ impl Statistics {
     }
 }
 
-/// Owned capture session: arm through [`Provider`], pass
-/// [`Session::wait_ready`] before transmission, read records, then call
-/// [`Session::shutdown`] to join the backend exactly once. Statistics are final
-/// only after successful shutdown.
+/// Owned capture session: arm through [`Provider`] (or compose a [`Group`]),
+/// pass [`Session::wait_ready`] before transmission, read records, then call
+/// [`Session::shutdown`] to join every backend. Statistics are final only
+/// after successful shutdown.
+///
+/// A session reads [`Session::source_count`] sources, numbered from zero; a
+/// provider's single-interface session has exactly one. Every record carries
+/// its source number in [`Captured::source`].
 pub trait Session: Send {
-    /// Returns the backend-confirmed properties fixed when the session was activated.
+    /// Returns the backend-confirmed properties fixed when the session was
+    /// activated. A multi-source session reports its first source here.
     fn metadata(&self) -> &Metadata;
+    /// Number of activated sources.
+    fn source_count(&self) -> usize {
+        1
+    }
+    /// Activation metadata of `source`, the number a record carries in
+    /// [`Captured::source`]; `None` outside `0..source_count()`.
+    fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+        (source == 0).then(|| self.metadata())
+    }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
     /// Waits up to `timeout` for a record. `Ok(None)` means no record was
@@ -115,13 +139,22 @@ pub trait Session: Send {
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
-    /// Returns cumulative counters, including undelivered queue loss.
+    /// Returns cumulative counters, including undelivered queue loss, summed
+    /// over every source.
     fn statistics(&self) -> Statistics;
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
     fn metadata(&self) -> &Metadata {
         (**self).metadata()
+    }
+
+    fn source_count(&self) -> usize {
+        (**self).source_count()
+    }
+
+    fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+        (**self).source_metadata(source)
     }
 
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
@@ -169,6 +202,12 @@ impl<C: Session> Cancellable<C> {
 impl<C: Session> Session for Cancellable<C> {
     fn metadata(&self) -> &Metadata {
         self.inner.metadata()
+    }
+    fn source_count(&self) -> usize {
+        self.inner.source_count()
+    }
+    fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+        self.inner.source_metadata(source)
     }
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         self.check()?;
@@ -426,6 +465,27 @@ pub struct Request {
     pub native: NativeSettings,
 }
 
+impl Request {
+    /// Checks everything that needs no interface: queue limits, native
+    /// settings, and the [`MAX_FILTER_BYTES`] filter limit.
+    pub fn validate(&self) -> Result<(), Error> {
+        validate_filter_length(self.filter.as_deref())?;
+        self.limits.validate()?;
+        self.native.validate(&self.limits)
+    }
+}
+
+/// The filter-size limit single sessions and groups share.
+fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
+    match filter {
+        Some(filter) if filter.len() > MAX_FILTER_BYTES => Err(Error::CaptureFilterTooLong {
+            length: filter.len(),
+            maximum: MAX_FILTER_BYTES,
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Backend-confirmed properties of an activated capture session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
@@ -447,6 +507,9 @@ static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct Captured {
     identity: RecordIdentity,
+    /// The session source that delivered this record; `0` for a
+    /// single-interface session. A [`Group`] sets its own source number.
+    pub source: usize,
     pub frame: CaptureFrame,
     /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
@@ -471,6 +534,7 @@ impl Captured {
             .expect("capture record identity space exhausted");
         Self {
             identity: RecordIdentity(identity),
+            source: 0,
             frame,
             received_at,
         }

@@ -11,7 +11,7 @@ use packetcraftr_core::{
     error::{Classification, Classified, Kind},
     frame::Frame,
 };
-use packetcraftr_netio::capture::group::Source;
+use packetcraftr_netio::capture::Source;
 use std::{
     fs::File,
     io::{self, Seek, Write},

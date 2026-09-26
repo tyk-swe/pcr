@@ -784,12 +784,27 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5));
         canceller.join().unwrap();
 
-        release_sender
-            .send(())
-            .expect("release fake capture worker");
+        // Shutdown sets the stop flag before it interrupts the source, so a
+        // worker released after the interrupt sees a requested stop rather
+        // than an unexpected close.
+        let releaser = {
+            let interrupt = Arc::clone(&interrupt);
+            thread::spawn(move || {
+                let waited = Instant::now();
+                while interrupt.calls.load(Ordering::SeqCst) == 0
+                    && waited.elapsed() < Duration::from_secs(1)
+                {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                release_sender
+                    .send(())
+                    .expect("release fake capture worker");
+            })
+        };
         session
             .shutdown()
             .expect("cancellation leaves cleanup available");
+        releaser.join().unwrap();
     }
 
     #[test]

@@ -9,7 +9,7 @@ use super::PcapNgState;
 use crate::capture_file::pcapng::section::validate_pcapng_block_length;
 use crate::capture_file::{
     error::Error,
-    model::{PacketBlockKind, ReaderOptions},
+    model::{PacketBlockKind, ReaderLimits},
     wire::{
         PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_PACKET_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32,
         read_exact_vec,
@@ -37,12 +37,12 @@ pub(super) fn read<'a, R: Read>(
     reader: &mut R,
     raw_header: [u8; 8],
     state: &mut PcapNgState,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
     scratch: &'a mut Vec<u8>,
 ) -> Result<FramedBlock<'a>, Error> {
     let block_type = decode_u32(state.endianness, &raw_header[..4])?;
     let block_length = decode_u32(state.endianness, &raw_header[4..8])?;
-    validate_pcapng_block_length(block_length, options.max_size)?;
+    validate_pcapng_block_length(block_length, limits.max_size)?;
     if let Some(remaining) = state.remaining_in_section
         && u64::from(block_length) > remaining
     {
@@ -56,7 +56,7 @@ pub(super) fn read<'a, R: Read>(
             length: block_length,
         })?;
     if packet_block_kind(block_type).is_none() {
-        state.account_metadata(block_length_usize, options)?;
+        state.account_metadata(block_length_usize, limits)?;
     }
 
     let payload_length = block_length_usize

@@ -41,12 +41,12 @@ fuzz_target!(|data: &[u8]| {
     ) else {
         return;
     };
-    let Ok(mut reader) = capture_file::Reader::with_options(
+    let Ok(mut reader) = capture_file::Reader::with_limits(
         input,
-        capture_file::ReaderOptions {
+        capture_file::ReaderLimits {
             max_size: 64 * 1024,
             max_total_interfaces: 32,
-            ..capture_file::ReaderOptions::default()
+            ..capture_file::ReaderLimits::default()
         },
     ) else {
         return;

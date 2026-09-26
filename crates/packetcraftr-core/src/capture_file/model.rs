@@ -82,19 +82,19 @@ impl Limits {
 ///
 /// ```rust
 /// use std::io::Cursor;
-/// use packetcraftr_core::capture_file::{Reader, ReaderOptions, Writer};
+/// use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
-/// let options = ReaderOptions {
+/// let options = ReaderLimits {
 ///     max_size: 64 * 1024,
-///     ..ReaderOptions::default()
+///     ..ReaderLimits::default()
 /// };
-/// let _reader = Reader::with_options(Cursor::new(bytes), options)?;
+/// let _reader = Reader::with_limits(Cursor::new(bytes), options)?;
 /// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReaderOptions {
+pub struct ReaderLimits {
     /// Maximum packet or PCAPNG block size, in bytes.
     pub max_size: usize,
     pub max_interfaces_per_section: usize,
@@ -103,7 +103,7 @@ pub struct ReaderOptions {
     pub max_metadata_bytes_per_frame: usize,
 }
 
-impl Default for ReaderOptions {
+impl Default for ReaderLimits {
     fn default() -> Self {
         Self {
             max_size: DEFAULT_SIZE_LIMIT,

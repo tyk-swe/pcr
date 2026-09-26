@@ -5,7 +5,7 @@ use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core::capture_file::{
-    Endianness, Error, Format, PcapOptions, Reader, ReaderOptions, Writer,
+    Endianness, Error, Format, PcapOptions, Reader, ReaderLimits, Writer,
 };
 use packetcraftr_core::frame::{Frame, Lengths, LinkType};
 
@@ -63,11 +63,11 @@ fn truncated_records_and_declared_size_limits_fail_closed() {
         .expect_err("short payload must fail");
     assert!(matches!(error, Error::Truncated { .. }));
 
-    let mut reader = Reader::with_options(
+    let mut reader = Reader::with_limits(
         Cursor::new(pcap(Endianness::Little)),
-        ReaderOptions {
+        ReaderLimits {
             max_size: 3,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
     )
     .expect("global header remains within the limit");

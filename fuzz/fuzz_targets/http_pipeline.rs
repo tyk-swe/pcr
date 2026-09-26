@@ -15,12 +15,12 @@ use std::io::Cursor;
 
 fuzz_target!(|data: &[u8]| {
     let data = &data[..data.len().min(64 * 1024)];
-    let Ok(mut reader) = capture_file::Reader::with_options(
+    let Ok(mut reader) = capture_file::Reader::with_limits(
         Cursor::new(data),
-        capture_file::ReaderOptions {
+        capture_file::ReaderLimits {
             max_size: 64 * 1024,
             max_total_interfaces: 32,
-            ..capture_file::ReaderOptions::default()
+            ..capture_file::ReaderLimits::default()
         },
     ) else {
         return;

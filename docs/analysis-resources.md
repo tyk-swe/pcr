@@ -34,7 +34,7 @@ are counted in `underflow_frames` and folded into bucket zero.
 including unused interfaces and interfaces whose frames are filtered out. A
 separate, fixed CLI input ceiling limits the capture to 65,536 descriptions
 across all sections. The library exposes that ceiling as
-`ReaderOptions::max_total_interfaces`. With `read --normalize`,
+`ReaderLimits::max_total_interfaces`. With `read --normalize`,
 `--max-interfaces` also bounds the selected interfaces in the single output
 section; filtering can reduce that output count, not either input count.
 Non-normalizing reads and rewrites retain the per-section input semantics.

@@ -9,7 +9,7 @@ use crate::frame::{Frame, LinkType};
 use super::classic::{read_next_pcap_record, read_pcap_header};
 use super::error::Error;
 use super::model::{
-    CaptureHeader, CaptureRecord, Endianness, Format, Interface, ReaderOptions, Section,
+    CaptureHeader, CaptureRecord, Endianness, Format, Interface, ReaderLimits, Section,
     TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{PcapNgState, read_next_pcapng_record, read_section_header_after_type};
@@ -33,7 +33,7 @@ pub struct Reader<R> {
     state: ReaderState,
     header: CaptureHeader,
     interfaces: Vec<Interface>,
-    options: ReaderOptions,
+    limits: ReaderLimits,
     scratch: Vec<u8>,
     finished: bool,
     cancellation: Option<Cancellation>,
@@ -48,12 +48,12 @@ fn wrap_pcap_header(
 
 impl<R: Read> Reader<R> {
     pub fn new(inner: R) -> Result<Self, Error> {
-        Self::with_options(inner, ReaderOptions::default())
+        Self::with_limits(inner, ReaderLimits::default())
     }
 
-    pub fn with_options(mut inner: R, options: ReaderOptions) -> Result<Self, Error> {
-        let max_size = options.max_size;
-        let max_total_interfaces = options.max_total_interfaces;
+    pub fn with_limits(mut inner: R, limits: ReaderLimits) -> Result<Self, Error> {
+        let max_size = limits.max_size;
+        let max_total_interfaces = limits.max_total_interfaces;
         let mut scratch = Vec::new();
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
@@ -136,7 +136,7 @@ impl<R: Read> Reader<R> {
             state,
             header,
             interfaces,
-            options,
+            limits,
             scratch,
             finished: false,
             cancellation: None,
@@ -244,13 +244,13 @@ impl<R: Read> Reader<R> {
                 *precision,
                 *snap_len,
                 *link_type,
-                self.options.max_size,
+                self.limits.max_size,
             ),
             ReaderState::PcapNg(state) => read_next_pcapng_record(
                 &mut self.inner,
                 state,
                 &mut self.interfaces,
-                &self.options,
+                &self.limits,
                 &mut self.scratch,
             ),
         }?;
@@ -300,7 +300,7 @@ impl<R: Read + Seek> Reader<R> {
         self.check_interrupted()?;
         self.finished = true;
         self.inner.rewind()?;
-        let fresh = Reader::with_options(&mut self.inner, self.options)?;
+        let fresh = Reader::with_limits(&mut self.inner, self.limits)?;
         self.state = fresh.state;
         self.header = fresh.header;
         self.interfaces = fresh.interfaces;

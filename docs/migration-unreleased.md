@@ -1033,7 +1033,7 @@ composes a second I/O stack for it.
 | `packetcraftr::route::materialize(plan, &resolver, deadline)` | none; `Client` send and exchange methods materialize admitted plans |
 | `packetcraftr_netio::link::MAX_VLAN_TAGS` | `packetcraftr::route::MAX_VLAN_TAGS` |
 
-`I` must implement both `transmit::Sender` and `capture::Provider` for
+`I` must implement both `transmit::Provider` and `capture::Provider` for
 `Client::send` and the send-set methods too, since a Layer 2 send may resolve
 a neighbor. `PacketIo::new(sender, capture)` composes the two. An I/O fake
 for Layer 3 sends only can implement `arm_capture` as unreachable; a fake that
@@ -1060,3 +1060,31 @@ implements `From<interface::Error>`, so `?` still converts an enumeration
 failure into a live I/O failure. A test fake that returned
 `InterfaceDiscovery { source: None }` supplies a source, for example
 `Arc::new(std::io::Error::other("fixture"))`.
+
+## One provider contract shape
+
+Every netio capability is `<capability>::Provider` with a
+`<capability>::SystemProvider`, and every provider trait has `Send + Sync`
+supertraits.
+
+| Before | After |
+|---|---|
+| `transmit::Sender` | `transmit::Provider` (same `send` method) |
+| `transmit::Frame` | `transmit::Outbound` (same variants and methods) |
+| `transmit::{Layer2Sender, Layer3Sender}` | `transmit::Provider`; match `Outbound::Layer2`/`Outbound::Layer3` inside `send` |
+| `ModeSender::new(SystemLayer2, SystemLayer3)` | `transmit::SystemProvider` |
+| `SystemLayer2.send_layer2(frame)` | `transmit::SystemProvider.send(Outbound::Layer2(frame))` |
+| `route::Provider::classify_error(&error)` | `error.classification()`; `type Error` must implement `Classified` |
+| `tcp::Provider` (no bounds), `tcp::Stream: Read + Write` | `tcp::Provider: Send + Sync`, `tcp::Stream: Read + Write + Send` |
+
+`transmit::SystemProvider` sends through the backend built for the frame's
+layer. A layer this build does not include fails with
+`Error::Unsupported` (`capability.unsupported`), as `SystemLayer2` and
+`SystemLayer3` did.
+
+A route provider that cannot fail keeps `type Error = Infallible`, since core
+implements `Classified` for it. A provider with its own error type implements
+`Classified` for it and chooses the code that `classify_error` returned
+before; the old default was `io.route` (`Kind::Io`). A fake whose error was
+`std::io::Error` needs a local error type, because `Classified` is a core
+trait. A TCP fake that counted calls in a `Cell` uses an atomic instead.

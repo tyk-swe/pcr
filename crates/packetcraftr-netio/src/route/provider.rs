@@ -75,10 +75,6 @@ impl Provider for SystemProvider {
     fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
         crate::platform::interface_route(interface).map(Some)
     }
-
-    fn classify_error(&self, error: &Self::Error) -> Classification {
-        error.classification()
-    }
 }
 
 /// Rejects a preferred source of the wrong address family before any backend
@@ -184,7 +180,7 @@ mod tests {
                     if message.contains("enable the native-route feature")
                         && message.contains(capability)
             ));
-            let classification = provider.classify_error(&error);
+            let classification = error.classification();
             assert_eq!(classification.code, "capability.route");
             assert_eq!(classification.kind, Kind::Capability);
         }

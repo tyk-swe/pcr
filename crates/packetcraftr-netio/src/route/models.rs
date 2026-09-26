@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use crate::interface::Id as InterfaceId;
 use crate::link::{Capability, MacAddress};
-use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -46,8 +46,12 @@ pub struct Decision {
     pub link_type: LinkType,
 }
 
+/// Passive route and interface lookups.
+///
+/// Provider errors classify themselves, so injected providers choose their
+/// own stable codes without exposing native operating-system error types.
 pub trait Provider: Send + Sync {
-    type Error: std::error::Error + Send + Sync + 'static;
+    type Error: Classified + Send + Sync + 'static;
 
     /// Passively selects a consistent per-exchange route snapshot without neighbor traffic.
     /// `preferred_source` constrains interface selection but never rewrites packet source.
@@ -62,19 +66,5 @@ pub trait Provider: Send + Sync {
     /// lookup or neighbor traffic. Defaults to `None` for IP-only providers.
     fn lookup_interface(&self, _interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
         Ok(None)
-    }
-
-    /// Classifies a provider-specific failure without forcing injected
-    /// providers to expose native operating-system error types. The default is
-    /// a runtime route failure; native providers override it with their exact
-    /// capability or invariant class.
-    fn classify_error(&self, _error: &Self::Error) -> Classification {
-        Classification::new(
-            "io.route",
-            Kind::Io,
-            Some(
-                "inspect the route table, interface selection, and provider diagnostic before retrying",
-            ),
-        )
     }
 }

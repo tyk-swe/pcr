@@ -339,3 +339,70 @@ fn dhcp_codec_failures_keep_the_dhcp_error_as_their_source() {
         assert_eq!(source.classification().code, "packet.dhcp");
     }
 }
+
+#[test]
+fn dhcp_limits_above_their_ceiling_are_refused_rather_than_lowered() {
+    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::protocol::application::dhcp::{
+        Error, Limit, MAX_MESSAGE_BYTES, MAX_NESTING, MAX_OPTIONS,
+    };
+
+    let v4 = Dhcpv4::default();
+    let v6 = Dhcpv6::default();
+    let (v4_wire, v6_wire) = (v4.to_wire().unwrap(), v6.to_wire().unwrap());
+    for (limits, limit, value, maximum) in [
+        (
+            Limits {
+                max_message_bytes: MAX_MESSAGE_BYTES + 1,
+                ..Limits::default()
+            },
+            Limit::MessageBytes,
+            MAX_MESSAGE_BYTES + 1,
+            MAX_MESSAGE_BYTES,
+        ),
+        (
+            Limits {
+                max_options: MAX_OPTIONS + 1,
+                ..Limits::default()
+            },
+            Limit::OptionCount,
+            MAX_OPTIONS + 1,
+            MAX_OPTIONS,
+        ),
+        (
+            Limits {
+                max_nesting: MAX_NESTING + 1,
+                ..Limits::default()
+            },
+            Limit::OptionNesting,
+            MAX_NESTING + 1,
+            MAX_NESTING,
+        ),
+    ] {
+        let expected = Error::InvalidLimit {
+            limit,
+            value,
+            maximum,
+        };
+        assert_eq!(limits.validate(), Err(expected.clone()));
+        for refused in [
+            Dhcpv4::from_wire_with_limits(v4_wire.clone(), limits).map(|_| ()),
+            Dhcpv6::from_wire_with_limits(v6_wire.clone(), limits).map(|_| ()),
+            v4.to_wire_with_limits(limits).map(|_| ()),
+            v6.to_wire_with_limits(limits).map(|_| ()),
+        ] {
+            assert_eq!(refused, Err(expected.clone()));
+        }
+        assert_eq!(expected.classification().code, "policy.dhcp_limit");
+    }
+
+    // Every ceiling at its maximum is accepted as given.
+    let widest = Limits {
+        max_message_bytes: MAX_MESSAGE_BYTES,
+        max_options: MAX_OPTIONS,
+        max_nesting: MAX_NESTING,
+    };
+    assert_eq!(widest.validate(), Ok(()));
+    assert!(Dhcpv4::from_wire_with_limits(v4_wire, widest).is_ok());
+    assert!(Dhcpv6::from_wire_with_limits(v6_wire, widest).is_ok());
+}

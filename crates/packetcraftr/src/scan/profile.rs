@@ -3,7 +3,7 @@
 
 //! Explicit UDP fixture payloads and bounded application response checks,
 //! compiled from the profiles a `packetcraftr.udp-profiles/v1` document
-//! ([`udp_profiles`](packetcraftr_core::document::udp_profiles), read by core)
+//! ([`udp_profiles`], read by core)
 //! assigns to ports. Confirmation means the configured checks matched, not
 //! authenticated identity.
 use bytes::Bytes;

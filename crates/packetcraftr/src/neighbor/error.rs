@@ -9,7 +9,7 @@ use packetcraftr_core::{
 };
 
 use super::Request;
-use packetcraftr_netio::{capture::Statistics, interface::Id as InterfaceId};
+use packetcraftr_netio::{capture::Stats, interface::Id as InterfaceId};
 
 /// The provider failures this wraps retain their own platform source, which
 /// is not comparable, so these failures are matched on rather than equated.
@@ -31,7 +31,7 @@ pub enum Error {
         attempts: u32,
         captured: Vec<Frame>,
         evidence_truncated: bool,
-        capture_statistics: Statistics,
+        capture_statistics: Stats,
     },
     /// `source` is the core refusal when encoding or building the request
     /// frame is what failed.

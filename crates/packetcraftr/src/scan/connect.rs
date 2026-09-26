@@ -8,7 +8,7 @@ use crate::deadline::DeadlineExt as _;
 use crate::{
     BoundaryError,
     clock::Clock,
-    policy::{Authorizer, Operation, SocketBudget, SocketOperation},
+    policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Error, ErrorKind, Transport, enforce_deadline},
     target::{DeclaredTargets, admit_selection, approve_operation},
 };
@@ -60,7 +60,7 @@ pub struct Probe {
     pub error: Option<Arc<io::Error>>,
 }
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
@@ -77,7 +77,7 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub planned_duration: Duration,
-    pub stats: Statistics,
+    pub stats: Stats,
 }
 #[derive(Clone, Debug)]
 pub struct Endpoint {
@@ -197,18 +197,18 @@ fn execution(
 }
 
 /// The authorized connect plan: every endpoint to probe, the total attempt
-/// count, the pacing delay, and the approved socket budget. The admitted
+/// count, the pacing delay, and the approved socket limits. The admitted
 /// addresses accompany the plan in the return value for the summary.
 struct Planned {
     endpoints: Vec<SocketAddr>,
     count: usize,
     delay: Duration,
-    budget: SocketBudget,
+    limits: SocketLimits,
     planned_duration: Duration,
 }
 
 /// Validates the connect-specific request, admits the declared targets, and
-/// approves the complete socket budget before any connection is scheduled.
+/// approves the complete socket limits before any connection is scheduled.
 fn planned<A: Authorizer>(
     request: &Request,
     authorizer: &mut A,
@@ -282,12 +282,12 @@ fn planned<A: Authorizer>(
                 endpoints,
                 count,
                 delay,
-                budget: SocketBudget::new(count as u64, 0, 0),
+                limits: SocketLimits::new(count as u64, 0, 0),
                 planned_duration,
             })
         },
         |planned| {
-            SocketOperation::new(&planned.endpoints, planned.budget)
+            SocketOperation::new(&planned.endpoints, planned.limits)
                 .map(Operation::Socket)
                 .map_err(|source| execution(0, source))
         },
@@ -317,7 +317,7 @@ where
     let endpoint = planned.endpoints[next % planned.endpoints.len()];
     let attempt = (next / planned.endpoints.len()) as u32 + 1;
     let final_endpoints = [endpoint];
-    let operation = SocketOperation::new(&final_endpoints, planned.budget)
+    let operation = SocketOperation::new(&final_endpoints, planned.limits)
         .map_err(|source| execution(next as u64, source))?;
     approve_operation(
         authorizer,
@@ -411,7 +411,7 @@ where
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     enforce_deadline(WORKFLOW, &deadline)?;
     let (resolved_addresses, planned) = planned(request, authorizer, &deadline)?;
-    let mut stats = Statistics::default();
+    let mut stats = Stats::default();
     let mut rtt = super::report::RttAccumulator::default();
     let mut active: Vec<Active<P::Stream>> = Vec::new();
     let mut next = 0usize;

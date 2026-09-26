@@ -12,7 +12,6 @@ use packetcraftr::{
 };
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_netio as net;
-use packetcraftr_netio::capture::Statistics;
 
 struct FixedResolver(Vec<IpAddr>);
 
@@ -231,35 +230,33 @@ fn policy_validates_address_and_operation_bounds() {
     );
 
     defaults
-        .authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        .authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation,
             defaults.max_bytes_per_operation,
         )))
         .expect("limits are inclusive");
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation + 1,
             0
         ))),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::PacketLimit { .. }
-        ))
+        Err(policy::Error::PacketLimit { .. })
     ));
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             0,
             defaults.max_bytes_per_operation + 1
         ))),
-        Err(packetcraftr::Error::Policy(policy::Error::ByteLimit { .. }))
+        Err(policy::Error::ByteLimit { .. })
     ));
     defaults
         .authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(
+                policy::WireLimits::new(
                     defaults.max_packets_per_operation,
                     defaults.max_bytes_per_operation,
                 ),
-                policy::SocketBudget::none(),
+                policy::SocketLimits::none(),
             )
             .unwrap(),
         ))
@@ -267,26 +264,22 @@ fn policy_validates_address_and_operation_bounds() {
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(defaults.max_packets_per_operation + 1, 0),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(defaults.max_packets_per_operation + 1, 0),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficUnitLimit { .. }
-        ))
+        Err(policy::Error::TrafficUnitLimit { .. })
     ));
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(0, defaults.max_bytes_per_operation + 1),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(0, defaults.max_bytes_per_operation + 1),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficByteLimit { .. }
-        ))
+        Err(policy::Error::TrafficByteLimit { .. })
     ));
 }
 
@@ -329,7 +322,7 @@ fn exchange_options_validate_all_aggregate_bounds() {
 
     let invalid = [
         exchange::Options {
-            timeout: exchange::MAX_EXCHANGE_TIMEOUT + Duration::from_nanos(1),
+            timeout: net::capture::MAX_TIMEOUT + Duration::from_nanos(1),
             ..defaults.clone()
         },
         exchange::Options {
@@ -373,7 +366,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         packets_completed: 1,
         bytes: 10,
         elapsed: Duration::from_secs(1),
-        capture: Statistics {
+        capture: net::capture::Stats {
             received_frames: 1,
             received_bytes: 5,
             dropped_frames: 1,
@@ -400,9 +393,9 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
     assert_eq!(total, before);
 
     let overflow = Stats {
-        capture: Statistics {
+        capture: net::capture::Stats {
             receiver_dropped_frames: u64::MAX,
-            ..Statistics::default()
+            ..net::capture::Stats::default()
         },
         ..Stats::default()
     };
@@ -439,6 +432,26 @@ fn public_errors_retain_stable_policy_and_target_classification() {
             }),
             "policy.invalid_packet_semantics",
             Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UndecodableWire {
+                source: packetcraftr_core::decode::Error::LayerLimit { limit: 1 },
+            }),
+            "policy.invalid_packet_semantics",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::PermissiveLiveOptIn),
+            "policy.permissive_live_opt_in",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UnsupportedOperation {
+                authorizer: "a fixture authorizer",
+                operation: "replay",
+            }),
+            "internal.unsupported_operation",
+            Kind::Internal,
         ),
         (
             Box::new(TargetError::AddressFamilyUnavailable { family: "IPv6" }),

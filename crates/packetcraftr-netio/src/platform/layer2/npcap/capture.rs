@@ -20,7 +20,7 @@ use crate::{
     Error,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
     capture::{
         Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
@@ -340,7 +340,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
         }
     }
 
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
+    fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
         let mut statistics = PcapStatistics::default();
         // SAFETY: the SDK-sized output structure is writable and the worker
         // exclusively operates this live capture handle.
@@ -352,7 +352,7 @@ impl NativeCaptureSource for NpcapCaptureSource {
                 source: Diagnostic::new(Some(result), self.handle.error_message()).into_source(),
             });
         }
-        Ok(NativeCaptureStatistics {
+        Ok(NativeCaptureStats {
             capture_dropped_frames: statistics.dropped,
             network_dropped_frames: statistics.network_dropped,
             interface_dropped_frames: statistics.interface_dropped,

@@ -10,7 +10,7 @@ use packetcraftr_core::{decode::Dissector, registry::Registry};
 use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{OverflowPolicy, Session, Statistics},
+    capture::{self, OverflowPolicy, Session},
     transmit::Provider as PacketIo,
 };
 
@@ -241,7 +241,7 @@ impl<C: Session> Transaction<C> {
     where
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
-        let capture_statistics = self.capture.inner.statistics();
+        let capture_statistics = self.capture.inner.stats();
         capture_statistics.validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         self.publish_diagnostics(emit)
@@ -281,7 +281,7 @@ impl<C: Session> Transaction<C> {
         })
     }
 
-    fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), Error> {
+    fn apply_capture_loss_policy(&mut self, statistics: capture::Stats) -> Result<(), Error> {
         let Some(loss) = statistics.evidence_loss_error() else {
             return Ok(());
         };

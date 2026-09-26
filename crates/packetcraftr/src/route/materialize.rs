@@ -91,7 +91,7 @@ mod tests {
     use packetcraftr_core::error::Classified;
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
-    use packetcraftr_netio::capture::Statistics;
+    use packetcraftr_netio::capture::Stats;
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::Capability;
     use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
@@ -162,7 +162,7 @@ mod tests {
                 cache_hit: false,
                 captured: Vec::new(),
                 evidence_truncated: false,
-                capture_statistics: Statistics::default(),
+                capture_statistics: Stats::default(),
             })
         }
     }

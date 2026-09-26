@@ -52,7 +52,7 @@ use packetcraftr_netio::{Error as LiveIoError, capture, interface, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
-use crate::policy::{Operation, Policy, WireBudget};
+use crate::policy::{Operation, Policy, WireLimits};
 use crate::route;
 use crate::{Client, Error, SentPacket, send};
 use materialize::{
@@ -236,7 +236,8 @@ impl Materializer<'_> {
     }
 }
 
-/// The operation's packet count and cumulative exact wire bytes.
+/// The operation's running wire budget: its declared packet count and the
+/// exact wire bytes charged so far, each authorized against policy limits.
 #[derive(Debug)]
 struct Budget {
     packets: u64,
@@ -246,7 +247,7 @@ struct Budget {
 impl Budget {
     /// Authorizes the count-only budget before any provider is consulted.
     fn open(policy: &Policy, packets: u64) -> Result<Self, Error> {
-        policy.authorize(Operation::Budgeted(WireBudget::new(packets, 0)))?;
+        policy.authorize(Operation::Wire(WireLimits::new(packets, 0)))?;
         Ok(Self {
             packets,
             wire_bytes: 0,
@@ -263,10 +264,7 @@ impl Budget {
                 actual: u64::MAX,
                 limit: policy.max_bytes_per_operation,
             })?;
-        policy.authorize(Operation::Budgeted(WireBudget::new(
-            self.packets,
-            wire_bytes,
-        )))?;
+        policy.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
         self.wire_bytes = wire_bytes;
         Ok(())
     }
@@ -379,6 +377,16 @@ where
         Ok(admitted)
     }
 
+    /// Authorizes a build's declared destinations and permissive-live
+    /// approvals, then the exact bytes that would reach the wire on `plan`,
+    /// decoded with the trusted registry.
+    fn authorize_built(&self, built: &BuiltPacket, plan: &route::Plan) -> Result<(), Error> {
+        let policy = &self.client.policy;
+        policy.authorize_built_packet(built, self.options.allow_permissive_live)?;
+        crate::policy::authorize_wire(policy, plan.wire_link_type()?, &built.bytes, Some(plan))?;
+        Ok(())
+    }
+
     /// Stage 3: materializes route-dependent network fields and authorizes
     /// the preliminary build without traffic.
     fn build_and_authorize(
@@ -386,14 +394,12 @@ where
         mut packet: Packet,
         plan: route::Plan,
     ) -> Result<Admitted, Error> {
-        let policy = &self.client.policy;
         let (build_context, preliminary_build) =
             self.materializer()
                 .preliminary(&mut packet, &plan, || self.check())?;
         self.check()?;
         validate_mtu(&preliminary_build, plan.decision.mtu)?;
-        policy.authorize_built_packet(&preliminary_build, self.options.allow_permissive_live)?;
-        policy.authorize_built_wire(&preliminary_build, &plan)?;
+        self.authorize_built(&preliminary_build, &plan)?;
         Ok(Admitted {
             packet,
             plan,
@@ -412,7 +418,6 @@ where
             build_context,
             preliminary_build,
         } = admitted;
-        let policy = &self.client.policy;
         self.check()?;
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
@@ -433,8 +438,7 @@ where
                     self.check()
                 })?;
         self.check()?;
-        policy.authorize_built_packet(&built, self.options.allow_permissive_live)?;
-        policy.authorize_built_wire(&built, &route.plan)?;
+        self.authorize_built(&built, &route.plan)?;
         Ok(PreparedPacket { built, route })
     }
 }

@@ -3,8 +3,9 @@
 
 use std::time::Duration;
 
+use packetcraftr_netio::capture::MAX_TIMEOUT;
+
 use super::LiveOptions;
-use super::MAX_DURATION;
 use super::error::Error;
 
 pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Duration, Error> {
@@ -13,17 +14,17 @@ pub(super) fn worst_case_duration(live: LiveOptions, cases: usize) -> Result<Dur
         .checked_mul(u32::try_from(cases).unwrap_or(u32::MAX))
         .ok_or(Error::DurationLimit {
             actual: Duration::MAX,
-            limit: MAX_DURATION,
+            limit: MAX_TIMEOUT,
         })?;
     let delay = rate_delay(live.cases_per_second)?
         .checked_mul(u32::try_from(cases.saturating_sub(1)).unwrap_or(u32::MAX))
         .ok_or(Error::DurationLimit {
             actual: Duration::MAX,
-            limit: MAX_DURATION,
+            limit: MAX_TIMEOUT,
         })?;
     exchange.checked_add(delay).ok_or(Error::DurationLimit {
         actual: Duration::MAX,
-        limit: MAX_DURATION,
+        limit: MAX_TIMEOUT,
     })
 }
 

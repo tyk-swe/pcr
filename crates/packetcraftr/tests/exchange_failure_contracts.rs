@@ -128,8 +128,8 @@ impl capture::Session for Capture {
             Ok(())
         }
     }
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 

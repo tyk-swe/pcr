@@ -48,8 +48,8 @@ impl native::Session for Session {
         self.stopped.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    fn statistics(&self) -> native::Statistics {
-        native::Statistics {
+    fn stats(&self) -> native::Stats {
+        native::Stats {
             received_frames: 1,
             received_bytes: 4,
             ..Default::default()

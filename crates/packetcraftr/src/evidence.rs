@@ -1,14 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::{
-    build::BuiltPacket,
-    diagnostic::Diagnostic,
-    frame::{Frame, LinkType},
-};
+use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, SendEvidenceFault,
-    link::Mode as LinkMode,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
 
@@ -72,40 +67,44 @@ pub(crate) fn total_bytes_sent<'a>(sent: impl IntoIterator<Item = &'a SentPacket
     })
 }
 
+/// Why a frame could not be retained: a retention limit was reached or a
+/// counter would overflow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BudgetError {
+pub(crate) enum RetentionError {
     FrameCountOverflow,
     FrameLimit,
     ByteCountOverflow,
     ByteLimit,
 }
 
+/// The retention budget: frames and bytes of evidence kept so far, charged
+/// against a workflow's evidence limits.
 #[derive(Default)]
-pub(crate) struct Budget {
+pub(crate) struct RetentionBudget {
     retained_frames: usize,
     retained_bytes: usize,
 }
 
-impl Budget {
+impl RetentionBudget {
     pub(crate) fn reserve(
         &mut self,
         additional_bytes: usize,
         max_frames: usize,
         max_bytes: usize,
-    ) -> Result<(), BudgetError> {
+    ) -> Result<(), RetentionError> {
         let next_frames = self
             .retained_frames
             .checked_add(1)
-            .ok_or(BudgetError::FrameCountOverflow)?;
+            .ok_or(RetentionError::FrameCountOverflow)?;
         if next_frames > max_frames {
-            return Err(BudgetError::FrameLimit);
+            return Err(RetentionError::FrameLimit);
         }
         let next_bytes = self
             .retained_bytes
             .checked_add(additional_bytes)
-            .ok_or(BudgetError::ByteCountOverflow)?;
+            .ok_or(RetentionError::ByteCountOverflow)?;
         if next_bytes > max_bytes {
-            return Err(BudgetError::ByteLimit);
+            return Err(RetentionError::ByteLimit);
         }
         self.retained_frames = next_frames;
         self.retained_bytes = next_bytes;
@@ -137,11 +136,7 @@ impl SentPacket {
         report: TransmissionReport,
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
-        let link_type = match route.plan.mode {
-            LinkMode::Layer2 => route.plan.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
-        };
+        let link_type = route.plan.wire_link_type()?;
         let frame = Frame::new(
             report.timing().freshness_marker().wall_clock(),
             link_type,
@@ -263,7 +258,7 @@ mod tests {
 
     #[test]
     fn reservation_commits_both_counters_only_when_every_bound_fits() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 10,
         };
@@ -273,17 +268,17 @@ mod tests {
 
     #[test]
     fn frame_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 3,
         };
-        assert_eq!(budget.reserve(1, 1, 10), Err(BudgetError::FrameLimit));
+        assert_eq!(budget.reserve(1, 1, 10), Err(RetentionError::FrameLimit));
         assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 3));
 
         budget.retained_frames = usize::MAX;
         assert_eq!(
             budget.reserve(1, usize::MAX, 10),
-            Err(BudgetError::FrameCountOverflow)
+            Err(RetentionError::FrameCountOverflow)
         );
         assert_eq!(
             (budget.retained_frames, budget.retained_bytes),
@@ -293,17 +288,17 @@ mod tests {
 
     #[test]
     fn byte_limit_and_overflow_leave_counters_untouched() {
-        let mut budget = Budget {
+        let mut budget = RetentionBudget {
             retained_frames: 1,
             retained_bytes: 9,
         };
-        assert_eq!(budget.reserve(2, 10, 10), Err(BudgetError::ByteLimit));
+        assert_eq!(budget.reserve(2, 10, 10), Err(RetentionError::ByteLimit));
         assert_eq!((budget.retained_frames, budget.retained_bytes), (1, 9));
 
         budget.retained_bytes = usize::MAX;
         assert_eq!(
             budget.reserve(1, 10, usize::MAX),
-            Err(BudgetError::ByteCountOverflow)
+            Err(RetentionError::ByteCountOverflow)
         );
         assert_eq!(
             (budget.retained_frames, budget.retained_bytes),

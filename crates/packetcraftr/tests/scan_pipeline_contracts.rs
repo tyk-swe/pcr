@@ -176,9 +176,9 @@ impl capture::Session for Capture {
         self.state.lock().unwrap().shutdowns += 1;
         Ok(())
     }
-    fn statistics(&self) -> capture::Statistics {
+    fn stats(&self) -> capture::Stats {
         let state = self.state.lock().unwrap();
-        capture::Statistics {
+        capture::Stats {
             received_frames: state.sends as u64,
             received_bytes: state.sends as u64 * 40,
             ..Default::default()

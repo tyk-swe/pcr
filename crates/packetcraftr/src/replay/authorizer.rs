@@ -13,9 +13,8 @@ use packetcraftr_netio::link::Mode;
 use crate::BoundaryError;
 
 use crate::policy::{
-    Authorizer, Operation, PermissiveLiveDenial, WireAuthorizationError, authorize_wire,
-    authorize_wire_destinations, authorize_wire_sources, check_permissive_live,
-    unsupported_operation,
+    Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
+    authorize_wire_sources, unsupported_operation,
 };
 
 use crate::replay::wire::replay_network_envelope;
@@ -135,17 +134,19 @@ impl SystemAuthorizer {
             ));
         }
         if crate::policy::requires_live_opt_in(rebuilt) {
-            check_permissive_live(&self.policy, self.allow_malformed_live)
+            authorize_permissive_live(&self.policy, self.allow_malformed_live)
                 .map_err(permissive_live_error)?;
         }
         Ok(())
     }
 }
 
-fn wire_error(error: WireAuthorizationError) -> BoundaryError {
+/// Replay reports undecodable captured bytes as a packet failure rather than
+/// a policy refusal.
+fn wire_error(error: crate::policy::Error) -> BoundaryError {
     match error {
-        WireAuthorizationError::Decode(source) => decode_error(source),
-        WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        crate::policy::Error::UndecodableWire { source } => decode_error(source),
+        error => BoundaryError::from_error(error),
     }
 }
 
@@ -164,9 +165,9 @@ fn decode_error(source: decode::Error) -> BoundaryError {
 
 /// Replay's denial names captured bytes rather than a built packet, and the
 /// flag that unblocks them.
-fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
-    match denial {
-        PermissiveLiveDenial::OperationOptIn => BoundaryError::new(
+fn permissive_live_error(error: crate::policy::Error) -> BoundaryError {
+    match error {
+        crate::policy::Error::PermissiveLiveOptIn => BoundaryError::new(
             "permissive or malformed captured bytes require --allow-malformed-live",
             Classification::new(
                 "policy.permissive_live_opt_in",
@@ -175,9 +176,7 @@ fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
             ),
             Vec::new(),
         ),
-        PermissiveLiveDenial::PolicyApproval => {
-            BoundaryError::from_error(crate::policy::Error::PermissivePacket)
-        }
+        error => BoundaryError::from_error(error),
     }
 }
 
@@ -220,19 +219,18 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
 }
 
 impl Authorizer for SystemAuthorizer {
-    /// Budgets are checked before the frame is decoded or rebuilt, so a
+    /// Limits are checked before the frame is decoded or rebuilt, so a
     /// request that exceeds policy never reaches the expensive round trip.
     /// Shapes without an exact frame are rejected: replay cannot be
-    /// authorized from a budget or a declared packet list.
+    /// authorized from limits alone or a declared packet list.
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        let budget = operation.budget();
         self.policy
-            .authorize(crate::policy::Operation::Budgeted(budget))
+            .authorize(crate::policy::Operation::Wire(operation.limits()))
             .map_err(BoundaryError::from_error)?;
         match operation {
             Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
             Operation::Socket(_)
-            | Operation::Budgeted(_)
+            | Operation::Wire(_)
             | Operation::Dns(_)
             | Operation::Declared(_) => Err(unsupported_operation(
                 "the replay system authorizer",
@@ -291,7 +289,7 @@ mod tests {
     use crate::route::Plan;
 
     use super::*;
-    use crate::policy::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};
+    use crate::policy::{DeclaredPackets, PermissiveLive, ReplayFrame, WireLimits};
 
     fn registry() -> Arc<Registry> {
         packetcraftr_core::protocol::builtin::registry()
@@ -688,7 +686,7 @@ mod tests {
 
         let packet_error = authorizer
             .authorize_operation(Operation::Replay(ReplayFrame::new(
-                WireBudget::new(2, 1),
+                WireLimits::new(2, 1),
                 &invalid_frame,
                 Mode::Layer2,
             )))
@@ -697,7 +695,7 @@ mod tests {
 
         let byte_error = authorizer
             .authorize_operation(Operation::Replay(ReplayFrame::new(
-                WireBudget::new(1, 3),
+                WireLimits::new(1, 3),
                 &invalid_frame,
                 Mode::Layer2,
             )))
@@ -808,7 +806,7 @@ mod tests {
             SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
 
         let error = authorizer
-            .authorize_operation(Operation::Budgeted(WireBudget::new(1, 1)))
+            .authorize_operation(Operation::Wire(WireLimits::new(1, 1)))
             .expect_err("a frameless replay operation cannot be authorized");
 
         assert_eq!(error.classification().kind, Kind::Internal);
@@ -819,7 +817,7 @@ mod tests {
 
         let declared = authorizer
             .authorize_operation(Operation::Declared(DeclaredPackets::new(
-                WireBudget::new(1, 1),
+                WireLimits::new(1, 1),
                 &[],
                 None,
                 PermissiveLive::NotRequired,

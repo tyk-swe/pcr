@@ -8,7 +8,7 @@
 
 use super::{
     Captured, Limits, Metadata, NativeSettings, Provider, Realized, RealizedSettings, Request,
-    Session, Statistics,
+    Session, Stats,
 };
 use crate::{Error, interface::Id};
 use packetcraftr_core::{budget::Deadline, frame::LinkType};
@@ -106,7 +106,7 @@ pub enum Phase {
     Ready,
     Receive,
     Shutdown,
-    Statistics,
+    Stats,
 }
 
 impl fmt::Display for Phase {
@@ -116,7 +116,7 @@ impl fmt::Display for Phase {
             Self::Ready => "readiness",
             Self::Receive => "receive",
             Self::Shutdown => "shutdown",
-            Self::Statistics => "statistics",
+            Self::Stats => "statistics",
         })
     }
 }
@@ -131,7 +131,7 @@ pub struct Source {
     pub ready: bool,
     pub shutdown_confirmed: bool,
     pub statistics_valid: bool,
-    pub statistics: Statistics,
+    pub statistics: Stats,
     pub delivered_frames: u64,
     pub delivered_bytes: u64,
 }
@@ -287,7 +287,7 @@ impl<C: Session> Group<C> {
                     ready: false,
                     shutdown_confirmed: false,
                     statistics_valid: false,
-                    statistics: Statistics::default(),
+                    statistics: Stats::default(),
                     delivered_frames: 0,
                     delivered_bytes: 0,
                 },
@@ -316,7 +316,7 @@ impl<C: Session> Group<C> {
             .map(|owned| {
                 let mut source = owned.source.clone();
                 if !owned.shutdown_attempted {
-                    source.statistics = owned.capture.statistics();
+                    source.statistics = owned.capture.stats();
                     source.statistics_valid = source.statistics.validate().is_ok();
                 }
                 source
@@ -406,10 +406,10 @@ impl<C: Session> Group<C> {
                 Ok(()) => owned.source.shutdown_confirmed = true,
                 Err(source) => self.cleanup.push(failure(Phase::Shutdown, source)),
             }
-            owned.source.statistics = owned.capture.statistics();
+            owned.source.statistics = owned.capture.stats();
             match owned.source.statistics.validate() {
                 Ok(()) => owned.source.statistics_valid = true,
-                Err(source) => self.cleanup.push(failure(Phase::Statistics, source)),
+                Err(source) => self.cleanup.push(failure(Phase::Stats, source)),
             }
         }
     }
@@ -544,12 +544,12 @@ impl<C: Session> Session for Group<C> {
     }
 
     /// Sums every source's counters, saturating each one.
-    fn statistics(&self) -> Statistics {
+    fn stats(&self) -> Stats {
         self.snapshot()
             .iter()
-            .fold(Statistics::default(), |total, source| {
+            .fold(Stats::default(), |total, source| {
                 let value = source.statistics;
-                Statistics {
+                Stats {
                     received_frames: total.received_frames.saturating_add(value.received_frames),
                     received_bytes: total.received_bytes.saturating_add(value.received_bytes),
                     dropped_frames: total.dropped_frames.saturating_add(value.dropped_frames),

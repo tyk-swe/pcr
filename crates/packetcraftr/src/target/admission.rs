@@ -228,9 +228,9 @@ mod tests {
 
     use super::{DeclaredTargets, admit_operation, admit_selection, require_family};
     use crate::BoundaryError;
-    use crate::policy::{Authorizer, Operation, SocketBudget, SocketOperation};
+    use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
     use crate::target::{
-        Authorized, Family, GateErrors, Selection, SelectionError, Target, budgeted,
+        Authorized, Family, GateErrors, Selection, SelectionError, Target, wire_limits,
     };
 
     /// One authorizer boundary call, in order.
@@ -358,7 +358,7 @@ mod tests {
             &target(),
             Family::Any,
             |selected| Ok(u64::try_from(selected.addresses.len()).unwrap_or(u64::MAX)),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect("admission succeeds");
         assert_eq!(selected.declared, "192.0.2.1");
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(probes, 1);
         assert_eq!(
             authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("budgeted")]
+            [Call::Resolve(target()), Call::Approve("wire")]
         );
     }
 
@@ -387,7 +387,7 @@ mod tests {
             &target(),
             Family::Any,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("target denial must stop admission");
         assert_eq!(error, StubError::Authorization);
@@ -413,7 +413,7 @@ mod tests {
                 planned.set(true);
                 Ok(1_u64)
             },
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("an answer set with no IPv4 address must be gated");
         assert_eq!(error, StubError::Family("IPv4"));
@@ -432,7 +432,7 @@ mod tests {
             &target(),
             Family::Any,
             |_| Err(StubError::Plan),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("a failed plan must stop admission");
         assert_eq!(error, StubError::Plan);
@@ -476,7 +476,7 @@ mod tests {
                 )])
             },
             |endpoints| {
-                SocketOperation::new(endpoints, SocketBudget::new(1, 0, 0))
+                SocketOperation::new(endpoints, SocketLimits::new(1, 0, 0))
                     .map(Operation::Socket)
                     .map_err(|_| StubError::Operation)
             },
@@ -507,7 +507,7 @@ mod tests {
                 &hostname(),
                 Family::Ipv4,
                 |_| Ok(1_u64),
-                |probes| Ok(budgeted(*probes, 0)),
+                |probes| Ok(wire_limits(*probes, 0)),
             )
             .expect_err("the family gate must fail");
             assert_eq!(error.workflow, workflow);
@@ -532,7 +532,7 @@ mod tests {
             &target(),
             Family::Any,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("a spent deadline must stop admission");
         assert_eq!(error, StubError::DurationLimit);
@@ -561,13 +561,13 @@ mod tests {
             &target(),
             Family::Any,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("the spent deadline must be reported");
         assert_eq!(error, StubError::DurationLimit);
         assert_eq!(
             authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("budgeted")]
+            [Call::Resolve(target()), Call::Approve("wire")]
         );
     }
 
@@ -591,13 +591,13 @@ mod tests {
             &target(),
             Family::Any,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect("elapsed-time gates do not observe cancellation");
         assert_eq!(selected.addresses.len(), 1);
         assert_eq!(
             authorizer.calls,
-            [Call::Resolve(target()), Call::Approve("budgeted")]
+            [Call::Resolve(target()), Call::Approve("wire")]
         );
         assert!(matches!(deadline.enforce(), Err(Interrupted::Cancelled(_))));
     }
@@ -631,7 +631,7 @@ mod tests {
             },
             selection_error,
             |selected| Ok(u64::try_from(selected.addresses.len()).unwrap_or(u64::MAX)),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect("admission succeeds");
         assert_eq!(probes, 2);
@@ -651,7 +651,7 @@ mod tests {
             [
                 Call::Resolve(Target::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)))),
                 Call::Resolve(hostname()),
-                Call::Approve("budgeted"),
+                Call::Approve("wire"),
             ]
         );
     }
@@ -682,7 +682,7 @@ mod tests {
             },
             selection_error,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("the address cap must stop admission");
         assert_eq!(error, StubError::Selection("max_targets"));
@@ -708,7 +708,7 @@ mod tests {
             },
             selection_error,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("an oversized network must fail before authorization");
         assert_eq!(error, StubError::Selection("target_candidates"));
@@ -742,7 +742,7 @@ mod tests {
             },
             selection_error,
             |_| Ok(1_u64),
-            |probes| Ok(budgeted(*probes, 0)),
+            |probes| Ok(wire_limits(*probes, 0)),
         )
         .expect_err("cancellation inside resolution must stop admission");
         assert_eq!(error, StubError::Interrupted);

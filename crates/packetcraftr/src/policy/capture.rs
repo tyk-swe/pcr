@@ -103,13 +103,13 @@ mod tests {
         assert_eq!(budget.frames(), 2);
         assert_eq!(budget.bytes(), 20);
 
-        assert_eq!(
+        assert!(matches!(
             budget.account(10),
             Err(Error::PacketLimit {
                 actual: 3,
                 limit: 2
             })
-        );
+        ));
         assert_eq!(budget.frames(), 2);
         assert_eq!(budget.bytes(), 20);
     }
@@ -119,13 +119,13 @@ mod tests {
         let mut budget = CaptureBudget::new(&policy(10, 64));
         budget.account(60).expect("first frame fits");
 
-        assert_eq!(
+        assert!(matches!(
             budget.account(5),
             Err(Error::ByteLimit {
                 actual: 65,
                 limit: 64
             })
-        );
+        ));
         assert_eq!(budget.frames(), 1);
         assert_eq!(budget.bytes(), 60);
     }
@@ -135,13 +135,13 @@ mod tests {
         let mut budget = CaptureBudget::new(&policy(u64::MAX, u64::MAX));
         budget.account(u64::MAX).expect("first frame fits exactly");
 
-        assert_eq!(
+        assert!(matches!(
             budget.account(1),
             Err(Error::ByteLimit {
                 actual: u64::MAX,
                 limit: u64::MAX
             })
-        );
+        ));
         assert_eq!(budget.bytes(), u64::MAX);
     }
 
@@ -154,13 +154,13 @@ mod tests {
             bytes: 0,
         };
 
-        assert_eq!(
+        assert!(matches!(
             budget.account(0),
             Err(Error::PacketLimit {
                 actual: u64::MAX,
                 limit: u64::MAX
             })
-        );
+        ));
         assert_eq!(budget.frames(), u64::MAX);
     }
 
@@ -169,13 +169,13 @@ mod tests {
         let mut budget = CaptureBudget::new(&policy(0, 0));
         assert!(budget.is_exhausted());
 
-        assert_eq!(
+        assert!(matches!(
             budget.account(0),
             Err(Error::PacketLimit {
                 actual: 1,
                 limit: 0
             })
-        );
+        ));
         assert_eq!(budget.frames(), 0);
         assert_eq!(budget.bytes(), 0);
     }
@@ -189,12 +189,12 @@ mod tests {
         assert!(budget.is_exhausted());
         assert_eq!(budget.frames(), 1);
         assert_eq!(budget.bytes(), 1);
-        assert_eq!(
+        assert!(matches!(
             budget.account(1),
             Err(Error::PacketLimit {
                 actual: 2,
                 limit: 1
             })
-        );
+        ));
     }
 }

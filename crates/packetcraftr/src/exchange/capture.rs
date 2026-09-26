@@ -218,7 +218,7 @@ mod tests {
     use packetcraftr_core::layer::Raw;
     use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
     use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
-    use packetcraftr_netio::capture::{Captured, Metadata, Statistics};
+    use packetcraftr_netio::capture::{Captured, Metadata, Stats};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::transmit::{Outbound, Report};
 
@@ -272,8 +272,8 @@ mod tests {
             Ok(())
         }
 
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
+        fn stats(&self) -> Stats {
+            Stats::default()
         }
     }
 

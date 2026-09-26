@@ -27,7 +27,7 @@ struct Script {
     frames: VecDeque<capture::Captured>,
     ready_error: bool,
     shutdown_error: bool,
-    statistics: capture::Statistics,
+    statistics: capture::Stats,
     cancel_on_ready: Option<Cancellation>,
 }
 struct Session {
@@ -68,7 +68,7 @@ impl capture::Session for Session {
             Ok(())
         }
     }
-    fn statistics(&self) -> capture::Statistics {
+    fn stats(&self) -> capture::Stats {
         self.script.statistics
     }
 }
@@ -189,7 +189,7 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
         },
         Script {
             frames: frames(1),
-            statistics: capture::Statistics {
+            statistics: capture::Stats {
                 dropped_frames: 2,
                 dropped_bytes: 2,
                 overflow_events: 1,
@@ -242,7 +242,7 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
     let sources = group.snapshot();
     assert_eq!(sources[0].delivered_frames, 2);
     assert_eq!(sources[1].statistics.dropped_frames, 2);
-    assert_eq!(group.statistics().dropped_frames, 2);
+    assert_eq!(group.stats().dropped_frames, 2);
     assert!(
         sources
             .iter()
@@ -260,7 +260,7 @@ fn queue_budgets_are_shared_and_busy_sources_do_not_starve_quiet_sources() {
 fn partial_arm_and_readiness_failures_clean_every_admitted_session_once() {
     let mut provider = Provider::new(vec![
         Script {
-            statistics: capture::Statistics {
+            statistics: capture::Stats {
                 received_frames: 1,
                 received_bytes: 4,
                 ..Default::default()

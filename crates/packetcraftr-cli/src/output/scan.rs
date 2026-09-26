@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use super::capture::Statistics as CaptureStatistics;
+use super::capture::Stats as CaptureStats;
 use super::contract::Error;
 use super::envelope::{Published, Stats};
 use super::frame::{Captured, Timestamp};
@@ -403,7 +403,7 @@ pub struct CaptureSource {
     pub ready: bool,
     pub shutdown_confirmed: bool,
     pub statistics_valid: bool,
-    pub statistics: CaptureStatistics,
+    pub statistics: CaptureStats,
 }
 
 /// Pipeline failure report: partial statistics and every incomplete probe.

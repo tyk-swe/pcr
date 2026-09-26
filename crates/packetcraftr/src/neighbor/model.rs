@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use packetcraftr_core::frame::{Frame, LinkType};
 
 use packetcraftr_core::packet::{MacAddress, VlanTag};
-use packetcraftr_netio::{capture::Statistics, interface::Id};
+use packetcraftr_netio::{capture::Stats, interface::Id};
 
 /// Interface-owned context for one active ARP/NDP lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,5 +28,5 @@ pub struct Resolution {
     pub cache_hit: bool,
     pub captured: Vec<Frame>,
     pub evidence_truncated: bool,
-    pub capture_statistics: Statistics,
+    pub capture_statistics: Stats,
 }

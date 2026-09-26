@@ -12,7 +12,11 @@
 //! [`neighbor`] resolves an admitted route's next hop over the client's own
 //! transmit and capture providers.
 //! Live entry points such as [`scan`], [`dns`], and [`send`] require a
-//! [`policy::Policy`] and finite resource budgets.
+//! [`policy::Policy`] and finite resource limits.
+//!
+//! Every workflow duration and timeout is at most
+//! [`packetcraftr_netio::capture::MAX_TIMEOUT`], the longest a capture stays
+//! armed for one wait, so no workflow has a ceiling of its own.
 //!
 //! ```rust
 //! use packetcraftr_core::{build, codec, layer::Raw, packet::Packet, protocol};

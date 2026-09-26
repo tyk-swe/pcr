@@ -20,7 +20,7 @@ use crate::{
     Error, NativeCapability, Unsupported,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+        NativeCaptureStats, NativeCapturedPacket, monotonic_packet_time, system_time,
     },
     capture::{
         Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
@@ -344,10 +344,10 @@ impl NativeCaptureSource for PcapCaptureSource {
         }
     }
 
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
+    fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
         self.capture
             .stats()
-            .map(|statistics| NativeCaptureStatistics {
+            .map(|statistics| NativeCaptureStats {
                 capture_dropped_frames: statistics.dropped,
                 network_dropped_frames: 0,
                 interface_dropped_frames: statistics.if_dropped,

@@ -12,8 +12,6 @@
 //! socket bytes are never represented as captured [`Frame`](packetcraftr_core::frame::Frame)
 //! evidence.
 
-use std::time::Duration;
-
 use crate::probe::evidence::EvidenceDiagnosticDescriptor;
 
 pub const HEADER_BYTES: usize = 12;
@@ -30,7 +28,6 @@ pub const MAX_MESSAGE_BYTES: usize = u16::MAX as usize;
 pub const MAX_RECORDS: usize = 4_096;
 pub const MAX_NAME_POINTERS: usize = 128;
 pub const MAX_RATE: u32 = 1_000_000;
-pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
     EvidenceDiagnosticDescriptor::new("dns.evidence_limit", "dns.undecoded_limit", "DNS");

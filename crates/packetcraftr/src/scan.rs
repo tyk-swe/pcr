@@ -4,8 +4,6 @@
 //! Policy-gated scanning of authorized targets with finite packet, byte,
 //! duration, and evidence budgets.
 
-use std::time::Duration;
-
 use crate::probe::Workflow;
 
 pub const DEFAULT_ATTEMPTS: u32 = 1;
@@ -14,7 +12,6 @@ pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_ATTEMPTS: u32 = 32;
 pub const MAX_PROBES: usize = 100_000;
 pub const MAX_RATE: u32 = 1_000_000;
-pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 /// Maximum UDP payload accepted for either IP family, before final MTU checks.
 pub const MAX_UDP_PAYLOAD_BYTES: usize = 65_507;
 

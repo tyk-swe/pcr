@@ -110,7 +110,7 @@ where
                 cache_hit: true,
                 captured: Vec::new(),
                 evidence_truncated: false,
-                capture_statistics: capture::Statistics::default(),
+                capture_statistics: capture::Stats::default(),
             });
         }
 
@@ -140,7 +140,7 @@ where
         );
         let cleanup = capture.shutdown();
         // A successful shutdown makes these final discovery-session statistics.
-        let statistics = capture.statistics();
+        let statistics = capture.stats();
         let outcome = match (primary, cleanup) {
             (Ok(outcome), Ok(())) => outcome,
             (Err(error), Ok(())) => return Err(error),

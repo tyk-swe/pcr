@@ -65,7 +65,7 @@ mod tests {
 
     use packetcraftr_core::budget::Deadline;
     use packetcraftr_core::frame::LinkType;
-    use packetcraftr_netio::capture::{Captured, Metadata, Statistics};
+    use packetcraftr_netio::capture::{Captured, Metadata, Stats};
     use packetcraftr_netio::interface::Id as InterfaceId;
 
     use super::*;
@@ -129,8 +129,8 @@ mod tests {
             }
         }
 
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
+        fn stats(&self) -> Stats {
+            Stats::default()
         }
     }
 

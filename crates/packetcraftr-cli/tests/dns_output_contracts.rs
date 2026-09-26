@@ -204,10 +204,10 @@ fn stats() -> Stats {
         packets_completed: 1,
         bytes: 128,
         elapsed: Duration::from_millis(25),
-        capture: packetcraftr_netio::capture::Statistics {
+        capture: packetcraftr_netio::capture::Stats {
             received_frames: 2,
             received_bytes: 256,
-            ..packetcraftr_netio::capture::Statistics::default()
+            ..packetcraftr_netio::capture::Stats::default()
         },
     }
 }

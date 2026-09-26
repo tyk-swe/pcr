@@ -9,18 +9,13 @@ use packetcraftr_core::capture_file::{
 };
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
 use packetcraftr_netio::{
-    Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
-    transmit::Report as IoSendReport,
+    Error as LiveIoError, capture::MAX_TIMEOUT, interface::Id as InterfaceId,
+    link::Mode as LinkMode, transmit::Report as IoSendReport,
 };
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
 use crate::route::Materialized as MaterializedRoute;
-
-/// Ceiling for [`Limits::max_duration`], which bounds one replay operation as
-/// a deadline on elapsed time from its start. The intentional delays it
-/// schedules must also fit within that limit.
-pub const MAX_REPLAY_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -146,6 +141,8 @@ pub struct Limits {
     pub max_source_frames: u64,
     pub max_transmitted_bytes: u64,
     pub max_frame_bytes: usize,
+    /// Deadline on elapsed time from the replay's start, at most
+    /// [`MAX_TIMEOUT`]. The intentional delays it schedules must also fit.
     pub max_duration: Duration,
 }
 
@@ -155,7 +152,7 @@ impl Default for Limits {
             max_source_frames: DEFAULT_STREAM_FRAMES,
             max_transmitted_bytes: DEFAULT_STREAM_BYTES,
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
-            max_duration: MAX_REPLAY_DURATION,
+            max_duration: MAX_TIMEOUT,
         }
     }
 }
@@ -201,10 +198,10 @@ impl Limits {
                 reason: "cannot exceed max_transmitted_bytes",
             });
         }
-        if self.max_duration.is_zero() || self.max_duration > MAX_REPLAY_DURATION {
+        if self.max_duration.is_zero() || self.max_duration > MAX_TIMEOUT {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_REPLAY_DURATION,
+                maximum: MAX_TIMEOUT,
             });
         }
         Ok(())

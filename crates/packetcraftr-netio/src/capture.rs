@@ -58,7 +58,7 @@ pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub received_frames: u64,
     pub received_bytes: u64,
     pub dropped_frames: u64,
@@ -68,7 +68,7 @@ pub struct Statistics {
     pub receiver_dropped_frames: u64,
 }
 
-impl Statistics {
+impl Stats {
     /// Returns the fieldwise sum, or `None` if any counter would overflow.
     pub fn checked_add(self, value: Self) -> Option<Self> {
         Some(Self {
@@ -124,7 +124,7 @@ impl Statistics {
 
 /// Owned capture session: arm through [`Provider`] (or compose a [`Group`]),
 /// pass [`Session::wait_ready`] before transmission, read records, then call
-/// [`Session::shutdown`] to join every backend. Statistics are final only
+/// [`Session::shutdown`] to join every backend. Stats are final only
 /// after successful shutdown.
 ///
 /// A session reads [`Session::source_count`] sources, numbered from zero; a
@@ -155,13 +155,13 @@ pub trait Session: Send {
     /// delivered during this wait, not that none was captured or that the
     /// session ended. A spent deadline waits for nothing: it delivers a record
     /// that is already queued, or `Ok(None)`. Only [`Session::shutdown`] ends
-    /// the session; [`Session::statistics`] reports loss.
+    /// the session; [`Session::stats`] reports loss.
     fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
     /// Returns cumulative counters, including undelivered queue loss, summed
     /// over every source.
-    fn statistics(&self) -> Statistics;
+    fn stats(&self) -> Stats;
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
@@ -189,8 +189,8 @@ impl<T: Session + ?Sized> Session for Box<T> {
         (**self).shutdown()
     }
 
-    fn statistics(&self) -> Statistics {
-        (**self).statistics()
+    fn stats(&self) -> Stats {
+        (**self).stats()
     }
 }
 

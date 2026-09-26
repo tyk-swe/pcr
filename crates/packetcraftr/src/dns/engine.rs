@@ -16,7 +16,7 @@ use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
 use crate::execution::Context;
 use crate::policy::Authorizer;
-use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};
+use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
 use crate::probe::Executor;
 use crate::probe::evidence::{EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector};
 use crate::probe::runner::sink_observer;
@@ -29,7 +29,7 @@ use super::classification::{
 };
 use super::error::Error;
 use super::evidence::validate_dns_execution;
-use super::plan::{OperationBudget, operation_budget};
+use super::plan::{OperationLimits, operation_limits};
 use super::probe::rotated_source_port;
 use super::report::Collector;
 use super::{
@@ -143,11 +143,11 @@ where
     deadline.check_cancelled()?;
     let mut prepared = PreparedOperation::new(request)?;
     // `Operation::Dns` is deliberately approved before any server resolution:
-    // destination authorization follows budget approval for this shape, so
+    // destination authorization follows limits approval for this shape, so
     // admission cannot route through `admit_operation`'s resolve-first order.
     approve_operation(
         authorizer,
-        AuthorizedOperation::Dns(prepared.budget),
+        AuthorizedOperation::Dns(prepared.limits),
         deadline,
         &Gates,
     )?;
@@ -161,7 +161,7 @@ pub(super) struct PreparedOperation<'a> {
     request: &'a Request,
     query: Bytes,
     pub(super) delay: Duration,
-    pub(super) budget: DnsOperation,
+    pub(super) limits: DnsOperation,
     pub(super) summary: Summary,
 }
 
@@ -176,18 +176,18 @@ impl<'a> PreparedOperation<'a> {
             request.edns,
         )
         .map_err(Error::Query)?;
-        let budget = operation_budget(request, query.len())?;
-        let OperationBudget {
+        let limits = operation_limits(request, query.len())?;
+        let OperationLimits {
             packet_count,
             maximum_wire_bytes,
             tcp,
             delay,
-        } = budget;
+        } = limits;
         Ok(Self {
             request,
             query,
             delay,
-            budget: DnsOperation::new(WireBudget::new(packet_count, maximum_wire_bytes), tcp)?,
+            limits: DnsOperation::new(WireLimits::new(packet_count, maximum_wire_bytes), tcp)?,
             summary: Summary {
                 server: request.server.to_string(),
                 server_port: request.server_port,

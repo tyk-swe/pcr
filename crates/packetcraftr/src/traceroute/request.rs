@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
 use crate::probe::evidence::EvidenceLimits;
 use crate::probe::limits::{CaptureEvidenceLimits, check_limits, duration_violation};
@@ -13,9 +13,7 @@ use crate::target::Target;
 
 use crate::probe::{Error, ErrorKind, Transport};
 use crate::traceroute::WORKFLOW;
-use crate::traceroute::{
-    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DURATION, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE,
-};
+use crate::traceroute::{DEFAULT_MAX_UNDECODED_FRAMES, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -30,7 +28,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_probes: packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS,
-            max_duration: MAX_DURATION,
+            max_duration: MAX_TIMEOUT,
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
             max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
@@ -79,12 +77,12 @@ impl Limits {
                 },
             )
         })?;
-        if duration_violation(self.max_duration, MAX_DURATION) {
+        if duration_violation(self.max_duration, MAX_TIMEOUT) {
             return Err(Error::new(
                 WORKFLOW,
                 ErrorKind::InvalidDuration {
                     value: self.max_duration,
-                    maximum: MAX_DURATION,
+                    maximum: MAX_TIMEOUT,
                 },
             ));
         }
@@ -159,12 +157,12 @@ impl Request {
                 },
             ));
         }
-        if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
             return Err(Error::new(
                 WORKFLOW,
                 ErrorKind::InvalidTimeout {
                     value: self.timeout,
-                    maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+                    maximum: MAX_TIMEOUT,
                 },
             ));
         }

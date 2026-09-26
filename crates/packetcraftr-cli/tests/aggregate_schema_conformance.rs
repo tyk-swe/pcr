@@ -47,7 +47,7 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
-use packetcraftr_netio::capture::Statistics as CaptureStatistics;
+use packetcraftr_netio::capture::Stats as CaptureStats;
 use packetcraftr_netio::interface::Address;
 use packetcraftr_netio::interface::Flags;
 use packetcraftr_netio::interface::Id as InterfaceId;
@@ -228,8 +228,8 @@ fn decoded_frame() -> decode::DecodedPacket {
         .expect("representative frame dissects")
 }
 
-fn capture_statistics() -> CaptureStatistics {
-    CaptureStatistics {
+fn capture_statistics() -> CaptureStats {
+    CaptureStats {
         received_frames: 4,
         received_bytes: 512,
         dropped_frames: 1,
@@ -1897,7 +1897,7 @@ fn capture_case() -> Value {
                 ready: true,
                 shutdown_confirmed: true,
                 statistics_valid: true,
-                statistics: CaptureStatistics::default(),
+                statistics: CaptureStats::default(),
                 delivered_frames: 0,
                 delivered_bytes: 0,
             },

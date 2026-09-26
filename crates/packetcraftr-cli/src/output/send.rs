@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::output::capture::Statistics as CaptureStats;
+use crate::output::capture::Stats as CaptureStats;
 use crate::output::contract::Error;
 use crate::output::envelope::Published;
 use crate::output::frame::Captured;

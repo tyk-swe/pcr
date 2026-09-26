@@ -472,7 +472,7 @@ mod tests {
         frame::{Frame, LinkType},
     };
     use packetcraftr_netio::{
-        capture::{Limits, Metadata, Statistics},
+        capture::{Limits, Metadata, Stats},
         interface::Id,
     };
     use std::time::UNIX_EPOCH;
@@ -496,7 +496,7 @@ mod tests {
             ready: true,
             shutdown_confirmed: false,
             statistics_valid: true,
-            statistics: Statistics::default(),
+            statistics: Stats::default(),
             delivered_frames: 0,
             delivered_bytes: 0,
         }]

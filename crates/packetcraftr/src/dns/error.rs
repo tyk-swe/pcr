@@ -73,7 +73,7 @@ pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     #[error(transparent)]
-    BudgetOverflow(#[from] crate::policy::BudgetOverflow),
+    LimitOverflow(#[from] crate::policy::LimitOverflow),
     #[error(transparent)]
     IncoherentReport(#[from] super::EvidenceError),
     #[error("invalid DNS limit {field}={value}: {reason}")]
@@ -178,7 +178,7 @@ impl Classified for Error {
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
-            Self::BudgetOverflow(_)
+            Self::LimitOverflow(_)
             | Self::IncoherentReport(_)
             | Self::InvalidEvidence { .. }
             | Self::StatisticsOverflow { .. } => Classification::new(

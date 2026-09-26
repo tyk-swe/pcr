@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
-use packetcraftr_netio::capture::Statistics as CaptureStatistics;
+use packetcraftr_netio::capture::Stats as CaptureStats;
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -78,7 +78,7 @@ pub struct Stats {
     pub packets_completed: u64,
     pub bytes: u64,
     pub elapsed: Duration,
-    pub capture: CaptureStatistics,
+    pub capture: CaptureStats,
 }
 
 /// One completed live campaign. Diagnostics are carried by the case they were

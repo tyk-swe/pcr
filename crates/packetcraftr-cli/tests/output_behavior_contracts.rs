@@ -90,7 +90,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
         packets_completed: 2,
         bytes: 99,
         elapsed: Duration::from_millis(125),
-        capture: packetcraftr_netio::capture::Statistics {
+        capture: packetcraftr_netio::capture::Stats {
             received_frames: 4,
             received_bytes: 120,
             dropped_frames: 1,

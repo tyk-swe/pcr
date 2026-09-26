@@ -508,8 +508,8 @@ fn malformed_dns_response() -> Bytes {
 struct RecordingAuthorizer {
     address: IpAddr,
     targets: Vec<Target>,
-    budgets: Vec<crate::policy::WireBudget>,
-    socket_budgets: Vec<crate::policy::SocketBudget>,
+    limits: Vec<crate::policy::WireLimits>,
+    socket_limits: Vec<crate::policy::SocketLimits>,
     deny_numeric: bool,
 }
 
@@ -518,8 +518,8 @@ impl RecordingAuthorizer {
         Self {
             address,
             targets: Vec::new(),
-            budgets: Vec::new(),
-            socket_budgets: Vec::new(),
+            limits: Vec::new(),
+            socket_limits: Vec::new(),
             deny_numeric: false,
         }
     }
@@ -543,13 +543,13 @@ impl Authorizer for RecordingAuthorizer {
 
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         match operation {
-            Operation::Budgeted(budget) => self.budgets.push(budget),
+            Operation::Wire(limits) => self.limits.push(limits),
             Operation::Dns(dns) => {
-                self.budgets.push(dns.budget());
-                self.socket_budgets.push(dns.tcp());
+                self.limits.push(dns.limits());
+                self.socket_limits.push(dns.tcp());
             }
             Operation::Socket(_) | Operation::Declared(_) | Operation::Replay(_) => {
-                panic!("DNS must submit a DNS or budgeted operation")
+                panic!("DNS must submit a DNS or wire-limits operation")
             }
         }
         Ok(())
@@ -1001,10 +1001,10 @@ fn truncated_udp_falls_back_once_and_accepts_tcp_without_a_captured_frame() {
     assert_eq!(authorizer.targets.len(), 2);
     assert!(matches!(authorizer.targets[0], Target::Hostname(_)));
     assert_eq!(authorizer.targets[1], Target::Address(address));
-    assert_eq!(authorizer.budgets.len(), 1);
-    assert_eq!(authorizer.budgets[0].packets(), 3);
-    assert_eq!(authorizer.socket_budgets[0].connections(), 1);
-    assert_eq!(authorizer.socket_budgets[0].messages(), 1);
+    assert_eq!(authorizer.limits.len(), 1);
+    assert_eq!(authorizer.limits[0].packets(), 3);
+    assert_eq!(authorizer.socket_limits[0].connections(), 1);
+    assert_eq!(authorizer.socket_limits[0].messages(), 1);
 }
 
 #[test]
@@ -1035,7 +1035,7 @@ fn udp_only_mode_keeps_truncation_terminal_and_reserves_no_tcp_phase() {
         Some(super::Transport::Udp)
     );
     assert!(result.response().unwrap().metadata.truncated);
-    assert_eq!(authorizer.budgets[0].packets(), 1);
+    assert_eq!(authorizer.limits[0].packets(), 1);
 }
 
 #[test]
@@ -1098,10 +1098,10 @@ fn direct_tcp_retries_validate_responses_and_charge_only_socket_traffic() {
     assert_eq!(report.summary().stats.packets_completed, 0);
     let query_bytes = u64::try_from(executor.tcp_queries[0].len() + 2).unwrap();
     assert_eq!(report.summary().stats.bytes, query_bytes * 3);
-    assert_eq!(authorizer.budgets[0].packets(), 6);
-    assert_eq!(authorizer.budgets[0].wire_bytes(), query_bytes * 3);
-    assert_eq!(authorizer.socket_budgets[0].connections(), 3);
-    assert_eq!(authorizer.socket_budgets[0].messages(), 3);
+    assert_eq!(authorizer.limits[0].packets(), 6);
+    assert_eq!(authorizer.limits[0].wire_bytes(), query_bytes * 3);
+    assert_eq!(authorizer.socket_limits[0].connections(), 3);
+    assert_eq!(authorizer.socket_limits[0].messages(), 3);
     assert_eq!(authorizer.targets.len(), 6);
     assert!(
         executor
@@ -1422,7 +1422,7 @@ fn tcp_failure_retries_once_per_attempt_and_preserves_final_precedence() {
     );
     assert_eq!(result.summary().stats.packets_attempted, 2);
     assert_eq!(result.summary().stats.packets_completed, 2);
-    assert_eq!(authorizer.budgets[0].packets(), 6);
+    assert_eq!(authorizer.limits[0].packets(), 6);
 }
 
 #[test]
@@ -1787,7 +1787,7 @@ fn edns_validation_precedes_authorization_and_execution() {
             std::error::Error::source(&error).is_some(),
             "query construction failures keep their wire cause"
         );
-        assert!(authorizer.budgets.is_empty());
+        assert!(authorizer.limits.is_empty());
         assert!(authorizer.targets.is_empty());
         assert_eq!(executor.udp_calls + executor.tcp_calls, 0);
     }
@@ -1841,14 +1841,14 @@ fn edns_bytes_are_shared_and_budgeted_across_fallback_and_retries() {
         assert!(executor.tcp_timeouts[0] < request.timeout);
         let length = u64::try_from(query.len()).unwrap();
         assert_eq!(
-            authorizer.socket_budgets[0].application_bytes(),
+            authorizer.socket_limits[0].application_bytes(),
             2 * (length + 2)
         );
         assert_eq!(
-            authorizer.budgets[0].wire_bytes(),
+            authorizer.limits[0].wire_bytes(),
             2 * (length + super::MAX_PROBE_OVERHEAD) + 2 * (length + 2)
         );
-        assert_eq!(authorizer.budgets[0].packets(), 6);
+        assert_eq!(authorizer.limits[0].packets(), 6);
     }
 }
 

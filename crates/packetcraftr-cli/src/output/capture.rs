@@ -9,13 +9,13 @@ use packetcraftr_netio::capture as native;
 use serde::Serialize;
 
 use super::contract::Error;
-use super::envelope::{Stats, is_zero};
+use super::envelope::{self, is_zero};
 use super::frame::{Captured, SourceFrame, Stack};
 use super::network::InterfaceId;
 
 /// Native capture counters one source, or a whole operation, reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub received_frames: u64,
     pub received_bytes: u64,
     pub dropped_frames: u64,
@@ -25,8 +25,8 @@ pub struct Statistics {
     pub receiver_dropped_frames: u64,
 }
 
-impl From<native::Statistics> for Statistics {
-    fn from(value: native::Statistics) -> Self {
+impl From<native::Stats> for Stats {
+    fn from(value: native::Stats) -> Self {
         Self {
             received_frames: value.received_frames,
             received_bytes: value.received_bytes,
@@ -205,7 +205,7 @@ pub struct Source {
     pub ready: bool,
     pub shutdown_confirmed: bool,
     pub statistics_valid: bool,
-    pub statistics: Statistics,
+    pub statistics: Stats,
     pub delivered_frames: u64,
     pub delivered_bytes: u64,
     pub admitted_frames: u64,
@@ -284,7 +284,7 @@ impl From<(&packetcraftr::capture::Report, Option<Files>)> for Summary {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Snapshot {
     pub summary: Summary,
-    pub stats: Stats,
+    pub stats: envelope::Stats,
 }
 
 /// A capture report, with the rotated files the CLI wrote, and its totals.

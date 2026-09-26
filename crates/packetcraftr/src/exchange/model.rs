@@ -7,14 +7,15 @@ use std::time::Instant;
 
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, template::DEFAULT_MAX_TEMPLATE_PACKETS};
-use packetcraftr_netio::capture::{Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{
+    Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT,
+};
 
 use crate::Error;
 use crate::Stats;
 
 pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
 pub const DEFAULT_MAX_RESPONSES: usize = MAX_CAPTURE_QUEUE_FRAMES;
-pub const MAX_EXCHANGE_TIMEOUT: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
@@ -188,10 +189,10 @@ impl Options {
     /// exactly the bounded queue configuration a capture provider may be armed
     /// with, and every retention ceiling fits inside it.
     pub fn validate(&self) -> Result<(), Error> {
-        if self.timeout > MAX_EXCHANGE_TIMEOUT {
+        if self.timeout > MAX_TIMEOUT {
             return Err(Error::InvalidExchangeOption {
                 field: "timeout",
-                message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
+                message: format!("must not exceed {MAX_TIMEOUT:?}"),
             });
         }
         if self.max_template_packets == 0 {

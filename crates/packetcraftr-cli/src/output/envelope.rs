@@ -11,7 +11,7 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic as LibraryDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use super::capture::Statistics as CaptureStatistics;
+use super::capture::Stats as CaptureStats;
 use super::contract::{Command, Mode, SCHEMA_V6};
 use super::diagnostic::Diagnostic;
 
@@ -155,7 +155,7 @@ pub struct Stats {
     pub packets_completed: u64,
     pub bytes: u64,
     pub elapsed: Duration,
-    pub capture: CaptureStatistics,
+    pub capture: CaptureStats,
 }
 
 impl From<packetcraftr::Stats> for Stats {

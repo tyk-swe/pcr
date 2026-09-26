@@ -1,8 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::Policy;
-use crate::Error;
+use super::{Error, Policy};
 use bytes::Bytes;
 use packetcraftr_core::{
     build::BuiltPacket,
@@ -10,7 +9,6 @@ use packetcraftr_core::{
     decode::Dissector,
     frame::{Frame, LinkType},
 };
-use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 
 /// Whether transmitting `built` needs the permissive-live opt-in: it was
 /// built permissively, contains a malformed layer, or carries a trailer after
@@ -20,45 +18,19 @@ pub fn requires_live_opt_in(built: &BuiltPacket) -> bool {
     built.mode == Mode::Permissive || built.contains_malformed() || built.contains_network_trailer()
 }
 
-/// Identifies the missing permissive-live approval so callers can phrase the
-/// error.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PermissiveLiveDenial {
-    OperationOptIn,
-    PolicyApproval,
-}
-
 /// Requires both the per-operation opt-in and the policy's permissive-live
-/// allowance.
-pub(crate) fn check_permissive_live(
-    policy: &crate::policy::Policy,
-    allow_permissive_live: bool,
-) -> Result<(), PermissiveLiveDenial> {
-    if !allow_permissive_live {
-        return Err(PermissiveLiveDenial::OperationOptIn);
-    }
-    if !policy.allow_permissive_packets {
-        return Err(PermissiveLiveDenial::PolicyApproval);
-    }
-    Ok(())
-}
-
-/// [`check_permissive_live`] phrased as the workflow error every caller but
-/// replay reports.
+/// allowance, reporting the missing opt-in first.
 pub(crate) fn authorize_permissive_live(
-    policy: &crate::policy::Policy,
+    policy: &Policy,
     allow_permissive_live: bool,
 ) -> Result<(), Error> {
-    check_permissive_live(policy, allow_permissive_live).map_err(|denial| match denial {
-        PermissiveLiveDenial::OperationOptIn => Error::PermissiveLiveOptInRequired,
-        PermissiveLiveDenial::PolicyApproval => crate::policy::Error::PermissivePacket.into(),
-    })
-}
-
-#[derive(Debug)]
-pub(crate) enum WireAuthorizationError {
-    Decode(packetcraftr_core::decode::Error),
-    Policy(crate::policy::Error),
+    if !allow_permissive_live {
+        return Err(Error::PermissiveLiveOptIn);
+    }
+    if !policy.allow_permissive_packets {
+        return Err(Error::PermissivePacket);
+    }
+    Ok(())
 }
 
 /// Decodes exact wire bytes with the trusted built-in registry.
@@ -68,12 +40,10 @@ pub(crate) enum WireAuthorizationError {
 pub(crate) fn decode_wire(
     link_type: LinkType,
     bytes: &Bytes,
-) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
-    let unsupported = |reason| {
-        WireAuthorizationError::Policy(crate::policy::Error::InvalidPacketSemantics {
-            reason,
-            source: None,
-        })
+) -> Result<packetcraftr_core::decode::DecodedPacket, Error> {
+    let unsupported = |reason| Error::InvalidPacketSemantics {
+        reason,
+        source: None,
     };
     let registry = packetcraftr_core::protocol::builtin::registry();
     if registry.root_for_link_type(link_type).is_none() {
@@ -86,48 +56,46 @@ pub(crate) fn decode_wire(
         .map_err(|source| unsupported(source.to_string()))?;
     Dissector::new(registry)
         .decode(frame, packetcraftr_core::decode::Options::default())
-        .map_err(WireAuthorizationError::Decode)
+        .map_err(|source| Error::UndecodableWire { source })
 }
 
 /// Decodes exact wire bytes with the trusted registry and applies destination
 /// policy, returning the trusted decode so a later route-aware source check
 /// can reuse it instead of decoding again.
-/// Caller registries remain outside this policy trust boundary. Callers
-/// classify decode failures in their own vocabulary.
+/// Caller registries remain outside this policy trust boundary. A decode
+/// failure is [`Error::UndecodableWire`], which callers may reclassify in
+/// their own vocabulary.
 pub(crate) fn authorize_wire_destinations(
-    policy: &crate::policy::Policy,
+    policy: &Policy,
     link_type: LinkType,
     bytes: &Bytes,
-) -> Result<packetcraftr_core::decode::DecodedPacket, WireAuthorizationError> {
+) -> Result<packetcraftr_core::decode::DecodedPacket, Error> {
     let decoded = decode_wire(link_type, bytes)?;
-    policy
-        .authorize_packet_destinations(&decoded.packet)
-        .map_err(WireAuthorizationError::Policy)?;
+    policy.authorize_packet_destinations(&decoded.packet)?;
     Ok(decoded)
 }
 
 /// Applies route-dependent source policy to a packet the trusted registry
 /// already decoded from the wire bytes.
 pub(crate) fn authorize_wire_sources(
-    policy: &crate::policy::Policy,
+    policy: &Policy,
     decoded: &packetcraftr_core::decode::DecodedPacket,
     route: &crate::route::Plan,
-) -> Result<(), WireAuthorizationError> {
-    policy
-        .authorize_packet_sources(&decoded.packet, route)
-        .map_err(WireAuthorizationError::Policy)
+) -> Result<(), Error> {
+    policy.authorize_packet_sources(&decoded.packet, route)
 }
 
 /// Applies destination (and, given a route, source) policy to the packet the
 /// trusted registry decodes from the bytes that will actually reach the wire.
-/// Caller registries remain outside this policy trust boundary. Callers
-/// classify decode failures in their own vocabulary.
+/// Caller registries remain outside this policy trust boundary. A decode
+/// failure is [`Error::UndecodableWire`], which callers may reclassify in
+/// their own vocabulary.
 pub(crate) fn authorize_wire(
-    policy: &crate::policy::Policy,
+    policy: &Policy,
     link_type: LinkType,
     bytes: &Bytes,
     route: Option<&crate::route::Plan>,
-) -> Result<(), WireAuthorizationError> {
+) -> Result<(), Error> {
     let decoded = authorize_wire_destinations(policy, link_type, bytes)?;
     if let Some(route) = route {
         authorize_wire_sources(policy, &decoded, route)?;
@@ -148,23 +116,5 @@ impl Policy {
             authorize_permissive_live(self, allow_permissive_live)?;
         }
         Ok(())
-    }
-
-    /// Authorizes the exact bytes that would reach the wire against the route
-    /// that was selected for them, decoding them with the trusted registry.
-    pub(crate) fn authorize_built_wire(
-        &self,
-        built: &BuiltPacket,
-        route: &crate::route::Plan,
-    ) -> Result<(), Error> {
-        let link_type = match route.mode {
-            LinkMode::Layer2 => route.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
-        };
-        authorize_wire(self, link_type, &built.bytes, Some(route)).map_err(|error| match error {
-            WireAuthorizationError::Decode(source) => Error::Wire(source),
-            WireAuthorizationError::Policy(source) => Error::Policy(source),
-        })
     }
 }

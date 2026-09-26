@@ -10,14 +10,14 @@ use packetcraftr_core::budget::{Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::check_deadline;
-use crate::policy::{Authorizer, Operation, WireBudget};
+use crate::policy::{Authorizer, Operation, WireLimits};
 
 /// How a workflow names the failures each admission gate can raise.
 pub(crate) trait GateErrors {
     type Error;
     /// The elapsed-time budget was spent at a policy boundary.
     fn duration_limit(&self, actual: Duration, limit: Duration) -> Self::Error;
-    /// The authorizer refused the declared target or the operation budget.
+    /// The authorizer refused the declared target or the operation limits.
     fn authorization(&self, source: BoundaryError) -> Self::Error;
     /// A cooperative `Deadline::enforce` boundary refused: the operation was
     /// cancelled or its budget was spent.
@@ -87,6 +87,6 @@ where
     approval.map_err(|source| gates.authorization(source))
 }
 
-pub(crate) const fn budgeted(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {
-    Operation::Budgeted(WireBudget::new(packets, maximum_wire_bytes))
+pub(crate) const fn wire_limits(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {
+    Operation::Wire(WireLimits::new(packets, maximum_wire_bytes))
 }

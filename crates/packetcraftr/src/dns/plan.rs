@@ -6,8 +6,10 @@ use std::time::Duration;
 use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
 use super::MAX_PROBE_OVERHEAD;
+use super::engine::Attempts;
 use super::error::Error;
 use super::{Request, TransportMode};
+use crate::execution::rate_delay;
 
 /// The complete finite cost one DNS operation may incur, approved before any
 /// resolver, route, capture, or socket side effect.
@@ -82,7 +84,12 @@ pub(super) fn operation_limits(
     } else {
         SocketLimits::none()
     };
-    let delay = rate_delay(request.queries_per_second)?;
+    let delay = rate_delay(
+        &Attempts,
+        "queries_per_second",
+        1,
+        request.queries_per_second,
+    )?;
     let worst_case = worst_case_duration(request, delay)?;
     if worst_case > request.limits.max_duration {
         return Err(Error::DurationLimit {
@@ -132,12 +139,4 @@ fn worst_case_duration(request: &Request, delay: Duration) -> Result<Duration, E
             actual: Duration::MAX,
             limit: request.limits.max_duration,
         })
-}
-
-pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::InvalidLimit {
-        field: "queries_per_second",
-        value: u64::from(rate.unwrap_or_default()),
-        reason: "rate-delay arithmetic overflowed".to_owned(),
-    })
 }

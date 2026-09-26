@@ -343,6 +343,17 @@ impl crate::execution::Errors for Workflow {
     type Error = Error;
     type Step = u64;
 
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::new(
+            *self,
+            ErrorKind::InvalidLimit {
+                field,
+                value,
+                reason,
+            },
+        )
+    }
+
     fn authorization(&self, source: BoundaryError) -> Error {
         Error::new(*self, ErrorKind::Authorization(source))
     }

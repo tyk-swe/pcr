@@ -632,6 +632,14 @@ impl crate::execution::Errors for Attempts {
     type Error = Error;
     type Step = u32;
 
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        }
+    }
+
     fn authorization(&self, source: BoundaryError) -> Error {
         Error::from(source)
     }

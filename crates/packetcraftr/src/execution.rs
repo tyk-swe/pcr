@@ -13,7 +13,7 @@ pub(crate) mod limits;
 mod sink;
 pub(crate) mod validation;
 
-pub(crate) use context::{Context, Grant, Paused, Receipt, pause};
+pub(crate) use context::{Context, Grant, Paused, Receipt, pause, rate_delay};
 pub(crate) use errors::Errors;
 pub use executor::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions, Request};
 pub(crate) use executor::{ExecutorFault, WorkflowOverrides};

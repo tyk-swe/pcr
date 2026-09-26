@@ -18,6 +18,9 @@ pub(crate) trait Errors {
     /// a whole; admission gates report under it before any step runs.
     type Step: Copy + Default;
 
+    /// A request limit, or arithmetic derived from one such as a rate delay,
+    /// is invalid.
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Self::Error;
     /// The authorizer refused the declared target or the operation limits.
     fn authorization(&self, source: BoundaryError) -> Self::Error;
     /// Committing time would pass the operation budget, or nothing remains

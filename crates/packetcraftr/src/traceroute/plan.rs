@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use super::WORKFLOW;
 use super::{Batch, Probe, Request};
+use crate::execution::rate_delay;
 use crate::probe::{Error, ErrorKind, ProbeEndpoint, Transport};
 
 pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
@@ -112,21 +113,12 @@ pub(super) fn worst_case_duration(request: &Request) -> Result<Duration, Error> 
     };
     let exchange = request.timeout.checked_mul(hops).ok_or_else(&overflow)?;
     let delay = rate_delay(
+        &WORKFLOW,
+        "probes_per_second",
         usize::try_from(request.probes_per_hop).unwrap_or(usize::MAX),
         request.probes_per_second,
     )?
     .checked_mul(hops.saturating_sub(1))
     .ok_or_else(&overflow)?;
     exchange.checked_add(delay).ok_or_else(overflow)
-}
-
-fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(probes, rate).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-    ))
 }

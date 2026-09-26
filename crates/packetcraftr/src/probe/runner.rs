@@ -14,11 +14,11 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
-use crate::clock::{Clock, rate_delay};
+use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::execution::Executor;
-use crate::execution::{Context, Grant, Receipt};
-use crate::probe::{Error, ErrorKind};
+use crate::execution::{Context, Grant, Receipt, rate_delay};
+use crate::probe::Error;
 use crate::{SentPacket, Stats};
 
 /// A planned batch of probes executed together: one probe per scan batch,
@@ -129,16 +129,12 @@ where
         let sequence = batch.sequence;
         context.enforce(sequence)?;
         if let Some(previous_probes) = previous_probes {
-            let delay = rate_delay(previous_probes, probes_per_second).ok_or_else(|| {
-                Error::new(
-                    workflow,
-                    ErrorKind::InvalidLimit {
-                        field: "probes_per_second",
-                        value: u64::from(probes_per_second.unwrap_or_default()),
-                        reason: "rate-delay arithmetic overflowed".to_owned(),
-                    },
-                )
-            })?;
+            let delay = rate_delay(
+                &workflow,
+                "probes_per_second",
+                previous_probes,
+                probes_per_second,
+            )?;
             context.pace(sequence, delay)?;
         }
         previous_probes = Some(batch.probes.len());

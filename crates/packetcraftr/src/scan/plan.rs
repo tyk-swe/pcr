@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use super::WORKFLOW;
 use super::{Batch, Probe, Request};
+use crate::execution::rate_delay;
 use crate::probe::{Error, ErrorKind, ProbeEndpoint};
 
 pub(super) fn build_batches<'a>(
@@ -87,22 +88,11 @@ pub(super) fn worst_case_duration(
     let delay = if delay_count == 0 {
         Duration::ZERO
     } else {
-        rate_delay(request.probes_per_second)?
+        rate_delay(&WORKFLOW, "probes_per_second", 1, request.probes_per_second)?
             .checked_mul(delay_count)
             .ok_or_else(&overflow)?
     };
     exchange_time.checked_add(delay).ok_or_else(overflow)
-}
-
-fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-    ))
 }
 
 #[cfg(test)]

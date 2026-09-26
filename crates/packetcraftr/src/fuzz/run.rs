@@ -16,9 +16,10 @@ use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{CaseErrors, Error, duration_limit};
 use super::evidence::{Recorder, validate_execution};
 use super::execution::{Execution, ExecutionCase};
-use super::plan::{rate_delay, worst_case_duration};
+use super::plan::worst_case_duration;
 use super::{Case, LiveOptions, Report, Stats, Summary};
 use crate::execution::Executor;
+use crate::execution::rate_delay;
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
@@ -133,7 +134,7 @@ where
         built_case_count,
         ..
     } = prepared;
-    let delay = rate_delay(live.cases_per_second)?;
+    let delay = rate_delay(&CaseErrors, "cases_per_second", 1, live.cases_per_second)?;
     let builder = Builder::new(Arc::clone(&registry));
     let mut recorder = Recorder::new(Arc::clone(&registry), request.limits, live.limits);
     let mut context = Context::new(&mut deadline, clock, CaseErrors);

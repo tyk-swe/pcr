@@ -68,6 +68,24 @@ pub(crate) fn pause<C: Clock>(
     deadline.account(delay).map_err(Paused::DurationLimit)
 }
 
+/// The pacing delay after `items` units at `rate` per second (none when the
+/// rate is unbounded), or the workflow's invalid-limit error naming `field`
+/// when the arithmetic overflows or the rate is zero.
+pub(crate) fn rate_delay<R: Errors>(
+    errors: &R,
+    field: &'static str,
+    items: usize,
+    rate: Option<u32>,
+) -> Result<Duration, R::Error> {
+    crate::clock::rate_delay(items, rate).ok_or_else(|| {
+        errors.invalid_limit(
+            field,
+            u64::from(rate.unwrap_or_default()),
+            "rate-delay arithmetic overflowed".to_owned(),
+        )
+    })
+}
+
 /// Evidence a step returns: the permit it was executed under and the
 /// statistics of the traffic it produced.
 pub(crate) trait Receipt {

@@ -16,6 +16,7 @@ enum Failure {
     DurationLimit(u64, DeadlineExceeded),
     Interrupted(u64, Interrupted),
     Clock(u64, Box<dyn std::error::Error + Send + Sync>),
+    InvalidLimit(&'static str),
     Authorization,
     Execution(u64, BoundaryError),
     InvalidEvidence(u64, ExchangeEvidenceError),
@@ -28,6 +29,9 @@ impl Errors for TestErrors {
     type Error = Failure;
     type Step = u64;
 
+    fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> Failure {
+        Failure::InvalidLimit(field)
+    }
     fn authorization(&self, _: BoundaryError) -> Failure {
         Failure::Authorization
     }
@@ -484,4 +488,16 @@ fn stats_overflow_is_mapped_through_the_adapter_and_leaves_stats_untouched() {
 
     assert!(matches!(error, Failure::StatsOverflow(3, StatsOverflow)));
     assert_eq!(context.into_stats(), saturated);
+}
+
+#[test]
+fn a_rate_delay_names_an_invalid_rate_through_the_adapter() {
+    assert_eq!(
+        rate_delay(&TestErrors, "probes_per_second", 3, Some(3)).unwrap(),
+        Duration::from_secs(1)
+    );
+    assert!(matches!(
+        rate_delay(&TestErrors, "probes_per_second", 1, Some(0)),
+        Err(Failure::InvalidLimit("probes_per_second"))
+    ));
 }

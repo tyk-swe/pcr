@@ -324,6 +324,7 @@ mod tests {
         Selection(&'static str),
         Plan,
         Operation,
+        Limit(&'static str),
         /// A step failure, which admission never raises.
         Step,
     }
@@ -331,6 +332,10 @@ mod tests {
     impl Errors for StubGates {
         type Error = StubError;
         type Step = ();
+
+        fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> StubError {
+            StubError::Limit(field)
+        }
 
         fn authorization(&self, _: BoundaryError) -> StubError {
             StubError::Authorization

@@ -12,7 +12,7 @@ use super::*;
 use crate::BoundaryError;
 use crate::evidence::ExecutionPermit;
 use crate::execution::evidence::EvidenceLimits;
-use crate::probe::Workflow;
+use crate::probe::{ErrorKind, Workflow};
 use crate::test_support::RecordingClock;
 use crate::test_support::{decoded_packet, evidence_frame};
 

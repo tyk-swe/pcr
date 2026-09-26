@@ -137,6 +137,14 @@ impl crate::execution::Errors for CaseErrors {
     type Error = Error;
     type Step = u64;
 
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        }
+    }
+
     fn authorization(&self, source: crate::BoundaryError) -> Error {
         Error::Authorization(source)
     }

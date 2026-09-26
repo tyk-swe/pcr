@@ -36,7 +36,7 @@ use crate::decode::{self, Dissector};
 use crate::field::FieldValue;
 use crate::frame::Frame;
 use crate::layout::{ByteRange, PacketLayout};
-use crate::protocol::{BuiltinProtocol, checksum};
+use crate::protocol::{BuiltinProtocol, checksum, headers::IpHeader};
 use crate::registry::Registry;
 
 use super::{Error, RewriteLimits};
@@ -512,35 +512,25 @@ fn enclosing_network(layout: &PacketLayout, layer: usize) -> Result<usize, Error
         ))
 }
 
-/// The end of the payload a network header declares, from its own bytes.
+/// The end of the datagram a network header declares, walked from its own
+/// bytes.
 fn network_end(layout: &PacketLayout, network: usize, bytes: &[u8]) -> Result<usize, Error> {
-    let layer = &layout.layers[network];
-    match BuiltinProtocol::from_id(layer.protocol) {
-        Some(BuiltinProtocol::Ipv4) => {
-            let total = read_uint(
-                bytes,
-                ByteRange::new(layer.range.start + 2, layer.range.start + 4),
-            )?;
-            layer
-                .range
-                .start
-                .checked_add(usize::try_from(total).unwrap_or(usize::MAX))
-                .ok_or(Error::Invalid("IPv4 length overflows"))
-        }
-        Some(BuiltinProtocol::Ipv6) => {
-            let payload = read_uint(
-                bytes,
-                ByteRange::new(layer.range.start + 4, layer.range.start + 6),
-            )?;
-            layer
-                .range
-                .start
-                .checked_add(40)
-                .and_then(|start| start.checked_add(usize::try_from(payload).unwrap_or(usize::MAX)))
-                .ok_or(Error::Invalid("IPv6 length overflows"))
-        }
-        _ => Err(Error::Unsupported("unsupported network envelope")),
-    }
+    let (start, header) = walk_network(layout, network, bytes)?;
+    Ok(start + header.datagram_length())
+}
+
+/// Walks the IPv4/IPv6 header of the decoded `network` layer over the
+/// patched bytes, which may no longer match the decoded fields.
+fn walk_network(
+    layout: &PacketLayout,
+    network: usize,
+    bytes: &[u8],
+) -> Result<(usize, IpHeader), Error> {
+    let start = layout.layers[network].range.start;
+    let ip = bytes
+        .get(start..)
+        .ok_or(Error::Invalid("transport coverage exceeds captured bytes"))?;
+    Ok((start, IpHeader::walk(ip)?))
 }
 
 /// The byte span a TCP/UDP layer's checksum covers: the segment start through
@@ -583,101 +573,11 @@ fn transport_span(
 /// Home Address options, any of which change what the pseudo-header covers.
 fn ensure_transport_computable(
     layout: &PacketLayout,
-    transport: usize,
     network: usize,
     bytes: &[u8],
 ) -> Result<(), Error> {
-    let net = &layout.layers[network];
-    match BuiltinProtocol::from_id(net.protocol) {
-        Some(BuiltinProtocol::Ipv4) => {
-            if read_uint(
-                bytes,
-                ByteRange::new(net.range.start + 6, net.range.start + 8),
-            )? & 0x3fff
-                != 0
-            {
-                return Err(Error::Unsupported(
-                    "transport checksum repair needs a complete datagram",
-                ));
-            }
-            let mut option = net.range.start + 20;
-            while option < net.range.end {
-                match bytes[option] {
-                    0 => break,
-                    1 => option += 1,
-                    131 | 137 => {
-                        return Err(Error::Unsupported(
-                            "IPv4 source routing changes checksum destinations",
-                        ));
-                    }
-                    _ => {
-                        let length = usize::from(
-                            *bytes
-                                .get(option + 1)
-                                .ok_or(Error::Invalid("truncated IPv4 option"))?,
-                        );
-                        if length < 2 || option + length > net.range.end {
-                            return Err(Error::Invalid("invalid IPv4 option length"));
-                        }
-                        option += length;
-                    }
-                }
-            }
-            Ok(())
-        }
-        Some(BuiltinProtocol::Ipv6) => {
-            for layer in &layout.layers[network + 1..transport] {
-                match BuiltinProtocol::from_id(layer.protocol) {
-                    Some(BuiltinProtocol::Ipv6Fragment) => {
-                        if read_uint(
-                            bytes,
-                            ByteRange::new(layer.range.start + 2, layer.range.start + 4),
-                        )? & 0xfff9
-                            != 0
-                        {
-                            return Err(Error::Unsupported(
-                                "transport checksum repair needs a complete datagram",
-                            ));
-                        }
-                    }
-                    Some(BuiltinProtocol::Ipv6Srh | BuiltinProtocol::Ah) => {
-                        return Err(Error::Unsupported(
-                            "IPv6 routing headers change checksum destinations",
-                        ));
-                    }
-                    Some(
-                        BuiltinProtocol::Ipv6HopByHop | BuiltinProtocol::Ipv6DestinationOptions,
-                    ) => {
-                        let mut option = layer.range.start + 2;
-                        while option < layer.range.end {
-                            let kind = bytes[option];
-                            if kind == 0 {
-                                option += 1;
-                                continue;
-                            }
-                            if kind == 201 {
-                                return Err(Error::Unsupported(
-                                    "IPv6 Home Address option changes checksum sources",
-                                ));
-                            }
-                            let length = usize::from(
-                                *bytes
-                                    .get(option + 1)
-                                    .ok_or(Error::Invalid("truncated IPv6 option"))?,
-                            ) + 2;
-                            if option + length > layer.range.end {
-                                return Err(Error::Invalid("invalid IPv6 option length"));
-                            }
-                            option += length;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Ok(())
-        }
-        _ => Err(Error::Unsupported("unsupported network envelope")),
-    }
+    let (start, header) = walk_network(layout, network, bytes)?;
+    super::ensure_checksum_coverage(&bytes[start..], &header)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -739,7 +639,7 @@ fn repair_transport(
 ) -> Result<Option<FieldChange>, Error> {
     let layer = &layout.layers[transport];
     let network = enclosing_network(layout, transport)?;
-    ensure_transport_computable(layout, transport, network, bytes)?;
+    ensure_transport_computable(layout, network, bytes)?;
     let span = transport_span(layout, transport, bytes)?;
     let checksum_range = checksum_field_range(layout, transport)?;
     if checksum_range.end > span.end || checksum_range.start < span.start {

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared Clap groups; command-specific options stay in `commands/<command>/arguments.rs`.
+//! Clap groups and value parsers several commands share; a group only one
+//! command uses stays in `commands/<command>/arguments.rs`.
 
 pub(crate) use address_family::AddressFamily;
 pub(crate) use capture_limits::CaptureLimitsArgs;

@@ -717,3 +717,15 @@ let formats = ToolFormat::FORMATS;
 
 `Command::require_format::<F>` requires `F: FormatSubset` instead of
 `F: TryFrom<Format, Error = Format>`.
+
+## CLI output modules named after commands
+
+Each `packetcraftr_cli::output` module is named after the command whose
+output it describes. Update imports; the types, their fields, and their JSON
+are unchanged:
+
+| Before | After |
+| --- | --- |
+| `output::dns_analysis` | `output::dns_read` |
+| `output::forwarding` | `output::verify_forwarding` |
+| `output::scan_connect` | `output::scan::connect` |

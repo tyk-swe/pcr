@@ -117,6 +117,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   the inherent constant, and `Command::require_format` takes
   `F: FormatSubset`. Serialized command names and formats are unchanged. See
   `docs/migration-unreleased.md`.
+- CLI output modules are named after their commands: `output::dns_analysis`
+  is `output::dns_read`, `output::forwarding` is `output::verify_forwarding`,
+  and `output::scan_connect` is `output::scan::connect`. The types and their
+  JSON are unchanged. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -583,6 +587,24 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `dns-read`, `http`, `fragment`, `merge`, `export`, and `rewrite` print text
+  output through the terminal-sanitizing writer, as every other command does,
+  and `capture` no longer prints interface names and saved-file paths in its
+  text summary unsanitized. `dns-read` and `http` text spells statuses,
+  optional values, and frame lists as the JSON document does instead of Rust
+  `Debug` formatting, HTTP header names are escaped like their values, and
+  `dns-read` prints each message's questions and records. DNS records print
+  in one line shape across `read`, `dissect`, `capture`, `dns-read`, and
+  `dns`. These six commands also gain `--help` examples.
+- `--max-duration-ms` accepts 1 to 3600000 and `--timeout-ms` 0 to 3600000
+  on every command, checked while arguments are parsed. Offline analysis
+  commands previously accepted any duration, including ones no deadline
+  could represent. An out-of-range value now fails with `cli.error` (exit 2)
+  before any input is read, instead of a command-specific `cli.*` limit code
+  after setup.
+- `--interface` and `--stream` values are validated while arguments are
+  parsed, so a malformed selector (`--interface 0`, `--stream sctp:1`) fails
+  as a usage error before any input is opened or any policy is checked.
 - Replay text output reports a stdout write failure even if the invocation
   deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with

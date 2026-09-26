@@ -3,12 +3,16 @@
 
 //! One module per CLI command, plus the pieces several of them share.
 //!
-//! Each command owns its `Args`: compact commands keep them beside `run` in a
-//! single file (`interfaces.rs`, `routes.rs`), while larger commands split
-//! into `arguments.rs`, `rendering.rs`, and sometimes `conversion.rs` — most
-//! of the live and capture-reading commands. Clap groups several commands
-//! share live under `command_options` instead (`SendArgs` serves `send` and
-//! `exchange`).
+//! Every command has the same shape: `commands/<cmd>.rs` drives the command
+//! (validation, composition, the workflow run, and the format dispatch),
+//! `commands/<cmd>/arguments.rs` holds its clap `Args` and `--help` text, and
+//! `commands/<cmd>/rendering.rs` formats text from the command's output
+//! types and never runs a workflow. A command may add helper modules beside
+//! them (`capture/files.rs`, `replay/selection.rs`). Clap groups several
+//! commands share live under `command_options` (`SendArgs` serves `send` and
+//! `exchange`; `--max-duration-ms`, `--timeout-ms`, and `--compression` are
+//! one group each); a group only one command uses lives in that command's
+//! `arguments`.
 //!
 //! Every command's `Args` implements [`Spec`], and the `commands!` declaration
 //! below lists each command once. Dispatch, the output contract, presets, and

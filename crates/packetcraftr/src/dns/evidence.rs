@@ -5,15 +5,17 @@ use std::time::Duration;
 
 use packetcraftr_core::{codec::NetworkEnvelope, packet::Packet, protocol::BuiltinProtocol};
 
-use crate::probe::validation::{
-    ExchangeEvidenceError, format_exchange_evidence_error, validate_aggregate_evidence_limits,
+use crate::execution::validation::{
+    ExchangeEvidenceError, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
 
 use super::classification::dns_payload;
+use super::engine::Attempts;
 use super::error::Error;
 use super::{Execution, Limits, Probe};
+use crate::execution::Errors as _;
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,
@@ -110,10 +112,7 @@ pub(super) fn validate_dns_execution(
 }
 
 fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
-    Error::InvalidEvidence {
-        attempt,
-        message: format_exchange_evidence_error(error, "DNS exchange", "DNS"),
-    }
+    Attempts.invalid_evidence(attempt, error)
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

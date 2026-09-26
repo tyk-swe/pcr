@@ -161,13 +161,10 @@ fn domain_failures_preserve_typed_error_context() {
     ));
     assert_eq!(replay.context, Some(ErrorContext::SourceFrame(8)));
 
-    let scan = OutputError::classified(&packetcraftr::probe::Error::new(
-        packetcraftr::probe::Workflow::Scan,
-        packetcraftr::probe::ErrorKind::Clock {
-            sequence: 8,
-            source: Box::new(io::Error::other("failed")),
-        },
-    ));
+    let scan = OutputError::classified(&packetcraftr::scan::Error::Clock {
+        sequence: 8,
+        source: Box::new(io::Error::other("failed")),
+    });
     assert_eq!(scan.context, Some(ErrorContext::ProbeSequence(8)));
 
     let dns = OutputError::classified(&packetcraftr::dns::Error::Clock {

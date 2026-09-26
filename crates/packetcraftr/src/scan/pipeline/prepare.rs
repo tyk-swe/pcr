@@ -3,8 +3,8 @@
 use super::{Planned, limit};
 use crate::{
     BoundaryError,
+    execution::{ExchangeExecutor, PipelineOptions},
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
-    probe::{ExchangeExecutor, PipelineOptions},
 };
 use packetcraftr_core::{field::FieldValue, packet::Packet};
 use packetcraftr_netio::{

@@ -6,16 +6,16 @@
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::execution::Context;
+use crate::execution::Executor;
+use crate::execution::{Sink, publisher};
 use crate::policy::{Authorizer, Operation};
-use crate::probe::Executor;
-use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 use crate::target::approve_operation;
-use crate::{BoundaryError, Stats};
 
-use super::engine::{Attempts, Gates, PreparedOperation};
+use super::engine::{Attempts, PreparedOperation};
 use super::plan::batch_limits;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
@@ -133,22 +133,22 @@ where
 
 /// [`run_batch`] with progressive per-question events on a runtime-budgeted
 /// publisher, matching [`run_with_events`](super::run_with_events) semantics.
-pub fn run_batch_with_events<A, E, C, F>(
+pub fn run_batch_with_events<A, E, C, S>(
     requests: &[Request],
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<BatchReport, Error>
 where
     A: Authorizer,
     E: Executor<super::Exchange> + super::TcpExecutor,
     C: Clock,
-    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Event, Ack = ()>,
 {
-    let observe = sink_observer(runtime, emit, Error::from, |source| Error::Output {
+    let observe = publisher(runtime, sink, Error::from, |source| Error::Output {
         source,
     })?;
     let mut deadline = batch_deadline(requests)?.with_cancellation(clock.cancellation());
@@ -222,7 +222,7 @@ where
     let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
     let mut stop = deadline.enforce().is_err();
     if !stop {
-        approve_operation(authorizer, Operation::Dns(limits), deadline, &Gates)?;
+        approve_operation(authorizer, Operation::Dns(limits), deadline, &Attempts)?;
     }
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();

@@ -18,9 +18,14 @@ use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Execution, Sequenced};
 use crate::SentPacket;
-use crate::probe::evidence::{EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector};
-use crate::probe::validation::validate_batch_evidence;
-use crate::probe::{Error, ErrorKind, Workflow, enforce_deadline};
+use crate::execution::Errors;
+use crate::execution::evidence::{EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::validation::{
+    ExchangeEvidenceError, validate_aggregate_evidence_limits,
+    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
+};
+use crate::probe::{Workflow, enforce_deadline};
 
 /// The reason both probe workflows report for a probe without a winner.
 pub(crate) const NO_RESPONSE_REASON: &str =
@@ -85,19 +90,26 @@ pub(crate) struct Reply<O> {
     pub(crate) frame: Option<Frame>,
 }
 
-/// Operation-wide batch-evidence processing for one workflow.
-pub(crate) struct BatchEvidence<K, F> {
-    workflow: Workflow,
+/// Operation-wide batch-evidence processing for one workflow, naming every
+/// failure through the workflow's error adapter `G`.
+pub(crate) struct BatchEvidence<K, F, G> {
+    errors: G,
     limits: EvidenceLimits,
     state: EvidenceState,
     classifier: K,
     emit: F,
 }
 
-impl<K, F> BatchEvidence<K, F> {
-    pub(crate) fn new(workflow: Workflow, limits: EvidenceLimits, classifier: K, emit: F) -> Self {
+impl<K, F, G: Copy> BatchEvidence<K, F, G> {
+    pub(crate) fn new(
+        workflow: Workflow,
+        errors: G,
+        limits: EvidenceLimits,
+        classifier: K,
+        emit: F,
+    ) -> Self {
         Self {
-            workflow,
+            errors,
             limits,
             state: EvidenceState::new(limits, workflow.evidence_diagnostics()),
             classifier,
@@ -105,8 +117,8 @@ impl<K, F> BatchEvidence<K, F> {
         }
     }
 
-    pub(crate) const fn workflow(&self) -> Workflow {
-        self.workflow
+    pub(crate) const fn errors(&self) -> G {
+        self.errors
     }
 
     pub(crate) fn into_classifier(self) -> K {
@@ -114,10 +126,11 @@ impl<K, F> BatchEvidence<K, F> {
     }
 }
 
-impl<K, F> BatchEvidence<K, F>
+impl<K, F, G> BatchEvidence<K, F, G>
 where
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), Error>,
+    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
+    G: Errors<Step = u64>,
 {
     /// Checks one batch's executor evidence against its probes, its (clipped)
     /// timeout, and the evidence limits before anything is charged.
@@ -125,9 +138,9 @@ where
         &self,
         batch: &Batch<K::Probe>,
         execution: &Execution,
-    ) -> Result<(), Error> {
+    ) -> Result<(), G::Error> {
         validate_batch_evidence(
-            self.workflow,
+            &self.errors,
             &batch.probes,
             batch.timeout,
             execution,
@@ -138,7 +151,7 @@ where
 
     /// Publishes a workflow event that is not batch evidence, such as a
     /// pipelined send confirmation.
-    pub(crate) fn emit(&mut self, event: K::Event, deadline: &Deadline) -> Result<(), Error> {
+    pub(crate) fn emit(&mut self, event: K::Event, deadline: &Deadline) -> Result<(), G::Error> {
         (self.emit)(event, deadline)
     }
 
@@ -152,7 +165,7 @@ where
         batch: &Batch<K::Probe>,
         execution: Execution,
         deadline: &Deadline,
-    ) -> Result<ControlFlow<()>, Error> {
+    ) -> Result<ControlFlow<()>, G::Error> {
         self.enforce(deadline)?;
         let Execution {
             permit,
@@ -164,14 +177,9 @@ where
             stats: _,
         } = execution;
         if permit != batch.permit {
-            return Err(Error::new(
-                self.workflow,
-                ErrorKind::InvalidEvidence {
-                    sequence: batch.sequence,
-                    message: "executor returned evidence for a different execution permit"
-                        .to_owned(),
-                },
-            ));
+            return Err(self
+                .errors
+                .invalid_evidence(batch.sequence, ExchangeEvidenceError::PermitMismatch));
         }
         self.record_diagnostics(diagnostics, deadline)?;
         self.enforce(deadline)?;
@@ -180,7 +188,7 @@ where
         for (request_index, (probe, sent)) in batch.probes.iter().zip(&sent).enumerate() {
             self.enforce(deadline)?;
             let Self {
-                workflow,
+                errors,
                 state,
                 classifier,
                 emit,
@@ -192,7 +200,7 @@ where
                 |response| classifier.classify(probe, sent, response),
                 |observation| classifier.rank(observation),
                 |observation| classifier.responder(observation),
-                || enforce_deadline(*workflow, deadline),
+                || enforce_deadline(errors, deadline),
             )?;
             let outcome = match best {
                 None => Outcome::Timeout,
@@ -224,9 +232,9 @@ where
         probes: &[K::Probe],
         frames: Vec<Frame>,
         deadline: &Deadline,
-    ) -> Result<(), Error> {
+    ) -> Result<(), G::Error> {
         let Self {
-            workflow,
+            errors,
             state,
             classifier,
             emit,
@@ -235,7 +243,7 @@ where
         state.retain_undecoded(
             frames,
             &mut Events {
-                workflow: *workflow,
+                errors,
                 classifier,
                 emit,
                 probes,
@@ -249,9 +257,9 @@ where
         &mut self,
         diagnostics: Vec<Diagnostic>,
         deadline: &Deadline,
-    ) -> Result<(), Error> {
+    ) -> Result<(), G::Error> {
         let Self {
-            workflow,
+            errors,
             state,
             classifier,
             emit,
@@ -260,7 +268,7 @@ where
         state.record_diagnostics(
             diagnostics,
             &mut Events {
-                workflow: *workflow,
+                errors,
                 classifier,
                 emit,
                 probes: &[],
@@ -269,37 +277,119 @@ where
         )
     }
 
-    fn enforce(&self, deadline: &Deadline) -> Result<(), Error> {
-        enforce_deadline(self.workflow, deadline)
+    fn enforce(&self, deadline: &Deadline) -> Result<(), G::Error> {
+        enforce_deadline(&self.errors, deadline)
     }
 }
 
 /// Publishes what the evidence state keeps as the classifier's events.
 /// `probes` is the batch undecodable frames arrived with.
-struct Events<'e, K: Classifier, F> {
-    workflow: Workflow,
+struct Events<'e, K: Classifier, F, G> {
+    errors: &'e G,
     classifier: &'e K,
     emit: &'e mut F,
     probes: &'e [K::Probe],
     deadline: &'e Deadline,
 }
 
-impl<K, F> EvidenceSink for Events<'_, K, F>
+impl<K, F, G> EvidenceSink for Events<'_, K, F, G>
 where
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), Error>,
+    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
+    G: Errors,
 {
-    type Error = Error;
+    type Error = G::Error;
 
-    fn undecoded(&mut self, frame: Frame) -> Result<(), Error> {
+    fn undecoded(&mut self, frame: Frame) -> Result<(), G::Error> {
         (self.emit)(self.classifier.undecoded(self.probes, frame), self.deadline)
     }
 
-    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), Error> {
+    fn diagnostic(&mut self, diagnostic: Diagnostic) -> Result<(), G::Error> {
         (self.emit)(self.classifier.diagnostic(diagnostic), self.deadline)
     }
 
-    fn check(&mut self) -> Result<(), Error> {
-        enforce_deadline(self.workflow, self.deadline)
+    fn check(&mut self) -> Result<(), G::Error> {
+        enforce_deadline(self.errors, self.deadline)
     }
 }
+
+fn validate_batch_exchange_evidence<P, F>(
+    probes: &[P],
+    timeout: Duration,
+    execution: &Execution,
+    max_captured_frames: usize,
+    max_captured_bytes: usize,
+    mut sent_packet_matches: F,
+) -> Result<(), ExchangeEvidenceError>
+where
+    F: FnMut(&P, &Packet) -> bool,
+{
+    if execution.sent.len() != probes.len() {
+        return Err(ExchangeEvidenceError::SentCardinality {
+            expected: probes.len(),
+            receipts: execution.sent.len(),
+        });
+    }
+    if execution
+        .responses
+        .iter()
+        .any(|response| response.request_index >= probes.len())
+    {
+        return Err(ExchangeEvidenceError::ResponseOutsideBatch);
+    }
+
+    validate_aggregate_evidence_limits(
+        &execution.responses,
+        &execution.unsolicited,
+        &execution.undecoded,
+        max_captured_frames,
+        max_captured_bytes,
+    )?;
+
+    for (request_index, (sent, probe)) in execution.sent.iter().zip(probes).enumerate() {
+        if !sent_packet_matches(probe, &sent.built().packet) {
+            return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
+        }
+    }
+
+    validate_sent_byte_accounting(&execution.sent, execution.stats.bytes)?;
+    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)?;
+    validate_capture_statistics_evidence(execution.stats.capture)?;
+    if execution.stats.packets_attempted != u64::try_from(probes.len()).unwrap_or(u64::MAX)
+        || execution.stats.packets_completed != u64::try_from(probes.len()).unwrap_or(u64::MAX)
+    {
+        return Err(ExchangeEvidenceError::IncompleteStatistics);
+    }
+    Ok(())
+}
+
+/// Validates one batch's executor evidence under the workflow's limits and
+/// reports any inconsistency at the sequence of the probe it concerns.
+pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
+    errors: &G,
+    probes: &[P],
+    timeout: Duration,
+    execution: &Execution,
+    limits: EvidenceLimits,
+    sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
+) -> Result<(), G::Error> {
+    validate_batch_exchange_evidence(
+        probes,
+        timeout,
+        execution,
+        limits.max_frames,
+        limits.max_bytes,
+        sent_packet_matches,
+    )
+    .map_err(|error| {
+        let sequence = error
+            .request_index()
+            .and_then(|index| probes.get(index))
+            .or_else(|| probes.first())
+            .map_or(0, Sequenced::sequence);
+        errors.invalid_evidence(sequence, error)
+    })
+}
+
+#[cfg(test)]
+mod tests;

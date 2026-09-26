@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
-use crate::probe::ExchangeExecutor;
-use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{self, Executor, Transport as ProbeTransport};
+use crate::correlation::{self, Transport as ProbeTransport};
+use crate::execution::ExchangeExecutor;
+use crate::execution::Executor;
+use crate::execution::{ExecutorFault, WorkflowOverrides};
 
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
@@ -57,7 +58,7 @@ where
             |_request_index: usize,
              sent: &packetcraftr_core::packet::Packet,
              response: &packetcraftr_core::decode::DecodedPacket| {
-                probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
+                correlation::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
                     .is_some()
             };
         let mut stop_after_response =

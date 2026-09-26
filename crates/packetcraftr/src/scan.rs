@@ -26,6 +26,7 @@ const WORKFLOW: Workflow = Workflow::Scan;
 mod classification;
 pub mod connect;
 mod engine;
+mod error;
 mod evidence;
 mod execution;
 mod executor;
@@ -41,6 +42,7 @@ mod tests;
 
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
+pub use error::Error;
 pub use execution::{Batch, Probe};
 pub use pipeline::{Error as PipelineError, PendingEvidence};
 pub use report::{

@@ -12,7 +12,7 @@
 //! socket bytes are never represented as captured [`Frame`](packetcraftr_core::frame::Frame)
 //! evidence.
 
-use crate::probe::evidence::EvidenceDiagnosticDescriptor;
+use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 
 pub const HEADER_BYTES: usize = 12;
 pub const DEFAULT_SERVER_PORT: u16 = 53;

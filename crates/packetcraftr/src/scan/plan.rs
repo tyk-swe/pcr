@@ -4,9 +4,11 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::WORKFLOW;
+use super::Error;
+use super::error::Probes;
 use super::{Batch, Probe, Request};
-use crate::probe::{Error, ErrorKind, ProbeEndpoint};
+use crate::execution::rate_delay;
+use crate::probe::ProbeEndpoint;
 
 pub(super) fn build_batches<'a>(
     request: &'a Request,
@@ -19,14 +21,11 @@ pub(super) fn build_batches<'a>(
         .checked_mul(request.attempts as usize)
         .and_then(|count| count.checked_mul(endpoints.len()))
         .and_then(|count| u64::try_from(count).ok())
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "probes",
-                value: u64::MAX,
-                reason: "probe sequence overflowed".to_owned(),
-            },
-        ))?;
+        .ok_or(Error::InvalidLimit {
+            field: "probes",
+            value: u64::MAX,
+            reason: "probe sequence overflowed".to_owned(),
+        })?;
     Ok(addresses
         .iter()
         .flat_map(move |address| {
@@ -63,14 +62,9 @@ pub(super) fn worst_case_duration(
     address_count: usize,
     endpoints_per_address: usize,
 ) -> Result<Duration, Error> {
-    let overflow = || {
-        Error::new(
-            WORKFLOW,
-            ErrorKind::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            },
-        )
+    let overflow = || Error::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
     };
     let batch_count = address_count
         .checked_mul(usize::try_from(request.attempts).unwrap_or(usize::MAX))
@@ -87,22 +81,11 @@ pub(super) fn worst_case_duration(
     let delay = if delay_count == 0 {
         Duration::ZERO
     } else {
-        rate_delay(request.probes_per_second)?
+        rate_delay(&Probes, "probes_per_second", 1, request.probes_per_second)?
             .checked_mul(delay_count)
             .ok_or_else(&overflow)?
     };
     exchange_time.checked_add(delay).ok_or_else(overflow)
-}
-
-fn rate_delay(rate: Option<u32>) -> Result<Duration, Error> {
-    crate::clock::rate_delay(1, rate).ok_or(Error::new(
-        WORKFLOW,
-        ErrorKind::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-    ))
 }
 
 #[cfg(test)]
@@ -146,11 +129,8 @@ mod tests {
         );
         assert!(matches!(
             worst_case_duration(&request, 1, 2),
-            Err(Error {
-                kind: ErrorKind::InvalidLimit {
-                    field: "probes_per_second",
-                    ..
-                },
+            Err(Error::InvalidLimit {
+                field: "probes_per_second",
                 ..
             })
         ));
@@ -159,11 +139,8 @@ mod tests {
         for (addresses, endpoints) in [(usize::MAX, 2), (1, 2)] {
             assert!(matches!(
                 worst_case_duration(&request, addresses, endpoints),
-                Err(Error {
-                    kind: ErrorKind::DurationLimit {
-                        actual: Duration::MAX,
-                        ..
-                    },
+                Err(Error::DurationLimit {
+                    actual: Duration::MAX,
                     ..
                 })
             ));

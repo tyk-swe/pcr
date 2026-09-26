@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::probe::evidence::EvidenceLimits;
-use crate::probe::limits::{check_limits, duration_violation};
+use crate::execution::evidence::EvidenceLimits;
+use crate::execution::limits::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Selection;
 
-use crate::probe::{Error, ErrorKind, Transport};
-use crate::scan::WORKFLOW;
+use super::Error;
+use crate::probe::Transport;
 use crate::scan::{
     DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_PROBES, MAX_RATE,
 };
@@ -85,25 +85,17 @@ impl Limits {
                 self.max_evidence_frames,
                 "cannot exceed max_evidence_frames",
             )],
-            |field, value, reason| {
-                Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field,
-                        value,
-                        reason,
-                    },
-                )
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
             },
         )?;
         if duration_violation(self.max_duration, MAX_TIMEOUT) {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidDuration {
-                    value: self.max_duration,
-                    maximum: MAX_TIMEOUT,
-                },
-            ));
+            return Err(Error::InvalidDuration {
+                value: self.max_duration,
+                maximum: MAX_TIMEOUT,
+            });
         }
         Ok(())
     }
@@ -135,16 +127,13 @@ pub fn select_ports(
                 continue;
             }
             if ports.len() >= max_ports {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field: "ports",
-                        value: u64::try_from(ports.len())
-                            .unwrap_or(u64::MAX)
-                            .saturating_add(1),
-                        reason: format!("exceeds max_ports={max_ports}"),
-                    },
-                ));
+                return Err(Error::InvalidLimit {
+                    field: "ports",
+                    value: u64::try_from(ports.len())
+                        .unwrap_or(u64::MAX)
+                        .saturating_add(1),
+                    reason: format!("exceeds max_ports={max_ports}"),
+                });
             }
             ports.push(port);
         }
@@ -182,29 +171,21 @@ impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.max_in_flight == 0 || self.max_in_flight > 1024 {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "max_in_flight",
-                    value: self.max_in_flight as u64,
-                    reason: "must be within 1..=1024".to_owned(),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "max_in_flight",
+                value: self.max_in_flight as u64,
+                reason: "must be within 1..=1024".to_owned(),
+            });
         }
-        self.targets
-            .validate()
-            .map_err(|source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)))?;
+        self.targets.validate().map_err(Error::TargetSelection)?;
         if self.udp_profiles.len() > super::profile::MAX_PROFILE_PORTS
             || (!self.udp_profiles.is_empty() && self.transport != Transport::Udp)
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "udp_profiles",
-                    value: self.udp_profiles.len() as u64,
-                    reason: "profiles require UDP and at most 4096 port mappings".to_owned(),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "udp_profiles",
+                value: self.udp_profiles.len() as u64,
+                reason: "profiles require UDP and at most 4096 port mappings".to_owned(),
+            });
         }
         let mut seen_profiles = std::collections::HashSet::new();
         let mut profile_bytes = 0usize;
@@ -214,79 +195,57 @@ impl Request {
             }
         }
         if profile_bytes > super::profile::MAX_PROFILE_BYTES {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "udp_profile_bytes",
-                    value: profile_bytes as u64,
-                    reason: "compiled profiles exceed 1 MiB".to_owned(),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "udp_profile_bytes",
+                value: profile_bytes as u64,
+                reason: "compiled profiles exceed 1 MiB".to_owned(),
+            });
         }
         if self.udp_payload.len() > super::MAX_UDP_PAYLOAD_BYTES
             || (!self.udp_payload.is_empty() && self.transport != Transport::Udp)
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "udp_payload_bytes",
-                    value: u64::try_from(self.udp_payload.len()).unwrap_or(u64::MAX),
-                    reason: format!(
-                        "UDP scans accept at most {} payload bytes; TCP and ICMP require an empty payload",
-                        super::MAX_UDP_PAYLOAD_BYTES
-                    ),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "udp_payload_bytes",
+                value: u64::try_from(self.udp_payload.len()).unwrap_or(u64::MAX),
+                reason: format!(
+                    "UDP scans accept at most {} payload bytes; TCP and ICMP require an empty payload",
+                    super::MAX_UDP_PAYLOAD_BYTES
+                ),
+            });
         }
         if !(1..=MAX_ATTEMPTS).contains(&self.attempts) {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "attempts",
-                    value: u64::from(self.attempts),
-                    reason: format!("must be within 1..={MAX_ATTEMPTS}"),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "attempts",
+                value: u64::from(self.attempts),
+                reason: format!("must be within 1..={MAX_ATTEMPTS}"),
+            });
         }
         if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidTimeout {
-                    value: self.timeout,
-                    maximum: MAX_TIMEOUT,
-                },
-            ));
+            return Err(Error::InvalidTimeout {
+                value: self.timeout,
+                maximum: MAX_TIMEOUT,
+            });
         }
         if let Some(rate) = self.probes_per_second
             && (rate == 0 || rate > MAX_RATE)
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "probes_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_RATE}"),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "probes_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_RATE}"),
+            });
         }
         match self.transport {
             Transport::Tcp | Transport::Udp if self.ports.is_empty() => {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidPort {
-                        message: "TCP and UDP scans require at least one destination port"
-                            .to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidPort {
+                    message: "TCP and UDP scans require at least one destination port".to_owned(),
+                });
             }
             Transport::Icmp if !self.ports.is_empty() => {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidPort {
-                        message: "ICMP scans are portless and do not accept destination ports"
-                            .to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidPort {
+                    message: "ICMP scans are portless and do not accept destination ports"
+                        .to_owned(),
+                });
             }
             _ => {}
         }

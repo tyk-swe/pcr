@@ -7,6 +7,8 @@ use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use thiserror::Error;
 
+use crate::execution::ExchangeEvidenceError;
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -131,9 +133,21 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CaseErrors;
 
-impl crate::execution::PacingErrors for CaseErrors {
+impl crate::execution::Errors for CaseErrors {
     type Error = Error;
     type Step = u64;
+
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        }
+    }
+
+    fn authorization(&self, source: crate::BoundaryError) -> Error {
+        Error::Authorization(source)
+    }
 
     fn duration_limit(&self, _case_index: u64, source: DeadlineExceeded) -> Error {
         duration_limit(source)
@@ -146,17 +160,15 @@ impl crate::execution::PacingErrors for CaseErrors {
     fn clock(&self, case_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { case_index, source }
     }
-}
 
-impl crate::execution::Errors for CaseErrors {
     fn execution(&self, case_index: u64, source: crate::BoundaryError) -> Error {
         Error::Execution { case_index, source }
     }
 
-    fn invalid_evidence(&self, case_index: u64, message: String) -> Error {
+    fn invalid_evidence(&self, case_index: u64, source: ExchangeEvidenceError) -> Error {
         Error::InvalidEvidence {
             case_index,
-            message,
+            message: source.describe("case", "fuzz"),
         }
     }
 

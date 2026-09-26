@@ -94,6 +94,12 @@ is a query
 An incremental result a workflow publishes while it runs.
 _Avoid_: progress, frame evidence (for published results)
 
+**Sink**:
+The caller's receiver for a workflow's events. Each event reaches it on a
+runtime-admitted worker, and the workflow waits for its answer before it
+continues.
+_Avoid_: callback, observer, emitter (for the receiver)
+
 **Report**:
 The terminal result of one workflow run.
 _Avoid_: set report, batch report, summary (for the terminal result)

@@ -81,12 +81,12 @@ fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_wor
         writer_entered.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(writes.load(Ordering::SeqCst), 1);
         drop(stream);
-        assert!(Sink::new_in(&runtime, |(): ()| Ok(())).is_err());
+        assert!(Worker::<()>::new_in(&runtime, |(): ()| Ok(())).is_err());
         release.send(()).unwrap();
         writer_dropped.recv_timeout(Duration::from_secs(1)).unwrap();
         let reclaimed = Instant::now();
         loop {
-            if Sink::new_in(&runtime, |(): ()| Ok(())).is_ok() {
+            if Worker::<()>::new_in(&runtime, |(): ()| Ok(())).is_ok() {
                 break;
             }
             assert!(reclaimed.elapsed() < Duration::from_secs(1));

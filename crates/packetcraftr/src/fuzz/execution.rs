@@ -16,7 +16,7 @@ pub struct ExecutionCase {
     pub(crate) timeout: Duration,
 }
 
-impl crate::probe::Request for ExecutionCase {
+impl crate::execution::Request for ExecutionCase {
     type Execution = Execution;
 }
 

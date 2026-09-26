@@ -19,7 +19,7 @@ use crate::policy::{Authorizer, Operation};
 
 use super::{CaseOutcome, Execution, ExecutionCase, RunInput, run, run_with_events};
 use super::{LiveLimits, LiveOptions, Stats};
-use crate::probe::Executor;
+use crate::execution::Executor;
 
 #[test]
 fn live_evidence_limits_are_validated_outside_the_offline_campaign() {
@@ -231,7 +231,7 @@ impl Executor<ExecutionCase> for BudgetSpendingExecutor {
         } else {
             vec![crate::exchange::Response {
                 request_index: 0,
-                response: crate::probe::test_support::decoded_packet(
+                response: crate::test_support::decoded_packet(
                     case.packet.clone(),
                     std::time::UNIX_EPOCH,
                     sent.wire_bytes(),
@@ -378,7 +378,7 @@ impl Executor<ExecutionCase> for ThreeFrameExecutor {
         };
         execution.responses.push(crate::exchange::Response {
             request_index: 0,
-            response: crate::probe::test_support::decoded_packet(
+            response: crate::test_support::decoded_packet(
                 case.packet.clone(),
                 std::time::UNIX_EPOCH,
                 &[1],
@@ -576,7 +576,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         &mut executor,
         &mut NoopClock,
         &Runtime::default(),
-        move |case| {
+        move |case: super::Case| {
             observed.lock().unwrap().push(case.prepared.index);
             Err(BoundaryError::new(
                 "induced live fuzz sink failure",

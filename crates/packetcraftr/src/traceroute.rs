@@ -20,11 +20,12 @@ pub const MAX_RATE: u32 = 1_000_000;
 // The deliberately conservative value makes complete byte-policy approval
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
-const SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
+const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
 mod engine;
+mod error;
 mod evidence;
 mod execution;
 mod executor;
@@ -37,6 +38,7 @@ mod tests;
 
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
+pub use error::Error;
 pub use execution::{Batch, Probe};
 pub use report::{
     Completion, Event, Hop, ProbeEvidence, Report, ResponseKind, Summary, UndecodedEvidence,

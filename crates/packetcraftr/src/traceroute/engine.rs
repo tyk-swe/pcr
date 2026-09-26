@@ -9,19 +9,23 @@ use crate::progress::Runtime;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
-use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::execution::Errors as _;
+use crate::execution::{Sink, publisher};
 use crate::policy::Authorizer;
-use crate::probe::limits::{check_probe_count, check_probe_duration};
-use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
-use crate::target::{GateErrors, admit_operation, wire_limits};
+use crate::probe::runner::{BatchEvidence, run_batches};
+use crate::probe::{check_probe_count, check_probe_duration};
+use crate::target::{FamilyGate, admit_operation, wire_limits};
 
+use super::Error;
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
+use super::error::Probes;
 use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, worst_case_duration};
 use super::{Batch, Completion, Event, Hop, Report, Request, Summary, UndecodedEvidence};
-use crate::probe::{Error, ErrorKind, Executor, Transport, enforce_deadline, index_or_push};
+use crate::execution::Executor;
+use crate::probe::{Transport, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -59,26 +63,26 @@ where
 /// I/O, not arbitrary callback execution. Confirmed sends in the current hop
 /// are not undone, callback failure prevents later hops, and a callback may
 /// finish after this function returns while holding its permit.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor<Batch>,
     C: Clock,
-    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Event, Ack = ()>,
 {
-    let observe = sink_observer(
+    let observe = publisher(
         runtime,
-        emit,
-        |error| WORKFLOW.duration_limit(error.actual, error.limit),
-        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
+        sink,
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
@@ -99,12 +103,13 @@ where
 {
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
+        Probes,
         request.limits.evidence(),
         ProbeClassifier {
             registry,
@@ -193,23 +198,20 @@ fn approve_traceroute<A: Authorizer>(
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
-        &WORKFLOW,
+        &Probes,
         &request.target,
-        request.address_family,
+        FamilyGate::new(request.address_family, Error::family),
         |_| {
             let total_probes = request.total_probe_count()?;
             validate_probe_plan(request, total_probes)?;
             let maximum_wire_bytes = u64::try_from(total_probes)
                 .unwrap_or(u64::MAX)
                 .checked_mul(MAX_PROBE_BYTES)
-                .ok_or(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field: "wire_bytes",
-                        value: u64::MAX,
-                        reason: "wire-byte accounting overflowed".to_owned(),
-                    },
-                ))?;
+                .ok_or(Error::InvalidLimit {
+                    field: "wire_bytes",
+                    value: u64::MAX,
+                    reason: "wire-byte accounting overflowed".to_owned(),
+                })?;
             Ok((total_probes, maximum_wire_bytes))
         },
         |plan| {
@@ -229,26 +231,23 @@ fn approve_traceroute<A: Authorizer>(
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
-    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
+    check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
     if let (Transport::Udp, Some(base)) = (request.strategy, request.destination_port) {
         let last_offset = total_probes.saturating_sub(1);
         if usize::from(base)
             .checked_add(last_offset)
             .is_none_or(|last| last > usize::from(u16::MAX))
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidPort {
-                    message: format!(
-                        "base UDP port {base} plus {} unique probe(s) exceeds 65535",
-                        total_probes
-                    ),
-                },
-            ));
+            return Err(Error::InvalidPort {
+                message: format!(
+                    "base UDP port {base} plus {} unique probe(s) exceeds 65535",
+                    total_probes
+                ),
+            });
         }
     }
     check_probe_duration(
-        WORKFLOW,
+        &Probes,
         worst_case_duration(request)?,
         request.limits.max_duration,
     )

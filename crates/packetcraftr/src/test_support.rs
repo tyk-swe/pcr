@@ -6,25 +6,31 @@ use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::budget::Deadline;
+use bytes::Bytes;
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::build::BuiltPacket;
+use packetcraftr_core::decode::DecodedPacket;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::layout::PacketLayout;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::transmit::Report as TransmissionReport;
 
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::evidence::SentPacket;
+use crate::execution::ExchangeEvidenceError;
+use crate::execution::{Executor, Request};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
-use crate::probe::{Executor, Request};
 use crate::target::Authorized;
 use crate::target::Error as TargetError;
 use crate::target::Hostname;
 use crate::target::Resolver;
 use crate::target::Target;
+use crate::{BoundaryError, StatsOverflow};
 
 /// A deadline no fixture comes close to spending.
 pub(crate) fn live() -> Deadline {
@@ -191,5 +197,77 @@ fn materialized_route() -> crate::route::Materialized {
             synthesized_ethernet: false,
         },
         neighbor_resolution: None,
+    }
+}
+
+/// Builds decoded evidence for `packet` with an explicit timestamp, wire bytes,
+/// and diagnostics. Scan, traceroute, fuzz, and evidence-selection tests share
+/// this constructor; each keeps only a thin adapter when it needs fixed bytes.
+pub(crate) fn decoded_packet(
+    packet: Packet,
+    timestamp: SystemTime,
+    bytes: &[u8],
+    diagnostics: Vec<Diagnostic>,
+) -> DecodedPacket {
+    let frame = evidence_frame(timestamp, bytes);
+    DecodedPacket {
+        packet,
+        original: frame.bytes().clone(),
+        frame,
+        layout: PacketLayout::default(),
+        diagnostics,
+    }
+}
+
+pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
+    Frame::new(timestamp, LinkType::RAW, Bytes::copy_from_slice(bytes))
+        .expect("probe test fixture frame carries bytes")
+}
+
+/// Every failure the shared execution machinery raises, as [`TestErrors`]
+/// names it: the step it concerns and the original source.
+#[derive(Debug)]
+pub(crate) enum Failure {
+    DurationLimit(u64, DeadlineExceeded),
+    Interrupted(u64, Interrupted),
+    Clock(u64, Box<dyn std::error::Error + Send + Sync>),
+    InvalidLimit(&'static str),
+    Authorization,
+    Execution(u64, BoundaryError),
+    InvalidEvidence(u64, ExchangeEvidenceError),
+    StatsOverflow(u64, StatsOverflow),
+}
+
+/// An error adapter that records each failure as a [`Failure`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TestErrors;
+
+impl crate::execution::Errors for TestErrors {
+    type Error = Failure;
+    type Step = u64;
+
+    fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> Failure {
+        Failure::InvalidLimit(field)
+    }
+    fn authorization(&self, _: BoundaryError) -> Failure {
+        Failure::Authorization
+    }
+    fn duration_limit(&self, step: u64, source: DeadlineExceeded) -> Failure {
+        Failure::DurationLimit(step, source)
+    }
+    fn interrupted(&self, step: u64, source: Interrupted) -> Failure {
+        Failure::Interrupted(step, source)
+    }
+    fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
+        Failure::Clock(step, source)
+    }
+    fn execution(&self, step: u64, source: BoundaryError) -> Failure {
+        Failure::Execution(step, source)
+    }
+    fn invalid_evidence(&self, step: u64, source: ExchangeEvidenceError) -> Failure {
+        Failure::InvalidEvidence(step, source)
+    }
+    fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {
+        Failure::StatsOverflow(step, source)
     }
 }

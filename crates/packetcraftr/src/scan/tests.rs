@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::probe::ErrorKind;
-use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
+use super::Error;
+use crate::probe::test_support::{ProgressiveExecutor, private_policy};
 use crate::progress::Runtime;
+use crate::test_support::decoded_packet;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
     network::{Icmpv4, Ipv4, Ipv6},
@@ -20,8 +21,9 @@ use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::probe::probe_packet;
 use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_ports};
+use crate::execution::Executor;
 use crate::policy::PolicyAuthorizer;
-use crate::probe::{Execution, Executor, ProbeStatus, Transport};
+use crate::probe::{Execution, ProbeStatus, Transport};
 use crate::target::Target;
 use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
@@ -141,10 +143,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
         &mut NoopClock,
     )
     .unwrap_err();
-    assert!(
-        matches!(error.kind, ErrorKind::InvalidEvidence { .. }),
-        "{error:?}"
-    );
+    assert!(matches!(error, Error::InvalidEvidence { .. }), "{error:?}");
 
     let mut executor = TimeoutExecutor::default();
     let report = run(
@@ -358,8 +357,8 @@ fn scan_one_probe_budget_executes_and_rejects_excess_probes() {
     )
     .expect_err("two probes exceed the one-probe budget");
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidLimit {
+        error,
+        Error::InvalidLimit {
             field: "probes",
             value: 2,
             ..
@@ -393,8 +392,8 @@ fn scan_probe_limit_precedes_duration_planning() {
 
     assert!(
         matches!(
-            error.kind,
-            ErrorKind::InvalidLimit {
+            error,
+            Error::InvalidLimit {
                 field: "probes",
                 ..
             }
@@ -505,8 +504,8 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     .unwrap_err();
 
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message }
+        error,
+        Error::InvalidEvidence { sequence: 1, message }
             if message == "sent packet does not preserve the scan destination and probe identity"
     ));
 }
@@ -547,10 +546,7 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
     )
     .expect_err("the second batch must fail");
 
-    assert!(matches!(
-        error.kind,
-        ErrorKind::Execution { sequence: 1, .. }
-    ));
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -596,7 +592,7 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error.kind, ErrorKind::Output { .. }));
+    assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "io.test_output"
@@ -693,8 +689,8 @@ fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
     )
     .expect_err("a third distinct port exceeds the bound");
 
-    match error.kind {
-        ErrorKind::InvalidLimit {
+    match error {
+        Error::InvalidLimit {
             field,
             value,
             reason,
@@ -723,10 +719,7 @@ fn a_validated_request_selects_its_declared_ports_once_each() {
     let error = request
         .selected_ports()
         .expect_err("two distinct ports exceed max_ports=1");
-    assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidLimit { field: "ports", .. }
-    ));
+    assert!(matches!(error, Error::InvalidLimit { field: "ports", .. }));
 }
 
 #[derive(Default)]
@@ -1100,4 +1093,21 @@ fn scan_replies_with_a_stale_identity_count_as_lost_not_received() {
     assert_eq!(report.rtt.received, 0);
     assert_eq!(report.rtt.lost, 2);
     assert_eq!(report.rtt.min, None);
+}
+
+/// An authorized resolution without an address of the requested family fails
+/// in the scan's own vocabulary.
+#[test]
+fn a_family_miss_is_reported_as_a_scan_error() {
+    use packetcraftr_core::error::Classified as _;
+
+    let error = crate::target::FamilyGate::new(Family::Ipv4, Error::family)
+        .require(&[])
+        .expect_err("an empty resolution fails the family gate");
+    assert!(matches!(error, Error::Family { family: "IPv4" }));
+    assert_eq!(
+        error.to_string(),
+        "resolved target has no IPv4 address selected for this scan"
+    );
+    assert_eq!(error.classification().code, "packet.target_address_family");
 }

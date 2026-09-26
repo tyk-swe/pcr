@@ -114,7 +114,7 @@ pub(super) fn emit_complete(
     )
 }
 
-pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {
+pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
     use packetcraftr_core::error::Classified;
     let mut cli =
         CliError::from_classification(error.classification(), error.to_string(), error.causes())

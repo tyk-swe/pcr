@@ -8,46 +8,8 @@ use packetcraftr_core::budget::{Cancellation, Cancelled};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::*;
-use crate::test_support::RecordingClock;
-
-#[derive(Debug)]
-enum Failure {
-    DurationLimit(u64, DeadlineExceeded),
-    Interrupted(u64, Interrupted),
-    Clock(u64, Box<dyn std::error::Error + Send + Sync>),
-    Execution(u64, BoundaryError),
-    InvalidEvidence(u64, String),
-    StatsOverflow(u64, StatsOverflow),
-}
-
-struct TestErrors;
-
-impl PacingErrors for TestErrors {
-    type Error = Failure;
-    type Step = u64;
-
-    fn duration_limit(&self, step: u64, source: DeadlineExceeded) -> Failure {
-        Failure::DurationLimit(step, source)
-    }
-    fn interrupted(&self, step: u64, source: Interrupted) -> Failure {
-        Failure::Interrupted(step, source)
-    }
-    fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
-        Failure::Clock(step, source)
-    }
-}
-
-impl Errors for TestErrors {
-    fn execution(&self, step: u64, source: BoundaryError) -> Failure {
-        Failure::Execution(step, source)
-    }
-    fn invalid_evidence(&self, step: u64, message: String) -> Failure {
-        Failure::InvalidEvidence(step, message)
-    }
-    fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {
-        Failure::StatsOverflow(step, source)
-    }
-}
+use crate::StatsOverflow;
+use crate::test_support::{Failure, RecordingClock, TestErrors};
 
 #[derive(Debug, thiserror::Error)]
 #[error("pacing timer failed")]
@@ -392,7 +354,7 @@ fn a_permit_mismatch_fails_before_validation_or_accounting() {
 
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(3, message) if message.contains("different execution permit")
+        Failure::InvalidEvidence(3, ExchangeEvidenceError::PermitMismatch)
     ));
     assert!(!validated);
     assert_eq!(context.into_stats(), Stats::default());
@@ -482,4 +444,16 @@ fn stats_overflow_is_mapped_through_the_adapter_and_leaves_stats_untouched() {
 
     assert!(matches!(error, Failure::StatsOverflow(3, StatsOverflow)));
     assert_eq!(context.into_stats(), saturated);
+}
+
+#[test]
+fn a_rate_delay_names_an_invalid_rate_through_the_adapter() {
+    assert_eq!(
+        rate_delay(&TestErrors, "probes_per_second", 3, Some(3)).unwrap(),
+        Duration::from_secs(1)
+    );
+    assert!(matches!(
+        rate_delay(&TestErrors, "probes_per_second", 1, Some(0)),
+        Err(Failure::InvalidLimit("probes_per_second"))
+    ));
 }

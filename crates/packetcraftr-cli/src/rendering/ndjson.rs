@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::progress::{EmitError, Runtime, Sink};
+use packetcraftr::progress::{EmitError, Runtime, Worker};
 use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
@@ -37,7 +37,7 @@ pub(crate) fn write_unattributed_error(
     command: Option<output::contract::Command>,
     error: output::envelope::Error,
 ) -> Result<(), CliError> {
-    let sink = Sink::new_in(&Runtime::new(1), move |error| {
+    let sink = Worker::new_in(&Runtime::new(1), move |error| {
         output::stream::write_unattributed_error(io::stdout(), command, error)
             .map_err(|error| CliError::from(error).into_boundary_error())
     })

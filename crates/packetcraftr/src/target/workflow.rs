@@ -3,28 +3,12 @@
 
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::time::Duration;
 
 use super::{Family, Target};
-use packetcraftr_core::budget::{Deadline, Interrupted};
-use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::budget::Deadline;
 
-use crate::clock::check_deadline;
+use crate::execution::Errors;
 use crate::policy::{Authorizer, Operation, WireLimits};
-
-/// How a workflow names the failures each admission gate can raise.
-pub(crate) trait GateErrors {
-    type Error;
-    /// The elapsed-time budget was spent at a policy boundary.
-    fn duration_limit(&self, actual: Duration, limit: Duration) -> Self::Error;
-    /// The authorizer refused the declared target or the operation limits.
-    fn authorization(&self, source: BoundaryError) -> Self::Error;
-    /// A cooperative `Deadline::enforce` boundary refused: the operation was
-    /// cancelled or its budget was spent.
-    fn interrupted(&self, source: Interrupted) -> Self::Error;
-    /// Resolution produced no address the requested family accepts.
-    fn family(&self, family: Family) -> Self::Error;
-}
 
 /// The admitted address set a resolution produced: the declared target
 /// string plus the family-filtered, deduplicated addresses.
@@ -45,19 +29,19 @@ pub(crate) fn resolve_selected<A, G>(
 ) -> Result<SelectedTargets, G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
 {
-    let duration_error = |actual, limit| gates.duration_limit(actual, limit);
-    check_deadline(deadline, duration_error)?;
+    let check = || check_deadline(deadline, gates);
+    check()?;
     let resolved = authorizer.resolve_and_authorize(target);
-    check_deadline(deadline, duration_error)?;
+    check()?;
     let resolved = resolved.map_err(|source| gates.authorization(source))?;
 
     let declared = resolved.declared.to_string();
     let mut addresses = Vec::with_capacity(resolved.addresses.len());
     let mut seen = HashSet::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
-        check_deadline(deadline, duration_error)?;
+        check()?;
         if family.accepts(address) && seen.insert(address) {
             addresses.push(address);
         }
@@ -78,13 +62,20 @@ pub(crate) fn approve_operation<A, G>(
 ) -> Result<(), G::Error>
 where
     A: Authorizer,
-    G: GateErrors,
+    G: Errors,
 {
-    let duration_error = |actual, limit| gates.duration_limit(actual, limit);
-    check_deadline(deadline, duration_error)?;
+    check_deadline(deadline, gates)?;
     let approval = authorizer.authorize_operation(operation);
-    check_deadline(deadline, duration_error)?;
+    check_deadline(deadline, gates)?;
     approval.map_err(|source| gates.authorization(source))
+}
+
+/// The elapsed-time check on each side of a policy boundary, reported for the
+/// operation as a whole.
+fn check_deadline<G: Errors>(deadline: &Deadline, gates: &G) -> Result<(), G::Error> {
+    deadline
+        .check()
+        .map_err(|source| gates.duration_limit(G::Step::default(), source))
 }
 
 pub(crate) const fn wire_limits(packets: u64, maximum_wire_bytes: u64) -> Operation<'static> {

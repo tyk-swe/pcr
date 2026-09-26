@@ -9,7 +9,7 @@ use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
 use packetcraftr::deadline::DeadlineExt as _;
-use packetcraftr::progress::{Runtime, Sink};
+use packetcraftr::progress::{Runtime, Worker};
 
 use serde::Serialize;
 
@@ -63,7 +63,7 @@ struct EncoderOutput {
 enum EncoderWriter {
     Direct(Box<dyn Write + Send>),
     Bounded {
-        sink: Sink<Vec<u8>>,
+        sink: Worker<Vec<u8>>,
         timeout: Duration,
     },
 }
@@ -144,7 +144,7 @@ impl StreamEncoder {
         runtime: &Runtime,
         timeout: Duration,
     ) -> Result<Self, BoundaryError> {
-        let sink = Sink::new_in(runtime, move |line: Vec<u8>| {
+        let sink = Worker::new_in(runtime, move |line: Vec<u8>| {
             writer
                 .write_all(&line)
                 .and_then(|()| writer.flush())

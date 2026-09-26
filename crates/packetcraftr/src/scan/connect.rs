@@ -3,14 +3,16 @@
 
 //! Explicit kernel TCP scanning with socket evidence and bounded rolling admission.
 
-use super::{Classification, Request, WORKFLOW};
+use super::error::Probes;
+use super::{Classification, Error, Request};
 use crate::deadline::DeadlineExt as _;
 use crate::{
     BoundaryError,
     clock::Clock,
+    execution::Sink,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
-    probe::{Error, ErrorKind, Transport, enforce_deadline},
-    target::{DeclaredTargets, admit_selection, approve_operation},
+    probe::{Transport, enforce_deadline},
+    target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
 };
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
@@ -132,34 +134,29 @@ where
     Ok(Report { summary, endpoints })
 }
 
-pub fn run_with_events<P, A, C, F>(
+pub fn run_with_events<P, A, C, S>(
     request: &Request,
     authorizer: &mut A,
     provider: Arc<P>,
     clock: &mut C,
     runtime: &crate::progress::Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     P: Provider + 'static,
     P::Stream: 'static,
     A: Authorizer,
     C: Clock,
-    F: FnMut(Probe) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Probe, Ack = ()>,
 {
-    let observe = crate::probe::runner::sink_observer(
+    let observe = crate::execution::publisher(
         runtime,
-        emit,
-        |error| {
-            Error::new(
-                WORKFLOW,
-                ErrorKind::DurationLimit {
-                    actual: error.actual,
-                    limit: error.limit,
-                },
-            )
+        sink,
+        |error| Error::DurationLimit {
+            actual: error.actual,
+            limit: error.limit,
         },
-        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
+        |source| Error::Output { source },
     )?;
     run_observed(request, authorizer, provider, clock, observe)
 }
@@ -174,26 +171,20 @@ struct Active<S> {
     timeout: Duration,
 }
 fn invalid(field: &'static str, value: usize, reason: &str) -> Error {
-    Error::new(
-        WORKFLOW,
-        ErrorKind::InvalidLimit {
-            field,
-            value: value as u64,
-            reason: reason.to_owned(),
-        },
-    )
+    Error::InvalidLimit {
+        field,
+        value: value as u64,
+        reason: reason.to_owned(),
+    }
 }
 fn execution(
     sequence: u64,
     source: impl packetcraftr_core::error::Classified + Send + Sync + 'static,
 ) -> Error {
-    Error::new(
-        WORKFLOW,
-        ErrorKind::Execution {
-            sequence,
-            source: BoundaryError::from_error(source),
-        },
-    )
+    Error::Execution {
+        sequence,
+        source: BoundaryError::from_error(source),
+    }
 }
 
 /// The authorized connect plan: every endpoint to probe, the total attempt
@@ -236,13 +227,13 @@ fn planned<A: Authorizer>(
     let (selected, planned) = admit_selection(
         authorizer,
         deadline,
-        &WORKFLOW,
+        &Probes,
         DeclaredTargets {
             selection: &request.targets,
-            family: request.address_family,
+            family: FamilyGate::new(request.address_family, Error::family),
             max_targets: request.limits.max_targets,
         },
-        |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),
+        Error::TargetSelection,
         |selected| {
             let count = selected
                 .addresses
@@ -250,7 +241,7 @@ fn planned<A: Authorizer>(
                 .checked_mul(ports.len())
                 .and_then(|count| count.checked_mul(request.attempts as usize))
                 .ok_or_else(|| invalid("probes", usize::MAX, "probe count overflow"))?;
-            crate::probe::limits::check_probe_count(WORKFLOW, count, request.limits.max_probes)?;
+            crate::probe::check_probe_count(&Probes, count, request.limits.max_probes)?;
             let delay = crate::clock::rate_delay(1, request.probes_per_second)
                 .ok_or_else(|| invalid("rate", 0, "invalid rate"))?;
             let windows = u32::try_from(count.div_ceil(request.max_in_flight))
@@ -264,8 +255,8 @@ fn planned<A: Authorizer>(
                         .and_then(|pacing| duration.checked_add(pacing))
                 })
                 .ok_or_else(|| invalid("duration", count, "duration overflow"))?;
-            crate::probe::limits::check_probe_duration(
-                WORKFLOW,
+            crate::probe::check_probe_duration(
+                &Probes,
                 planned_duration,
                 request.limits.max_duration,
             )?;
@@ -319,22 +310,12 @@ where
     let final_endpoints = [endpoint];
     let operation = SocketOperation::new(&final_endpoints, planned.limits)
         .map_err(|source| execution(next as u64, source))?;
-    approve_operation(
-        authorizer,
-        Operation::Socket(operation),
-        deadline,
-        &WORKFLOW,
-    )?;
+    approve_operation(authorizer, Operation::Socket(operation), deadline, &Probes)?;
     let timeout = deadline
         .bounded_timeout(request.timeout)
-        .map_err(|source| {
-            Error::new(
-                WORKFLOW,
-                ErrorKind::DurationLimit {
-                    actual: source.actual,
-                    limit: source.limit,
-                },
-            )
+        .map_err(|source| Error::DurationLimit {
+            actual: source.actual,
+            limit: source.limit,
         })?;
     let admitted = Instant::now();
     let scheduled_at = SystemTime::now();
@@ -409,7 +390,7 @@ where
     let started = Instant::now();
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let (resolved_addresses, planned) = planned(request, authorizer, &deadline)?;
     let mut stats = Stats::default();
     let mut rtt = super::report::RttAccumulator::default();
@@ -418,7 +399,7 @@ where
     let mut next_start = clock.now();
     let mut evidence_bytes = 0usize;
     while next < planned.count || !active.is_empty() {
-        enforce_deadline(WORKFLOW, &deadline)?;
+        enforce_deadline(&Probes, &deadline)?;
         let mut admission_held = false;
         while next < planned.count
             && active.len() < request.max_in_flight
@@ -441,7 +422,7 @@ where
         }
         let mut index = 0;
         while index < active.len() {
-            enforce_deadline(WORKFLOW, &deadline)?;
+            enforce_deadline(&Probes, &deadline)?;
             let Some(probe) = settle_active(&mut active, index)? else {
                 index += 1;
                 continue;
@@ -485,28 +466,18 @@ where
             if !wait.is_zero() {
                 deadline
                     .start_accounting(Duration::ZERO)
-                    .map_err(|source| {
-                        Error::new(
-                            WORKFLOW,
-                            ErrorKind::DurationLimit {
-                                actual: source.actual,
-                                limit: source.limit,
-                            },
-                        )
+                    .map_err(|source| Error::DurationLimit {
+                        actual: source.actual,
+                        limit: source.limit,
                     })?;
-                clock.sleep(wait).map_err(|source| {
-                    Error::new(
-                        WORKFLOW,
-                        ErrorKind::Clock {
-                            sequence: next as u64,
-                            source: Box::new(source),
-                        },
-                    )
+                clock.sleep(wait).map_err(|source| Error::Clock {
+                    sequence: next as u64,
+                    source: Box::new(source),
                 })?;
             }
         }
     }
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     stats.elapsed = started.elapsed();
     stats.rtt = rtt.finish();
     Ok(Summary {
@@ -546,13 +517,10 @@ fn finish_probe<S: tcp::Stream>(
                 )
             })?;
             if peer != entry.endpoint {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidEvidence {
-                        sequence: entry.sequence,
-                        message: "TCP provider returned a different peer endpoint".to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidEvidence {
+                    sequence: entry.sequence,
+                    message: "TCP provider returned a different peer endpoint".to_owned(),
+                });
             }
             probe.local = Some(stream.local_addr().map_err(|source| {
                 execution(

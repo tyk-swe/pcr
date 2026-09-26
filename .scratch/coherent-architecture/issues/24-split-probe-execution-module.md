@@ -11,9 +11,32 @@ Phase 3.
 
 **Blocked by:** 23
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `probe` is imported only by scan and traceroute.
-- [ ] `scan::Error` and `traceroute::Error` are re-exported from their modules. The CLI no longer imports `probe::Error`.
-- [ ] Execution-context and batch-evidence tests move with the code, with no duplicates.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] `probe` is imported only by scan and traceroute.
+- [x] `scan::Error` and `traceroute::Error` are re-exported from their modules. The CLI no longer imports `probe::Error`.
+- [x] Execution-context and batch-evidence tests move with the code, with no duplicates.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Wire correlation (`observe`, identity and ephemeral-port helpers) and
+  `Transport` moved to a private `correlation` module (decision 9); `probe`
+  stays public as the home of `Transport`, `ProbeEndpoint`, and `ProbeStatus`
+  and, per decision f, still re-exports the executor contract.
+- The family miss is not an adapter method: fuzz implements the adapter and
+  can never raise it. It travels with the declared family as
+  `target::FamilyGate`. Replay only paces, so `execution::pause` returns a
+  typed `Paused` that replay names itself instead of implementing the adapter.
+  The adapter gained `invalid_limit`, which the one `execution::rate_delay`
+  uses. Connect scan and the scan pipeline keep their own rate checks because
+  their errors differ.
+- `ExchangeEvidenceError` is public at the crate root under its ticket name, so
+  it does not clash with `dns::EvidenceError` (renamed in 26).
+- `probe::Workflow` is crate-private and only picks evidence diagnostics and
+  the wording of evidence errors.
+- The sink contract is `packetcraftr::Sink<E>` with an `Ack` answer type;
+  `progress::Sink` became `progress::Worker<T, A = ()>`, and exchange events
+  also go through `execution::publisher`. `Discard` was not added: nothing
+  uses it yet.
+

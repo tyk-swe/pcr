@@ -14,9 +14,9 @@ use crate::Stats;
 use crate::clock::Clock;
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
 use crate::evidence::ExecutionPermit;
+use crate::execution::Executor;
 use crate::execution::Receipt;
 use crate::policy::Authorizer;
-use crate::probe::Executor;
 use crate::target::{Family, Target, resolve_selected};
 
 use super::super::classification::{
@@ -24,7 +24,7 @@ use super::super::classification::{
 };
 use super::super::error::Error;
 use super::super::{Event, Exchange, Outcome, Probe, TcpExchange, TcpExecution, TcpExecutor};
-use super::{Gates, Operation};
+use super::{Attempts, Operation};
 
 impl<A, E, C, F> Operation<'_, A, E, C, F>
 where
@@ -156,7 +156,7 @@ where
             &target,
             Family::Any,
             self.execution.deadline(),
-            &Gates,
+            &Attempts,
         );
         self.execution.enforce(probe.attempt)?;
         if attempt_deadline.check().is_err() {

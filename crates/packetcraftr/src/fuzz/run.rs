@@ -8,18 +8,19 @@ use packetcraftr_core::{build::Builder, fuzz as packet_fuzz, packet::Packet, reg
 
 use crate::clock::Clock;
 use crate::execution::{Context, Grant};
+use crate::execution::{Sink, publisher};
 use crate::preparation::exact_bytes;
-use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{CaseErrors, Error, duration_limit};
 use super::evidence::{Recorder, validate_execution};
 use super::execution::{Execution, ExecutionCase};
-use super::plan::{rate_delay, worst_case_duration};
+use super::plan::worst_case_duration;
 use super::{Case, LiveOptions, Report, Stats, Summary};
+use crate::execution::Executor;
+use crate::execution::rate_delay;
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
-use crate::probe::Executor;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(
@@ -52,21 +53,21 @@ where
 /// preserves its classification on failure. The campaign deadline bounds
 /// publisher waiting and live I/O, not callback execution; an outliving
 /// callback holds its worker permit until it returns.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<A, E, C, S>(
     input: RunInput<'_>,
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor<ExecutionCase>,
     C: Clock,
-    F: FnMut(Case) -> Result<(), crate::BoundaryError> + Send + 'static,
+    S: Sink<Case, Ack = ()>,
 {
-    let observe = sink_observer(runtime, emit, duration_limit, |source| Error::Output {
+    let observe = publisher(runtime, sink, duration_limit, |source| Error::Output {
         source,
     })?;
     run_observed(input, authorizer, executor, clock, observe)
@@ -74,17 +75,17 @@ where
 
 /// Generates an offline campaign and publishes each case through a bounded
 /// callback worker admitted by `runtime`, without any live execution.
-pub fn run_offline_with_events<F>(
+pub fn run_offline_with_events<S>(
     request: &packet_fuzz::Request,
     packet: Packet,
     registry: Arc<Registry>,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<packet_fuzz::Summary, packet_fuzz::Error>
 where
-    F: FnMut(packet_fuzz::Case) -> Result<(), crate::BoundaryError> + Send + 'static,
+    S: Sink<packet_fuzz::Case, Ack = ()>,
 {
-    let observe = sink_observer(runtime, emit, packet_fuzz::Error::from, |source| {
+    let observe = publisher(runtime, sink, packet_fuzz::Error::from, |source| {
         packet_fuzz::Error::Output { source }
     })?;
     packet_fuzz::run_observed(request, packet, registry, observe)
@@ -133,7 +134,7 @@ where
         built_case_count,
         ..
     } = prepared;
-    let delay = rate_delay(live.cases_per_second)?;
+    let delay = rate_delay(&CaseErrors, "cases_per_second", 1, live.cases_per_second)?;
     let builder = Builder::new(Arc::clone(&registry));
     let mut recorder = Recorder::new(Arc::clone(&registry), request.limits, live.limits);
     let mut context = Context::new(&mut deadline, clock, CaseErrors);

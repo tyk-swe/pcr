@@ -7,7 +7,9 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    BuildMode, CaptureLimitsArgs, FuzzPolicyArgs, RecipeArgs, RouteSelectionArgs,
+    BuildMode, CaptureLimitsArgs, DestinationAllowlistArgs, PermissivePacketArgs,
+    PublicDestinationArgs, RecipeArgs, RouteSelectionArgs, SourceSpoofingArgs, TrafficBudgetArgs,
+    Transmitted,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"NDJSON publishes each case as soon as its offline or live outcome is final, then one complete event with campaign statistics. Earlier case records remain valid if a later case fails.
@@ -122,5 +124,36 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: CaptureLimitsArgs,
     #[command(flatten)]
-    pub(crate) policy: FuzzPolicyArgs,
+    pub(crate) policy: PolicyArgs,
+}
+
+/// `fuzz`: mutated packets, addressed numerically, so no hostname resolution.
+#[derive(Clone, Debug, clap::Args)]
+pub(crate) struct PolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    permissive_packet: PermissivePacketArgs,
+    #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    budgets: TrafficBudgetArgs<Transmitted>,
+}
+
+impl PolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.budgets.resources(settings);
+    }
+
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
+        self.budgets.apply_to(&mut policy);
+        policy
+    }
 }

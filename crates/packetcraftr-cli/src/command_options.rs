@@ -12,8 +12,9 @@ pub(crate) use offline_limits::{
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{
-    Captured, FuzzPolicyArgs, HostnamePolicyArgs, ReplayPolicyArgs, RoutePolicyArgs,
-    SendPolicyArgs, TrafficBudgetArgs,
+    Budget, DestinationAllowlistArgs, HostnamePolicyArgs, HostnameResolutionArgs,
+    PermissivePacketArgs, PublicDestinationArgs, SendPolicyArgs, SourceSpoofingArgs,
+    TrafficBudgetArgs, Transmitted, default_limit_bytes,
 };
 pub(crate) use recipe::{BuildMode, RecipeArgs};
 pub(crate) use route::{LinkMode, RouteArgs, RouteSelectionArgs};
@@ -35,8 +36,8 @@ mod template;
 mod compression;
 pub(crate) use compression::Compression;
 
-mod capture_output;
-pub(crate) use capture_output::{CaptureOutput, CaptureOutputArgs};
+mod timestamp;
+pub(crate) use timestamp::parse_timestamp;
 
 mod application;
 pub(crate) use application::{ApplicationLimitsArgs, validate_output_bytes};

@@ -38,7 +38,7 @@ impl EpochBoundsArgs {
 /// Reuses the capture timestamp parser: non-negative Unix seconds with an
 /// optional fraction of at most nine digits, never rounded.
 fn epoch(input: &str) -> Result<SystemTime, String> {
-    super::capture_output::parse_timestamp(input).map_err(|error| error.message)
+    super::parse_timestamp(input).map_err(|error| error.message)
 }
 
 #[cfg(test)]

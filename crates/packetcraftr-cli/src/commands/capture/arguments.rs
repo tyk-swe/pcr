@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{CaptureLimitsArgs, Captured, DecodeArgs, TrafficBudgetArgs};
+use crate::command_options::{
+    Budget, CaptureLimitsArgs, DecodeArgs, TrafficBudgetArgs, default_limit_bytes,
+};
 use packetcraftr_netio::capture::{TimestampPrecision, TimestampSource};
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Live capture may require native features, dependencies, and privileges.
@@ -200,4 +202,24 @@ impl From<Retention> for crate::output::capture::Retention {
             Retention::Ring => Self::Ring,
         }
     }
+}
+
+/// Frames this operation only receives.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Captured;
+
+/// Frames one capture may keep; independent of the transmitted ceiling.
+pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
+
+impl Budget for Captured {
+    fn max_packets() -> u64 {
+        DEFAULT_CAPTURED_FRAMES
+    }
+
+    fn max_bytes() -> u64 {
+        default_limit_bytes()
+    }
+
+    const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
+    const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
 }

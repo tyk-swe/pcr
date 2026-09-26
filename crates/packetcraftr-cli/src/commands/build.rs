@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod capture_output;
 
 use crate::output::contract::BuildFormat;
 
@@ -64,7 +65,7 @@ pub(super) fn run(
     let builder = core::build::Builder::new(registry);
     let mut writer = capture
         .as_ref()
-        .map(crate::command_options::CaptureOutput::writer)
+        .map(capture_output::CaptureOutput::writer)
         .transpose()?;
     let mut summary = output::build::Complete::default();
     let mut diagnostics = Vec::new();

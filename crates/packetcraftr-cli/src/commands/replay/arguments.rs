@@ -3,7 +3,10 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{CaptureReaderBoundsArgs, LinkMode, ReplayPolicyArgs};
+use crate::command_options::{
+    Budget, CaptureReaderBoundsArgs, DestinationAllowlistArgs, LinkMode, PermissivePacketArgs,
+    PublicDestinationArgs, SourceSpoofingArgs, TrafficBudgetArgs,
+};
 use clap::ValueEnum;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Replay is policy-gated and may require native features, dependencies, and privileges.
@@ -89,5 +92,54 @@ pub(crate) struct Args {
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]
-    pub(crate) policy: ReplayPolicyArgs,
+    pub(crate) policy: PolicyArgs,
+}
+
+/// Frames read from a capture file and replayed onto the wire, which run to
+/// far larger counts than a hand-built operation.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Streamed;
+
+impl Budget for Streamed {
+    fn max_packets() -> u64 {
+        packetcraftr_core::capture_file::DEFAULT_STREAM_FRAMES
+    }
+
+    fn max_bytes() -> u64 {
+        packetcraftr_core::capture_file::DEFAULT_STREAM_BYTES
+    }
+
+    const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
+    const BYTES_HELP: &'static str = "Maximum wire bytes this operation is authorized to transmit";
+}
+
+/// `replay`: captured frames sent as they were captured, sources included.
+#[derive(Clone, Debug, clap::Args)]
+pub(crate) struct PolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    permissive_packet: PermissivePacketArgs,
+    #[command(flatten)]
+    source_spoofing: SourceSpoofingArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+    #[command(flatten)]
+    budgets: TrafficBudgetArgs<Streamed>,
+}
+
+impl PolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.budgets.resources(settings);
+    }
+
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.permissive_packet.apply_to(&mut policy);
+        self.source_spoofing.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
+        self.budgets.apply_to(&mut policy);
+        policy
+    }
 }

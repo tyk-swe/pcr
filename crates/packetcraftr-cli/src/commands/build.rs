@@ -98,13 +98,11 @@ pub(super) fn run(
                     stream_capture_error("write capture output failed", source)
                 })?;
             } else if format == BuildFormat::Ndjson {
-                let (packet, packet_diagnostics) = output::build::Report::from_built(built);
-                stream.emit_data(
-                    output::build::PacketEvent {
-                        packet_index: summary.packets_built,
-                        packet,
-                    },
-                    packet_diagnostics,
+                stream.emit_published(
+                    output::envelope::Published::<output::build::PacketEvent>::from((
+                        summary.packets_built,
+                        built,
+                    )),
                 )?;
             } else {
                 rendering::render_packet(built, format)?;

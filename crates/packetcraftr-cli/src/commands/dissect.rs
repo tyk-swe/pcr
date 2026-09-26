@@ -20,7 +20,7 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
-use crate::rendering::{emit_aggregate, emit_stderr_message, write_hex_line, write_raw};
+use crate::rendering::{emit_published, emit_stderr_message, write_hex_line, write_raw};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::DissectFormat;
@@ -137,19 +137,10 @@ pub(super) fn run(
         DissectFormat::Text => rendering::render_text(&decoded),
         DissectFormat::Hex => write_hex_line(&decoded.original),
         DissectFormat::Raw => write_raw(&decoded.original),
-        DissectFormat::Json => {
-            let (dissection, diagnostics) = if kept {
-                let (result, diagnostics) = output::dissect::Report::from_decoded(decoded);
-                (Some(result), diagnostics)
-            } else {
-                (None, decoded.diagnostics)
-            };
-            emit_aggregate(
-                output::contract::Command::Dissect,
-                output::dissect::AggregateResult::new(dissection),
-                diagnostics,
-            )
-        }
+        DissectFormat::Json => emit_published(
+            output::contract::Command::Dissect,
+            output::envelope::Published::<output::dissect::AggregateResult>::from((kept, decoded)),
+        ),
         DissectFormat::Ndjson | DissectFormat::Csv | DissectFormat::Tsv => Err(CliError::new(
             Kind::Internal,
             "--field output returned before dissection rendering",

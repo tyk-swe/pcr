@@ -200,10 +200,8 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
                             )
                             .map_err(BoundaryError::from_error)?;
                         for change in outcome.changes {
-                            changes.push(|| output::rewrite::Change {
-                                frame: number,
-                                rule: index as u64,
-                                change,
+                            changes.push(|| {
+                                output::rewrite::Change::from((number, index as u64, change))
                             });
                         }
                         changed = outcome.frame;
@@ -222,14 +220,14 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         staged.persist()?;
     }
     let changes_omitted = changes.omitted();
-    let report = output::rewrite::Report {
-        path: args.write.display().to_string(),
-        rule_matches: counts,
-        capture: report,
-        dry_run: args.dry_run,
-        changes: changes.into_items(),
+    let report = output::rewrite::Report::from((
+        args.write.display().to_string(),
+        counts,
+        report,
+        args.dry_run,
+        changes.into_items(),
         changes_omitted,
-    };
+    ));
     match format {
         ToolFormat::Json => emit_aggregate(Command::Rewrite, report, Vec::new()),
         ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),

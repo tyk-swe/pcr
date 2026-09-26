@@ -13,7 +13,6 @@ use self::arguments::Args;
 use super::offline_analysis::{Inspection, inspect};
 use crate::errors::CliError;
 use crate::output::{
-    self,
     contract::{Command, ToolFormat},
     dns_read as wire,
 };
@@ -77,30 +76,19 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
                 &mut transactions,
                 rendering::render_transaction,
             ),
-            Event::Issue(value) => {
-                output.emit(wire::Issue(value), &mut issues, rendering::render_issue)
-            }
+            Event::Issue(value) => output.emit(
+                wire::Issue::from(value),
+                &mut issues,
+                rendering::render_issue,
+            ),
         },
     )?;
-    let run = outcome.run;
-    let complete = wire::Complete {
-        frames_read: run.frames_read,
-        frames_matched: run.frames_matched,
-        summary: outcome.summary,
-        scopes: outcome.scopes,
-        incomplete_datagrams: run.incomplete_sources.len(),
-        source_outcomes_omitted: run.source_outcomes_omitted,
-        ip_reassembly: output::reassembly::Report::from_analysis(&run.ip_reassembly),
-    };
+    let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
+        .map_err(CliError::classified)?;
     match format {
         ToolFormat::Json => emit_aggregate(
             Command::DnsRead,
-            wire::Report {
-                messages,
-                transactions,
-                issues,
-                complete,
-            },
+            wire::Report::from((messages, transactions, issues, complete)),
             Vec::new(),
         ),
         ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),

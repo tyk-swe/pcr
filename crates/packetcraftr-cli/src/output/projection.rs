@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{frame::SourceFrame, stream::StreamRecord};
+use super::{contract::Error, frame::SourceFrame, stream::StreamRecord};
 use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::filter::Projection;
 use serde::{
     Serialize, Serializer,
     ser::{Error as _, SerializeMap, SerializeSeq},
@@ -52,11 +53,31 @@ pub struct Row {
     #[serde(serialize_with = "values")]
     pub values: Vec<Option<FieldValue>>,
 }
+/// A frame's projected cells, at its one-based source position.
+impl TryFrom<(u64, Vec<Option<FieldValue>>)> for Row {
+    type Error = Error;
+
+    fn try_from((source_frame, values): (u64, Vec<Option<FieldValue>>)) -> Result<Self, Error> {
+        Ok(Self {
+            source_frame: source_frame.try_into()?,
+            values,
+        })
+    }
+}
 #[derive(Serialize)]
 pub struct RowEvent<'a> {
     pub columns: &'a [String],
     #[serde(flatten)]
     pub row: &'a Row,
+}
+/// One row under the projection's column names.
+impl<'a> From<(&'a Projection, &'a Row)> for RowEvent<'a> {
+    fn from((projection, row): (&'a Projection, &'a Row)) -> Self {
+        Self {
+            columns: projection.columns(),
+            row,
+        }
+    }
 }
 impl StreamRecord for RowEvent<'_> {
     fn event_name(&self) -> &'static str {
@@ -70,9 +91,29 @@ pub struct Complete {
     pub frames_read: u64,
     pub captured_bytes_read: u64,
 }
+/// The projection's columns, the rows written, and the frames and captured
+/// bytes read.
+impl From<(&Projection, u64, u64, u64)> for Complete {
+    fn from(
+        (projection, rows_written, frames_read, captured_bytes_read): (&Projection, u64, u64, u64),
+    ) -> Self {
+        Self {
+            columns: projection.columns().to_vec(),
+            rows_written,
+            frames_read,
+            captured_bytes_read,
+        }
+    }
+}
 #[derive(Serialize)]
 pub struct Report {
     #[serde(flatten)]
     pub summary: Complete,
     pub rows: Vec<Row>,
+}
+/// The terminal counters and every retained row.
+impl From<(Complete, Vec<Row>)> for Report {
+    fn from((summary, rows): (Complete, Vec<Row>)) -> Self {
+        Self { summary, rows }
+    }
 }

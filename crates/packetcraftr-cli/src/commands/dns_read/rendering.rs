@@ -6,13 +6,12 @@
 
 use std::fmt::Display;
 
-use packetcraftr_core::analysis::dns::Latency;
+use crate::output::dns_read::Latency;
 
 use crate::errors::CliError;
 use crate::output::dns_read as wire;
 use crate::rendering::{
-    comma_separated, document_spelling, optional_display, render_dns_fields, write_stdout_line,
-    write_summary_line,
+    comma_separated, optional_display, render_dns_fields, write_stdout_line, write_summary_line,
 };
 
 /// One message line, then its questions and records and any decode error.
@@ -20,10 +19,10 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
     let flow = &message.flow.flow;
     write_stdout_line(format_args!(
         "DNS {}:{} message={} status={} {} -> {} frames={}",
-        document_spelling(&message.transport),
+        message.transport,
         message.stream,
         message.index,
-        document_spelling(&message.status),
+        message.status,
         endpoint(flow.source, flow.source_port),
         endpoint(flow.destination, flow.destination_port),
         frames(&message.sources),
@@ -41,7 +40,7 @@ pub(super) fn render_transaction(transaction: &wire::Transaction) -> Result<(), 
     write_stdout_line(format_args!(
         "  transaction id={} status={} queries={} response={} latest_latency={}",
         transaction.dns_id,
-        document_spelling(&transaction.status),
+        transaction.status,
         or_none(comma_separated(&transaction.queries)),
         optional_display(transaction.response),
         optional_display(transaction.latest_query_latency.map(latency)),
@@ -51,9 +50,7 @@ pub(super) fn render_transaction(transaction: &wire::Transaction) -> Result<(), 
 pub(super) fn render_issue(issue: &wire::Issue) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "  TCP stream={} frame={} status={}",
-        issue.0.stream,
-        issue.0.number,
-        document_spelling(&issue.0.status),
+        issue.stream, issue.number, issue.status,
     ))
 }
 

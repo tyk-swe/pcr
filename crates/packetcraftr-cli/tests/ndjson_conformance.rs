@@ -132,6 +132,20 @@ fn validate_records(validator: &jsonschema::Validator, records: &[Value]) {
     }
 }
 
+/// A converted event with the diagnostics its conversion carried.
+fn validate_published<T: output::stream::StreamRecord>(
+    command: output::contract::Command,
+    published: output::envelope::Published<T>,
+) {
+    let (sink, bytes) = stream(command);
+    sink.emit_published(published)
+        .expect("typed production event must render");
+    let records = bytes.records();
+    validate_records(schema_validator(), &records);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["status"], "success");
+}
+
 fn validate_typed_event<T: output::stream::StreamRecord>(
     command: output::contract::Command,
     event: T,
@@ -333,13 +347,12 @@ fn sent_packet() -> packetcraftr::SentPacket {
 
 #[test]
 fn production_typed_event_variants_are_schema_valid() {
-    let read =
-        output::read::Event::Frame(output::read::Frame::try_from_frame(1, frame(&[1])).unwrap());
+    let read = output::read::Event::from(output::read::Frame::try_from((1, frame(&[1]))).unwrap());
     validate_typed_event(output::contract::Command::Read, read, Vec::new());
-    let capture = output::capture::Event::try_from_frame(1, frame(&[1])).unwrap();
+    let capture = output::capture::Event::try_from((1, frame(&[1]))).unwrap();
     validate_typed_event(output::contract::Command::Capture, capture, Vec::new());
     let capture_decoded =
-        output::capture::Event::try_from_decoded(1, frame(&[1]), &decoded(&[1])).unwrap();
+        output::capture::Event::try_from((1, frame(&[1]), &decoded(&[1]))).unwrap();
     validate_typed_event(
         output::contract::Command::Capture,
         capture_decoded,
@@ -363,14 +376,14 @@ fn production_typed_event_variants_are_schema_valid() {
         output::replay::Frame {
             pass: 1,
             source_index: 1,
-            interface: packetcraftr_netio::interface::Id {
+            interface: output::network::InterfaceId {
                 name: "fixture0".to_owned(),
                 index: 1,
             },
-            link_mode: packetcraftr_netio::link::Mode::Layer3,
+            link_mode: output::network::LinkMode::Layer3,
             scheduled_delay: Duration::ZERO,
             bytes_sent: 1,
-            frame: output::frame::Captured::try_from_frame(frame(&[1])).unwrap(),
+            frame: output::frame::Captured::try_from(frame(&[1])).unwrap(),
         },
         Vec::new(),
     );
@@ -378,7 +391,7 @@ fn production_typed_event_variants_are_schema_valid() {
         output::contract::Command::Follow,
         output::follow::Chunk {
             direction_generation: 0,
-            direction: packetcraftr_core::analysis::follow::PeerDirection::ClientToServer,
+            direction: output::follow::PeerDirection::ClientToServer,
             frame: 1,
             bytes_hex: "01".to_owned(),
         },
@@ -387,7 +400,7 @@ fn production_typed_event_variants_are_schema_valid() {
     validate_typed_event(
         output::contract::Command::Expert,
         output::expert::Finding {
-            severity: packetcraftr_core::diagnostic::Severity::Warning,
+            severity: output::diagnostic::Severity::Warning,
             code: "fixture.warning",
             frame: 1,
             transport: None,
@@ -435,7 +448,8 @@ fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
                 datagram_bytes: 44,
                 duplicate_fragments: 0,
                 overlap_bytes: 0,
-            },
+            }
+            .into(),
         },
         output::reassembly::Event::IpDatagramIncomplete {
             frame: 7,
@@ -450,12 +464,13 @@ fn ip_reassembly_events() -> [output::reassembly::Event; 3] {
                     duplicate_fragments: 1,
                     overlap_bytes: 0,
                 },
-            ),
+            )
+            .into(),
         },
         output::reassembly::Event::IpOverlapResolved {
             frame: 8,
-            key: ipv4,
-            policy: packetcraftr_core::analysis::reassembly::ip::OverlapPolicy::Last,
+            key: ipv4.into(),
+            policy: packetcraftr_core::analysis::reassembly::ip::OverlapPolicy::Last.into(),
             affected_bytes: 8,
             fragment_count: 3,
             unique_bytes: 24,
@@ -503,7 +518,7 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
         output::follow::Report {
             clock: Default::default(),
             scope: None,
-            transport: packetcraftr_core::analysis::StreamTransport::Udp,
+            transport: output::analysis::StreamTransport::Udp,
             stream: 0,
             client: None,
             server: None,
@@ -532,21 +547,21 @@ fn ip_reassembly_events_and_terminal_reports_are_valid_for_every_offline_stream(
     );
     validate_ip_event_stream(
         output::contract::Command::Tls,
-        output::tls::Event::complete(output::tls::Summary::default()),
+        output::tls::Event::from(output::tls::Summary::default()),
     );
 }
 
 /// A minimal session record: the shape a `gap` session takes when the capture
 /// started after the ClientHello, so the optional halves are exercised too.
 fn tls_session_event() -> output::tls::Event {
-    let endpoint = |last: u8, port: u16| packetcraftr_core::analysis::Endpoint {
+    let endpoint = |last: u8, port: u16| output::analysis::Endpoint {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         port,
     };
     let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
     let id = scopes.intern(None, Vec::new()).unwrap();
-    output::tls::Event::session(output::tls::Session {
-        scope: scopes.definition(id).unwrap().clone(),
+    output::tls::Event::from(output::tls::Session {
+        scope: scopes.definition(id).unwrap().try_into().unwrap(),
         session: 0,
         tcp_stream: 4,
         client_endpoint: endpoint(1, 40_000),
@@ -563,7 +578,7 @@ fn tls_session_event() -> output::tls::Event {
             description_name: Some("handshake_failure"),
         }],
         alerts_dropped: 2,
-        status: packetcraftr_core::analysis::tls::Status::Gap,
+        status: output::tls::Status::Gap,
         reason: Some("no ClientHello observed".to_owned()),
     })
 }
@@ -591,8 +606,8 @@ fn validate_active_event_variants() {
             "warning",
         )),
     ] {
-        let (event, diagnostics) = output::scan::Event::try_from_scan(event).unwrap();
-        validate_typed_event(output::contract::Command::Scan, event, diagnostics);
+        let event = output::envelope::Published::<output::scan::Event>::try_from(event).unwrap();
+        validate_published(output::contract::Command::Scan, event);
     }
     for event in [
         packetcraftr::traceroute::Event::Probe {
@@ -608,8 +623,9 @@ fn validate_active_event_variants() {
             "warning",
         )),
     ] {
-        let (event, diagnostics) = output::traceroute::Event::try_from_traceroute(event).unwrap();
-        validate_typed_event(output::contract::Command::Traceroute, event, diagnostics);
+        let event =
+            output::envelope::Published::<output::traceroute::Event>::try_from(event).unwrap();
+        validate_published(output::contract::Command::Traceroute, event);
     }
     validate_dns_event_variants();
 }
@@ -672,8 +688,8 @@ fn validate_dns_event_variants() {
         )),
     ];
     for event in events {
-        let (event, diagnostics) = output::dns::Event::try_from_dns(event).unwrap();
-        validate_typed_event(output::contract::Command::Dns, event, diagnostics);
+        let event = output::envelope::Published::<output::dns::Event>::try_from(event).unwrap();
+        validate_published(output::contract::Command::Dns, event);
     }
     // The batch terminal record lists each question's deterministic status.
     // `complete` is reserved for the terminal record, so it emits through the
@@ -688,15 +704,15 @@ fn validate_dns_event_variants() {
                     query_name: "1.2.0.192.in-addr.arpa".to_owned(),
                     query_type: packetcraftr::dns::QueryType::PTR.code(),
                     transaction_id: 0x1234,
-                    status: packetcraftr::dns::QuestionStatus::Completed,
-                    outcome: Some(packetcraftr::dns::Outcome::Response),
+                    status: output::dns::QuestionStatus::Completed,
+                    outcome: Some(output::dns::Outcome::Response),
                     error: None,
                 },
                 output::dns::QuestionComplete {
                     query_name: "unreachable.test".to_owned(),
                     query_type: packetcraftr::dns::QueryType::A.code(),
                     transaction_id: 0x1235,
-                    status: packetcraftr::dns::QuestionStatus::Failed,
+                    status: output::dns::QuestionStatus::Failed,
                     outcome: None,
                     error: Some("induced failure".to_owned()),
                 },
@@ -704,7 +720,7 @@ fn validate_dns_event_variants() {
                     query_name: "never.test".to_owned(),
                     query_type: packetcraftr::dns::QueryType::A.code(),
                     transaction_id: 0x1236,
-                    status: packetcraftr::dns::QuestionStatus::Unattempted,
+                    status: output::dns::QuestionStatus::Unattempted,
                     outcome: None,
                     error: None,
                 },
@@ -723,14 +739,15 @@ fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
     if let packetcraftr::dns::AttemptTransport::Udp { response, .. } = &mut evidence.exchange {
         *response = Some(frame(&[4]));
     }
-    let (event, diagnostics) =
-        output::dns::Event::try_from_dns(packetcraftr::dns::Event::Attempt {
+    let event = output::envelope::Published::<output::dns::Event>::try_from(
+        packetcraftr::dns::Event::Attempt {
             context: dns_context(),
             evidence,
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let (sink, bytes) = stream(output::contract::Command::Dns);
-    sink.emit_data(event, diagnostics).unwrap();
+    sink.emit_published(event).unwrap();
     let mut record = bytes.records().remove(0);
     schema_validator()
         .validate(&record)
@@ -805,9 +822,9 @@ fn dns_schema_rejects_truncated_tcp_results() {
 
 fn validate_fuzz_event_variants() {
     let (offline, live) = fuzz_cases();
-    let event = output::fuzz::Event::try_from_offline(offline).unwrap();
+    let event = output::fuzz::Event::try_from(offline).unwrap();
     validate_typed_event(output::contract::Command::Fuzz, event, Vec::new());
-    let event = output::fuzz::Event::try_from_live(live).unwrap();
+    let event = output::fuzz::Event::try_from(live).unwrap();
     validate_typed_event(output::contract::Command::Fuzz, event, Vec::new());
 }
 
@@ -833,8 +850,9 @@ fn validate_exchange_event_variants() {
         )),
     ];
     for event in events {
-        let (event, diagnostics) = output::exchange::Event::try_from_exchange(event).unwrap();
-        validate_typed_event(output::contract::Command::Exchange, event, diagnostics);
+        let event =
+            output::envelope::Published::<output::exchange::Event>::try_from(event).unwrap();
+        validate_published(output::contract::Command::Exchange, event);
     }
 }
 

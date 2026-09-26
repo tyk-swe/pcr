@@ -35,22 +35,25 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         .as_ref()
         .map(crate::command_options::Selector::get)
         .transpose()?;
-    let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
-    let mut result = output::interfaces::Report::new(interfaces);
-    if arguments.timestamp_types {
-        let provider = net::capture::SystemProvider;
-        for interface in &mut result.interfaces {
-            let id = net::interface::Id {
-                name: interface.name.clone(),
-                index: interface.index,
-            };
-            interface.timestamp_types = Some(
-                provider
-                    .timestamp_types(&id)
-                    .map_err(CliError::classified)?,
-            );
-        }
-    }
+    let mut interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
+    // Enumerate timestamp types in published order, so the first failure is
+    // the one for the first interface a reader would see.
+    interfaces.sort_by(|left, right| {
+        (left.id.index, left.id.name.as_str()).cmp(&(right.id.index, right.id.name.as_str()))
+    });
+    let provider = net::capture::SystemProvider;
+    let interfaces = interfaces
+        .into_iter()
+        .map(|info| {
+            let timestamp_types = arguments
+                .timestamp_types
+                .then(|| provider.timestamp_types(&info.id))
+                .transpose()
+                .map_err(CliError::classified)?;
+            Ok((info, timestamp_types))
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    let result = output::interfaces::Report::from(interfaces);
     super::render_aggregate_rows(
         output::contract::Command::Interfaces,
         format,

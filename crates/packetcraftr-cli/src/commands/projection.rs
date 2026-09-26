@@ -108,10 +108,7 @@ impl Projector {
         values: Vec<Option<core::field::FieldValue>>,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
-        let row = Row {
-            source_frame: source_frame.try_into().map_err(CliError::classified)?,
-            values,
-        };
+        let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         self.header()?;
         if matches!(self.format, Format::Csv | Format::Tsv | Format::Text) {
             let separator = if self.format == Format::Csv {
@@ -138,18 +135,12 @@ impl Projector {
             self.charge(buffer.bytes.len())?;
             write_raw(&buffer.bytes)?;
         } else if self.format == Format::Ndjson {
-            let event = output::projection::RowEvent {
-                columns: self.projection.columns(),
-                row: &row,
-            };
+            let event = output::projection::RowEvent::from((&self.projection, &row));
             let bytes = bounded_json_len(&event, self.remaining)
                 .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
             stream.emit_data(
-                output::projection::RowEvent {
-                    columns: self.projection.columns(),
-                    row: &row,
-                },
+                output::projection::RowEvent::from((&self.projection, &row)),
                 Vec::new(),
             )?;
         } else {
@@ -168,19 +159,16 @@ impl Projector {
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         self.header()?;
-        let summary = output::projection::Complete {
-            columns: self.projection.columns().to_vec(),
-            rows_written: self.count,
+        let summary = output::projection::Complete::from((
+            &self.projection,
+            self.count,
             frames_read,
             captured_bytes_read,
-        };
+        ));
         match self.format {
             Format::Json => emit_aggregate(
                 self.command,
-                output::projection::Report {
-                    summary,
-                    rows: self.rows,
-                },
+                output::projection::Report::from((summary, self.rows)),
                 Vec::new(),
             ),
             Format::Ndjson => stream.complete(summary, Vec::new()).map_err(Into::into),

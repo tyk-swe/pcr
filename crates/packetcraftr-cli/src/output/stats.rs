@@ -3,23 +3,14 @@
 
 //! Structured capture-statistics output.
 
-use packetcraftr_core::analysis::stats::IoBucketStat as IoBucket;
-
-use packetcraftr_core::analysis::stats::PortStat as Port;
-
-use packetcraftr_core::analysis::stats::EndpointStat as Endpoint;
-
-use packetcraftr_core::analysis::stats::ProtocolStat as Protocol;
-
-use packetcraftr_core::analysis::StreamTransport as Transport;
-
 use std::net::IpAddr;
 use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::analysis::stats::ConversationStat;
+use packetcraftr_core::analysis::stats as library;
 
+use super::analysis::{Clock, Scope, StreamTransport as Transport};
 use super::contract::Error;
 use super::frame::Timestamp;
 
@@ -34,15 +25,80 @@ pub enum Table {
     Fragments,
 }
 
-impl From<Table> for packetcraftr_core::analysis::stats::Table {
-    fn from(value: Table) -> Self {
-        match value {
-            Table::Conversations => Self::Conversations,
-            Table::Endpoints => Self::Endpoints,
-            Table::Protocols => Self::Protocols,
-            Table::Ports => Self::Ports,
-            Table::Io => Self::Io,
-            Table::Fragments => Self::Fragments,
+/// Traffic one IP address sent and received.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Endpoint {
+    pub address: IpAddr,
+    pub tx_frames: u64,
+    pub tx_bytes: u64,
+    pub rx_frames: u64,
+    pub rx_bytes: u64,
+}
+
+impl From<library::EndpointStat> for Endpoint {
+    fn from(value: library::EndpointStat) -> Self {
+        Self {
+            address: value.address,
+            tx_frames: value.tx_frames,
+            tx_bytes: value.tx_bytes,
+            rx_frames: value.rx_frames,
+            rx_bytes: value.rx_bytes,
+        }
+    }
+}
+
+/// Frames and bytes one protocol appeared in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Protocol {
+    pub protocol: String,
+    pub frames: u64,
+    pub bytes: u64,
+}
+
+impl From<library::ProtocolStat> for Protocol {
+    fn from(value: library::ProtocolStat) -> Self {
+        Self {
+            protocol: value.protocol,
+            frames: value.frames,
+            bytes: value.bytes,
+        }
+    }
+}
+
+/// Frames and bytes one transport port carried.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Port {
+    pub transport: Transport,
+    pub port: u16,
+    pub frames: u64,
+    pub bytes: u64,
+}
+
+impl From<library::PortStat> for Port {
+    fn from(value: library::PortStat) -> Self {
+        Self {
+            transport: value.transport.into(),
+            port: value.port,
+            frames: value.frames,
+            bytes: value.bytes,
+        }
+    }
+}
+
+/// One I/O interval's frames and bytes, offset from the series origin.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct IoBucket {
+    pub offset: Duration,
+    pub frames: u64,
+    pub bytes: u64,
+}
+
+impl From<library::IoBucketStat> for IoBucket {
+    fn from(value: library::IoBucketStat) -> Self {
+        Self {
+            offset: value.offset,
+            frames: value.frames,
+            bytes: value.bytes,
         }
     }
 }
@@ -51,7 +107,7 @@ impl From<Table> for packetcraftr_core::analysis::stats::Table {
 pub struct Conversation {
     pub transport: Transport,
     pub stream: u64,
-    pub scope: packetcraftr_core::analysis::scope::Definition,
+    pub scope: Scope,
     pub address_a: IpAddr,
     pub port_a: u16,
     pub address_b: IpAddr,
@@ -86,7 +142,7 @@ pub struct Interface {
 /// Aggregate result of `stats`, carrying exactly the requested table.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
-    pub clock: packetcraftr_core::analysis::ClockReport,
+    pub clock: Clock,
     #[serde(flatten)]
     pub table: TableData,
     /// Frames the capture yielded, matched or not, and the frames the
@@ -146,11 +202,13 @@ pub enum TableData {
     },
 }
 
-impl Report {
-    pub fn try_from_report(
-        table: Table,
-        report: packetcraftr_core::analysis::stats::Report,
-        frames_read: u64,
+/// The one requested table of a statistics report, with the number of
+/// frames the capture yielded.
+impl TryFrom<(Table, library::Report, u64)> for Report {
+    type Error = Error;
+
+    fn try_from(
+        (table, report, frames_read): (Table, library::Report, u64),
     ) -> Result<Self, Error> {
         let duration = report.duration();
         let average_packet_size = report.average_packet_size();
@@ -171,32 +229,32 @@ impl Report {
                 conversations: report
                     .conversations
                     .into_iter()
-                    .map(convert_conversation)
+                    .map(Conversation::try_from)
                     .collect::<Result<_, _>>()?,
             },
             Table::Endpoints => TableData::Endpoints {
-                endpoints: report.endpoints,
+                endpoints: report.endpoints.into_iter().map(Into::into).collect(),
             },
             Table::Protocols => TableData::Protocols {
-                protocols: report.protocols,
+                protocols: report.protocols.into_iter().map(Into::into).collect(),
             },
             Table::Ports => TableData::Ports {
-                ports: report.ports,
+                ports: report.ports.into_iter().map(Into::into).collect(),
             },
             Table::Io => TableData::Io {
                 io: Io {
                     origin: convert_timestamp(report.io_origin)?,
                     underflow_frames: report.io_underflow_frames,
                     interval: report.interval,
-                    buckets: report.io,
+                    buckets: report.io.into_iter().map(Into::into).collect(),
                 },
             },
             Table::Fragments => TableData::Fragments {
-                fragments: super::reassembly::Report::from_analysis(&report.ip_reassembly),
+                fragments: (&report.ip_reassembly).into(),
             },
         };
         Ok(Self {
-            clock: report.clock,
+            clock: report.clock.into(),
             table,
             frames_read,
             frames_matched: report.frames,
@@ -216,22 +274,26 @@ fn convert_timestamp(value: Option<std::time::SystemTime>) -> Result<Option<Time
     value.map(Timestamp::try_from).transpose()
 }
 
-fn convert_conversation(row: ConversationStat) -> Result<Conversation, Error> {
-    let duration = row.duration();
-    Ok(Conversation {
-        transport: row.transport,
-        stream: row.stream,
-        scope: row.scope,
-        address_a: row.address_a,
-        port_a: row.port_a,
-        address_b: row.address_b,
-        port_b: row.port_b,
-        frames_a_to_b: row.frames_a_to_b,
-        bytes_a_to_b: row.bytes_a_to_b,
-        frames_b_to_a: row.frames_b_to_a,
-        bytes_b_to_a: row.bytes_b_to_a,
-        first_timestamp: row.first_timestamp.try_into()?,
-        last_timestamp: row.last_timestamp.try_into()?,
-        duration,
-    })
+impl TryFrom<library::ConversationStat> for Conversation {
+    type Error = Error;
+
+    fn try_from(row: library::ConversationStat) -> Result<Self, Error> {
+        let duration = row.duration();
+        Ok(Self {
+            transport: row.transport.into(),
+            stream: row.stream,
+            scope: row.scope.try_into()?,
+            address_a: row.address_a,
+            port_a: row.port_a,
+            address_b: row.address_b,
+            port_b: row.port_b,
+            frames_a_to_b: row.frames_a_to_b,
+            bytes_a_to_b: row.bytes_a_to_b,
+            frames_b_to_a: row.frames_b_to_a,
+            bytes_b_to_a: row.bytes_b_to_a,
+            first_timestamp: row.first_timestamp.try_into()?,
+            last_timestamp: row.last_timestamp.try_into()?,
+            duration,
+        })
+    }
 }

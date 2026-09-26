@@ -9,10 +9,231 @@ use serde::Serialize;
 
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
-use packetcraftr_core::frame::LinkType;
 
 use super::contract::Error;
 use super::frame::{SourceFrame, Timestamp};
+
+/// A value the same on both captures: `ingress` belongs to the ingress
+/// capture, `egress` to the egress capture, always.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Sided<T> {
+    pub ingress: T,
+    pub egress: T,
+}
+
+published_enum! {
+    /// The comparison result.
+    pub enum Verdict from analysis::Verdict {
+        Pass => "pass",
+        Fail => "fail",
+        Inconclusive => "inconclusive",
+    }
+}
+
+published_enum! {
+    /// Why an observation's evidence is incomplete.
+    pub enum Incomplete from analysis::Incomplete {
+        Truncated => "truncated",
+        FieldBudget => "field_budget",
+    }
+}
+
+published_enum! {
+    /// What one projected cell establishes.
+    pub enum ValueState from analysis::ValueState {
+        Observed => "observed",
+        Absent => "absent",
+        Truncated => "truncated",
+        DecodeIncomplete => "decode_incomplete",
+        FieldBudget => "field_budget",
+    }
+}
+
+published_enum! {
+    /// The kind of property a check asserts.
+    pub enum CheckKind from analysis::CheckKind {
+        Preserve => "preserve",
+        Expect => "expect",
+        PreservePresence => "preserve_presence",
+        ExpectAbsent => "expect_absent",
+    }
+}
+
+published_enum! {
+    /// How one requested check resolved.
+    pub enum Outcome from analysis::Outcome {
+        Satisfied => "satisfied",
+        Violated => "violated",
+        Unevaluable => "unevaluable",
+    }
+}
+
+published_enum! {
+    /// The scope of a pass: correspondence alone or requested properties.
+    pub enum ComparisonKind from analysis::ComparisonKind {
+        CorrespondenceOnly => "correspondence_only",
+        PropertyChecks => "property_checks",
+    }
+}
+
+/// One rule echoed beside the outcome it produced.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Check {
+    pub kind: CheckKind,
+    pub field: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+impl From<analysis::Check> for Check {
+    fn from(value: analysis::Check) -> Self {
+        Self {
+            kind: value.kind.into(),
+            field: value.field,
+            value: value.value,
+        }
+    }
+}
+
+/// One requested check applied to a uniquely matched pair.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct CheckEvaluation {
+    pub check: Check,
+    pub outcome: Outcome,
+    pub expected_state: Option<ValueState>,
+    pub actual_state: ValueState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<FieldValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual: Option<FieldValue>,
+}
+
+impl From<analysis::CheckEvaluation> for CheckEvaluation {
+    fn from(value: analysis::CheckEvaluation) -> Self {
+        Self {
+            check: value.check.into(),
+            outcome: value.outcome.into(),
+            expected_state: value.expected_state.map(Into::into),
+            actual_state: value.actual_state.into(),
+            expected: value.expected,
+            actual: value.actual,
+        }
+    }
+}
+
+/// A warning about what the declared rules can establish.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RuleWarning {
+    pub code: &'static str,
+    pub message: String,
+}
+
+/// One `FIELD=VALUE` expectation as declared.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ExpectationRule {
+    pub field: String,
+    pub value: String,
+}
+
+/// The rules exactly as declared, so the report stands alone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RequestedRules {
+    pub comparison: ComparisonKind,
+    pub warnings: Vec<RuleWarning>,
+    pub preserve_presence: Vec<String>,
+    pub expect_absent: Vec<String>,
+    pub identity: Vec<String>,
+    pub preserve: Vec<String>,
+    pub expect: Vec<ExpectationRule>,
+}
+
+impl From<analysis::RequestedRules> for RequestedRules {
+    fn from(value: analysis::RequestedRules) -> Self {
+        Self {
+            comparison: value.comparison.into(),
+            warnings: value
+                .warnings
+                .into_iter()
+                .map(|warning| RuleWarning {
+                    code: warning.code,
+                    message: warning.message,
+                })
+                .collect(),
+            preserve_presence: value.preserve_presence,
+            expect_absent: value.expect_absent,
+            identity: value.identity,
+            preserve: value.preserve,
+            expect: value
+                .expect
+                .into_iter()
+                .map(|rule| ExpectationRule {
+                    field: rule.field,
+                    value: rule.value,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Aggregate comparison counters over complete evidence.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Summary {
+    pub unique_matches: u64,
+    pub reordered_pairs: u64,
+    pub ingress_only: u64,
+    pub egress_only: u64,
+    pub ambiguous_groups: u64,
+    pub ambiguous_observations: u64,
+    pub checks_evaluated: u64,
+    pub checks_satisfied: u64,
+    pub checks_violated: u64,
+    pub checks_unevaluable: u64,
+}
+
+impl From<analysis::Summary> for Summary {
+    fn from(value: analysis::Summary) -> Self {
+        Self {
+            unique_matches: value.unique_matches,
+            reordered_pairs: value.reordered_pairs,
+            ingress_only: value.ingress_only,
+            egress_only: value.egress_only,
+            ambiguous_groups: value.ambiguous_groups,
+            ambiguous_observations: value.ambiguous_observations,
+            checks_evaluated: value.checks_evaluated,
+            checks_satisfied: value.checks_satisfied,
+            checks_violated: value.checks_violated,
+            checks_unevaluable: value.checks_unevaluable,
+        }
+    }
+}
+
+/// How many report entries each detail ceiling dropped, per category.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Omissions {
+    pub matches: u64,
+    pub violations: u64,
+    pub unmatched_ingress: u64,
+    pub unmatched_egress: u64,
+    pub unkeyed_ingress: u64,
+    pub unkeyed_egress: u64,
+    pub ambiguous_groups: u64,
+    pub group_members: u64,
+}
+
+impl From<analysis::Omissions> for Omissions {
+    fn from(value: analysis::Omissions) -> Self {
+        Self {
+            matches: value.matches,
+            violations: value.violations,
+            unmatched_ingress: value.unmatched_ingress,
+            unmatched_egress: value.unmatched_egress,
+            unkeyed_ingress: value.unkeyed_ingress,
+            unkeyed_egress: value.unkeyed_egress,
+            ambiguous_groups: value.ambiguous_groups,
+            group_members: value.group_members,
+        }
+    }
+}
 
 /// SHA-256 of the exact encoded source stream consumed through successful
 /// EOF. It binds a completed report to bytes, not merely a mutable pathname.
@@ -64,11 +285,11 @@ pub struct Evidence {
     /// The capture-global interface identity, when the source declared one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
-    pub link_type: LinkType,
+    pub link_type: u32,
     /// Present when the observation's evidence was truncated by the capture
     /// snap length or limited by the field-projection budget.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub incomplete: Option<analysis::Incomplete>,
+    pub incomplete: Option<Incomplete>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<&'static str>,
 }
@@ -81,8 +302,8 @@ impl TryFrom<&analysis::Evidence> for Evidence {
             frame: SourceFrame::try_from(value.frame)?,
             timestamp: Timestamp::try_from(value.timestamp)?,
             interface: value.interface,
-            link_type: value.link_type,
-            incomplete: value.incomplete,
+            link_type: value.link_type.0,
+            incomplete: value.incomplete.map(Into::into),
             diagnostics: value.diagnostics.clone(),
         })
     }
@@ -106,7 +327,7 @@ pub struct Match {
     /// order evidence only, not a claim about device behavior.
     pub reordered: bool,
     /// Per-requested-check outcomes in declaration order.
-    pub checks: Vec<analysis::CheckEvaluation>,
+    pub checks: Vec<CheckEvaluation>,
 }
 
 impl TryFrom<&analysis::Match> for Match {
@@ -120,7 +341,7 @@ impl TryFrom<&analysis::Match> for Match {
             ingress_order: value.ingress_order,
             egress_order: value.egress_order,
             reordered: value.reordered,
-            checks: value.checks.clone(),
+            checks: value.checks.iter().cloned().map(Into::into).collect(),
         })
     }
 }
@@ -128,7 +349,7 @@ impl TryFrom<&analysis::Match> for Match {
 /// A demonstrably violated check attributed to concrete observations.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Violation {
-    pub check: analysis::Check,
+    pub check: Check,
     /// The shared identity; absent when the violating egress observation was
     /// unkeyed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,7 +371,7 @@ impl TryFrom<&analysis::Violation> for Violation {
 
     fn try_from(value: &analysis::Violation) -> Result<Self, Self::Error> {
         Ok(Self {
-            check: value.check.clone(),
+            check: value.check.clone().into(),
             key: value.key.clone(),
             ingress: value.ingress.as_ref().map(Evidence::try_from).transpose()?,
             egress: Evidence::try_from(&value.egress)?,
@@ -210,72 +431,96 @@ impl TryFrom<&analysis::AmbiguousGroup> for AmbiguousGroup {
     }
 }
 
+/// Decoder overrides the comparison ran under.
+impl From<(Vec<u16>, Vec<String>)> for DecodeContext {
+    fn from((tls_ports, bindings): (Vec<u16>, Vec<String>)) -> Self {
+        Self {
+            tls_ports,
+            bindings,
+        }
+    }
+}
+
 /// The complete comparison result; the aggregate `result` and the NDJSON
 /// terminal `complete` record carry the same document.
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub decode: Option<DecodeContext>,
-    pub verdict: analysis::Verdict,
+    pub verdict: Verdict,
     /// The rules exactly as declared, so the report stands alone.
-    pub rules: analysis::RequestedRules,
+    pub rules: RequestedRules,
     /// The epistemic limits the comparison ran under, repeated verbatim.
     pub assumptions: &'static [&'static str],
     /// Per-capture censuses; each side's counts cover its own frames only.
-    pub captures: analysis::Sided<Capture>,
+    pub captures: Sided<Capture>,
     /// Counters computed over complete evidence before any detail bound.
-    pub summary: analysis::Summary,
+    pub summary: Summary,
     /// Uniquely paired observations, in ingress observation order.
     pub matches: Vec<Match>,
     pub violations: Vec<Violation>,
     /// Keyed observations with no keyed counterpart on the other side. An
     /// unmatched ingress observation is not evidence of device loss; an
     /// unmatched egress observation is not evidence of duplication.
-    pub unmatched: analysis::Sided<Vec<Evidence>>,
+    pub unmatched: Sided<Vec<Evidence>>,
     /// Selected observations without a complete identity.
-    pub unkeyed: analysis::Sided<Vec<Unkeyed>>,
+    pub unkeyed: Sided<Vec<Unkeyed>>,
     /// Identity groups that are not 1:1; members are never paired.
     pub ambiguous: Vec<AmbiguousGroup>,
     /// Per-category counts of detail entries the `--max-details` bound kept
     /// out of this document.
-    pub omitted: analysis::Omissions,
+    pub omitted: Omissions,
 }
 
-impl Report {
-    /// Converts the core report, attaching the invoked input paths and the
-    /// shared output timestamp/source-frame representations.
-    pub fn from_report(
-        report: &analysis::Report,
-        paths: analysis::Sided<String>,
-    ) -> Result<Self, Error> {
+/// One capture as invoked: its path, the digest of the stream the comparison
+/// consumed, and its selection filter.
+pub type Input = (String, Option<CaptureSource>, Option<String>);
+
+fn capture((path, source, selection_filter): Input, census: &analysis::SideSummary) -> Capture {
+    Capture {
+        source,
+        selection_filter,
+        path,
+        read: census.read,
+        selected: census.selected,
+        keyed: census.keyed,
+        unkeyed: census.unkeyed,
+        incomplete: census.incomplete,
+    }
+}
+
+fn unkeyed_list(values: &[analysis::UnkeyedObservation]) -> Result<Vec<Unkeyed>, Error> {
+    values.iter().map(Unkeyed::try_from).collect()
+}
+
+/// The core comparison, with each capture as invoked and the decoder
+/// overrides, in the shared output timestamp and source-frame forms.
+impl
+    TryFrom<(
+        &analysis::Report,
+        analysis::Sided<Input>,
+        Option<DecodeContext>,
+    )> for Report
+{
+    type Error = Error;
+
+    fn try_from(
+        (report, inputs, decode): (
+            &analysis::Report,
+            analysis::Sided<Input>,
+            Option<DecodeContext>,
+        ),
+    ) -> Result<Self, Self::Error> {
         Ok(Self {
-            decode: None,
-            verdict: report.verdict,
-            rules: report.rules.clone(),
+            decode,
+            verdict: report.verdict.into(),
+            rules: report.rules.clone().into(),
             assumptions: report.assumptions,
-            captures: analysis::Sided {
-                ingress: Capture {
-                    source: None,
-                    selection_filter: None,
-                    path: paths.ingress,
-                    read: report.sides.ingress.read,
-                    selected: report.sides.ingress.selected,
-                    keyed: report.sides.ingress.keyed,
-                    unkeyed: report.sides.ingress.unkeyed,
-                    incomplete: report.sides.ingress.incomplete,
-                },
-                egress: Capture {
-                    source: None,
-                    selection_filter: None,
-                    path: paths.egress,
-                    read: report.sides.egress.read,
-                    selected: report.sides.egress.selected,
-                    keyed: report.sides.egress.keyed,
-                    unkeyed: report.sides.egress.unkeyed,
-                    incomplete: report.sides.egress.incomplete,
-                },
+            captures: Sided {
+                ingress: capture(inputs.ingress, &report.sides.ingress),
+                egress: capture(inputs.egress, &report.sides.egress),
             },
-            summary: report.summary,
+            summary: report.summary.into(),
             matches: report
                 .matches
                 .iter()
@@ -286,30 +531,20 @@ impl Report {
                 .iter()
                 .map(Violation::try_from)
                 .collect::<Result<_, _>>()?,
-            unmatched: analysis::Sided {
+            unmatched: Sided {
                 ingress: evidence_list(&report.unmatched.ingress)?,
                 egress: evidence_list(&report.unmatched.egress)?,
             },
-            unkeyed: analysis::Sided {
-                ingress: report
-                    .unkeyed
-                    .ingress
-                    .iter()
-                    .map(Unkeyed::try_from)
-                    .collect::<Result<_, _>>()?,
-                egress: report
-                    .unkeyed
-                    .egress
-                    .iter()
-                    .map(Unkeyed::try_from)
-                    .collect::<Result<_, _>>()?,
+            unkeyed: Sided {
+                ingress: unkeyed_list(&report.unkeyed.ingress)?,
+                egress: unkeyed_list(&report.unkeyed.egress)?,
             },
             ambiguous: report
                 .ambiguous
                 .iter()
                 .map(AmbiguousGroup::try_from)
                 .collect::<Result<_, _>>()?,
-            omitted: report.omitted,
+            omitted: report.omitted.into(),
         })
     }
 }

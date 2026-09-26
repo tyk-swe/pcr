@@ -3,6 +3,8 @@
 
 use serde::Serialize;
 
+use packetcraftr_core::capture_file::MergeReport;
+
 #[derive(Debug, Serialize)]
 pub struct Interface {
     pub source: usize,
@@ -21,8 +23,9 @@ pub struct Report {
     pub interfaces: Vec<Interface>,
     pub source_metadata_records: u64,
 }
-impl Report {
-    pub fn new(path: String, report: packetcraftr_core::capture_file::MergeReport) -> Self {
+/// The destination path and what the merge wrote there.
+impl From<(String, MergeReport)> for Report {
+    fn from((path, report): (String, MergeReport)) -> Self {
         Self {
             path,
             frames: report.frames,

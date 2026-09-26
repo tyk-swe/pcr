@@ -196,8 +196,25 @@ All notable changes to PacketcraftR are documented here. The format follows
   rather than derived from `max_flows`. `decode::Options` and `build::Options`
   hold their `max_layers` and `max_packet_size` in a shared `packet::Limits`.
   See `docs/migration-unreleased.md`.
+- `packetcraftr_cli::output` types own every published field (ADR 0003).
+  Output types embed only the versioned `packetcraftr.packet` document and its
+  field values; every other field is a CLI-owned mirror with the same JSON
+  shape (`envelope::Stats`, `diagnostic::Diagnostic`, `envelope::ErrorContext`,
+  `network::InterfaceId`, `analysis::Scope`, `fuzz::Outcome`, and others).
+  Conversions are `From`/`TryFrom` only: the `from_*`, `try_from_*`, and
+  `complete_from_*` constructors, `Report::new`, `Detail::new`,
+  `Worker::progress`/`native`, and `provenance::from_source_set` are removed,
+  and a conversion that also yields diagnostics or stats returns
+  `envelope::Published<T>`. `http::Issue` and `dns_read::Issue` are structs
+  instead of newtypes, and `tls::SelectionCounts` is removed. output/v6 JSON is
+  unchanged. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- `packetcraftr::fuzz::Totals` checks a live or offline campaign's case counts
+  and cases for coherence (`TryFrom<&Report>`, `TryFrom<&Stats>`, and their
+  offline counterparts), failing with `fuzz::IncoherentReport`. The CLI's
+  `internal.fuzz_event_coherence` check now uses it.
 
 - `protocol::headers` is a public, bounded walker over raw link, VLAN, and IP
   header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,

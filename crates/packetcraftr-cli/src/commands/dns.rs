@@ -111,14 +111,14 @@ pub(super) fn run(
                 }),
                 on_event: rendering::emit_event,
                 into_result: Box::new(|report| {
-                    output::dns::Report::try_from_dns(report)
-                        .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                    output::envelope::Published::<output::dns::Report>::try_from(report)
                         .map_err(CliError::classified)
                 }),
                 render_text: Box::new(|report, _| {
-                    let (result, diagnostics, stats) =
-                        output::dns::Report::try_from_dns(report).map_err(CliError::classified)?;
-                    rendering::render_text(result, diagnostics, Some(stats))
+                    rendering::render_text(
+                        output::envelope::Published::try_from(report)
+                            .map_err(CliError::classified)?,
+                    )
                 }),
                 complete: rendering::emit_complete,
             },
@@ -155,14 +155,13 @@ pub(super) fn run(
             }),
             on_event: rendering::emit_event,
             into_result: Box::new(|batch| {
-                output::dns::BatchResult::try_from_batch(batch)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                output::envelope::Published::<output::dns::BatchResult>::try_from(batch)
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|batch, _| {
-                let (result, diagnostics, stats) = output::dns::BatchResult::try_from_batch(batch)
-                    .map_err(CliError::classified)?;
-                rendering::render_batch_text(result, diagnostics, stats)
+                rendering::render_batch_text(
+                    output::envelope::Published::try_from(batch).map_err(CliError::classified)?,
+                )
             }),
             complete: rendering::emit_batch_complete,
         },

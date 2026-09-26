@@ -280,11 +280,11 @@ fn read_records(
     }
     if format == ReadFormat::Ndjson {
         stream.complete(
-            output::read::Event::Complete {
+            output::read::Event::from(output::read::Totals {
                 frames_read: state.budget.frames(),
                 frames_matched: state.frames_matched,
                 captured_bytes_read: state.budget.captured_bytes(),
-            },
+            }),
             Vec::new(),
         )?;
     }
@@ -368,7 +368,7 @@ fn convert_frame(
     decoding: Option<&Decoding>,
 ) -> Result<Option<output::read::Frame>, CliError> {
     let Some(decoding) = decoding else {
-        return output::read::Frame::try_from_frame(source_frame, frame)
+        return output::read::Frame::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -376,9 +376,9 @@ fn convert_frame(
         return Ok(None);
     };
     if decoding.publish_layers {
-        output::read::Frame::try_from_decoded(source_frame, frame, &decoded)
+        output::read::Frame::try_from((source_frame, frame, &decoded))
     } else {
-        output::read::Frame::try_from_frame(source_frame, frame)
+        output::read::Frame::try_from((source_frame, frame))
     }
     .map(Some)
     .map_err(CliError::classified)

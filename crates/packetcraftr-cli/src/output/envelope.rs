@@ -3,16 +3,17 @@
 
 //! Aggregate JSON and streaming NDJSON envelopes.
 
-use packetcraftr::Stats;
-
 use std::fmt;
+use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::diagnostic::Diagnostic as LibraryDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
+use super::capture::Statistics as CaptureStatistics;
 use super::contract::{Command, Mode, SCHEMA_V6};
+use super::diagnostic::Diagnostic;
 
 /// The failure class an `error` object publishes.
 ///
@@ -56,6 +57,37 @@ impl From<Kind> for ErrorKind {
     }
 }
 
+/// The one coordinate an `error` object may locate its failure at.
+///
+/// Externally tagged, so each variant serializes as a one-key object:
+/// `{"source_frame": 7}`, `{"attempt": 3}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum ErrorContext {
+    #[serde(rename = "source_frame")]
+    SourceFrame(u64),
+    #[serde(rename = "probe_sequence")]
+    ProbeSequence(u64),
+    #[serde(rename = "attempt")]
+    Attempt(u32),
+    #[serde(rename = "case_index")]
+    CaseIndex(u64),
+}
+
+impl TryFrom<Coordinate> for ErrorContext {
+    /// A coordinate the published contract has no key for.
+    type Error = Coordinate;
+
+    fn try_from(coordinate: Coordinate) -> Result<Self, Coordinate> {
+        match coordinate {
+            Coordinate::SourceFrame(frame) => Ok(Self::SourceFrame(frame)),
+            Coordinate::ProbeSequence(sequence) => Ok(Self::ProbeSequence(sequence)),
+            Coordinate::Attempt(attempt) => Ok(Self::Attempt(attempt)),
+            Coordinate::CaseIndex(index) => Ok(Self::CaseIndex(index)),
+            unpublished => Err(unpublished),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
     pub code: String,
@@ -63,7 +95,7 @@ pub struct Error {
     pub message: String,
     pub causes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<Coordinate>,
+    pub context: Option<ErrorContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,9 +139,65 @@ impl Error {
         self
     }
 
+    /// Locates the failure. A coordinate the contract has no key for is
+    /// omitted, like any other optional error metadata.
     #[must_use]
-    pub const fn with_context(mut self, context: Option<Coordinate>) -> Self {
-        self.context = context;
+    pub fn with_context(mut self, context: Option<Coordinate>) -> Self {
+        self.context = context.and_then(|coordinate| ErrorContext::try_from(coordinate).ok());
+        self
+    }
+}
+
+/// Totals every live operation publishes in the envelope's `stats`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Stats {
+    pub packets_attempted: u64,
+    pub packets_completed: u64,
+    pub bytes: u64,
+    pub elapsed: Duration,
+    pub capture: CaptureStatistics,
+}
+
+impl From<packetcraftr::Stats> for Stats {
+    fn from(value: packetcraftr::Stats) -> Self {
+        Self {
+            packets_attempted: value.packets_attempted,
+            packets_completed: value.packets_completed,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: value.capture.into(),
+        }
+    }
+}
+
+impl From<&packetcraftr::Stats> for Stats {
+    fn from(value: &packetcraftr::Stats) -> Self {
+        value.clone().into()
+    }
+}
+
+/// A converted result together with the envelope metadata its source
+/// carried: the diagnostics it raised and, for live operations, its totals.
+#[derive(Clone, Debug)]
+pub struct Published<T> {
+    pub result: T,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Option<Stats>,
+}
+
+impl<T> Published<T> {
+    /// A result that raised the given library diagnostics.
+    pub(crate) fn new(result: T, diagnostics: Vec<LibraryDiagnostic>) -> Self {
+        Self {
+            result,
+            diagnostics: diagnostics.into_iter().map(Diagnostic::from).collect(),
+            stats: None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn with_stats(mut self, stats: impl Into<Stats>) -> Self {
+        self.stats = Some(stats.into());
         self
     }
 }
@@ -146,7 +234,17 @@ pub struct Envelope<T> {
 }
 
 impl<T> Envelope<T> {
-    pub fn success(command: Command, result: T, diagnostics: Vec<Diagnostic>) -> Self {
+    pub fn success(command: Command, result: T, diagnostics: Vec<LibraryDiagnostic>) -> Self {
+        Self::published(command, Published::new(result, diagnostics))
+    }
+
+    /// One aggregate document carrying a converted result and its metadata.
+    pub fn published(command: Command, published: Published<T>) -> Self {
+        let Published {
+            result,
+            diagnostics,
+            stats,
+        } = published;
         Self {
             schema: SCHEMA_V6,
             command: Some(command),
@@ -155,7 +253,7 @@ impl<T> Envelope<T> {
             event: None,
             payload: OutputPayload::Success { result },
             diagnostics,
-            stats: None,
+            stats,
             resources: None,
         }
     }
@@ -188,8 +286,8 @@ impl<T> Envelope<T> {
     }
 
     #[must_use]
-    pub fn with_stats(mut self, stats: Stats) -> Self {
-        self.stats = Some(stats);
+    pub fn with_stats(mut self, stats: impl Into<Stats>) -> Self {
+        self.stats = Some(stats.into());
         self
     }
 }

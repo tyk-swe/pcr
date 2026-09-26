@@ -48,6 +48,7 @@ impl super::Spec for Args {
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
+    let aggregation = analysis::stats::Table::from(arguments.table);
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let prepared = prepare(
@@ -57,7 +58,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     )?;
     let mut collector = analysis::stats::Collector::for_table(
         Duration::from_millis(arguments.interval_ms),
-        table.into(),
+        aggregation,
     )
     .map_err(CliError::classified)?;
 
@@ -76,7 +77,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     match format {
         AggregateFormat::Text => rendering::render_text(table, &report, frames_read, &diagnostics),
         AggregateFormat::Json => {
-            let result = output::stats::Report::try_from_report(table, report, frames_read)
+            let result = output::stats::Report::try_from((table, report, frames_read))
                 .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }

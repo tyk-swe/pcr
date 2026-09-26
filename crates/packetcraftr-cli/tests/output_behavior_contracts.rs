@@ -5,13 +5,14 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::Stats;
 use packetcraftr_cli::output::contract::Command;
 use packetcraftr_cli::output::contract::Error as ContractError;
 use packetcraftr_cli::output::contract::Format;
 use packetcraftr_cli::output::envelope::Envelope;
 use packetcraftr_cli::output::envelope::Error as OutputError;
+use packetcraftr_cli::output::envelope::ErrorContext;
 use packetcraftr_cli::output::envelope::ErrorKind;
+use packetcraftr_cli::output::envelope::Stats;
 use packetcraftr_cli::output::frame::Captured;
 use packetcraftr_cli::output::frame::Timestamp;
 use packetcraftr_cli::output::frame::Wire;
@@ -23,7 +24,6 @@ use packetcraftr_cli::output::protocols::Summary;
 use packetcraftr_cli::output::stream::StreamEncoder;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::Classified;
-use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::field::FieldKind as PacketFieldKind;
 use packetcraftr_core::frame::Direction as CaptureDirection;
@@ -159,7 +159,7 @@ fn domain_failures_preserve_typed_error_context() {
     let replay = OutputError::classified(&packetcraftr::replay::Error::output_at_source_index(
         7, "failed",
     ));
-    assert_eq!(replay.context, Some(Coordinate::SourceFrame(8)));
+    assert_eq!(replay.context, Some(ErrorContext::SourceFrame(8)));
 
     let scan = OutputError::classified(&packetcraftr::probe::Error::new(
         packetcraftr::probe::Workflow::Scan,
@@ -168,19 +168,19 @@ fn domain_failures_preserve_typed_error_context() {
             source: Box::new(io::Error::other("failed")),
         },
     ));
-    assert_eq!(scan.context, Some(Coordinate::ProbeSequence(8)));
+    assert_eq!(scan.context, Some(ErrorContext::ProbeSequence(8)));
 
     let dns = OutputError::classified(&packetcraftr::dns::Error::Clock {
         attempt: 3,
         source: Box::new(io::Error::other("failed")),
     });
-    assert_eq!(dns.context, Some(Coordinate::Attempt(3)));
+    assert_eq!(dns.context, Some(ErrorContext::Attempt(3)));
 
     let fuzz = OutputError::classified(&packetcraftr::fuzz::Error::Clock {
         case_index: 11,
         source: Box::new(io::Error::other("failed")),
     });
-    assert_eq!(fuzz.context, Some(Coordinate::CaseIndex(11)));
+    assert_eq!(fuzz.context, Some(ErrorContext::CaseIndex(11)));
 
     // Each coordinate publishes exactly the one-key object the output
     // contract's `errorContext` declares, and a coordinate-free failure
@@ -219,7 +219,7 @@ fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
     assert_eq!(fractional.unix_seconds, -3);
     assert_eq!(fractional.nanoseconds, 999_999_800);
 
-    let wire = Wire::new(vec![0, 1, 0xfe, 0xff]);
+    let wire = Wire::from(bytes::Bytes::from(vec![0, 1, 0xfe, 0xff]));
     assert_eq!(wire.bytes(), &[0, 1, 0xfe, 0xff]);
     assert_eq!(wire.bytes_hex().to_string(), "0001feff");
     assert_eq!(wire.length, 4);
@@ -244,7 +244,7 @@ fn frame_output_preserves_time_direction_lengths_and_exact_bytes() {
         .expect("truncated frame metadata is valid");
         frame.interface = Some(4);
         frame.direction = Some(capture_direction);
-        let captured = Captured::try_from_frame(frame).expect("frame converts");
+        let captured = Captured::try_from(frame).expect("frame converts");
         assert_eq!(captured.bytes(), &[1, 2, 3]);
         assert_eq!(captured.captured_length, 3);
         assert_eq!(captured.original_length, 8);
@@ -295,7 +295,7 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
         required: false,
         description: "fixture field",
     };
-    let field = Field::from(&schema);
+    let field = Field::try_from(&schema).expect("an unsigned field has a published kind");
     assert_eq!(field.name, "field_name");
     assert!(field.derived);
     assert!(!field.required);
@@ -314,24 +314,34 @@ fn protocol_output_converts_every_field_kind_and_manifest_capability() {
             .any(|protocol| !protocol.aliases.is_empty())
     );
 
-    let binding = Binding {
-        parent: "tcp".to_owned(),
-        discriminator: 443,
-    };
-    let detail = Detail::new(
-        summaries[0].clone(),
-        vec![field.clone()],
-        vec![binding.clone()],
-        Vec::new(),
-    );
+    let registry = packetcraftr_core::protocol::builtin::registry();
+    let protocol = BuiltinProtocol::ALL[0];
+    let detail =
+        Detail::try_from((registry.as_ref(), protocol)).expect("built-in fields are published");
     assert_eq!(detail.protocol, summaries[0].protocol);
-    assert_eq!(detail.fields, vec![field]);
-    assert_eq!(detail.bindings, vec![binding]);
-    assert!(detail.filter_fields.is_empty());
     assert_eq!(
-        serde_json::to_value(detail).unwrap()["filter_fields"],
-        serde_json::json!([])
+        detail.fields,
+        registry
+            .schema(protocol.as_str())
+            .map(|schema| schema
+                .fields
+                .iter()
+                .map(|field| Field::try_from(field).expect("published kind"))
+                .collect::<Vec<_>>())
+            .unwrap_or_default()
     );
+    assert_eq!(
+        detail.bindings,
+        registry
+            .parent_bindings(protocol.as_str())
+            .into_iter()
+            .map(|(parent, discriminator)| Binding {
+                parent: parent.as_str().to_owned(),
+                discriminator: discriminator.0,
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(serde_json::to_value(detail).unwrap()["filter_fields"].is_array());
 }
 
 fn interface_fixture() -> Vec<Info> {
@@ -389,7 +399,7 @@ fn interface_fixture() -> Vec<Info> {
 
 #[test]
 fn interface_outputs_are_stable_and_sorted() {
-    let output = interfaces::Report::new(interface_fixture());
+    let output = interfaces::Report::from(interface_fixture());
     assert_eq!(output.interfaces[0].name, "lo");
     assert_eq!(
         output.interfaces[1].addresses,
@@ -448,7 +458,12 @@ fn planned_route_output_preserves_link_metadata() {
     let output =
         packetcraftr_cli::output::network::Plan::from(planned_route(source_mac, destination_mac));
     assert_eq!(output.decision.interface.name, "eth0");
-    assert_eq!(output.destination_mac, Some(MacAddress(destination_mac.0)));
+    assert_eq!(
+        output.destination_mac,
+        Some(packetcraftr_cli::output::network::MacAddress(
+            destination_mac.0
+        ))
+    );
     assert_eq!(output.neighbor_vlan_tags[0].vlan_id, 42);
     assert!(output.synthesized_ethernet);
 }

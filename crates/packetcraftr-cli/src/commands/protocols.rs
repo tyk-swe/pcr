@@ -37,13 +37,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
 }
 
 fn list_protocols(format: AggregateFormat) -> Result<(), CliError> {
-    let result = output::protocols::ListResult {
-        protocols: BuiltinProtocol::ALL
-            .iter()
-            .copied()
-            .map(output::protocols::Summary::from)
-            .collect(),
-    };
+    let result = output::protocols::ListResult::from(BuiltinProtocol::ALL);
     super::render_aggregate_rows(
         output::contract::Command::Protocols,
         format,
@@ -66,35 +60,13 @@ fn describe_protocol(name: &str, format: AggregateFormat) -> Result<(), CliError
         })
         .ok_or_else(|| unknown_protocol(name))?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let fields = registry
-        .schema(protocol.as_str())
-        .map(|schema| {
-            schema
-                .fields
-                .iter()
-                .map(output::protocols::Field::from)
-                .collect()
-        })
-        .unwrap_or_default();
-    let bindings = registry
-        .parent_bindings(protocol.as_str())
-        .into_iter()
-        .map(|(parent, discriminator)| output::protocols::Binding {
-            parent: parent.as_str().to_owned(),
-            discriminator: discriminator.0,
-        })
-        .collect();
-    let detail = output::protocols::Detail::new(
-        output::protocols::Summary::from(protocol),
-        fields,
-        bindings,
-        output::protocols::FilterField::for_protocol(&registry, protocol.as_str()),
-    );
+    let detail = output::protocols::Detail::try_from((registry.as_ref(), protocol))
+        .map_err(CliError::classified)?;
     match format {
         AggregateFormat::Text => rendering::render_detail(&detail),
         AggregateFormat::Json => emit_aggregate(
             output::contract::Command::Protocols,
-            output::protocols::DetailResult { protocol: detail },
+            output::protocols::DetailResult::from(detail),
             Vec::new(),
         ),
     }

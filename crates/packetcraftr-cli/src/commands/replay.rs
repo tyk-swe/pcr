@@ -290,9 +290,10 @@ where
         frames.push(output_frame(evidence)?);
         Ok(())
     })?;
-    let stats = stats(&summary, started.elapsed());
+    let stats = output::envelope::Stats::from((&summary, started.elapsed()));
     let result =
-        output::replay::Report::from_summary(summary, requested_interface, link_mode, frames);
+        output::replay::Report::try_from((summary, requested_interface, link_mode, frames))
+            .map_err(CliError::classified)?;
     emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
 }
 
@@ -310,8 +311,9 @@ where
     let interface = run.options.interface.clone();
     let link_mode = run.options.link_mode;
     let summary = run.drive(|evidence| render_stream_record(stream, evidence))?;
-    let stats = stats(&summary, started.elapsed());
-    let result = output::replay::Report::from_summary(summary, interface, link_mode, Vec::new());
+    let stats = output::envelope::Stats::from((&summary, started.elapsed()));
+    let result = output::replay::Report::try_from((summary, interface, link_mode, Vec::new()))
+        .map_err(CliError::classified)?;
     Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
 }
 
@@ -388,7 +390,7 @@ fn output_frame(
     evidence: packetcraftr::replay::FrameEvidence,
 ) -> Result<output::replay::Frame, packetcraftr::replay::Error> {
     let source_index = evidence.source_index;
-    output::replay::Frame::try_from_evidence(evidence)
+    output::replay::Frame::try_from(evidence)
         .map_err(|source| output_error(source_index, source.to_string()))
 }
 
@@ -499,14 +501,4 @@ fn render_capture_record<W: Write>(
             evidence.frame,
         )
         .map_err(|source| output_error(source_index, source.to_string()))
-}
-
-fn stats(summary: &packetcraftr::replay::Summary, elapsed: Duration) -> packetcraftr::Stats {
-    packetcraftr::Stats {
-        packets_attempted: summary.frames_read,
-        packets_completed: summary.frames_transmitted,
-        bytes: summary.bytes_transmitted,
-        elapsed,
-        capture: net::capture::Statistics::default(),
-    }
 }

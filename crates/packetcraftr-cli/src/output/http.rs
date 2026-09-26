@@ -2,16 +2,60 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
+    analysis::{Scope, ScopedFlowKey},
     contract::Error,
     hex::compact_hex,
-    provenance::{Source, from_source_set},
+    provenance::Source,
     stream::StreamRecord,
 };
 use packetcraftr_core::{
-    analysis::{http as analysis, reassembly::tcp::ScopedFlowKey, scope::Definition},
+    analysis::{self as library, http as analysis, scope::Definition},
     protocol::application::http,
 };
 use serde::Serialize;
+
+published_enum! {
+    /// Where an HTTP message, or a stream issue, ended up.
+    pub enum Status from analysis::Status {
+        Complete => "complete",
+        Incomplete => "incomplete",
+        Malformed => "malformed",
+        Limit => "limit",
+        Gap => "gap",
+        Conflict => "conflict",
+        Reset => "reset",
+        Evicted => "evicted",
+        Upgrade => "upgrade",
+    }
+}
+
+/// How a message delimits its body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", content = "length")]
+pub enum Body {
+    #[serde(rename = "none")]
+    None,
+    #[serde(rename = "length")]
+    Length(u64),
+    #[serde(rename = "chunked")]
+    Chunked,
+    #[serde(rename = "close")]
+    Close,
+    #[serde(rename = "tunnel")]
+    Tunnel,
+}
+
+impl From<http::Body> for Body {
+    fn from(value: http::Body) -> Self {
+        match value {
+            http::Body::None => Self::None,
+            http::Body::Length(length) => Self::Length(length),
+            http::Body::Chunked => Self::Chunked,
+            http::Body::Close => Self::Close,
+            http::Body::Tunnel => Self::Tunnel,
+        }
+    }
+}
 
 /// The HTTP request line or status line of a message.
 #[derive(Debug, Serialize)]
@@ -82,11 +126,11 @@ pub struct Message {
     pub generation: u64,
     pub flow: ScopedFlowKey,
     pub request: Option<u64>,
-    pub status: analysis::Status,
+    pub status: Status,
     pub start: Option<StartLine>,
     pub headers: Vec<Header>,
     pub header_wire_hex: String,
-    pub framing: Option<http::Body>,
+    pub framing: Option<Body>,
     pub body_bytes: u64,
     pub trailers: Vec<Header>,
     pub error: Option<String>,
@@ -105,17 +149,22 @@ impl TryFrom<analysis::Message> for Message {
             index: value.index,
             stream: value.stream,
             generation: value.generation,
-            flow: value.flow,
+            flow: value.flow.into(),
             request: value.request,
-            status: value.status,
+            status: value.status.into(),
             start,
             headers,
             header_wire_hex: compact_hex(&value.header_wire),
-            framing: value.framing,
+            framing: value.framing.map(Into::into),
             body_bytes: value.body_bytes,
             trailers: value.trailers.into_iter().map(Into::into).collect(),
             error: value.error.map(|error| error.to_string()),
-            sources: from_source_set(&value.sources)?,
+            sources: value
+                .sources
+                .frames()
+                .iter()
+                .map(Source::try_from)
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -124,23 +173,82 @@ impl StreamRecord for Message {
         "http_message"
     }
 }
+/// A stream-level condition that invalidated pending messages.
 #[derive(Debug, Serialize)]
-#[serde(transparent)]
-pub struct Issue(pub analysis::Issue);
+pub struct Issue {
+    pub number: u64,
+    pub flow: ScopedFlowKey,
+    pub stream: u64,
+    pub status: Status,
+}
+impl From<analysis::Issue> for Issue {
+    fn from(value: analysis::Issue) -> Self {
+        Self {
+            number: value.number,
+            flow: value.flow.into(),
+            stream: value.stream,
+            status: value.status.into(),
+        }
+    }
+}
 impl StreamRecord for Issue {
     fn event_name(&self) -> &'static str {
         "http_stream_issue"
+    }
+}
+/// Cumulative counts over every message the collector framed.
+#[derive(Debug, Serialize)]
+pub struct Summary {
+    pub messages: u64,
+    pub complete_messages: u64,
+    pub incomplete_messages: u64,
+    pub malformed_messages: u64,
+    pub upgraded_connections: u64,
+    pub responses_without_request: u64,
+    pub requests_without_final_response: u64,
+}
+impl From<analysis::Summary> for Summary {
+    fn from(value: analysis::Summary) -> Self {
+        Self {
+            messages: value.messages,
+            complete_messages: value.complete_messages,
+            incomplete_messages: value.incomplete_messages,
+            malformed_messages: value.malformed_messages,
+            upgraded_connections: value.upgraded_connections,
+            responses_without_request: value.responses_without_request,
+            requests_without_final_response: value.requests_without_final_response,
+        }
     }
 }
 #[derive(Debug, Serialize)]
 pub struct Complete {
     pub frames_read: u64,
     pub frames_matched: u64,
-    pub summary: analysis::Summary,
-    pub scopes: Vec<Definition>,
+    pub summary: Summary,
+    pub scopes: Vec<Scope>,
     pub incomplete_datagrams: usize,
     pub source_outcomes_omitted: u64,
     pub ip_reassembly: super::reassembly::Report,
+}
+/// The run's counters, the collector's summary, and the scopes it exposed.
+impl TryFrom<(&library::Summary, analysis::Summary, Vec<Definition>)> for Complete {
+    type Error = Error;
+    fn try_from(
+        (run, summary, scopes): (&library::Summary, analysis::Summary, Vec<Definition>),
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            frames_read: run.frames_read,
+            frames_matched: run.frames_matched,
+            summary: summary.into(),
+            scopes: scopes
+                .into_iter()
+                .map(Scope::try_from)
+                .collect::<Result<_, _>>()?,
+            incomplete_datagrams: run.incomplete_sources.len(),
+            source_outcomes_omitted: run.source_outcomes_omitted,
+            ip_reassembly: (&run.ip_reassembly).into(),
+        })
+    }
 }
 #[derive(Debug, Serialize)]
 pub struct Report {
@@ -148,4 +256,15 @@ pub struct Report {
     pub issues: Vec<Issue>,
     #[serde(flatten)]
     pub complete: Complete,
+}
+/// The messages and issues retained for the document, and the terminal
+/// counters.
+impl From<(Vec<Message>, Vec<Issue>, Complete)> for Report {
+    fn from((messages, issues, complete): (Vec<Message>, Vec<Issue>, Complete)) -> Self {
+        Self {
+            messages,
+            issues,
+            complete,
+        }
+    }
 }

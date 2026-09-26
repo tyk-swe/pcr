@@ -61,7 +61,7 @@ pub(super) fn run(
             on_event: emit_event,
             into_result: Box::new(|report| {
                 output::scan::connect::Report::try_from(report)
-                    .map(|report| (report, Vec::new(), None))
+                    .map(|report| output::envelope::Published::new(report, Vec::new()))
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {

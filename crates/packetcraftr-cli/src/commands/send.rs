@@ -15,8 +15,8 @@ use self::arguments::Args;
 use super::preparation::{self, Prepared};
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_hex_line,
-    write_raw, write_summary_line,
+    emit_published, render_diagnostics_text, write_capture_file, write_hex_line, write_raw,
+    write_summary_line,
 };
 
 fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::SetOptions>, CliError> {
@@ -88,9 +88,9 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
                 .client
                 .send_set(&prepared.template, prepared.options)
                 .map_err(CliError::classified)?;
-            let (result, diagnostics, stats) =
-                output::send::Report::try_from_report(report).map_err(CliError::classified)?;
-            emit_aggregate_with_stats(output::contract::Command::Send, result, diagnostics, stats)
+            let published = output::envelope::Published::<output::send::Report>::try_from(report)
+                .map_err(CliError::classified)?;
+            emit_published(output::contract::Command::Send, published)
         }
         SendFormat::Hex => prepared
             .client

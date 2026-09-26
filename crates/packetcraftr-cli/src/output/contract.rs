@@ -263,8 +263,12 @@ pub enum Error {
     TimestampOutOfRange,
     #[error("source frame must be a non-zero unsigned 64-bit position")]
     InvalidSourceFrame,
-    #[error("fuzz events are incoherent: {message}")]
-    IncoherentFuzzEvents { message: String },
+    #[error("fuzz events are incoherent: {0}")]
+    IncoherentFuzzEvents(#[from] packetcraftr::fuzz::IncoherentReport),
+    /// A library value newer than the published output contract, which has
+    /// no spelling for it.
+    #[error("{value} has no representation in the published output contract")]
+    Unpublished { value: &'static str },
 }
 
 fn supported_formats(command: &Command) -> String {
@@ -294,11 +298,12 @@ impl Classified for Error {
                 Kind::Internal,
                 Some("use the one-based source position assigned while reading or capturing"),
             ),
-            Self::IncoherentFuzzEvents { .. } => Classification::new(
+            Self::IncoherentFuzzEvents(_) => Classification::new(
                 "internal.fuzz_event_coherence",
                 Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
             ),
+            Self::Unpublished { .. } => Classification::new("internal.error", Kind::Internal, None),
         }
     }
 }

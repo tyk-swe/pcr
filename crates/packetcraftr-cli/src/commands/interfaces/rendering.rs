@@ -45,7 +45,7 @@ pub(super) fn interface_line(interface: &output::network::Interface) -> String {
 
 /// The set flags as one comma-separated word, so text stays greppable while
 /// JSON keeps the structured object.
-pub(super) fn interface_flags(flags: &packetcraftr_netio::interface::Flags) -> String {
+pub(super) fn interface_flags(flags: &crate::output::network::Flags) -> String {
     let mut set = Vec::new();
     if flags.up {
         set.push("up");

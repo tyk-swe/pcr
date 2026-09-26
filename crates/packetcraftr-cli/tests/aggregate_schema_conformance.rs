@@ -13,16 +13,16 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr::Stats;
 use packetcraftr_cli::output::contract::{Command, Format};
-use packetcraftr_cli::output::envelope::Envelope;
+use packetcraftr_cli::output::envelope::{Envelope, Published, Stats as OutputStats};
 use packetcraftr_cli::output::{
-    build as build_output, dissect as dissect_output, dns as dns_output,
-    exchange as exchange_output, expert as expert_output, follow as follow_output,
-    fuzz as fuzz_output, interfaces as interfaces_output, network as network_output,
-    plan as plan_output, protocols as protocols_output, reassembly as reassembly_output,
-    replay as replay_output, routes as routes_output, scan as scan_output, send as send_output,
-    stats as stats_output, tls as tls_output, traceroute as traceroute_output,
+    analysis as analysis_output, build as build_output, dissect as dissect_output,
+    dns as dns_output, exchange as exchange_output, expert as expert_output,
+    follow as follow_output, fuzz as fuzz_output, interfaces as interfaces_output,
+    network as network_output, plan as plan_output, protocols as protocols_output,
+    reassembly as reassembly_output, replay as replay_output, routes as routes_output,
+    scan as scan_output, send as send_output, stats as stats_output, tls as tls_output,
+    traceroute as traceroute_output,
 };
 use packetcraftr_core::analysis::IpReassemblyReport;
 use packetcraftr_core::analysis::StreamTransport;
@@ -165,9 +165,15 @@ fn envelope_with_stats<T: serde::Serialize>(
     command: Command,
     payload: T,
     diagnostics: Vec<Diagnostic>,
-    stats: Stats,
+    stats: impl Into<OutputStats>,
 ) -> Value {
     serde_json::to_value(Envelope::success(command, payload, diagnostics).with_stats(stats))
+        .expect("aggregate envelope serializes")
+}
+
+/// A converted payload with the diagnostics and stats its conversion carried.
+fn published<T: serde::Serialize>(command: Command, published: Published<T>) -> Value {
+    serde_json::to_value(Envelope::published(command, published))
         .expect("aggregate envelope serializes")
 }
 
@@ -314,8 +320,7 @@ fn analysis_stats_report() -> packetcraftr_core::analysis::stats::Report {
 }
 
 fn fragment_case() -> Value {
-    let frame =
-        packetcraftr_cli::output::frame::Captured::try_from_frame(evidence_frame()).unwrap();
+    let frame = packetcraftr_cli::output::frame::Captured::try_from(evidence_frame()).unwrap();
     envelope(
         Command::Fragment,
         packetcraftr_cli::output::fragment::Report {
@@ -335,13 +340,13 @@ fn fragment_case() -> Value {
 fn merge_case() -> Value {
     envelope(
         Command::Merge,
-        packetcraftr_cli::output::merge::Report::new(
+        packetcraftr_cli::output::merge::Report::from((
             "merged.pcapng".to_owned(),
             packetcraftr_core::capture_file::MergeReport {
                 source_frames: vec![0, 0],
                 ..Default::default()
             },
-        ),
+        )),
         Vec::new(),
     )
 }
@@ -367,27 +372,25 @@ fn projection_case() -> Value {
 fn build_case() -> Value {
     let mut built = built_packet();
     built.diagnostics.push(diagnostic());
-    let (report, diagnostics) = build_output::Report::from_built(built);
-    envelope(Command::Build, report, diagnostics)
+    published(
+        Command::Build,
+        Published::<build_output::Report>::from(built),
+    )
 }
 
 fn dissect_case() -> Value {
     let mut decoded = decoded_frame();
     decoded.diagnostics.push(diagnostic());
-    let (report, diagnostics) = dissect_output::Report::from_decoded(decoded);
-    envelope(
+    published(
         Command::Dissect,
-        dissect_output::AggregateResult::new(Some(report)),
-        diagnostics,
+        Published::<dissect_output::AggregateResult>::from((true, decoded)),
     )
 }
 
 fn dissect_unmatched_case() -> Value {
-    let (_, diagnostics) = dissect_output::Report::from_decoded(decoded_frame());
-    envelope(
+    published(
         Command::Dissect,
-        dissect_output::AggregateResult::new(None),
-        diagnostics,
+        Published::<dissect_output::AggregateResult>::from((false, decoded_frame())),
     )
 }
 
@@ -411,31 +414,8 @@ fn protocols_detail_case() -> Value {
 
 fn protocols_detail_for(protocol: BuiltinProtocol) -> Value {
     let registry = builtin::registry();
-    let fields = registry
-        .schema(protocol.as_str())
-        .map(|schema| {
-            schema
-                .fields
-                .iter()
-                .map(protocols_output::Field::try_from)
-                .collect::<Result<Vec<_>, _>>()
-                .expect("every built-in field kind has a v1 representation")
-        })
-        .unwrap_or_default();
-    let bindings = registry
-        .parent_bindings(protocol.as_str())
-        .into_iter()
-        .map(|(parent, discriminator)| protocols_output::Binding {
-            parent: parent.as_str().to_owned(),
-            discriminator: discriminator.0,
-        })
-        .collect();
-    let detail = protocols_output::Detail::new(
-        protocols_output::Summary::from(protocol),
-        fields,
-        bindings,
-        protocols_output::FilterField::for_protocol(&registry, protocol.as_str()),
-    );
+    let detail = protocols_output::Detail::try_from((registry.as_ref(), protocol))
+        .expect("every built-in field kind has a v1 representation");
     envelope(
         Command::Protocols,
         protocols_output::DetailResult { protocol: detail },
@@ -454,18 +434,17 @@ fn plan_case() -> Value {
 }
 
 fn send_case() -> Value {
-    let (report, diagnostics, stats) =
-        send_output::Report::try_from_report(packetcraftr::send::SetReport {
-            sent: vec![packetcraftr::send::SentFrame {
-                pass: 1,
-                index: 0,
-                packet: sent_packet(),
-            }],
-            passes_completed: 1,
-            stats: workflow_stats(),
-        })
-        .expect("in-range send evidence converts");
-    envelope_with_stats(Command::Send, report, diagnostics, stats)
+    let report = Published::<send_output::Report>::try_from(packetcraftr::send::SetReport {
+        sent: vec![packetcraftr::send::SentFrame {
+            pass: 1,
+            index: 0,
+            packet: sent_packet(),
+        }],
+        passes_completed: 1,
+        stats: workflow_stats(),
+    })
+    .expect("in-range send evidence converts");
+    published(Command::Send, report)
 }
 
 fn send_without_neighbor_case() -> Value {
@@ -478,69 +457,66 @@ fn send_without_neighbor_case() -> Value {
     };
     let sent = packetcraftr::SentPacket::try_new(built, route, report)
         .expect("trusted transmission receipt");
-    let (report, diagnostics, stats) =
-        send_output::Report::try_from_report(packetcraftr::send::SetReport {
-            sent: vec![packetcraftr::send::SentFrame {
-                pass: 1,
-                index: 0,
-                packet: sent,
-            }],
-            passes_completed: 1,
-            stats: workflow_stats(),
-        })
-        .expect("in-range send evidence converts");
-    envelope_with_stats(Command::Send, report, diagnostics, stats)
+    let report = Published::<send_output::Report>::try_from(packetcraftr::send::SetReport {
+        sent: vec![packetcraftr::send::SentFrame {
+            pass: 1,
+            index: 0,
+            packet: sent,
+        }],
+        passes_completed: 1,
+        stats: workflow_stats(),
+    })
+    .expect("in-range send evidence converts");
+    published(Command::Send, report)
 }
 
 fn exchange_case() -> Value {
-    let (report, diagnostics, stats) =
-        exchange_output::Report::try_from_exchange(packetcraftr::exchange::Report {
-            sent: vec![Arc::new(sent_packet())],
-            responses: vec![packetcraftr::exchange::Response {
-                request_index: 0,
-                response: decoded_frame(),
-                latency: Duration::from_millis(3),
-            }],
-            unanswered: vec![1],
-            unsolicited: vec![decoded_frame()],
-            undecoded: vec![evidence_frame()],
-            diagnostics: vec![diagnostic()],
-            stats: workflow_stats(),
-        })
-        .expect("in-range exchange evidence converts");
-    envelope_with_stats(Command::Exchange, report, diagnostics, stats)
+    let report = Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Report {
+        sent: vec![Arc::new(sent_packet())],
+        responses: vec![packetcraftr::exchange::Response {
+            request_index: 0,
+            response: decoded_frame(),
+            latency: Duration::from_millis(3),
+        }],
+        unanswered: vec![1],
+        unsolicited: vec![decoded_frame()],
+        undecoded: vec![evidence_frame()],
+        diagnostics: vec![diagnostic()],
+        stats: workflow_stats(),
+    })
+    .expect("in-range exchange evidence converts");
+    published(Command::Exchange, report)
 }
 
 fn exchange_empty_case() -> Value {
-    let (report, diagnostics, stats) =
-        exchange_output::Report::try_from_exchange(packetcraftr::exchange::Report {
-            sent: Vec::new(),
-            responses: Vec::new(),
-            unanswered: Vec::new(),
-            unsolicited: Vec::new(),
-            undecoded: Vec::new(),
-            diagnostics: Vec::new(),
-            stats: packetcraftr::Stats::default(),
-        })
-        .expect("an empty exchange converts");
-    envelope_with_stats(Command::Exchange, report, diagnostics, stats)
+    let report = Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Report {
+        sent: Vec::new(),
+        responses: Vec::new(),
+        unanswered: Vec::new(),
+        unsolicited: Vec::new(),
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: packetcraftr::Stats::default(),
+    })
+    .expect("an empty exchange converts");
+    published(Command::Exchange, report)
 }
 
 fn replay_case() -> Value {
     let frames = vec![replay_output::Frame {
         pass: 1,
         source_index: 1,
-        interface: packetcraftr_netio::interface::Id {
+        interface: network_output::InterfaceId {
             name: "lab0".to_owned(),
             index: 2,
         },
-        link_mode: packetcraftr_netio::link::Mode::Layer3,
+        link_mode: network_output::LinkMode::Layer3,
         scheduled_delay: Duration::from_millis(5),
         bytes_sent: 29,
-        frame: packetcraftr_cli::output::frame::Captured::try_from_frame(evidence_frame())
+        frame: packetcraftr_cli::output::frame::Captured::try_from(evidence_frame())
             .expect("in-range capture evidence converts"),
     }];
-    let report = replay_output::Report::from_summary(
+    let report = replay_output::Report::try_from((
         packetcraftr::replay::Summary {
             passes_completed: 1,
             interfaces_used: vec![InterfaceId {
@@ -554,13 +530,14 @@ fn replay_case() -> Value {
             bytes_transmitted: 29,
             scheduled_duration: Duration::from_millis(5),
         },
-        InterfaceId {
+        Some(InterfaceId {
             name: "lab0".to_owned(),
             index: 2,
-        },
+        }),
         LinkMode::Auto,
         frames,
-    );
+    ))
+    .expect("published replay timing converts");
     envelope_with_stats(Command::Replay, report, Vec::new(), workflow_stats())
 }
 
@@ -594,25 +571,24 @@ fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
 
 fn scan_case() -> Value {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let (report, diagnostics, stats) =
-        scan_output::Report::try_from_scan(packetcraftr::scan::Report {
-            planned_duration: std::time::Duration::ZERO,
-            target: "host.example".to_owned(),
-            resolved_addresses: vec![address],
-            endpoints: vec![packetcraftr::scan::Endpoint {
-                address,
-                transport: packetcraftr::probe::Transport::Tcp,
-                port: Some(443),
-                classification: packetcraftr::scan::Classification::Open,
-                probes: vec![scan_probe(true), scan_probe(false)],
-            }],
-            undecoded: vec![evidence_frame()],
-            diagnostics: vec![diagnostic()],
-            stats: workflow_stats(),
-            rtt: packetcraftr::scan::Rtt::default(),
-        })
-        .expect("in-range scan evidence converts");
-    envelope_with_stats(Command::Scan, report, diagnostics, stats)
+    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Report {
+        planned_duration: std::time::Duration::ZERO,
+        target: "host.example".to_owned(),
+        resolved_addresses: vec![address],
+        endpoints: vec![packetcraftr::scan::Endpoint {
+            address,
+            transport: packetcraftr::probe::Transport::Tcp,
+            port: Some(443),
+            classification: packetcraftr::scan::Classification::Open,
+            probes: vec![scan_probe(true), scan_probe(false)],
+        }],
+        undecoded: vec![evidence_frame()],
+        diagnostics: vec![diagnostic()],
+        stats: workflow_stats(),
+        rtt: packetcraftr::scan::Rtt::default(),
+    })
+    .expect("in-range scan evidence converts");
+    published(Command::Scan, report)
 }
 
 fn scan_icmp_case() -> Value {
@@ -641,23 +617,22 @@ fn scan_icmp_case() -> Value {
         probes: vec![probe(address)],
     };
     let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let (report, diagnostics, stats) =
-        scan_output::Report::try_from_scan(packetcraftr::scan::Report {
-            planned_duration: std::time::Duration::ZERO,
-            target: "host.example".to_owned(),
-            resolved_addresses: vec![ipv4, ipv6],
-            endpoints: vec![endpoint(ipv4), endpoint(ipv6)],
-            undecoded: Vec::new(),
-            diagnostics: Vec::new(),
-            stats: workflow_stats(),
-            rtt: packetcraftr::scan::Rtt::default(),
-        })
-        .expect("in-range scan evidence converts");
-    envelope_with_stats(Command::Scan, report, diagnostics, stats)
+    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Report {
+        planned_duration: std::time::Duration::ZERO,
+        target: "host.example".to_owned(),
+        resolved_addresses: vec![ipv4, ipv6],
+        endpoints: vec![endpoint(ipv4), endpoint(ipv6)],
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+        stats: workflow_stats(),
+        rtt: packetcraftr::scan::Rtt::default(),
+    })
+    .expect("in-range scan evidence converts");
+    published(Command::Scan, report)
 }
 
 fn stats_case(table: stats_output::Table) -> Value {
-    let report = stats_output::Report::try_from_report(table, analysis_stats_report(), 9)
+    let report = stats_output::Report::try_from((table, analysis_stats_report(), 9))
         .expect("in-range statistics convert");
     envelope(Command::Stats, report, Vec::new())
 }
@@ -712,7 +687,7 @@ fn expert_case() -> Value {
     .into_iter()
     .map(expert_output::Finding::from)
     .collect();
-    let report = expert_output::Report::from_summary(
+    let report = expert_output::Report::from((
         Summary {
             clock: Default::default(),
             findings: 2,
@@ -727,7 +702,7 @@ fn expert_case() -> Value {
         11,
         findings,
         &analysis_stats_report().ip_reassembly,
-    );
+    ));
     envelope(Command::Expert, report, Vec::new())
 }
 
@@ -749,9 +724,11 @@ fn follow_case() -> Value {
     .into_iter()
     .map(follow_output::Chunk::from)
     .collect();
-    let report = follow_output::Report::from_summary(
-        packetcraftr_core::analysis::StreamTransport::Tcp,
-        2,
+    let report = follow_output::Report::try_from((
+        packetcraftr_core::analysis::StreamRef {
+            transport: StreamTransport::Tcp,
+            index: 2,
+        },
         FollowSummary {
             scope: None,
             clock: Default::default(),
@@ -769,29 +746,35 @@ fn follow_case() -> Value {
         chunks,
         &analysis_stats_report().ip_reassembly,
         Vec::new(),
-    );
+    ))
+    .expect("the followed conversation converts");
     envelope(Command::Follow, report, Vec::new())
 }
 
 fn follow_empty_case() -> Value {
-    let report = follow_output::Report::from_summary(
-        packetcraftr_core::analysis::StreamTransport::Udp,
-        99,
+    let report = follow_output::Report::try_from((
+        packetcraftr_core::analysis::StreamRef {
+            transport: StreamTransport::Udp,
+            index: 99,
+        },
         FollowSummary::default(),
         Vec::new(),
         &IpReassemblyReport::default(),
         Vec::new(),
-    );
+    ))
+    .expect("an absent conversation converts");
     envelope(Command::Follow, report, Vec::new())
 }
 
 fn tls_case() -> Value {
-    let endpoint = |last: u8, port: u16| packetcraftr_core::analysis::Endpoint {
+    let endpoint = |last: u8, port: u16| analysis_output::Endpoint {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         port,
     };
     let session = tls_output::Session {
-        scope: fixture_scope(),
+        scope: fixture_scope()
+            .try_into()
+            .expect("the fixture scope converts"),
         session: 0,
         tcp_stream: 4,
         client_endpoint: endpoint(1, 40_000),
@@ -834,7 +817,7 @@ fn tls_case() -> Value {
             description_name: Some("handshake_failure"),
         }],
         alerts_dropped: 2,
-        status: packetcraftr_core::analysis::tls::Status::Alert,
+        status: tls_output::Status::Alert,
         reason: None,
     };
     envelope(
@@ -856,7 +839,7 @@ fn tls_case() -> Value {
                 sessions_omitted: 0,
                 buffer_limit_hits: 0,
                 udp_443_frames: 0,
-                ip_reassembly: reassembly_output::Report::from_analysis(
+                ip_reassembly: reassembly_output::Report::from(
                     &analysis_stats_report().ip_reassembly,
                 ),
             },
@@ -866,7 +849,7 @@ fn tls_case() -> Value {
 }
 
 fn tls_gap_case() -> Value {
-    let endpoint = |last: u8, port: u16| packetcraftr_core::analysis::Endpoint {
+    let endpoint = |last: u8, port: u16| analysis_output::Endpoint {
         address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
         port,
     };
@@ -874,7 +857,9 @@ fn tls_gap_case() -> Value {
         Command::Tls,
         tls_output::Report {
             sessions: vec![tls_output::Session {
-                scope: fixture_scope(),
+                scope: fixture_scope()
+                    .try_into()
+                    .expect("the fixture scope converts"),
                 session: 0,
                 tcp_stream: 4,
                 client_endpoint: endpoint(1, 40_000),
@@ -887,7 +872,7 @@ fn tls_gap_case() -> Value {
                 hello_retry: false,
                 alerts: Vec::new(),
                 alerts_dropped: 0,
-                status: packetcraftr_core::analysis::tls::Status::Gap,
+                status: tls_output::Status::Gap,
                 reason: Some("no ClientHello observed".to_owned()),
             }],
             summary: tls_output::Summary::default(),
@@ -925,8 +910,8 @@ fn trace_probe(responded: bool) -> packetcraftr::traceroute::ProbeEvidence {
 }
 
 fn traceroute_case() -> Value {
-    let (report, diagnostics, stats) =
-        traceroute_output::Report::try_from_traceroute(packetcraftr::traceroute::Report {
+    let report =
+        Published::<traceroute_output::Report>::try_from(packetcraftr::traceroute::Report {
             target: "host.example".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))],
             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
@@ -945,12 +930,12 @@ fn traceroute_case() -> Value {
             stats: workflow_stats(),
         })
         .expect("in-range traceroute evidence converts");
-    envelope_with_stats(Command::Traceroute, report, diagnostics, stats)
+    published(Command::Traceroute, report)
 }
 
 fn dns_timeout_case() -> Value {
     let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-    let (report, diagnostics, stats) = dns_output::Report::try_from_dns({
+    let report = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = None;
         packetcraftr::dns::Report::new(
             packetcraftr::dns::Summary {
@@ -993,7 +978,7 @@ fn dns_timeout_case() -> Value {
         .unwrap()
     })
     .expect("in-range DNS evidence converts");
-    envelope_with_stats(Command::Dns, report, diagnostics, stats)
+    published(Command::Dns, report)
 }
 
 /// A batch result exercises the `questions` shape: one completed question with
@@ -1069,9 +1054,9 @@ fn dns_batch_case() -> Value {
             },
         ],
     };
-    let (result, diagnostics, stats) =
-        dns_output::BatchResult::try_from_batch(batch).expect("batch result converts");
-    envelope_with_stats(Command::Dns, result, diagnostics, stats)
+    let result =
+        Published::<dns_output::BatchResult>::try_from(batch).expect("batch result converts");
+    published(Command::Dns, result)
 }
 
 fn dns_name(value: &str) -> dns_wire::Name {
@@ -1203,7 +1188,7 @@ fn dns_response_case() -> Value {
             },
         },
     };
-    let (report, diagnostics, stats) = dns_output::Report::try_from_dns({
+    let report = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = Some(response);
         packetcraftr::dns::Report::new(
             packetcraftr::dns::Summary {
@@ -1244,7 +1229,7 @@ fn dns_response_case() -> Value {
         .unwrap()
     })
     .expect("in-range DNS evidence converts");
-    envelope_with_stats(Command::Dns, report, diagnostics, stats)
+    published(Command::Dns, report)
 }
 
 /// A campaign over the IPv4 fixture: an IPv4 root has a registered capture
@@ -1261,9 +1246,9 @@ fn offline_fuzz_report() -> packet_fuzz::Report {
 }
 
 fn fuzz_offline_case() -> Value {
-    let (report, diagnostics, stats) = fuzz_output::Report::try_from_offline(offline_fuzz_report())
+    let report = Published::<fuzz_output::Report>::try_from(offline_fuzz_report())
         .expect("offline fuzz campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+    published(Command::Fuzz, report)
 }
 
 fn fuzz_rejected_case() -> Value {
@@ -1284,9 +1269,9 @@ fn fuzz_rejected_case() -> Value {
     ));
     report.stats.cases_generated = 1;
     report.stats.cases_built = 0;
-    let (report, diagnostics, stats) =
-        fuzz_output::Report::try_from_offline(report).expect("a rejected-only campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+    let report = Published::<fuzz_output::Report>::try_from(report)
+        .expect("a rejected-only campaign converts");
+    published(Command::Fuzz, report)
 }
 
 fn fuzz_live_case() -> Value {
@@ -1315,21 +1300,20 @@ fn fuzz_live_case() -> Value {
             live
         })
         .collect();
-    let (report, diagnostics, stats) =
-        fuzz_output::Report::try_from_live(packetcraftr::fuzz::Report {
-            seed: offline.seed,
-            first_case: offline.first_case,
-            cases,
-            stats,
-        })
-        .expect("live fuzz campaign converts");
-    envelope_with_stats(Command::Fuzz, report, diagnostics, stats)
+    let report = Published::<fuzz_output::Report>::try_from(packetcraftr::fuzz::Report {
+        seed: offline.seed,
+        first_case: offline.first_case,
+        cases,
+        stats,
+    })
+    .expect("live fuzz campaign converts");
+    published(Command::Fuzz, report)
 }
 
 fn interfaces_case() -> Value {
     envelope(
         Command::Interfaces,
-        interfaces_output::Report::new(vec![
+        interfaces_output::Report::from(vec![
             Info {
                 id: InterfaceId {
                     name: "eth0".to_owned(),
@@ -1447,13 +1431,14 @@ fn verify_forwarding_case() -> Value {
         None,
     )
     .expect("fixture comparison runs");
-    let document = forwarding_output::Report::from_report(
+    let document = forwarding_output::Report::try_from((
         &report,
         forwarding::Sided {
-            ingress: "pre-forwarding.pcap".to_owned(),
-            egress: "post-forwarding.pcap".to_owned(),
+            ingress: ("pre-forwarding.pcap".to_owned(), None, None),
+            egress: ("post-forwarding.pcap".to_owned(), None, None),
         },
-    )
+        None,
+    ))
     .expect("the report converts");
     envelope(Command::VerifyForwarding, document, Vec::new())
 }
@@ -1539,36 +1524,36 @@ fn vocabulary<T: serde::Serialize>(
     }
 }
 
-/// Ten of these types are re-exported straight out of a domain module, so a
-/// variant renamed there is a wire break here with nothing in between. The
-/// aggregate fixtures above only exercise the variants they happen to carry;
-/// this pins every one.
+/// The CLI-owned enums that publish these vocabularies mirror library enums
+/// variant for variant. The aggregate fixtures above only exercise the
+/// variants they happen to carry; this pins every one.
 fn frozen_vocabularies() -> Vec<Vocabulary> {
-    use packetcraftr::dns::{Outcome as DnsOutcome, Section, Transport as DnsTransport};
-    use packetcraftr::fuzz::CaseOutcome;
-    use packetcraftr::probe::{
+    use packetcraftr_cli::output::diagnostic::Severity;
+    use packetcraftr_cli::output::dns::{
+        Outcome as DnsOutcome, Section, Transport as DnsTransport,
+    };
+    use packetcraftr_cli::output::frame::Direction;
+    use packetcraftr_cli::output::fuzz::{Outcome as CaseOutcome, Strategy as FuzzStrategy};
+    use packetcraftr_cli::output::probe::{
         ProbeStatus as ScanStatus, ProbeStatus as TraceStatus, Transport as ScanTransport,
         Transport as TraceStrategy,
     };
-    use packetcraftr::scan::Classification;
-    use packetcraftr::traceroute::{Completion, ResponseKind};
-    use packetcraftr_core::diagnostic::Severity;
-    use packetcraftr_core::frame::Direction;
-    use packetcraftr_core::fuzz::Strategy as FuzzStrategy;
+    use packetcraftr_cli::output::scan::Classification;
+    use packetcraftr_cli::output::traceroute::{Completion, ResponseKind};
 
     vec![
         vocabulary(
-            "diagnostic::Severity",
+            "output::diagnostic::Severity",
             "/$defs/diagnostic/properties/severity/enum",
             [Severity::Info, Severity::Warning, Severity::Error],
         ),
         vocabulary(
-            "packetcraftr_core::frame::Direction",
+            "output::frame::Direction",
             "/$defs/frame/properties/direction/enum",
             [Direction::Inbound, Direction::Outbound, Direction::Unknown],
         ),
         vocabulary(
-            "packetcraftr::fuzz::CaseOutcome",
+            "output::fuzz::Outcome",
             "/$defs/fuzzCase/properties/outcome/enum",
             [
                 CaseOutcome::Built,
@@ -1578,7 +1563,7 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr_core::fuzz::Strategy",
+            "output::fuzz::Strategy",
             "/$defs/fuzzMutation/properties/strategy/enum",
             [
                 FuzzStrategy::Boundary,
@@ -1588,12 +1573,12 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::dns::Section",
+            "output::dns::Section",
             "/$defs/dnsSection/enum",
             [Section::Answer, Section::Authority, Section::Additional],
         ),
         vocabulary(
-            "packetcraftr::dns::Outcome",
+            "output::dns::Outcome",
             "/$defs/dnsOutcome/enum",
             [
                 DnsOutcome::Response,
@@ -1605,20 +1590,20 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::dns::Transport",
+            "output::dns::Transport",
             "/$defs/dnsTransport/enum",
             [DnsTransport::Udp, DnsTransport::Tcp],
         ),
         vocabulary(
-            "packetcraftr_core::capture_file::Format",
+            "output::replay::SourceFormat",
             "/$defs/replayResult/properties/source_format/enum",
             [
-                packetcraftr_core::capture_file::Format::Pcap,
-                packetcraftr_core::capture_file::Format::PcapNg,
+                replay_output::SourceFormat::Pcap,
+                replay_output::SourceFormat::PcapNg,
             ],
         ),
         vocabulary(
-            "packetcraftr::scan::Classification",
+            "output::scan::Classification",
             "/$defs/scanProbe/properties/classification/enum",
             [
                 Classification::Open,
@@ -1630,7 +1615,7 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::probe::ProbeStatus",
+            "output::probe::ProbeStatus",
             "/$defs/scanProbe/properties/status/enum",
             [ScanStatus::Response, ScanStatus::Timeout],
         ),
@@ -1645,17 +1630,17 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::probe::Transport",
+            "output::probe::Transport",
             "/$defs/scanEndpoint/properties/transport/enum",
             [ScanTransport::Tcp, ScanTransport::Udp, ScanTransport::Icmp],
         ),
         vocabulary(
-            "packetcraftr::probe::ProbeStatus",
+            "output::probe::ProbeStatus",
             "/$defs/traceProbe/properties/status/enum",
             [TraceStatus::Response, TraceStatus::Timeout],
         ),
         vocabulary(
-            "packetcraftr::traceroute::ResponseKind",
+            "output::traceroute::ResponseKind",
             "/$defs/traceProbe/properties/response_kind/enum",
             [
                 ResponseKind::Intermediate,
@@ -1664,12 +1649,12 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr::probe::Transport",
+            "output::probe::Transport",
             "/$defs/traceProbe/properties/strategy/enum",
             [TraceStrategy::Udp, TraceStrategy::Icmp, TraceStrategy::Tcp],
         ),
         vocabulary(
-            "packetcraftr::traceroute::Completion",
+            "output::traceroute::Completion",
             "/$defs/tracerouteResult/properties/completion/enum",
             [
                 Completion::DestinationReached,
@@ -1679,20 +1664,20 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             ],
         ),
         vocabulary(
-            "packetcraftr_core::analysis::follow::PeerDirection",
+            "output::follow::PeerDirection",
             "/$defs/followChunk/properties/direction/enum",
             [
-                packetcraftr_core::analysis::follow::PeerDirection::ClientToServer,
-                packetcraftr_core::analysis::follow::PeerDirection::ServerToClient,
+                follow_output::PeerDirection::ClientToServer,
+                follow_output::PeerDirection::ServerToClient,
             ],
         ),
         vocabulary(
-            "packetcraftr_netio::link::Mode",
+            "output::network::LinkMode",
             "/$defs/linkMode/enum",
             [
-                packetcraftr_netio::link::Mode::Auto,
-                packetcraftr_netio::link::Mode::Layer2,
-                packetcraftr_netio::link::Mode::Layer3,
+                network_output::LinkMode::Auto,
+                network_output::LinkMode::Layer2,
+                network_output::LinkMode::Layer3,
             ],
         ),
     ]
@@ -1718,8 +1703,8 @@ fn every_frozen_enum_serializes_exactly_the_vocabulary_the_schema_declares() {
     }
 }
 
-/// `packetcraftr_core::analysis::tls::Status` publishes its vocabulary as annotated `const`s rather than a
-/// bare `enum` list, so it is compared against those.
+/// `tlsStatus` publishes its vocabulary as annotated `const`s rather than a
+/// bare `enum` list, so the CLI's `tls::Status` is compared against those.
 #[test]
 fn tls_status_serializes_exactly_the_vocabulary_the_schema_declares() {
     let declared = output_schema()["$defs"]["tlsStatus"]["oneOf"]
@@ -1729,13 +1714,13 @@ fn tls_status_serializes_exactly_the_vocabulary_the_schema_declares() {
         .map(|member| member["const"].clone())
         .collect::<Vec<_>>();
     let variants = [
-        packetcraftr_core::analysis::tls::Status::Complete,
-        packetcraftr_core::analysis::tls::Status::ClientOnly,
-        packetcraftr_core::analysis::tls::Status::Retry,
-        packetcraftr_core::analysis::tls::Status::Alert,
-        packetcraftr_core::analysis::tls::Status::Malformed,
-        packetcraftr_core::analysis::tls::Status::Gap,
-        packetcraftr_core::analysis::tls::Status::Truncated,
+        tls_output::Status::Complete,
+        tls_output::Status::ClientOnly,
+        tls_output::Status::Retry,
+        tls_output::Status::Alert,
+        tls_output::Status::Malformed,
+        tls_output::Status::Gap,
+        tls_output::Status::Truncated,
     ]
     .into_iter()
     .map(|status| serde_json::to_value(status).expect("a status serializes"))
@@ -1791,43 +1776,30 @@ fn fixture_scope() -> packetcraftr_core::analysis::scope::Definition {
 
 fn dns_read_case() -> Value {
     use packetcraftr_cli::output::dns_read::{Complete, Report};
+    let complete = Complete::try_from((
+        &packetcraftr_core::analysis::Summary::default(),
+        Default::default(),
+        Vec::new(),
+    ))
+    .expect("an empty run converts");
     envelope(
         Command::DnsRead,
-        Report {
-            messages: Vec::new(),
-            transactions: Vec::new(),
-            issues: Vec::new(),
-            complete: Complete {
-                frames_read: 0,
-                frames_matched: 0,
-                summary: Default::default(),
-                scopes: Vec::new(),
-                incomplete_datagrams: 0,
-                source_outcomes_omitted: 0,
-                ip_reassembly: reassembly_output::Report::from_analysis(&Default::default()),
-            },
-        },
+        Report::from((Vec::new(), Vec::new(), Vec::new(), complete)),
         Vec::new(),
     )
 }
 
 fn http_case() -> Value {
     use packetcraftr_cli::output::http::{Complete, Report};
+    let complete = Complete::try_from((
+        &packetcraftr_core::analysis::Summary::default(),
+        Default::default(),
+        Vec::new(),
+    ))
+    .expect("an empty run converts");
     envelope(
         Command::Http,
-        Report {
-            messages: Vec::new(),
-            issues: Vec::new(),
-            complete: Complete {
-                frames_read: 0,
-                frames_matched: 0,
-                summary: Default::default(),
-                scopes: Vec::new(),
-                incomplete_datagrams: 0,
-                source_outcomes_omitted: 0,
-                ip_reassembly: reassembly_output::Report::from_analysis(&Default::default()),
-            },
-        },
+        Report::from((Vec::new(), Vec::new(), complete)),
         Vec::new(),
     )
 }
@@ -1859,8 +1831,12 @@ fn export_case() -> Value {
     };
     envelope(
         Command::Export,
-        packetcraftr_cli::output::export::Report::new("selected.pcap".to_owned(), capture, plan)
-            .unwrap(),
+        packetcraftr_cli::output::export::Report::try_from((
+            "selected.pcap".to_owned(),
+            capture,
+            plan,
+        ))
+        .unwrap(),
         Vec::new(),
     )
 }
@@ -1868,15 +1844,15 @@ fn export_case() -> Value {
 fn rewrite_case() -> Value {
     envelope(
         Command::Rewrite,
-        packetcraftr_cli::output::rewrite::Report {
-            path: "rewritten.pcapng".to_owned(),
-            rule_matches: vec![0],
-            capture: Default::default(),
-            dry_run: true,
-            changes: vec![packetcraftr_cli::output::rewrite::Change {
-                frame: 1,
-                rule: 0,
-                change: packetcraftr_core::transform::FieldChange {
+        packetcraftr_cli::output::rewrite::Report::from((
+            "rewritten.pcapng".to_owned(),
+            vec![0],
+            packetcraftr_core::capture_file::MapReport::default(),
+            true,
+            vec![packetcraftr_cli::output::rewrite::Change::from((
+                1,
+                0,
+                packetcraftr_core::transform::FieldChange {
                     field: "ipv4#1.ttl".to_owned(),
                     layer: 0,
                     range: packetcraftr_core::layout::ByteRange::new(8, 9),
@@ -1884,9 +1860,9 @@ fn rewrite_case() -> Value {
                     new: 63,
                     origin: packetcraftr_core::transform::ChangeOrigin::Requested,
                 },
-            }],
-            changes_omitted: 0,
-        },
+            ))],
+            0,
+        )),
         Vec::new(),
     )
 }
@@ -1944,9 +1920,14 @@ fn capture_case() -> Value {
         requested_interfaces: Vec::new(),
         sources,
         frames_delivered: 0,
-        stop_reason: packetcraftr::capture::StopReason::Window,
+        stop_reason: packetcraftr::capture::StopReason::Window.into(),
         capture_statistics_complete: true,
         files: None,
     };
-    envelope_with_stats(Command::Capture, summary, Vec::new(), Default::default())
+    envelope_with_stats(
+        Command::Capture,
+        summary,
+        Vec::new(),
+        OutputStats::default(),
+    )
 }

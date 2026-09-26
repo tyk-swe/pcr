@@ -40,7 +40,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
-    let result = output::plan::Report { plan: route.into() };
+    let result = output::plan::Report::from(route);
     match format {
         AggregateFormat::Text => rendering::render_text(&result.plan),
         AggregateFormat::Json => {

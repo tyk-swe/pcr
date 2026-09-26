@@ -249,19 +249,17 @@ fn execute_offline(
                 .map_err(CliError::classified)
             }),
             on_event: |case, stream| {
-                let event =
-                    output::fuzz::Event::try_from_offline(case).map_err(CliError::classified)?;
+                let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_data(event, Vec::new())?)
             },
             into_result: Box::new(|report| {
-                output::fuzz::Report::try_from_offline(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                output::envelope::Published::<output::fuzz::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::fuzz::Report::try_from_offline(report).map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
+                rendering::render_text(
+                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                )
             }),
             complete: rendering::render_offline_complete,
         },
@@ -330,19 +328,17 @@ fn execute_live(
                 .map_err(CliError::classified)
             }),
             on_event: |case, stream| {
-                let event =
-                    output::fuzz::Event::try_from_live(case).map_err(CliError::classified)?;
+                let event = output::fuzz::Event::try_from(case).map_err(CliError::classified)?;
                 Ok(stream.emit_data(event, Vec::new())?)
             },
             into_result: Box::new(|report| {
-                output::fuzz::Report::try_from_live(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                output::envelope::Published::<output::fuzz::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::fuzz::Report::try_from_live(report).map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
+                rendering::render_text(
+                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                )
             }),
             complete: rendering::render_live_complete,
         },

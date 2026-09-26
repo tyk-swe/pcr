@@ -91,8 +91,7 @@ pub(super) fn run(
             }),
             on_event: rendering::emit_event,
             into_result: Box::new(|report| {
-                output::exchange::Report::try_from_exchange(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                output::envelope::Published::<output::exchange::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(move |report, format| match format {

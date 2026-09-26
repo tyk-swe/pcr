@@ -21,7 +21,7 @@ pub(super) fn render_record(
     match format {
         ReadFormat::Text => render_frame_text(*source_frame, frame, decoded.as_ref()),
         ReadFormat::Hex => write_hex_line(frame.bytes()),
-        ReadFormat::Ndjson => Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?),
+        ReadFormat::Ndjson => Ok(stream.emit_data(output::read::Event::from(record), Vec::new())?),
         ReadFormat::Json
         | ReadFormat::Csv
         | ReadFormat::Tsv

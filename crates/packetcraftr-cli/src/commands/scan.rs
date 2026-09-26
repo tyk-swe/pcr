@@ -180,14 +180,13 @@ pub(super) fn run(
             }),
             on_event: rendering::emit_event,
             into_result: Box::new(|report| {
-                output::scan::Report::try_from_scan(report)
-                    .map(|(result, diagnostics, stats)| (result, diagnostics, Some(stats)))
+                output::envelope::Published::<output::scan::Report>::try_from(report)
                     .map_err(CliError::classified)
             }),
             render_text: Box::new(|report, _| {
-                let (result, diagnostics, stats) =
-                    output::scan::Report::try_from_scan(report).map_err(CliError::classified)?;
-                rendering::render_text(result, diagnostics, stats)
+                rendering::render_text(
+                    output::envelope::Published::try_from(report).map_err(CliError::classified)?,
+                )
             }),
             complete: rendering::emit_complete,
         },

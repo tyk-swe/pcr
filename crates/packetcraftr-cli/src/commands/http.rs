@@ -17,7 +17,6 @@ use self::arguments::Args;
 use super::offline_analysis::{Inspection, inspect};
 use crate::errors::CliError;
 use crate::output::{
-    self,
     contract::{Command, ToolFormat},
     http as wire,
 };
@@ -85,29 +84,19 @@ fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), Cli
                 &mut messages,
                 rendering::render_message,
             ),
-            Event::Issue(issue) => {
-                output.emit(wire::Issue(issue), &mut issues, rendering::render_issue)
-            }
+            Event::Issue(issue) => output.emit(
+                wire::Issue::from(issue),
+                &mut issues,
+                rendering::render_issue,
+            ),
         },
     )?;
-    let run = outcome.run;
-    let complete = wire::Complete {
-        frames_read: run.frames_read,
-        frames_matched: run.frames_matched,
-        summary: outcome.summary,
-        scopes: outcome.scopes,
-        incomplete_datagrams: run.incomplete_sources.len(),
-        source_outcomes_omitted: run.source_outcomes_omitted,
-        ip_reassembly: output::reassembly::Report::from_analysis(&run.ip_reassembly),
-    };
+    let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
+        .map_err(CliError::classified)?;
     match format {
         ToolFormat::Json => emit_aggregate(
             Command::Http,
-            wire::Report {
-                messages,
-                issues,
-                complete,
-            },
+            wire::Report::from((messages, issues, complete)),
             Vec::new(),
         ),
         ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),

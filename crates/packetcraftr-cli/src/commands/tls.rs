@@ -212,14 +212,8 @@ pub(super) fn run(
         ));
     }
 
-    let run_summary = outcome.run;
-    let summary = output::tls::Summary::from_analysis(
-        outcome.summary,
-        run_summary.frames_read,
-        run_summary.frames_matched,
-        state.counts(),
-        &run_summary.ip_reassembly,
-    );
+    let (selected, omitted) = state.counts();
+    let summary = output::tls::Summary::from((outcome.summary, &outcome.run, selected, omitted));
     match format {
         ToolFormat::Text => rendering::render_text(&state, &summary, &prepared.registry),
         ToolFormat::Json => rendering::render_aggregate(state, summary),

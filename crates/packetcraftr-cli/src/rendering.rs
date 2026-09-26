@@ -26,7 +26,8 @@ pub(crate) use human::{
 };
 
 pub(crate) use machine::{
-    bounded_json_len, bounded_pretty_json_len, emit_aggregate, emit_aggregate_with_stats, emit_json,
+    bounded_json_len, bounded_pretty_json_len, emit_aggregate, emit_aggregate_with_stats,
+    emit_json, emit_published,
 };
 
 pub(crate) use ndjson::{

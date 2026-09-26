@@ -3,9 +3,10 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, layout::PacketLayout};
+use packetcraftr_core::decode::DecodedPacket;
 
-use super::frame::Wire;
+use super::envelope::Published;
+use super::frame::{Layout, Wire};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Report {
@@ -16,11 +17,12 @@ pub struct Report {
     pub frame: Wire,
     pub link_type: u32,
     pub packet: packetcraftr_core::document::Packet,
-    pub layout: PacketLayout,
+    pub layout: Layout,
 }
 
-impl Report {
-    pub fn from_decoded(decoded: DecodedPacket) -> (Self, Vec<Diagnostic>) {
+/// A dissected frame, with the dissector's diagnostics for the envelope.
+impl From<DecodedPacket> for Published<Report> {
+    fn from(decoded: DecodedPacket) -> Self {
         let DecodedPacket {
             packet,
             original,
@@ -28,12 +30,12 @@ impl Report {
             layout,
             diagnostics,
         } = decoded;
-        (
-            Self {
-                frame: Wire::new(original),
+        Self::new(
+            Report {
+                frame: original.into(),
                 link_type: frame.link_type.0,
                 packet: packetcraftr_core::document::Packet::from_packet(&packet),
-                layout,
+                layout: layout.into(),
             },
             diagnostics,
         )
@@ -48,12 +50,32 @@ pub struct AggregateResult {
     dissection: Option<Report>,
 }
 
-impl AggregateResult {
-    #[must_use]
-    pub const fn new(dissection: Option<Report>) -> Self {
-        Self {
-            matched: dissection.is_some(),
-            dissection,
+/// A dissected frame and whether the filter kept it. The dissector's
+/// diagnostics are published either way.
+impl From<(bool, DecodedPacket)> for Published<AggregateResult> {
+    fn from((matched, decoded): (bool, DecodedPacket)) -> Self {
+        if matched {
+            let Published {
+                result,
+                diagnostics,
+                stats,
+            } = Published::<Report>::from(decoded);
+            Self {
+                result: AggregateResult {
+                    matched: true,
+                    dissection: Some(result),
+                },
+                diagnostics,
+                stats,
+            }
+        } else {
+            Self::new(
+                AggregateResult {
+                    matched: false,
+                    dissection: None,
+                },
+                decoded.diagnostics,
+            )
         }
     }
 }

@@ -4,7 +4,10 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    field::FieldValue, packet::Packet, protocol::BuiltinProtocol, protocol::semantics,
+    packet::Packet,
+    protocol::BuiltinProtocol,
+    protocol::link::{Arp, Ethernet},
+    protocol::semantics,
 };
 
 use super::error::Error;
@@ -19,14 +22,18 @@ pub(super) fn packet_has_link_layer_intent(packet: &Packet) -> bool {
     })
 }
 
-pub(super) fn outer_ethernet_mac(packet: &Packet, field: &str) -> Option<MacAddress> {
+/// The MAC addresses of the outer Ethernet header, as (source, destination);
+/// an all-zero address counts as unset.
+pub(super) fn outer_ethernet_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
     semantics::outer_layers(packet)
-        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
-        .and_then(|layer| layer.field(field))
-        .and_then(|value| match value {
-            FieldValue::Mac(value) if value != [0; 6] => Some(MacAddress(value)),
-            _ => None,
+        .find_map(|layer| layer.downcast_ref::<Ethernet>())
+        .map_or((None, None), |ethernet| {
+            (set_mac(ethernet.source), set_mac(ethernet.destination))
         })
+}
+
+fn set_mac(value: [u8; 6]) -> Option<MacAddress> {
+    (value != [0; 6]).then_some(MacAddress(value))
 }
 
 pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>, Error> {
@@ -44,25 +51,13 @@ pub(super) fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<VlanTag>
 }
 
 pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
-    let Some(layer) = semantics::outer_layers(packet)
-        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Arp))
+    let Some(arp) = semantics::outer_layers(packet).find_map(|layer| layer.downcast_ref::<Arp>())
     else {
         return (None, None);
     };
-    let source = match layer.field("sender_hardware") {
-        Some(FieldValue::Mac(value)) if value != [0; 6] => Some(MacAddress(value)),
-        _ => None,
-    };
-    let operation = match layer.field("operation") {
-        Some(FieldValue::Unsigned(value)) => Some(value),
-        _ => None,
-    };
-    let target = match layer.field("target_hardware") {
-        Some(FieldValue::Mac(value)) if value != [0; 6] => Some(MacAddress(value)),
-        _ if operation == Some(1) => Some(MacAddress([0xff; 6])),
-        _ => None,
-    };
-    (source, target)
+    let target = set_mac(arp.target_hardware)
+        .or_else(|| (arp.operation == 1).then_some(MacAddress([0xff; 6])));
+    (set_mac(arp.sender_hardware), target)
 }
 
 pub(super) fn multicast_mac(destination: IpAddr) -> Option<MacAddress> {

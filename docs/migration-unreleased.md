@@ -761,3 +761,10 @@ it gets no built-in matcher or validation behavior. Give a custom layer its
 own protocol name and register it through `registry::Builder`.
 `BuiltinProtocol::from_id` and `from_name` still map registry identifiers and
 names.
+
+`protocol::semantics` no longer exports its field-name constants (`SOURCE`,
+`DESTINATION`, `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`,
+`SEGMENTS_LEFT`, `LAST_ENTRY`, `TARGET_PROTOCOL`, `IPV4_OPTIONS`). Downcast
+to the built-in layer and read its field: `layer.field(semantics::DESTINATION)`
+on an Ethernet layer becomes
+`layer.downcast_ref::<Ethernet>().map(|ethernet| ethernet.destination)`.

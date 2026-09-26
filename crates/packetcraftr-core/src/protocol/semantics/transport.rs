@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::path::{DESTINATION_PORT, SOURCE_PORT};
 use crate::layer::Layer;
 use crate::protocol::BuiltinProtocol;
+use crate::protocol::transport::{Sctp, Tcp, Udp};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TransportKey {
@@ -12,18 +12,21 @@ pub struct TransportKey {
     pub destination_port: u16,
 }
 
-/// Extracts an all-or-nothing transport tuple. Missing, wrongly typed, and
-/// out-of-range ports never become a partially comparable key.
+/// Extracts the transport tuple of a built-in TCP, UDP, or SCTP layer. Any
+/// other layer, including a custom one that reflects port fields, has none.
 pub fn transport_key(layer: &dyn Layer) -> Option<TransportKey> {
-    let protocol = BuiltinProtocol::of(layer)?;
-    if !matches!(
-        protocol,
-        BuiltinProtocol::Tcp | BuiltinProtocol::Udp | BuiltinProtocol::Sctp
-    ) {
-        return None;
-    }
-    let source_port = u16::try_from(layer.field(SOURCE_PORT)?.as_u64()?).ok()?;
-    let destination_port = u16::try_from(layer.field(DESTINATION_PORT)?.as_u64()?).ok()?;
+    let (protocol, source_port, destination_port) = if let Some(tcp) = layer.downcast_ref::<Tcp>() {
+        (BuiltinProtocol::Tcp, tcp.source_port, tcp.destination_port)
+    } else if let Some(udp) = layer.downcast_ref::<Udp>() {
+        (BuiltinProtocol::Udp, udp.source_port, udp.destination_port)
+    } else {
+        let sctp = layer.downcast_ref::<Sctp>()?;
+        (
+            BuiltinProtocol::Sctp,
+            sctp.source_port,
+            sctp.destination_port,
+        )
+    };
     Some(TransportKey {
         protocol,
         source_port,

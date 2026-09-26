@@ -137,6 +137,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   is no longer read as that protocol by route semantics, matchers, or
   validation. `BuiltinProtocol::from_id` still maps a registry identifier by
   name. See `docs/migration-unreleased.md`.
+- `protocol::semantics` reads built-in layers through their types and no
+  longer exports the reflective field-name constants `SOURCE`, `DESTINATION`,
+  `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`, `SEGMENTS_LEFT`,
+  `LAST_ENTRY`, `TARGET_PROTOCOL`, and `IPV4_OPTIONS`. Read the typed layer's
+  fields instead.
 
 ### Added
 

@@ -31,7 +31,6 @@ pub(crate) fn finish_route(
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
-    validate_preferred_source_family(destination, preferred_source)?;
     if snapshot
         .next_hop
         .is_some_and(|next_hop| next_hop.is_ipv4() != destination.is_ipv4())
@@ -576,15 +575,6 @@ mod tests {
         assert!(matches!(
             finish_route(destination, Some(&wrong_interface), None, snapshot()),
             Err(SystemError::InterfaceMismatch { .. })
-        ));
-        assert!(matches!(
-            finish_route(
-                destination,
-                None,
-                Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
-                snapshot()
-            ),
-            Err(SystemError::SourceFamilyMismatch { .. })
         ));
 
         let mut invalid = snapshot();

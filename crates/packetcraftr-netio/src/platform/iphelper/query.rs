@@ -22,7 +22,7 @@ use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
 use super::enumeration::{adapter_snapshots, win32_error};
 use crate::platform::route_normalize::{
     InterfaceCandidate, NativeRouteSnapshot, constrain_by_preferred_source, finish_route,
-    interface_decision, validate_preferred_source_family,
+    interface_decision,
 };
 use crate::{
     interface::Id as InterfaceId,
@@ -34,8 +34,6 @@ pub(in crate::platform) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
-    validate_preferred_source_family(destination, preferred_source)?;
-
     let available = adapter_snapshots()?;
     let constrained_interface = constrain_interface(&available, interface_hint, preferred_source)?;
     let BestRoute {

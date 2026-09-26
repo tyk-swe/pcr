@@ -22,8 +22,8 @@ use windows::Win32::Networking::WinSock::{
 };
 
 use super::preparation::PreparedRawIp;
-use crate::Error;
 use crate::interface::Id as InterfaceId;
+use crate::{Error, NativeCapability, Unsupported, link::Mode};
 use packetcraftr_core::error::Source;
 
 const IPPROTO_RAW: i32 = 255;
@@ -173,10 +173,11 @@ fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {
 #[cfg(target_os = "macos")]
 pub(super) fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), Error> {
     if packet.destination.is_ipv6() {
-        return Err(Error::Unsupported {
-            message: "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path"
-                .to_owned(),
-         source: None });
+        return Err(Unsupported::new(
+            NativeCapability::Transmission(Mode::Layer3),
+            "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path",
+        )
+        .into());
     }
     Ok(())
 }
@@ -191,7 +192,12 @@ pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> E
     let source = Some(Source::new(error.source));
     match kind {
         io::ErrorKind::PermissionDenied => Error::Privilege { message, source },
-        io::ErrorKind::Unsupported => Error::Unsupported { message, source },
+        io::ErrorKind::Unsupported => Unsupported {
+            capability: NativeCapability::Transmission(Mode::Layer3),
+            message,
+            source,
+        }
+        .into(),
         io::ErrorKind::NotFound => Error::Device {
             interface: interface.name.clone(),
             message,
@@ -333,7 +339,7 @@ mod tests {
             assert!(error.to_string().contains("binding fixture socket"));
             let actual = match error {
                 Error::Privilege { .. } => "privilege",
-                Error::Unsupported { .. } => "unsupported",
+                Error::Unsupported(_) => "unsupported",
                 Error::Device { ref interface, .. } if interface == "fixture0" => "device",
                 Error::Send { .. } => "send",
                 other => panic!("unexpected mapping: {other:?}"),

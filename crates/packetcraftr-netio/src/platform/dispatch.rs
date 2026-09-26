@@ -18,6 +18,8 @@ use crate::{
     route::{Decision, SystemError},
     transmit::{self, Layer2Frame, Layer3Frame},
 };
+#[cfg(not(all(native_route, native_layer2, native_layer3)))]
+use crate::{NativeCapability, Unsupported};
 
 #[cfg(all(native_route, target_os = "linux"))]
 use super::route::netlink as route_backend;
@@ -34,24 +36,24 @@ use super::layer2::pcap_backend as layer2_backend;
 #[cfg(npcap_backend)]
 use super::layer2::npcap as layer2_backend;
 
-/// Distinguishes a target that has no native implementation from a build that
-/// simply left the feature off.
+/// The failure for a native `capability` this build has no backend for. The
+/// message names the `operation` and distinguishes a target that has no
+/// native implementation from a build that simply left `feature` off.
 #[cfg(not(all(native_route, native_layer2, native_layer3)))]
-fn unsupported_message(feature_enabled: bool, feature: &str, capability: &str) -> String {
-    if feature_enabled {
-        format!("native {capability} is unsupported on this target")
-    } else {
-        format!("enable the {feature} feature for native {capability}")
-    }
-}
-
-/// The failure for a native capability this build has no backend for.
-#[cfg(not(all(native_route, native_layer2, native_layer3)))]
-pub(crate) fn unsupported(feature_enabled: bool, feature: &str, capability: &str) -> Error {
-    Error::Unsupported {
-        message: unsupported_message(feature_enabled, feature, capability),
-        source: None,
-    }
+pub(crate) fn unsupported(
+    capability: NativeCapability,
+    feature_enabled: bool,
+    feature: &str,
+    operation: &str,
+) -> Unsupported {
+    Unsupported::new(
+        capability,
+        if feature_enabled {
+            format!("native {operation} is unsupported on this target")
+        } else {
+            format!("enable the {feature} feature for native {operation}")
+        },
+    )
 }
 
 #[cfg(native_route)]
@@ -71,13 +73,13 @@ pub(crate) fn route(
     _preferred_source: Option<IpAddr>,
     _deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: unsupported_message(
-            cfg!(feature = "native-route"),
-            "native-route",
-            "route selection",
-        ),
-    })
+    Err(unsupported(
+        NativeCapability::Route,
+        cfg!(feature = "native-route"),
+        "native-route",
+        "route selection",
+    )
+    .into())
 }
 
 #[cfg(native_route)]
@@ -93,13 +95,13 @@ pub(crate) fn interface_route(
     _interface: &InterfaceId,
     _deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
-    Err(SystemError::Unsupported {
-        message: unsupported_message(
-            cfg!(feature = "native-route"),
-            "native-route",
-            "interface selection",
-        ),
-    })
+    Err(unsupported(
+        NativeCapability::Route,
+        cfg!(feature = "native-route"),
+        "native-route",
+        "interface selection",
+    )
+    .into())
 }
 
 #[cfg(native_route)]
@@ -109,13 +111,13 @@ pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, in
 
 #[cfg(not(native_route))]
 pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
-    Err(interface::Error::Unsupported {
-        message: unsupported_message(
-            cfg!(feature = "native-route"),
-            "native-route",
-            "interface enumeration",
-        ),
-    })
+    Err(unsupported(
+        NativeCapability::InterfaceEnumeration,
+        cfg!(feature = "native-route"),
+        "native-route",
+        "interface enumeration",
+    )
+    .into())
 }
 
 /// Opens the backend's capture source; the capture capability owns every
@@ -147,10 +149,12 @@ pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Er
 #[cfg(not(native_layer2))]
 pub(crate) fn send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     Err(unsupported(
+        NativeCapability::Transmission(crate::link::Mode::Layer2),
         cfg!(feature = "native-layer2"),
         "native-layer2",
         "Layer 2 injection",
-    ))
+    )
+    .into())
 }
 
 #[cfg(native_layer3)]
@@ -161,10 +165,12 @@ pub(crate) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Er
 #[cfg(not(native_layer3))]
 pub(crate) fn send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     Err(unsupported(
+        NativeCapability::Transmission(crate::link::Mode::Layer3),
         cfg!(feature = "native-layer3"),
         "native-layer3",
         "raw IP transmission",
-    ))
+    )
+    .into())
 }
 
 /// Confirms the interface a send was routed to still has that name and index.

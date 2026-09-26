@@ -6,7 +6,8 @@ use std::{fmt, io, net::IpAddr, time::Duration};
 use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, SendEvidenceFault, capture, interface, link::Mode, route::SystemError,
+    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode,
+    route::SystemError,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
@@ -52,9 +53,10 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
 /// the matching live-I/O failure with the same message and source chain.
 #[test]
 fn interface_errors_keep_live_io_classes_and_their_source() {
-    let unsupported = interface::Error::Unsupported {
-        message: "enable the native-route feature for native interface enumeration".to_owned(),
-    };
+    let unsupported = interface::Error::Unsupported(Unsupported::new(
+        NativeCapability::InterfaceEnumeration,
+        "enable the native-route feature for native interface enumeration",
+    ));
     assert_row(&unsupported, "capability.unsupported", Kind::Capability);
     let discovery = interface::Error::Discovery {
         message: "the native route adapter refused the interface query".to_owned(),
@@ -74,6 +76,67 @@ fn interface_errors_keep_live_io_classes_and_their_source() {
         assert_eq!(live.to_string(), error.to_string());
         assert_eq!(live.causes(), error.causes());
         assert_eq!(live.classification(), error.classification());
+    }
+}
+
+/// Every "unsupported" failure is one [`Unsupported`] whose capability
+/// decides its class: route lookups publish `capability.route`, everything
+/// else `capability.unsupported`. The three error types that carry it publish
+/// the same message, class, and causes.
+#[test]
+fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
+    for (capability, code, subject) in [
+        (
+            NativeCapability::Route,
+            "capability.route",
+            "native route selection",
+        ),
+        (
+            NativeCapability::InterfaceEnumeration,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Capture,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer2),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer3),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+    ] {
+        let unsupported = Unsupported {
+            capability,
+            message: "fixture".to_owned(),
+            source: Some(Source::new(io::Error::other("refused by the driver"))),
+        };
+        assert_row(&unsupported, code, Kind::Capability);
+        assert_eq!(
+            unsupported.to_string(),
+            format!("{subject} is unavailable: fixture")
+        );
+        assert_eq!(unsupported.causes(), ["refused by the driver"]);
+
+        let carriers: [Box<dyn Classified>; 3] = [
+            Box::new(Error::from(unsupported.clone())),
+            Box::new(SystemError::from(unsupported.clone())),
+            Box::new(interface::Error::from(unsupported.clone())),
+        ];
+        for carrier in carriers {
+            assert_eq!(carrier.classification(), unsupported.classification());
+            assert_eq!(carrier.causes(), unsupported.causes());
+        }
+        assert_eq!(
+            Error::from(unsupported.clone()).to_string(),
+            unsupported.to_string()
+        );
     }
 }
 
@@ -105,9 +168,7 @@ fn assert_row(
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
         (
-            SystemError::Unsupported {
-                message: "fixture".to_owned(),
-            },
+            SystemError::Unsupported(Unsupported::new(NativeCapability::Route, "fixture")),
             "capability.route",
             Kind::Capability,
         ),
@@ -189,10 +250,7 @@ fn system_route_errors_keep_stable_provider_classes() {
 fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     let cases = [
         (
-            Error::Unsupported {
-                message: "fixture".to_owned(),
-                source: None,
-            },
+            Error::Unsupported(Unsupported::new(NativeCapability::Capture, "fixture")),
             "capability.unsupported",
             Kind::Capability,
         ),

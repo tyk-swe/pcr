@@ -206,7 +206,10 @@ mod tests {
             Ok(_) => panic!("injected reaper spawn must fail"),
             Err(error) => error,
         };
-        assert_eq!(error.to_string(), "start shared native worker reaper failed");
+        assert_eq!(
+            error.to_string(),
+            "start shared native worker reaper failed"
+        );
         assert_eq!(
             packetcraftr_core::error::render(&error),
             "start shared native worker reaper failed: injected spawn failure"

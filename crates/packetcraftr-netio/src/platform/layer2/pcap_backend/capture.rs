@@ -17,7 +17,7 @@ use pcap::{Active, Capture, Error as PcapError};
 
 use super::bpf::install_capture_filter;
 use crate::{
-    Error,
+    Error, NativeCapability, Unsupported,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
@@ -88,12 +88,14 @@ pub(in crate::platform) fn open_capture(
     let datalink = capture.get_datalink().0;
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
-        .map_err(|_| Error::Unsupported {
-            message: format!(
-                "libpcap returned negative data-link type {datalink} for {}",
-                interface.name
-            ),
-            source: None,
+        .map_err(|_| {
+            Unsupported::new(
+                NativeCapability::Capture,
+                format!(
+                    "libpcap returned negative data-link type {datalink} for {}",
+                    interface.name
+                ),
+            )
         })?;
     // SAFETY: capture is activated and remains live and immutably borrowed for
     // this query; pcap_snapshot only reads its configured snapshot length.

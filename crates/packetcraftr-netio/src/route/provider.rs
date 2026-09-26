@@ -8,6 +8,7 @@ use thiserror::Error;
 use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 
+use crate::Unsupported;
 use crate::interface::Id as InterfaceId;
 
 use super::models::{Decision, Provider};
@@ -22,8 +23,8 @@ pub enum SystemError {
     /// The caller's deadline expired before the native lookup answered.
     #[error("live operation deadline expired while {operation}")]
     DeadlineExceeded { operation: &'static str },
-    #[error("native route selection is unavailable: {message}")]
-    Unsupported { message: String },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     #[error("no route to {destination} was found")]
     RouteNotFound { destination: IpAddr },
     #[error("interface {name} (index {index}) was not found")]
@@ -134,13 +135,7 @@ impl Classified for SystemError {
             Self::DeadlineExceeded { operation } => {
                 crate::Error::DeadlineExceeded { operation }.classification()
             }
-            Self::Unsupported { .. } => Classification::new(
-                "capability.route",
-                Kind::Capability,
-                Some(
-                    "enable the native-route capability on a supported target or inject a route provider",
-                ),
-            ),
+            Self::Unsupported(unsupported) => unsupported.classification(),
             Self::RouteNotFound { .. } => Classification::new(
                 "io.route_not_found",
                 Kind::Io,
@@ -183,6 +178,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use super::*;
+    use crate::NativeCapability;
 
     fn interface() -> InterfaceId {
         InterfaceId {
@@ -215,9 +211,12 @@ mod tests {
         ] {
             assert!(matches!(
                 error,
-                SystemError::Unsupported { ref message }
-                    if message.contains("enable the native-route feature")
-                        && message.contains(capability)
+                SystemError::Unsupported(Unsupported {
+                    capability: NativeCapability::Route,
+                    ref message,
+                    source: None,
+                }) if message.contains("enable the native-route feature")
+                    && message.contains(capability)
             ));
             let classification = error.classification();
             assert_eq!(classification.code, "capability.route");

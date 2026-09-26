@@ -8,6 +8,7 @@ use thiserror::Error as ThisError;
 use super::capture::Phase as CapturePhase;
 use super::interface::Id as InterfaceId;
 use super::link::Mode;
+use super::unsupported::Unsupported;
 use packetcraftr_core::error::{Classification, Classified, Kind, Source, source_chain};
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
@@ -36,12 +37,8 @@ pub enum SendEvidenceFault {
 pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    #[error("live packet I/O is unavailable: {message}")]
-    Unsupported {
-        message: String,
-        #[source]
-        source: Option<Source>,
-    },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     #[error("interface discovery failed: {message}")]
     InterfaceDiscovery {
         message: String,
@@ -186,11 +183,7 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::Unsupported { .. } => classified(
-                "capability.unsupported",
-                Kind::Capability,
-                "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
-            ),
+            Self::Unsupported(unsupported) => unsupported.classification(),
             Self::MissingDependency { .. } => classified(
                 "capability.missing_dependency",
                 Kind::Capability,

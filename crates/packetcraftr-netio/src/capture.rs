@@ -583,10 +583,11 @@ pub trait Provider: Send + Sync {
         _interface: &InterfaceId,
         _deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
-        Err(Error::Unsupported {
-            message: "this capture provider cannot enumerate timestamp types".to_owned(),
-            source: None,
-        })
+        Err(crate::Unsupported::new(
+            crate::NativeCapability::Capture,
+            "this capture provider cannot enumerate timestamp types",
+        )
+        .into())
     }
 }
 

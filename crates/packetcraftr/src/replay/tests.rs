@@ -719,9 +719,12 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
 
     // The capability arm keeps naming the replay boundary and publishes the
     // adapter's text once, in `causes`.
-    let unsupported = map_replay_route_error(RouteSystemError::Unsupported {
-        message: "native route selection is off".to_owned(),
-    });
+    let unsupported = map_replay_route_error(RouteSystemError::Unsupported(
+        packetcraftr_netio::Unsupported::new(
+            packetcraftr_netio::NativeCapability::Route,
+            "native route selection is off",
+        ),
+    ));
     assert_eq!(
         unsupported.to_string(),
         "live packet I/O is unavailable: the native route adapter cannot select a replay route"

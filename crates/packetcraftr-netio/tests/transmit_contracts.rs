@@ -14,7 +14,7 @@ use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::{
-    Error,
+    Error, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
     link::{Capability, Mode},
     route::{Decision, Scope, SelectionReason},
@@ -53,9 +53,16 @@ fn send(mode: Mode) -> Error {
         .expect_err("this build has no backend for the layer")
 }
 
-fn assert_capability_refusal(error: &Error, capability: &str) {
+fn assert_capability_refusal(error: &Error, mode: Mode, operation: &str) {
     assert!(
-        matches!(error, Error::Unsupported { message, source: None } if message.contains(capability)),
+        matches!(
+            error,
+            Error::Unsupported(Unsupported {
+                capability: NativeCapability::Transmission(refused),
+                message,
+                source: None,
+            }) if *refused == mode && message.contains(operation)
+        ),
         "{error:?}"
     );
     let classification = error.classification();
@@ -66,11 +73,11 @@ fn assert_capability_refusal(error: &Error, capability: &str) {
 #[cfg(not(native_layer2))]
 #[test]
 fn a_build_without_layer2_refuses_a_layer2_frame_with_a_capability_error() {
-    assert_capability_refusal(&send(Mode::Layer2), "Layer 2 injection");
+    assert_capability_refusal(&send(Mode::Layer2), Mode::Layer2, "Layer 2 injection");
 }
 
 #[cfg(not(native_layer3))]
 #[test]
 fn a_build_without_layer3_refuses_a_layer3_packet_with_a_capability_error() {
-    assert_capability_refusal(&send(Mode::Layer3), "raw IP transmission");
+    assert_capability_refusal(&send(Mode::Layer3), Mode::Layer3, "raw IP transmission");
 }

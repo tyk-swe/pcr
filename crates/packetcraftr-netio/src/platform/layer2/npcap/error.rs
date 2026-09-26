@@ -9,7 +9,7 @@ use super::abi::{
     PCAP_ERROR_RFMON_NOTSUP, PCAP_WARNING_PROMISC_NOTSUP,
 };
 use crate::{
-    Error,
+    Error, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{is_missing_device, is_permission_denied},
 };
@@ -21,13 +21,14 @@ pub(super) fn map_activation_error(
     message: String,
 ) -> Error {
     match status {
-        PCAP_WARNING_PROMISC_NOTSUP => Error::Unsupported {
-            message: format!(
+        PCAP_WARNING_PROMISC_NOTSUP => Unsupported::new(
+            NativeCapability::Capture,
+            format!(
                 "Npcap does not support requested promiscuous capture on {}: {message}",
                 interface.name
             ),
-            source: None,
-        },
+        )
+        .into(),
         PCAP_ERROR_PERM_DENIED | PCAP_ERROR_PROMISC_PERM_DENIED => Error::Privilege {
             message: format!(
                 "cannot open {} through Npcap: {message}; grant capture privileges or run elevated",
@@ -40,13 +41,14 @@ pub(super) fn map_activation_error(
             message: format!("Npcap activation failed with status {status}: {message}"),
             source: None,
         },
-        PCAP_ERROR_RFMON_NOTSUP | PCAP_ERROR_CAPTURE_NOTSUP => Error::Unsupported {
-            message: format!(
+        PCAP_ERROR_RFMON_NOTSUP | PCAP_ERROR_CAPTURE_NOTSUP => Unsupported::new(
+            NativeCapability::Capture,
+            format!(
                 "Npcap does not support capture on {} (status {status}): {message}",
                 interface.name
             ),
-            source: None,
-        },
+        )
+        .into(),
         _ => Error::Capture {
             message: format!(
                 "Npcap activation failed for {} with status {status}: {message}",

@@ -9,8 +9,6 @@ use std::io::{self, Write};
 use packetcraftr_core as core;
 use packetcraftr_core::budget::Interrupted;
 
-use crate::output;
-
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,
     terminal_safe,
@@ -69,24 +67,6 @@ pub(crate) fn document_spelling(value: &impl serde::Serialize) -> String {
     }
 }
 
-/// Renders `undecoded [<label> ]{captured_frame_text(frame)}` for every row,
-/// so the section's format string lives here alone while each command keeps
-/// its own row type.
-pub(crate) fn render_undecoded<'a>(
-    rows: impl IntoIterator<Item = (Option<String>, &'a output::frame::Captured)>,
-) -> Result<(), CliError> {
-    for (label, frame) in rows {
-        match label {
-            Some(label) => write_stdout_line(format_args!(
-                "undecoded {label} {}",
-                captured_frame_text(frame)
-            ))?,
-            None => write_stdout_line(format_args!("undecoded {}", captured_frame_text(frame)))?,
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn comma_separated<I, T>(values: I) -> String
 where
     I: IntoIterator<Item = T>,
@@ -114,26 +94,6 @@ impl fmt::Display for SpacedHex<'_> {
             write!(formatter, "{byte:02x}")?;
         }
         Ok(())
-    }
-}
-
-pub(crate) fn captured_frame_text(frame: &output::frame::Captured) -> impl fmt::Display + '_ {
-    CapturedFrameText(frame)
-}
-
-struct CapturedFrameText<'a>(&'a output::frame::Captured);
-
-impl fmt::Display for CapturedFrameText<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let frame = self.0;
-        write!(
-            formatter,
-            "dlt={} caplen={} wirelen={} {}",
-            frame.link_type,
-            frame.captured_length,
-            frame.original_length,
-            spaced_hex(frame.bytes())
-        )
     }
 }
 
@@ -256,6 +216,8 @@ fn write_terminated(
 mod tests {
 
     use packetcraftr_core::error::{Classification, Kind};
+
+    use crate::output;
 
     use super::*;
 

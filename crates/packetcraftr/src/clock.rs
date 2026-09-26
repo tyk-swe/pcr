@@ -31,12 +31,6 @@ pub trait Clock: Clone + Send + Sync + 'static {
     /// Returns the clock's own failure while the operation could still
     /// continue.
     fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
-
-    /// A cancellation signal the clock carries in addition to the client's.
-    /// Kept for the free workflow entry points until they run on the client.
-    fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
-        None
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -81,48 +75,9 @@ pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
 }
 
-/// Production pacing clock sharing an explicit operation cancellation signal.
-#[derive(Clone, Debug)]
-pub struct CancellableClock(pub packetcraftr_core::budget::Cancellation);
-
-impl Clock for CancellableClock {
-    type Error = packetcraftr_core::budget::Cancelled;
-    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
-        interruptible_sleep(delay, || {
-            self.0.is_cancelled() || deadline.check_cancelled().is_err()
-        });
-        self.0.check()
-    }
-    fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
-        Some(self.0.clone())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_shared_signal_interrupts_a_long_pacing_wait() {
-        let signal = packetcraftr_core::budget::Cancellation::default();
-        let clock = CancellableClock(signal.clone());
-        let (started, entered) = std::sync::mpsc::channel();
-        let (finished, outcome) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            started.send(()).unwrap();
-            let deadline = Deadline::new(Duration::from_secs(120));
-            finished
-                .send(clock.sleep(Duration::from_secs(60), &deadline))
-                .unwrap();
-        });
-        entered.recv_timeout(Duration::from_secs(2)).unwrap();
-        signal.cancel();
-        assert!(matches!(
-            outcome.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Err(packetcraftr_core::budget::Cancelled)
-        ));
-        worker.join().unwrap();
-    }
 
     #[test]
     fn the_system_clock_stops_sleeping_once_the_deadline_is_cancelled() {

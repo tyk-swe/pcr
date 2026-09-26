@@ -30,12 +30,6 @@ fn request(campaign: packet_fuzz::Request) -> Request {
     Request::new(campaign, packet())
 }
 
-/// A deadline for `request` carrying the clock's cancellation, as the
-/// client builds one from its own.
-fn deadline<C: Clock>(request: &Request, clock: &C) -> Deadline {
-    Deadline::new(request.campaign.limits.max_duration).with_cancellation(clock.cancellation())
-}
-
 /// Runs the engine, publishing each case to `sink` on a worker.
 fn publish<A, E, C, S>(
     request: &Request,
@@ -50,7 +44,27 @@ where
     C: Clock,
     S: Sink<Event, Ack = ()>,
 {
-    let mut deadline = deadline(request, clock);
+    publish_cancellable(request, authorizer, executor, clock, None, sink)
+}
+
+/// [`publish`] under a deadline carrying `cancellation`, as the client
+/// builds one from its own.
+fn publish_cancellable<A, E, C, S>(
+    request: &Request,
+    authorizer: &mut A,
+    executor: &mut E,
+    clock: &mut C,
+    cancellation: Option<Cancellation>,
+    sink: S,
+) -> Result<Report, Error>
+where
+    A: Authorizer,
+    E: Executor<ExecutionCase>,
+    C: Clock,
+    S: Sink<Event, Ack = ()>,
+{
+    let mut deadline =
+        Deadline::new(request.campaign.limits.max_duration).with_cancellation(cancellation);
     let runtime = Runtime::default();
     let emit = publisher(&runtime, sink, duration_limit, |source| Error::Output {
         source,
@@ -78,8 +92,31 @@ where
     E: Executor<ExecutionCase>,
     C: Clock,
 {
+    collect_cancellable(request, authorizer, executor, clock, None)
+}
+
+/// [`collect`] under a deadline carrying `cancellation`.
+fn collect_cancellable<A, E, C>(
+    request: &Request,
+    authorizer: &mut A,
+    executor: &mut E,
+    clock: &mut C,
+    cancellation: Option<Cancellation>,
+) -> Result<Aggregate, Error>
+where
+    A: Authorizer,
+    E: Executor<ExecutionCase>,
+    C: Clock,
+{
     let collector = Collector::default();
-    let report = publish(request, authorizer, executor, clock, collector.clone())?;
+    let report = publish_cancellable(
+        request,
+        authorizer,
+        executor,
+        clock,
+        cancellation,
+        collector.clone(),
+    )?;
     Ok(collector.finish(report))
 }
 
@@ -199,10 +236,6 @@ impl Clock for InterruptedPacingClock {
             Ok(())
         }
     }
-
-    fn cancellation(&self) -> Option<Cancellation> {
-        Some(self.signal.clone())
-    }
 }
 
 #[test]
@@ -219,8 +252,9 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
                     ..packet_fuzz::Request::default()
                 })
             };
+            let signal = Cancellation::default();
             let mut clock = InterruptedPacingClock {
-                signal: Default::default(),
+                signal: signal.clone(),
                 cancel,
                 fail,
             };
@@ -228,11 +262,12 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
             let published = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let error = if progressive {
                 let published = Arc::clone(&published);
-                publish(
+                publish_cancellable(
                     &request,
                     &mut AllowAll,
                     &mut executor,
                     &mut clock,
+                    Some(signal.clone()),
                     move |_| {
                         published.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         Ok(())
@@ -240,7 +275,14 @@ fn live_pacing_distinguishes_cancellation_from_clock_failure() {
                 )
                 .unwrap_err()
             } else {
-                collect(&request, &mut AllowAll, &mut executor, &mut clock).unwrap_err()
+                collect_cancellable(
+                    &request,
+                    &mut AllowAll,
+                    &mut executor,
+                    &mut clock,
+                    Some(signal.clone()),
+                )
+                .unwrap_err()
             };
             assert_eq!(executor.executions, 1);
             assert_eq!(

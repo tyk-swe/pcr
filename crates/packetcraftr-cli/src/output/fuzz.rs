@@ -3,8 +3,8 @@
 
 use serde::Serialize;
 
-use packetcraftr::fuzz::{self as live_fuzz, Totals};
-use packetcraftr_core::fuzz as packet_fuzz;
+use packetcraftr::fuzz as live_fuzz;
+use packetcraftr_core::fuzz::{self as packet_fuzz, Totals};
 
 use super::contract::Error as ContractError;
 use super::diagnostic::Diagnostic;
@@ -21,18 +21,6 @@ impl From<&packet_fuzz::Stats> for Stats {
             bytes: value.bytes,
             elapsed: value.elapsed,
             capture: Default::default(),
-        }
-    }
-}
-
-impl From<&live_fuzz::Stats> for Stats {
-    fn from(value: &live_fuzz::Stats) -> Self {
-        Self {
-            packets_attempted: value.packets_attempted,
-            packets_completed: value.packets_completed,
-            bytes: value.bytes,
-            elapsed: value.elapsed,
-            capture: value.capture.into(),
         }
     }
 }
@@ -65,14 +53,47 @@ published_enum! {
     }
 }
 
-published_enum! {
-    /// What became of one case: built or rejected offline, and answered or
-    /// timed out once transmitted.
-    pub enum Outcome from live_fuzz::CaseOutcome {
-        Built => "built",
-        Rejected => "rejected",
-        Response => "response",
-        Timeout => "timeout",
+/// What became of one case: built or rejected offline, and answered or
+/// timed out once transmitted. No library enum carries all four: core owns
+/// the offline outcomes and the live workflow the transmitted ones.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub enum Outcome {
+    #[serde(rename = "built")]
+    Built,
+    #[serde(rename = "rejected")]
+    Rejected,
+    #[serde(rename = "response")]
+    Response,
+    #[serde(rename = "timeout")]
+    Timeout,
+}
+
+impl Outcome {
+    /// The published name, for text output that must agree with JSON.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Built => "built",
+            Self::Rejected => "rejected",
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+impl std::fmt::Display for Outcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A transmitted case was answered or timed out.
+impl From<live_fuzz::Outcome> for Outcome {
+    fn from(value: live_fuzz::Outcome) -> Self {
+        match value {
+            live_fuzz::Outcome::Response => Self::Response,
+            live_fuzz::Outcome::Timeout => Self::Timeout,
+        }
     }
 }
 
@@ -181,15 +202,16 @@ impl TryFrom<packet_fuzz::Report> for Published<Report> {
 
 /// A live campaign, checked for coherence. Diagnostics stay with the case
 /// that raised them.
-impl TryFrom<live_fuzz::Report> for Published<Report> {
+impl TryFrom<live_fuzz::Aggregate> for Published<Report> {
     type Error = ContractError;
 
-    fn try_from(result: live_fuzz::Report) -> Result<Self, ContractError> {
+    fn try_from(result: live_fuzz::Aggregate) -> Result<Self, ContractError> {
         let totals = Totals::try_from(&result)?;
-        let live_fuzz::Report {
+        let live_fuzz::Aggregate {
             seed,
             first_case,
-            cases,
+            trials: cases,
+            campaign: _,
             stats,
         } = result;
         let cases = cases
@@ -225,26 +247,30 @@ impl TryFrom<packet_fuzz::Case> for Case {
     }
 }
 
-impl TryFrom<live_fuzz::Case> for Case {
+/// A transmitted case publishes its live outcome and evidence; a rejected
+/// one, never sent, publishes as it would offline.
+impl TryFrom<live_fuzz::Trial> for Case {
     type Error = ContractError;
 
-    fn try_from(case: live_fuzz::Case) -> Result<Self, ContractError> {
-        let live_fuzz::Case {
-            prepared,
-            outcome,
-            sent,
-            responses,
-            unmatched,
-            undecoded,
-        } = case;
-        convert_case(
-            prepared,
-            outcome.into(),
-            sent,
-            responses,
-            unmatched,
-            undecoded,
-        )
+    fn try_from(trial: live_fuzz::Trial) -> Result<Self, ContractError> {
+        let live_fuzz::Trial { case, evidence } = trial;
+        match evidence {
+            Some(live_fuzz::Evidence {
+                sent,
+                outcome,
+                responses,
+                unmatched,
+                undecoded,
+            }) => convert_case(
+                case,
+                outcome.into(),
+                Some(sent),
+                responses,
+                unmatched,
+                undecoded,
+            ),
+            None => case.try_into(),
+        }
     }
 }
 
@@ -336,14 +362,15 @@ impl TryFrom<packet_fuzz::Case> for Event {
     }
 }
 
-impl TryFrom<live_fuzz::Case> for Event {
+impl TryFrom<live_fuzz::Event> for Event {
     type Error = ContractError;
 
-    fn try_from(case: live_fuzz::Case) -> Result<Self, ContractError> {
-        let operation_seed = case.prepared.operation_seed;
+    fn try_from(event: live_fuzz::Event) -> Result<Self, ContractError> {
+        let live_fuzz::Event::Case(trial) = event;
+        let operation_seed = trial.case.operation_seed;
         Ok(Self::Case {
             operation_seed,
-            case: Box::new(case.try_into()?),
+            case: Box::new(trial.try_into()?),
         })
     }
 }
@@ -364,16 +391,16 @@ impl TryFrom<packet_fuzz::Summary> for Published<Event> {
 }
 
 /// The terminal record of a live campaign, with its totals.
-impl TryFrom<live_fuzz::Summary> for Published<Event> {
+impl TryFrom<live_fuzz::Report> for Published<Event> {
     type Error = ContractError;
 
-    fn try_from(summary: live_fuzz::Summary) -> Result<Self, ContractError> {
-        let totals = Totals::try_from(&summary.stats)?;
+    fn try_from(report: live_fuzz::Report) -> Result<Self, ContractError> {
+        let totals = Totals::try_from(&report.campaign)?;
         Ok(Self::new(
-            complete(summary.seed, summary.first_case, Mode::Live, totals),
+            complete(report.seed, report.first_case, Mode::Live, totals),
             Vec::new(),
         )
-        .with_stats(&summary.stats))
+        .with_stats(&report.stats))
     }
 }
 

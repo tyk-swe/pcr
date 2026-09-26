@@ -272,7 +272,7 @@ pub enum Error {
     #[error("source frame must be a non-zero unsigned 64-bit position")]
     InvalidSourceFrame,
     #[error("fuzz events are incoherent: {0}")]
-    IncoherentFuzzEvents(#[from] packetcraftr::fuzz::IncoherentReport),
+    IncoherentFuzzEvents(#[from] packetcraftr_core::fuzz::IncoherentReport),
     /// A library value newer than the published output contract, which has
     /// no spelling for it.
     #[error("{value} has no representation in the published output contract")]

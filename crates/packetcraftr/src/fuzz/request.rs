@@ -4,43 +4,70 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_core::fuzz as packet_fuzz;
+use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
 use crate::execution::evidence::EvidenceLimits;
 use crate::execution::limits::CaptureEvidenceLimits;
+use crate::{exchange, route, send};
 
-use crate::fuzz::MAX_RATE;
-use crate::fuzz::error::Error;
+use super::MAX_RATE;
+use super::error::Error;
 
-/// Bounds exact response evidence retained by a live fuzz campaign.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveLimits {
+/// One live fuzz campaign: the offline campaign core prepares, and how each
+/// of its built cases is sent, paced, and collected.
+#[derive(Clone, Debug)]
+pub struct Request {
+    /// The deterministic campaign every case comes from. Its limits bound the
+    /// whole live run, including its duration.
+    pub campaign: packet_fuzz::Request,
+    /// The template packet every case mutates.
+    pub packet: Packet,
+    /// How long each case's exchange collects responses.
+    pub timeout: Duration,
+    /// Case-start ceiling; `None` is unpaced.
+    pub cases_per_second: Option<u32>,
+    /// The destination every case is authorized for and routed to; `None`
+    /// uses each case's own.
+    pub destination: Option<IpAddr>,
+    pub route: route::Options,
+    /// How each case's capture is armed and what it retains.
+    pub collection: exchange::Collection,
+    /// Second explicit opt-in, required in addition to policy approval when
+    /// a case is a permissive packet.
+    pub allow_permissive_live: bool,
+    /// Exact frames the whole campaign retains as case evidence.
     pub max_evidence_frames: usize,
+    /// Bytes the whole campaign retains as case evidence.
     pub max_evidence_bytes: usize,
 }
 
-impl Default for LiveLimits {
-    fn default() -> Self {
+impl Request {
+    /// A live run of `campaign` over `packet`, unpaced, with a one-second
+    /// collection window and the largest evidence retention.
+    #[must_use]
+    pub fn new(campaign: packet_fuzz::Request, packet: Packet) -> Self {
         Self {
+            campaign,
+            packet,
+            timeout: Duration::from_secs(1),
+            cases_per_second: None,
+            destination: None,
+            route: route::Options::default(),
+            collection: exchange::Collection::default(),
+            allow_permissive_live: false,
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
         }
     }
-}
 
-impl LiveLimits {
-    /// Fuzz bounds undecodable frames by the frame budget alone.
-    pub(crate) const fn evidence(&self) -> EvidenceLimits {
-        EvidenceLimits {
-            max_frames: self.max_evidence_frames,
-            max_bytes: self.max_evidence_bytes,
-            max_undecoded: self.max_evidence_frames,
-        }
-    }
-
-    /// Rejects any retention bound above the ceiling this crate enforces.
+    /// Rejects every bound this workflow cannot run under: an out-of-range
+    /// evidence retention, timeout, or rate, then an invalid campaign.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
         CaptureEvidenceLimits {
             max_evidence_frames: self.max_evidence_frames,
@@ -52,41 +79,10 @@ impl LiveLimits {
             value,
             reason,
         })?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveOptions {
-    pub timeout: Duration,
-    pub cases_per_second: Option<u32>,
-    pub destination: Option<IpAddr>,
-    /// Independent call-site opt-in for a permissive/malformed live frame.
-    pub allow_malformed_live: bool,
-    pub limits: LiveLimits,
-}
-
-impl Default for LiveOptions {
-    fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(1),
-            cases_per_second: None,
-            destination: None,
-            allow_malformed_live: false,
-            limits: LiveLimits::default(),
-        }
-    }
-}
-
-impl LiveOptions {
-    /// Rejects every live campaign option this workflow cannot execute: an
-    /// out-of-range retention bound, timeout, or rate.
-    pub fn validate(&self) -> Result<(), Error> {
-        self.limits.validate()?;
-        if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+                maximum: MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.cases_per_second
@@ -98,6 +94,27 @@ impl LiveOptions {
                 reason: format!("must be within 1..={MAX_RATE}"),
             });
         }
+        self.campaign.validate()?;
         Ok(())
+    }
+
+    /// How every case is prepared: built as the campaign builds it, towards
+    /// the requested destination and route.
+    pub(super) fn send(&self) -> send::Options {
+        send::Options {
+            destination: self.destination,
+            plan: self.route.clone(),
+            build: self.campaign.build.clone(),
+            allow_permissive_live: self.allow_permissive_live,
+        }
+    }
+
+    /// Fuzz bounds undecodable frames by the frame budget alone.
+    pub(super) const fn evidence(&self) -> EvidenceLimits {
+        EvidenceLimits {
+            max_frames: self.max_evidence_frames,
+            max_bytes: self.max_evidence_bytes,
+            max_undecoded: self.max_evidence_frames,
+        }
     }
 }

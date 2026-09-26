@@ -49,9 +49,11 @@ mod report;
 mod request;
 pub(crate) mod rng;
 mod run;
+mod totals;
 
 pub use decode::{dissect_built, packet_link_type};
 pub use error::{BaseFault, Constraint, Error, TargetFault};
 pub use report::{Case, CaseFailure, CaseOutcome, Mutation, Report, Stats, Summary};
 pub use request::{Limits, Request, Strategy, Target};
 pub use run::{Campaign, run, run_observed};
+pub use totals::{IncoherentReport, Totals};

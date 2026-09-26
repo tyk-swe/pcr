@@ -88,10 +88,10 @@ pub(super) fn render_offline_complete(
 }
 
 pub(super) fn render_live_complete(
-    summary: packetcraftr::fuzz::Summary,
+    report: packetcraftr::fuzz::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let published = output::envelope::Published::<output::fuzz::Event>::try_from(summary)
+    let published = output::envelope::Published::<output::fuzz::Event>::try_from(report)
         .map_err(CliError::classified)?;
     Ok(stream.complete_published(published)?)
 }

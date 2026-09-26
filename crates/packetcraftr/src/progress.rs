@@ -315,7 +315,7 @@ const FIXTURE_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(30)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::error::Classified;
+    use packetcraftr_core::{budget::Cancellation, error::Classified};
     use std::time::{Duration, Instant};
 
     fn wait_for_cleanup(runtime: &Runtime) {
@@ -445,13 +445,6 @@ mod tests {
         release.send(()).unwrap();
         wait_for_cleanup(&runtime);
     }
-}
-
-#[cfg(test)]
-mod cancellation_tests {
-    use super::*;
-    use packetcraftr_core::{budget::Cancellation, error::Classified};
-    use std::time::Duration;
 
     #[test]
     fn cancellation_interrupts_publication_wait_without_releasing_callback_resources() {

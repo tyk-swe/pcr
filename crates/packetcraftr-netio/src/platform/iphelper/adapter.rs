@@ -333,7 +333,7 @@ fn socket_address_ip(
 }
 
 #[cfg(test)]
-mod buffer_tests {
+mod tests {
     use super::*;
 
     #[test]

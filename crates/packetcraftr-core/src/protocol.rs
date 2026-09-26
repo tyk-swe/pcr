@@ -10,7 +10,8 @@
 //! [`semantics`] interprets the routing fields of built-in layers.
 //!
 //! Protocol models are grouped by layer: [`capture`] link headers, [`link`],
-//! [`network`] (IPv4, IPv6 and its extension headers, ICMP, IGMP),
+//! [`network`] (IPv4, IPv6 and its extension headers, ICMP, IGMP, and the
+//! Neighbor Discovery messages ICMPv6 carries),
 //! [`transport`], [`tunnel`] (including GRE), and [`application`].
 //!
 //! Each protocol is one `<proto>.rs` holding its model, its

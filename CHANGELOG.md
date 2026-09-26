@@ -256,6 +256,15 @@ All notable changes to PacketcraftR are documented here. The format follows
   offline counterparts), failing with `fuzz::IncoherentReport`. The CLI's
   `internal.fuzz_event_coherence` check now uses it.
 
+- `protocol::network::ndp` types Neighbor Solicitation and Neighbor
+  Advertisement bodies with their source and target link-layer address options
+  (`NeighborSolicitation`, `NeighborAdvertisement`, `MessageOption`,
+  `solicited_node_multicast`). Decoding keeps reserved bits and unknown
+  options, and a decoded body re-encodes byte for byte. The models are not
+  registered layers, so dissection output is unchanged.
+- `packet::MacAddress::for_ip_multicast` maps an IPv4 or IPv6 multicast group
+  to its Ethernet group address.
+
 - `protocol::headers` is a public, bounded walker over raw link, VLAN, and IP
   header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,
   `Ipv6Header` with its extension chain, and option iterators). Code that
@@ -505,6 +514,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Neighbor discovery builds ARP requests and neighbor solicitations from core
+  layers and reads replies through the dissector; the frames on the wire are
+  unchanged. An advertisement is now accepted behind the IPv6 extension headers
+  the codecs type (Hop-by-Hop, Destination Options, Segment Routing, AH) and
+  refused behind any other routing header type or a malformed AH header, which
+  the hand-written walk used to step over.
 - `rewrite` and `fragment` validate every IPv6 extension header and IP option
   they step over. A malformed length in a source-route, Home Address,
   routing, fragment, or AH header now reports `packet.transform_input` where

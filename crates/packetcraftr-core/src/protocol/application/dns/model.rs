@@ -1,14 +1,59 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{
-    DecodeError,
-    name::{self, MAX_LABEL_LEN, MAX_NAME_LEN},
-};
 use bytes::Bytes;
 use serde::Serialize;
 use std::fmt::{self, Write as _};
 use std::net::{Ipv4Addr, Ipv6Addr};
+
+use super::{
+    Error,
+    name::{self, MAX_LABEL_LEN, MAX_NAME_LEN},
+};
+use crate::field::WireValue;
+
+/// The bounded, exact DNS-over-UDP layer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Dns {
+    pub id: u16,
+    pub response: bool,
+    pub opcode: u8,
+    pub authoritative_answer: bool,
+    pub truncated: bool,
+    pub recursion_desired: bool,
+    pub recursion_available: bool,
+    pub authenticated_data: bool,
+    pub checking_disabled: bool,
+    pub rcode: u8,
+    pub question_count: WireValue<u16>,
+    pub answer_count: WireValue<u16>,
+    pub authority_count: WireValue<u16>,
+    pub additional_count: WireValue<u16>,
+    pub questions: Vec<Question>,
+    /// Reserved header bit retained for protocol fixtures.
+    pub reserved: bool,
+    pub answers: Vec<Record>,
+    pub authorities: Vec<Record>,
+    pub additionals: Vec<Record>,
+    pub(super) wire: Bytes,
+}
+
+impl Dns {
+    /// Returns the complete original DNS payload, including opaque records.
+    pub fn wire(&self) -> &Bytes {
+        &self.wire
+    }
+
+    /// Begins an explicit edit, deriving section counts from the new record sets.
+    pub fn edit(&mut self, edit: impl FnOnce(&mut Self)) {
+        self.wire = Bytes::new();
+        self.question_count = WireValue::Auto;
+        self.answer_count = WireValue::Auto;
+        self.authority_count = WireValue::Auto;
+        self.additional_count = WireValue::Auto;
+        edit(self);
+    }
+}
 
 /// A lossless DNS wire name. Labels retain their exact octets; DNS semantic
 /// equality folds ASCII letters only, and presentation escaping is deferred
@@ -23,7 +68,7 @@ impl Name {
         Self { labels: Vec::new() }
     }
 
-    pub fn from_labels<I, B>(labels: I) -> Result<Self, DecodeError>
+    pub fn from_labels<I, B>(labels: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = B>,
         B: Into<Bytes>,
@@ -33,7 +78,7 @@ impl Name {
         for label in labels {
             let label = label.into();
             if label.is_empty() || label.len() > MAX_LABEL_LEN {
-                return Err(DecodeError::InvalidName {
+                return Err(Error::InvalidName {
                     message: format!("wire labels must contain 1..={MAX_LABEL_LEN} octets"),
                 });
             }
@@ -58,11 +103,11 @@ impl Name {
 }
 
 impl std::str::FromStr for Name {
-    type Err = DecodeError;
+    type Err = Error;
 
     /// Parses presentation names, including `\\DDD` escaped label octets.
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let invalid = || DecodeError::InvalidName {
+        let invalid = || Error::InvalidName {
             message: "invalid DNS presentation name".to_owned(),
         };
         if input == "." {

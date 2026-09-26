@@ -18,7 +18,7 @@ use packetcraftr_core::diagnostic::{
 use packetcraftr_core::filter::{Context as FilterContext, Filter};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
-use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::application::dns::{self, Dns};
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
 use packetcraftr_core::protocol::network::{
@@ -978,10 +978,9 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
 
     assert!(matches!(
         Dns::try_from(vec![0; 11]),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 12,
-            available: 11,
-            ..
+        Err(dns::Error::MessageTooShort {
+            actual: 11,
+            minimum: 12,
         })
     ));
     let mut truncated_name = vec![0; 12];
@@ -989,39 +988,36 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     truncated_name.extend_from_slice(&[3, b'w', b'w']);
     assert!(matches!(
         Dns::try_from(truncated_name),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 16,
-            available: 15,
+        Err(dns::Error::Name(dns::name::Error::TruncatedLabel {
+            end: 16,
             ..
-        })
+        }))
     ));
     let mut truncated_question_type = vec![0; 12];
     truncated_question_type[4..6].copy_from_slice(&1_u16.to_be_bytes());
     truncated_question_type.extend_from_slice(&[0, 0]);
     assert!(matches!(
         Dns::try_from(truncated_question_type),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 15,
-            available: 14,
-            ..
-        })
+        Err(dns::Error::TruncatedField { needed: 15, .. })
     ));
     let mut truncated_rdata = vec![0; 12];
     truncated_rdata[6..8].copy_from_slice(&1_u16.to_be_bytes());
     truncated_rdata.extend_from_slice(&[0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 4, 192, 0]);
     assert!(matches!(
         Dns::try_from(truncated_rdata),
-        Err(packetcraftr_core::codec::Error::Truncated {
-            needed: 27,
-            available: 25,
-            ..
-        })
+        Err(dns::Error::TruncatedField { needed: 27, .. })
     ));
     let mut too_many = vec![0; 12];
     too_many[4..6].copy_from_slice(&65_u16.to_be_bytes());
     let record_cap = Dns::try_from(too_many).expect_err("record count above the cap");
     assert!(
-        matches!(record_cap, packetcraftr_core::codec::Error::Invalid { .. }),
+        matches!(
+            record_cap,
+            dns::Error::QuestionLimit {
+                actual: 65,
+                limit: 64
+            }
+        ),
         "{record_cap:?}"
     );
     let mut pointer_loop = vec![0; 18];
@@ -1030,7 +1026,10 @@ fn sctp_dns_and_malformed_inputs_cover_bounded_parsers() {
     pointer_loop[13] = 12;
     let looped = Dns::try_from(pointer_loop).expect_err("self-referential name pointer");
     assert!(
-        matches!(looped, packetcraftr_core::codec::Error::Invalid { .. }),
+        matches!(
+            looped,
+            dns::Error::Name(dns::name::Error::SelfPointer { .. })
+        ),
         "{looped:?}"
     );
 

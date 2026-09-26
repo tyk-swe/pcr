@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name, read_u16};
+use packetcraftr_core::protocol::application::dns::{self as core_dns, decode_name, read_u16};
 
 use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
@@ -24,19 +24,18 @@ pub fn decode_tcp_frame(
     transaction_id: u16,
     limits: MessageLimits,
 ) -> Result<ValidatedResponse, WireError> {
-    let (prefix, payload) =
-        frame
-            .split_first_chunk::<2>()
-            .ok_or(WireError::Decode(DecodeError::MessageTooShort {
-                actual: frame.len(),
-                minimum: 2,
-            }))?;
+    let (prefix, payload) = frame.split_first_chunk::<2>().ok_or(WireError::Decode(
+        core_dns::Error::MessageTooShort {
+            actual: frame.len(),
+            minimum: 2,
+        },
+    ))?;
     let declared = usize::from(u16::from_be_bytes(*prefix));
     if declared == 0 {
         return Err(WireError::TcpFrameZeroLength);
     }
     if declared > limits.max_message_bytes {
-        return Err(WireError::Decode(DecodeError::MessageTooLarge {
+        return Err(WireError::Decode(core_dns::Error::MessageTooLarge {
             actual: declared,
             maximum: limits.max_message_bytes,
         }));
@@ -140,7 +139,7 @@ struct ResponseSections {
 fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
     offset
         .checked_add(delta)
-        .ok_or(WireError::Decode(DecodeError::TruncatedField {
+        .ok_or(WireError::Decode(core_dns::Error::TruncatedField {
             field,
             offset,
             needed: offset.saturating_add(delta),
@@ -149,13 +148,13 @@ fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Wi
 
 fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), WireError> {
     if message.len() < HEADER_BYTES {
-        return Err(WireError::Decode(DecodeError::MessageTooShort {
+        return Err(WireError::Decode(core_dns::Error::MessageTooShort {
             actual: message.len(),
             minimum: HEADER_BYTES,
         }));
     }
     if message.len() > limits.max_message_bytes {
-        return Err(WireError::Decode(DecodeError::MessageTooLarge {
+        return Err(WireError::Decode(core_dns::Error::MessageTooLarge {
             actual: message.len(),
             maximum: limits.max_message_bytes,
         }));

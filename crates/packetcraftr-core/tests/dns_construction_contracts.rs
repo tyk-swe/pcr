@@ -10,7 +10,7 @@ use packetcraftr_core::{
     fuzz,
     layer::Layer,
     protocol::{
-        application::dns::{Dns, Name},
+        application::dns::{self, Dns, Name},
         builtin,
     },
     template::Template,
@@ -220,11 +220,17 @@ fn borrowed_dns_wire_enforces_message_byte_limit() {
 
     wire.push(0);
     let error = Dns::try_from(wire.as_slice()).unwrap_err();
-    assert!(matches!(
-        &error,
-        codec::Error::Invalid { message, .. }
-            if message == "DNS message is 65536 bytes; maximum is 65535"
-    ));
+    assert_eq!(
+        error,
+        dns::Error::MessageTooLarge {
+            actual: 65_536,
+            maximum: 65_535
+        }
+    );
+    assert_eq!(
+        error.to_string(),
+        "DNS message is 65536 bytes; maximum is 65535"
+    );
     assert_eq!(
         error.to_string(),
         Dns::try_from(wire).unwrap_err().to_string()

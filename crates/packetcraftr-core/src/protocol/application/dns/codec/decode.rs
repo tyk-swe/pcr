@@ -1,24 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::{DecodeError, DecodeLimits, Dns, Name, Question};
+use super::super::{DecodeLimits, Dns, Error, Name, Question};
 use bytes::Bytes;
 pub use primitives::read_u16;
 mod primitives;
 mod records;
 
-pub(super) fn advance(
-    offset: usize,
-    delta: usize,
-    field: &'static str,
-) -> Result<usize, DecodeError> {
-    offset
-        .checked_add(delta)
-        .ok_or(DecodeError::TruncatedField {
-            field,
-            offset,
-            needed: usize::MAX,
-        })
+pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Error> {
+    offset.checked_add(delta).ok_or(Error::TruncatedField {
+        field,
+        offset,
+        needed: usize::MAX,
+    })
 }
 
 /// Decompresses one bounded, lossless name and returns its wire resume offset.
@@ -26,7 +20,7 @@ pub fn decode_name(
     message: &Bytes,
     offset: usize,
     limits: DecodeLimits,
-) -> Result<(Name, usize), DecodeError> {
+) -> Result<(Name, usize), Error> {
     let expanded = super::name::decompress(message, offset, limits.max_name_pointers.min(128))?;
     Ok((
         Name {
@@ -36,17 +30,17 @@ pub fn decode_name(
     ))
 }
 
-pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeError> {
+pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, Error> {
     let message = wire.as_ref();
     let maximum = limits.max_message_bytes.min(u16::MAX as usize);
     if message.len() > maximum {
-        return Err(DecodeError::MessageTooLarge {
+        return Err(Error::MessageTooLarge {
             actual: message.len(),
             maximum,
         });
     }
     if message.len() < 12 {
-        return Err(DecodeError::MessageTooShort {
+        return Err(Error::MessageTooShort {
             actual: message.len(),
             minimum: 12,
         });
@@ -57,7 +51,7 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
     let authority_count = read_u16(message, 8, "authority count")?;
     let additional_count = read_u16(message, 10, "additional count")?;
     if question_count > 64 {
-        return Err(DecodeError::QuestionLimit {
+        return Err(Error::QuestionLimit {
             actual: usize::from(question_count),
             limit: 64,
         });
@@ -66,7 +60,7 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
         usize::from(answer_count) + usize::from(authority_count) + usize::from(additional_count);
     let limit = limits.max_records.min(4096);
     if count > limit {
-        return Err(DecodeError::RecordLimit {
+        return Err(Error::RecordLimit {
             actual: count,
             limit,
         });
@@ -98,7 +92,7 @@ pub(super) fn decode(wire: Bytes, limits: DecodeLimits) -> Result<Dns, DecodeErr
     let (additionals, next) =
         records::decode_records(&wire, next, usize::from(additional_count), limits)?;
     if next != message.len() {
-        return Err(DecodeError::TrailingBytes {
+        return Err(Error::TrailingBytes {
             remaining: message.len() - next,
         });
     }

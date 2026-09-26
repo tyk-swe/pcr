@@ -13,7 +13,7 @@ use crate::{
     registry::Discriminator,
 };
 
-use super::vxlan::VNI_MAX;
+use super::VNI_MAX;
 
 use crate::protocol::common::{
     ensure_encode_budget, expected_discriminator, invalid, make_layer, protocol, resolve_u16,

@@ -13,6 +13,7 @@ use crate::{
     registry::Discriminator,
 };
 
+use super::VNI_MAX;
 use crate::protocol::common::{
     ensure_encode_budget, invalid, make_layer, protocol, strict_or_diagnostic, truncated,
     typed_layer, validate_raw_child_discriminator,
@@ -26,8 +27,6 @@ const VXLAN_LEN: usize = 8;
 /// The I flag: the VNI field is valid. RFC 7348 requires it set and every
 /// other flag bit clear.
 const VNI_VALID_FLAG: u8 = 0x08;
-/// Largest 24-bit virtual network identifier, shared with GENEVE.
-pub(crate) const VNI_MAX: u32 = 0x00ff_ffff;
 
 /// VXLAN encapsulation header (RFC 7348).
 ///

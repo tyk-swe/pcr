@@ -25,3 +25,6 @@ pub(crate) use pppoe::{PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec};
 pub use pppoe::{Ppp, Pppoe};
 pub use vxlan::Vxlan;
 pub(crate) use vxlan::VxlanCodec;
+
+/// Largest 24-bit virtual network identifier, used by VXLAN and GENEVE.
+const VNI_MAX: u32 = 0x00ff_ffff;

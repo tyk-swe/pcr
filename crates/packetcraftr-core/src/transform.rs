@@ -16,9 +16,11 @@
 //!
 //! Every byte-level edit says which faithfulness gap it avoids.
 
+mod error;
 mod fields;
 mod fragment;
 mod rewrite;
+pub use error::{Error, InvalidInput, Limit, Unsupported};
 pub use fields::{
     ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEdit, FieldEditOutcome,
     FieldEdits, MAX_FIELD_ASSIGNMENTS,
@@ -26,59 +28,8 @@ pub use fields::{
 pub use fragment::{FragmentOptions, fragment};
 pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 
-use crate::error::{Classification, Classified, Kind};
-use crate::protocol::headers::{self, IpHeader};
+use crate::protocol::headers::IpHeader;
 use crate::protocol::network::ip_protocol;
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    #[error("invalid packet transform input: {0}")]
-    Invalid(&'static str),
-    #[error("unsupported packet transform: {0}")]
-    Unsupported(&'static str),
-    #[error("packet transform exceeds {field}={limit}")]
-    Limit { field: &'static str, limit: usize },
-    #[error(transparent)]
-    Frame(#[from] crate::frame::Error),
-    #[error(transparent)]
-    Decode(#[from] crate::decode::Error),
-    #[error("packet transform checksum failed")]
-    Checksum(#[source] crate::codec::Error),
-    /// The link, VLAN, or IP headers the transform edits could not be walked.
-    #[error(transparent)]
-    Header(#[from] headers::Error),
-}
-
-impl Classified for Error {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Frame(source) => source.classification(),
-            Self::Decode(source) => source.classification(),
-            Self::Header(source) => source.classification(),
-            Self::Unsupported(_) => Classification::new(
-                "packet.transform_unsupported",
-                Kind::Packet,
-                Some("inspect the documented transform boundaries"),
-            ),
-            Self::Limit { .. } => Classification::new(
-                "policy.transform_limit",
-                Kind::Policy,
-                Some("raise a finite transform limit or reduce the input"),
-            ),
-            Self::Invalid(_) => Classification::new(
-                "packet.transform_input",
-                Kind::Packet,
-                Some("supply a complete supported datagram"),
-            ),
-            Self::Checksum(_) => Classification::new(
-                "packet.transform_checksum",
-                Kind::Packet,
-                Some("supply a complete datagram the checksum can cover"),
-            ),
-        }
-    }
-}
 
 /// Refuses a datagram whose transport pseudo-header an in-place edit cannot
 /// recompute. An incomplete fragment hides the rest of the segment, and IPv4
@@ -89,32 +40,24 @@ fn ensure_checksum_coverage(ip: &[u8], header: &IpHeader) -> Result<(), Error> {
     const STRICT_SOURCE_ROUTE: u8 = 137;
     const HOME_ADDRESS: u8 = 201;
     if header.is_fragment() {
-        return Err(Error::Unsupported(
-            "checksum-covered edits require a reassembled datagram",
-        ));
+        return Err(Error::Unsupported(Unsupported::ChecksumOverFragment));
     }
     match header {
         IpHeader::V4(ipv4) => {
             for option in ipv4.options(ip) {
                 if matches!(option?.kind, LOOSE_SOURCE_ROUTE | STRICT_SOURCE_ROUTE) {
-                    return Err(Error::Unsupported(
-                        "IPv4 source routing changes checksum destinations",
-                    ));
+                    return Err(Error::Unsupported(Unsupported::Ipv4SourceRoute));
                 }
             }
         }
         IpHeader::V6(ipv6) => {
             for extension in ipv6.extensions() {
                 if extension.protocol() == ip_protocol::ROUTING {
-                    return Err(Error::Unsupported(
-                        "IPv6 routing header changes checksum destinations",
-                    ));
+                    return Err(Error::Unsupported(Unsupported::Ipv6RoutingHeader));
                 }
                 for option in extension.options(ip) {
                     if option?.kind == HOME_ADDRESS {
-                        return Err(Error::Unsupported(
-                            "IPv6 Home Address option changes checksum sources",
-                        ));
+                        return Err(Error::Unsupported(Unsupported::Ipv6HomeAddress));
                     }
                 }
             }

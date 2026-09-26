@@ -13,6 +13,9 @@
 //! - [`FieldEdits`] locates fields through the codecs' decoded layout.
 //! - [`rewrite()`] and [`fragment()`] locate the link, VLAN, and IP headers with
 //!   the shared [`protocol::headers`](crate::protocol::headers) walker.
+//! - [`Rules`] applies ordered header patches and field assignments, read
+//!   from a versioned `packetcraftr.rewrite` document or built from direct
+//!   edits.
 //!
 //! Every byte-level edit says which faithfulness gap it avoids.
 
@@ -20,6 +23,7 @@ mod error;
 mod fields;
 mod fragment;
 mod rewrite;
+mod rules;
 pub use error::{Error, InvalidInput, Limit, Unsupported};
 pub use fields::{
     ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEdit, FieldEditOutcome,
@@ -27,6 +31,10 @@ pub use fields::{
 };
 pub use fragment::{FragmentOptions, fragment};
 pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
+pub use rules::{
+    MAX_REWRITE_DOCUMENT_BYTES, MAX_REWRITE_RULES, REWRITE_SCHEMA_V1, REWRITE_SCHEMA_V2, Rule,
+    Rules, RulesError,
+};
 
 use crate::protocol::headers::IpHeader;
 use crate::protocol::network::ip_protocol;

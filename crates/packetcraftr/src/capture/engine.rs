@@ -1,20 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_netio::capture::{self as native, Group, GroupRequest, Session as _};
+use packetcraftr_netio::capture::{self as native, Session as _};
 
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
-use crate::policy::CaptureBudget;
 use crate::providers::Providers;
-use crate::{Client, Sink, Stats};
+use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
-use super::{Cause, Control, Error, Event, Report, Request, Source, StopReason};
+use super::error::{failure, interrupted_or};
+use super::evidence::{evidence_loss, finish_stats, replace_sources};
+use super::executor::Armed;
+use super::{Cause, Control, Error, Event, Report, Request, StopReason};
 
 /// The longest single read, so cancellation, the budget, and the window are
 /// checked at least this often while no frame arrives.
@@ -54,7 +54,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
         } = request;
         let started = self.now();
         let deadline = self.deadline(window);
-        let report = self.admit(&group_request, window, started, &deadline)?;
+        let report = self.plan_capture(&group_request, window, started, &deadline)?;
         let mut publisher = match crate::execution::publisher(
             &self.runtime,
             sink,
@@ -74,7 +74,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
             mut group,
             mut report,
             mut primary,
-        } = self.arm(&group_request, window, &deadline, report)?;
+        } = self.arm_capture_group(&group_request, window, &deadline, report)?;
         let mut source_frame = None;
         replace_sources(&mut report, &group.snapshot());
         if primary.is_none() {
@@ -195,177 +195,4 @@ impl<P: Providers, K: Clock> Client<P, K> {
             Ok(report)
         }
     }
-
-    /// Validates the request before any provider is consulted, and returns
-    /// the report skeleton every later failure carries.
-    fn admit(
-        &self,
-        request: &GroupRequest,
-        window: Duration,
-        started: Instant,
-        deadline: &Deadline,
-    ) -> Result<Report, Error> {
-        let validated = request.validate();
-        let report = Report {
-            requested_interfaces: if validated.is_ok() {
-                request.interfaces.clone()
-            } else {
-                Vec::new()
-            },
-            sources: Vec::new(),
-            frames_delivered: 0,
-            stats: Stats::default(),
-            budget: CaptureBudget::new(&self.policy),
-            stop: StopReason::Failure,
-            capture_statistics_complete: false,
-            diagnostics: Vec::new(),
-        };
-        if let Err(error) = validated {
-            return Err(failure(Cause::Native(error), report, None));
-        }
-        if window > native::MAX_TIMEOUT || started.checked_add(window).is_none() {
-            return Err(failure(
-                Cause::Invalid("capture window exceeds the supported range"),
-                report,
-                None,
-            ));
-        }
-        if let Err(cancelled) = deadline.check_cancelled() {
-            return Err(failure(Cause::Cancelled(cancelled), report, None));
-        }
-        Ok(report)
-    }
-
-    /// Arms the capture group and waits for it to become ready within the
-    /// window. A failure before the group exists carries the report skeleton
-    /// inside its error; a later one becomes the primary failure of the
-    /// returned group.
-    fn arm(
-        &self,
-        request: &GroupRequest,
-        window: Duration,
-        deadline: &Deadline,
-        report: Report,
-    ) -> Result<Armed<<P::Capture as native::Provider>::Capture>, Error> {
-        // The window bounds arming and readiness. A zero window still arms its
-        // sources, bounded only by the longest wait a provider accepts, and
-        // then stops without waiting.
-        let unbounded;
-        let arming = if window.is_zero() {
-            unbounded = self.deadline(native::MAX_TIMEOUT);
-            &unbounded
-        } else {
-            deadline
-        };
-        let mut group = match Group::new(request) {
-            Ok(group) => group,
-            Err(error) => return Err(failure(Cause::Native(error), report, None)),
-        };
-        let mut primary = group
-            .arm(self.providers.capture(), arming)
-            .err()
-            .map(Cause::Native);
-        if primary.is_none() && !window.is_zero() {
-            if deadline
-                .remaining()
-                .map_or(true, |remaining| remaining.is_zero())
-            {
-                primary = Some(Cause::Invalid("capture window expired during activation"));
-            } else if let Err(error) = group.wait_ready(deadline) {
-                primary = Some(Cause::Native(error));
-            }
-        }
-        Ok(Armed {
-            group,
-            report,
-            primary,
-        })
-    }
-}
-
-/// The capture after activation: the group, the report skeleton, and the
-/// first activation failure if arming, `wait_ready`, or the window produced
-/// one.
-struct Armed<C: native::Session> {
-    group: Group<C>,
-    report: Report,
-    primary: Option<Cause>,
-}
-
-/// A failure while the capture is cancelled reports the cancellation.
-fn interrupted_or(deadline: &Deadline, cause: Cause) -> Cause {
-    match deadline.check_cancelled() {
-        Err(cancelled) => Cause::Cancelled(cancelled),
-        Ok(()) => cause,
-    }
-}
-
-fn failure(cause: Cause, report: Report, source_frame: Option<u64>) -> Error {
-    Error {
-        cause: Box::new(cause),
-        report: Box::new(report),
-        cleanup: Vec::new(),
-        source_frame,
-    }
-}
-
-fn replace_sources(report: &mut Report, sources: &[native::Source]) {
-    for source in sources {
-        if let Some(existing) = report.sources.get_mut(source.index) {
-            existing.update(source);
-        } else {
-            report.sources.push(Source::armed(source));
-        }
-    }
-}
-
-/// Fills the run's statistics from the budget and every source. Returns
-/// whether every requested source reported complete statistics.
-fn finish_stats(report: &mut Report, elapsed: Duration) -> bool {
-    report.stats.packets_attempted = report.budget.frames();
-    report.stats.bytes = report.budget.bytes();
-    report.stats.packets_completed = report
-        .sources
-        .iter()
-        .map(|source| source.emitted_frames)
-        .sum();
-    report.stats.elapsed = elapsed;
-    let mut capture = native::Stats::default();
-    let mut complete = report.sources.len() == report.requested_interfaces.len();
-    for source in &report.sources {
-        complete &= source.metadata_valid && source.shutdown_confirmed && source.statistics_valid;
-        if let Some(sum) = capture.checked_add(source.statistics) {
-            capture = sum;
-        } else {
-            report.capture_statistics_complete = false;
-            return false;
-        }
-    }
-    report.stats.capture = capture;
-    report.capture_statistics_complete = complete;
-    complete
-}
-
-/// Fails on the first source that lost evidence under
-/// [`OverflowPolicy::Fail`](native::OverflowPolicy::Fail), and warns about
-/// every other source that lost evidence.
-fn evidence_loss(report: &mut Report) -> Option<Cause> {
-    for source in &report.sources {
-        if let Some(error) = source.statistics.evidence_loss_error() {
-            if source.limits.overflow_policy == native::OverflowPolicy::Fail {
-                return Some(Cause::Loss {
-                    source_index: source.index,
-                    error,
-                });
-            }
-            report.diagnostics.push(Diagnostic::warning(
-                "capture.evidence_incomplete",
-                format!(
-                    "source {} ({}): {error}",
-                    source.index, source.metadata.interface.name
-                ),
-            ));
-        }
-    }
-    None
 }

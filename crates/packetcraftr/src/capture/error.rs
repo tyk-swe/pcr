@@ -6,6 +6,7 @@ use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Report;
+use packetcraftr_core::budget::Deadline;
 
 /// Why a capture failed.
 #[derive(Debug, thiserror::Error)]
@@ -79,5 +80,22 @@ impl Classified for Error {
             causes.extend(failure.causes());
         }
         causes
+    }
+}
+
+/// A failure while the capture is cancelled reports the cancellation.
+pub(super) fn interrupted_or(deadline: &Deadline, cause: Cause) -> Cause {
+    match deadline.check_cancelled() {
+        Err(cancelled) => Cause::Cancelled(cancelled),
+        Ok(()) => cause,
+    }
+}
+
+pub(super) fn failure(cause: Cause, report: Report, source_frame: Option<u64>) -> Error {
+    Error {
+        cause: Box::new(cause),
+        report: Box::new(report),
+        cleanup: Vec::new(),
+        source_frame,
     }
 }

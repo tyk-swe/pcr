@@ -10,9 +10,13 @@
 
 mod engine;
 mod error;
+mod evidence;
+mod executor;
+mod plan;
 mod report;
 mod request;
 
 pub use error::Error;
-pub use report::{Aggregate, Collector, Event, Report, SentFrame};
+pub use evidence::{Event, SentFrame};
+pub use report::{Aggregate, Collector, Report};
 pub use request::{Options, Request};

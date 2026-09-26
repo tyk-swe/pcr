@@ -115,3 +115,12 @@ impl From<std::convert::Infallible> for Error {
         match source {}
     }
 }
+
+impl From<packetcraftr_core::template::Error> for Error {
+    fn from(source: packetcraftr_core::template::Error) -> Self {
+        Self::Template {
+            message: "the template could not be expanded".to_owned(),
+            source: Some(source),
+        }
+    }
+}

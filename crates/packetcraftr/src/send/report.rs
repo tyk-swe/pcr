@@ -2,28 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::execution::Shared;
-use crate::{Sink, Stats, evidence::SentPacket};
+use crate::{Sink, Stats};
 use packetcraftr_core::error::BoundaryError;
 
-use super::Error;
-
-/// One confirmed transmission inside a send.
-#[derive(Clone, Debug)]
-pub struct SentFrame {
-    /// One-based pass over the packet set.
-    pub pass: u32,
-    /// Zero-based index of the packet within one expansion pass.
-    pub index: u64,
-    pub packet: SentPacket,
-}
-
-/// What a send publishes while it runs. Each event is answered before the
-/// next frame is transmitted.
-#[derive(Clone, Debug)]
-pub enum Event {
-    /// The provider confirmed this frame.
-    Sent(SentFrame),
-}
+use super::{Error, Event, SentFrame};
 
 /// The terminal result of one send.
 #[derive(Clone, Debug)]
@@ -67,11 +49,7 @@ impl Collector {
     /// the ones the report counts.
     pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
         let sent = self.0.take();
-        if u64::try_from(sent.len()).unwrap_or(u64::MAX) != report.stats.packets_completed {
-            return Err(Error::IncoherentEvents {
-                message: "sent events disagree with completion statistics".to_owned(),
-            });
-        }
+        super::evidence::validate(&sent, &report)?;
         Ok(Aggregate {
             sent,
             passes_completed: report.passes_completed,

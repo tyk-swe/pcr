@@ -19,8 +19,46 @@ use super::{
     WorkflowStopPredicate,
 };
 
-use crate::Stats;
+use super::Prepared;
+use crate::planning::ensure_preparation_deadline;
 use crate::preparation::PreparedPacket;
+use crate::{Client, Stats, clock::Clock, providers::Providers};
+use packetcraftr_netio::capture::{Provider as CaptureProvider, Request as CaptureRequest};
+
+type CaptureSession<P> = <<P as Providers>::Capture as CaptureProvider>::Capture;
+
+impl<P: Providers, K: Clock> Client<P, K> {
+    pub(super) fn arm_capture(
+        &self,
+        prepared: Prepared,
+    ) -> Result<Transaction<CaptureSession<P>>, Error> {
+        let Some(first_packet) = prepared.packets.first() else {
+            return Err(crate::Error::Template {
+                message: "template expanded to no packets".to_owned(),
+                source: None,
+            }
+            .into());
+        };
+        let first_route = &first_packet.route().plan;
+        ensure_preparation_deadline(prepared.window.deadline())?;
+        self.check_cancelled()?;
+        let capture = self.providers.capture().arm_capture(
+            &CaptureRequest {
+                interface: first_route.decision.interface.clone(),
+                limits: prepared.collection.capture,
+                filter: None,
+                promiscuous: false,
+                native: Default::default(),
+            },
+            prepared.window.deadline(),
+        )?;
+        Ok(Transaction::new(
+            Arc::clone(&self.registry),
+            capture,
+            prepared,
+        ))
+    }
+}
 
 pub(super) enum OperationError {
     Io(LiveIoError),

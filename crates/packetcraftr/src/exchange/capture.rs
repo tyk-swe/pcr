@@ -5,8 +5,8 @@
 
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
-use super::transaction::OperationError;
-use super::transaction::Transaction;
+use super::executor::OperationError;
+use super::executor::Transaction;
 use super::{ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
 
 /// Deadline handling for drains before and after the last send.

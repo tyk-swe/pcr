@@ -11,11 +11,11 @@ use packetcraftr_netio::{
     transmit::Timing,
 };
 
+use super::Response;
 use super::accumulator::{
     Accumulator, DuplicateRecord, ProcessContext, ProcessOutcome, UnsolicitedEvidence,
     UnsolicitedFreshness, WorkflowResponseMatcher,
 };
-use super::report::Response;
 use super::{Collection, Window};
 use crate::preparation::PreparedPacket;
 
@@ -281,17 +281,16 @@ impl Accumulator {
                     }
                     // a unique attribution indexes a request that was already sent, so
                     // `request_index` is below `sent.len()`
-                    self.pending_events
-                        .push(super::report::Event::Response(Response {
-                            request_index,
-                            response: decoded,
-                            latency: received_at.duration_since(
-                                context.sent[request_index]
-                                    .timing()
-                                    .freshness_marker()
-                                    .monotonic(),
-                            ),
-                        }));
+                    self.pending_events.push(super::Event::Response(Response {
+                        request_index,
+                        response: decoded,
+                        latency: received_at.duration_since(
+                            context.sent[request_index]
+                                .timing()
+                                .freshness_marker()
+                                .monotonic(),
+                        ),
+                    }));
                 }
             }
             Attribution::None => {
@@ -395,12 +394,11 @@ impl Accumulator {
             // `request_index` is below `freshness.eligible_requests`, a partition point in `sent`,
             // so it is below `sent.len()`
             let sent_timing_monotonic = sent[request_index].timing().freshness_marker().monotonic();
-            self.pending_events
-                .push(super::report::Event::Response(Response {
-                    request_index,
-                    response: candidate.decoded,
-                    latency: freshness.received_at.duration_since(sent_timing_monotonic),
-                }));
+            self.pending_events.push(super::Event::Response(Response {
+                request_index,
+                response: candidate.decoded,
+                latency: freshness.received_at.duration_since(sent_timing_monotonic),
+            }));
         }
         ProcessOutcome::Continue
     }
@@ -436,7 +434,7 @@ impl Accumulator {
     }
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
-        self.pending_events.push(super::report::Event::Unsolicited {
+        self.pending_events.push(super::Event::Unsolicited {
             frame: candidate.decoded,
         });
     }

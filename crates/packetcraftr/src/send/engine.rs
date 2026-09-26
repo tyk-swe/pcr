@@ -30,10 +30,9 @@ impl<P: Providers, K: Clock> Client<P, K> {
     where
         S: Sink<Event, Ack = ()>,
     {
-        let total = request.packet_count()?;
-        let delay = request.delay()?;
+        let plan = super::plan::Plan::try_from(&request)?;
         let started = self.now();
-        let mut stream = self.streaming(&request.send, total)?;
+        let mut stream = self.streaming(&request.send, plan.packet_count)?;
         let mut publish = crate::execution::publisher(
             &self.runtime,
             sink,
@@ -49,19 +48,14 @@ impl<P: Providers, K: Clock> Client<P, K> {
             let expansion = request
                 .template
                 .expand(request.max_template_packets)
-                .map_err(template_error)?;
+                .map_err(crate::Error::from)?;
             for (offset, expanded) in expansion.into_iter().enumerate() {
-                stream.check()?;
-                let prepared = stream.prepare(expanded.map_err(template_error)?)?;
-                if completed > 0 {
-                    stream.check()?;
-                    self.clock
-                        .sleep(delay, &self.deadline(MAX_TIMEOUT))
-                        .map_err(|source| Error::Clock {
-                            source: Box::new(source),
-                        })?;
-                }
-                let packet = stream.transmit(prepared)?;
+                let packet = super::executor::send(
+                    self,
+                    &mut stream,
+                    expanded,
+                    (completed > 0).then_some(plan.delay),
+                )?;
                 completed += 1;
                 bytes =
                     bytes.saturating_add(u64::try_from(packet.bytes_sent()).unwrap_or(u64::MAX));
@@ -87,12 +81,5 @@ impl<P: Providers, K: Clock> Client<P, K> {
                 capture: capture::Stats::default(),
             },
         })
-    }
-}
-
-fn template_error(source: packetcraftr_core::template::Error) -> crate::Error {
-    crate::Error::Template {
-        message: source.to_string(),
-        source: Some(source),
     }
 }

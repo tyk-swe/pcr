@@ -33,7 +33,7 @@ pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPa
 
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
-    pub(super) pending_events: Vec<super::report::Event>,
+    pub(super) pending_events: Vec<super::Event>,
     pub(crate) diagnostics: DiagnosticLog,
     pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
@@ -98,7 +98,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::report::Event> {
+    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::Event> {
         self.pending_events.drain(..)
     }
 
@@ -195,8 +195,7 @@ impl Accumulator {
         collection: &Collection,
     ) {
         if self.reserve_unattributed(identity, frame.bytes().len(), collection) {
-            self.pending_events
-                .push(super::report::Event::Undecoded { frame });
+            self.pending_events.push(super::Event::Undecoded { frame });
         }
     }
 }

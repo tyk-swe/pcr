@@ -1,0 +1,68 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Capture-group activation and readiness, retaining every armed resource.
+
+use super::error::failure;
+use super::{Cause, Error, Report};
+use crate::{Client, clock::Clock, providers::Providers};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::capture::{self as native, Group, GroupRequest, Session as _};
+use std::time::Duration;
+
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Arms the capture group and waits for it to become ready within the
+    /// window. A failure before the group exists carries the report skeleton
+    /// inside its error; a later one becomes the primary failure of the
+    /// returned group.
+    pub(super) fn arm_capture_group(
+        &self,
+        request: &GroupRequest,
+        window: Duration,
+        deadline: &Deadline,
+        report: Report,
+    ) -> Result<Armed<<P::Capture as native::Provider>::Capture>, Error> {
+        // The window bounds arming and readiness. A zero window still arms its
+        // sources, bounded only by the longest wait a provider accepts, and
+        // then stops without waiting.
+        let unbounded;
+        let arming = if window.is_zero() {
+            unbounded = self.deadline(native::MAX_TIMEOUT);
+            &unbounded
+        } else {
+            deadline
+        };
+        let mut group = match Group::new(request) {
+            Ok(group) => group,
+            Err(error) => return Err(failure(Cause::Native(error), report, None)),
+        };
+        let mut primary = group
+            .arm(self.providers.capture(), arming)
+            .err()
+            .map(Cause::Native);
+        if primary.is_none() && !window.is_zero() {
+            if deadline
+                .remaining()
+                .map_or(true, |remaining| remaining.is_zero())
+            {
+                primary = Some(Cause::Invalid("capture window expired during activation"));
+            } else if let Err(error) = group.wait_ready(deadline) {
+                primary = Some(Cause::Native(error));
+            }
+        }
+        Ok(Armed {
+            group,
+            report,
+            primary,
+        })
+    }
+}
+
+/// The capture after activation: the group, the report skeleton, and the
+/// first activation failure if arming, `wait_ready`, or the window produced
+/// one.
+pub(super) struct Armed<C: native::Session> {
+    pub(super) group: Group<C>,
+    pub(super) report: Report,
+    pub(super) primary: Option<Cause>,
+}

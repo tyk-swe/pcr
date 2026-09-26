@@ -1,0 +1,32 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! One staged send: preparation, pacing, and final transmission checks.
+
+use super::Error;
+use crate::{
+    Client, clock::Clock, evidence::SentPacket, preparation::Streaming, providers::Providers,
+};
+use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::capture::MAX_TIMEOUT;
+use std::time::Duration;
+
+pub(super) fn send<P: Providers, K: Clock>(
+    client: &Client<P, K>,
+    stream: &mut Streaming<'_, P, K>,
+    expanded: Result<Packet, packetcraftr_core::template::Error>,
+    delay: Option<Duration>,
+) -> Result<SentPacket, Error> {
+    stream.check()?;
+    let prepared = stream.prepare(expanded.map_err(crate::Error::from)?)?;
+    if let Some(delay) = delay {
+        stream.check()?;
+        client
+            .clock
+            .sleep(delay, &client.deadline(MAX_TIMEOUT))
+            .map_err(|source| Error::Clock {
+                source: Box::new(source),
+            })?;
+    }
+    Ok(stream.transmit(prepared)?)
+}

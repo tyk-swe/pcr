@@ -15,9 +15,13 @@
 
 mod engine;
 mod error;
+mod evidence;
+mod executor;
+mod plan;
 mod report;
 mod request;
 
 pub use error::{Cause, Error};
-pub use report::{Control, Event, Report, Source, StopReason};
+pub use evidence::{Event, Source};
+pub use report::{Control, Report, StopReason};
 pub use request::Request;

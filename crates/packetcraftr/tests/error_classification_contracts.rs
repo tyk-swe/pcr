@@ -52,6 +52,65 @@ fn selection_failure() -> packetcraftr_core::filter::Error {
 }
 
 #[test]
+fn send_and_exchange_template_failures_publish_each_source_only_once() {
+    use packetcraftr::exchange;
+    use packetcraftr_core::{field::FieldValue, template::Template};
+
+    let client = Client::new(
+        protocol::builtin::registry(),
+        policy::Policy::default(),
+        packetcraftr::SystemProviders,
+    );
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        destination: Ipv4Addr::LOCALHOST,
+        ..Default::default()
+    });
+    let mut overflow = Template::new(packet.clone());
+    for _ in 0..usize::BITS {
+        overflow = overflow.axis(
+            0,
+            "ttl",
+            vec![FieldValue::Unsigned(1), FieldValue::Unsigned(2)],
+        );
+    }
+    let invalid_layer = Template::new(packet.clone()).axis(9, "ttl", vec![FieldValue::Unsigned(1)]);
+    let invalid_value = Template::new(packet).axis(0, "ttl", vec![FieldValue::Text("bad".into())]);
+    for template in [overflow, invalid_layer, invalid_value] {
+        let send = client
+            .send(
+                send::Request::new(template.clone(), Default::default()),
+                send::Collector::default(),
+            )
+            .unwrap_err();
+        let exchange = client
+            .exchange(
+                exchange::Request {
+                    template,
+                    send: Default::default(),
+                    timeout: Duration::from_secs(1),
+                    max_template_packets: 10,
+                    collection: Default::default(),
+                },
+                exchange::Collector::default(),
+            )
+            .unwrap_err();
+        for error in [&send as &dyn Classified, &exchange as &dyn Classified] {
+            assert_eq!(error.classification().code, "packet.template");
+            let causes = error.causes();
+            assert!(
+                !causes.is_empty(),
+                "the template error must remain a source"
+            );
+            assert!(
+                !error.to_string().contains(&causes[0]),
+                "wrapper must not repeat its source: {error}",
+            );
+        }
+    }
+}
+
+#[test]
 fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
     let cases: Vec<(&str, ReplayError, &str, Kind, Option<Coordinate>)> = vec![
         (

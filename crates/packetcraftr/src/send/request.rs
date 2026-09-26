@@ -5,7 +5,6 @@ use std::net::IpAddr;
 
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::template::{DEFAULT_MAX_TEMPLATE_PACKETS, Template};
-use packetcraftr_netio::capture::MAX_TIMEOUT;
 
 use super::Error;
 
@@ -87,45 +86,11 @@ impl Request {
     /// Returns the first invalid bound, or the template's refusal to count
     /// its expansion.
     pub fn packet_count(&self) -> Result<u64, Error> {
-        self.validate()?;
-        let count = self
-            .template
-            .expansion_len()
-            .map_err(|source| crate::Error::Template {
-                message: source.to_string(),
-                source: Some(source),
-            })?;
-        if count == 0 || count > self.max_template_packets {
-            return Err(invalid(
-                "max_template_packets",
-                "expansion must be non-empty and within the packet ceiling",
-            ));
-        }
-        let total = u64::try_from(count)
-            .ok()
-            .and_then(|count| count.checked_mul(u64::from(self.repeat)))
-            .ok_or_else(|| invalid("repeat", "expansion times repetition overflows u64"))?;
-        let delay = self.delay()?;
-        let scheduled_nanos = u128::from(total - 1) * delay.as_nanos();
-        if scheduled_nanos > MAX_TIMEOUT.as_nanos() {
-            return Err(Error::InvalidRequest {
-                field: "rate",
-                message: format!(
-                    "scheduled pacing {scheduled_nanos} ns exceeds the {MAX_TIMEOUT:?} ceiling"
-                ),
-            });
-        }
-        Ok(total)
-    }
-
-    /// The pause between transmission starts.
-    pub(super) fn delay(&self) -> Result<std::time::Duration, Error> {
-        crate::clock::rate_delay(1, self.rate)
-            .ok_or_else(|| invalid("rate", "rate-delay arithmetic overflowed"))
+        super::plan::Plan::try_from(self).map(|plan| plan.packet_count)
     }
 }
 
-fn invalid(field: &'static str, message: &str) -> Error {
+pub(super) fn invalid(field: &'static str, message: &str) -> Error {
     Error::InvalidRequest {
         field,
         message: message.to_owned(),

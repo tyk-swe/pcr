@@ -9,16 +9,55 @@ mod adapter;
 mod enumeration;
 mod query;
 
+use std::net::IpAddr;
+
 use packetcraftr_core::budget::Deadline;
 
-use crate::interface;
+use crate::{
+    interface::{self, Id as InterfaceId},
+    route::{Decision, SystemError},
+};
 
-pub(in crate::platform) use query::{interface_route, route};
+// IP Helper calls are synchronous and take no timeout, so every one runs on
+// the worker pool and the caller waits only until its deadline.
 
-/// One synchronous `GetAdaptersAddresses` snapshot; the interface capability
-/// has already checked the caller's deadline.
+pub(in crate::platform) fn route(
+    destination: IpAddr,
+    interface_hint: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
+    deadline: &Deadline,
+) -> Result<Decision, SystemError> {
+    let interface_hint = interface_hint.cloned();
+    super::on_worker(
+        deadline,
+        "selecting the Windows best route",
+        move |deadline| {
+            query::route(
+                destination,
+                interface_hint.as_ref(),
+                preferred_source,
+                deadline,
+            )
+        },
+    )
+}
+
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+    deadline: &Deadline,
+) -> Result<Decision, SystemError> {
+    let requested = requested.clone();
+    super::on_worker(deadline, "selecting a Windows interface", move |_| {
+        query::interface_route(&requested)
+    })
+}
+
+/// One `GetAdaptersAddresses` snapshot.
 pub(in crate::platform) fn interfaces(
-    _deadline: &Deadline,
+    deadline: &Deadline,
 ) -> Result<Vec<interface::Info>, interface::Error> {
-    enumeration::interfaces().map_err(interface::Error::native)
+    super::on_worker(deadline, "enumerating Windows interfaces", |_| {
+        enumeration::interfaces()
+    })
+    .map_err(interface::Error::native)
 }

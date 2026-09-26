@@ -171,8 +171,10 @@ Embedders can clone a `progress::Runtime` and give it to multiple clients with
 snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
 and their captured-resource destructors keep their permits until cleanup ends.
 `packetcraftr_netio::resources::native_snapshot()` reports the process-wide
-16-permit native pool, active reservations, rejected admissions and retained
-cleanup. Unsupported profiles say so explicitly. These counts describe admission
+native worker pool (`resources::WORKER_CAPACITY`, 16 slots shared by capture
+reads, route queries, and TCP connects): active reservations, rejected
+admissions and retained cleanup. `tcp_connect_snapshot()` reports the TCP
+connect sub-limit of the same pool. These counts describe admission
 reservations, not all OS threads, handles, or process memory.
 
 TCP pending ranges now use separately charged 4 KiB payload pages and interval

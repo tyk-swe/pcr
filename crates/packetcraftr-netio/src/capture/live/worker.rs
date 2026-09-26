@@ -7,11 +7,10 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
-use crate::workers::WorkerPermit;
+use crate::workers::{Permit, Task};
 
 use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, Lengths, LinkType};
@@ -23,10 +22,10 @@ const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 const REAPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(super) fn transfer_capture_worker(
-    worker: JoinHandle<()>,
+    worker: Task<()>,
     stop: Arc<AtomicBool>,
     interrupt: Arc<dyn super::CaptureInterrupt>,
-    permit: WorkerPermit,
+    permit: Permit,
     reaper: &ReaperClient,
 ) {
     permit.retention_marker().mark_retained();

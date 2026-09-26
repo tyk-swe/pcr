@@ -28,9 +28,9 @@ use crate::{
 };
 use packetcraftr_core::budget::Deadline;
 
-/// IP Helper calls are synchronous and take no timeout, so the caller's
-/// deadline is checked between them rather than bounding each one.
-pub(in crate::platform) fn route(
+/// Runs on the worker pool. IP Helper calls take no timeout, so the deadline
+/// is also checked between them, stopping work nobody waits for.
+pub(super) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
@@ -180,12 +180,8 @@ fn query_best_route(
     Ok(BestRoute { row, source })
 }
 
-/// One synchronous `GetAdaptersAddresses` snapshot; the interface capability
-/// has already checked the caller's deadline.
-pub(in crate::platform) fn interface_route(
-    requested: &InterfaceId,
-    _deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+/// One synchronous `GetAdaptersAddresses` snapshot, run on the worker pool.
+pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, SystemError> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }

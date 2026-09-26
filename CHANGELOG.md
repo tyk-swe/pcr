@@ -297,6 +297,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- `packetcraftr_netio::resources::WORKER_CAPACITY` names the capacity of the
+  one native worker pool (16). `tcp::MAX_PENDING_CONNECTIONS` is defined as a
+  sub-limit of it, and `capture::MAX_SOURCES` documents how a group relates to
+  it.
 - `packetcraftr_core::error::Classified` is implemented for
   `std::convert::Infallible`, so a provider that cannot fail satisfies a
   `Classified` error bound.
@@ -677,6 +681,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   expiry scans while preserving source attribution and budget accounting.
 - Capture encoding avoids redundant preparation and small writes while preserving
   validation and wire output; neighbor-cache hits avoid scanning unrelated entries.
+- Every native call that can block past a deadline runs on one process-wide
+  worker pool of `resources::WORKER_CAPACITY` slots: capture reads, Linux route
+  netlink, macOS routing-socket queries, Windows IP Helper calls, and ordinary
+  TCP connects. Pooled threads are reused, never outnumber the pool, and only
+  take work from callers in the same network namespace. TCP connects no longer
+  spawn a thread each, and macOS and Windows route queries no longer block the
+  caller past its deadline. Sends stay on the caller's thread. The
+  `native_process` resource row now covers the whole pool, TCP connects
+  included, and reports `supported: true` with capacity 16 in every build
+  profile; `tcp_connect_process` reports the TCP sub-limit. A connect scan or
+  capture waits for or is refused a slot while other native work holds the
+  pool, under the existing `io.tcp_connect_capacity` and `io.capture` codes.
+- Linux netlink submissions, capture shutdown, and worker cleanup wait on
+  condition variables instead of sleeping between checks; the remaining
+  sliced waits exist only to notice a caller's cancellation.
 - Linux route lookups share a netlink worker (thread, Tokio runtime, and socket)
   per network namespace behind the native worker budget, submitting requests
   over bounded channels instead of respawning all three per destination.

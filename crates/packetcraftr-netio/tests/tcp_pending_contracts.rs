@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::{budget::Deadline, error::Classified as _};
 use packetcraftr_netio::{
-    resources::tcp_connect_snapshot,
+    resources::{self, native_snapshot, tcp_connect_snapshot},
     tcp::{self, Provider, Stream},
 };
 use std::{
@@ -128,14 +128,26 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
     for _ in 1..tcp::MAX_PENDING_CONNECTIONS {
         started.recv_timeout(Duration::from_secs(2)).unwrap();
     }
-    assert!(matches!(
-        tcp::start_connect(
-            Arc::clone(&provider),
-            endpoint,
-            &Deadline::new(Duration::from_secs(1))
-        ),
-        Err(tcp::ConnectError::Capacity { .. })
-    ));
+    // Connects are a sub-limit of the one native worker pool, which refuses
+    // work past its capacity with a classified error instead of waiting.
+    let pool = native_snapshot();
+    assert_eq!(pool.capacity, resources::WORKER_CAPACITY);
+    assert_eq!(pool.active, tcp::MAX_PENDING_CONNECTIONS);
+    let refused = match tcp::start_connect(
+        Arc::clone(&provider),
+        endpoint,
+        &Deadline::new(Duration::from_secs(1)),
+    ) {
+        Err(error @ tcp::ConnectError::Capacity { .. }) => error,
+        Err(other) => panic!("a full pool must refuse admission: {other}"),
+        Ok(_) => panic!("a full pool must refuse admission"),
+    };
+    assert_eq!(refused.classification().code, "io.tcp_connect_capacity");
+    assert_eq!(tcp_connect_snapshot().rejected_admissions, 1);
+    assert_eq!(
+        native_snapshot().rejected_admissions,
+        pool.rejected_admissions + 1
+    );
     drop(more);
     for _ in 0..tcp::MAX_PENDING_CONNECTIONS {
         release.send(()).unwrap();
@@ -165,7 +177,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
 
 #[test]
 fn a_spent_or_cancelled_caller_starts_no_connection() {
-    use packetcraftr_core::{budget::Cancellation, error::Classified as _};
+    use packetcraftr_core::budget::Cancellation;
 
     let (entered, started) = mpsc::channel();
     let (_release, gate) = mpsc::channel();

@@ -1,22 +1,43 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! ARP and NDP discovery frames, built and read with core codecs.
+
+#[cfg(test)]
 use std::net::IpAddr;
 #[cfg(test)]
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+#[cfg(test)]
 use bytes::Bytes;
 
+#[cfg(test)]
 use super::Request as NeighborRequest;
+#[cfg(test)]
 use super::error::invalid_request;
+#[cfg(test)]
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::packet::{MacAddress, VlanTag};
+use packetcraftr_core::packet::MacAddress;
+#[cfg(test)]
+use packetcraftr_core::packet::VlanTag;
 
+#[cfg(test)]
 mod arp;
+#[cfg(test)]
 mod ethernet;
+#[cfg(test)]
 mod ndp;
+mod reply;
+mod request;
 
-pub(super) use ethernet::is_unicast_mac;
+pub(super) use reply::match_neighbor_response;
+pub(super) use request::build_request_frame;
+
+/// Whether `address` names one interface: not the zero, broadcast, or a
+/// group address.
+pub(super) fn is_unicast_mac(address: MacAddress) -> bool {
+    address.0 != [0; 6] && address.0 != [0xff; 6] && address.0[0] & 1 == 0
+}
 
 #[cfg(test)]
 use self::{
@@ -40,7 +61,8 @@ use self::{
 use crate::route::MAX_VLAN_TAGS;
 #[cfg(test)]
 use packetcraftr_core::packet::VlanKind;
-pub(super) fn build_request_frame(
+#[cfg(test)]
+fn legacy_build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {
     match (request.interface_source, request.target) {
@@ -74,10 +96,8 @@ pub(super) fn build_request_frame(
     }
 }
 
-pub(super) fn match_neighbor_response(
-    request: &NeighborRequest,
-    frame: &Frame,
-) -> Option<MacAddress> {
+#[cfg(test)]
+fn legacy_match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<MacAddress> {
     if frame.link_type != LinkType::ETHERNET
         || frame
             .interface
@@ -106,8 +126,7 @@ pub(super) fn match_neighbor_response(
     }
 }
 
-/// VLAN kind and ID identify the logical link. Priority and drop eligibility
-/// are per-frame markings that a responder or switch may set independently.
+#[cfg(test)]
 fn same_vlan_link(captured: &[VlanTag], requested: &[VlanTag]) -> bool {
     captured.len() == requested.len()
         && captured.iter().zip(requested).all(|(captured, requested)| {
@@ -285,7 +304,7 @@ mod tests {
         assert!(parsed.payload.is_empty());
     }
 
-    fn arp_response(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {
+    pub(super) fn arp_response(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {
         let (IpAddr::V4(interface_source), IpAddr::V4(target)) =
             (request.interface_source, request.target)
         else {
@@ -437,7 +456,7 @@ mod tests {
         }
     }
 
-    fn neighbor_advertisement(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {
+    pub(super) fn neighbor_advertisement(request: &NeighborRequest, sender: MacAddress) -> Vec<u8> {
         let (IpAddr::V6(interface_source), IpAddr::V6(target)) =
             (request.interface_source, request.target)
         else {
@@ -482,19 +501,54 @@ mod tests {
         frame[icmp_offset + 2..icmp_offset + 4].copy_from_slice(&checksum.to_be_bytes());
     }
 
-    fn with_ipv6_extension(mut frame: Vec<u8>, extension_type: u8) -> Vec<u8> {
+    /// A well-formed extension header of `extension_type` that leads to
+    /// ICMPv6.
+    fn extension_header(extension_type: u8) -> Vec<u8> {
+        match extension_type {
+            // Payload Len 2: next header, length, reserved, SPI, sequence, ICV
+            51 => vec![
+                IPV6_NEXT_HEADER_ICMP,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+            ],
+            // Type 2 routing header carrying one home address
+            43 => {
+                let mut header = vec![IPV6_NEXT_HEADER_ICMP, 2, 2, 1, 0, 0, 0, 0];
+                header
+                    .extend_from_slice(&"2001:db8::9".parse::<Ipv6Addr>().expect("home").octets());
+                header
+            }
+            _ => vec![IPV6_NEXT_HEADER_ICMP, 0, 0, 0, 0, 0, 0, 0],
+        }
+    }
+
+    pub(super) fn with_ipv6_extension(mut frame: Vec<u8>, extension_type: u8) -> Vec<u8> {
+        let header = extension_header(extension_type);
         let ipv6_offset = ETHERNET_HEADER_LENGTH;
         let payload_length = u16::from_be_bytes([frame[ipv6_offset + 4], frame[ipv6_offset + 5]]);
         frame[ipv6_offset + 4..ipv6_offset + 6].copy_from_slice(
             &payload_length
-                .checked_add(8)
+                .checked_add(u16::try_from(header.len()).expect("fixture length"))
                 .expect("fixture length")
                 .to_be_bytes(),
         );
         frame[ipv6_offset + 6] = extension_type;
         frame.splice(
             ipv6_offset + IPV6_HEADER_LENGTH..ipv6_offset + IPV6_HEADER_LENGTH,
-            [IPV6_NEXT_HEADER_ICMP, 0, 0, 0, 0, 0, 0, 0],
+            header,
         );
         frame
     }
@@ -607,5 +661,188 @@ mod tests {
             too_many_tags.extend_from_slice(&[0, 1, 0x81, 0]);
         }
         assert!(parse_ethernet(&too_many_tags).is_none());
+    }
+}
+
+/// Proves the codec-built frames and the dissector-based matcher reproduce
+/// the hand-written wire code they replace.
+#[cfg(test)]
+mod differential {
+    use std::time::SystemTime;
+
+    use super::*;
+    use packetcraftr_core::packet::VlanKind;
+    use packetcraftr_netio::interface::Id as InterfaceId;
+
+    fn request(source: IpAddr, target: IpAddr, vlan_tags: Vec<VlanTag>) -> NeighborRequest {
+        NeighborRequest {
+            interface: InterfaceId {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            interface_source: source,
+            interface_mac: MacAddress([0x02, 0, 0, 0, 0, 1]),
+            target,
+            vlan_tags,
+            mtu: 1_500,
+            link_type: LinkType::ETHERNET,
+            deadline: None,
+        }
+    }
+
+    fn tag(kind: VlanKind, priority: u8, drop_eligible: bool, vlan_id: u16) -> VlanTag {
+        VlanTag {
+            kind,
+            priority,
+            drop_eligible,
+            vlan_id,
+        }
+    }
+
+    fn stacks() -> Vec<Vec<VlanTag>> {
+        let full = (0..MAX_VLAN_TAGS)
+            .map(|index| {
+                let kind = if index % 2 == 0 {
+                    VlanKind::Ieee8021Ad
+                } else {
+                    VlanKind::Ieee8021Q
+                };
+                let index = u16::try_from(index).expect("small index");
+                tag(kind, (index % 8) as u8, index % 3 == 0, 4095 - index * 511)
+            })
+            .collect();
+        vec![
+            Vec::new(),
+            vec![tag(VlanKind::Ieee8021Q, 3, true, 409)],
+            vec![tag(VlanKind::Ieee8021Ad, 7, false, 0)],
+            vec![
+                tag(VlanKind::Ieee8021Ad, 5, true, 100),
+                tag(VlanKind::Ieee8021Q, 1, false, 200),
+            ],
+            full,
+        ]
+    }
+
+    fn addresses() -> Vec<(IpAddr, IpAddr)> {
+        vec![
+            (
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99)),
+            ),
+            (
+                IpAddr::V4(Ipv4Addr::new(198, 51, 100, 254)),
+                IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            ),
+            (
+                IpAddr::V6("2001:db8::1".parse().expect("source")),
+                IpAddr::V6("2001:db8::abcd".parse().expect("target")),
+            ),
+            (
+                IpAddr::V6("fe80::1".parse().expect("source")),
+                IpAddr::V6("fe80::1234:5678:9abc:def0".parse().expect("target")),
+            ),
+        ]
+    }
+
+    #[test]
+    fn codec_requests_match_the_hand_written_frames_byte_for_byte() {
+        let mut compared = 0;
+        for (source, target) in addresses() {
+            for tags in stacks() {
+                for mtu in [1_500, 72, 71, 28, 27] {
+                    let mut request = request(source, target, tags.clone());
+                    request.mtu = mtu;
+                    let legacy = legacy_build_request_frame(&request);
+                    let codec = build_request_frame(&request);
+                    match (legacy, codec) {
+                        (Ok(legacy), Ok(codec)) => {
+                            assert_eq!(codec, legacy, "{request:?}");
+                            compared += 1;
+                        }
+                        (Err(legacy), Err(codec)) => {
+                            assert_eq!(codec.to_string(), legacy.to_string(), "{request:?}");
+                        }
+                        (legacy, codec) => {
+                            panic!("{request:?}: legacy {legacy:?} but codec {codec:?}")
+                        }
+                    }
+                }
+            }
+        }
+        let mixed = request(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            Vec::new(),
+        );
+        assert_eq!(
+            build_request_frame(&mixed).map_err(|error| error.to_string()),
+            legacy_build_request_frame(&mixed).map_err(|error| error.to_string())
+        );
+        assert!(compared >= 40, "only {compared} frames compared");
+    }
+
+    fn capture(bytes: impl Into<Bytes>) -> Frame {
+        Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes).expect("fixture frame")
+    }
+
+    fn replies() -> Vec<(NeighborRequest, Vec<u8>)> {
+        let sender = MacAddress([0x02, 0, 0, 0, 0, 2]);
+        let mut replies = Vec::new();
+        for (source, target) in addresses() {
+            for tags in stacks() {
+                let request = request(source, target, tags);
+                if source.is_ipv4() {
+                    let mut reply = super::tests::arp_response(&request, sender);
+                    replies.push((request.clone(), reply.clone()));
+                    reply.resize(reply.len() + 18, 0);
+                    replies.push((request, reply));
+                } else {
+                    let reply = super::tests::neighbor_advertisement(&request, sender);
+                    if request.vlan_tags.is_empty() {
+                        for extension in [0, 60, 51, 44] {
+                            replies.push((
+                                request.clone(),
+                                super::tests::with_ipv6_extension(reply.clone(), extension),
+                            ));
+                        }
+                    }
+                    replies.push((request, reply));
+                }
+            }
+        }
+        replies
+    }
+
+    #[test]
+    fn dissected_replies_match_what_the_hand_written_matcher_accepts() {
+        let mut accepted = 0;
+        for (request, reply) in replies() {
+            let expected = legacy_match_neighbor_response(&request, &capture(reply.clone()));
+            accepted += usize::from(expected.is_some());
+            assert_eq!(
+                match_neighbor_response(&request, &capture(reply.clone())),
+                expected,
+                "{request:?} {reply:02x?}"
+            );
+            for offset in 0..reply.len() {
+                for mask in [0x01, 0x80, 0xff] {
+                    let mut mutated = reply.clone();
+                    mutated[offset] ^= mask;
+                    assert_eq!(
+                        match_neighbor_response(&request, &capture(mutated.clone())),
+                        legacy_match_neighbor_response(&request, &capture(mutated.clone())),
+                        "byte {offset} ^ {mask:#x}: {request:?} {mutated:02x?}"
+                    );
+                }
+            }
+            for length in 0..reply.len() {
+                assert_eq!(
+                    match_neighbor_response(&request, &capture(reply[..length].to_vec())),
+                    legacy_match_neighbor_response(&request, &capture(reply[..length].to_vec())),
+                    "truncated to {length}: {request:?}"
+                );
+            }
+        }
+        assert!(accepted >= 20, "only {accepted} replies accepted");
     }
 }

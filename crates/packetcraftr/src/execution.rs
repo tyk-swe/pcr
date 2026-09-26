@@ -23,4 +23,3 @@ pub(crate) use executor::{ExecutorFault, WorkflowOverrides};
 pub(crate) use shared::Shared;
 pub use sink::Sink;
 pub(crate) use sink::publisher;
-pub use validation::ExchangeEvidenceError;

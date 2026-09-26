@@ -6,9 +6,8 @@ use std::time::Duration;
 use packetcraftr_core::{codec::NetworkEnvelope, packet::Packet, protocol::BuiltinProtocol};
 
 use crate::execution::validation::{
-    ExchangeEvidenceError, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
+    validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
+    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 
 use super::Limits;
@@ -108,7 +107,7 @@ pub(super) fn validate_dns_execution(
     Ok(())
 }
 
-fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
+fn map_dns_evidence_error(attempt: u32, error: crate::evidence::Error) -> Error {
     Error::InvalidEvidence {
         attempt,
         fault: EvidenceFault::Exchange(error),

@@ -5,9 +5,10 @@ use super::{PipelineEvent, PipelineOptions};
 use crate::probe::Batch;
 use crate::scan::{Classification, Probe, SentProbe, evidence::Observation, profile};
 use crate::{
-    Client, Providers, SentPacket, Stats,
+    Client, Providers, Stats,
     clock::Clock,
     evidence::ExecutionPermit,
+    evidence::SentPacket,
     execution::{
         ExchangeExecutor,
         evidence::{CandidateKey, candidate_precedes},

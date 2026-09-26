@@ -3,7 +3,6 @@
 
 use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 
-use super::ExchangeEvidenceError;
 use crate::StatsOverflow;
 use packetcraftr_core::error::BoundaryError;
 
@@ -40,7 +39,7 @@ pub(crate) trait Errors {
     /// The step's work failed at its provider boundary.
     fn execution(&self, step: Self::Step, source: BoundaryError) -> Self::Error;
     /// The step returned evidence inconsistent with what it was granted.
-    fn invalid_evidence(&self, step: Self::Step, source: ExchangeEvidenceError) -> Self::Error;
+    fn invalid_evidence(&self, step: Self::Step, source: crate::evidence::Error) -> Self::Error;
     /// Merging the step's statistics, or a scheduled delay, overflowed.
     fn stats_overflow(&self, step: Self::Step, source: StatsOverflow) -> Self::Error;
 }

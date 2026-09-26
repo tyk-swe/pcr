@@ -15,8 +15,8 @@ use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence};
-use crate::SentPacket;
 use crate::correlation::{Correlation, Transport};
+use crate::evidence::SentPacket;
 use crate::probe::ProbeStatus;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
 

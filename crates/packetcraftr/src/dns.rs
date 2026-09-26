@@ -68,21 +68,18 @@ mod reverse;
 pub mod tcp;
 #[cfg(test)]
 mod tests;
-mod wire;
+pub mod wire;
 
 pub use classification::{ResponseClassification, classify_response, response_code_name};
-pub use error::{Error, EvidenceFault, WireError};
+pub use error::{Error, EvidenceFault};
 pub use report::{
     Aggregate, AttemptEvidence, Collector, Completion, Event, EventContext, IncoherentReport,
     Outcome, RejectedRecord, Report, ResponseMetadata, Section, Transport, TransportEvidence,
     UndecodedEvidence, ValidatedResponse,
 };
-pub use request::{
-    EdnsRequest, Limits, MessageLimits, QueryType, QueryTypeParseError, Request, TransportMode,
-};
+pub use request::{EdnsRequest, Limits, MessageLimits, QueryType, Request, TransportMode};
 
 pub use probe::{Probe, unpredictable_source_port, unpredictable_transaction_id};
 pub use reverse::reverse_name;
-pub use wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query};
 
 use packetcraftr_core::protocol::application::dns::{Edns, Name, Record, RecordValue};

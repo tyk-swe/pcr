@@ -487,8 +487,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}`,
   `clock::CancellableClock`, and `Clock::cancellation` are removed; the client
   carries cancellation to every workflow. The `progress` module is renamed
-  `runtime` (`runtime::{Runtime, RuntimeSnapshot, Worker, EmitError,
-  MAX_WORKER_CAPACITY}`). `SystemProviders` is a unit struct implementing
+  `runtime` (`runtime::{Runtime, RuntimeSnapshot, Worker, Error,
+  MAX_WORKER_CAPACITY}`; `EmitError` is `runtime::Error`). `SystemProviders` is a unit struct implementing
   `Providers` instead of an alias of `ProviderSet`, and `ProviderSet::system`
   is removed. The `capture::Selector` alias is removed (use
   `capture::Request::with_selector`), and `scan::PipelineFailure` is its
@@ -522,8 +522,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
   See `docs/migration-unreleased.md`.
 - Each module has one error type, named `Error` and used module-qualified:
-  `packetcraftr_netio::route::SystemError` is `route::Error`. Variants,
-  messages, and classification codes are unchanged. See
+  `packetcraftr_netio::route::SystemError` is `route::Error`, and
+  `packetcraftr::runtime::Error` (formerly `progress::EmitError`) implements
+  `Classified`. `packetcraftr::SentPacket` moves into the public `evidence`
+  module (`packetcraftr::evidence::SentPacket`) beside the evidence `Error`.
+  DNS wire handling is the `dns::wire` sub-domain: `dns::WireError` is
+  `dns::wire::Error` (now `Classified`: `packet.dns_query` for a query that
+  cannot be built, `packet.dns` for a response that breaks a wire rule, and
+  the codec's or core DNS error's own class for `Encode` and `Decode`, which
+  are transparent), `dns::{canonical_query_name, decode_response,
+  decode_tcp_frame, encode_query}` are `dns::wire::…`, and
+  `dns::QueryTypeParseError` folds into `wire::Error` (`QueryTypeSyntax`,
+  `QueryTypeRange`). Variants, messages, and classification codes are unchanged. See
   `docs/migration-unreleased.md`.
 
 ### Added
@@ -533,9 +543,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   it as its source without repeating its text.
 - `scan::MAX_IN_FLIGHT` (1024) names the most probe response windows one scan
   overlaps; request validation and the pipeline share it.
-- `packetcraftr::ExchangeEvidenceError` is public and names why the evidence an
-  executor returned is inconsistent with its step, including the new
-  `PermitMismatch`.
+- `packetcraftr::evidence::Error` is public, implements `Classified`
+  (`internal.live_io_invariant`), and names why the evidence an executor
+  returned is inconsistent with its step, including the new `PermitMismatch`.
 - `packetcraftr_netio::resources::WORKER_CAPACITY` names the capacity of the
   one native worker pool (16). `tcp::MAX_PENDING_CONNECTIONS` is defined as a
   sub-limit of it, and `capture::MAX_SOURCES` documents how a group relates to

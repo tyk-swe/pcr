@@ -8,7 +8,6 @@ use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::WORKFLOW;
 use crate::StatsOverflow;
-use crate::execution::ExchangeEvidenceError;
 use crate::target::{Family, SelectionError};
 use packetcraftr_core::error::BoundaryError;
 
@@ -197,7 +196,7 @@ impl crate::execution::Errors for Probes {
         Error::Execution { sequence, source }
     }
 
-    fn invalid_evidence(&self, sequence: u64, source: ExchangeEvidenceError) -> Error {
+    fn invalid_evidence(&self, sequence: u64, source: crate::evidence::Error) -> Error {
         Error::InvalidEvidence {
             sequence,
             message: WORKFLOW.describe_evidence(&source),

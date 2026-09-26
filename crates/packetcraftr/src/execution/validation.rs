@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use crate::SentPacket;
+use crate::evidence::{self, SentPacket};
 use packetcraftr_core::decode::DecodedPacket;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::capture::Stats;
@@ -26,96 +26,18 @@ fn validate_capture_statistics(statistics: Stats) -> Result<(), String> {
         .map_err(|error| format!("capture statistics are invalid: {error}"))
 }
 
-/// Why the evidence an executor returned for one step is inconsistent with
-/// the step it was granted: the exact sent packets and bytes, the captured
-/// responses and their timing, capture statistics, or evidence limits.
-///
-/// Workflows report it at the step it concerns, in their own error.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ExchangeEvidenceError {
-    /// The evidence is bound to a different execution permit than the one
-    /// the step was granted.
-    #[error("executor returned evidence for a different execution permit")]
-    PermitMismatch,
-    #[error("expected {expected} sent receipts, received {receipts}")]
-    SentCardinality { expected: usize, receipts: usize },
-    #[error("matched response references a request outside the executed step")]
-    ResponseOutsideBatch,
-    #[error("executor capture frame-count accounting overflowed")]
-    CapturedFrameCountOverflow,
-    #[error("executor returned {actual} captured frames beyond max_evidence_frames={limit}")]
-    CapturedFrameLimitExceeded { actual: usize, limit: usize },
-    #[error("executor capture byte accounting overflowed")]
-    CapturedByteCountOverflow,
-    #[error("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")]
-    CapturedByteLimitExceeded { actual: usize, limit: usize },
-    /// The packet at `request_index` does not carry the destination and
-    /// probe identity the step requested.
-    #[error("sent packet does not preserve the requested destination and probe identity")]
-    SentPacketMismatch { request_index: usize },
-    #[error("sent frame byte accounting overflowed")]
-    SentByteCountOverflow,
-    #[error("successful exchange reported {reported} sent bytes for {actual} exact frame bytes")]
-    SentByteCountMismatch { reported: u64, actual: u64 },
-    #[error("executor returned {evidence} without a timestamp")]
-    TimestampUnavailable { evidence: &'static str },
-    #[error("{message}")]
-    InvalidMatchedResponse { message: String },
-    #[error("matched response latency {latency:?} exceeds timeout {timeout:?}")]
-    ResponseAfterTimeout {
-        latency: Duration,
-        timeout: Duration,
-    },
-    #[error("{message}")]
-    InvalidUnsolicitedResponse { message: String },
-    #[error("{message}")]
-    InvalidCaptureStatistics { message: String },
-    #[error("successful exchange statistics do not account for every request")]
-    IncompleteStatistics,
-}
-
-impl ExchangeEvidenceError {
-    pub(crate) const fn request_index(&self) -> Option<usize> {
-        match self {
-            Self::SentPacketMismatch { request_index } => Some(*request_index),
-            _ => None,
-        }
-    }
-
-    /// The message a workflow reports, naming what one executed step is
-    /// (`step`, such as "hop batch") and the workflow (`workflow`) where the
-    /// neutral [`Display`](std::fmt::Display) text leaves them generic.
-    pub(crate) fn describe(&self, step: &str, workflow: &str) -> String {
-        match self {
-            Self::ResponseOutsideBatch => {
-                format!("matched response references a request outside the {step}")
-            }
-            Self::SentPacketMismatch { .. } => {
-                format!(
-                    "sent packet does not preserve the {workflow} destination and probe identity"
-                )
-            }
-            Self::IncompleteStatistics => {
-                format!("successful exchange statistics do not account for every {workflow} probe")
-            }
-            error => error.to_string(),
-        }
-    }
-}
-
 pub(crate) fn validate_aggregate_evidence_limits(
     matched_responses: &[crate::exchange::Response],
     unsolicited: &[DecodedPacket],
     undecoded: &[Frame],
     max_captured_frames: usize,
     max_captured_bytes: usize,
-) -> Result<(), ExchangeEvidenceError> {
+) -> Result<(), evidence::Error> {
     let captured_frames =
         checked_frame_count(&[matched_responses.len(), unsolicited.len(), undecoded.len()])
-            .ok_or(ExchangeEvidenceError::CapturedFrameCountOverflow)?;
+            .ok_or(evidence::Error::CapturedFrameCountOverflow)?;
     if captured_frames > max_captured_frames {
-        return Err(ExchangeEvidenceError::CapturedFrameLimitExceeded {
+        return Err(evidence::Error::CapturedFrameLimitExceeded {
             actual: captured_frames,
             limit: max_captured_frames,
         });
@@ -127,9 +49,9 @@ pub(crate) fn validate_aggregate_evidence_limits(
             .chain(unsolicited.iter().map(|response| &response.frame))
             .chain(undecoded),
     )
-    .ok_or(ExchangeEvidenceError::CapturedByteCountOverflow)?;
+    .ok_or(evidence::Error::CapturedByteCountOverflow)?;
     if captured_bytes > max_captured_bytes {
-        return Err(ExchangeEvidenceError::CapturedByteLimitExceeded {
+        return Err(evidence::Error::CapturedByteLimitExceeded {
             actual: captured_bytes,
             limit: max_captured_bytes,
         });
@@ -140,11 +62,11 @@ pub(crate) fn validate_aggregate_evidence_limits(
 pub(crate) fn validate_sent_byte_accounting(
     sent: &[SentPacket],
     reported: u64,
-) -> Result<(), ExchangeEvidenceError> {
-    let actual = crate::evidence::total_bytes_sent(sent)
-        .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
+) -> Result<(), evidence::Error> {
+    let actual =
+        crate::evidence::total_bytes_sent(sent).ok_or(evidence::Error::SentByteCountOverflow)?;
     if reported != actual {
-        return Err(ExchangeEvidenceError::SentByteCountMismatch { reported, actual });
+        return Err(evidence::Error::SentByteCountMismatch { reported, actual });
     }
     Ok(())
 }
@@ -153,13 +75,13 @@ pub(crate) fn validate_response_frames_and_deadlines(
     matched_responses: &[crate::exchange::Response],
     unsolicited: &[DecodedPacket],
     timeout: Duration,
-) -> Result<(), ExchangeEvidenceError> {
+) -> Result<(), evidence::Error> {
     for response in matched_responses {
         validate_decoded_frame(&response.response, "matched response")
-            .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })?;
+            .map_err(|message| evidence::Error::InvalidMatchedResponse { message })?;
         validate_frame_timestamp(&response.response.frame, "matched response")?;
         if response.latency > timeout {
-            return Err(ExchangeEvidenceError::ResponseAfterTimeout {
+            return Err(evidence::Error::ResponseAfterTimeout {
                 latency: response.latency,
                 timeout,
             });
@@ -167,27 +89,24 @@ pub(crate) fn validate_response_frames_and_deadlines(
     }
     for response in unsolicited {
         validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
+            .map_err(|message| evidence::Error::InvalidUnsolicitedResponse { message })?;
         validate_frame_timestamp(&response.frame, "unsolicited response")?;
     }
     Ok(())
 }
 
-fn validate_frame_timestamp(
-    frame: &Frame,
-    evidence: &'static str,
-) -> Result<(), ExchangeEvidenceError> {
+fn validate_frame_timestamp(frame: &Frame, evidence: &'static str) -> Result<(), evidence::Error> {
     if frame.timestamp.is_none() {
-        return Err(ExchangeEvidenceError::TimestampUnavailable { evidence });
+        return Err(evidence::Error::TimestampUnavailable { evidence });
     }
     Ok(())
 }
 
 pub(crate) fn validate_capture_statistics_evidence(
     statistics: Stats,
-) -> Result<(), ExchangeEvidenceError> {
+) -> Result<(), evidence::Error> {
     validate_capture_statistics(statistics)
-        .map_err(|message| ExchangeEvidenceError::InvalidCaptureStatistics { message })
+        .map_err(|message| evidence::Error::InvalidCaptureStatistics { message })
 }
 
 fn checked_frame_count(counts: &[usize]) -> Option<usize> {

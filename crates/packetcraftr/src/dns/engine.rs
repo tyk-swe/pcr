@@ -17,7 +17,7 @@ use crate::execution::Context;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
 };
-use crate::execution::{ExchangeEvidenceError, ExchangeExecutor, Executor, publisher};
+use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::Providers;
@@ -666,7 +666,7 @@ impl crate::execution::Errors for Attempts {
         Error::Execution { attempt, source }
     }
 
-    fn invalid_evidence(&self, attempt: u32, source: ExchangeEvidenceError) -> Error {
+    fn invalid_evidence(&self, attempt: u32, source: crate::evidence::Error) -> Error {
         Error::InvalidEvidence {
             attempt,
             fault: EvidenceFault::Exchange(source),

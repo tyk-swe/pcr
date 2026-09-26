@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::runtime::{EmitError, Runtime, Worker};
+use packetcraftr::runtime::{self, Runtime, Worker};
 use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
@@ -45,7 +45,7 @@ pub(crate) fn write_unattributed_error(
     sink.emit(error, &Deadline::new(OUTPUT_TIMEOUT))
         .map_err(|source| match source {
             // The callback already reported the classified write failure.
-            EmitError::Output(source) => CliError::classified(source),
+            runtime::Error::Output(source) => CliError::classified(source),
             source => CliError::from(output::stream::EncodeError::Write {
                 sequence: 0,
                 source: io::Error::other(source),

@@ -25,7 +25,6 @@ use packetcraftr_netio::{Error as LiveIoError, capture, interface, route, tcp, t
 use crate::StatsOverflow;
 use crate::clock::Clock;
 use crate::evidence::SentPacket;
-use crate::execution::ExchangeEvidenceError;
 use crate::execution::{Executor, Step};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
@@ -450,7 +449,7 @@ pub(crate) enum Failure {
     InvalidLimit(&'static str),
     Authorization,
     Execution(u64, BoundaryError),
-    InvalidEvidence(u64, ExchangeEvidenceError),
+    InvalidEvidence(u64, crate::evidence::Error),
     StatsOverflow(u64, StatsOverflow),
 }
 
@@ -480,7 +479,7 @@ impl crate::execution::Errors for TestErrors {
     fn execution(&self, step: u64, source: BoundaryError) -> Failure {
         Failure::Execution(step, source)
     }
-    fn invalid_evidence(&self, step: u64, source: ExchangeEvidenceError) -> Failure {
+    fn invalid_evidence(&self, step: u64, source: crate::evidence::Error) -> Failure {
         Failure::InvalidEvidence(step, source)
     }
     fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {

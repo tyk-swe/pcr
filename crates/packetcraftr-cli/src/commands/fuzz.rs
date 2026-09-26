@@ -299,10 +299,8 @@ fn publish_offline(
         .map_err(|source| core::fuzz::Error::Output { source })?;
     core::fuzz::run_observed(request, packet, registry, |case, deadline| {
         worker.emit(case, deadline).map_err(|error| match error {
-            packetcraftr::runtime::EmitError::Deadline(error) => error.into(),
-            packetcraftr::runtime::EmitError::Output(source) => {
-                core::fuzz::Error::Output { source }
-            }
+            packetcraftr::runtime::Error::Deadline(error) => error.into(),
+            packetcraftr::runtime::Error::Output(source) => core::fuzz::Error::Output { source },
             // A publication failure this command does not know yet.
             error => core::fuzz::Error::Output {
                 source: CliError::new(

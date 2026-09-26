@@ -39,7 +39,7 @@ pub(crate) struct Exchange {
 #[derive(Clone, Debug)]
 pub(crate) struct ExchangeEvidence {
     pub(crate) permit: ExecutionPermit,
-    pub(crate) sent: crate::SentPacket,
+    pub(crate) sent: crate::evidence::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unsolicited: Vec<DecodedPacket>,
     pub(crate) undecoded: Vec<Frame>,

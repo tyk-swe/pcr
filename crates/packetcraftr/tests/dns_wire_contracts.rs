@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use packetcraftr_core::protocol::application::dns::{Name, Record, RecordValue};
 
-use packetcraftr::dns::{self, MessageLimits as Limits, QueryType, Section, WireError};
+use packetcraftr::dns::{self, MessageLimits as Limits, QueryType, Section, wire};
 
 const ID: u16 = 0x4a5b;
 const RESPONSE: u16 = 0x8000;
@@ -109,7 +109,7 @@ fn response(
 }
 
 fn decode(message: &[u8], query_name: &str, query_type: QueryType) -> dns::ValidatedResponse {
-    dns::decode_response(message, query_name, query_type, ID, Limits::default())
+    dns::wire::decode_response(message, query_name, query_type, ID, Limits::default())
         .expect("fixture response must decode")
 }
 
@@ -133,7 +133,7 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
         assert_eq!(query_type.to_string(), label);
     }
 
-    let recursive = dns::encode_query("WWW.Example.COM", QueryType::A, ID, true, None)
+    let recursive = dns::wire::encode_query("WWW.Example.COM", QueryType::A, ID, true, None)
         .expect("canonical query");
     assert_eq!(&recursive[..2], &ID.to_be_bytes());
     assert_eq!(&recursive[2..4], &RECURSION_DESIRED.to_be_bytes());
@@ -141,7 +141,7 @@ fn query_encoder_canonicalizes_names_flags_and_all_type_codes() {
     assert_eq!(&recursive[12..29], &name("www.example.com."));
     assert_eq!(&recursive[29..], &[0, 1, 0, 1]);
 
-    let root = dns::encode_query(".", QueryType::ANY, ID, false, None).expect("root query");
+    let root = dns::wire::encode_query(".", QueryType::ANY, ID, false, None).expect("root query");
     assert_eq!(&root[12..], &[0, 0, 255, 0, 1]);
 }
 
@@ -182,7 +182,7 @@ fn names_are_lossless_case_insensitive_and_safely_presented() {
 #[test]
 fn canonical_name_validation_rejects_empty_oversize_and_non_wire_characters() {
     assert_eq!(
-        dns::canonical_query_name("*.SRV_example.test."),
+        dns::wire::canonical_query_name("*.SRV_example.test."),
         Ok("*.srv_example.test.".to_owned())
     );
     for invalid in [
@@ -193,7 +193,10 @@ fn canonical_name_validation_rejects_empty_oversize_and_non_wire_characters() {
         format!("{}.test", "a".repeat(64)),
         (0..4).map(|_| "a".repeat(63)).collect::<Vec<_>>().join("."),
     ] {
-        assert!(dns::canonical_query_name(&invalid).is_err(), "{invalid}");
+        assert!(
+            dns::wire::canonical_query_name(&invalid).is_err(),
+            "{invalid}"
+        );
     }
 }
 
@@ -261,7 +264,7 @@ fn truncated_response_stops_after_the_complete_question() {
         &[],
     );
     message.truncate(name("example.test.").len() + 16);
-    let decoded = dns::decode_response(
+    let decoded = dns::wire::decode_response(
         &message,
         "example.test",
         QueryType::A,
@@ -297,8 +300,8 @@ fn truncated_response_stops_after_the_complete_question() {
 #[test]
 fn decoder_error_precedence_is_stable() {
     assert!(matches!(
-        dns::decode_response(&[], "", QueryType::A, ID, Limits::default()),
-        Err(WireError::InvalidName { .. })
+        dns::wire::decode_response(&[], "", QueryType::A, ID, Limits::default()),
+        Err(wire::Error::InvalidName { .. })
     ));
 
     let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
@@ -307,64 +310,64 @@ fn decoder_error_precedence_is_stable() {
     combined[2..4].copy_from_slice(&((1_u16 << 11) | 0x40).to_be_bytes());
     combined[4..6].copy_from_slice(&2_u16.to_be_bytes());
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &combined,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::NotResponse)
+        Err(wire::Error::NotResponse)
     ));
 
     combined[2..4].copy_from_slice(&(RESPONSE | (1 << 11) | 0x40).to_be_bytes());
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &combined,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::UnsupportedOpcode { opcode: 1 })
+        Err(wire::Error::UnsupportedOpcode { opcode: 1 })
     ));
 
     combined[2..4].copy_from_slice(&(RESPONSE | 0x40).to_be_bytes());
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &combined,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::ReservedHeaderBits)
+        Err(wire::Error::ReservedHeaderBits)
     ));
 
     combined[2..4].copy_from_slice(&RESPONSE.to_be_bytes());
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &combined,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::TransactionIdMismatch { .. })
+        Err(wire::Error::TransactionIdMismatch { .. })
     ));
 
     let mut truncated_wrong_question = base;
     truncated_wrong_question[2..4].copy_from_slice(&(RESPONSE | TRUNCATED).to_be_bytes());
     truncated_wrong_question[13] = b'x';
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &truncated_wrong_question,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::QuestionNameMismatch { .. })
+        Err(wire::Error::QuestionNameMismatch { .. })
     ));
 
     let opt = WireRecord {
@@ -378,14 +381,14 @@ fn decoder_error_precedence_is_stable() {
         response("example.test.", QueryType::A, RESPONSE, &[opt], &[], &[]);
     misplaced_with_trailing.push(0xff);
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &misplaced_with_trailing,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::TrailingBytes {
+        Err(wire::Error::Decode(DecodeError::TrailingBytes {
             remaining: 1
         }))
     ));
@@ -393,14 +396,14 @@ fn decoder_error_precedence_is_stable() {
     // Size limits and the remaining question checks each surface their own
     // variant once the header has been accepted.
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &[0; 11],
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::MessageTooShort { .. }))
+        Err(wire::Error::Decode(DecodeError::MessageTooShort { .. }))
     ));
     let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
     let limits = Limits {
@@ -408,27 +411,27 @@ fn decoder_error_precedence_is_stable() {
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&base, "example.test", QueryType::A, ID, limits),
-        Err(WireError::Decode(DecodeError::MessageTooLarge { .. }))
+        dns::wire::decode_response(&base, "example.test", QueryType::A, ID, limits),
+        Err(wire::Error::Decode(DecodeError::MessageTooLarge { .. }))
     ));
     let mut questions = base.clone();
     questions[4..6].copy_from_slice(&2_u16.to_be_bytes());
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &questions,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::QuestionCount { actual: 2 })
+        Err(wire::Error::QuestionCount { actual: 2 })
     ));
     let mut qtype = base.clone();
     let type_offset = qtype.len() - 4;
     qtype[type_offset..type_offset + 2].copy_from_slice(&QueryType::AAAA.code().to_be_bytes());
     assert!(matches!(
-        dns::decode_response(&qtype, "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::QuestionTypeMismatch {
+        dns::wire::decode_response(&qtype, "example.test", QueryType::A, ID, Limits::default()),
+        Err(wire::Error::QuestionTypeMismatch {
             expected: 1,
             actual: 28
         })
@@ -437,8 +440,8 @@ fn decoder_error_precedence_is_stable() {
     let class_offset = qclass.len() - 2;
     qclass[class_offset..].copy_from_slice(&3_u16.to_be_bytes());
     assert!(matches!(
-        dns::decode_response(&qclass, "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::QuestionClassMismatch { actual: 3 })
+        dns::wire::decode_response(&qclass, "example.test", QueryType::A, ID, Limits::default()),
+        Err(wire::Error::QuestionClassMismatch { actual: 3 })
     ));
 }
 
@@ -446,9 +449,9 @@ fn decoder_error_precedence_is_stable() {
 fn unrelated_question_errors_are_distinct_from_malformed_messages() {
     let base = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
     let errors = [
-        dns::decode_response(&base, "other.test", QueryType::A, ID, Limits::default())
+        dns::wire::decode_response(&base, "other.test", QueryType::A, ID, Limits::default())
             .expect_err("question name mismatch"),
-        dns::decode_response(
+        dns::wire::decode_response(
             &base,
             "example.test",
             QueryType::AAAA,
@@ -456,7 +459,7 @@ fn unrelated_question_errors_are_distinct_from_malformed_messages() {
             Limits::default(),
         )
         .expect_err("question type mismatch"),
-        dns::decode_response(
+        dns::wire::decode_response(
             &base,
             "example.test",
             QueryType::A,
@@ -468,7 +471,7 @@ fn unrelated_question_errors_are_distinct_from_malformed_messages() {
     for error in errors {
         assert!(error.is_unrelated());
     }
-    assert!(!WireError::NotResponse.is_unrelated());
+    assert!(!wire::Error::NotResponse.is_unrelated());
 }
 
 #[test]
@@ -581,14 +584,14 @@ fn caa_record_decodes_flags_tag_and_value() {
             &[],
         );
         assert!(matches!(
-            dns::decode_response(
+            dns::wire::decode_response(
                 &message,
                 "example.test",
                 QueryType::CAA,
                 ID,
                 Limits::default()
             ),
-            Err(WireError::Decode(DecodeError::InvalidRdata { .. }))
+            Err(wire::Error::Decode(DecodeError::InvalidRdata { .. }))
         ));
     }
 }
@@ -640,14 +643,14 @@ fn duplicate_edns_records_are_rejected() {
         &[opt.clone(), opt.clone()],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &duplicate,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::DuplicateEdns)
+        Err(wire::Error::DuplicateEdns)
     ));
 }
 
@@ -663,14 +666,14 @@ fn misplaced_edns_records_are_rejected() {
         &[],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &answer_opt,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::InvalidEdns { .. })
+        Err(wire::Error::InvalidEdns { .. })
     ));
 
     let mut non_root = opt;
@@ -684,14 +687,14 @@ fn misplaced_edns_records_are_rejected() {
         &[non_root],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &non_root,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::InvalidEdns { .. })
+        Err(wire::Error::InvalidEdns { .. })
     ));
 }
 
@@ -708,14 +711,14 @@ fn unsupported_edns_versions_and_invalid_option_lengths_are_rejected() {
         &[version],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &version,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::UnsupportedEdnsVersion { version: 1 })
+        Err(wire::Error::UnsupportedEdnsVersion { version: 1 })
     ));
 
     let mut bad_option = opt_record();
@@ -729,14 +732,14 @@ fn unsupported_edns_versions_and_invalid_option_lengths_are_rejected() {
         &[bad_option],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &bad_option,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::InvalidEdns { .. }))
+        Err(wire::Error::Decode(DecodeError::InvalidEdns { .. }))
     ));
 }
 
@@ -795,8 +798,9 @@ fn relevance_filter_follows_cname_authority_and_glue_references() {
         max_rejected_records: 1,
         ..Limits::default()
     };
-    let decoded = dns::decode_response(&message, "www.example.test", QueryType::A, ID, limits)
-        .expect("relevance-filtered response");
+    let decoded =
+        dns::wire::decode_response(&message, "www.example.test", QueryType::A, ID, limits)
+            .expect("relevance-filtered response");
     assert_eq!(decoded.answers.len(), 2);
     assert_eq!(decoded.authorities.len(), 1);
     assert_eq!(decoded.additionals.len(), 1);
@@ -821,8 +825,8 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&base, "example.test", QueryType::A, ID, limits),
-        Err(WireError::Decode(DecodeError::RecordLimit {
+        dns::wire::decode_response(&base, "example.test", QueryType::A, ID, limits),
+        Err(wire::Error::Decode(DecodeError::RecordLimit {
             actual: 1,
             limit: 0
         }))
@@ -831,14 +835,14 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
     let mut trailing = base;
     trailing.push(0xff);
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &trailing,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::TrailingBytes {
+        Err(wire::Error::Decode(DecodeError::TrailingBytes {
             remaining: 1
         }))
     ));
@@ -859,8 +863,8 @@ fn record_limits_trailing_bytes_and_malformed_rdata_are_rejected() {
             &[],
         );
         assert!(matches!(
-            dns::decode_response(&message, "example.test", query_type, ID, Limits::default()),
-            Err(WireError::Decode(DecodeError::InvalidRdata { .. }))
+            dns::wire::decode_response(&message, "example.test", query_type, ID, Limits::default()),
+            Err(wire::Error::Decode(DecodeError::InvalidRdata { .. }))
         ));
     }
 }
@@ -880,16 +884,18 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&message, "example.test", QueryType::TXT, ID, string_limit),
-        Err(WireError::Decode(DecodeError::TxtStringLimit { limit: 1 }))
+        dns::wire::decode_response(&message, "example.test", QueryType::TXT, ID, string_limit),
+        Err(wire::Error::Decode(DecodeError::TxtStringLimit {
+            limit: 1
+        }))
     ));
     let byte_limit = Limits {
         max_txt_bytes: 1,
         ..Limits::default()
     };
     assert!(matches!(
-        dns::decode_response(&message, "example.test", QueryType::TXT, ID, byte_limit),
-        Err(WireError::Decode(DecodeError::TxtByteLimit { limit: 1 }))
+        dns::wire::decode_response(&message, "example.test", QueryType::TXT, ID, byte_limit),
+        Err(wire::Error::Decode(DecodeError::TxtByteLimit { limit: 1 }))
     ));
 
     let pointer_limit = Limits {
@@ -905,14 +911,14 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         &[],
     );
     assert!(matches!(
-        dns::decode_response(
+        dns::wire::decode_response(
             &pointer_message,
             "example.test",
             QueryType::A,
             ID,
             pointer_limit
         ),
-        Err(WireError::Decode(DecodeError::PointerLimit { limit: 0 }))
+        Err(wire::Error::Decode(DecodeError::PointerLimit { limit: 0 }))
     ));
 
     for (question, expected) in [
@@ -929,7 +935,7 @@ fn txt_limits_and_name_compression_safety_are_enforced() {
         malformed.extend_from_slice(&QueryType::A.code().to_be_bytes());
         malformed.extend_from_slice(&1_u16.to_be_bytes());
         assert!(
-            dns::decode_response(
+            dns::wire::decode_response(
                 &malformed,
                 "example.test",
                 QueryType::A,
@@ -954,7 +960,7 @@ fn tcp_frame(message: &[u8]) -> Vec<u8> {
 #[test]
 fn dns_over_tcp_accepts_one_exact_complete_response() {
     let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
-    let decoded = dns::decode_tcp_frame(
+    let decoded = dns::wire::decode_tcp_frame(
         &tcp_frame(&message),
         "example.test",
         QueryType::A,
@@ -968,15 +974,15 @@ fn dns_over_tcp_accepts_one_exact_complete_response() {
 #[test]
 fn dns_over_tcp_rejects_short_prefix_and_zero_length_message() {
     assert!(matches!(
-        dns::decode_tcp_frame(&[0], "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::Decode(DecodeError::MessageTooShort {
+        dns::wire::decode_tcp_frame(&[0], "example.test", QueryType::A, ID, Limits::default()),
+        Err(wire::Error::Decode(DecodeError::MessageTooShort {
             minimum: 2,
             ..
         }))
     ));
     assert_eq!(
-        dns::decode_tcp_frame(&[0, 0], "example.test", QueryType::A, ID, Limits::default()),
-        Err(WireError::TcpFrameZeroLength)
+        dns::wire::decode_tcp_frame(&[0, 0], "example.test", QueryType::A, ID, Limits::default()),
+        Err(wire::Error::TcpFrameZeroLength)
     );
 }
 
@@ -987,8 +993,8 @@ fn dns_over_tcp_rejects_oversized_declaration_before_incomplete_frame() {
         ..Limits::default()
     };
     assert_eq!(
-        dns::decode_tcp_frame(&[0, 13], "example.test", QueryType::A, ID, limits),
-        Err(WireError::Decode(DecodeError::MessageTooLarge {
+        dns::wire::decode_tcp_frame(&[0, 13], "example.test", QueryType::A, ID, limits),
+        Err(wire::Error::Decode(DecodeError::MessageTooLarge {
             actual: 13,
             maximum: 12,
         }))
@@ -1006,14 +1012,14 @@ fn dns_over_tcp_rejects_incomplete_and_trailing_frame_bytes() {
             .to_be_bytes(),
     );
     assert_eq!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &incomplete,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::TcpFrameLength {
+        Err(wire::Error::TcpFrameLength {
             declared,
             actual: message.len(),
         })
@@ -1022,14 +1028,14 @@ fn dns_over_tcp_rejects_incomplete_and_trailing_frame_bytes() {
     let mut trailing = tcp_frame(&message);
     trailing.push(0xff);
     assert_eq!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &trailing,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::TcpFrameLength {
+        Err(wire::Error::TcpFrameLength {
             declared: message.len(),
             actual: message.len() + 1,
         })
@@ -1040,14 +1046,14 @@ fn dns_over_tcp_rejects_incomplete_and_trailing_frame_bytes() {
 fn dns_over_tcp_preserves_dns_malformed_trailing_and_identity_validation() {
     let malformed = tcp_frame(&[0; 11]);
     assert!(matches!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &malformed,
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::MessageTooShort {
+        Err(wire::Error::Decode(DecodeError::MessageTooShort {
             actual: 11,
             minimum: 12,
         }))
@@ -1056,28 +1062,28 @@ fn dns_over_tcp_preserves_dns_malformed_trailing_and_identity_validation() {
     let mut dns_trailing = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
     dns_trailing.push(0xff);
     assert_eq!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &tcp_frame(&dns_trailing),
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::Decode(DecodeError::TrailingBytes {
+        Err(wire::Error::Decode(DecodeError::TrailingBytes {
             remaining: 1
         }))
     );
 
     let message = response("example.test.", QueryType::A, RESPONSE, &[], &[], &[]);
     assert!(matches!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &tcp_frame(&message),
             "example.test",
             QueryType::A,
             ID + 1,
             Limits::default()
         ),
-        Err(WireError::TransactionIdMismatch { .. })
+        Err(wire::Error::TransactionIdMismatch { .. })
     ));
 }
 
@@ -1092,14 +1098,14 @@ fn dns_over_tcp_rejects_a_response_that_is_still_truncated() {
         &[],
     );
     assert_eq!(
-        dns::decode_tcp_frame(
+        dns::wire::decode_tcp_frame(
             &tcp_frame(&message),
             "example.test",
             QueryType::A,
             ID,
             Limits::default()
         ),
-        Err(WireError::TcpResponseTruncated)
+        Err(wire::Error::TcpResponseTruncated)
     );
 }
 
@@ -1108,7 +1114,7 @@ fn non_in_address_rdata_is_audited_without_in_interpretation() {
     let mut ch = record(1, [name("host.example.test."), vec![0, 1]].concat());
     ch.class = 3;
     let message = response("example.test.", QueryType::A, RESPONSE, &[ch], &[], &[]);
-    let decoded = dns::decode_response(
+    let decoded = dns::wire::decode_response(
         &message,
         "example.test",
         QueryType::A,
@@ -1126,7 +1132,8 @@ fn non_in_address_rdata_is_audited_without_in_interpretation() {
 fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
     use std::error::Error as _;
     let error =
-        dns::decode_response(&[], "example.test", QueryType::A, ID, Limits::default()).unwrap_err();
+        dns::wire::decode_response(&[], "example.test", QueryType::A, ID, Limits::default())
+            .unwrap_err();
     let cause = error
         .source()
         .unwrap()
@@ -1147,7 +1154,7 @@ fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
 fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
     for code in [0_u16, 65000, 65535] {
         let query_type = QueryType::new(code);
-        let query = dns::encode_query("example.test", query_type, ID, true, None).unwrap();
+        let query = dns::wire::encode_query("example.test", query_type, ID, true, None).unwrap();
         assert_eq!(
             &query[query.len() - 4..],
             &[code.to_be_bytes(), 1_u16.to_be_bytes()].concat()
@@ -1173,18 +1180,18 @@ fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
         assert_eq!(decoded.metadata.rejected_record_count, 1);
         let wrong_type = QueryType::new(code ^ 1);
         assert!(
-            matches!(dns::decode_response(&message, "example.test", wrong_type, ID, Limits::default()), Err(WireError::QuestionTypeMismatch { expected, actual }) if expected == code ^ 1 && actual == code)
+            matches!(dns::wire::decode_response(&message, "example.test", wrong_type, ID, Limits::default()), Err(wire::Error::QuestionTypeMismatch { expected, actual }) if expected == code ^ 1 && actual == code)
         );
         let mut framed = u16::try_from(message.len()).unwrap().to_be_bytes().to_vec();
         framed.extend_from_slice(&message);
         assert_eq!(
-            dns::decode_tcp_frame(&framed, "example.test", query_type, ID, Limits::default())
+            dns::wire::decode_tcp_frame(&framed, "example.test", query_type, ID, Limits::default())
                 .unwrap(),
             decoded
         );
         assert!(matches!(
-            dns::decode_tcp_frame(&framed, "example.test", wrong_type, ID, Limits::default()),
-            Err(WireError::QuestionTypeMismatch { .. })
+            dns::wire::decode_tcp_frame(&framed, "example.test", wrong_type, ID, Limits::default()),
+            Err(wire::Error::QuestionTypeMismatch { .. })
         ));
     }
 }
@@ -1192,7 +1199,7 @@ fn numeric_queries_match_exact_codes_and_preserve_unknown_answers() {
 #[test]
 fn edns_query_has_one_exact_bounded_opt_and_no_options() {
     use packetcraftr_core::protocol::application::dns::{Dns, RecordValue};
-    let plain = dns::encode_query("example.test", QueryType::A, ID, true, None).unwrap();
+    let plain = dns::wire::encode_query("example.test", QueryType::A, ID, true, None).unwrap();
     assert_eq!(&plain[10..12], &[0, 0]);
     for udp_payload_size in [512, 1232, u16::MAX] {
         for dnssec_ok in [false, true] {
@@ -1201,7 +1208,8 @@ fn edns_query_has_one_exact_bounded_opt_and_no_options() {
                 dnssec_ok,
             };
             let query =
-                dns::encode_query("example.test", QueryType::A, ID, true, Some(settings)).unwrap();
+                dns::wire::encode_query("example.test", QueryType::A, ID, true, Some(settings))
+                    .unwrap();
             let mut expected = plain.to_vec();
             expected[11] = 1;
             expected.extend_from_slice(&[0, 0, 41]);
@@ -1223,7 +1231,7 @@ fn edns_query_has_one_exact_bounded_opt_and_no_options() {
     }
     for udp_payload_size in [0, 511] {
         assert!(matches!(
-            dns::encode_query(
+            dns::wire::encode_query(
                 ".",
                 QueryType::ANY,
                 ID,
@@ -1233,7 +1241,7 @@ fn edns_query_has_one_exact_bounded_opt_and_no_options() {
                     dnssec_ok: true,
                 })
             ),
-            Err(WireError::InvalidEdns { .. })
+            Err(wire::Error::InvalidEdns { .. })
         ));
     }
 }

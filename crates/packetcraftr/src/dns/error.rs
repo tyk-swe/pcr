@@ -7,67 +7,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::execution::ExchangeEvidenceError;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
-
-#[derive(Clone, Debug, Error, PartialEq)]
-#[non_exhaustive]
-pub enum WireError {
-    #[error("{0}")]
-    Encode(#[from] packetcraftr_core::codec::Error),
-
-    #[error("{0}")]
-    Decode(#[from] packetcraftr_core::protocol::application::dns::Error),
-
-    #[error("DNS name is invalid: {message}")]
-    InvalidName { message: String },
-    #[error("DNS message is a query, not a response")]
-    NotResponse,
-    #[error("DNS opcode {opcode} is unsupported for a standard query response")]
-    UnsupportedOpcode { opcode: u8 },
-    #[error("DNS reserved header bits are non-zero")]
-    ReservedHeaderBits,
-    #[error("DNS response transaction ID {actual} does not match {expected}")]
-    TransactionIdMismatch { expected: u16, actual: u16 },
-    #[error("DNS response contains {actual} questions; expected exactly one")]
-    QuestionCount { actual: u16 },
-    #[error("DNS response question name {actual} does not match {expected}")]
-    QuestionNameMismatch { expected: String, actual: String },
-    #[error("DNS response question type {actual} does not match {expected}")]
-    QuestionTypeMismatch { expected: u16, actual: u16 },
-    #[error("DNS response question class {actual} is not IN")]
-    QuestionClassMismatch { actual: u16 },
-    #[error("DNS response contains more than one EDNS OPT pseudo-record")]
-    DuplicateEdns,
-    #[error("DNS EDNS version {version} is unsupported")]
-    UnsupportedEdnsVersion { version: u8 },
-    #[error("DNS EDNS metadata is invalid: {message}")]
-    InvalidEdns { message: String },
-    #[error(
-        "DNS name exceeds the {}-byte wire limit",
-        packetcraftr_core::protocol::application::dns::MAX_NAME_LEN
-    )]
-    NameTooLong,
-    #[error("DNS-over-TCP frame declares a zero-length DNS message")]
-    TcpFrameZeroLength,
-    #[error("DNS-over-TCP frame length {declared} does not match {actual} payload byte(s)")]
-    TcpFrameLength { declared: usize, actual: usize },
-    #[error("DNS-over-TCP response is still truncated")]
-    TcpResponseTruncated,
-}
-
-impl WireError {
-    pub const fn is_unrelated(&self) -> bool {
-        matches!(
-            self,
-            Self::TransactionIdMismatch { .. }
-                | Self::QuestionNameMismatch { .. }
-                | Self::QuestionTypeMismatch { .. }
-                | Self::QuestionClassMismatch { .. }
-        )
-    }
-}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -93,7 +34,7 @@ pub enum Error {
     #[error("DNS duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("DNS query construction failed")]
-    Query(#[source] WireError),
+    Query(#[source] super::wire::Error),
     #[error("DNS authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
@@ -237,7 +178,7 @@ impl Classified for Error {
 #[non_exhaustive]
 pub enum EvidenceFault {
     /// The exchange evidence failed the checks every workflow applies.
-    Exchange(ExchangeEvidenceError),
+    Exchange(crate::evidence::Error),
     /// The sent packet has no outer IPv4 or IPv6 header.
     SentWithoutNetwork,
     /// The sent packet has no complete UDP header.
@@ -302,13 +243,14 @@ impl fmt::Display for EvidenceFault {
 mod tests {
     use packetcraftr_core::error::{Classified, Coordinate};
 
-    use super::{Error, EvidenceFault, WireError};
+    use super::{Error, EvidenceFault};
+    use crate::dns::wire;
 
     #[test]
     fn messages_leave_their_typed_sources_to_the_causes() {
-        let query = Error::Query(WireError::NameTooLong);
+        let query = Error::Query(wire::Error::NameTooLong);
         assert_eq!(query.to_string(), "DNS query construction failed");
-        assert_eq!(query.causes(), [WireError::NameTooLong.to_string()]);
+        assert_eq!(query.causes(), [wire::Error::NameTooLong.to_string()]);
 
         let tcp = Error::TcpExecution {
             attempt: 2,

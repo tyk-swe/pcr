@@ -85,7 +85,7 @@ with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CN
 Use `Display` for presentation and integer serde values for data. The CLI
 contract constant is now `SCHEMA_V6`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
-Text parsing returns `QueryTypeParseError`, preserving the original integer
+Text parsing returns `dns::wire::Error` (`QueryTypeSyntax` or `QueryTypeRange`), preserving the original integer
 parse error for out-of-range values.
 CLI DNS output structs store `query_type` as `u16`; use `.code()` when
 constructing their summaries or events from a `QueryType`.
@@ -175,7 +175,7 @@ these core types. `Name::from_labels` now returns core `dns::Error`.
 Name failures use `dns::Error::Name(name::Error)`, retaining their original
 offsets and typed source, including the distinction between self-pointers and
 pointer loops.
-Structural live-decoder failures are wrapped in `WireError::Decode(dns::Error)`;
+Structural live-decoder failures are wrapped in `dns::wire::Error::Decode(dns::Error)`;
 match the core error inside that variant. Query correlation, TCP framing, and
 live EDNS policy errors remain workflow-owned.
 
@@ -1329,7 +1329,7 @@ a runtime admits. Its callback returns `Result<A, BoundaryError>`, and
 `emit` returns that `A`. Name the answer type when the callback never returns
 `Ok` (for example `Worker::<()>::new_in(&runtime, |_| Err(error))`).
 
-**Evidence errors.** `packetcraftr::ExchangeEvidenceError` is public. It names
+**Evidence errors.** `packetcraftr::evidence::Error` is public. It names
 why an executor's evidence disagrees with its step, including the new
 `PermitMismatch`, and its `Display` is workflow-neutral.
 
@@ -1701,7 +1701,7 @@ of fake executors or authorizers.
 | `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}` | removed; the client runs each step |
 | `policy::{Authorizer, PolicyAuthorizer}`, `policy::unsupported_operation`, `target::ResolveTarget` | removed; the client admits every workflow (`Policy::authorize` and `Policy::resolve_target` stay public) |
 | `clock::CancellableClock`, `Clock::cancellation` | removed; `Client::with_cancellation` |
-| `packetcraftr::progress::{Runtime, RuntimeSnapshot, Worker, EmitError, MAX_WORKER_CAPACITY}` | `packetcraftr::runtime::…` |
+| `packetcraftr::progress::{Runtime, RuntimeSnapshot, Worker, EmitError, MAX_WORKER_CAPACITY}` | `packetcraftr::runtime::{Runtime, RuntimeSnapshot, Worker, Error, MAX_WORKER_CAPACITY}` |
 | `SystemProviders` (an alias of `ProviderSet<…>`), `ProviderSet::system()` | `SystemProviders`, a unit struct implementing `Providers` |
 | `capture::Selector` | removed; pass the closure to `capture::Request::with_selector` |
 | `dns::AttemptTransport`, `AttemptEvidence.exchange` | `dns::TransportEvidence`, `AttemptEvidence.transport_evidence` |
@@ -1767,3 +1767,8 @@ otherwise.
 | Before | After |
 |---|---|
 | `packetcraftr_netio::route::SystemError` | `packetcraftr_netio::route::Error` |
+| `packetcraftr::progress::EmitError` | `packetcraftr::runtime::Error`, which implements `Classified` |
+| `packetcraftr::SentPacket` | `packetcraftr::evidence::SentPacket` |
+| `packetcraftr::dns::WireError` | `packetcraftr::dns::wire::Error` |
+| `dns::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` | `dns::wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` |
+| `dns::QueryTypeParseError::{Syntax, OutOfRange}` | `dns::wire::Error::{QueryTypeSyntax, QueryTypeRange}` (the `Err` of `QueryType::from_str`) |

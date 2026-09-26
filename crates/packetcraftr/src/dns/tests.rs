@@ -1351,7 +1351,7 @@ fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
 fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
     let limits = super::MessageLimits::default();
     let complete = super::classification::ResponseClassification::Response(
-        super::decode_response(
+        super::wire::decode_response(
             &dns_response(),
             "example.com",
             super::QueryType::A,
@@ -1361,7 +1361,7 @@ fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
         .unwrap(),
     );
     let truncated = super::classification::ResponseClassification::Response(
-        super::decode_response(
+        super::wire::decode_response(
             &truncated_dns_response(),
             "example.com",
             super::QueryType::A,
@@ -1774,7 +1774,7 @@ fn loopback_fallback(edns: Option<super::EdnsRequest>) {
     udp.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
     udp.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
     let expected_query =
-        super::encode_query("example.com", super::QueryType::A, 0x1234, true, edns)
+        super::wire::encode_query("example.com", super::QueryType::A, 0x1234, true, edns)
             .expect("fixture query");
     let udp_query = expected_query.clone();
     let udp_server = thread::spawn(move || {
@@ -1894,7 +1894,7 @@ fn edns_validation_precedes_authorization_and_execution() {
         .unwrap_err();
         assert!(matches!(
             error,
-            super::Error::Query(super::error::WireError::InvalidEdns { .. })
+            super::Error::Query(super::wire::Error::InvalidEdns { .. })
         ));
         assert!(
             std::error::Error::source(&error).is_some(),
@@ -1921,7 +1921,7 @@ fn edns_bytes_are_shared_and_budgeted_across_fallback_and_retries() {
         request.transport = super::TransportMode::UdpThenTcp;
         request.attempts = 2;
         request.timeout = Duration::from_secs(1);
-        let query = super::encode_query(
+        let query = super::wire::encode_query(
             &request.query_name,
             request.query_type,
             request.transaction_id,
@@ -1975,7 +1975,7 @@ fn added_edns_bytes_can_exceed_policy_before_any_io() {
         } else {
             super::TransportMode::Udp
         };
-        let plain = super::encode_query(
+        let plain = super::wire::encode_query(
             &request.query_name,
             request.query_type,
             request.transaction_id,
@@ -2045,7 +2045,7 @@ fn udp_attempt_evidence() -> super::AttemptEvidence {
 
 #[test]
 fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
-    let metadata = super::decode_response(
+    let metadata = super::wire::decode_response(
         &dns_response(),
         "example.com",
         super::QueryType::A,

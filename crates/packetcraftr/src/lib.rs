@@ -80,7 +80,7 @@ mod correlation;
 pub mod deadline;
 pub mod dns;
 mod error;
-mod evidence;
+pub mod evidence;
 pub mod exchange;
 mod execution;
 pub mod fuzz;
@@ -105,7 +105,6 @@ mod test_support;
 
 pub use client::Client;
 pub use error::Error;
-pub use evidence::SentPacket;
-pub use execution::{ExchangeEvidenceError, Sink};
+pub use execution::Sink;
 pub use providers::{ProviderSet, Providers, SystemProviders};
 pub use stats::{Stats, StatsOverflow};

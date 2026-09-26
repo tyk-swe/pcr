@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 
-use super::{Errors, ExchangeEvidenceError};
+use super::Errors;
 use crate::Stats;
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
@@ -221,7 +221,7 @@ where
         if execution.permit() != grant.permit {
             return Err(self
                 .errors
-                .invalid_evidence(step, ExchangeEvidenceError::PermitMismatch));
+                .invalid_evidence(step, crate::evidence::Error::PermitMismatch));
         }
         validate(subject, &execution, grant, &*self.deadline)?;
         self.merge(step, execution.stats())?;

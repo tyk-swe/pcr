@@ -144,7 +144,7 @@ fn representative_response() -> packetcraftr::dns::ValidatedResponse {
         rdata: vec![0, 10, 0, 2, 0xaa, 0xbb],
     };
     let message = response_message(&answers, &[opt]);
-    let mut response = dns::decode_response(
+    let mut response = dns::wire::decode_response(
         &message,
         "example.test",
         dns::QueryType::ANY,

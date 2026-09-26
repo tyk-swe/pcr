@@ -15,8 +15,9 @@ use packetcraftr_core::{
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::execution::evidence::{EvidenceState, ResponseCandidate};
 
-use super::error::{Error, EvidenceFault, WireError};
+use super::error::{Error, EvidenceFault};
 use super::probe::Probe;
+use super::wire;
 use super::wire::{decode_response, decode_tcp_frame};
 use super::{AttemptEvidence, MessageLimits, Outcome, ValidatedResponse};
 
@@ -56,11 +57,11 @@ pub enum ResponseClassification {
     /// no source.
     Unrelated {
         reason: String,
-        source: Option<WireError>,
+        source: Option<wire::Error>,
     },
     DecodeFailure {
         reason: String,
-        source: Option<WireError>,
+        source: Option<wire::Error>,
     },
     NetworkFailure {
         reason: String,

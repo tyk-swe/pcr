@@ -167,8 +167,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   categories are `Resource`/`Malformed`. `codec::Error` gains `Rejected`, which
   keeps a protocol's typed error as its source, and drops `Eq`, as do
   `dns::Error` and `tls::Error`. `dhcp::Error::Limit`, `http::Error::Limit`,
-  and `analysis::Error::InvalidLimit` carry typed reasons. Type-erased sources
-  are the new `error::Source`. See `docs/migration-unreleased.md`.
+  `analysis::Error::InvalidLimit`, and `protocol::semantics::Error::Field`
+  carry typed reasons. Type-erased sources are the new `error::Source`. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

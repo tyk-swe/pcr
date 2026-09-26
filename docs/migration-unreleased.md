@@ -841,6 +841,8 @@ Typed sources and reasons:
 - `dhcp::Error::Limit` holds `dhcp::Limit` and `http::Error::Limit` holds
   `http::Limit` instead of a string; their messages are unchanged.
   `analysis::Error::InvalidLimit.reason` is an `analysis::Constraint`.
+  `protocol::semantics::Error::Field.reason` is a `semantics::Constraint`
+  instead of a string; its message is unchanged.
   `forwarding::Error::ExpectationSyntax` splits into `ExpectationSeparator`
   and `ExpectationEmptySide`.
 - `error::render(&error)` joins an error and its sources into one line for text

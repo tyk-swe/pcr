@@ -17,7 +17,7 @@ pub enum Error {
     Field {
         protocol: Id,
         field: &'static str,
-        reason: &'static str,
+        reason: Constraint,
     },
     #[error(
         "destination cannot be determined because the {protocol} layer is a non-atomic fragment"
@@ -74,11 +74,39 @@ impl crate::error::Classified for Error {
 }
 
 impl Error {
-    pub(super) fn field(protocol: &Id, field: &'static str, reason: &'static str) -> Self {
+    pub(super) fn field(protocol: &Id, field: &'static str, reason: Constraint) -> Self {
         Self::Field {
             protocol: *protocol,
             field,
             reason,
         }
+    }
+}
+
+/// The rule a route-bearing field breaks in an [`Error::Field`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Constraint {
+    /// An SRH segment list holds at least one address.
+    NonEmptySegments,
+    /// An SRH segment list holds at most 256 addresses.
+    AtMost256Segments,
+    /// A derived one-byte field is `Auto`, an exact `u8`, or one raw byte.
+    OneByte,
+    /// A VLAN priority is within `0..=7`.
+    PriorityAtMost7,
+    /// A VLAN identifier is within `0..=4095`.
+    VlanIdAtMost4095,
+}
+
+impl std::fmt::Display for Constraint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::NonEmptySegments => "must contain at least one address",
+            Self::AtMost256Segments => "contains more than 256 addresses",
+            Self::OneByte => "is not Auto, an unsigned u8, or one raw byte",
+            Self::PriorityAtMost7 => "is outside 0..=7",
+            Self::VlanIdAtMost4095 => "is outside 0..=4095",
+        })
     }
 }

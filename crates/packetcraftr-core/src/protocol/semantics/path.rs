@@ -3,7 +3,7 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 
-use super::error::Error;
+use super::error::{Constraint, Error};
 use super::ipv4_option::parse_ipv4_source_routes;
 use super::segment_routing::{SegmentRoute, validate_segment_route};
 use crate::field::WireValue;
@@ -222,9 +222,9 @@ fn typed_segment_route(
         .segments
         .len()
         .checked_sub(1)
-        .ok_or_else(|| Error::field(protocol, SEGMENTS, "must contain at least one address"))?;
+        .ok_or_else(|| Error::field(protocol, SEGMENTS, Constraint::NonEmptySegments))?;
     let expected_last = u8::try_from(expected_last)
-        .map_err(|_| Error::field(protocol, SEGMENTS, "contains more than 256 addresses"))?;
+        .map_err(|_| Error::field(protocol, SEGMENTS, Constraint::AtMost256Segments))?;
     let segments_left = wire_u8(layer, SEGMENTS_LEFT, &layer.segments_left, expected_last)?;
     let last_entry = wire_u8(layer, LAST_ENTRY, &layer.last_entry, expected_last)?;
     validate_segment_route(
@@ -251,7 +251,7 @@ fn wire_u8(
         WireValue::Raw(_) => Err(Error::field(
             layer.protocol_id(),
             field,
-            "is not Auto, an unsigned u8, or one raw byte",
+            Constraint::OneByte,
         )),
     }
 }

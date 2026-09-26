@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::error::Error;
+use super::error::{Constraint, Error};
 use super::path::outer_scope_len;
 use crate::layer::Layer;
 use crate::packet::Packet;
@@ -50,14 +50,14 @@ fn checked_tag(layer: &dyn Layer, tag: VlanTag) -> Result<VlanTag, Error> {
         return Err(Error::field(
             layer.protocol_id(),
             "priority",
-            "is outside 0..=7",
+            Constraint::PriorityAtMost7,
         ));
     }
     if tag.vlan_id > 4095 {
         return Err(Error::field(
             layer.protocol_id(),
             "vlan_id",
-            "is outside 0..=4095",
+            Constraint::VlanIdAtMost4095,
         ));
     }
     Ok(tag)

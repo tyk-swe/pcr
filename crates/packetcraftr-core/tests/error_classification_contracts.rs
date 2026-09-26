@@ -12,7 +12,7 @@ use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::field;
 use packetcraftr_core::frame::{Error as FrameError, Frame, LinkType};
 use packetcraftr_core::layer::{Id, Malformed};
-use packetcraftr_core::protocol::semantics::{Error as SemanticsError, live_destinations};
+use packetcraftr_core::protocol::semantics::{self, Error as SemanticsError, live_destinations};
 use packetcraftr_core::{build, decode, registry};
 
 fn ipv4() -> Id {
@@ -395,11 +395,11 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
         (
             "Field",
             SemanticsError::Field {
-                protocol: Id::new("arp"),
-                field: "target_protocol",
-                reason: "is missing",
+                protocol: Id::new("vlan"),
+                field: "priority",
+                reason: semantics::Constraint::PriorityAtMost7,
             },
-            "field target_protocol on layer arp is missing",
+            "field priority on layer vlan is outside 0..=7",
         ),
         (
             "NonAtomicFragment",

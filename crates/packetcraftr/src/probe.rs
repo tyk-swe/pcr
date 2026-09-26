@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The kernel scan and traceroute share: batches of homogeneous probes run
-//! through the execution context, batch-evidence processing, and the probe
-//! vocabulary their requests and reports use.
+//! The probe vocabulary scan and traceroute requests and reports use, and,
+//! internally, the kernel both share: batches of homogeneous probes run
+//! through the execution context, and batch-evidence processing.
 
 mod limits;
 mod model;

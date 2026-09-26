@@ -60,10 +60,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
   listing the arriving segment's actual retransmitted sequence spans, which
   need not form a contiguous prefix.
-- Shared probe APIs have canonical paths: `probe::{Executor, Execution,
-  ProbeEndpoint, ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`,
-  and `fuzz` aliases are removed without compatibility aliases. See
-  `docs/migration-unreleased.md`.
+- Shared probe APIs have canonical paths: `probe::{ProbeEndpoint,
+  ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`, and `fuzz`
+  aliases are removed without compatibility aliases, and the executor seams
+  they aliased are internal. See `docs/migration-unreleased.md`.
 - `LayerCodec::decode` takes a refcounted `Bytes` view of the layer input
   instead of `&[u8]`; `dns::decode_name` and `http::parse_head` take `&Bytes`
   for the same reason. Byte-retaining codecs
@@ -353,7 +353,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   connect scan, traceroute, DNS, DNS batch, and fuzz (live and offline) take
   `S: Sink<Event, Ack = ()>` instead of a closure bound; a closure whose
   argument type was inferred from that bound names it. `progress::Sink` is
-  renamed `progress::Worker<T, A = ()>`, and its callback may answer a value
+  renamed `runtime::Worker<T, A = ()>`, and its callback may answer a value
   that `emit` returns.
 - `probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port}` are no longer
   public.
@@ -361,7 +361,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   See `docs/migration-unreleased.md`.
 - The `Client` owns its providers: `Client<P, K = SystemClock>` holds a
   `Providers` bundle (route, interface, capture, transmit, TCP, resolver),
-  composed with `ProviderSet` or `ProviderSet::system()`, and is built with
+  composed with `ProviderSet` or the native `SystemProviders`, and is built with
   `Client::new(registry, policy, providers)`. `with_clock`, `with_runtime`,
   `runtime()`, and `providers()` replace `with_progress_runtime` and
   `progress_runtime()`. `packetcraftr_netio::PacketIo` is removed.
@@ -373,8 +373,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `exchange_with_events` are removed; `exchange::Options` splits into
   `exchange::Request` and the reusable `exchange::Collection`; the former
   `exchange::Summary` is `exchange::Report` and the former `exchange::Report`
-  is `exchange::Aggregate`. `probe::ExchangeExecutor::new` takes the client,
-  `send::Options`, and an `exchange::Collection`.
+  is `exchange::Aggregate`.
 - `send::Error` and `exchange::Error` wrap the root preparation error
   `packetcraftr::Error`, which keeps only preparation failures. The send and
   exchange variants move to the workflow errors with unchanged codes:
@@ -394,23 +393,26 @@ All notable changes to PacketcraftR are documented here. The format follows
   provider only after the operation is admitted; `route::plan` accepts only a
   resolved `Interface::Id` and otherwise fails with
   `route::Error::UnresolvedInterface`.
-- Target resolution is the separate `target::ResolveTarget` seam:
-  `policy::Authorizer` keeps `authorize_operation` (and
-  `authorize_final_wire`), and DNS, scan, connect scan, and traceroute require
-  `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
+- Workflows are admitted only through the client: `policy::Authorizer`,
+  `policy::PolicyAuthorizer`, and `policy::unsupported_operation` are removed
+  from the public API, and target resolution is internal to the client, which
+  resolves declared targets through its `resolver` provider. Use
+  `Policy::authorize` and `Policy::resolve_target` to apply a policy directly.
 - Live capture runs on the client: `client.capture(capture::Request, S)`
-  replaces `capture::run`. `capture::Request { group, window, select }`
-  replaces the provider, `GroupRequest`, and `capture::Options` arguments; the
-  budget comes from the client's policy and cancellation from the client. The
-  selector is `capture::Selector`, and events reach a `Sink<capture::Event>`
-  whose answer converts into `capture::Control` (`()` continues).
+  replaces `capture::run`. `capture::Request::new(group, window)` replaces the
+  provider, `GroupRequest`, and `capture::Options` arguments; the budget comes
+  from the client's policy and cancellation from the client. A frame selector
+  is set with `Request::with_selector`, and events reach a
+  `Sink<capture::Event>` whose answer converts into `capture::Control` (`()`
+  continues).
   `capture::Source` holds the source fields itself instead of a public
   `capture: netio::capture::Source`, and `Event::Started` carries
   `capture::Source` values.
 - TCP connect scans run on the client: `client.scan_connect(scan::Request, S)`
   replaces `scan::connect::run` and `run_with_events` and connects through the
-  client's TCP provider. Events are `connect::Event::Probe(Probe)`; the former
-  `connect::Summary` is `connect::Report`, and the former `connect::Report` is
+  client's TCP provider. Events are `connect::Event::Probe(ProbeEvidence)`
+  (the former `connect::Probe`); the former `connect::Summary` is
+  `connect::Report`, and the former `connect::Report` is
   `connect::Aggregate { report, endpoints }`, rebuilt by `connect::Collector`.
 
   See `docs/migration-unreleased.md`.
@@ -480,9 +482,29 @@ All notable changes to PacketcraftR are documented here. The format follows
   published fuzz output is unchanged.
 
   See `docs/migration-unreleased.md`.
+- The workflow crate's public surface is the client model: every workflow is
+  a `Client` method, and the seams the client owns are internal.
+  `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}`,
+  `clock::CancellableClock`, and `Clock::cancellation` are removed; the client
+  carries cancellation to every workflow. The `progress` module is renamed
+  `runtime` (`runtime::{Runtime, RuntimeSnapshot, Worker, EmitError,
+  MAX_WORKER_CAPACITY}`). `SystemProviders` is a unit struct implementing
+  `Providers` instead of an alias of `ProviderSet`, and `ProviderSet::system`
+  is removed. The `capture::Selector` alias is removed (use
+  `capture::Request::with_selector`), and `scan::PipelineFailure` is its
+  type's own name. `dns::AttemptTransport` is `dns::TransportEvidence`, and
+  `dns::AttemptEvidence::exchange` is `transport_evidence`: a TCP attempt is a
+  query, not an exchange. `scan::connect::Probe` is
+  `scan::connect::ProbeEvidence`. `fuzz::Error::Authorization` no longer
+  converts from `BoundaryError`.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
+- `packetcraftr_core::error::BoundaryError::as_causes` lists a boundary
+  error's message followed by its captured causes, for a wrapper that reports
+  it as its source without repeating its text.
 - `scan::MAX_IN_FLIGHT` (1024) names the most probe response windows one scan
   overlaps; request validation and the pipeline share it.
 - `packetcraftr::ExchangeEvidenceError` is public and names why the evidence an
@@ -783,6 +805,18 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Workflow failures no longer repeat the text of the error they carry: the
+  message names what failed and the carried error is the first cause. For
+  example a refused scan reads `scan authorization failed` with the policy
+  denial in `causes`, and a failing sink reads `send progressive output
+  failed`. This covers the authorization, execution, and output failures of
+  send, exchange, scan, traceroute, DNS, fuzz, replay, and capture, the replay
+  capture-read, selection, and transmission failures, the scan pipeline
+  failure, route and interface lookup failures, neighbor I/O and cleanup
+  failures, and the policy's undecodable-wire refusal; a scan or traceroute
+  cancellation or target-selection failure reports its own message without a
+  `scan:` or `traceroute:` prefix. Codes, exit codes, and coordinates are
+  unchanged.
 - `replay` publishes each transmitted frame from a runtime worker, so a
   replay's `resources` report lists the `client_progress` runtime, and the
   replay deadline runs on the client's clock and cancellation.

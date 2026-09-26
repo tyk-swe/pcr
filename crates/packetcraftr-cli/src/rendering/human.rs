@@ -6,7 +6,6 @@ use packetcraftr_core::error::Kind;
 use std::fmt::{self, Write as _};
 use std::io::{self, Write};
 
-use packetcraftr_core as core;
 use packetcraftr_core::budget::Interrupted;
 
 use super::style::{
@@ -14,9 +13,11 @@ use super::style::{
     terminal_safe,
 };
 use crate::errors::CliError;
+use crate::output;
 
 /// One diagnostic line, severity spelled exactly as the JSON document spells it.
-fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
+fn diagnostic_line(diagnostic: impl Into<output::diagnostic::Diagnostic>) -> String {
+    let diagnostic = diagnostic.into();
     format!(
         "{} {}: {}",
         diagnostic.severity.as_str(),
@@ -25,22 +26,23 @@ fn diagnostic_line(diagnostic: &core::diagnostic::Diagnostic) -> String {
     )
 }
 
-pub(crate) fn render_diagnostics_text(
-    diagnostics: &[core::diagnostic::Diagnostic],
+/// Library or published diagnostics, one line each on stdout.
+pub(crate) fn render_diagnostics_text<D: Clone + Into<output::diagnostic::Diagnostic>>(
+    diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic)))?;
+        write_stdout_line(format_args!("{}", diagnostic_line(diagnostic.clone())))?;
     }
     Ok(())
 }
 
 /// The same lines on stderr, for a command whose stdout carries capture bytes
 /// or NDJSON records a diagnostic must not be interleaved with.
-pub(crate) fn render_diagnostics_stderr(
-    diagnostics: &[core::diagnostic::Diagnostic],
+pub(crate) fn render_diagnostics_stderr<D: Clone + Into<output::diagnostic::Diagnostic>>(
+    diagnostics: &[D],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
-        emit_stderr_message(&diagnostic_line(diagnostic))?;
+        emit_stderr_message(&diagnostic_line(diagnostic.clone()))?;
     }
     Ok(())
 }
@@ -222,8 +224,6 @@ mod tests {
 
     use packetcraftr_core::error::{Classification, Kind};
 
-    use crate::output;
-
     use super::*;
 
     fn plain(error: &CliError) -> String {
@@ -235,16 +235,20 @@ mod tests {
     #[test]
     fn diagnostic_lines_spell_severity_exactly_as_the_document_does() {
         for diagnostic in [
-            core::diagnostic::Diagnostic::info("decode.note", "a note"),
-            core::diagnostic::Diagnostic::warning("tcp.retransmission", "duplicate segment"),
-            core::diagnostic::Diagnostic::error("ipv4.checksum", "bad checksum"),
+            packetcraftr_core::diagnostic::Diagnostic::info("decode.note", "a note"),
+            packetcraftr_core::diagnostic::Diagnostic::warning(
+                "tcp.retransmission",
+                "duplicate segment",
+            ),
+            packetcraftr_core::diagnostic::Diagnostic::error("ipv4.checksum", "bad checksum"),
         ] {
             let severity = diagnostic.severity.as_str();
             assert_eq!(
-                diagnostic_line(&diagnostic),
+                diagnostic_line(diagnostic.clone()),
                 format!("{severity} {}: {}", diagnostic.code, diagnostic.message),
             );
-            let document = serde_json::to_value(&diagnostic).expect("diagnostics serialize");
+            let document = serde_json::to_value(output::diagnostic::Diagnostic::from(diagnostic))
+                .expect("diagnostics serialize");
             assert_eq!(
                 document.get("severity"),
                 Some(&serde_json::Value::from(severity)),

@@ -17,9 +17,7 @@ use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::contract::Command;
-use super::envelope::Envelope;
-use super::envelope::Error;
-use packetcraftr::Stats;
+use super::envelope::{Envelope, Error, Published, Stats};
 
 /// A data record declares its discriminator independently of its serialized
 /// payload. The encoder supplies `complete` and `error` terminal records.
@@ -177,11 +175,19 @@ impl StreamEncoder {
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Result<(), EncodeError> {
-        let event = result.event_name();
+        self.emit_published(Published::new(result, diagnostics))
+    }
+
+    /// Writes one data record carrying a converted event and its metadata.
+    pub fn emit_published<T: StreamRecord>(
+        &self,
+        published: Published<T>,
+    ) -> Result<(), EncodeError> {
+        let event = published.result.event_name();
         if event.is_empty() || matches!(event, "complete" | "error") {
             return Err(EncodeError::ReservedEvent);
         }
-        self.write_success(event, result, diagnostics, None, false)
+        self.write_success(event, published, false)
     }
 
     pub fn complete<T: Serialize>(
@@ -189,16 +195,24 @@ impl StreamEncoder {
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
     ) -> Result<(), EncodeError> {
-        self.write_success("complete", result, diagnostics, None, true)
+        self.complete_published(Published::new(result, diagnostics))
     }
 
     pub fn complete_with_stats<T: Serialize>(
         &self,
         result: T,
         diagnostics: Vec<PacketDiagnostic>,
-        stats: Stats,
+        stats: impl Into<Stats>,
     ) -> Result<(), EncodeError> {
-        self.write_success("complete", result, diagnostics, Some(stats), true)
+        self.complete_published(Published::new(result, diagnostics).with_stats(stats))
+    }
+
+    /// Writes the terminal record carrying a converted result and its metadata.
+    pub fn complete_published<T: Serialize>(
+        &self,
+        published: Published<T>,
+    ) -> Result<(), EncodeError> {
+        self.write_success("complete", published, true)
     }
 
     pub fn emit_error(&self, error: Error) -> Result<(), EncodeError> {
@@ -244,11 +258,14 @@ impl StreamEncoder {
     fn write_success<T: Serialize>(
         &self,
         event: &'static str,
-        result: T,
-        diagnostics: Vec<PacketDiagnostic>,
-        stats: Option<Stats>,
+        published: Published<T>,
         terminal: bool,
     ) -> Result<(), EncodeError> {
+        let Published {
+            result,
+            diagnostics,
+            stats,
+        } = published;
         let mut output = self.lock_output()?;
         output.require_open()?;
         let sequence = output.sequence;

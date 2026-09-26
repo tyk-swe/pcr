@@ -125,18 +125,18 @@ pub(super) fn render_aggregate(
         state.retained.omitted(),
         "--max-frames",
     );
-    emit_aggregate(
-        output::contract::Command::Follow,
-        output::follow::Report::from_summary(
-            selector.transport,
-            selector.index,
-            summary,
-            state.retained.into_items(),
-            ip_reassembly,
-            written.into_iter().map(Into::into).collect(),
-        ),
-        diagnostics,
-    )
+    let report = output::follow::Report::try_from((
+        selector,
+        summary,
+        state.retained.into_items(),
+        ip_reassembly,
+        written
+            .into_iter()
+            .map(|file| (file.direction, file.path, file.bytes).into())
+            .collect(),
+    ))
+    .map_err(CliError::classified)?;
+    emit_aggregate(output::contract::Command::Follow, report, diagnostics)
 }
 
 pub(super) fn render_stream(
@@ -146,17 +146,18 @@ pub(super) fn render_stream(
     stream: &StreamEncoder,
     written: Vec<super::write::Written>,
 ) -> Result<(), CliError> {
-    Ok(stream.complete(
-        output::follow::Report::from_summary(
-            selector.transport,
-            selector.index,
-            summary,
-            Vec::new(),
-            ip_reassembly,
-            written.into_iter().map(Into::into).collect(),
-        ),
+    let report = output::follow::Report::try_from((
+        selector,
+        summary,
         Vec::new(),
-    )?)
+        ip_reassembly,
+        written
+            .into_iter()
+            .map(|file| (file.direction, file.path, file.bytes).into())
+            .collect(),
+    ))
+    .map_err(CliError::classified)?;
+    Ok(stream.complete(report, Vec::new())?)
 }
 
 pub(super) fn render_payload_warning(summary: &Summary) -> Result<(), CliError> {

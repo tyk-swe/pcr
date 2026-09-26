@@ -41,12 +41,8 @@ struct Decoding {
     publish_layers: bool,
 }
 
-#[derive(Default)]
-struct StreamState {
-    frames_read: u64,
-    frames_matched: u64,
-    captured_bytes_read: u64,
-}
+/// The counters a `read` stream publishes when it ends.
+type StreamState = output::read::Totals;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ReadFormat;
@@ -265,14 +261,7 @@ fn read_records(
         state.frames_matched = increment_counter(state.frames_matched, "read matched-frame count")?;
     }
     if format == ReadFormat::Ndjson {
-        stream.complete(
-            output::read::Event::Complete {
-                frames_read: state.frames_read,
-                frames_matched: state.frames_matched,
-                captured_bytes_read: state.captured_bytes_read,
-            },
-            Vec::new(),
-        )?;
+        stream.complete(output::read::Event::from(state), Vec::new())?;
     }
     Ok(())
 }
@@ -367,7 +356,7 @@ fn convert_frame(
     decoding: Option<&Decoding>,
 ) -> Result<Option<output::read::Frame>, CliError> {
     let Some(decoding) = decoding else {
-        return output::read::Frame::try_from_frame(source_frame, frame)
+        return output::read::Frame::try_from((source_frame, frame))
             .map(Some)
             .map_err(CliError::classified);
     };
@@ -375,9 +364,9 @@ fn convert_frame(
         return Ok(None);
     };
     if decoding.publish_layers {
-        output::read::Frame::try_from_decoded(source_frame, frame, &decoded)
+        output::read::Frame::try_from((source_frame, frame, &decoded))
     } else {
-        output::read::Frame::try_from_frame(source_frame, frame)
+        output::read::Frame::try_from((source_frame, frame))
     }
     .map(Some)
     .map_err(CliError::classified)

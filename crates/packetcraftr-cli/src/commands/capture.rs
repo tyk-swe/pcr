@@ -413,12 +413,9 @@ fn drive<P: Provider>(
         });
     }
 
-    let summary = output::capture::Summary::from_capture(&report, files);
+    let snapshot = output::capture::Snapshot::from((&report, files));
     if let Some(error) = error {
-        return Err(error.with_capture(output::capture::Snapshot {
-            summary,
-            stats: report.stats,
-        }));
+        return Err(error.with_capture(snapshot));
     }
     // A projection that never matched a frame still owes its text header; the
     // NDJSON terminal is the capture summary, never a second complete record.
@@ -431,26 +428,10 @@ fn drive<P: Provider>(
                 report.stats.bytes,
                 rendering.stream,
             )
-            .map_err(|error| {
-                error.with_capture(output::capture::Snapshot {
-                    summary: summary.clone(),
-                    stats: report.stats.clone(),
-                })
-            })?;
+            .map_err(|error| error.with_capture(snapshot.clone()))?;
     }
-    rendering::render_complete(
-        format,
-        &summary,
-        &report.stats,
-        report.diagnostics,
-        rendering.stream,
-    )
-    .map_err(|error| {
-        error.with_capture(output::capture::Snapshot {
-            summary,
-            stats: report.stats,
-        })
-    })
+    rendering::render_complete(format, &snapshot, report.diagnostics, rendering.stream)
+        .map_err(|error| error.with_capture(snapshot))
 }
 
 /// Publishes one matched frame. Decoded output reuses the dissection the
@@ -486,15 +467,15 @@ fn emit_frame(
         return match format {
             CaptureFormat::Text => {
                 // Only the text rendering needs a stack here; the NDJSON event
-                // builds its own inside `try_from_decoded`.
-                let stack = output::frame::Stack::from_decoded(&decoded);
+                // builds its own in its conversion.
+                let stack = output::frame::Stack::from(&decoded);
                 let frame =
-                    output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
+                    output::frame::Captured::try_from(frame).map_err(CliError::classified)?;
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 render_frame_text(source_frame, &frame, Some(&stack))
             }
             CaptureFormat::Ndjson => {
-                output::capture::Event::try_from_decoded(source_frame, frame, &decoded)
+                output::capture::Event::try_from((source_frame, frame, &decoded))
                     .map_err(CliError::classified)
                     .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into))
             }
@@ -508,16 +489,16 @@ fn emit_frame(
         };
     }
     match format {
-        CaptureFormat::Text => output::frame::Captured::try_from_frame(frame)
+        CaptureFormat::Text => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| {
                 let source_frame = source_frame.try_into().map_err(CliError::classified)?;
                 render_frame_text(source_frame, &frame, None)
             }),
-        CaptureFormat::Hex => output::frame::Captured::try_from_frame(frame)
+        CaptureFormat::Hex => output::frame::Captured::try_from(frame)
             .map_err(CliError::classified)
             .and_then(|frame| write_hex_line(frame.bytes())),
-        CaptureFormat::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
+        CaptureFormat::Ndjson => output::capture::Event::try_from((source_frame, frame))
             .map_err(CliError::classified)
             .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),
         CaptureFormat::Json => Ok(()),

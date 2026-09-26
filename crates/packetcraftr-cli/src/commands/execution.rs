@@ -215,14 +215,9 @@ type Publish<'a, S, E, U> = Box<dyn FnOnce(&mut S, Emit<E>) -> Result<U, CliErro
 
 /// The (result, diagnostics, stats) triple a collected report converts into
 /// for the `json` envelope.
-type Converted<T> = (
-    T,
-    Vec<core::diagnostic::Diagnostic>,
-    Option<packetcraftr::Stats>,
-);
-
 /// The report → wire conversion the driver's `json` arm emits.
-type Convert<'a, R, T> = Box<dyn FnOnce(R) -> Result<Converted<T>, CliError> + 'a>;
+type Convert<'a, R, T> =
+    Box<dyn FnOnce(R) -> Result<output::envelope::Published<T>, CliError> + 'a>;
 
 /// The render dispatch for a format that is neither `ndjson` nor `json`.
 type Render<'a, R, F> = Box<dyn FnOnce(R, F) -> Result<(), CliError> + 'a>;
@@ -242,8 +237,8 @@ pub(super) struct Hooks<'a, S, E, U, R, F, T> {
     pub(super) run_with_events: Publish<'a, S, E, U>,
     /// Adapts one engine event into its wire record on the stream.
     pub(super) on_event: fn(E, &StreamEncoder) -> Result<(), CliError>,
-    /// Converts the collected report into the wire result, diagnostics, and
-    /// optional stats the driver's `json` arm emits.
+    /// Converts the collected report into the published result, with the
+    /// diagnostics and optional stats the driver's `json` arm emits.
     pub(super) into_result: Convert<'a, R, T>,
     /// Renders the report under a format that is neither `ndjson` streaming
     /// nor the `json` aggregate: command text and, for `exchange`, the
@@ -293,16 +288,7 @@ where
             let report = (hooks.run)(session)?;
             emission_check(cancellation)?;
             if wide == output::contract::Format::Json {
-                let (result, diagnostics, stats) = (hooks.into_result)(report)?;
-                match stats {
-                    Some(stats) => crate::rendering::emit_aggregate_with_stats(
-                        hooks.command,
-                        result,
-                        diagnostics,
-                        stats,
-                    ),
-                    None => crate::rendering::emit_aggregate(hooks.command, result, diagnostics),
-                }
+                crate::rendering::emit_published(hooks.command, (hooks.into_result)(report)?)
             } else {
                 (hooks.render_text)(report, format)
             }
@@ -442,7 +428,7 @@ mod tests {
             on_event: emit_event,
             into_result: Box::new(|report| {
                 log.borrow_mut().push("into_result".to_owned());
-                Ok((report, Vec::new(), None))
+                Ok(output::envelope::Published::new(report, Vec::new()))
             }),
             render_text: Box::new(|report: u64, format| {
                 log.borrow_mut()
@@ -539,7 +525,9 @@ mod tests {
                 unreachable!("aggregate never streams")
             }),
             on_event: emit_event,
-            into_result: Box::new(|report| Ok((report, Vec::new(), None))),
+            into_result: Box::new(|report| {
+                Ok(output::envelope::Published::new(report, Vec::new()))
+            }),
             render_text: Box::new(|report: u64, format: ExchangeFormat| {
                 log.borrow_mut()
                     .push(format!("render_text:{report}:{format:?}"));

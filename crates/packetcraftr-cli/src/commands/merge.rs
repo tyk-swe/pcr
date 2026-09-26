@@ -87,7 +87,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     staged.sync()?;
     crate::cancellation::check()?;
     staged.persist()?;
-    let report = output::merge::Report::new(args.write.display().to_string(), report);
+    let report = output::merge::Report::from((args.write.display().to_string(), report));
     match format {
         ToolFormat::Json => emit_aggregate(output::contract::Command::Merge, report, Vec::new()),
         ToolFormat::Ndjson => stream.complete(report, Vec::new()).map_err(Into::into),

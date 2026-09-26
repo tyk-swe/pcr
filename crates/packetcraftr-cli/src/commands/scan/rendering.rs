@@ -3,8 +3,6 @@
 
 use crate::rendering::StreamEncoder;
 
-use packetcraftr_core as core;
-
 use crate::output;
 
 use crate::errors::CliError;
@@ -14,10 +12,14 @@ use crate::rendering::{
 };
 
 pub(super) fn render_text(
-    result: output::scan::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    published: output::envelope::Published<output::scan::Report>,
 ) -> Result<(), CliError> {
+    let output::envelope::Published {
+        result,
+        diagnostics,
+        stats,
+    } = published;
+    let stats = stats.unwrap_or_default();
     write_stdout_line(format_args!(
         "target={} resolved={}",
         result.target,
@@ -37,8 +39,8 @@ pub(super) fn render_text(
         // ICMP has no port, so it names itself; the port-bearing transports
         // name the endpoint they probed.
         let endpoint_name = match endpoint.transport {
-            packetcraftr::probe::Transport::Icmp => endpoint.transport.to_string(),
-            packetcraftr::probe::Transport::Tcp | packetcraftr::probe::Transport::Udp => {
+            output::probe::Transport::Icmp => endpoint.transport.to_string(),
+            output::probe::Transport::Tcp | output::probe::Transport::Udp => {
                 format!("{}/{}", endpoint.transport, optional_display(endpoint.port))
             }
         };
@@ -96,17 +98,20 @@ pub(super) fn emit_event(
     event: packetcraftr::scan::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::scan::Event::try_from_scan(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
+    let published = output::envelope::Published::<output::scan::Event>::try_from(event)
+        .map_err(CliError::classified)?;
+    Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn emit_complete(
     summary: packetcraftr::scan::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics, stats) = output::scan::Event::complete_from_scan(summary);
-    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<output::scan::Event>::from(
+            summary,
+        ))?,
+    )
 }
 
 pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {
@@ -117,7 +122,7 @@ pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     while let Some(error) = source {
         if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineError>() {
-            match output::scan::Failure::try_from_pipeline(pipeline) {
+            match output::scan::Failure::try_from(pipeline) {
                 Ok(partial) => cli = cli.with_scan(partial),
                 Err(error) => cli
                     .causes

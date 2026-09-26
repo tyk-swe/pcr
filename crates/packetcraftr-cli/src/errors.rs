@@ -238,7 +238,10 @@ mod tests {
         assert_eq!(output.code, "fixture.denied");
         assert_eq!(output.causes, ["first cause", "second cause"]);
         assert_eq!(output.remediation.as_deref(), Some("authorize the fixture"));
-        assert_eq!(output.context, Some(Coordinate::ProbeSequence(42)));
+        assert_eq!(
+            output.context,
+            Some(crate::output::envelope::ErrorContext::ProbeSequence(42))
+        );
 
         let boundary = error.into_boundary_error();
         assert_eq!(boundary.classification().code, "fixture.denied");

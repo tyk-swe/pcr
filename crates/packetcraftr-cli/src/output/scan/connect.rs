@@ -11,6 +11,42 @@ use std::{
     time::Duration,
 };
 
+use super::{Classification, Rtt};
+
+published_enum! {
+    /// How one connect attempt ended.
+    pub enum Outcome from connect::Outcome {
+        Connected => "connected",
+        Refused => "refused",
+        TimedOut => "timed_out",
+        Unreachable => "unreachable",
+        LocalError => "local_error",
+        DeadlineExpired => "deadline_expired",
+    }
+}
+
+/// Socket-level accounting for one connect scan.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Statistics {
+    pub connections_scheduled: u64,
+    pub connections_attempted: u64,
+    pub connections_succeeded: u64,
+    pub elapsed: Duration,
+    pub rtt: Rtt,
+}
+
+impl From<connect::Statistics> for Statistics {
+    fn from(value: connect::Statistics) -> Self {
+        Self {
+            connections_scheduled: value.connections_scheduled,
+            connections_attempted: value.connections_attempted,
+            connections_succeeded: value.connections_succeeded,
+            elapsed: value.elapsed,
+            rtt: value.rtt.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SocketError {
     pub kind: String,
@@ -25,8 +61,8 @@ pub struct Probe {
     pub attempt: u32,
     pub attempted: bool,
     pub connect_succeeded: Option<bool>,
-    pub outcome: connect::Outcome,
-    pub classification: packetcraftr::scan::Classification,
+    pub outcome: Outcome,
+    pub classification: Classification,
     pub scheduled_at: Timestamp,
     pub finished_at: Option<Timestamp>,
     pub elapsed: Duration,
@@ -43,8 +79,8 @@ impl TryFrom<connect::Probe> for Probe {
             attempt: probe.attempt,
             attempted: probe.attempted,
             connect_succeeded: probe.connect_succeeded,
-            outcome: probe.outcome,
-            classification: probe.outcome.classification(),
+            outcome: probe.outcome.into(),
+            classification: probe.outcome.classification().into(),
             scheduled_at: probe.scheduled_at.try_into()?,
             finished_at: probe.finished_at.map(Timestamp::try_from).transpose()?,
             elapsed: probe.elapsed,
@@ -61,7 +97,7 @@ impl TryFrom<connect::Probe> for Probe {
 pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
-    pub classification: packetcraftr::scan::Classification,
+    pub classification: Classification,
     pub probes: Vec<Probe>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -70,7 +106,7 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub planned_duration: Duration,
-    pub socket_stats: connect::Statistics,
+    pub socket_stats: Statistics,
 }
 impl From<connect::Summary> for Summary {
     fn from(summary: connect::Summary) -> Self {
@@ -79,7 +115,7 @@ impl From<connect::Summary> for Summary {
             target: summary.target,
             resolved_addresses: summary.resolved_addresses,
             planned_duration: summary.planned_duration,
-            socket_stats: summary.stats,
+            socket_stats: summary.stats.into(),
         }
     }
 }
@@ -101,7 +137,7 @@ impl TryFrom<connect::Report> for Report {
                     Ok(Endpoint {
                         address: endpoint.address,
                         port: endpoint.port,
-                        classification: endpoint.classification,
+                        classification: endpoint.classification.into(),
                         probes: endpoint
                             .probes
                             .into_iter()

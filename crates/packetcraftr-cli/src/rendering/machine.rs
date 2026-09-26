@@ -116,11 +116,22 @@ pub(crate) fn emit_aggregate_with_stats<T: Serialize>(
     command: output::contract::Command,
     result: T,
     diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    stats: impl Into<output::envelope::Stats>,
 ) -> Result<(), CliError> {
     crate::cancellation::check()?;
     emit_json(&crate::resources::decorate(
         output::envelope::Envelope::success(command, result, diagnostics).with_stats(stats),
+    ))
+}
+
+/// One aggregate document for a converted result and the metadata it carried.
+pub(crate) fn emit_published<T: Serialize>(
+    command: output::contract::Command,
+    published: output::envelope::Published<T>,
+) -> Result<(), CliError> {
+    crate::cancellation::check()?;
+    emit_json(&crate::resources::decorate(
+        output::envelope::Envelope::published(command, published),
     ))
 }
 

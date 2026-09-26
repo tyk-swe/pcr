@@ -12,3 +12,9 @@ pub struct Report {
     #[serde(rename = "route")]
     pub plan: Plan,
 }
+
+impl From<packetcraftr_netio::route::Plan> for Report {
+    fn from(plan: packetcraftr_netio::route::Plan) -> Self {
+        Self { plan: plan.into() }
+    }
+}

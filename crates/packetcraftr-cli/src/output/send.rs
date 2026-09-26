@@ -1,16 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::diagnostic::Diagnostic;
-
 use serde::Serialize;
 
+use crate::output::capture::Statistics as CaptureStats;
 use crate::output::contract::Error;
+use crate::output::envelope::Published;
 use crate::output::frame::Captured;
 use crate::output::frame::Wire;
 use crate::output::network::Plan;
-use packetcraftr::Stats;
-use packetcraftr_netio::capture::Statistics as CaptureStats;
 
 /// Serializable route materialization evidence retained by send-like commands.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -31,18 +29,24 @@ pub struct NeighborEvidence {
     pub capture_statistics: CaptureStats,
 }
 
-impl MaterializedRoute {
-    pub fn try_from_route(route: packetcraftr_netio::route::Materialized) -> Result<Self, Error> {
+impl TryFrom<packetcraftr_netio::route::Materialized> for MaterializedRoute {
+    type Error = Error;
+
+    fn try_from(route: packetcraftr_netio::route::Materialized) -> Result<Self, Error> {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {
-                Ok(NeighborEvidence {
+                Ok::<_, Error>(NeighborEvidence {
                     mac_address: resolution.mac_address.to_string(),
                     attempts: resolution.attempts,
                     cache_hit: resolution.cache_hit,
-                    captured: Captured::try_from_frames(resolution.captured)?,
+                    captured: resolution
+                        .captured
+                        .into_iter()
+                        .map(Captured::try_from)
+                        .collect::<Result<_, _>>()?,
                     evidence_truncated: resolution.evidence_truncated,
-                    capture_statistics: resolution.capture_statistics,
+                    capture_statistics: resolution.capture_statistics.into(),
                 })
             })
             .transpose()?;
@@ -71,10 +75,11 @@ pub struct Report {
     pub passes_completed: u32,
 }
 
-impl Report {
-    pub fn try_from_report(
-        report: packetcraftr::send::SetReport,
-    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+/// A packet-set transmission, with each builder diagnostic code once.
+impl TryFrom<packetcraftr::send::SetReport> for Published<Report> {
+    type Error = Error;
+
+    fn try_from(report: packetcraftr::send::SetReport) -> Result<Self, Error> {
         let packetcraftr::send::SetReport {
             sent,
             passes_completed,
@@ -94,17 +99,17 @@ impl Report {
             frames.push(SentFrame {
                 pass,
                 index,
-                frame: Wire::new(packet.wire_bytes().clone()),
-                route: MaterializedRoute::try_from_route(packet.route().clone())?,
+                frame: packet.wire_bytes().clone().into(),
+                route: packet.route().clone().try_into()?,
             });
         }
-        Ok((
-            Self {
+        Ok(Self::new(
+            Report {
                 frames,
                 passes_completed,
             },
             diagnostics,
-            stats,
-        ))
+        )
+        .with_stats(stats))
     }
 }

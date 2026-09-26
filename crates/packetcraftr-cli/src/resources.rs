@@ -379,19 +379,23 @@ pub(crate) fn runtime(name: &'static str, capacity: usize) -> Runtime {
 
 pub(crate) fn snapshot() -> Option<Report> {
     let context = CONTEXT.get()?;
-    let mut workers = vec![Worker::native(
-        packetcraftr_netio::resources::native_snapshot(),
-    )];
-    let mut tcp = Worker::native(packetcraftr_netio::resources::tcp_connect_snapshot());
-    tcp.name = "tcp_connect_process".to_owned();
-    workers.push(tcp);
+    let mut workers = vec![
+        Worker::from((
+            "native_process",
+            packetcraftr_netio::resources::native_snapshot(),
+        )),
+        Worker::from((
+            "tcp_connect_process",
+            packetcraftr_netio::resources::tcp_connect_snapshot(),
+        )),
+    ];
     workers.extend(
         context
             .runtimes
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .map(|(name, runtime)| Worker::progress(*name, runtime.snapshot())),
+            .map(|(name, runtime)| Worker::from((*name, runtime.snapshot()))),
     );
     let stream_index = context.stream_index.load(Ordering::Relaxed);
     let settings = context

@@ -4,15 +4,74 @@
 use std::net::IpAddr;
 use std::time::Duration;
 
-use packetcraftr_core::diagnostic::Diagnostic;
 use serde::Serialize;
 
 use super::record::Edns;
 use super::record::Record;
 use crate::output::contract::Error;
+use crate::output::envelope::Published;
 use crate::output::frame::{Captured, Timestamp};
-use packetcraftr::Stats;
-use packetcraftr::dns::{Outcome, RejectedRecord, Section, Transport, response_code_name};
+use packetcraftr::dns::{self as library, response_code_name};
+
+published_enum! {
+    /// How one DNS attempt, or the whole query, ended.
+    pub enum Outcome from library::Outcome {
+        Response => "response",
+        Truncated => "truncated",
+        Timeout => "timeout",
+        Unrelated => "unrelated",
+        DecodeFailure => "decode_failure",
+        NetworkFailure => "network_failure",
+    }
+}
+
+published_enum! {
+    /// The transport a DNS attempt used.
+    pub enum Transport from library::Transport {
+        Udp => "udp",
+        Tcp => "tcp",
+    }
+}
+
+published_enum! {
+    /// The response section a record came from.
+    pub enum Section from library::Section {
+        Answer => "answer",
+        Authority => "authority",
+        Additional => "additional",
+    }
+}
+
+published_enum! {
+    /// Whether a batch question ran to completion.
+    pub enum QuestionStatus from library::QuestionStatus {
+        Completed => "completed",
+        Failed => "failed",
+        Unattempted => "unattempted",
+    }
+}
+
+/// A response record validation set aside, with why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RejectedRecord {
+    pub section: Section,
+    pub index: usize,
+    pub owner: String,
+    pub type_code: u16,
+    pub reason: String,
+}
+
+impl From<library::RejectedRecord> for RejectedRecord {
+    fn from(value: library::RejectedRecord) -> Self {
+        Self {
+            section: value.section.into(),
+            index: value.index,
+            owner: value.owner,
+            type_code: value.type_code,
+            reason: value.reason,
+        }
+    }
+}
 
 /// The response-header block the aggregate result and the terminal record both
 /// publish, present exactly when a response was accepted.
@@ -34,8 +93,8 @@ pub struct ResponseSummary {
     pub checking_disabled: bool,
 }
 
-impl From<packetcraftr::dns::ResponseMetadata> for ResponseSummary {
-    fn from(metadata: packetcraftr::dns::ResponseMetadata) -> Self {
+impl From<library::ResponseMetadata> for ResponseSummary {
+    fn from(metadata: library::ResponseMetadata) -> Self {
         Self {
             response_code: metadata.response_code,
             response_code_name: response_code_name(metadata.response_code).to_owned(),
@@ -82,21 +141,22 @@ struct ResponseRecords {
     rejected_records: Vec<RejectedRecord>,
 }
 
-impl From<Vec<packetcraftr::dns::RejectedRecord>> for ResponseRecords {
-    fn from(rejected_records: Vec<packetcraftr::dns::RejectedRecord>) -> Self {
+impl From<Vec<library::RejectedRecord>> for ResponseRecords {
+    fn from(rejected_records: Vec<library::RejectedRecord>) -> Self {
         Self {
-            rejected_records,
+            rejected_records: rejected_records.into_iter().map(Into::into).collect(),
             ..Self::default()
         }
     }
 }
 
-impl Report {
-    pub fn try_from_dns(
-        result: packetcraftr::dns::Report,
-    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
+/// One query, with its diagnostics and totals.
+impl TryFrom<library::Report> for Published<Report> {
+    type Error = Error;
+
+    fn try_from(result: library::Report) -> Result<Self, Error> {
         let (summary, response, attempts, undecoded, diagnostics) = result.into_parts();
-        let packetcraftr::dns::Summary {
+        let library::Summary {
             server,
             server_port,
             resolved_addresses,
@@ -106,20 +166,20 @@ impl Report {
             completion,
             stats,
         } = summary;
-        let outcome = completion.outcome();
+        let outcome = completion.outcome().into();
         let fallback_attempted = completion.fallback_attempted();
-        let accepted_transport = completion.accepted_transport();
+        let accepted_transport = completion.accepted_transport().map(Into::into);
         let (summary, records, rejected_record_count) = split_response(response);
         let attempt_outputs = attempts
             .into_iter()
-            .map(try_from_attempt)
+            .map(Attempt::try_from)
             .collect::<Result<Vec<_>, Error>>()?;
         let undecoded_outputs = undecoded
             .into_iter()
-            .map(try_from_undecoded)
+            .map(Undecoded::try_from)
             .collect::<Result<Vec<_>, Error>>()?;
-        Ok((
-            Self {
+        Ok(Self::new(
+            Report {
                 server,
                 server_port,
                 resolved_addresses,
@@ -139,20 +199,20 @@ impl Report {
                 undecoded: undecoded_outputs,
             },
             diagnostics,
-            stats,
-        ))
+        )
+        .with_stats(stats))
     }
 }
 
 /// Splits a validated response into the flattened header summary, the record
 /// sections only the aggregate publishes, and the rejection tally both do.
 fn split_response(
-    response: Option<packetcraftr::dns::ValidatedResponse>,
+    response: Option<library::ValidatedResponse>,
 ) -> (Option<ResponseSummary>, ResponseRecords, usize) {
     let Some(response) = response else {
         return (None, ResponseRecords::default(), 0);
     };
-    let packetcraftr::dns::ValidatedResponse {
+    let library::ValidatedResponse {
         metadata,
         answers,
         authorities,
@@ -161,50 +221,58 @@ fn split_response(
     } = response;
     let rejected_record_count = metadata.rejected_record_count;
     let records = ResponseRecords {
-        answers: answers.into_iter().map(Record::from_record).collect(),
-        authorities: authorities.into_iter().map(Record::from_record).collect(),
-        additionals: additionals.into_iter().map(Record::from_record).collect(),
+        answers: answers.into_iter().map(Record::from).collect(),
+        authorities: authorities.into_iter().map(Record::from).collect(),
+        additionals: additionals.into_iter().map(Record::from).collect(),
         ..ResponseRecords::from(rejected_records)
     };
     (Some(metadata.into()), records, rejected_record_count)
 }
 
-fn try_from_attempt(evidence: packetcraftr::dns::AttemptEvidence) -> Result<Attempt, Error> {
-    let (transport, source_port, sent_at, response) = match evidence.exchange {
-        packetcraftr::dns::AttemptTransport::Udp {
+impl TryFrom<library::AttemptEvidence> for Attempt {
+    type Error = Error;
+
+    fn try_from(evidence: library::AttemptEvidence) -> Result<Self, Error> {
+        let (transport, source_port, sent_at, response) = match evidence.exchange {
+            library::AttemptTransport::Udp {
+                source_port,
+                sent_at,
+                response,
+            } => (Transport::Udp, Some(source_port), Some(sent_at), response),
+            library::AttemptTransport::Tcp {
+                source_port,
+                sent_at,
+            } => (Transport::Tcp, source_port, sent_at, None),
+        };
+        Ok(Self {
+            attempt: evidence.attempt,
+            transport,
+            server_address: evidence.server_address,
             source_port,
-            sent_at,
-            response,
-        } => (Transport::Udp, Some(source_port), Some(sent_at), response),
-        packetcraftr::dns::AttemptTransport::Tcp {
-            source_port,
-            sent_at,
-        } => (Transport::Tcp, source_port, sent_at, None),
-    };
-    Ok(Attempt {
-        attempt: evidence.attempt,
-        transport,
-        server_address: evidence.server_address,
-        source_port,
-        status: evidence.status,
-        sent_at: sent_at.map(Timestamp::try_from).transpose()?,
-        received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
-        latency: evidence.latency,
-        frame: response.map(Captured::try_from_frame).transpose()?,
-        response_code: evidence.response_code,
-        reason: evidence.reason,
-    })
+            status: evidence.status.into(),
+            sent_at: sent_at.map(Timestamp::try_from).transpose()?,
+            received_at: evidence.received_at.map(Timestamp::try_from).transpose()?,
+            latency: evidence.latency,
+            frame: response.map(Captured::try_from).transpose()?,
+            response_code: evidence.response_code,
+            reason: evidence.reason,
+        })
+    }
 }
 
-fn try_from_undecoded(evidence: packetcraftr::dns::UndecodedEvidence) -> Result<Undecoded, Error> {
-    Ok(Undecoded {
-        attempt: evidence.attempt,
-        // DNS-over-TCP runs on a kernel socket and never yields captured
-        // frames, so undecoded evidence is UDP by construction. The schema
-        // pins this to the constant "udp".
-        transport: Transport::Udp,
-        frame: Captured::try_from_frame(evidence.frame)?,
-    })
+impl TryFrom<library::UndecodedEvidence> for Undecoded {
+    type Error = Error;
+
+    fn try_from(evidence: library::UndecodedEvidence) -> Result<Self, Error> {
+        Ok(Self {
+            attempt: evidence.attempt,
+            // DNS-over-TCP runs on a kernel socket and never yields captured
+            // frames, so undecoded evidence is UDP by construction. The schema
+            // pins this to the constant "udp".
+            transport: Transport::Udp,
+            frame: evidence.frame.try_into()?,
+        })
+    }
 }
 
 /// Aggregate result of a `dns` batch: the shared server plus each question's
@@ -223,7 +291,7 @@ pub struct QuestionResult {
     pub query_name: String,
     pub query_type: u16,
     pub transaction_id: u16,
-    pub status: packetcraftr::dns::QuestionStatus,
+    pub status: QuestionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -235,18 +303,19 @@ pub struct QuestionComplete {
     pub query_name: String,
     pub query_type: u16,
     pub transaction_id: u16,
-    pub status: packetcraftr::dns::QuestionStatus,
+    pub status: QuestionStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<Outcome>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-impl BatchResult {
-    pub fn try_from_batch(
-        batch: packetcraftr::dns::BatchReport,
-    ) -> Result<(Self, Vec<Diagnostic>, Stats), Error> {
-        let packetcraftr::dns::BatchReport {
+/// A question batch, with each diagnostic code once and the batch totals.
+impl TryFrom<library::BatchReport> for Published<BatchResult> {
+    type Error = Error;
+
+    fn try_from(batch: library::BatchReport) -> Result<Self, Error> {
+        let library::BatchReport {
             server,
             server_port,
             questions,
@@ -255,7 +324,7 @@ impl BatchResult {
         let mut diagnostics = Vec::new();
         let mut results = Vec::with_capacity(questions.len());
         for question in questions {
-            let packetcraftr::dns::QuestionOutcome {
+            let library::QuestionOutcome {
                 query_name,
                 query_type,
                 transaction_id,
@@ -265,51 +334,52 @@ impl BatchResult {
             } = question;
             let result = report
                 .map(|report| {
-                    let (converted, found, _) = Report::try_from_dns(report)?;
                     // Questions in a batch trip the same codes; the aggregate
                     // envelope carries one entry per code, not per question.
-                    for diagnostic in found {
-                        packetcraftr_core::diagnostic::push_once(&mut diagnostics, diagnostic);
+                    for diagnostic in report.diagnostics() {
+                        packetcraftr_core::diagnostic::push_once(
+                            &mut diagnostics,
+                            diagnostic.clone(),
+                        );
                     }
-                    Ok(Box::new(converted))
+                    Published::<Report>::try_from(report)
+                        .map(|published| Box::new(published.result))
                 })
                 .transpose()?;
             results.push(QuestionResult {
                 query_name,
                 query_type: query_type.code(),
                 transaction_id,
-                status,
+                status: status.into(),
                 error: error.map(|error| error.to_string()),
                 result,
             });
         }
-        Ok((
-            Self {
+        Ok(Self::new(
+            BatchResult {
                 server,
                 server_port,
                 questions: results,
             },
             diagnostics,
-            stats,
-        ))
+        )
+        .with_stats(stats))
     }
+}
 
-    pub fn question_completions(batch: &packetcraftr::dns::BatchReport) -> Vec<QuestionComplete> {
-        batch
-            .questions
-            .iter()
-            .map(|question| QuestionComplete {
-                query_name: question.query_name.clone(),
-                query_type: question.query_type.code(),
-                transaction_id: question.transaction_id,
-                status: question.status,
-                outcome: question
-                    .report
-                    .as_ref()
-                    .map(|report| report.summary().completion.outcome()),
-                error: question.error.as_ref().map(ToString::to_string),
-            })
-            .collect()
+impl From<&library::QuestionOutcome> for QuestionComplete {
+    fn from(question: &library::QuestionOutcome) -> Self {
+        Self {
+            query_name: question.query_name.clone(),
+            query_type: question.query_type.code(),
+            transaction_id: question.transaction_id,
+            status: question.status.into(),
+            outcome: question
+                .report
+                .as_ref()
+                .map(|report| report.summary().completion.outcome().into()),
+            error: question.error.as_ref().map(ToString::to_string),
+        }
     }
 }
 
@@ -398,71 +468,74 @@ pub enum Event {
     },
 }
 
-impl Event {
-    pub fn try_from_dns(event: packetcraftr::dns::Event) -> Result<(Self, Vec<Diagnostic>), Error> {
-        let (event, diagnostics) = match event {
-            packetcraftr::dns::Event::Attempt { context, evidence } => (
-                Self::Attempt {
+/// One DNS event, with any diagnostic it carried for the envelope.
+impl TryFrom<library::Event> for Published<Event> {
+    type Error = Error;
+
+    fn try_from(event: library::Event) -> Result<Self, Error> {
+        Ok(match event {
+            library::Event::Attempt { context, evidence } => Self::new(
+                Event::Attempt {
                     server: context.server.to_string(),
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
                     query_type: context.query_type.code(),
-                    evidence: try_from_attempt(evidence)?,
+                    evidence: evidence.try_into()?,
                 },
                 Vec::new(),
             ),
-            packetcraftr::dns::Event::Record {
+            library::Event::Record {
                 attempt,
                 transport,
                 context,
                 section,
                 record,
-            } => (
-                Self::Record {
+            } => Self::new(
+                Event::Record {
                     attempt,
-                    transport,
+                    transport: transport.into(),
                     server: context.server.to_string(),
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
                     query_type: context.query_type.code(),
-                    section,
-                    record: Record::from_record(record),
+                    section: section.into(),
+                    record: record.into(),
                 },
                 Vec::new(),
             ),
-            packetcraftr::dns::Event::Rejected {
+            library::Event::Rejected {
                 attempt,
                 transport,
                 context,
                 record,
-            } => (
-                Self::Rejected {
+            } => Self::new(
+                Event::Rejected {
                     attempt,
-                    transport,
+                    transport: transport.into(),
                     server: context.server.to_string(),
                     server_port: context.server_port,
                     query_name: context.query_name.to_string(),
                     query_type: context.query_type.code(),
-                    record,
+                    record: record.into(),
                 },
                 Vec::new(),
             ),
-            packetcraftr::dns::Event::Undecoded(evidence) => (
-                Self::Undecoded {
-                    evidence: try_from_undecoded(evidence)?,
+            library::Event::Undecoded(evidence) => Self::new(
+                Event::Undecoded {
+                    evidence: evidence.try_into()?,
                 },
                 Vec::new(),
             ),
-            packetcraftr::dns::Event::Diagnostic(diagnostic) => {
-                (Self::Diagnostic {}, vec![diagnostic])
+            library::Event::Diagnostic(diagnostic) => {
+                Self::new(Event::Diagnostic {}, vec![diagnostic])
             }
-        };
-        Ok((event, diagnostics))
+        })
     }
+}
 
-    pub fn complete_from_dns(
-        summary: packetcraftr::dns::Summary,
-    ) -> (Self, Vec<Diagnostic>, Stats) {
+/// The terminal record of one query, with its totals.
+impl From<library::Summary> for Published<Event> {
+    fn from(summary: library::Summary) -> Self {
         let rejected_record_count = summary
             .completion
             .response()
@@ -473,23 +546,39 @@ impl Event {
             .response()
             .cloned()
             .map(ResponseSummary::from);
-        (
-            Self::Complete {
+        Self::new(
+            Event::Complete {
                 server: summary.server,
                 server_port: summary.server_port,
                 resolved_addresses: summary.resolved_addresses,
                 query_name: summary.query_name,
                 query_type: summary.query_type.code(),
                 transaction_id: summary.transaction_id,
-                outcome: summary.completion.outcome(),
+                outcome: summary.completion.outcome().into(),
                 fallback_attempted: summary.completion.fallback_attempted(),
-                accepted_transport: summary.completion.accepted_transport(),
+                accepted_transport: summary.completion.accepted_transport().map(Into::into),
                 response,
                 rejected_record_count,
             },
             Vec::new(),
-            summary.stats,
         )
+        .with_stats(summary.stats)
+    }
+}
+
+/// The terminal record of a batch: every question's status in input order,
+/// with the batch totals.
+impl From<library::BatchReport> for Published<Event> {
+    fn from(batch: library::BatchReport) -> Self {
+        Self::new(
+            Event::BatchComplete {
+                questions: batch.questions.iter().map(Into::into).collect(),
+                server: batch.server,
+                server_port: batch.server_port,
+            },
+            Vec::new(),
+        )
+        .with_stats(batch.stats)
     }
 }
 

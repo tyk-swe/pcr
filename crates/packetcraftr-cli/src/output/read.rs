@@ -19,37 +19,59 @@ pub struct Frame {
     pub decoded: Option<Stack>,
 }
 
-impl Frame {
-    pub fn try_from_frame(source_frame: u64, frame: CaptureFrame) -> Result<Self, Error> {
+/// A frame at its one-based source position.
+impl TryFrom<(u64, CaptureFrame)> for Frame {
+    type Error = Error;
+
+    fn try_from((source_frame, frame): (u64, CaptureFrame)) -> Result<Self, Error> {
         Ok(Self {
             source_frame: source_frame.try_into()?,
-            frame: Captured::try_from_frame(frame)?,
+            frame: frame.try_into()?,
             decoded: None,
         })
     }
+}
 
-    pub fn try_from_decoded(
-        source_frame: u64,
-        frame: CaptureFrame,
-        decoded: &DecodedPacket,
+/// A frame at its one-based source position, with its dissected stack.
+impl TryFrom<(u64, CaptureFrame, &DecodedPacket)> for Frame {
+    type Error = Error;
+
+    fn try_from(
+        (source_frame, frame, decoded): (u64, CaptureFrame, &DecodedPacket),
     ) -> Result<Self, Error> {
         Ok(Self {
             source_frame: source_frame.try_into()?,
-            frame: Captured::try_from_frame(frame)?,
-            decoded: Some(Stack::from_decoded(decoded)),
+            frame: frame.try_into()?,
+            decoded: Some(Stack::from(decoded)),
         })
     }
+}
+
+/// What a `read` stream accounted for when it ended.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Totals {
+    pub frames_read: u64,
+    pub frames_matched: u64,
+    pub captured_bytes_read: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {
     Frame(Frame),
-    Complete {
-        frames_read: u64,
-        frames_matched: u64,
-        captured_bytes_read: u64,
-    },
+    Complete(Totals),
+}
+
+impl From<Frame> for Event {
+    fn from(frame: Frame) -> Self {
+        Self::Frame(frame)
+    }
+}
+
+impl From<Totals> for Event {
+    fn from(totals: Totals) -> Self {
+        Self::Complete(totals)
+    }
 }
 
 impl crate::output::stream::StreamRecord for Event {

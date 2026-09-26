@@ -7,9 +7,7 @@
 
 use crate::errors::CliError;
 use crate::output::http as wire;
-use crate::rendering::{
-    comma_separated, document_spelling, optional_display, write_stdout_line, write_summary_line,
-};
+use crate::rendering::{comma_separated, optional_display, write_stdout_line, write_summary_line};
 
 /// One message line, then its header fields and any parse error.
 pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
@@ -27,7 +25,7 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
         "HTTP tcp:{} message={} status={} {} body_bytes={} request={} frames={}",
         message.stream,
         message.index,
-        document_spelling(&message.status),
+        message.status,
         start,
         message.body_bytes,
         optional_display(message.request),
@@ -49,9 +47,7 @@ pub(super) fn render_message(message: &wire::Message) -> Result<(), CliError> {
 pub(super) fn render_issue(issue: &wire::Issue) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "  TCP stream={} frame={} status={}",
-        issue.0.stream,
-        issue.0.number,
-        document_spelling(&issue.0.status),
+        issue.stream, issue.number, issue.status,
     ))
 }
 

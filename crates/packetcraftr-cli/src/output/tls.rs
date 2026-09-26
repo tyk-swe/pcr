@@ -8,19 +8,28 @@
 
 use serde::Serialize;
 
-use packetcraftr_core::analysis::Endpoint;
-use packetcraftr_core::analysis::tls::Alert as AnalysisAlert;
-use packetcraftr_core::analysis::tls::ClientSummary;
-use packetcraftr_core::analysis::tls::ServerSummary;
-use packetcraftr_core::analysis::tls::Session as AnalysisSession;
-use packetcraftr_core::analysis::tls::Status;
-use packetcraftr_core::analysis::tls::Summary as AnalysisSummary;
+use packetcraftr_core::analysis::{self as library, tls};
 use packetcraftr_core::protocol::application::tls::{
     alert_description_name, cipher_suite_name, named_group_name, version_name,
 };
 
+use super::analysis::{Clock, Endpoint, Scope};
+use super::contract::Error;
 use super::envelope::is_zero;
 use super::hex::compact_hex;
+
+published_enum! {
+    /// Where a TLS handshake ended up.
+    pub enum Status from tls::Status {
+        Complete => "complete",
+        ClientOnly => "client_only",
+        Retry => "retry",
+        Alert => "alert",
+        Malformed => "malformed",
+        Gap => "gap",
+        Truncated => "truncated",
+    }
+}
 
 /// One alert record observed in the clear.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -33,8 +42,8 @@ pub struct Alert {
     pub description_name: Option<&'static str>,
 }
 
-impl From<AnalysisAlert> for Alert {
-    fn from(value: AnalysisAlert) -> Self {
+impl From<tls::Alert> for Alert {
+    fn from(value: tls::Alert) -> Self {
         Self {
             level: value.level,
             description: value.description,
@@ -73,8 +82,8 @@ pub struct Client {
     pub ja4: String,
 }
 
-impl From<ClientSummary> for Client {
-    fn from(value: ClientSummary) -> Self {
+impl From<tls::ClientSummary> for Client {
+    fn from(value: tls::ClientSummary) -> Self {
         Self {
             legacy_version: value.legacy_version,
             legacy_version_name: version_name(value.legacy_version),
@@ -114,8 +123,8 @@ pub struct Server {
     pub ja3s_raw: String,
 }
 
-impl From<ServerSummary> for Server {
-    fn from(value: ServerSummary) -> Self {
+impl From<tls::ServerSummary> for Server {
+    fn from(value: tls::ServerSummary) -> Self {
         Self {
             selected_version: value.selected_version,
             selected_version_name: version_name(value.selected_version),
@@ -140,7 +149,7 @@ pub struct Session {
     pub session: u64,
     /// The `tcp.stream` conversation index this handshake rode on.
     pub tcp_stream: u64,
-    pub scope: packetcraftr_core::analysis::scope::Definition,
+    pub scope: Scope,
     pub client_endpoint: Endpoint,
     pub server_endpoint: Endpoint,
     /// First capture frame that delivered handshake bytes for this session.
@@ -176,14 +185,16 @@ pub struct Session {
     pub reason: Option<String>,
 }
 
-impl From<AnalysisSession> for Session {
-    fn from(value: AnalysisSession) -> Self {
-        Self {
+impl TryFrom<tls::Session> for Session {
+    type Error = Error;
+
+    fn try_from(value: tls::Session) -> Result<Self, Error> {
+        Ok(Self {
             session: value.session,
             tcp_stream: value.tcp_stream,
-            scope: value.scope,
-            client_endpoint: value.client_endpoint,
-            server_endpoint: value.server_endpoint,
+            scope: value.scope.try_into()?,
+            client_endpoint: value.client_endpoint.into(),
+            server_endpoint: value.server_endpoint.into(),
             first_frame: value.first_frame,
             last_frame: value.last_frame,
             handshake_rtt_ms: value.handshake_rtt_ms,
@@ -192,9 +203,9 @@ impl From<AnalysisSession> for Session {
             hello_retry: value.hello_retry,
             alerts: value.alerts.into_iter().map(Alert::from).collect(),
             alerts_dropped: value.alerts_dropped,
-            status: value.status,
+            status: value.status.into(),
             reason: value.reason,
-        }
+        })
     }
 }
 
@@ -227,7 +238,7 @@ impl StatusCounts {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Summary {
-    pub clock: packetcraftr_core::analysis::ClockReport,
+    pub clock: Clock,
     pub frames_read: u64,
     pub frames_matched: u64,
     /// Sessions assembled, of every status, whether or not a selector kept
@@ -254,47 +265,45 @@ pub struct Summary {
     pub ip_reassembly: super::reassembly::Report,
 }
 
-impl Summary {
-    #[must_use]
-    pub fn from_analysis(
-        analysis: AnalysisSummary,
-        frames_read: u64,
-        frames_matched: u64,
-        selected: SelectionCounts,
-        ip_reassembly: &packetcraftr_core::analysis::IpReassemblyReport,
+/// The assembler's totals, with the run's frame counts and IP reassembly,
+/// and how many sessions the selectors kept and the retention ceiling
+/// omitted.
+impl From<(tls::Summary, &library::Summary, u64, u64)> for Summary {
+    fn from(
+        (analysis, run, selected, omitted): (tls::Summary, &library::Summary, u64, u64),
     ) -> Self {
         let mut by_status = StatusCounts::default();
         for (status, count) in analysis.by_status {
-            *by_status.slot(status) = count;
+            *by_status.slot(status.into()) = count;
         }
         Self {
-            clock: analysis.clock,
-            frames_read,
-            frames_matched,
+            clock: analysis.clock.into(),
+            frames_read: run.frames_read,
+            frames_matched: run.frames_matched,
             sessions: analysis.sessions,
-            sessions_selected: selected.selected,
+            sessions_selected: selected,
             by_status,
             tcp_streams: analysis.tcp_streams,
             sessions_evicted: analysis.evicted_sessions,
-            sessions_omitted: selected.omitted,
+            sessions_omitted: omitted,
             buffer_limit_hits: analysis.buffer_limit_hits,
             udp_443_frames: analysis.udp_443_frames,
-            ip_reassembly: super::reassembly::Report::from_analysis(ip_reassembly),
+            ip_reassembly: (&run.ip_reassembly).into(),
         }
     }
-}
-
-/// What the command's selectors kept, and what its retention ceiling dropped.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SelectionCounts {
-    pub selected: u64,
-    pub omitted: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Report {
     pub sessions: Vec<Session>,
     pub summary: Summary,
+}
+
+/// The sessions retained for the document and the run's summary.
+impl From<(Vec<Session>, Summary)> for Report {
+    fn from((sessions, summary): (Vec<Session>, Summary)) -> Self {
+        Self { sessions, summary }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -310,16 +319,16 @@ pub enum Event {
     },
 }
 
-impl Event {
-    #[must_use]
-    pub fn session(session: Session) -> Self {
+impl From<Session> for Event {
+    fn from(session: Session) -> Self {
         Self::Session {
             session: Box::new(session),
         }
     }
+}
 
-    #[must_use]
-    pub fn complete(summary: Summary) -> Self {
+impl From<Summary> for Event {
+    fn from(summary: Summary) -> Self {
         Self::Complete {
             summary: Box::new(summary),
         }

@@ -89,7 +89,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     .map_err(CliError::classified)?;
     let _ = writer.finish().map_err(CliError::classified)?;
     // Construct all fallible report fields before publishing the saved capture.
-    let report = output::export::Report::new(args.write.display().to_string(), report, plan)
+    let report = output::export::Report::try_from((args.write.display().to_string(), report, plan))
         .map_err(CliError::classified)?;
     staged.sync()?;
     crate::cancellation::check()?;

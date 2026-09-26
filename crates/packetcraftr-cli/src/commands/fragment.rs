@@ -91,18 +91,12 @@ pub(crate) fn run(
             compression,
         );
     }
-    let summary = output::fragment::Complete {
-        mtu: args.mtu,
-        fragments: frames.len() as u64,
-        bytes: frames.iter().map(|frame| frame.bytes().len() as u64).sum(),
-    };
+    let summary = output::fragment::Complete::from((args.mtu, frames.as_slice()));
     let mut records = Vec::new();
     for (index, frame) in frames.into_iter().enumerate() {
         crate::cancellation::check()?;
-        let record = output::fragment::Fragment {
-            fragment_index: index as u64,
-            frame: output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?,
-        };
+        let record = output::fragment::Fragment::try_from((index as u64, frame))
+            .map_err(CliError::classified)?;
         match format {
             CaptureFormat::Json => records.push(record),
             CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
@@ -119,10 +113,7 @@ pub(crate) fn run(
     match format {
         CaptureFormat::Json => emit_aggregate(
             output::contract::Command::Fragment,
-            output::fragment::Report {
-                summary,
-                fragments: records,
-            },
+            output::fragment::Report::from((summary, records)),
             built.diagnostics,
         ),
         CaptureFormat::Ndjson => stream

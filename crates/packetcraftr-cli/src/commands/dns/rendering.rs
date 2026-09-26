@@ -7,8 +7,6 @@ use crate::rendering::StreamEncoder;
 
 use packetcraftr_core::error::Kind;
 
-use packetcraftr_core as core;
-
 use crate::output;
 
 use crate::errors::CliError;
@@ -20,10 +18,14 @@ use crate::rendering::{
 /// Renders each batch question in input order: a status line first, then the
 /// completed question's ordinary detail block.
 pub(super) fn render_batch_text(
-    result: output::dns::BatchResult,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    published: output::envelope::Published<output::dns::BatchResult>,
 ) -> Result<(), CliError> {
+    let output::envelope::Published {
+        result,
+        diagnostics,
+        stats,
+    } = published;
+    let stats = stats.unwrap_or_default();
     let total = result.questions.len();
     for (index, question) in result.questions.iter().enumerate() {
         write_stdout_line(format_args!(
@@ -37,7 +39,10 @@ pub(super) fn render_batch_text(
             question.error.as_deref().unwrap_or("none"),
         ))?;
         if let Some(report) = &question.result {
-            render_text((**report).clone(), Vec::new(), None)?;
+            render_text(output::envelope::Published::new(
+                (**report).clone(),
+                Vec::new(),
+            ))?;
         }
     }
     write_stdout_line(format_args!(
@@ -50,10 +55,13 @@ pub(super) fn render_batch_text(
 /// `stats` is absent for a batch question, whose counters only the batch
 /// total reports.
 pub(super) fn render_text(
-    result: output::dns::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: Option<packetcraftr::Stats>,
+    published: output::envelope::Published<output::dns::Report>,
 ) -> Result<(), CliError> {
+    let output::envelope::Published {
+        result,
+        diagnostics,
+        stats,
+    } = published;
     let server = result.server.parse::<IpAddr>().map_or_else(
         |_| format!("{}:{}", result.server, result.server_port),
         |address| SocketAddr::new(address, result.server_port).to_string(),
@@ -88,9 +96,9 @@ pub(super) fn render_text(
         }
     }
     for (section, records) in [
-        (packetcraftr::dns::Section::Answer, &result.answers),
-        (packetcraftr::dns::Section::Authority, &result.authorities),
-        (packetcraftr::dns::Section::Additional, &result.additionals),
+        (output::dns::Section::Answer, &result.answers),
+        (output::dns::Section::Authority, &result.authorities),
+        (output::dns::Section::Additional, &result.additionals),
     ] {
         for record in records {
             render_record(section, record)?;
@@ -145,7 +153,7 @@ pub(super) fn render_text(
 /// A decoded record in the shared DNS record line; its data is the record's
 /// JSON form without the type tag the line already names.
 fn render_record(
-    section: packetcraftr::dns::Section,
+    section: output::dns::Section,
     record: &output::dns::Record,
 ) -> Result<(), CliError> {
     let mut data = serde_json::to_value(&record.data).map_err(serialization_failure)?;
@@ -209,31 +217,31 @@ pub(super) fn emit_event(
     event: packetcraftr::dns::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::dns::Event::try_from_dns(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
+    let published = output::envelope::Published::<output::dns::Event>::try_from(event)
+        .map_err(CliError::classified)?;
+    Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn emit_complete(
     summary: packetcraftr::dns::Summary,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics, stats) = output::dns::Event::complete_from_dns(summary);
-    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<output::dns::Event>::from(
+            summary,
+        ))?,
+    )
 }
 
 pub(super) fn emit_batch_complete(
     batch: packetcraftr::dns::BatchReport,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let stats = batch.stats.clone();
-    let questions = output::dns::BatchResult::question_completions(&batch);
-    let record = output::dns::Event::BatchComplete {
-        server: batch.server,
-        server_port: batch.server_port,
-        questions,
-    };
-    Ok(stream.complete_with_stats(record, Vec::new(), stats)?)
+    Ok(
+        stream.complete_published(output::envelope::Published::<output::dns::Event>::from(
+            batch,
+        ))?,
+    )
 }
 
 #[cfg(test)]

@@ -29,16 +29,6 @@ pub(super) struct Written {
     pub(super) bytes: u64,
 }
 
-impl From<Written> for crate::output::follow::WrittenFile {
-    fn from(value: Written) -> Self {
-        Self {
-            direction: value.direction,
-            path: value.path,
-            bytes: value.bytes,
-        }
-    }
-}
-
 /// Stages per-direction files under one output-byte budget. Each publishes
 /// atomically without overwriting, in deterministic order. On failure, attempts
 /// to remove files already published and reports cleanup errors; unpublished

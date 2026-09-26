@@ -12,15 +12,14 @@ use crate::rendering::{
     StreamEncoder, document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
     render_diagnostics_text, write_stdout_line, write_summary_line,
 };
-use packetcraftr::Stats;
 
 pub(super) fn render_complete(
     format: CaptureFormat,
-    summary: &output::capture::Summary,
-    stats: &Stats,
+    snapshot: &output::capture::Snapshot,
     diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
+    let output::capture::Snapshot { summary, stats } = snapshot;
     match format {
         CaptureFormat::Json => {
             emit_aggregate_with_stats(Command::Capture, summary, diagnostics, stats.clone())
@@ -35,7 +34,7 @@ pub(super) fn render_complete(
                 stats.packets_completed,
                 stats.bytes,
                 summary.sources.len(),
-                document_spelling(&summary.stop_reason)
+                summary.stop_reason
             ))?;
             for source in &summary.sources {
                 if let Some(settings) = &source.capture_settings {
@@ -72,9 +71,7 @@ pub(super) fn render_complete(
 /// `requested/applied/effective` in one parenthesized triplet; `default` marks
 /// an unset request, `-` a setting never applied, and `unknown` a value the
 /// backend cannot confirm.
-fn realized_text<T: std::fmt::Display>(
-    realized: &packetcraftr_netio::capture::Realized<T>,
-) -> String {
+fn realized_text<T: std::fmt::Display>(realized: &output::capture::Realized<T>) -> String {
     fn field<T: std::fmt::Display>(value: &Option<T>, none: &str) -> String {
         value
             .as_ref()

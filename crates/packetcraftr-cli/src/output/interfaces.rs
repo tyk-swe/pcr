@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 
+use packetcraftr_netio::capture::TimestampType;
 use packetcraftr_netio::interface::Info;
 
 use crate::output::network::Interface;
@@ -12,11 +13,17 @@ pub struct Report {
     pub interfaces: Vec<Interface>,
 }
 
-impl Report {
-    pub fn new(interfaces: Vec<Info>) -> Self {
+/// Interfaces, each with the timestamp types enumerated for it when they were
+/// requested, in index-then-name order with sorted addresses.
+impl From<Vec<(Info, Option<Vec<TimestampType>>)>> for Report {
+    fn from(interfaces: Vec<(Info, Option<Vec<TimestampType>>)>) -> Self {
         let mut interfaces = interfaces
             .into_iter()
-            .map(Interface::from)
+            .map(|(info, timestamp_types)| Interface {
+                timestamp_types: timestamp_types
+                    .map(|types| types.into_iter().map(Into::into).collect()),
+                ..Interface::from(info)
+            })
             .collect::<Vec<_>>();
         for interface in &mut interfaces {
             interface.addresses.sort();
@@ -25,5 +32,15 @@ impl Report {
             (left.index, left.name.as_str()).cmp(&(right.index, right.name.as_str()))
         });
         Self { interfaces }
+    }
+}
+
+impl From<Vec<Info>> for Report {
+    fn from(interfaces: Vec<Info>) -> Self {
+        interfaces
+            .into_iter()
+            .map(|info| (info, None))
+            .collect::<Vec<_>>()
+            .into()
     }
 }

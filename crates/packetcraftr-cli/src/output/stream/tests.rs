@@ -148,7 +148,10 @@ fn classified_error_includes_typed_context() {
     )
     .with_context(Some(Coordinate::Attempt(7)));
     let error = Error::classified(&source);
-    assert_eq!(error.context, Some(Coordinate::Attempt(7)));
+    assert_eq!(
+        error.context,
+        Some(crate::output::envelope::ErrorContext::Attempt(7))
+    );
     // The externally tagged coordinate publishes exactly the one key the
     // output contract declares.
     let value = serde_json::to_value(&error).expect("error serializes");

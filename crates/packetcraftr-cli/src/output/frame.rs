@@ -9,12 +9,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use bytes::Bytes;
 use serde::Serialize;
 
-use packetcraftr_core::frame::{Direction, Frame};
-use packetcraftr_core::{decode::DecodedPacket, layout::PacketLayout};
+use packetcraftr_core::frame::{self as library_frame, Frame};
+use packetcraftr_core::{decode::DecodedPacket, layout};
 
 use super::contract::Error;
+use super::diagnostic::Diagnostic;
 use super::hex::CompactHex;
-use packetcraftr_core::diagnostic::Diagnostic;
 
 const MAX_SIGNED_SECONDS: u64 = i64::MAX as u64;
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
@@ -126,6 +126,87 @@ impl std::fmt::Display for Timestamp {
     }
 }
 
+published_enum! {
+    /// The direction a capture source recorded for a frame.
+    pub enum Direction from library_frame::Direction {
+        Inbound => "inbound",
+        Outbound => "outbound",
+        Unknown => "unknown",
+    }
+}
+
+/// A half-open byte range within an encoded packet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct ByteRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl From<layout::ByteRange> for ByteRange {
+    fn from(value: layout::ByteRange) -> Self {
+        Self {
+            start: value.start,
+            end: value.end,
+        }
+    }
+}
+
+/// Where one reflective field sits in the encoded packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct FieldLayout {
+    pub name: &'static str,
+    pub range: ByteRange,
+}
+
+impl From<layout::FieldLayout> for FieldLayout {
+    fn from(value: layout::FieldLayout) -> Self {
+        Self {
+            name: value.name,
+            range: value.range.into(),
+        }
+    }
+}
+
+/// Where one layer and its fields sit in the encoded packet.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LayerLayout {
+    pub index: usize,
+    pub protocol: &'static str,
+    pub range: ByteRange,
+    pub fields: Vec<FieldLayout>,
+}
+
+impl From<layout::LayerLayout> for LayerLayout {
+    fn from(value: layout::LayerLayout) -> Self {
+        Self {
+            index: value.index,
+            protocol: value.protocol.as_str(),
+            range: value.range.into(),
+            fields: value.fields.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The byte layout of every layer of an encoded packet, in packet order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Layout {
+    pub layers: Vec<LayerLayout>,
+}
+
+impl From<layout::PacketLayout> for Layout {
+    fn from(value: layout::PacketLayout) -> Self {
+        Self {
+            layers: value.layers.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<&layout::PacketLayout> for Layout {
+    fn from(value: &layout::PacketLayout) -> Self {
+        value.clone().into()
+    }
+}
+
 /// Exact complete-frame bytes used by raw/hex/capture renderers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Wire {
@@ -133,15 +214,16 @@ pub struct Wire {
     pub length: u64,
 }
 
-impl Wire {
-    pub fn new(bytes: impl Into<Bytes>) -> Self {
-        let bytes = bytes.into();
+impl From<Bytes> for Wire {
+    fn from(bytes: Bytes) -> Self {
         Self {
             length: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
             bytes,
         }
     }
+}
 
+impl Wire {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -184,23 +266,23 @@ pub struct Captured {
     pub direction: Option<Direction>,
 }
 
-impl Captured {
-    pub fn try_from_frame(frame: Frame) -> Result<Self, Error> {
+impl TryFrom<Frame> for Captured {
+    type Error = Error;
+
+    fn try_from(frame: Frame) -> Result<Self, Error> {
         Ok(Self {
             timestamp: frame.timestamp.map(Timestamp::try_from).transpose()?,
             captured_length: frame.captured_length(),
             original_length: frame.original_length(),
             link_type: frame.link_type.0,
             interface: frame.interface,
-            direction: frame.direction,
+            direction: frame.direction.map(Into::into),
             bytes: frame.bytes().clone(),
         })
     }
+}
 
-    pub(crate) fn try_from_frames(frames: Vec<Frame>) -> Result<Vec<Self>, Error> {
-        frames.into_iter().map(Self::try_from_frame).collect()
-    }
-
+impl Captured {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -249,16 +331,16 @@ impl Serialize for Captured {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Stack {
     pub packet: packetcraftr_core::document::Packet,
-    pub layout: PacketLayout,
+    pub layout: Layout,
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl Stack {
-    pub fn from_decoded(decoded: &DecodedPacket) -> Self {
+impl From<&DecodedPacket> for Stack {
+    fn from(decoded: &DecodedPacket) -> Self {
         Self {
             packet: packetcraftr_core::document::Packet::from_packet(&decoded.packet),
-            layout: decoded.layout.clone(),
-            diagnostics: decoded.diagnostics.clone(),
+            layout: (&decoded.layout).into(),
+            diagnostics: decoded.diagnostics.iter().map(Into::into).collect(),
         }
     }
 }
@@ -268,12 +350,14 @@ impl Stack {
 pub struct Decoded {
     pub frame: Captured,
     pub packet: packetcraftr_core::document::Packet,
-    pub layout: PacketLayout,
+    pub layout: Layout,
     pub diagnostics: Vec<Diagnostic>,
 }
 
-impl Decoded {
-    pub fn try_from_decoded(decoded: DecodedPacket) -> Result<Self, Error> {
+impl TryFrom<DecodedPacket> for Decoded {
+    type Error = Error;
+
+    fn try_from(decoded: DecodedPacket) -> Result<Self, Error> {
         let DecodedPacket {
             packet,
             original: _,
@@ -282,10 +366,10 @@ impl Decoded {
             diagnostics,
         } = decoded;
         Ok(Self {
-            frame: Captured::try_from_frame(frame)?,
+            frame: frame.try_into()?,
             packet: packetcraftr_core::document::Packet::from_packet(&packet),
-            layout,
-            diagnostics,
+            layout: layout.into(),
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })
     }
 }

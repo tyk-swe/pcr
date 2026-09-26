@@ -65,7 +65,11 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .diagnostics
         .push(Diagnostic::warning("build.fixture", "fixture warning"));
     let wire = built.bytes.clone();
-    let (built_output, build_diagnostics) = build_output::Report::from_built(built);
+    let packetcraftr_cli::output::envelope::Published {
+        result: built_output,
+        diagnostics: build_diagnostics,
+        ..
+    } = packetcraftr_cli::output::envelope::Published::<build_output::Report>::from(built);
 
     assert_eq!(built_output.frame.bytes(), wire.as_ref());
     assert_eq!(
@@ -101,26 +105,26 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
         .push(Diagnostic::info("decode.fixture", "fixture note"));
 
     assert!(matches!(
-        read::Frame::try_from_frame(0, frame.clone()),
+        read::Frame::try_from((0, frame.clone())),
         Err(contract::Error::InvalidSourceFrame)
     ));
     assert!(matches!(
-        capture::Event::try_from_frame(0, frame.clone()),
+        capture::Event::try_from((0, frame.clone())),
         Err(contract::Error::InvalidSourceFrame)
     ));
-    let raw_record = read::Frame::try_from_frame(7, frame.clone()).expect("raw frame converts");
+    let raw_record = read::Frame::try_from((7, frame.clone())).expect("raw frame converts");
     let dissected_record =
-        read::Frame::try_from_decoded(7, frame, &decoded).expect("dissected frame converts");
-    let event = read::Event::Frame(raw_record.clone());
+        read::Frame::try_from((7, frame, &decoded)).expect("dissected frame converts");
+    let event = read::Event::from(raw_record.clone());
     assert_eq!(event.event_name(), "frame");
     let raw_value = serde_json::to_value(event).expect("raw read payload serializes");
     assert_eq!(raw_value["source_frame"], 7);
     assert!(raw_value.get("decoded").is_none());
-    let complete = read::Event::Complete {
+    let complete = read::Event::from(read::Totals {
         frames_read: 7,
         frames_matched: 1,
         captured_bytes_read: 512,
-    };
+    });
     assert_eq!(complete.event_name(), "complete");
     let complete = serde_json::to_value(complete).expect("read completion payload serializes");
     assert_eq!(complete["captured_bytes_read"], 512);
@@ -139,7 +143,10 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
     assert!(raw_decoded.is_none());
     assert_eq!(raw_frame.bytes(), dissected_frame.bytes());
     let stack = decoded_stack.expect("dissection was requested");
-    assert_eq!(stack.layout, decoded.layout);
+    assert_eq!(
+        stack.layout,
+        packetcraftr_cli::output::frame::Layout::from(&decoded.layout)
+    );
     assert!(
         stack
             .diagnostics
@@ -149,7 +156,11 @@ fn packet_output_adapters_preserve_wire_data_and_separate_diagnostics() {
 
     let original = decoded.original.clone();
     let link_type = decoded.frame.link_type.0;
-    let (dissected_output, decode_diagnostics) = dissect_output::Report::from_decoded(decoded);
+    let packetcraftr_cli::output::envelope::Published {
+        result: dissected_output,
+        diagnostics: decode_diagnostics,
+        ..
+    } = packetcraftr_cli::output::envelope::Published::<dissect_output::Report>::from(decoded);
     assert_eq!(dissected_output.frame.bytes(), original.as_ref());
     assert_eq!(
         dissected_output.frame.length,
@@ -180,7 +191,7 @@ fn stats_output_selects_exactly_one_requested_table() {
     ];
 
     for (table, expected_key) in cases {
-        let result = stats::Report::try_from_report(table, report.clone(), 9)
+        let result = stats::Report::try_from((table, report.clone(), 9))
             .expect("in-range report must convert");
         let value = serde_json::to_value(&result).expect("statistics output serializes");
 
@@ -215,7 +226,7 @@ fn stats_output_selects_exactly_one_requested_table() {
 fn stats_fragment_output_preserves_family_counters_outcomes_and_omissions() {
     let report = representative_stats_report();
     let stats::TableData::Fragments { fragments } =
-        stats::Report::try_from_report(stats::Table::Fragments, report.clone(), 9)
+        stats::Report::try_from((stats::Table::Fragments, report.clone(), 9))
             .expect("fragment report converts")
             .table
     else {
@@ -279,7 +290,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
     .into_iter()
     .map(Into::into)
     .collect();
-    let expert_result = expert::Report::from_summary(
+    let expert_result = expert::Report::from((
         packetcraftr_core::analysis::expert::Summary {
             clock: Default::default(),
             findings: 3,
@@ -292,7 +303,7 @@ fn expert_output_preserves_finding_severity_streams_and_code_order() {
         11,
         findings,
         &IpReassemblyReport::default(),
-    );
+    ));
     let expert_json = serde_json::to_value(&expert_result).expect("expert output serializes");
     assert_eq!(expert_result.codes[0].code, "capture.note");
     assert_eq!(expert_json["findings"][0]["severity"], "error");
@@ -327,9 +338,11 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
     .into_iter()
     .map(Into::into)
     .collect();
-    let followed = follow::Report::from_summary(
-        packetcraftr_core::analysis::StreamTransport::Tcp,
-        2,
+    let followed = follow::Report::try_from((
+        packetcraftr_core::analysis::StreamRef {
+            transport: packetcraftr_core::analysis::StreamTransport::Tcp,
+            index: 2,
+        },
         packetcraftr_core::analysis::follow::Summary {
             scope: None,
             clock: Default::default(),
@@ -342,29 +355,33 @@ fn follow_output_preserves_flow_directions_bytes_and_missing_endpoints() {
         chunks,
         &IpReassemblyReport::default(),
         Vec::new(),
-    );
+    ))
+    .expect("the followed conversation converts");
 
     assert_eq!(followed.client.expect("client endpoint").port, 40_000);
     assert_eq!(followed.server.expect("server endpoint").port, 443);
     assert_eq!(followed.chunks[0].bytes_hex, "00ff");
     assert_eq!(
         followed.chunks[0].direction,
-        packetcraftr_core::analysis::follow::PeerDirection::ClientToServer
+        follow::PeerDirection::ClientToServer
     );
     assert_eq!(
         followed.chunks[1].direction,
-        packetcraftr_core::analysis::follow::PeerDirection::ServerToClient
+        follow::PeerDirection::ServerToClient
     );
     assert_eq!(followed.undelivered_bytes, 4);
 
-    let empty = follow::Report::from_summary(
-        packetcraftr_core::analysis::StreamTransport::Udp,
-        99,
+    let empty = follow::Report::try_from((
+        packetcraftr_core::analysis::StreamRef {
+            transport: packetcraftr_core::analysis::StreamTransport::Udp,
+            index: 99,
+        },
         packetcraftr_core::analysis::follow::Summary::default(),
         Vec::new(),
         &IpReassemblyReport::default(),
         Vec::new(),
-    );
+    ))
+    .expect("an absent conversation converts");
     assert!(empty.client.is_none() && empty.server.is_none());
     assert_eq!(
         serde_json::to_value(empty).expect("empty follow output serializes")["chunks"],

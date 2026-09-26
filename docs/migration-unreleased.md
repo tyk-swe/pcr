@@ -865,3 +865,52 @@ are unchanged:
 | `output::dns_analysis` | `output::dns_read` |
 | `output::forwarding` | `output::verify_forwarding` |
 | `output::scan_connect` | `output::scan::connect` |
+
+## CLI-owned output types
+
+`packetcraftr_cli::output` types no longer embed library types, except the
+versioned `packetcraftr.packet` document (`document::Packet`) and its
+`FieldValue`s. Each other field is a CLI-owned type with the same JSON shape,
+so the published JSON is unchanged. Common replacements:
+
+| Library type | Output type |
+| --- | --- |
+| `packetcraftr::Stats` | `output::envelope::Stats` |
+| `core::diagnostic::{Diagnostic, Severity}` | `output::diagnostic::{Diagnostic, Severity}` |
+| `core::error::Coordinate` (in `envelope::Error.context`) | `output::envelope::ErrorContext` |
+| `core::layout::PacketLayout`, `core::frame::Direction` | `output::frame::{Layout, Direction}` |
+| `netio::interface::Id`, `link::Mode`, `route::{Scope, SelectionReason}` | `output::network::{InterfaceId, LinkMode, Scope, SelectionReason}` |
+| `netio::capture::{Statistics, RealizedSettings}` | `output::capture::{Statistics, RealizedSettings}` |
+| `core::analysis::{scope::Definition, ClockReport, StreamTransport, Endpoint, StreamRef}` | `output::analysis::{Scope, Clock, StreamTransport, Endpoint, StreamRef}` |
+| `packetcraftr::probe::{Transport, ProbeStatus}` | `output::probe::{Transport, ProbeStatus}` |
+| `packetcraftr::fuzz::CaseOutcome`, `core::fuzz::Strategy` | `output::fuzz::{Outcome, Strategy}` |
+
+Every conversion is a `From` or `TryFrom` impl. A conversion whose source also
+carries diagnostics or totals yields `output::envelope::Published<T>`
+(`result`, `diagnostics`, `stats`), which `Envelope::published` and
+`StreamEncoder::{emit_published, complete_published}` publish:
+
+| Before | After |
+| --- | --- |
+| `send::Report::try_from_report(r)` → `(report, diagnostics, stats)` | `Published::<send::Report>::try_from(r)` |
+| `scan::Event::try_from_scan(e)` → `(event, diagnostics)` | `Published::<scan::Event>::try_from(e)` |
+| `scan::Event::complete_from_scan(s)` | `Published::<scan::Event>::from(s)` |
+| `fuzz::Report::try_from_offline(r)` / `try_from_live(r)` | `Published::<fuzz::Report>::try_from(r)` |
+| `build::Report::from_built(b)` | `Published::<build::Report>::from(b)` |
+| `dissect::Report::from_decoded(d)` + `AggregateResult::new` | `Published::<dissect::AggregateResult>::from((matched, d))` |
+| `frame::Captured::try_from_frame(f)`, `Wire::new(b)` | `Captured::try_from(f)`, `Wire::from(b)` |
+| `read::Frame::try_from_frame(n, f)` / `try_from_decoded(n, f, &d)` | `read::Frame::try_from((n, f))` / `try_from((n, f, &d))` |
+| `stats::Report::try_from_report(t, r, n)` | `stats::Report::try_from((t, r, n))` |
+| `follow::Report::from_summary(transport, index, s, chunks, &ip, written)` | `follow::Report::try_from((stream_ref, s, chunks, &ip, written))` |
+| `replay::Report::from_summary(s, interface, mode, frames)` | `replay::Report::try_from((s, Option<interface>, mode, frames))` |
+| `verify_forwarding::Report::from_report(&r, paths)` | `Report::try_from((&r, Sided<(path, source, filter)>, decode))` |
+| `interfaces::Report::new(infos)`, `merge::Report::new(path, r)` | `Report::from(infos)`, `Report::from((path, r))` |
+
+The other command outputs follow the same pattern (exchange, traceroute, dns,
+tls, expert, http, dns-read, export, rewrite, fragment, projection,
+protocols, routes, plan, and resource workers). The fuzz campaign coherence
+check moved to `packetcraftr::fuzz::Totals`; `contract::Error::IncoherentFuzzEvents`
+wraps its `fuzz::IncoherentReport` source. A library value the published
+contract has no spelling for (a future variant of a `non_exhaustive` enum)
+fails with `contract::Error::Unpublished` (`internal.error`), except an error
+coordinate, which is omitted like other optional error metadata.

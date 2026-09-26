@@ -9,7 +9,7 @@ use packetcraftr_core::error::Kind;
 use crate::errors::CliError;
 use crate::output::{self, contract::BuildFormat};
 use crate::rendering::{
-    emit_aggregate, render_diagnostics_text, spaced_hex, write_hex_line, write_raw,
+    emit_published, render_diagnostics_text, spaced_hex, write_hex_line, write_raw,
     write_stdout_line, write_summary_line,
 };
 
@@ -25,10 +25,10 @@ pub(super) fn render_packet(
         }
         BuildFormat::Hex => write_hex_line(&built.bytes),
         BuildFormat::Raw => write_raw(&built.bytes),
-        BuildFormat::Json => {
-            let (result, diagnostics) = output::build::Report::from_built(built);
-            emit_aggregate(output::contract::Command::Build, result, diagnostics)
-        }
+        BuildFormat::Json => emit_published(
+            output::contract::Command::Build,
+            output::envelope::Published::<output::build::Report>::from(built),
+        ),
         BuildFormat::Ndjson | BuildFormat::Pcap | BuildFormat::PcapNg => Err(CliError::new(
             Kind::Internal,
             "streaming and capture build output returned before packet rendering",

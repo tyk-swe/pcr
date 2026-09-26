@@ -9,7 +9,7 @@ use packetcraftr_core::error::Coordinate;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::filter::Context;
 use packetcraftr_core::filter::Filter;
-use packetcraftr_core::frame::Frame;
+use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
 use packetcraftr_core::registry::Registry;
 
 use super::errors::CliError;
@@ -66,131 +66,48 @@ pub(crate) fn compile(
     Ok(filter)
 }
 
-/// Decodes complete bounded frames and applies an optional display filter, so
-/// every frame-at-a-time command dissects, budgets, and classifies identically.
-#[derive(Debug)]
-pub(crate) struct FrameDecoder {
-    decoder: core::decode::Dissector,
-    filter: Option<Filter>,
+/// A frame selector over `source`, compiled for a command that judges frames
+/// one at a time.
+pub(crate) fn frame_selector(
+    source: &str,
+    registry: &Arc<Registry>,
     max_frame_bytes: usize,
+) -> Result<FrameSelector, CliError> {
+    let filter = compile(source, registry, Capabilities::frames_only())?;
+    FrameSelector::new(Arc::clone(registry), filter, max_frame_bytes).map_err(CliError::classified)
 }
 
-impl FrameDecoder {
-    pub(crate) fn new(
-        registry: Arc<Registry>,
-        filter: Option<Filter>,
-        max_frame_bytes: usize,
-    ) -> Self {
-        Self {
-            decoder: core::decode::Dissector::new(registry),
-            filter,
-            max_frame_bytes,
-        }
-    }
-
-    pub(crate) fn compile(
-        registry: &Arc<Registry>,
-        source: Option<&str>,
-        max_frame_bytes: usize,
-    ) -> Result<Self, CliError> {
-        let filter = source
-            .map(|source| compile(source, registry, Capabilities::frames_only()))
-            .transpose()?;
-        Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
-    }
-
-    /// Dissects `frame` under this decoder's bounded packet budget.
-    pub(crate) fn decode(&self, frame: &Frame) -> Result<core::decode::DecodedPacket, CliError> {
-        self.decoder
-            .decode(
-                frame.clone(),
-                core::decode::Options {
-                    limits: core::packet::Limits {
-                        max_packet_size: self.max_frame_bytes,
-                        ..core::packet::Limits::default()
-                    },
-                },
-            )
-            .map_err(CliError::classified)
-    }
-
-    /// Decodes then evaluates the filter with `derived=&[]` and no stream
-    /// indexes; `Ok(None)` means the frame decoded but was not selected.
-    /// Failures carry the source frame as their coordinate.
-    pub(crate) fn decode_selected(
-        &self,
-        source_frame: u64,
-        frame: &Frame,
-    ) -> Result<Option<core::decode::DecodedPacket>, CliError> {
-        let context = Some(Coordinate::SourceFrame(source_frame));
-        let decoded = self
-            .decode(frame)
-            .map_err(|error| error.with_context(context))?;
-        if let Some(filter) = &self.filter {
-            let keep = filter
-                .matches(&Context {
-                    decoded: &decoded,
-                    derived: &[],
-                    number: source_frame,
-                    tcp_stream: None,
-                    udp_stream: None,
-                })
-                .map_err(|error| CliError::classified(error).with_context(context))?;
-            if !keep {
-                return Ok(None);
-            }
-        }
-        Ok(Some(decoded))
-    }
+/// [`frame_selector`] for an optional `--filter`.
+pub(crate) fn optional_frame_selector(
+    source: Option<&str>,
+    registry: &Arc<Registry>,
+    max_frame_bytes: usize,
+) -> Result<Option<FrameSelector>, CliError> {
+    source
+        .map(|source| frame_selector(source, registry, max_frame_bytes))
+        .transpose()
 }
 
-/// Evaluates a compiled filter against complete bounded frames.
-///
-/// Undissectable frames are errors rather than silent mismatches.
-#[derive(Debug)]
-pub(crate) struct FrameSelector(FrameDecoder);
-
-impl FrameSelector {
-    pub(crate) fn new(registry: Arc<Registry>, filter: Filter, max_frame_bytes: usize) -> Self {
-        Self(FrameDecoder::new(registry, Some(filter), max_frame_bytes))
-    }
-
-    pub(crate) fn compile(
-        source: &str,
-        registry: &Arc<Registry>,
-        max_frame_bytes: usize,
-    ) -> Result<Self, CliError> {
-        let filter = compile(source, registry, Capabilities::frames_only())?;
-        Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
-    }
-
-    pub(crate) fn compile_optional(
-        source: Option<&str>,
-        registry: &Arc<Registry>,
-        max_frame_bytes: usize,
-    ) -> Result<Option<Self>, CliError> {
-        source
-            .map(|source| Self::compile(source, registry, max_frame_bytes))
-            .transpose()
-    }
-
-    /// Decides whether the one-based `source_frame` is kept.
-    pub(crate) fn keep(&self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
-        self.0
-            .decode_selected(source_frame, frame)
-            .map(|decoded| decoded.is_some())
-    }
+/// A frame decoder applying an optional `--filter`, so every frame-at-a-time
+/// command dissects, budgets, and classifies identically.
+pub(crate) fn frame_decoder(
+    registry: &Arc<Registry>,
+    source: Option<&str>,
+    max_frame_bytes: usize,
+) -> Result<FrameDecoder, CliError> {
+    let filter = source
+        .map(|source| compile(source, registry, Capabilities::frames_only()))
+        .transpose()?;
+    FrameDecoder::new(Arc::clone(registry), filter, max_frame_bytes).map_err(CliError::classified)
 }
 
-impl packetcraftr::replay::Selector for FrameSelector {
-    fn select(
-        &mut self,
-        source_frame: u64,
-        frame: &Frame,
-    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
-        self.keep(source_frame, frame)
-            .map_err(CliError::into_boundary_error)
-    }
+/// A frame-at-a-time decode or filter failure, at the one-based source frame
+/// it stopped on.
+pub(crate) fn frame_error(
+    source_frame: u64,
+    error: impl core::error::Classified + std::fmt::Display,
+) -> CliError {
+    CliError::classified(error).with_context(Some(Coordinate::SourceFrame(source_frame)))
 }
 
 /// Evaluates a compiled filter against a dissection the caller already owns,
@@ -203,7 +120,8 @@ pub(crate) fn matches_decoded(filter: &Filter, context: &Context<'_>) -> Result<
 mod tests {
     use std::time::UNIX_EPOCH;
 
-    use packetcraftr_core::{frame::LinkType, protocol::builtin};
+    use packetcraftr_core::frame::{Frame, LinkType};
+    use packetcraftr_core::protocol::builtin;
 
     use super::*;
 
@@ -229,52 +147,47 @@ mod tests {
     }
 
     #[test]
-    fn selector_uses_frame_context_and_surfaces_decode_limits() {
+    fn frame_failures_keep_their_classification_at_the_source_frame() {
         let registry = registry();
-        let filter = compile(
-            "frame.number == 2 && frame.len == 14",
-            &registry,
-            Capabilities::frames_only(),
-        )
-        .expect("frame metadata filter");
         let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
             .expect("bounded Ethernet frame");
-        let selector = FrameSelector::new(Arc::clone(&registry), filter, 14);
-
-        assert!(!selector.keep(1, &frame).expect("frame dissects"));
-        assert!(selector.keep(2, &frame).expect("frame dissects"));
-
-        let filter = compile("frame.number == 2", &registry, Capabilities::frames_only()).unwrap();
-        let too_small = FrameSelector::new(registry, filter, 13);
-        let error = too_small
-            .keep(2, &frame)
-            .expect_err("decode errors cannot become silent mismatches");
+        let too_small = frame_selector("frame.number == 2", &registry, 13).unwrap();
+        let error = frame_error(
+            2,
+            too_small
+                .keep(2, &frame)
+                .expect_err("decode errors cannot become silent mismatches"),
+        );
         assert_eq!(error.classification.code, "policy.decode_resource_limit");
         assert_eq!(error.exit_code(), 6);
+        assert_eq!(
+            core::error::Classified::context(&error.into_boundary_error()),
+            Some(Coordinate::SourceFrame(2))
+        );
     }
 
     #[test]
-    fn compile_optional_handles_none_valid_and_invalid_filters() {
+    fn optional_selectors_handle_none_valid_and_invalid_filters() {
         let registry = registry();
-        let none_selector = FrameSelector::compile_optional(None, &registry, 14)
-            .expect("absent filter compiles to None");
+        let none_selector =
+            optional_frame_selector(None, &registry, 14).expect("absent filter compiles to None");
         assert!(none_selector.is_none());
 
-        let some_selector = FrameSelector::compile_optional(Some("frame.len == 14"), &registry, 14)
+        let some_selector = optional_frame_selector(Some("frame.len == 14"), &registry, 14)
             .expect("valid filter compiles to Some")
             .expect("selector is present");
         let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14])
             .expect("bounded Ethernet frame");
         assert!(some_selector.keep(1, &frame).expect("frame dissects"));
 
-        let stream_error = FrameSelector::compile_optional(Some("tcp.stream == 1"), &registry, 14)
+        let stream_error = optional_frame_selector(Some("tcp.stream == 1"), &registry, 14)
             .expect_err("stream field rejected under frames_only capability");
         assert_eq!(
             stream_error.classification.code,
             "cli.filter_unsupported_field"
         );
 
-        let syntax_error = FrameSelector::compile_optional(Some("(ethernet"), &registry, 14)
+        let syntax_error = optional_frame_selector(Some("(ethernet"), &registry, 14)
             .expect_err("malformed filter rejected");
         assert_eq!(syntax_error.classification.code, "cli.filter");
     }

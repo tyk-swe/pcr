@@ -34,6 +34,21 @@ impl From<&interface::Id> for InterfaceId {
     }
 }
 
+/// A requested interface publishes the half its selector names, leaving the
+/// other half empty.
+impl From<packetcraftr::route::Interface> for InterfaceId {
+    fn from(value: packetcraftr::route::Interface) -> Self {
+        match value {
+            packetcraftr::route::Interface::Id(id) => id.into(),
+            packetcraftr::route::Interface::Name(name) => Self { name, index: 0 },
+            packetcraftr::route::Interface::Index(index) => Self {
+                name: String::new(),
+                index: index.get(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize)]
 pub struct Flags {
     pub up: bool,

@@ -47,16 +47,8 @@ fn assert_message_is_stable(message: &str, variant: &str) {
     );
 }
 
-fn selection_denial() -> BoundaryError {
-    BoundaryError::new(
-        "selector refused frame 3",
-        Classification::new(
-            "cli.replay_selection",
-            Kind::Usage,
-            Some("narrow the filter"),
-        ),
-        vec!["frame 3 failed the filter".to_owned()],
-    )
+fn selection_failure() -> packetcraftr_core::filter::Error {
+    packetcraftr_core::filter::Error::TimestampUnavailable
 }
 
 #[test]
@@ -98,9 +90,23 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
             "Selection",
             ReplayError::Selection {
                 source_index: 2,
-                source: selection_denial(),
+                source: selection_failure(),
             },
-            "cli.replay_selection",
+            "packet.timestamp_unavailable",
+            Kind::Packet,
+            Some(Coordinate::SourceFrame(3)),
+        ),
+        (
+            "ConflictingInterfaces",
+            ReplayError::ConflictingInterfaces { source_index: 2 },
+            "cli.error",
+            Kind::Usage,
+            Some(Coordinate::SourceFrame(3)),
+        ),
+        (
+            "Unmapped",
+            ReplayError::Unmapped { source_index: 2 },
+            "cli.error",
             Kind::Usage,
             Some(Coordinate::SourceFrame(3)),
         ),
@@ -116,12 +122,12 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
 
     let selection = ReplayError::Selection {
         source_index: 2,
-        source: selection_denial(),
+        source: selection_failure(),
     };
     assert_eq!(
         selection.causes(),
-        ["selector refused frame 3", "frame 3 failed the filter"],
-        "selection reports the boundary's message and captured causes"
+        [selection_failure().to_string()],
+        "selection reports the filter's failure as its cause"
     );
 }
 
@@ -216,7 +222,6 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
         owned_ethernet_frame(3),
     ];
     let options = ReplayOptions {
-        interface: Some(common::fixture_interface().id),
         repeat: 1,
         inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Layer2,
@@ -245,7 +250,13 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
 
     let error = client
         .replay(
-            replay::Request::new(replay::Source::stream(ethernet_capture(&frames)), options),
+            replay::Request::new(
+                replay::Source::stream(ethernet_capture(&frames)),
+                replay::Routing::from(packetcraftr::route::Interface::Id(
+                    common::fixture_interface().id,
+                )),
+                options,
+            ),
             move |replay::Event::Frame(frame): replay::Event| {
                 published.push(Step::Published(frame.source_index as usize));
                 Ok(())

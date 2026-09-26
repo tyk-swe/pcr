@@ -26,10 +26,10 @@ use super::evidence::{FrameEvidence, Transmission, network_envelope, validate_tr
 use super::executor::{Executor, map_route_error};
 use super::plan::link_mode;
 use super::report::Report;
-use super::request::{AllFrames, Limits, Options, Request, Selector, Source, Timing};
+use super::request::{Limits, Options, Parts, Request, Selector, Source, Timing};
 use crate::clock::Clock;
 use crate::policy::{Authorizer, Operation};
-use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
+use crate::route::{Interface, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
 use packetcraftr_core::error::BoundaryError;
 
@@ -96,13 +96,16 @@ struct RecordingTransmitter {
 impl Executor for RecordingTransmitter {
     fn plan_frame(
         &mut self,
-        interface: &InterfaceId,
+        interface: &Interface,
         mode: LinkMode,
         frame: &Frame,
         _deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError> {
         self.validation_calls += 1;
-        let interface = self.resolves_to.as_ref().unwrap_or(interface);
+        let interface = match (&self.resolves_to, interface) {
+            (Some(resolved), _) | (None, Interface::Id(resolved)) => resolved,
+            (None, unresolved) => panic!("{unresolved:?} needs a resolved identity"),
+        };
         Ok(MaterializedRoute {
             plan: test_route(interface, mode, frame.link_type),
             neighbor_resolution: None,
@@ -138,6 +141,33 @@ impl Executor for RecordingTransmitter {
     }
 }
 
+/// Selects every frame and routes it through [`test_interface`].
+struct AllFrames;
+
+impl Selector for AllFrames {
+    fn select(&mut self, _source_index: u64, _frame: &Frame) -> Result<bool, Error> {
+        Ok(true)
+    }
+
+    fn interface(&mut self, _source_index: u64, _frame: &Frame) -> Result<Interface, Error> {
+        Ok(Interface::Id(test_interface()))
+    }
+}
+
+/// Selects every frame and routes it through one interface selector.
+struct Through(Interface);
+
+impl Selector for Through {
+    fn select(&mut self, _source_index: u64, _frame: &Frame) -> Result<bool, Error> {
+        Ok(true)
+    }
+
+    fn interface(&mut self, _source_index: u64, _frame: &Frame) -> Result<Interface, Error> {
+        Ok(self.0.clone())
+    }
+}
+
+/// Records the one-based frame numbers it is asked about.
 struct RecordingSelector {
     numbers: Vec<u64>,
     skip: Option<u64>,
@@ -145,9 +175,14 @@ struct RecordingSelector {
 }
 
 impl Selector for RecordingSelector {
-    fn select(&mut self, number: u64, _frame: &Frame) -> Result<bool, BoundaryError> {
+    fn select(&mut self, source_index: u64, _frame: &Frame) -> Result<bool, Error> {
+        let number = source_index + 1;
         self.numbers.push(number);
         Ok(self.keep && self.skip != Some(number))
+    }
+
+    fn interface(&mut self, _source_index: u64, _frame: &Frame) -> Result<Interface, Error> {
+        Ok(Interface::Id(test_interface()))
     }
 }
 
@@ -203,7 +238,6 @@ fn capture_reader(link_type: LinkType, frames: &[(Duration, &[u8])]) -> Reader<C
 
 fn replay_options(timing: Timing) -> Options {
     Options {
-        interface: Some(test_interface()),
         repeat: 1,
         inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Auto,
@@ -224,7 +258,7 @@ fn replay_source<R: std::io::Read, S: Selector, C: Clock>(
     emit: impl FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 ) -> Result<Report, Error> {
     run(
-        Request {
+        Parts {
             source,
             selector,
             options: options.clone(),
@@ -283,33 +317,18 @@ fn replay<S: Selector, C: Clock>(
 fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
     let resolved = test_interface();
     for (requested, accepted) in [
+        (Interface::Name(resolved.name.clone()), true),
         (
-            InterfaceId {
-                name: resolved.name.clone(),
-                index: 0,
-            },
+            Interface::Index(std::num::NonZeroU32::new(resolved.index).expect("fixture index")),
             true,
         ),
+        (Interface::Id(resolved.clone()), true),
+        (Interface::Name("other0".to_owned()), false),
         (
-            InterfaceId {
-                name: String::new(),
-                index: resolved.index,
-            },
-            true,
-        ),
-        (resolved.clone(), true),
-        (
-            InterfaceId {
-                name: "other0".to_owned(),
-                index: 0,
-            },
-            false,
-        ),
-        (
-            InterfaceId {
+            Interface::Id(InterfaceId {
                 name: resolved.name.clone(),
                 index: resolved.index + 1,
-            },
+            }),
             false,
         ),
     ] {
@@ -320,12 +339,10 @@ fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
             ..RecordingTransmitter::default()
         };
         let mut clock = RecordingClock::default();
-        let mut options = replay_options(Timing::Immediate);
-        options.interface = Some(requested.clone());
         let result = replay(
             reader,
-            &options,
-            AllFrames,
+            &replay_options(Timing::Immediate),
+            Through(requested.clone()),
             &mut authorizer,
             &mut transmitter,
             &mut clock,
@@ -873,15 +890,17 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
     );
 }
 
+/// Routes the frame at source index `i` through `test{i + 1}`.
 struct MappedInterfaces;
 impl Selector for MappedInterfaces {
-    fn select(&mut self, _: u64, _: &Frame) -> Result<bool, BoundaryError> {
+    fn select(&mut self, _: u64, _: &Frame) -> Result<bool, Error> {
         Ok(true)
     }
-    fn interface(&mut self, number: u64, _: &Frame) -> Result<Option<InterfaceId>, BoundaryError> {
-        Ok(Some(InterfaceId {
+    fn interface(&mut self, source_index: u64, _: &Frame) -> Result<Interface, Error> {
+        let number = source_index + 1;
+        Ok(Interface::Id(InterfaceId {
             name: format!("test{number}"),
-            index: 6 + number as u32,
+            index: 6 + u32::try_from(number).expect("fixture index"),
         }))
     }
 }
@@ -895,7 +914,6 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
         )
     };
     let mut options = replay_options(Timing::Original);
-    options.interface = None;
     options.repeat = 2;
     options.inter_pass_delay = Duration::from_millis(3);
     let mut authorizer = RecordingAuthorizer::default();
@@ -1055,7 +1073,9 @@ mod client {
 
     use super::*;
     use crate::policy::Policy;
-    use crate::replay::Collector;
+    use packetcraftr_core::filter::{Filter, FrameSelector, Options as FilterOptions};
+
+    use crate::replay::{Collector, Condition, Routing, Rule};
     use crate::test_support::{Call, FakeProviders};
     use crate::{Client, ProviderSet};
 
@@ -1070,7 +1090,7 @@ mod client {
         FakeProviders,
     >;
 
-    /// One up Ethernet interface that owns 192.0.2.1, enumerated into the
+    /// Two up Ethernet interfaces that own 192.0.2.1, enumerated into the
     /// same call log as the other fake providers.
     #[derive(Clone)]
     struct Interfaces(Arc<Mutex<Vec<Call>>>);
@@ -1084,8 +1104,8 @@ mod client {
                 .lock()
                 .expect("fake provider calls")
                 .push(Call::Interfaces);
-            Ok(vec![interface::Info {
-                id: test_interface(),
+            let info = |id| interface::Info {
+                id,
                 description: None,
                 mac_address: Some(INTERFACE_MAC),
                 addresses: vec![Address {
@@ -1099,7 +1119,16 @@ mod client {
                 mtu: Some(1_500),
                 capability: LinkCapability::Layer2AndLayer3,
                 link_type: LinkType::ETHERNET,
-            }])
+            };
+            Ok(vec![info(test_interface()), info(second_interface())])
+        }
+    }
+
+    /// The other interface [`Interfaces`] enumerates.
+    fn second_interface() -> InterfaceId {
+        InterfaceId {
+            name: "test1".to_owned(),
+            index: 8,
         }
     }
 
@@ -1159,6 +1188,10 @@ mod client {
     }
 
     fn request(frames: &[Vec<u8>]) -> Request<Cursor<Vec<u8>>> {
+        routed_request(frames, Routing::from(Interface::Id(test_interface())))
+    }
+
+    fn routed_request(frames: &[Vec<u8>], routing: Routing) -> Request<Cursor<Vec<u8>>> {
         let frames = frames
             .iter()
             .map(|bytes| (Duration::ZERO, bytes.as_slice()))
@@ -1167,8 +1200,94 @@ mod client {
         options.allow_permissive_live = true;
         Request::new(
             Source::stream(capture_reader(LinkType::ETHERNET, &frames)),
+            routing,
             options,
         )
+    }
+
+    /// Routing by filter rules, each `(filter, interface)`.
+    fn filter_routing(rules: &[(&str, Interface)]) -> Routing {
+        let registry = packetcraftr_core::protocol::builtin::registry();
+        let rules = rules
+            .iter()
+            .map(|(filter, interface)| Rule {
+                condition: Condition::Filter(
+                    FrameSelector::new(
+                        Arc::clone(&registry),
+                        Filter::compile(filter, &registry, FilterOptions::default())
+                            .expect("fixture filter compiles"),
+                        1_500,
+                    )
+                    .expect("frame filter"),
+                ),
+                interface: interface.clone(),
+            })
+            .collect();
+        Routing::new(rules, None).expect("bounded rules")
+    }
+
+    #[test]
+    fn routing_sends_each_frame_through_the_interface_its_rule_names() {
+        let frames = [owned_frame(1), owned_frame(64)];
+        let (client, fake) = client(permissive());
+        let collector = Collector::default();
+        let routing = filter_routing(&[
+            ("ipv4.ttl == 1", Interface::Name("test0".to_owned())),
+            (
+                "ipv4.ttl == 64",
+                Interface::Index(std::num::NonZeroU32::new(8).expect("fixture index")),
+            ),
+        ]);
+
+        let report = client
+            .replay(routed_request(&frames, routing), collector.clone())
+            .expect("both frames are routed");
+        let aggregate = collector.finish(report).expect("collected frames agree");
+
+        assert_eq!(
+            aggregate.report.interfaces_used,
+            [test_interface(), second_interface()]
+        );
+        assert_eq!(
+            aggregate
+                .frames
+                .iter()
+                .map(|evidence| evidence.transmission().interface.clone())
+                .collect::<Vec<_>>(),
+            [test_interface(), second_interface()]
+        );
+        // Each name or index selector resolves through the interface provider.
+        assert_eq!(
+            fake.calls(),
+            [
+                Call::Interfaces,
+                Call::Transmit(frames[0].clone()),
+                Call::Interfaces,
+                Call::Transmit(frames[1].clone()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_frame_its_rules_route_two_ways_stops_before_any_provider() {
+        let (client, fake) = client(permissive());
+        let routing = filter_routing(&[
+            ("ipv4", Interface::Name("test0".to_owned())),
+            ("icmp", Interface::Name("test1".to_owned())),
+        ]);
+
+        let error = client
+            .replay(
+                routed_request(&[owned_frame(64)], routing),
+                Collector::default(),
+            )
+            .expect_err("the frame's rules disagree");
+
+        assert!(
+            matches!(error, Error::ConflictingInterfaces { source_index: 0 }),
+            "{error:?}"
+        );
+        assert!(fake.calls().is_empty(), "{:?}", fake.calls());
     }
 
     #[test]

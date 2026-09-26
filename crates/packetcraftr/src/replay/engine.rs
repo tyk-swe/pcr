@@ -15,17 +15,17 @@ use crate::clock::Clock;
 use crate::execution::{self, Paused};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
 use crate::providers::Providers;
-use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
+use crate::route::{self, Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::{Client, Sink};
 use packetcraftr_core::error::BoundaryError;
 
 use super::admission::{FinalWire, FrameAdmission};
 use super::error::Error;
 use super::evidence::{FrameEvidence, Transmission, validate_transmission};
-use super::executor::{Executor, ProviderExecutor, requested_interface_matches};
+use super::executor::{Executor, ProviderExecutor};
 use super::plan::{FramePlan, Tally, plan_frame};
 use super::report::{Event, Report};
-use super::request::{Limits, Options, Request, Selector, Timing};
+use super::request::{Limits, Options, Parts, Request, Selector, Timing, validate};
 
 impl<P: Providers, K: Clock> Client<P, K> {
     /// Replays the request's capture: every selected frame is admitted by the
@@ -50,10 +50,9 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// Returns the invalid request, the capture, policy, provider, or clock
     /// failure, the sink's failure, or the interruption, each at the source
     /// frame it stopped at.
-    pub fn replay<R, S, E>(&self, request: Request<R, S>, sink: E) -> Result<Report, Error>
+    pub fn replay<R, E>(&self, request: Request<R>, sink: E) -> Result<Report, Error>
     where
         R: Read,
-        S: Selector,
         E: Sink<Event, Ack = ()>,
     {
         request.validate()?;
@@ -70,7 +69,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
             request.options.allow_permissive_live,
         );
         run(
-            request,
+            request.into_parts(),
             &mut admission,
             &mut ProviderExecutor::new(self.providers.as_ref()),
             &mut self.clock.clone(),
@@ -140,12 +139,12 @@ struct Run<'a, 'x, 'c, S, A, X, C, F> {
     emit: F,
 }
 
-/// Replays `request` under `deadline`, authorizing through `authorizer`,
-/// sending through `executor`, and handing each confirmed frame to `emit`.
-/// A seekable source is rewound before every pass under one aggregate budget
-/// and schedule.
+/// Replays the frames the parts' selector selects under `deadline`,
+/// authorizing through `authorizer`, sending through `executor`, and handing
+/// each confirmed frame to `emit`. A seekable source is rewound before every
+/// pass under one aggregate budget and schedule.
 pub(crate) fn run<R, S, A, X, C, F>(
-    request: Request<R, S>,
+    parts: Parts<R, S>,
     authorizer: &mut A,
     executor: &mut X,
     clock: &mut C,
@@ -160,13 +159,13 @@ where
     C: Clock,
     F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
-    request.validate()?;
-    enforce_deadline(&deadline, 0)?;
-    let Request {
+    let Parts {
         source,
         selector,
         options,
-    } = request;
+    } = parts;
+    validate(&source, &options)?;
+    enforce_deadline(&deadline, 0)?;
     let mut reader = source.reader;
     let rewind = source.rewind;
     let mut session = Session {
@@ -368,37 +367,18 @@ where
         read: &ReadFrame,
     ) -> Result<bool, Error> {
         enforce_deadline(deadline, source_index)?;
-        let selected = self
-            .selector
-            .select(read.number, &read.frame)
-            .map_err(|source| Error::Selection {
-                source_index,
-                source,
-            })?;
+        let selected = self.selector.select(source_index, &read.frame)?;
         enforce_deadline(deadline, source_index)?;
         Ok(selected)
     }
 
-    /// The selector's interface for the frame, or the request's fallback.
+    /// The interface the selector routes the frame to.
     fn interface(
         &mut self,
         source_index: u64,
         read: &ReadFrame,
-    ) -> Result<packetcraftr_netio::interface::Id, Error> {
-        let mapped = self
-            .selector
-            .interface(read.number, &read.frame)
-            .map_err(|source| Error::Selection {
-                source_index,
-                source,
-            })?;
-        mapped
-            .or_else(|| self.options.interface.clone())
-            .ok_or(Error::InvalidLimit {
-                field: "interface",
-                value: 0,
-                reason: "selected frame has no mapped or fallback interface",
-            })
+    ) -> Result<route::Interface, Error> {
+        self.selector.interface(source_index, &read.frame)
     }
 }
 
@@ -497,7 +477,7 @@ fn authorize_frame<A: Authorizer>(
 
 fn plan_frame_route<X: Executor>(
     executor: &mut X,
-    interface: &packetcraftr_netio::interface::Id,
+    interface: &route::Interface,
     deadline: &Deadline,
     source_index: u64,
     plan: &FramePlan,
@@ -510,9 +490,9 @@ fn plan_frame_route<X: Executor>(
         source_index,
         source,
     })?;
-    // The caller's selector may name only the interface's name or index; the
+    // The routed interface may name only the interface's name or index; the
     // executor resolves it to the complete identity it will use.
-    if !requested_interface_matches(&route.plan.decision.interface, interface) {
+    if !interface.matches(&route.plan.decision.interface) {
         return Err(Error::InvalidEvidence {
             source_index,
             message: "planned route changed the selected output interface".to_owned(),

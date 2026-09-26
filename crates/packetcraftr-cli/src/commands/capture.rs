@@ -18,7 +18,7 @@ use crate::output::{
 };
 use crate::{
     errors::CliError,
-    filtering::FrameSelector,
+    filtering,
     rendering::StreamEncoder,
     system::{client, resolve},
 };
@@ -31,11 +31,11 @@ use std::{
 
 use self::files::Files;
 use crate::command_options::Compression;
-use crate::filtering::FrameDecoder;
 use crate::output;
 use crate::rendering::{render_frame_text, write_hex_line};
 use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr::policy::CaptureBudget;
+use packetcraftr_core::filter::{FrameDecoder, FrameSelector};
 use packetcraftr_core::{
     self as core,
     capture_file::compression,
@@ -166,7 +166,7 @@ pub(super) fn run(
     // requested; `Decoding` otherwise evaluates the same filter itself so a
     // frame is decoded at most once.
     let selector = if decoding.is_none() {
-        FrameSelector::compile_optional(args.filter.as_deref(), &registry, limits.snap_length)?
+        filtering::optional_frame_selector(args.filter.as_deref(), &registry, limits.snap_length)?
     } else {
         None
     };
@@ -253,7 +253,7 @@ impl Decoding {
             return Ok(None);
         }
         Ok(Some(Self {
-            frames: FrameDecoder::compile(registry, filter, snap_length)?,
+            frames: filtering::frame_decoder(registry, filter, snap_length)?,
             parked: None,
         }))
     }
@@ -261,7 +261,11 @@ impl Decoding {
     /// The filter half of frame selection, run by the capture's selector; a
     /// kept frame's dissection is parked for the sink.
     fn select(&mut self, source_frame: u64, frame: &Frame) -> Result<bool, CliError> {
-        let Some(decoded) = self.frames.decode_selected(source_frame, frame)? else {
+        let Some(decoded) = self
+            .frames
+            .decode_selected(source_frame, frame)
+            .map_err(|error| filtering::frame_error(source_frame, error))?
+        else {
             return Ok(false);
         };
         self.parked = Some((source_frame, decoded));
@@ -280,7 +284,7 @@ impl Decoding {
         {
             return Ok(decoded);
         }
-        self.frames.decode(frame)
+        self.frames.decode(frame).map_err(CliError::classified)
     }
 }
 
@@ -343,7 +347,7 @@ fn drive<P: packetcraftr::Providers>(
         (None, Some(selector)) => request.with_selector(move |number, frame| {
             selector
                 .keep(number, frame)
-                .map_err(CliError::into_boundary_error)
+                .map_err(|error| filtering::frame_error(number, error).into_boundary_error())
         }),
         (None, None) => request,
     };

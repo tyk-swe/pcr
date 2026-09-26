@@ -12,7 +12,6 @@ use packetcraftr_core::protocol::semantics;
 use packetcraftr_netio::route::Provider as RouteProvider;
 use packetcraftr_netio::{
     Error as LiveIoError, NativeCapability, Unsupported,
-    interface::Id as InterfaceId,
     interface::{Info as InterfaceInfo, Provider as InterfaceProvider},
     link::Mode as LinkMode,
     transmit::{Outbound, Provider as TransmitProvider},
@@ -20,7 +19,7 @@ use packetcraftr_netio::{
 
 use crate::policy::decode_wire;
 use crate::providers::Providers;
-use crate::route::Materialized as MaterializedRoute;
+use crate::route::{Interface, Materialized as MaterializedRoute};
 
 use super::evidence::{Transmission, network_envelope};
 
@@ -33,7 +32,7 @@ pub(crate) trait Executor {
     /// and route lookups receive the replay's `deadline`.
     fn plan_frame(
         &mut self,
-        interface: &InterfaceId,
+        interface: &Interface,
         mode: LinkMode,
         frame: &Frame,
         deadline: &Deadline,
@@ -45,14 +44,6 @@ pub(crate) trait Executor {
         route: &MaterializedRoute,
         frame: &Frame,
     ) -> Result<Transmission, LiveIoError>;
-}
-
-/// Whether a resolved interface is the one a possibly partial selector named:
-/// a selector fills in its name, its index, or both.
-pub(super) fn requested_interface_matches(actual: &InterfaceId, requested: &InterfaceId) -> bool {
-    !(requested.index == 0 && requested.name.is_empty())
-        && (requested.index == 0 || actual.index == requested.index)
-        && (requested.name.is_empty() || actual.name == requested.name)
 }
 
 /// Maps route failures to live-I/O errors, retaining the provider's error as
@@ -94,7 +85,7 @@ impl<'c, P: Providers> ProviderExecutor<'c, P> {
 
     fn resolve(
         &mut self,
-        requested: &InterfaceId,
+        requested: &Interface,
         mode: LinkMode,
         frame: &Frame,
         deadline: &Deadline,
@@ -106,16 +97,16 @@ impl<'c, P: Providers> ProviderExecutor<'c, P> {
         let cached = self
             .validated_interface
             .take()
-            .filter(|selected| requested_interface_matches(&selected.id, requested));
+            .filter(|selected| requested.matches(&selected.id));
         let selected = match cached {
             Some(selected) => selected,
             None => {
                 let interfaces = self.providers.interface().interfaces(deadline)?;
                 let selected = interfaces
                     .into_iter()
-                    .find(|interface| requested_interface_matches(&interface.id, requested))
+                    .find(|interface| requested.matches(&interface.id))
                     .ok_or_else(|| LiveIoError::Device {
-                        interface: requested.name.clone(),
+                        interface: requested_name(requested),
                         message: "no interface matches the requested name or index".to_owned(),
                         source: None,
                     })?;
@@ -158,6 +149,15 @@ impl<'c, P: Providers> ProviderExecutor<'c, P> {
             network,
             deadline,
         )
+    }
+}
+
+/// The name a routed interface was requested by; an index names none.
+fn requested_name(requested: &Interface) -> String {
+    match requested {
+        Interface::Id(id) => id.name.clone(),
+        Interface::Name(name) => name.clone(),
+        Interface::Index(_) => String::new(),
     }
 }
 
@@ -278,7 +278,7 @@ fn interface_owned_packet_source(
 impl<P: Providers> Executor for ProviderExecutor<'_, P> {
     fn plan_frame(
         &mut self,
-        interface: &InterfaceId,
+        interface: &Interface,
         mode: LinkMode,
         frame: &Frame,
         deadline: &Deadline,
@@ -331,7 +331,7 @@ mod tests {
         link::Ethernet,
         network::{Icmpv4, Ipv4},
     };
-    use packetcraftr_netio::interface::{Address, Flags};
+    use packetcraftr_netio::interface::{Address, Flags, Id as InterfaceId};
     use packetcraftr_netio::link::Capability as LinkCapability;
 
     use super::*;
@@ -408,53 +408,16 @@ mod tests {
     }
 
     #[test]
-    fn interface_matching_supports_exact_name_or_index_but_rejects_an_empty_selector() {
-        let actual = InterfaceId {
-            name: "fixture0".to_owned(),
-            index: 7,
-        };
-        for requested in [
-            actual.clone(),
-            InterfaceId {
-                name: String::new(),
-                index: 7,
-            },
-            InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 0,
-            },
-        ] {
-            assert!(requested_interface_matches(&actual, &requested));
-        }
-        for requested in [
-            InterfaceId {
-                name: String::new(),
-                index: 0,
-            },
-            InterfaceId {
-                name: "other0".to_owned(),
-                index: 7,
-            },
-            InterfaceId {
-                name: "fixture0".to_owned(),
-                index: 8,
-            },
-        ] {
-            assert!(!requested_interface_matches(&actual, &requested));
-        }
-    }
-
-    #[test]
     fn cached_layer2_interface_validation_returns_the_passive_route() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
 
         let frame = ethernet_frame(LinkType::ETHERNET);
         let route = transmitter
             .plan_frame(&requested, LinkMode::Layer2, &frame, &live())
             .expect("matching cached Layer 2 interface");
-        assert_eq!(route.plan.decision.interface, requested);
+        assert_eq!(Interface::Id(route.plan.decision.interface), requested);
         assert_eq!(route.plan.mode, LinkMode::Layer2);
         assert!(route.neighbor_resolution.is_none());
     }
@@ -462,7 +425,7 @@ mod tests {
     #[test]
     fn cached_interface_validation_rejects_modes_capabilities_and_link_mismatches() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(
@@ -475,7 +438,7 @@ mod tests {
         ));
 
         let selected = interface(LinkCapability::Layer3, LinkType::RAW);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(
@@ -488,7 +451,7 @@ mod tests {
         ));
 
         let selected = interface(LinkCapability::Layer2, LinkType::ETHERNET);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(&requested, LinkMode::Layer3, &ipv4_frame(), &live()),
@@ -496,7 +459,7 @@ mod tests {
         ));
 
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::RAW);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(
@@ -510,7 +473,7 @@ mod tests {
         ));
 
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(
@@ -622,7 +585,7 @@ mod tests {
         ));
         // The envelope reaches the route only through `plan_frame`, which
         // rejects bytes that are not a raw network datagram before it is built.
-        let requested = selected.id.clone();
+        let requested = Interface::Id(selected.id.clone());
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(

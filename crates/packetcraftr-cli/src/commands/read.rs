@@ -26,9 +26,10 @@ use crate::output;
 use self::arguments::Args;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
-use crate::filtering::FrameDecoder;
+use crate::filtering;
 use crate::input::{open_capture, validate_capture_stream_limits};
 use crate::rendering::{StreamEncoder, finish_compressed_output};
+use packetcraftr_core::filter::FrameDecoder;
 
 use super::increment_counter;
 use rendering::render_record;
@@ -196,7 +197,7 @@ fn prepare_decoding(
         return Ok(None);
     }
     Ok(Some(Decoding {
-        frames: FrameDecoder::compile(&registry, filter, max_frame_bytes)?,
+        frames: filtering::frame_decoder(&registry, filter, max_frame_bytes)?,
         publish_layers: dissect,
     }))
 }
@@ -252,7 +253,7 @@ fn rewrite_capture(
             .frames
             .decode_selected(number, frame)
             .map(|decoded| decoded.is_some())
-            .map_err(CliError::into_boundary_error)
+            .map_err(|error| filtering::frame_error(number, error).into_boundary_error())
     })
     .map(|_| ())
     .map_err(CliError::classified)
@@ -321,7 +322,8 @@ fn normalize_capture(
         if let Some(decoding) = decoding
             && decoding
                 .frames
-                .decode_selected(source_frame, &frame)?
+                .decode_selected(source_frame, &frame)
+                .map_err(|error| filtering::frame_error(source_frame, error))?
                 .is_none()
         {
             continue;
@@ -372,7 +374,11 @@ fn convert_frame(
             .map(Some)
             .map_err(CliError::classified);
     };
-    let Some(decoded) = decoding.frames.decode_selected(source_frame, &frame)? else {
+    let Some(decoded) = decoding
+        .frames
+        .decode_selected(source_frame, &frame)
+        .map_err(|error| filtering::frame_error(source_frame, error))?
+    else {
         return Ok(None);
     };
     if decoding.publish_layers {

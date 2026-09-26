@@ -88,12 +88,20 @@ pub enum Error {
         link_type: u32,
         requested: LinkMode,
     },
+    /// The request's filter, or a filter rule of its routing, could not
+    /// judge the frame.
     #[error("replay frame selection failed at source index {source_index}")]
     Selection {
         source_index: u64,
         #[source]
-        source: packetcraftr_core::error::BoundaryError,
+        source: packetcraftr_core::filter::Error,
     },
+    /// Routing rules that match the frame name different interfaces.
+    #[error("replay frame {} matches conflicting output interfaces", source_index.saturating_add(1))]
+    ConflictingInterfaces { source_index: u64 },
+    /// No routing rule matches the frame and the routing has no fallback.
+    #[error("replay frame {} has no output interface mapping", source_index.saturating_add(1))]
+    Unmapped { source_index: u64 },
     #[error("replay policy denied source index {source_index}")]
     Authorization {
         source_index: u64,
@@ -141,6 +149,8 @@ impl Error {
             | Self::UnsupportedLinkType { source_index, .. }
             | Self::LinkModeMismatch { source_index, .. }
             | Self::Selection { source_index, .. }
+            | Self::ConflictingInterfaces { source_index }
+            | Self::Unmapped { source_index }
             | Self::Authorization { source_index, .. }
             | Self::Transmission { source_index, .. }
             | Self::InvalidEvidence { source_index, .. }
@@ -203,9 +213,13 @@ impl Classified for Error {
                     ),
                 )
             }
-            Self::Selection { source, .. } | Self::Authorization { source, .. } => {
-                source.classification()
+            Self::Selection { source, .. } => source.classification(),
+            // Routing is part of the request, so a frame it cannot route is
+            // the caller's to fix.
+            Self::ConflictingInterfaces { .. } | Self::Unmapped { .. } => {
+                Classification::new("cli.error", Kind::Usage, None)
             }
+            Self::Authorization { source, .. } => source.classification(),
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
                 "internal.replay_evidence",
@@ -243,9 +257,7 @@ impl Classified for Error {
     /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Selection { source, .. }
-            | Self::Authorization { source, .. }
-            | Self::Output { source, .. } => source.as_causes(),
+            Self::Authorization { source, .. } | Self::Output { source, .. } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

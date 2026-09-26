@@ -295,11 +295,9 @@ pub(super) fn read(
     } else {
         // The stream-capable filter takes the analysis branch above, so the
         // frame-at-a-time seam applies here.
-        let decoder = crate::filtering::FrameDecoder::new(
-            registry,
-            filter,
-            args.limits.reader.max_frame_bytes,
-        );
+        let decoder =
+            core::filter::FrameDecoder::new(registry, filter, args.limits.reader.max_frame_bytes)
+                .map_err(CliError::classified)?;
         let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
             max_frames: args.limits.max_frames,
             max_bytes: args.limits.max_bytes,
@@ -313,7 +311,10 @@ pub(super) fn read(
             if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
                 continue;
             }
-            let Some(decoded) = decoder.decode_selected(frames, &frame)? else {
+            let Some(decoded) = decoder
+                .decode_selected(frames, &frame)
+                .map_err(|error| crate::filtering::frame_error(frames, error))?
+            else {
                 continue;
             };
             let context = core::filter::Context {

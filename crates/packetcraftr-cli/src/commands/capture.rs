@@ -57,7 +57,7 @@ pub(super) fn run(
         if args.rotate_bytes.is_some()
             || args.rotate_interval_ms.is_some()
             || args.rotate_files != 1
-            || args.retention != Retention::Stop
+            || Retention::from(args.retention) != Retention::Stop
         {
             return Err(CliError::new(
                 Kind::Cli,
@@ -131,7 +131,7 @@ pub(super) fn run(
                     rotate_bytes: args.rotate_bytes,
                     rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
                     max_files: args.rotate_files,
-                    retention: args.retention,
+                    retention: args.retention.into(),
                 },
                 pcap::Limits {
                     max_frames: budget.max_frames(),

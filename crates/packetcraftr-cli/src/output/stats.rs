@@ -24,7 +24,7 @@ use super::contract::Error;
 use super::frame::Timestamp;
 
 /// Which statistics table a result carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Table {
     Conversations,
     Endpoints,

@@ -628,3 +628,15 @@ canonical path:
 
 The undocumented `packetcraftr_core::layer::{malformed_layout, padding_layout}`
 exports are removed; `raw_layout` remains for codecs that emit `Raw` layers.
+
+## CLI library entry point
+
+The `packetcraftr_cli` library now holds the whole command-line application.
+`packetcraftr_cli::main()` parses the process arguments, runs the command, and
+returns its `ExitCode`; the `packetcraftr` binary only calls it. Command-line
+behavior, flags, exit codes, and output documents are unchanged.
+
+`output::contract::Format`, `output::stats::Table`, and
+`output::capture::Retention` are plain output types and no longer implement
+`clap::ValueEnum`. Code that parsed them with clap declares its own value enum
+and converts it with `From`, as the CLI does.

@@ -129,7 +129,7 @@ packetcraftr_core::display_via_as_str!(Command);
 
 /// User-selectable output formats across supported commands. Never a document
 /// field: a format is chosen on the command line, so it has no default here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Format {
     Text,
     Json,
@@ -139,7 +139,6 @@ pub enum Format {
     Hex,
     Raw,
     Pcap,
-    #[value(name = "pcapng")]
     PcapNg,
 }
 

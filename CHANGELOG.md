@@ -75,6 +75,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `traceroute::Batch` already was. Executor implementations read the scan
   batch's single probe from the one-element `batch.probes` instead of
   `batch.probe`. See `docs/migration-unreleased.md`.
+- The `packetcraftr_cli` library now holds the whole command-line application
+  and exposes `packetcraftr_cli::main()`, which the `packetcraftr` binary calls.
+  `output::contract::Format`, `output::stats::Table`, and
+  `output::capture::Retention` no longer implement `clap::ValueEnum`; the CLI
+  parses its own selectors and converts them with `From`. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

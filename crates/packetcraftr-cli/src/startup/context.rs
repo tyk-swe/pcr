@@ -5,8 +5,7 @@ use std::ffi::OsString;
 
 use crate::output;
 
-use crate::cli::ColorChoice;
-use crate::output::contract::Format;
+use crate::cli::{ColorChoice, Format};
 
 /// The formats that can carry a structured error document. A clap failure is
 /// reported in one of these or, for everything else, as prose on stderr.

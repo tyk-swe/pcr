@@ -4,7 +4,7 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use crate::output::contract::Format;
+use crate::output;
 use clap::{Parser, ValueEnum};
 
 use crate::commands::Command;
@@ -130,6 +130,37 @@ pub(crate) struct Cli {
     pub(crate) color: ColorChoice,
     #[command(subcommand)]
     pub(crate) command: Command,
+}
+
+/// The `--output` selector for [`output::contract::Format`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum Format {
+    Text,
+    Json,
+    Ndjson,
+    Csv,
+    Tsv,
+    Hex,
+    Raw,
+    Pcap,
+    #[value(name = "pcapng")]
+    PcapNg,
+}
+
+impl From<Format> for output::contract::Format {
+    fn from(value: Format) -> Self {
+        match value {
+            Format::Text => Self::Text,
+            Format::Json => Self::Json,
+            Format::Ndjson => Self::Ndjson,
+            Format::Csv => Self::Csv,
+            Format::Tsv => Self::Tsv,
+            Format::Hex => Self::Hex,
+            Format::Raw => Self::Raw,
+            Format::Pcap => Self::Pcap,
+            Format::PcapNg => Self::PcapNg,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]

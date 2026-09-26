@@ -281,11 +281,10 @@ fn read_records(
     }
     if format == ReadFormat::Ndjson {
         stream.complete(
-            output::read::Event::from(output::read::Totals {
-                frames_read: state.budget.frames(),
-                frames_matched: state.frames_matched,
-                captured_bytes_read: state.budget.captured_bytes(),
-            }),
+            output::read::Event::from(output::read::Totals::from((
+                &state.budget,
+                state.frames_matched,
+            ))),
             Vec::new(),
         )?;
     }

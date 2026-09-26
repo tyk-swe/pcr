@@ -55,6 +55,16 @@ pub struct Totals {
     pub captured_bytes_read: u64,
 }
 
+impl From<(&packetcraftr_core::capture_file::Budget, u64)> for Totals {
+    fn from((budget, frames_matched): (&packetcraftr_core::capture_file::Budget, u64)) -> Self {
+        Self {
+            frames_read: budget.frames(),
+            frames_matched,
+            captured_bytes_read: budget.captured_bytes(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Event {

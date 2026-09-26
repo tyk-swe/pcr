@@ -483,6 +483,18 @@ pub struct Input {
     pub selection_filter: Option<String>,
 }
 
+impl From<(&std::path::Path, Option<CaptureSource>, Option<&str>)> for Input {
+    fn from(
+        (path, source, selection_filter): (&std::path::Path, Option<CaptureSource>, Option<&str>),
+    ) -> Self {
+        Self {
+            path: path.display().to_string(),
+            source,
+            selection_filter: selection_filter.map(str::to_owned),
+        }
+    }
+}
+
 fn capture(
     Input {
         path,

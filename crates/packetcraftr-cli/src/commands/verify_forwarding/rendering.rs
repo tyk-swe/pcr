@@ -33,16 +33,16 @@ pub(super) fn render(
             let document = Report::try_from((
                 report,
                 analysis::Sided {
-                    ingress: output::verify_forwarding::Input {
-                        path: arguments.ingress.display().to_string(),
-                        source: Some(sources.ingress),
-                        selection_filter: arguments.ingress_filter.clone(),
-                    },
-                    egress: output::verify_forwarding::Input {
-                        path: arguments.egress.display().to_string(),
-                        source: Some(sources.egress),
-                        selection_filter: arguments.egress_filter.clone(),
-                    },
+                    ingress: output::verify_forwarding::Input::from((
+                        arguments.ingress.as_path(),
+                        Some(sources.ingress),
+                        arguments.ingress_filter.as_deref(),
+                    )),
+                    egress: output::verify_forwarding::Input::from((
+                        arguments.egress.as_path(),
+                        Some(sources.egress),
+                        arguments.egress_filter.as_deref(),
+                    )),
                 },
                 Some(output::verify_forwarding::DecodeContext::from((
                     arguments.decode.ports.clone(),

@@ -1088,3 +1088,47 @@ implements `Classified` for it. A provider with its own error type implements
 before; the old default was `io.route` (`Kind::Io`). A fake whose error was
 `std::io::Error` needs a local error type, because `Classified` is a core
 trait. A TCP fake that counted calls in a `Cell` uses an atomic instead.
+
+## One deadline convention for providers
+
+Every provider call that can block takes the caller's core
+`packetcraftr_core::budget::Deadline` by reference. The deadline carries the
+caller's cancellation, so there is no separate cancellation argument. A
+provider checks cancellation first, treats a zero remainder as expired, and
+never waits past the remainder.
+
+| Before | After |
+|---|---|
+| `route::Provider::lookup_with_preferences(destination, hint, source)` | `lookup_with_preferences(destination, hint, source, &deadline)` |
+| `route::Provider::lookup_interface(&interface)` | `lookup_interface(&interface, &deadline)` |
+| `interface::Provider::interfaces()` | `interfaces(&deadline)` |
+| `capture::Provider::arm_capture(&request)` | `arm_capture(&request, &deadline)` |
+| `capture::Provider::timestamp_types(&interface)` | `timestamp_types(&interface, &deadline)` |
+| `Session::wait_ready(timeout)` | `wait_ready(&deadline)` |
+| `Session::next_captured_frame(timeout)` | `next_captured_frame(&deadline)`; a spent deadline takes only what is queued |
+| `capture::Cancellable::new(session, cancellation)` | the session itself; pass `Deadline::new(timeout).with_cancellation(cancellation)` to each wait |
+| `Group::arm(&provider, &request, cancellation)` | `Group::arm(&provider, &request, &deadline)` |
+| `Group::wait_ready(timeout)`, `Group::next_record(timeout)` | `wait_ready(&deadline)`, `next_record(&deadline)` |
+| `tcp::Provider::connect(endpoint, timeout)` | `connect(endpoint, &deadline)` |
+| `tcp::start_connect(provider, endpoint, timeout, cancellation)` | `start_connect(provider, endpoint, &deadline)` |
+| `packetcraftr::route::plan(packet, destination, &options, &provider)` | `plan(packet, destination, &options, &provider, &deadline)` |
+| `Client::plan(packet, destination, &options)` | `Client::plan(packet, destination, &options, &deadline)` |
+| `replay::Transmitter::plan_frame(interface, mode, frame)` | `plan_frame(interface, mode, frame, &deadline)` |
+| `neighbor::Request { deadline, .. }` | no `deadline` field; the client passes the operation deadline to resolution |
+
+A caller that had a timeout builds the deadline from it:
+`Deadline::new(timeout)`, with `.with_cancellation(Some(signal))` to share a
+stop signal. A passive lookup whose operation has no deadline can use
+`packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT`, the allowance the backends
+used to apply themselves.
+
+A fake provider that ignores time takes `_deadline: &Deadline`. A fake that
+recorded or slept for its timeout reads `deadline.remaining()` instead, and
+one that stalls until expiry can loop on
+`packetcraftr_netio::deadline::remaining(deadline)`. A system backend stopped
+by the deadline reports `route::SystemError::DeadlineExceeded`,
+`interface::Error::DeadlineExceeded`, or `Error::DeadlineExceeded`, all
+classified `io.deadline_exceeded`; a cancelled one reports the `Cancelled`
+variant (`io.cancelled`). `tcp::start_connect` refuses a spent deadline with
+`ConnectError::DeadlineExceeded` rather than `ConnectError::Timeout`, which
+now means only a remainder above one hour.

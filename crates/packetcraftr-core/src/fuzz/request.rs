@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::DEFAULT_MAX_PACKET_SIZE;
 
-use super::error::Error;
+use super::error::{Constraint, Error};
 use super::{
     DEFAULT_CASES, DEFAULT_MAX_CASES, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_LIST_ITEMS,
     DEFAULT_MAX_SHRINK_STEPS, DEFAULT_MAX_TOTAL_BYTES, MAX_CASES, MAX_DURATION, MAX_FIELD_BYTES,
@@ -114,7 +114,9 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(value).unwrap_or(u64::MAX),
-                    reason: format!("must be within 1..={maximum}"),
+                    reason: Constraint::Within {
+                        maximum: u64::try_from(maximum).unwrap_or(u64::MAX),
+                    },
                 });
             }
         }
@@ -122,7 +124,7 @@ impl Limits {
             return Err(Error::InvalidLimit {
                 field: "max_packet_bytes",
                 value: u64::try_from(self.max_packet_bytes).unwrap_or(u64::MAX),
-                reason: "cannot exceed max_total_bytes".to_owned(),
+                reason: Constraint::AtMostMaxTotalBytes,
             });
         }
         if self.max_duration.is_zero() || self.max_duration > MAX_DURATION {
@@ -173,7 +175,9 @@ impl Request {
             return Err(Error::InvalidLimit {
                 field: "cases",
                 value: self.cases as u64,
-                reason: format!("must be within 1..={}", self.limits.max_cases),
+                reason: Constraint::Within {
+                    maximum: self.limits.max_cases as u64,
+                },
             });
         }
         if self.strategies.is_empty() {
@@ -183,7 +187,7 @@ impl Request {
             return Err(Error::InvalidLimit {
                 field: "strategies",
                 value: self.strategies.len() as u64,
-                reason: format!("at most {MAX_STRATEGIES} strategies may be selected"),
+                reason: Constraint::AtMostMaxStrategies,
             });
         }
         if self.strategies.iter().enumerate().any(|(index, strategy)| {
@@ -204,7 +208,9 @@ impl Request {
             return Err(Error::InvalidLimit {
                 field: "build.max_packet_size",
                 value: self.build.limits.max_packet_size as u64,
-                reason: format!("must be within 1..={}", self.limits.max_packet_bytes),
+                reason: Constraint::Within {
+                    maximum: self.limits.max_packet_bytes as u64,
+                },
             });
         }
         Ok(())

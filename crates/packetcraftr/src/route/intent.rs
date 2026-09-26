@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::IpAddr;
-
 use super::model::MAX_VLAN_TAGS;
 use packetcraftr_core::{
     packet::{MacAddress, Packet, VlanTag},
@@ -58,27 +56,4 @@ pub(super) fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacA
     let target = set_mac(arp.target_hardware)
         .or_else(|| (arp.operation == 1).then_some(MacAddress([0xff; 6])));
     (set_mac(arp.sender_hardware), target)
-}
-
-pub(super) fn multicast_mac(destination: IpAddr) -> Option<MacAddress> {
-    match destination {
-        IpAddr::V4(address) if address.is_multicast() => {
-            let octets = address.octets();
-            Some(MacAddress([
-                0x01,
-                0x00,
-                0x5e,
-                octets[1] & 0x7f,
-                octets[2],
-                octets[3],
-            ]))
-        }
-        IpAddr::V6(address) if address.is_multicast() => {
-            let octets = address.octets();
-            Some(MacAddress([
-                0x33, 0x33, octets[12], octets[13], octets[14], octets[15],
-            ]))
-        }
-        _ => None,
-    }
 }

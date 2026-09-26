@@ -12,7 +12,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use super::{
+use crate::platform::common::npcap::{
     abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},
     handles::{NpcapHandle, PromiscuousMode, create_handle, open_handle, reported_precision},
 };
@@ -26,7 +26,7 @@ use crate::{
         Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
     },
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::{
+    platform::common::pcap_api::{
         Diagnostic, canonical_link_type, realize_settings, timestamp_source_of_value,
         validate_effective_snapshot_length,
     },

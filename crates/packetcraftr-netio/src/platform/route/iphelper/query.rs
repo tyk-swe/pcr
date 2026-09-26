@@ -18,8 +18,10 @@ use windows::Win32::Networking::WinSock::{
     SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
-use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
-use super::enumeration::{adapter_snapshots, win32_error};
+use crate::platform::interface::iphelper::{
+    adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter},
+    adapter_snapshots, win32_error,
+};
 use crate::platform::route::{InterfaceCandidate, constrain_by_preferred_source};
 use crate::route::normalize::{NativeRouteSnapshot, finish_route, interface_decision};
 use crate::{

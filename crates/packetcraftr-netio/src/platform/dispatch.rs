@@ -22,19 +22,19 @@ use crate::{
 use crate::{NativeCapability, Unsupported};
 
 #[cfg(all(native_route, target_os = "linux"))]
-use super::route::netlink as route_backend;
+use super::{interface::netlink as interface_backend, route::netlink as route_backend};
 
 #[cfg(all(native_route, target_os = "macos"))]
-use super::route::af_route as route_backend;
+use super::{interface::af_route as interface_backend, route::af_route as route_backend};
 
 #[cfg(all(native_route, windows))]
-use super::route::iphelper as route_backend;
+use super::{interface::iphelper as interface_backend, route::iphelper as route_backend};
 
 #[cfg(pcap_backend)]
-use super::layer2::pcap_backend as layer2_backend;
+use super::{capture::libpcap as capture_backend, transmit::libpcap as transmit_backend};
 
 #[cfg(npcap_backend)]
-use super::layer2::npcap as layer2_backend;
+use super::{capture::npcap as capture_backend, transmit::npcap as transmit_backend};
 
 /// The failure for a native `capability` this build has no backend for. The
 /// message names the `operation` and distinguishes a target that has no
@@ -106,7 +106,7 @@ pub(crate) fn interface_route(
 
 #[cfg(native_route)]
 pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
-    route_backend::interfaces(deadline)
+    interface_backend::interfaces(deadline)
 }
 
 #[cfg(not(native_route))]
@@ -131,19 +131,19 @@ pub(crate) fn open_capture(
     promiscuous: bool,
     native: &crate::capture::NativeSettings,
 ) -> Result<crate::capture::live::NativeCaptureParts, Error> {
-    layer2_backend::open_capture(interface, limits, filter, netmask, promiscuous, native)
+    capture_backend::open_capture(interface, limits, filter, netmask, promiscuous, native)
 }
 
 #[cfg(native_layer2)]
 pub(crate) fn timestamp_types(
     interface: &InterfaceId,
 ) -> Result<Vec<crate::capture::TimestampType>, Error> {
-    layer2_backend::timestamp_types(interface)
+    capture_backend::timestamp_types(interface)
 }
 
 #[cfg(native_layer2)]
 pub(crate) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    layer2_backend::send_layer2(frame)
+    transmit_backend::send_layer2(frame)
 }
 
 #[cfg(not(native_layer2))]
@@ -159,7 +159,7 @@ pub(crate) fn send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Report, E
 
 #[cfg(native_layer3)]
 pub(crate) fn send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
-    super::layer3::raw_ip::send_layer3(frame)
+    super::transmit::raw_ip::send_layer3(frame)
 }
 
 #[cfg(not(native_layer3))]
@@ -176,7 +176,7 @@ pub(crate) fn send_layer3(_frame: Layer3Frame<'_>) -> Result<transmit::Report, E
 /// Confirms the interface a send was routed to still has that name and index.
 #[cfg(native_send)]
 pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
-    super::interface_identity::verify_interface_identity(expected)
+    super::interface::identity::verify_interface_identity(expected)
 }
 
 /// Confirms the interface is still current and returns its snapshot.
@@ -185,5 +185,5 @@ pub(crate) fn current_interface(
     expected: &InterfaceId,
     deadline: &Deadline,
 ) -> Result<interface::Info, Error> {
-    super::interface_identity::validate_current_interface_identity(expected, deadline)
+    super::interface::identity::validate_current_interface_identity(expected, deadline)
 }

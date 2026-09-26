@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure bounded parsers for Darwin socket-address records.
+//! Pure bounded parsers for Darwin socket-address records, shared by the
+//! macOS route and interface backends.
 
 use std::{
     mem::{offset_of, size_of},
@@ -10,7 +11,7 @@ use std::{
 
 use crate::route;
 
-pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
+pub(in crate::platform) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr stores `sa_family` after its leading length byte.
     let family = *bytes.get(1)? as libc::sa_family_t;
     match i32::from(family) {
@@ -36,7 +37,7 @@ pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
 /// the shortened length (255.255.255.0 arrives with length 7), so the mask
 /// is zero-extended to the family's address width instead of requiring a
 /// complete sockaddr, and the mask's own family byte is not relied on.
-pub(super) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
+pub(in crate::platform) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
     let (offset, width) = match interface_address {
         IpAddr::V4(_) => (offset_of!(libc::sockaddr_in, sin_addr), 4),
         IpAddr::V6(_) => (offset_of!(libc::sockaddr_in6, sin6_addr), 16),
@@ -62,7 +63,7 @@ fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
     u8::try_from(prefix).ok()
 }
 
-pub(super) fn parse_route_addresses(
+pub(in crate::platform) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
 ) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], route::Error> {
@@ -132,7 +133,7 @@ pub(super) fn parse_route_addresses(
     Ok(output)
 }
 
-pub(super) fn roundup(length: usize) -> usize {
+pub(in crate::platform) fn roundup(length: usize) -> usize {
     // Darwin routing sockets use 32-bit sockaddr alignment, not pointer-width alignment.
     let alignment = size_of::<u32>();
     if length == 0 {

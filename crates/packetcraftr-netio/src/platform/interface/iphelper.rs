@@ -1,9 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Windows interface enumeration backed by IP Helper `GetAdaptersAddresses`.
+//! Windows interface enumeration backed by IP Helper `GetAdaptersAddresses`,
+//! whose adapter snapshot the route backend also reads. It emits no neighbor
+//! traffic.
 
 #![allow(unsafe_code)]
+
+pub(in crate::platform) mod adapter;
 
 use std::mem::{align_of, size_of};
 
@@ -15,18 +19,27 @@ use windows::Win32::NetworkManagement::IpHelper::{
 };
 use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
-use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
-use crate::{interface, route};
+use self::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
+use crate::{interface, platform::common::on_worker, route};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Source;
 
-pub(super) fn interfaces() -> Result<Vec<interface::Info>, route::Error> {
-    Ok(adapter_snapshots()?
-        .into_iter()
-        .map(|adapter| adapter.interface)
-        .collect())
+/// One `GetAdaptersAddresses` snapshot. The call is synchronous and takes no
+/// timeout, so it runs on the worker pool and the caller waits only until its
+/// deadline.
+pub(in crate::platform) fn interfaces(
+    deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    on_worker(deadline, "enumerating Windows interfaces", |_| {
+        Ok(adapter_snapshots()?
+            .into_iter()
+            .map(|adapter| adapter.interface)
+            .collect())
+    })
+    .map_err(interface::Error::native)
 }
 
-pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
+pub(in crate::platform) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
             | GAA_FLAG_SKIP_ANYCAST.0
@@ -105,7 +118,10 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
     })
 }
 
-pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> route::Error {
+pub(in crate::platform) fn win32_error(
+    operation: &'static str,
+    error: WIN32_ERROR,
+) -> route::Error {
     route::Error::OperatingSystem {
         operation,
         message: format!("Win32 error {}", error.0),

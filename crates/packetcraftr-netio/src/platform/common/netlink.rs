@@ -32,7 +32,7 @@ use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline};
 use rtnetlink::{Handle, new_connection};
 
 use crate::{
-    platform::route::{os_error, refused},
+    platform::common::{os_error, refused},
     route,
     workers::{self, Class, Task, Waited},
 };
@@ -253,7 +253,10 @@ static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// Runs `operation` on this namespace's worker. The caller's deadline bounds
 /// every step (admission, worker start, queueing, execution, and the reply);
 /// cancellation is checked while the caller waits.
-pub(super) fn with_netlink<F, Fut, T>(caller: &Deadline, operation: F) -> Result<T, route::Error>
+pub(in crate::platform) fn with_netlink<F, Fut, T>(
+    caller: &Deadline,
+    operation: F,
+) -> Result<T, route::Error>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
     Fut: Future<Output = Result<T, route::Error>> + Send + 'static,

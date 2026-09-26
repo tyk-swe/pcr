@@ -14,10 +14,13 @@ use std::time::Instant;
 use packetcraftr_core::budget::Deadline;
 use socket2::{Domain, Socket, Type};
 
-use super::enumeration::interfaces;
-use super::parser::{parse_route_addresses, roundup};
 use crate::deadline::{POLL_INTERVAL, expires_at, remaining_before};
-use crate::platform::route::{constrain_by_preferred_source, find_interface, os_error};
+use crate::platform::common::{
+    af_route::{parse_route_addresses, roundup},
+    os_error,
+};
+use crate::platform::interface::af_route::snapshot;
+use crate::platform::route::{constrain_by_preferred_source, find_interface};
 use crate::route::normalize::{NativeRouteSnapshot, finish_route, interface_decision};
 use crate::{
     interface::Id as InterfaceId,
@@ -37,7 +40,7 @@ pub(super) fn route(
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
-    let available = interfaces()?;
+    let available = snapshot()?;
     let requested = interface_hint
         .map(|requested| find_interface(&available, requested))
         .transpose()?;
@@ -101,7 +104,7 @@ pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
     _deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
-    interface_decision(find_interface(&interfaces()?, requested)?)
+    interface_decision(find_interface(&snapshot()?, requested)?)
 }
 
 struct RouteResponse {

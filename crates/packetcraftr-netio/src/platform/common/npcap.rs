@@ -1,14 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Runtime-loaded Npcap adapter for Windows (x86_64-pc-windows-msvc).
+//! The runtime-loaded Npcap library for Windows (x86_64-pc-windows-msvc): its
+//! ABI, loader, handles, and error mapping, shared by the Npcap capture and
+//! transmit backends.
 
-mod abi;
-mod capture;
-mod error;
-mod handles;
-mod loader;
-mod transmit;
-
-pub(in crate::platform) use capture::{open_capture, timestamp_types};
-pub(in crate::platform) use transmit::send_layer2;
+pub(in crate::platform) mod abi;
+pub(in crate::platform) mod error;
+pub(in crate::platform) mod handles;
+pub(in crate::platform) mod loader;

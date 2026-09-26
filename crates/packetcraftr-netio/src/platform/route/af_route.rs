@@ -1,11 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Passive macOS route/interface adapter backed by `getifaddrs(3)` and routing sockets.
-//! It performs no neighbor discovery, capture, or transmission.
+//! Passive macOS route lookup backed by routing sockets and the interface
+//! backend's `getifaddrs(3)` snapshot. It performs no neighbor discovery,
+//! capture, or transmission.
 
-mod enumeration;
-mod parser;
 mod query;
 
 use std::net::IpAddr;
@@ -13,7 +12,7 @@ use std::net::IpAddr;
 use packetcraftr_core::budget::Deadline;
 
 use crate::{
-    interface::{self, Id as InterfaceId},
+    interface::Id as InterfaceId,
     route::{self, Decision},
 };
 
@@ -27,7 +26,7 @@ pub(in crate::platform) fn route(
     deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
     let interface_hint = interface_hint.cloned();
-    super::on_worker(
+    crate::platform::common::on_worker(
         deadline,
         "querying the macOS routing socket",
         move |deadline| {
@@ -39,12 +38,4 @@ pub(in crate::platform) fn route(
             )
         },
     )
-}
-
-/// `getifaddrs(3)` answers without waiting; the interface capability has
-/// already checked the caller's deadline.
-pub(in crate::platform) fn interfaces(
-    _deadline: &Deadline,
-) -> Result<Vec<interface::Info>, interface::Error> {
-    enumeration::interfaces().map_err(interface::Error::native)
 }

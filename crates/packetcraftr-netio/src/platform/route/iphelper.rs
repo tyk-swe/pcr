@@ -1,12 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Windows route and interface adapter backed by IP Helper. `GetBestRoute2`
-//! supplies route/source selection and `GetAdaptersAddresses` supplies the
-//! portable interface snapshot. Neither API emits neighbor traffic.
+//! Windows route lookup backed by IP Helper. `GetBestRoute2` supplies
+//! route/source selection over the interface backend's
+//! `GetAdaptersAddresses` snapshot. Neither API emits neighbor traffic.
 
-mod adapter;
-mod enumeration;
 mod query;
 
 use std::net::IpAddr;
@@ -14,7 +12,7 @@ use std::net::IpAddr;
 use packetcraftr_core::budget::Deadline;
 
 use crate::{
-    interface::{self, Id as InterfaceId},
+    interface::Id as InterfaceId,
     route::{self, Decision},
 };
 
@@ -28,7 +26,7 @@ pub(in crate::platform) fn route(
     deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
     let interface_hint = interface_hint.cloned();
-    super::on_worker(
+    crate::platform::common::on_worker(
         deadline,
         "selecting the Windows best route",
         move |deadline| {
@@ -47,17 +45,7 @@ pub(in crate::platform) fn interface_route(
     deadline: &Deadline,
 ) -> Result<Decision, route::Error> {
     let requested = requested.clone();
-    super::on_worker(deadline, "selecting a Windows interface", move |_| {
+    crate::platform::common::on_worker(deadline, "selecting a Windows interface", move |_| {
         query::interface_route(&requested)
     })
-}
-
-/// One `GetAdaptersAddresses` snapshot.
-pub(in crate::platform) fn interfaces(
-    deadline: &Deadline,
-) -> Result<Vec<interface::Info>, interface::Error> {
-    super::on_worker(deadline, "enumerating Windows interfaces", |_| {
-        enumeration::interfaces()
-    })
-    .map_err(interface::Error::native)
 }

@@ -30,21 +30,21 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 
 #[derive(Clone)]
-pub(super) struct WindowsAdapter {
-    pub(super) interface: interface::Info,
-    pub(super) ipv4_index: u32,
-    pub(super) ipv6_index: u32,
-    pub(super) luid: NET_LUID_LH,
+pub(in crate::platform) struct WindowsAdapter {
+    pub(in crate::platform) interface: interface::Info,
+    pub(in crate::platform) ipv4_index: u32,
+    pub(in crate::platform) ipv6_index: u32,
+    pub(in crate::platform) luid: NET_LUID_LH,
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct BufferBounds {
+pub(in crate::platform) struct BufferBounds {
     start: usize,
     end: usize,
 }
 
 impl BufferBounds {
-    pub(super) fn new(start: *const u8, length: usize) -> Result<Self, route::Error> {
+    pub(in crate::platform) fn new(start: *const u8, length: usize) -> Result<Self, route::Error> {
         let start = start as usize;
         let end = start
             .checked_add(length)
@@ -54,7 +54,7 @@ impl BufferBounds {
         Ok(Self { start, end })
     }
 
-    pub(super) fn contains<T>(self, pointer: *const T) -> bool {
+    pub(in crate::platform) fn contains<T>(self, pointer: *const T) -> bool {
         let address = pointer as usize;
         !pointer.is_null()
             && address.is_multiple_of(align_of::<T>())
@@ -64,7 +64,7 @@ impl BufferBounds {
                 .is_some_and(|end| end <= self.end)
     }
 
-    pub(super) fn contains_bytes(self, pointer: *const u8, length: usize) -> bool {
+    pub(in crate::platform) fn contains_bytes(self, pointer: *const u8, length: usize) -> bool {
         let address = pointer as usize;
         !pointer.is_null()
             && address >= self.start
@@ -73,14 +73,14 @@ impl BufferBounds {
                 .is_some_and(|end| end <= self.end)
     }
 }
-pub(super) fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -> u32 {
+pub(in crate::platform) fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -> u32 {
     if destination.is_ipv4() {
         adapter.ipv4_index
     } else {
         adapter.ipv6_index
     }
 }
-pub(super) fn find_windows_adapter(
+pub(in crate::platform) fn find_windows_adapter(
     adapters: &[WindowsAdapter],
     requested: &InterfaceId,
 ) -> Result<WindowsAdapter, route::Error> {
@@ -114,7 +114,7 @@ pub(super) fn find_windows_adapter(
     })
 }
 
-pub(super) fn parse_adapters(
+pub(in crate::platform) fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
     bounds: BufferBounds,
 ) -> Result<Vec<WindowsAdapter>, route::Error> {

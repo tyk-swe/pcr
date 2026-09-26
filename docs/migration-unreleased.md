@@ -526,7 +526,7 @@ Registry APIs take the `LinkType` newtype (`RegistryBuilder::bind_link_type`,
 `impl Into<Discriminator>` (`From<u64>`) instead of bare integers — drop `.0`
 peels at call sites. `Frame::try_with_lengths`/`try_with_optional_timestamp`
 take `frame::Lengths { captured, original }`, and
-`Interner::with_limits` takes `analysis::scope::Limits { limit, max_bytes }`,
+`Interner::with_limits` takes `analysis::scope::Limits { max_scopes, max_bytes }`,
 removing adjacent-scalar swaps. `Malformed::new` takes `Option<String>`;
 analysis HTTP/DNS collectors take `impl IntoIterator<Item = u16>` for ports.
 
@@ -852,3 +852,43 @@ Messages that ended in `: {source}` now end before it, and the source
 appears in `Classified::causes()` (and the published `causes`). Code that
 searched `to_string()` for a source's text reads `causes()` or
 `error::source_chain`, or `error::render` for one line.
+
+## Limits and budgets
+
+A configured ceiling is a `…Limits` type, validated where it is accepted and
+never lowered silently. The running allowance charged against it is a
+`…Budget`.
+
+| Removed | Use instead |
+|---|---|
+| `capture_file::ReaderOptions` | `capture_file::ReaderLimits` |
+| `capture_file::Reader::with_options` | `capture_file::Reader::with_limits` |
+| `capture_file::Limits::advance(frames, bytes, len)` | `capture_file::Budget::new(limits)?`, then `budget.charge(len)?` (or `budget.after(len)?` to check without charging) and `budget.frames()` / `budget.captured_bytes()` |
+| `analysis::Limits { max_tcp_bytes_per_flow, max_tcp_reassembly_bytes, max_tcp_segments_per_flow, tcp_idle_expiry, .. }` | `analysis::Limits { tcp: reassembly::tcp::Limits { max_bytes_per_flow, max_aggregate_bytes, max_segments_per_flow, idle_expiry, max_flows }, .. }` |
+| `analysis::Limits { max_ip_datagrams, max_ip_fragments_per_datagram, max_ip_bytes_per_datagram, max_ip_reassembly_bytes, max_ip_outcomes, ip_idle_expiry, .. }` | `analysis::Limits { ip: reassembly::ip::Limits { max_datagrams, max_fragments_per_datagram, max_bytes_per_datagram, max_aggregate_bytes, max_retained_outcomes, idle_expiry }, .. }` |
+| `scope::Limits { limit, .. }` | `scope::Limits { max_scopes, .. }`, at most `scope::MAX_SCOPES` |
+| `decode::Options { max_layers, max_packet_size }` | `decode::Options { limits: packet::Limits { max_layers, max_packet_size } }` |
+| `build::Options { mode, max_layers, max_packet_size }` | `build::Options { mode, limits: packet::Limits { .. } }` |
+| `reassembly::tcp::Resource::InvalidWindowLimit` | `analysis::Error::InvalidLimit` from `tcp::Reassembler::new` |
+
+Constructors that accept limits now validate them and return a `Result`:
+`reassembly::ip::Reassembler::new` and `reassembly::tcp::Reassembler::new`
+return `analysis::Error::InvalidLimit` (`cli.analysis_limit`), and
+`scope::Interner::with_limits` returns `scope::Error::InvalidLimit`
+(`cli.analysis_limit`). Each of these types, plus `capture_file::Limits`,
+`MergeLimits`, `compression::Limits`, `dhcp::Limits`, `dns::DecodeLimits`, and
+`application::Limits`, has a public `validate()`.
+
+Behavior changes:
+
+- `analysis::Limits.tcp.max_flows` bounds concurrent directional TCP flows by
+  itself. It was derived as twice `max_flows`, which is still its default; set
+  both if you raise `max_flows` past half of `tcp.max_flows`.
+- Capture writers, `rewrite`, `select`, `map_frames`, and `merge` refuse a zero
+  `max_frames` or `max_bytes` with `capture_file::Error::InvalidLimit`
+  (`cli.capture_limit`) before writing anything.
+- `dhcp::Limits` above `dhcp::{MAX_MESSAGE_BYTES, MAX_OPTIONS, MAX_NESTING}`
+  and `dns::DecodeLimits` above `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS,
+  MAX_NAME_POINTERS}` fail with `InvalidLimit` (`policy.dhcp_limit` /
+  `policy.dns_limit`) instead of being lowered to the ceiling. Pass the
+  constant itself to ask for the widest limit.

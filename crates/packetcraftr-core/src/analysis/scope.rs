@@ -97,6 +97,8 @@ pub enum Error {
     Limit { limit: usize },
     #[error("capture scope metadata needs {actual} charged bytes, exceeding {limit}")]
     Bytes { actual: usize, limit: usize },
+    #[error("capture scope limit {value} exceeds the {maximum} scopes a 32-bit identity can name")]
+    InvalidLimit { value: usize, maximum: usize },
 }
 
 impl Classified for Error {
@@ -105,6 +107,11 @@ impl Classified for Error {
             Self::Capacity | Self::Limit { .. } | Self::Bytes { .. } => {
                 super::error::resource_limit(super::error::GENERAL_RESOURCE_REMEDIATION)
             }
+            Self::InvalidLimit { .. } => Classification::new(
+                "cli.analysis_limit",
+                Kind::Usage,
+                Some("use a scope limit within the 32-bit scope identity space"),
+            ),
             Self::Unknown { .. } | Self::ReplayMismatch { .. } => Classification::new(
                 "internal.scope_composition",
                 Kind::Internal,
@@ -114,25 +121,43 @@ impl Classified for Error {
     }
 }
 
+/// Most scopes one [`Interner`] can issue: every [`ScopeId`] is a distinct
+/// 32-bit value.
+pub const MAX_SCOPES: usize = u32::MAX as usize;
+
 /// Finite entry-count and retained-byte ceilings for [`Interner`].
 ///
 /// The two ceilings use unrelated units, so they travel in one named struct
 /// rather than adjacent `usize` parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum number of interned scopes. Zero refuses new entries.
-    pub limit: usize,
+    /// Maximum number of interned scopes, at most [`MAX_SCOPES`]. Zero
+    /// refuses new entries.
+    pub max_scopes: usize,
     /// Conservative retained-byte ceiling covering path copies and table
-    /// capacity headroom, not RSS.
+    /// capacity headroom, not RSS. Zero refuses new entries.
     pub max_bytes: usize,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            limit: usize::MAX,
+            max_scopes: MAX_SCOPES,
             max_bytes: usize::MAX,
         }
+    }
+}
+
+impl Limits {
+    /// Rejects a scope count the 32-bit identity space cannot name.
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.max_scopes > MAX_SCOPES {
+            return Err(Error::InvalidLimit {
+                value: self.max_scopes,
+                maximum: MAX_SCOPES,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -142,9 +167,8 @@ pub struct Interner {
     scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
     definitions: Vec<Definition>,
     retained_bytes: usize,
-    max_bytes: usize,
+    limits: Limits,
     next: u32,
-    limit: usize,
 }
 
 impl Default for Interner {
@@ -153,9 +177,8 @@ impl Default for Interner {
             scopes: HashMap::new(),
             definitions: Vec::new(),
             retained_bytes: 0,
-            max_bytes: usize::MAX,
+            limits: Limits::default(),
             next: 0,
-            limit: usize::MAX,
         }
     }
 }
@@ -166,15 +189,14 @@ impl Interner {
         Self::default()
     }
 
-    /// Finite count and conservative retained-byte ceilings. Zero refuses new
-    /// entries. Includes both path copies and table capacity headroom, not RSS.
-    #[must_use]
-    pub fn with_limits(limits: Limits) -> Self {
-        Self {
-            limit: limits.limit,
-            max_bytes: limits.max_bytes,
+    /// An interner bounded by `limits`, after [`Limits::validate`] accepts
+    /// them.
+    pub fn with_limits(limits: Limits) -> Result<Self, Error> {
+        limits.validate()?;
+        Ok(Self {
+            limits,
             ..Self::default()
-        }
+        })
     }
 
     pub fn definition(&self, id: ScopeId) -> Option<&Definition> {
@@ -199,8 +221,10 @@ impl Interner {
         if let Some(id) = self.scopes.get(&scope) {
             return Ok(*id);
         }
-        if self.scopes.len() >= self.limit {
-            return Err(Error::Limit { limit: self.limit });
+        if self.scopes.len() >= self.limits.max_scopes {
+            return Err(Error::Limit {
+                limit: self.limits.max_scopes,
+            });
         }
         // Two owned paths, plus conservative table/header/capacity overhead.
         let charge = scope
@@ -214,10 +238,10 @@ impl Interner {
             .retained_bytes
             .checked_add(charge)
             .ok_or(Error::Capacity)?;
-        if actual > self.max_bytes {
+        if actual > self.limits.max_bytes {
             return Err(Error::Bytes {
                 actual,
-                limit: self.max_bytes,
+                limit: self.limits.max_bytes,
             });
         }
         let next = self.next.checked_add(1).ok_or(Error::Capacity)?;
@@ -362,11 +386,28 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_limit_beyond_the_identity_space_is_refused() {
+        let beyond = Limits {
+            max_scopes: MAX_SCOPES + 1,
+            ..Limits::default()
+        };
+        let expected = Error::InvalidLimit {
+            value: MAX_SCOPES + 1,
+            maximum: MAX_SCOPES,
+        };
+        assert_eq!(beyond.validate(), Err(expected.clone()));
+        assert_eq!(Interner::with_limits(beyond).unwrap_err(), expected);
+        assert_eq!(expected.classification().code, "cli.analysis_limit");
+        assert!(Limits::default().validate().is_ok());
+    }
+
+    #[test]
     fn configured_scope_limit_bounds_persistent_path_metadata() {
         let mut interner = Interner::with_limits(Limits {
-            limit: 1,
+            max_scopes: 1,
             ..Limits::default()
-        });
+        })
+        .expect("valid limits");
         let first = interner
             .intern(Some(1), tunnel_path(10))
             .expect("first scope fits");
@@ -390,9 +431,10 @@ mod tests {
         let charge = measured.retained_bytes();
         for limit in [charge - 1, charge, charge + 1] {
             let mut scopes = Interner::with_limits(Limits {
-                limit: 2,
+                max_scopes: 2,
                 max_bytes: limit,
-            });
+            })
+            .expect("valid limits");
             let result = scopes.intern(Some(1), path.clone());
             if limit < charge {
                 assert!(matches!(result, Err(Error::Bytes { .. })));

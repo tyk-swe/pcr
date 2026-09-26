@@ -7,7 +7,6 @@ use packetcraftr::{ProviderSet, SystemProviders};
 use packetcraftr_core as core;
 
 pub(crate) type Client = packetcraftr::Client<SystemProviders>;
-pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<'a, SystemProviders>;
 
 /// The one client a command runs its workflows on: every system provider,
 /// the installed cancellation signal, and one event runtime registered for

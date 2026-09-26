@@ -76,15 +76,14 @@ pub(super) fn run(
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    let executor = &providers.executor;
     for request in &mut requests {
-        request.route = executor.send.plan.clone();
-        request.collection = executor.collection.clone();
+        request.route = providers.route.clone();
+        request.collection = providers.collection.clone();
     }
     // DNS drives the composed client itself — authorization, cancellation,
     // and the callback runtime live inside it — so the driver vends no
     // session state.
-    let client = &executor.client;
+    let client = &providers.client;
     // A lone question keeps the single-query contract: its failure propagates
     // as the command's error rather than reporting as batch evidence.
     if let [request] = requests.as_slice() {

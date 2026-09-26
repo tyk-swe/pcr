@@ -4,8 +4,8 @@
 //! Live workflow orchestration shared by the probe-driven commands:
 //! provider composition ([`prepare`]/[`Providers`]) and [`run_workflow`], the
 //! one driver deciding between the streaming and collecting engine entry
-//! points under the negotiated output format. [`Executor`] delegates to the library exchange, whose client
-//! resolves the interface selector after it admits each exchange.
+//! points under the negotiated output format. The client resolves the
+//! interface selector after it admits each exchange.
 
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::output;
@@ -17,45 +17,22 @@ use std::time::Duration;
 
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
-use crate::system::{Client, Exchange};
+use crate::system::Client;
 
-/// The client and the exchange settings every step of one workflow runs
-/// under.
-pub(super) struct Executor {
-    pub(super) client: Client,
-    pub(super) send: packetcraftr::send::Options,
-    pub(super) collection: packetcraftr::exchange::Collection,
-}
-
-impl Executor {
-    fn exchange(&self) -> Exchange<'_> {
-        Exchange::new(&self.client, self.send.clone(), self.collection.clone())
-    }
-}
-
-/// Every live workflow request the library's exchange executor accepts is
-/// served the same way: delegate to an exchange on the client.
-impl<Req> packetcraftr::probe::Executor<Req> for Executor
-where
-    Req: packetcraftr::probe::Request,
-    for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
-{
-    fn execute(
-        &mut self,
-        request: &Req,
-    ) -> Result<Req::Execution, packetcraftr_core::error::BoundaryError> {
-        self.exchange().execute(request)
-    }
-}
-
+/// The client a probe-driven workflow runs on, with the route and capture
+/// bounds its requests carry.
 pub(super) struct Providers {
-    pub(super) executor: Executor,
+    pub(super) client: Client,
+    /// The route every exchange of the workflow plans on.
+    pub(super) route: packetcraftr::route::Options,
+    /// The capture bounds every exchange of the workflow collects under.
+    pub(super) collection: packetcraftr::exchange::Collection,
     /// Admits the one callback worker NDJSON streaming publishes through.
     pub(super) runtime: packetcraftr::progress::Runtime,
 }
 
-/// Validates the policy and interface selector, then binds an executor to the
-/// requested route. The client resolves the selector only after it admits
+/// Validates the policy and interface selector, then composes the client and
+/// the requested route. The client resolves the selector only after it admits
 /// each exchange, so a denied target never enumerates interfaces.
 ///
 /// `max_template_packets` is how many packets one exchange may hold: one query
@@ -76,22 +53,14 @@ pub(super) fn prepare(
         .transpose()?
         .map(Into::into);
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let executor = Executor {
+    Ok(Providers {
         client: client(registry, policy, "client_progress"),
-        send: packetcraftr::send::Options {
-            destination: None,
-            plan: packetcraftr::route::Options {
-                link_mode: route.link_mode.into(),
-                interface,
-                preferred_source: route.source,
-            },
-            build: core::build::Options::default(),
-            allow_permissive_live: false,
+        route: packetcraftr::route::Options {
+            link_mode: route.link_mode.into(),
+            interface,
+            preferred_source: route.source,
         },
         collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
-    };
-    Ok(Providers {
-        executor,
         runtime: crate::resources::runtime(
             "workflow_progress",
             packetcraftr::progress::MAX_WORKER_CAPACITY,

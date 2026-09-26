@@ -13,4 +13,4 @@ pub(crate) use interface::{InterfaceSelector, resolve, select_interfaces};
 
 pub(crate) use route::{prepare_expanded_route, prepare_route};
 
-pub(crate) use client::{Client, Exchange, client};
+pub(crate) use client::{Client, client};

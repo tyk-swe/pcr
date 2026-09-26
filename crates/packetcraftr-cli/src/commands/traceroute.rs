@@ -63,7 +63,10 @@ pub(super) fn run(
         )
     })?;
     let execution::Providers {
-        executor, runtime, ..
+        client,
+        route,
+        collection,
+        runtime,
     } = execution::prepare(
         arguments.route,
         arguments.policy,
@@ -72,13 +75,13 @@ pub(super) fn run(
         queue_limits,
     )?;
     let request = packetcraftr::traceroute::Request {
-        route: executor.send.plan,
-        collection: executor.collection,
+        route,
+        collection,
         ..request
     };
     // Events publish on the workflow runtime, as they did before traceroute
     // ran on the client, so the `resources` report keeps its rows.
-    let client = executor.client.with_runtime(runtime);
+    let client = client.with_runtime(runtime);
     execution::run_workflow(
         &mut (),
         format,

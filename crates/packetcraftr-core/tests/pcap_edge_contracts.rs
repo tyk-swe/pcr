@@ -7,7 +7,7 @@ use common::pcap::{frame_at, pcap_bytes};
 use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::capture_file::{
     Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader,
     ReaderOptions, TimestampResolution, Writer,
 };

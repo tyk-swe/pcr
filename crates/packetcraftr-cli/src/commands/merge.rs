@@ -7,7 +7,7 @@ use crate::{
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
 };
 use packetcraftr_cli::output::{self, contract::ToolFormat};
-use packetcraftr_core::{analysis::pcap, error::Kind};
+use packetcraftr_core::{capture_file, error::Kind};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, clap::Args)]
@@ -38,22 +38,22 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         .paths
         .iter()
         .map(|path| {
-            Ok(pcap::MergeSource {
+            Ok(capture_file::MergeSource {
                 name: path.display().to_string(),
                 reader: crate::input::open_capture(path, args.limits.reader)?,
             })
         })
         .collect::<Result<Vec<_>, CliError>>()?;
-    let mut writer = pcap::Writer::pcapng_with_options(
+    let mut writer = capture_file::Writer::pcapng_with_options(
         args.compression.writer(std::io::BufWriter::with_capacity(
             64 * 1024,
             staged.as_file_mut(),
         ))?,
-        pcap::PcapNgOptions {
+        capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: pcap::DEFAULT_TOTAL_INTERFACE_LIMIT,
-            stream_limits: pcap::Limits {
+            max_interfaces: capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT,
+            stream_limits: capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,
             },
@@ -61,11 +61,11 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         },
     )
     .map_err(CliError::classified)?;
-    let report = pcap::merge(
+    let report = capture_file::merge(
         &mut sources,
         &mut writer,
-        pcap::MergeLimits {
-            streams: pcap::Limits {
+        capture_file::MergeLimits {
+            streams: capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,
             },

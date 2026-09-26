@@ -46,8 +46,7 @@ fn fragment_capture_and_structured_outputs_have_matching_bounded_frames() {
         "--output", "pcapng", "fragment", "--packet", &packet, "--mtu", "128",
     ]);
     let mut reader =
-        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(capture.stdout))
-            .unwrap();
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(capture.stdout)).unwrap();
     let mut count = 0;
     while let Some(frame) = reader.next_frame().unwrap() {
         assert!(frame.bytes().len() <= 128);

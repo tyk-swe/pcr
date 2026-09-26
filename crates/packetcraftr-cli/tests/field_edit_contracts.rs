@@ -8,7 +8,7 @@ fn examples() -> std::path::PathBuf {
 }
 
 fn frames(path: &std::path::Path) -> Vec<packetcraftr_core::frame::Frame> {
-    use packetcraftr_core::analysis::pcap::{Reader, compression::Input};
+    use packetcraftr_core::capture_file::{Reader, compression::Input};
     let bytes = std::fs::read(path).unwrap();
     let mut reader =
         Reader::new(Input::new(std::io::Cursor::new(bytes), Default::default()).unwrap()).unwrap();
@@ -45,8 +45,8 @@ fn field_range(
 /// One eth/ipv4/tcp capture with `count` identical frames.
 fn tcp_capture(path: &std::path::Path, count: usize) {
     use packetcraftr_core::{
-        analysis::pcap,
         build::Builder,
+        capture_file,
         frame::{Frame, LinkType},
         layer::Raw,
         packet::Packet,
@@ -69,12 +69,12 @@ fn tcp_capture(path: &std::path::Path, count: usize) {
         .build(packet, Default::default(), Default::default())
         .unwrap();
     let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap();
-    let mut writer = pcap::Writer::pcapng(Vec::new()).unwrap();
+    let mut writer = capture_file::Writer::pcapng(Vec::new()).unwrap();
     writer
-        .add_interface_description(pcap::Interface {
+        .add_interface_description(capture_file::Interface {
             link_type: LinkType::ETHERNET,
             snap_len: 65535,
-            timestamp_resolution: pcap::TimestampResolution::Decimal(6),
+            timestamp_resolution: capture_file::TimestampResolution::Decimal(6),
             timestamp_offset: 0,
         })
         .unwrap();

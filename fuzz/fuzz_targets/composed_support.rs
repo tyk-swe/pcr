@@ -10,8 +10,9 @@ use std::{
 };
 
 use packetcraftr_core::{
-    analysis::{self, forwarding, pcap},
+    analysis::{self, forwarding},
     build::{Builder, Options as BuildOptions},
+    capture_file,
     codec::Context,
     error::BoundaryError,
     frame::{Frame, LinkType},
@@ -92,12 +93,12 @@ pub fn tcp(sequence: u32, flags: u16, payload: &[u8]) -> Frame {
     finish(packet, payload)
 }
 
-pub fn reader(frames: &[Frame]) -> pcap::Reader<Cursor<Vec<u8>>> {
-    let mut writer = pcap::Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
+pub fn reader(frames: &[Frame]) -> capture_file::Reader<Cursor<Vec<u8>>> {
+    let mut writer = capture_file::Writer::pcap(Vec::new(), LinkType::IPV4).unwrap();
     for frame in frames {
         writer.write_frame(frame).unwrap();
     }
-    pcap::Reader::new(Cursor::new(writer.into_inner())).unwrap()
+    capture_file::Reader::new(Cursor::new(writer.into_inner())).unwrap()
 }
 
 pub fn collect(

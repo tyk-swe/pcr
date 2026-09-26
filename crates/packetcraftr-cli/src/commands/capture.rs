@@ -17,7 +17,7 @@ use packetcraftr_cli::output::{
     capture::Retention,
     contract::{CaptureFormat, Command},
 };
-use packetcraftr_core::{analysis::pcap, error::Kind};
+use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
 use std::{
     collections::HashSet,
@@ -133,7 +133,7 @@ pub(super) fn run(
                     max_files: args.rotate_files,
                     retention: args.retention,
                 },
-                pcap::Limits {
+                capture_file::Limits {
                     max_frames: budget.max_frames(),
                     max_bytes: budget.max_bytes(),
                 },

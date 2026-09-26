@@ -8,8 +8,8 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crate::analysis::pcap::Reader;
 use crate::budget::Deadline;
+use crate::capture_file::Reader;
 use crate::decode::{DecodedPacket, Dissector};
 use crate::filter::{Context as FilterContext, DerivedPacket as FilterDerivedPacket};
 use crate::registry::Registry;
@@ -242,7 +242,7 @@ pub struct Summary {
     /// Source interfaces in global [`crate::frame::Frame::interface`] order.
     /// Classic PCAP has one entry; PCAPNG without interface-description blocks
     /// has none.
-    pub interfaces: Vec<crate::analysis::pcap::Interface>,
+    pub interfaces: Vec<crate::capture_file::Interface>,
     /// Every capture scope interned during the run, including scopes of
     /// frames the sink never saw, which `incomplete_sources` keys may name.
     pub scopes: Vec<crate::analysis::scope::Definition>,
@@ -783,7 +783,7 @@ fn decode_derived(
 
 /// Reads one physical frame and charges it against the aggregate frame and
 /// captured-byte ceilings, which the capture reader's own
-/// [`pcap::Limits`](crate::analysis::pcap::Limits) enforces.
+/// [`capture_file::Limits`](crate::capture_file::Limits) enforces.
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
     frames_read: &mut u64,

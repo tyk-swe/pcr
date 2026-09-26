@@ -6,11 +6,11 @@ use std::net::Ipv4Addr;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::build::Builder;
 use packetcraftr_core::build::Options;
+use packetcraftr_core::capture_file::Format as CaptureFormat;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;

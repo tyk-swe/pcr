@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap as capture;
-use packetcraftr_core::analysis::pcap::Limits;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::rewrite;
+use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::capture_file::Limits;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::capture_file::rewrite;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 

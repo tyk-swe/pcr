@@ -6,7 +6,7 @@ use std::io::Read;
 use bytes::Bytes;
 
 use super::options::parse_options;
-use crate::analysis::pcap::{
+use crate::capture_file::{
     error::Error,
     model::{Endianness, Format, PcapNgOption},
     wire::{
@@ -15,7 +15,7 @@ use crate::analysis::pcap::{
 };
 
 #[derive(Clone)]
-pub(in crate::analysis::pcap) struct SectionHeader {
+pub(in crate::capture_file) struct SectionHeader {
     pub endianness: Endianness,
     pub major: u16,
     pub minor: u16,
@@ -25,7 +25,7 @@ pub(in crate::analysis::pcap) struct SectionHeader {
     pub raw: Bytes,
 }
 
-pub(in crate::analysis::pcap) fn read_pcapng_block_header<R: Read>(
+pub(in crate::capture_file) fn read_pcapng_block_header<R: Read>(
     reader: &mut R,
 ) -> Result<Option<[u8; 8]>, Error> {
     let mut header = [0_u8; 8];
@@ -36,7 +36,7 @@ pub(in crate::analysis::pcap) fn read_pcapng_block_header<R: Read>(
     }
 }
 
-pub(in crate::analysis::pcap) fn read_section_header_after_type<R: Read>(
+pub(in crate::capture_file) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
     scratch: &mut Vec<u8>,
@@ -46,7 +46,7 @@ pub(in crate::analysis::pcap) fn read_section_header_after_type<R: Read>(
     read_section_header_with_length(reader, length, max_size, None, scratch)
 }
 
-pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
+pub(in crate::capture_file) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
@@ -143,7 +143,7 @@ pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
             kind: "pcapng section header",
             requested: block_length_usize,
         })?;
-    raw.extend_from_slice(&crate::analysis::pcap::wire::PCAPNG_SECTION_HEADER);
+    raw.extend_from_slice(&crate::capture_file::wire::PCAPNG_SECTION_HEADER);
     raw.extend_from_slice(&raw_length);
     raw.extend_from_slice(&raw_bom);
     raw.extend_from_slice(scratch);
@@ -158,7 +158,7 @@ pub(in crate::analysis::pcap) fn read_section_header_with_length<R: Read>(
     })
 }
 
-pub(in crate::analysis::pcap) fn validate_pcapng_block_length(
+pub(in crate::capture_file) fn validate_pcapng_block_length(
     length: u32,
     max_size: usize,
 ) -> Result<(), Error> {
@@ -177,7 +177,7 @@ pub(in crate::analysis::pcap) fn validate_pcapng_block_length(
 
 /// Copies a reader-validated section header with an unknown section length.
 // validated section headers contain at least 28 bytes
-pub(in crate::analysis::pcap) fn write_selected_section(
+pub(in crate::capture_file) fn write_selected_section(
     output: &mut impl std::io::Write,
     raw: &[u8],
 ) -> Result<(), Error> {

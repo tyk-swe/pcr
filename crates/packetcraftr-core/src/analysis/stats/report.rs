@@ -103,7 +103,7 @@ pub struct Report {
     /// interface-ID order frames reference. Classic PCAP always contributes
     /// exactly one entry; a PCAPNG source with no interface descriptions
     /// yields an empty list rather than invented values.
-    pub interfaces: Vec<crate::analysis::pcap::Interface>,
+    pub interfaces: Vec<crate::capture_file::Interface>,
 }
 
 impl Report {

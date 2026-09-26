@@ -5,7 +5,7 @@ use common::{parse_json, run, run_success};
 #[test]
 fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_capture() {
     use packetcraftr_core::{
-        analysis::pcap::{Reader, compression::Input},
+        capture_file::{Reader, compression::Input},
         decode::Dissector,
         protocol::{builtin, network::Ipv4, transport::Tcp},
     };

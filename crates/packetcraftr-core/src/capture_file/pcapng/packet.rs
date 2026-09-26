@@ -6,22 +6,22 @@ use bytes::Bytes;
 use crate::frame::{Direction, Frame, Lengths};
 
 use super::options::visit_options;
-use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Endianness, Format, Interface, PcapNgOption};
-use crate::analysis::pcap::wire::{
+use crate::capture_file::error::Error;
+use crate::capture_file::model::{Endianness, Format, Interface, PcapNgOption};
+use crate::capture_file::wire::{
     PCAPNG_OPTION_EPB_FLAGS, align_to_usize, copy_bytes_fallibly, decode_u16, decode_u32,
     timestamp_from_ticks, validate_declared_lengths,
 };
 
-pub(in crate::analysis::pcap) struct ParsedPacket<'a> {
-    pub(in crate::analysis::pcap) frame: Frame,
-    pub(in crate::analysis::pcap) interface_id: u32,
+pub(in crate::capture_file) struct ParsedPacket<'a> {
+    pub(in crate::capture_file) frame: Frame,
+    pub(in crate::capture_file) interface_id: u32,
     /// Option bytes following the packet data. A simple packet block has no
     /// options at all, so this is empty for one.
-    pub(in crate::analysis::pcap) options: &'a [u8],
+    pub(in crate::capture_file) options: &'a [u8],
 }
 
-pub(in crate::analysis::pcap) fn parse_enhanced_packet<'a>(
+pub(in crate::capture_file) fn parse_enhanced_packet<'a>(
     body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -38,7 +38,7 @@ pub(in crate::analysis::pcap) fn parse_enhanced_packet<'a>(
     )
 }
 
-pub(in crate::analysis::pcap) fn parse_obsolete_packet<'a>(
+pub(in crate::capture_file) fn parse_obsolete_packet<'a>(
     body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -153,7 +153,7 @@ fn parse<'a>(
     })
 }
 
-pub(in crate::analysis::pcap) fn parse_simple_packet<'a>(
+pub(in crate::capture_file) fn parse_simple_packet<'a>(
     body: &'a [u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -223,7 +223,7 @@ pub(in crate::analysis::pcap) fn parse_simple_packet<'a>(
     })
 }
 
-pub(in crate::analysis::pcap) fn parse_packet_direction(
+pub(in crate::capture_file) fn parse_packet_direction(
     options: &[u8],
     endianness: Endianness,
 ) -> Result<Option<Direction>, Error> {
@@ -264,7 +264,7 @@ pub(in crate::analysis::pcap) fn parse_packet_direction(
 /// inbound/outbound direction is carried onto the frame, so other flag bits and
 /// the undefined direction value 3 are refused. A value that is not four bytes
 /// is reported with `malformed_reason`.
-pub(in crate::analysis::pcap) fn validate_rewritable_packet_flags(
+pub(in crate::capture_file) fn validate_rewritable_packet_flags(
     options: &[PcapNgOption],
     endianness: Endianness,
     malformed_reason: &'static str,

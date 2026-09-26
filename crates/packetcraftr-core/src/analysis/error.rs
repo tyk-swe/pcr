@@ -4,9 +4,9 @@
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::analysis::pcap::Error as CaptureError;
 use crate::analysis::reassembly::ip::Error as IpError;
 use crate::analysis::reassembly::tcp::Error as TcpError;
+use crate::capture_file::Error as CaptureError;
 
 use crate::error::{Classification, Classified, Kind};
 

@@ -788,11 +788,11 @@ mod tests {
             timestamp_offset: 0,
         };
         let options = [
-            crate::analysis::pcap::PcapNgOption {
+            crate::capture_file::PcapNgOption {
                 code: 2,
                 value: vec![0; 5].into(),
             },
-            crate::analysis::pcap::PcapNgOption {
+            crate::capture_file::PcapNgOption {
                 code: 3,
                 value: vec![0; 3].into(),
             },

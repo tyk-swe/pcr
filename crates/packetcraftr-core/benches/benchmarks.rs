@@ -10,7 +10,6 @@ use std::time::{Instant, SystemTime};
 use bytes::Bytes;
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 
-use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
 use packetcraftr_core::analysis::reassembly::ip::{
     Fragment, Ipv4DatagramKey, Ipv4Fragment, Limits as IpReassemblyLimits, OverlapPolicy,
     Reassembler as IpReassembler,
@@ -19,6 +18,7 @@ use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
 use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::capture_file::{Reader, ReaderOptions, Writer};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};

@@ -1,9 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Portable streaming PCAP/PCAPNG I/O with optional gzip/Zstd support; no
-//! native libpcap/Npcap dependency. [`rewrite`](fn@rewrite) preserves validated
-//! source records and format; [`Writer`] creates new captures from frames.
+//! Capture files: portable streaming PCAP/PCAPNG I/O with optional gzip/Zstd
+//! support; no native libpcap/Npcap dependency. [`rewrite`](fn@rewrite)
+//! preserves validated source records and format; [`Writer`] creates new
+//! captures from frames.
 
 mod classic;
 pub mod compression;

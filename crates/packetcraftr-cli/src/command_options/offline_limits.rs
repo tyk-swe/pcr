@@ -3,7 +3,7 @@
 
 use clap::{Args, ValueEnum};
 use packetcraftr_core::analysis;
-use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::capture_file as capture;
 
 /// How conflicting bytes in overlapping IP fragments are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]

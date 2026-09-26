@@ -5,11 +5,11 @@ use std::io::Write;
 
 use crate::frame::{Frame, LinkType};
 
-use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Endianness, TimestampPrecision};
-use crate::analysis::pcap::wire::{PCAP_RECORD_HEADER_LEN, write_u16, write_u32};
+use crate::capture_file::error::Error;
+use crate::capture_file::model::{Endianness, TimestampPrecision};
+use crate::capture_file::wire::{PCAP_RECORD_HEADER_LEN, write_u16, write_u32};
 
-pub(in crate::analysis::pcap) fn write_pcap_header<W: Write>(
+pub(in crate::capture_file) fn write_pcap_header<W: Write>(
     writer: &mut W,
     endianness: Endianness,
     precision: TimestampPrecision,
@@ -33,7 +33,7 @@ pub(in crate::analysis::pcap) fn write_pcap_header<W: Write>(
 }
 
 // Timestamp and representability checks are shared by preview and output in Writer.
-pub(in crate::analysis::pcap) fn write_pcap_frame<W: Write>(
+pub(in crate::capture_file) fn write_pcap_frame<W: Write>(
     writer: &mut W,
     endianness: Endianness,
     seconds: u32,

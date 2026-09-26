@@ -12,9 +12,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr_core::analysis::pcap::{Format, Reader, Writer};
 use packetcraftr_core::analysis::{self, stats};
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
+use packetcraftr_core::capture_file::{Format, Reader, Writer};
 use packetcraftr_core::codec::Context as BuildContext;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::{Frame, LinkType};

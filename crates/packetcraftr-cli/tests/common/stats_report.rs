@@ -131,18 +131,20 @@ pub(crate) fn report(
             outcomes_omitted: 2,
         },
         interfaces: vec![
-            packetcraftr_core::analysis::pcap::Interface {
+            packetcraftr_core::capture_file::Interface {
                 link_type: packetcraftr_core::frame::LinkType(1),
                 snap_len: 65_535,
-                timestamp_resolution:
-                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(6),
+                timestamp_resolution: packetcraftr_core::capture_file::TimestampResolution::Decimal(
+                    6,
+                ),
                 timestamp_offset: 0,
             },
-            packetcraftr_core::analysis::pcap::Interface {
+            packetcraftr_core::capture_file::Interface {
                 link_type: packetcraftr_core::frame::LinkType(276),
                 snap_len: 9_000,
-                timestamp_resolution:
-                    packetcraftr_core::analysis::pcap::TimestampResolution::Decimal(9),
+                timestamp_resolution: packetcraftr_core::capture_file::TimestampResolution::Decimal(
+                    9,
+                ),
                 timestamp_offset: 0,
             },
         ],

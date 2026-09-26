@@ -22,7 +22,7 @@ use packetcraftr_cli::output::{
 };
 use packetcraftr_core::{
     self as core,
-    analysis::pcap::{self, compression},
+    capture_file::{self, compression},
     decode::DecodedPacket,
     error::{BoundaryError, Classified},
     frame::Frame,
@@ -103,11 +103,11 @@ pub(super) fn run<P: Provider>(
     options: capture::Options,
     mut rendering: Rendering<'_>,
 ) -> Result<(), CliError> {
-    let limits = pcap::Limits {
+    let limits = capture_file::Limits {
         max_frames: options.budget.max_frames(),
         max_bytes: options.budget.max_bytes(),
     };
-    let mut writer: Option<pcap::Writer<compression::Output<io::Stdout>>> = None;
+    let mut writer: Option<capture_file::Writer<compression::Output<io::Stdout>>> = None;
     let format = rendering.format;
     let result = capture::run(
         provider,
@@ -141,9 +141,9 @@ pub(super) fn run<P: Provider>(
                         super::writer::initialize(
                             destination,
                             if format == CaptureFormat::Pcap {
-                                pcap::Format::Pcap
+                                capture_file::Format::Pcap
                             } else {
-                                pcap::Format::PcapNg
+                                capture_file::Format::PcapNg
                             },
                             &sources,
                             limits,
@@ -266,7 +266,7 @@ fn emit_frame(
     projector: Option<&mut super::super::projection::Projector>,
     stream: &StreamEncoder,
     format: CaptureFormat,
-    writer: &mut Option<pcap::Writer<compression::Output<io::Stdout>>>,
+    writer: &mut Option<capture_file::Writer<compression::Output<io::Stdout>>>,
     source_frame: u64,
     frame: Frame,
 ) -> Result<(), CliError> {
@@ -581,7 +581,7 @@ mod tests {
                 max_files: 1,
                 retention: output::capture::Retention::Stop,
             },
-            pcap::Limits {
+            capture_file::Limits {
                 max_frames: 10,
                 max_bytes: 1024,
             },
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(buffer.records().len(), 2);
         let input = compression::Input::new(std::fs::File::open(path).unwrap(), Default::default())
             .unwrap();
-        let mut reader = pcap::Reader::new(input).unwrap();
+        let mut reader = capture_file::Reader::new(input).unwrap();
         assert_eq!(reader.next_frame().unwrap().unwrap().interface, Some(0));
         assert_eq!(reader.next_frame().unwrap().unwrap().interface, Some(1));
         assert!(reader.next_frame().unwrap().is_none());

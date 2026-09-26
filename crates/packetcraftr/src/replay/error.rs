@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::analysis::pcap::Error as CaptureError;
+use packetcraftr_core::capture_file::Error as CaptureError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 use thiserror::Error;

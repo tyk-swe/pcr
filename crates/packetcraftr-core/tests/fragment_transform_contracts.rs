@@ -3,8 +3,7 @@
 
 use bytes::Bytes;
 use packetcraftr_core::{
-    analysis::{self, pcap},
-    build,
+    analysis, build, capture_file,
     frame::{Frame, LinkType},
     layer::Raw,
     packet::Packet,
@@ -80,11 +79,11 @@ fn both_families_reassemble_exact_transport_bytes_in_reverse_capture_order() {
                 assert_eq!(fragments[1].bytes()[0] & 15, 6);
                 assert_eq!(&fragments[1].bytes()[20..24], &[0x82, 4, 1, 2]);
             }
-            let mut writer = pcap::Writer::pcap(Vec::new(), original.link_type).unwrap();
+            let mut writer = capture_file::Writer::pcap(Vec::new(), original.link_type).unwrap();
             for frame in fragments.iter().rev() {
                 writer.write_frame(frame).unwrap();
             }
-            let mut reader = pcap::Reader::new(Cursor::new(writer.into_inner())).unwrap();
+            let mut reader = capture_file::Reader::new(Cursor::new(writer.into_inner())).unwrap();
             let mut rebuilt = None;
             analysis::run(
                 &mut reader,

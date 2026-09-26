@@ -4,7 +4,7 @@
 use std::io::Read;
 
 use super::section::{SectionHeader, read_pcapng_block_header, read_section_header_with_length};
-use crate::analysis::pcap::{
+use crate::capture_file::{
     error::Error,
     model::{
         CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, ReaderOptions, RecordKind,
@@ -16,7 +16,7 @@ use crate::analysis::pcap::{
 mod framing;
 mod record;
 
-pub(in crate::analysis::pcap) struct PcapNgState {
+pub(in crate::capture_file) struct PcapNgState {
     endianness: Endianness,
     interfaces: Vec<Interface>,
     interface_base: u32,
@@ -27,7 +27,7 @@ pub(in crate::analysis::pcap) struct PcapNgState {
 }
 
 impl PcapNgState {
-    pub(in crate::analysis::pcap) fn new(header: SectionHeader) -> Self {
+    pub(in crate::capture_file) fn new(header: SectionHeader) -> Self {
         Self {
             endianness: header.endianness,
             interfaces: Vec::new(),
@@ -39,7 +39,7 @@ impl PcapNgState {
         }
     }
 
-    pub(in crate::analysis::pcap) fn endianness(&self) -> Endianness {
+    pub(in crate::capture_file) fn endianness(&self) -> Endianness {
         self.endianness
     }
 
@@ -162,7 +162,7 @@ fn read_section_record<R: Read>(
     })
 }
 
-pub(in crate::analysis::pcap) fn read_next_pcapng_record<R: Read>(
+pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
     reader: &mut R,
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,

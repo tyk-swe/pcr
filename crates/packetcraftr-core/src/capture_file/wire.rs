@@ -4,5 +4,5 @@
 mod primitives;
 mod timestamp;
 
-pub(in crate::analysis::pcap) use primitives::*;
-pub(in crate::analysis::pcap) use timestamp::*;
+pub(in crate::capture_file) use primitives::*;
+pub(in crate::capture_file) use timestamp::*;

@@ -6,8 +6,8 @@ use std::io::Read;
 use bytes::Bytes;
 
 use super::PcapNgState;
-use crate::analysis::pcap::pcapng::section::validate_pcapng_block_length;
-use crate::analysis::pcap::{
+use crate::capture_file::pcapng::section::validate_pcapng_block_length;
+use crate::capture_file::{
     error::Error,
     model::{PacketBlockKind, ReaderOptions},
     wire::{

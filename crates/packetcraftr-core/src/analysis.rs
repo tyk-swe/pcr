@@ -1,10 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded offline capture analysis. [`pcap`] handles files; [`run`] dissects,
-//! indexes, filters, and dispatches to collectors. [`reassembly`] is also
-//! available as a standalone algorithm API. Core has no native I/O or
-//! live-workflow dependencies.
+//! Bounded offline capture analysis. [`run`] dissects, indexes, filters, and
+//! dispatches to collectors over frames read with
+//! [`capture_file`](crate::capture_file). [`reassembly`] is also available as
+//! a standalone algorithm API. Core has no native I/O or live-workflow
+//! dependencies.
 //!
 //! Conversation indices and IP fragment state cover all frames before
 //! filtering. A completing frame exposes both its physical layers and
@@ -22,7 +23,6 @@ pub mod export;
 pub mod follow;
 pub mod forwarding;
 pub mod http;
-pub mod pcap;
 mod pipeline;
 pub mod provenance;
 pub mod reassembly;

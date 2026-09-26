@@ -5,34 +5,34 @@ use std::io::{self, Read, Write};
 
 use crate::frame::Frame;
 
-use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Endianness, Format, TimestampResolution};
+use crate::capture_file::error::Error;
+use crate::capture_file::model::{Endianness, Format, TimestampResolution};
 
-pub(in crate::analysis::pcap) const PCAP_GLOBAL_HEADER_LEN: usize = 24;
-pub(in crate::analysis::pcap) const PCAP_RECORD_HEADER_LEN: usize = 16;
-pub(in crate::analysis::pcap) const PCAPNG_SECTION_HEADER: [u8; 4] = [0x0a, 0x0d, 0x0d, 0x0a];
-pub(in crate::analysis::pcap) const PCAPNG_BYTE_ORDER_MAGIC: u32 = 0x1a2b_3c4d;
-pub(in crate::analysis::pcap) const PCAPNG_SECTION_HEADER_BLOCK: u32 = 0x0a0d_0d0a;
-pub(in crate::analysis::pcap) const PCAPNG_INTERFACE_DESCRIPTION_BLOCK: u32 = 0x0000_0001;
-pub(in crate::analysis::pcap) const PCAPNG_PACKET_BLOCK: u32 = 0x0000_0002;
-pub(in crate::analysis::pcap) const PCAPNG_SIMPLE_PACKET_BLOCK: u32 = 0x0000_0003;
-pub(in crate::analysis::pcap) const PCAPNG_NAME_RESOLUTION_BLOCK: u32 = 0x0000_0004;
-pub(in crate::analysis::pcap) const PCAPNG_INTERFACE_STATISTICS_BLOCK: u32 = 0x0000_0005;
-pub(in crate::analysis::pcap) const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0006;
-pub(in crate::analysis::pcap) const PCAPNG_CUSTOM_BLOCK: u32 = 0x0000_0bad;
-pub(in crate::analysis::pcap) const PCAPNG_CUSTOM_BLOCK_NO_COPY: u32 = 0x4000_0bad;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_END: u16 = 0;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_COMMENT: u16 = 1;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_FCSLEN: u16 = 13;
-pub(in crate::analysis::pcap) const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
-pub(in crate::analysis::pcap) const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution =
+pub(in crate::capture_file) const PCAP_GLOBAL_HEADER_LEN: usize = 24;
+pub(in crate::capture_file) const PCAP_RECORD_HEADER_LEN: usize = 16;
+pub(in crate::capture_file) const PCAPNG_SECTION_HEADER: [u8; 4] = [0x0a, 0x0d, 0x0d, 0x0a];
+pub(in crate::capture_file) const PCAPNG_BYTE_ORDER_MAGIC: u32 = 0x1a2b_3c4d;
+pub(in crate::capture_file) const PCAPNG_SECTION_HEADER_BLOCK: u32 = 0x0a0d_0d0a;
+pub(in crate::capture_file) const PCAPNG_INTERFACE_DESCRIPTION_BLOCK: u32 = 0x0000_0001;
+pub(in crate::capture_file) const PCAPNG_PACKET_BLOCK: u32 = 0x0000_0002;
+pub(in crate::capture_file) const PCAPNG_SIMPLE_PACKET_BLOCK: u32 = 0x0000_0003;
+pub(in crate::capture_file) const PCAPNG_NAME_RESOLUTION_BLOCK: u32 = 0x0000_0004;
+pub(in crate::capture_file) const PCAPNG_INTERFACE_STATISTICS_BLOCK: u32 = 0x0000_0005;
+pub(in crate::capture_file) const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0006;
+pub(in crate::capture_file) const PCAPNG_CUSTOM_BLOCK: u32 = 0x0000_0bad;
+pub(in crate::capture_file) const PCAPNG_CUSTOM_BLOCK_NO_COPY: u32 = 0x4000_0bad;
+pub(in crate::capture_file) const PCAPNG_OPTION_END: u16 = 0;
+pub(in crate::capture_file) const PCAPNG_OPTION_COMMENT: u16 = 1;
+pub(in crate::capture_file) const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
+pub(in crate::capture_file) const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
+pub(in crate::capture_file) const PCAPNG_OPTION_IF_FCSLEN: u16 = 13;
+pub(in crate::capture_file) const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
+pub(in crate::capture_file) const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution =
     TimestampResolution::Decimal(6);
-pub(in crate::analysis::pcap) const WRITER_TIMESTAMP_RESOLUTION: TimestampResolution =
+pub(in crate::capture_file) const WRITER_TIMESTAMP_RESOLUTION: TimestampResolution =
     TimestampResolution::Decimal(9);
 
-pub(in crate::analysis::pcap) fn validate_frame_size(
+pub(in crate::capture_file) fn validate_frame_size(
     frame: &Frame,
     max_size: usize,
 ) -> Result<(), Error> {
@@ -46,7 +46,7 @@ pub(in crate::analysis::pcap) fn validate_frame_size(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn validate_declared_lengths(
+pub(in crate::capture_file) fn validate_declared_lengths(
     captured_length: u32,
     original_length: u32,
     max_size: usize,
@@ -69,7 +69,7 @@ pub(in crate::analysis::pcap) fn validate_declared_lengths(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn read_exact_or_eof<R: Read>(
+pub(in crate::capture_file) fn read_exact_or_eof<R: Read>(
     reader: &mut R,
     buffer: &mut [u8],
     context: &'static str,
@@ -94,7 +94,7 @@ pub(in crate::analysis::pcap) fn read_exact_or_eof<R: Read>(
     Ok(true)
 }
 
-pub(in crate::analysis::pcap) fn read_exact_counted<R: Read>(
+pub(in crate::capture_file) fn read_exact_counted<R: Read>(
     reader: &mut R,
     buffer: &mut [u8],
     context: &'static str,
@@ -110,7 +110,7 @@ pub(in crate::analysis::pcap) fn read_exact_counted<R: Read>(
     }
 }
 
-pub(in crate::analysis::pcap) fn read_exact_vec<R: Read>(
+pub(in crate::capture_file) fn read_exact_vec<R: Read>(
     reader: &mut R,
     buffer: &mut Vec<u8>,
     length: usize,
@@ -135,7 +135,7 @@ pub(in crate::analysis::pcap) fn read_exact_vec<R: Read>(
     }
 }
 
-pub(in crate::analysis::pcap) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+pub(in crate::capture_file) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let mut copy = Vec::new();
     copy.try_reserve_exact(bytes.len())
         .map_err(|_| Error::Io(io::ErrorKind::OutOfMemory.into()))?;
@@ -143,7 +143,7 @@ pub(in crate::analysis::pcap) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec
     Ok(copy)
 }
 
-pub(in crate::analysis::pcap) fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
+pub(in crate::capture_file) fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
     u32::try_from(value).map_err(|_| Error::SizeLimitExceeded {
         kind: "capture size",
         declared: value as u64,
@@ -151,7 +151,7 @@ pub(in crate::analysis::pcap) fn usize_to_u32_limit(value: usize) -> Result<u32,
     })
 }
 
-pub(in crate::analysis::pcap) fn align_to_usize(value: usize) -> Result<usize, Error> {
+pub(in crate::capture_file) fn align_to_usize(value: usize) -> Result<usize, Error> {
     value
         .checked_add(3)
         .map(|padded| padded & !3)
@@ -161,14 +161,14 @@ pub(in crate::analysis::pcap) fn align_to_usize(value: usize) -> Result<usize, E
         })
 }
 
-pub(in crate::analysis::pcap) fn align_to_u32(value: u32) -> Result<u32, Error> {
+pub(in crate::capture_file) fn align_to_u32(value: u32) -> Result<u32, Error> {
     value
         .checked_add(3)
         .map(|padded| padded & !3)
         .ok_or(Error::InvalidBlockLength { length: value })
 }
 
-pub(in crate::analysis::pcap) fn write_padding<W: Write>(
+pub(in crate::capture_file) fn write_padding<W: Write>(
     writer: &mut W,
     unpadded_length: u32,
 ) -> Result<(), Error> {
@@ -185,7 +185,7 @@ pub(in crate::analysis::pcap) fn write_padding<W: Write>(
 
 macro_rules! decode_int {
     ($name:ident, $int:ty, $width:expr, $context:literal) => {
-        pub(in crate::analysis::pcap) fn $name(
+        pub(in crate::capture_file) fn $name(
             endianness: Endianness,
             bytes: &[u8],
         ) -> Result<$int, Error> {
@@ -219,7 +219,7 @@ fn decode_array<const LENGTH: usize>(
 
 macro_rules! write_int {
     ($function:ident, $type:ty) => {
-        pub(in crate::analysis::pcap) fn $function<W: Write>(
+        pub(in crate::capture_file) fn $function<W: Write>(
             writer: &mut W,
             endianness: Endianness,
             value: $type,

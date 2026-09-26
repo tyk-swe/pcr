@@ -14,8 +14,8 @@ use packetcraftr_cli::output::{
     rewrite::MAX_REPORTED_CHANGES,
 };
 use packetcraftr_core::{
-    analysis::pcap,
     budget::Deadline,
+    capture_file,
     decode::Dissector,
     error::{BoundaryError, Kind},
     transform::{self, ChecksumMode, FieldAssignment, FieldEdits, HeaderRewrite, VlanRewrite},
@@ -176,7 +176,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let deadline = Deadline::new(Duration::from_millis(args.max_duration_ms))
         .with_cancellation(Some(crate::cancellation::signal().clone()));
     let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
-    let limits = pcap::Limits {
+    let limits = capture_file::Limits {
         max_frames: args.limits.max_frames,
         max_bytes: args.limits.max_bytes,
     };
@@ -187,12 +187,12 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         )),
         None => Box::new(std::io::sink()),
     };
-    let mut writer = pcap::Writer::pcapng_with_options(
+    let mut writer = capture_file::Writer::pcapng_with_options(
         args.compression.writer(inner)?,
-        pcap::PcapNgOptions {
+        capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.
-            max_interfaces: pcap::DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_interfaces: capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT,
             stream_limits: limits,
             ..Default::default()
         },
@@ -201,53 +201,54 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let dissector = Dissector::new(registry.clone());
     let mut counts = vec![0u64; rules.len()];
     let mut changes = Retained::new(MAX_REPORTED_CHANGES);
-    let report = pcap::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
-        check_deadline(&deadline)?;
-        let mut changed = frame.clone();
-        for (index, (filter, patch, edits)) in rules.iter().enumerate() {
-            if filter
-                .as_ref()
-                .map(|filter| filter.keep(number, frame))
-                .transpose()
-                .map_err(CliError::into_boundary_error)?
-                .unwrap_or(true)
-            {
-                if !patch.is_empty() {
-                    changed = transform::rewrite(
-                        &changed,
-                        patch,
-                        transform::RewriteLimits {
-                            max_output_bytes: args.limits.reader.max_frame_bytes,
-                        },
-                    )
-                    .map_err(BoundaryError::from_error)?;
-                }
-                if let Some(edits) = edits {
-                    let outcome = edits
-                        .apply(
+    let report =
+        capture_file::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
+            check_deadline(&deadline)?;
+            let mut changed = frame.clone();
+            for (index, (filter, patch, edits)) in rules.iter().enumerate() {
+                if filter
+                    .as_ref()
+                    .map(|filter| filter.keep(number, frame))
+                    .transpose()
+                    .map_err(CliError::into_boundary_error)?
+                    .unwrap_or(true)
+                {
+                    if !patch.is_empty() {
+                        changed = transform::rewrite(
                             &changed,
-                            &dissector,
+                            patch,
                             transform::RewriteLimits {
                                 max_output_bytes: args.limits.reader.max_frame_bytes,
                             },
                         )
                         .map_err(BoundaryError::from_error)?;
-                    for change in outcome.changes {
-                        changes.push(|| output::rewrite::Change {
-                            frame: number,
-                            rule: index as u64,
-                            change,
-                        });
                     }
-                    changed = outcome.frame;
+                    if let Some(edits) = edits {
+                        let outcome = edits
+                            .apply(
+                                &changed,
+                                &dissector,
+                                transform::RewriteLimits {
+                                    max_output_bytes: args.limits.reader.max_frame_bytes,
+                                },
+                            )
+                            .map_err(BoundaryError::from_error)?;
+                        for change in outcome.changes {
+                            changes.push(|| output::rewrite::Change {
+                                frame: number,
+                                rule: index as u64,
+                                change,
+                            });
+                        }
+                        changed = outcome.frame;
+                    }
+                    counts[index] += 1;
                 }
-                counts[index] += 1;
             }
-        }
-        check_deadline(&deadline)?;
-        Ok(changed)
-    })
-    .map_err(CliError::classified)?;
+            check_deadline(&deadline)?;
+            Ok(changed)
+        })
+        .map_err(CliError::classified)?;
     let _ = writer.into_inner().finish().map_err(CliError::classified)?;
     if let Some(staged) = staged {
         staged.sync()?;

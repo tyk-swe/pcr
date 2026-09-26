@@ -3,10 +3,10 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{Format, TimestampResolution};
+use crate::capture_file::error::Error;
+use crate::capture_file::model::{Format, TimestampResolution};
 
-pub(in crate::analysis::pcap) fn validate_timestamp_resolution(
+pub(in crate::capture_file) fn validate_timestamp_resolution(
     resolution: TimestampResolution,
 ) -> Result<(), Error> {
     match resolution {
@@ -21,7 +21,7 @@ pub(in crate::analysis::pcap) fn validate_timestamp_resolution(
     }
 }
 
-pub(in crate::analysis::pcap) fn timestamp_from_ticks(
+pub(in crate::capture_file) fn timestamp_from_ticks(
     ticks: u64,
     resolution: TimestampResolution,
     offset_seconds: i64,
@@ -73,7 +73,7 @@ pub(in crate::analysis::pcap) fn timestamp_from_ticks(
     system_time_from_signed_unix(unix_seconds, nanoseconds)
 }
 
-pub(in crate::analysis::pcap) fn timestamp_to_ticks(
+pub(in crate::capture_file) fn timestamp_to_ticks(
     timestamp: SystemTime,
     resolution: TimestampResolution,
     offset_seconds: i64,
@@ -143,7 +143,7 @@ pub(in crate::analysis::pcap) fn timestamp_to_ticks(
     })
 }
 
-pub(in crate::analysis::pcap) fn system_time_from_signed_unix(
+pub(in crate::capture_file) fn system_time_from_signed_unix(
     seconds: i128,
     nanoseconds: u32,
 ) -> Result<SystemTime, Error> {

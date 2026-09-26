@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use bytes::Bytes;
 use packetcraftr_core::{
-    analysis::pcap,
     build::Builder,
+    capture_file,
     decode::Dissector,
     error::BoundaryError,
     field::WireValue,
@@ -210,14 +210,14 @@ fn fragment_network_edits_truncation_and_output_growth_are_rejected() {
 fn capture_mapping_preserves_interface_options_and_rejects_declared_fcs() {
     for fcs in [false, true] {
         let original = frame(false, false, true, false);
-        let mut source = pcap::Writer::pcapng(Vec::new()).unwrap();
-        let interface = pcap::Interface {
+        let mut source = capture_file::Writer::pcapng(Vec::new()).unwrap();
+        let interface = capture_file::Interface {
             link_type: LinkType::ETHERNET,
             snap_len: 65535,
-            timestamp_resolution: pcap::TimestampResolution::Decimal(9),
+            timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
             timestamp_offset: 0,
         };
-        let option = pcap::PcapNgOption {
+        let option = capture_file::PcapNgOption {
             code: if fcs { 13 } else { 2 },
             value: if fcs {
                 Bytes::from_static(&[32])
@@ -229,13 +229,13 @@ fn capture_mapping_preserves_interface_options_and_rejects_declared_fcs() {
             .add_interface_description_with_options(interface, std::slice::from_ref(&option))
             .unwrap();
         source.write_frame(&original).unwrap();
-        let mut reader = pcap::Reader::new(Cursor::new(source.into_inner())).unwrap();
-        let mut output = pcap::Writer::pcapng(Vec::new()).unwrap();
+        let mut reader = capture_file::Reader::new(Cursor::new(source.into_inner())).unwrap();
+        let mut output = capture_file::Writer::pcapng(Vec::new()).unwrap();
         let patch = HeaderRewrite {
             source_ip: Some("192.0.2.9".parse().unwrap()),
             ..Default::default()
         };
-        let result = pcap::map_frames(
+        let result = capture_file::map_frames(
             &mut reader,
             &mut output,
             Default::default(),
@@ -249,12 +249,11 @@ fn capture_mapping_preserves_interface_options_and_rejects_declared_fcs() {
             assert!(result.is_err());
         } else {
             assert_eq!(result.unwrap().frames_changed, 1);
-            let mut reader = pcap::Reader::new(Cursor::new(output.into_inner())).unwrap();
+            let mut reader = capture_file::Reader::new(Cursor::new(output.into_inner())).unwrap();
             let record = reader.next_record().unwrap().unwrap();
-            let pcap::RecordKind::Metadata(pcap::MetadataBlockKind::InterfaceDescription {
-                options,
-                ..
-            }) = record.kind
+            let capture_file::RecordKind::Metadata(
+                capture_file::MetadataBlockKind::InterfaceDescription { options, .. },
+            ) = record.kind
             else {
                 panic!("interface description")
             };

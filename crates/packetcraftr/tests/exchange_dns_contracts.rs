@@ -18,9 +18,9 @@ use packetcraftr_core::{
     field::FieldValue,
     frame::{Frame, LinkType},
     layer::Raw,
-    packet::{Packet, semantics},
+    packet::Packet,
     protocol::{
-        BuiltinProtocol, application::dns::Dns, builtin, icmp::Icmpv4, network::Ipv4,
+        BuiltinProtocol, application::dns::Dns, builtin, icmp::Icmpv4, network::Ipv4, semantics,
         transport::Udp,
     },
     template::Template,

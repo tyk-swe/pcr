@@ -338,10 +338,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
-- `packet::semantics::Error` messages describe the packet instead of a
-  transmission denial (for example "destination cannot be determined because
-  the ipv4 layer is malformed: …" instead of "malformed ipv4 layer may hide a
-  live destination: …"). Live commands still refuse such packets with
+- `protocol::semantics::Error` (formerly `packet::semantics::Error`) messages
+  describe the packet instead of a transmission denial (for example
+  "destination cannot be determined because the ipv4 layer is malformed: …"
+  instead of "malformed ipv4 layer may hide a live destination: …"). Live commands still refuse such packets with
   `policy.invalid_packet_semantics`; only the reason text changes.
 - `dns-read --dns-port` adds ports to 53 instead of replacing it, as README
   documents and `http --http-port` already behaves.

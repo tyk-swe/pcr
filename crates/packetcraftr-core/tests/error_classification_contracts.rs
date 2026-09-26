@@ -11,7 +11,7 @@ use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::{Error as FrameError, Frame, LinkType};
 use packetcraftr_core::layer::{FieldError, Id, Malformed};
-use packetcraftr_core::packet::semantics::{Error as SemanticsError, live_destinations};
+use packetcraftr_core::protocol::semantics::{Error as SemanticsError, live_destinations};
 use packetcraftr_core::{build, decode, registry};
 
 fn ipv4() -> Id {

@@ -223,7 +223,7 @@ packet/v2 field contract.
 `source: Option<Box<dyn std::error::Error + Send + Sync>>`.
 When constructing a local route failure, provide `source: None`. Conversions
 from packet-semantics validation retain the original error as `Some`, so
-`source().downcast_ref::<packetcraftr_core::packet::semantics::Error>()`
+`source().downcast_ref::<packetcraftr_core::protocol::semantics::Error>()`
 recovers the typed cause.
 
 Wrapped errors display route context; inspect `std::error::Error::source()` or
@@ -589,7 +589,7 @@ Core keeps packet facts; `packetcraftr` owns what they mean for live traffic.
 `BuiltPacket` now records the codec `mode` it was built with and exposes
 `contains_malformed()` and `contains_network_trailer()`; the published
 `requires_live_opt_in` output field is unchanged. `Deadline` gains `limit()`
-and `cancellation()` getters. `packet::semantics::Error` messages now read
+and `cancellation()` getters. `protocol::semantics::Error` messages now read
 "destination cannot be determined because …"; match on the variant, not the
 text.
 

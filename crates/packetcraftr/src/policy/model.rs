@@ -133,7 +133,7 @@ pub enum Error {
         /// The semantics traversal failure this refusal reports, when it
         /// came from the packet rather than from policy's own checks.
         #[source]
-        source: Option<packetcraftr_core::packet::semantics::Error>,
+        source: Option<packetcraftr_core::protocol::semantics::Error>,
     },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },

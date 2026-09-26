@@ -1485,7 +1485,7 @@ fn reduced_srh_round_trips_with_explicit_outer_destination_and_valid_checksum() 
             .iter()
             .all(|diagnostic| diagnostic.code != UDP_CHECKSUM)
     );
-    let path = packetcraftr_core::packet::semantics::outer_ip_path(&decoded.packet)
+    let path = packetcraftr_core::protocol::semantics::outer_ip_path(&decoded.packet)
         .unwrap()
         .unwrap();
     assert_eq!(

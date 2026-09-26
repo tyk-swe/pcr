@@ -22,6 +22,7 @@ pub mod link;
 mod matcher;
 pub mod network;
 pub mod raw;
+pub mod semantics;
 pub mod transport;
 pub mod tunnel;
 

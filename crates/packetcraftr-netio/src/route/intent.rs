@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
+    field::FieldValue, packet::Packet, protocol::BuiltinProtocol, protocol::semantics,
 };
 
 use super::error::Error;

@@ -8,9 +8,10 @@ use packetcraftr_core::{
     decode::DecodedPacket,
     error::{Classification, Classified, Kind},
     field::WireValue,
-    packet::{Packet, semantics},
+    packet::Packet,
     protocol::{
         application::dns::{Dns, Name, Question},
+        semantics,
         transport::Udp,
     },
 };

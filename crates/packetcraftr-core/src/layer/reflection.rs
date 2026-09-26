@@ -23,12 +23,12 @@ use crate::field::{self, FieldValue, WireValue, parse_mac};
 /// `children` schemas, and how it reflects:
 ///
 /// - `reflect: member` reads and writes a struct member through
-///   [`ReflectiveField`](crate::layer::ReflectiveField);
+///   [`ReflectiveField`];
 /// - `reflect_bounded: member, MAX` does the same but refuses unsigned values
 ///   above a wire-width maximum;
 /// - `get |layer| expr, set |layer, value, name| expr` supplies handwritten
-///   accessors, which usually call [`reflect_get`](crate::layer::reflect_get)
-///   and [`reflect_set`](crate::layer::reflect_set).
+///   accessors, which usually call [`reflect_get`]
+///   and [`reflect_set`].
 ///
 /// A field may also give its byte range relative to the layer start with
 /// `layout: (start, end)`; the declared layout function returns those ranges

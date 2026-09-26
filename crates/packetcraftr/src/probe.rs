@@ -24,8 +24,7 @@ use std::net::IpAddr;
 
 use bytes::Bytes;
 use packetcraftr_core::protocol::{
-    QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
-    transport_tuple_reversed,
+    IcmpErrorKind, QuotedTransport, quoted_icmp_error, transport::Tcp, transport_tuple_reversed,
 };
 use packetcraftr_core::{
     budget::Deadline, decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet,
@@ -259,11 +258,11 @@ fn classify_icmp_error(
     responder: IpAddr,
 ) -> Option<Observation> {
     let expected_transport = match transport {
-        Transport::Tcp => QuotedProbeTransport::Tcp,
-        Transport::Udp => QuotedProbeTransport::Udp,
-        Transport::Icmp => QuotedProbeTransport::Icmp,
+        Transport::Tcp => QuotedTransport::Tcp,
+        Transport::Udp => QuotedTransport::Udp,
+        Transport::Icmp => QuotedTransport::Icmp,
     };
-    let kind = quoted_icmp_error_kind(request, response, expected_transport)?;
+    let kind = quoted_icmp_error(request, response, expected_transport)?;
     let icmp_protocol = response
         .iter()
         .find_map(|layer| match BuiltinProtocol::of(layer) {
@@ -272,22 +271,22 @@ fn classify_icmp_error(
         })?;
     let ipv6 = icmp_protocol == BuiltinProtocol::Icmpv6;
     let (correlation, ipv4_reason, ipv6_reason) = match kind {
-        QuotedIcmpError::PortUnreachable => (
+        IcmpErrorKind::PortUnreachable => (
             Correlation::PortUnreachable,
             "ICMPv4 port unreachable",
             "ICMPv6 port unreachable",
         ),
-        QuotedIcmpError::AdministrativelyProhibited => (
+        IcmpErrorKind::AdministrativelyProhibited => (
             Correlation::AdministrativelyProhibited,
             "ICMPv4 administratively prohibited",
             "ICMPv6 policy or administrative rejection",
         ),
-        QuotedIcmpError::DestinationUnreachable => (
+        IcmpErrorKind::DestinationUnreachable => (
             Correlation::DestinationUnreachable,
             "ICMPv4 destination unreachable",
             "ICMPv6 destination unreachable",
         ),
-        QuotedIcmpError::TimeExceeded => (
+        IcmpErrorKind::TimeExceeded => (
             Correlation::TimeExceeded,
             "ICMPv4 time exceeded before reaching the endpoint",
             "ICMPv6 time exceeded before reaching the endpoint",

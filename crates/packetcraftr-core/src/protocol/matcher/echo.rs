@@ -8,8 +8,7 @@ use crate::{
 };
 
 use super::{
-    IcmpMessage, QuotedProbeTransport, quoted_icmp_error_kind, response_source,
-    reversed_protocol_layers,
+    IcmpMessage, QuotedTransport, quoted_icmp_error, response_source, reversed_protocol_layers,
 };
 
 #[derive(Clone, Debug)]
@@ -39,7 +38,7 @@ impl EchoMatcher {
 
 impl ResponseMatcher for EchoMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
-        if quoted_icmp_error_kind(request, response, QuotedProbeTransport::Icmp).is_some() {
+        if quoted_icmp_error(request, response, QuotedTransport::Icmp).is_some() {
             return Some(Match::new(150));
         }
         let layers = reversed_protocol_layers(self.protocol, request, response)?;

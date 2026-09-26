@@ -20,10 +20,7 @@ use crate::{
 
 pub(crate) use dns::DnsMatcher;
 pub(crate) use echo::EchoMatcher;
-// Exported for the workflow crate's probe classification; not part of the
-// documented public API.
-#[doc(hidden)]
-pub use quoted_icmp::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
+pub use quoted_icmp::{IcmpErrorKind, QuotedTransport, quoted_icmp_error};
 pub(crate) use reverse_flow::ReverseFlowMatcher;
 
 struct ReversedProtocolLayers<'request, 'response> {
@@ -118,9 +115,8 @@ fn reversed_layer_pair(
 /// identity. The deepest transport must be `transport`; enclosing tunnel
 /// transports and every enclosing network envelope must also reverse.
 ///
-/// The returned address is the source of the deepest transport's envelope.
-/// Exported for workflow classification; not part of the documented public API.
-#[doc(hidden)]
+/// The returned address is the source of the deepest transport's envelope:
+/// the host that answered.
 pub fn transport_tuple_reversed(
     request: &Packet,
     response: &Packet,

@@ -3,9 +3,11 @@
 
 //! The `packetcraftr.udp-profiles/v1` document.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use packetcraftr::scan::profile::{DocumentError, MAX_PROFILE_BYTES, parse_document};
+use packetcraftr::scan::profile::{self, Error, UdpProfile};
+use packetcraftr_core::document::udp_profiles::{self, MAX_PROFILE_BYTES};
 use packetcraftr_core::error::{Classified, Kind};
 use serde_json::{Value, json};
 
@@ -15,7 +17,12 @@ fn sample() -> Value {
     serde_json::from_str(SAMPLE).unwrap()
 }
 
-fn parse(document: &Value) -> Result<(), DocumentError> {
+/// Reads the document as the CLI does: core parses it, the scan compiles it.
+fn parse_document(document: &[u8]) -> Result<BTreeMap<u16, Arc<UdpProfile>>, Error> {
+    profile::compile(udp_profiles::parse(document)?)
+}
+
+fn parse(document: &Value) -> Result<(), Error> {
     parse_document(&serde_json::to_vec(document).unwrap()).map(drop)
 }
 
@@ -41,18 +48,27 @@ fn the_published_example_maps_each_port_to_a_shared_profile() {
 
 #[test]
 fn document_refusals_keep_their_published_codes_and_messages() {
-    const SHAPE: &str =
-        "UDP profiles require schema packetcraftr.udp-profiles/v1 and 1..=256 assignments";
     let mut cases = Vec::new();
     let mut document = sample();
     document["schema"] = json!("packetcraftr.udp-profiles/v2");
-    cases.push((document, SHAPE.to_owned()));
+    cases.push((
+        document,
+        "unsupported UDP profiles schema packetcraftr.udp-profiles/v2; \
+         expected packetcraftr.udp-profiles/v1"
+            .to_owned(),
+    ));
     let mut document = sample();
     document["profiles"] = json!([]);
-    cases.push((document, SHAPE.to_owned()));
+    cases.push((
+        document,
+        "UDP profiles hold 0 assignments; expected 1 to 256".to_owned(),
+    ));
     let mut document = sample();
     document["profiles"] = json!(vec![sample()["profiles"][0].clone(); 257]);
-    cases.push((document, SHAPE.to_owned()));
+    cases.push((
+        document,
+        "UDP profiles hold 257 assignments; expected 1 to 256".to_owned(),
+    ));
     let mut document = sample();
     document["profiles"][0]["ports"] = json!([]);
     cases.push((
@@ -96,7 +112,7 @@ fn distinct_profiles_share_one_storage_budget() {
     let bytes = serde_json::to_vec(&document).unwrap();
     assert!(bytes.len() < MAX_PROFILE_BYTES);
     let error = parse_document(&bytes).expect_err("over budget");
-    assert!(matches!(error, DocumentError::Storage), "{error:?}");
+    assert!(matches!(error, Error::Storage), "{error:?}");
     assert_eq!(error.to_string(), "compiled UDP profiles exceed 1 MiB");
 }
 
@@ -105,7 +121,7 @@ fn an_invalid_profile_keeps_its_own_classification() {
     let mut document = sample();
     document["profiles"][1]["profile"]["response"]["checks"][0]["mask"] = json!("00");
     let error = parse(&document).expect_err("mask length differs from data");
-    assert!(matches!(error, DocumentError::Profile(_)), "{error:?}");
+    assert!(matches!(error, Error::Invalid(_)), "{error:?}");
     assert_eq!(error.classification().code, "cli.udp_profile");
 }
 
@@ -115,14 +131,17 @@ fn syntax_refusals_name_the_parser_reason_once() {
     document["profiles"][0]["unknown"] = json!(true);
     for bytes in [b"{".to_vec(), serde_json::to_vec(&document).unwrap()] {
         let error = parse_document(&bytes).expect_err("refused");
-        assert!(matches!(error, DocumentError::Syntax(_)), "{error:?}");
-        assert!(error.to_string().starts_with("invalid UDP profiles: "));
+        assert!(
+            matches!(error, Error::Document(udp_profiles::Error::Syntax(_))),
+            "{error:?}"
+        );
+        assert_eq!(error.to_string(), "invalid UDP profiles");
         assert_eq!(error.classification().code, "cli.error");
-        assert!(error.causes().is_empty());
+        assert_eq!(error.causes().len(), 1, "{:?}", error.causes());
     }
     let oversized = vec![b' '; MAX_PROFILE_BYTES + 1];
     assert!(matches!(
         parse_document(&oversized),
-        Err(DocumentError::DocumentSize { .. })
+        Err(Error::Document(udp_profiles::Error::DocumentSize { .. }))
     ));
 }

@@ -64,9 +64,11 @@ pub(super) fn plan<'c, P: Providers, K: Clock>(
         super::check(client, deadline)?;
         let packet = probe.packet();
         if !crate::scan::plan::packet::sent_probe_matches(probe, &packet) {
-            return Err(BoundaryError::from_error(crate::scan::profile::Error(
-                "probe fields differ from its selected profile",
-            )));
+            return Err(BoundaryError::from_error(
+                crate::scan::profile::Error::Invalid(
+                    "probe fields differ from its selected profile",
+                ),
+            ));
         }
         let route = match routes.entry(probe.address) {
             Entry::Occupied(entry) => entry.into_mut(),

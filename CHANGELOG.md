@@ -533,7 +533,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   are transparent), `dns::{canonical_query_name, decode_response,
   decode_tcp_frame, encode_query}` are `dns::wire::…`, and
   `dns::QueryTypeParseError` folds into `wire::Error` (`QueryTypeSyntax`,
-  `QueryTypeRange`). Variants, messages, and classification codes are unchanged. See
+  `QueryTypeRange`).
+  The UDP profiles document's data lives in core:
+  `scan::profile::{Config, Payload, ResponseCheck, ByteCheck,
+  MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` are
+  `packetcraftr_core::document::udp_profiles::…`, and `scan::profile::Error`
+  is an enum whose `Invalid` variant replaces the tuple struct and which also
+  carries the document refusals (`Document`, `PortCount`, `Storage`,
+  `ConflictingPort`, `MappedPorts`). Variants, messages, and classification codes are unchanged. See
   `docs/migration-unreleased.md`.
 
 ### Added
@@ -574,9 +581,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   (`Rules::single`), reports the VLAN growth a map needs
   (`maximum_growth`), and applies the rules in order to a frame with a
   caller-compiled filter (`try_map_filters`, `apply`).
-  `packetcraftr::scan::profile::parse_document` reads
-  `packetcraftr.udp-profiles/v1` into per-port profiles
-  (`scan::profile::DocumentError`). Core `document::recipe::parse` reads
+  Core `document::udp_profiles::parse` reads a
+  `packetcraftr.udp-profiles/v1` document into its assignments as neutral
+  data (`document::udp_profiles::Error`), and
+  `packetcraftr::scan::profile::compile` compiles them into per-port
+  profiles. Core `document::recipe::parse` reads
   recipe text as a JSON or YAML packet document or a layer expression
   (`document::Format::{from_path, sniff}`, `document::recipe::Error`), and
   `document::payload::Target` fills an empty bytes field from outside the
@@ -842,12 +851,16 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
-- A `rewrite --rules` document that is not valid JSON of its schema's shape
+- A `rewrite --rules-file` document that is not valid JSON of its schema's shape
   reads `invalid rewrite rules` with the parser's reason as its first cause,
   instead of repeating that reason in the message. An unsupported schema and
   a rule count outside 1 to 64 now have distinct messages
   (`unsupported rewrite rules schema S; expected ...` and `rewrite rules hold
-  N rules; expected 1 to 64`). Codes and exit codes are unchanged.
+  N rules; expected 1 to 64`). A `scan --udp-profiles` document reads the
+  same way: `invalid UDP profiles` with the parser's reason as its cause,
+  `unsupported UDP profiles schema S; expected packetcraftr.udp-profiles/v1`,
+  and `UDP profiles hold N assignments; expected 1 to 256`. Codes and exit
+  codes are unchanged.
 - A `replay` frame that matches `--map-interface` or `--map-filter` rules
   naming different interfaces now reports `replay frame N matches conflicting
   output interfaces` as its message, and a frame no rule maps without an

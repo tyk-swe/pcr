@@ -391,7 +391,7 @@ array on `statsResult`.
 `Request::udp_profiles` maps ports to validated `Arc<profile::UdpProfile>` values.
 `Probe` retains its selected profile, and `ProbeEvidence::application` reports
 application validation independently of reachability. Configuration serializes
-through `profile::Config`; private compiled state is revalidated on deserialization.
+through `packetcraftr_core::document::udp_profiles::Config`; private compiled state is revalidated on deserialization.
 `Registry::to_builder` derives isolated bindings for explicit byte/DNS profiles,
 without changing the caller's registry. UDP profile documents use independent
 `packetcraftr.udp-profiles/v1` and ship with a schema and example.
@@ -1758,11 +1758,14 @@ fallback fails with `replay::Error::Unmapped` (replacing `InvalidLimit {
 field: "interface" }`); both are `cli.error`. `replay::Error::Selection`
 carries the `filter::Error` that stopped the request's filter or a filter rule.
 
-## One error per module
+## One error per module and sub-domain placement
 
-Each module has one error type, named `Error` and used module-qualified.
-Variants, messages, and classification codes are unchanged unless a row says
-otherwise.
+Each module has one error type, named `Error` and used module-qualified. A
+concept with its own error and document (rewrite rules, recipes, payload
+targets, UDP profiles, replay routing, DNS wire) is a public sub-domain module
+of its owner, and the items it holds move with it (the new rewrite, recipe,
+payload, routing, and evidence APIs listed above already use these paths).
+Classification codes are unchanged.
 
 | Before | After |
 |---|---|
@@ -1772,3 +1775,6 @@ otherwise.
 | `packetcraftr::dns::WireError` | `packetcraftr::dns::wire::Error` |
 | `dns::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` | `dns::wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` |
 | `dns::QueryTypeParseError::{Syntax, OutOfRange}` | `dns::wire::Error::{QueryTypeSyntax, QueryTypeRange}` (the `Err` of `QueryType::from_str`) |
+| `packetcraftr::scan::profile::{Config, Payload, ResponseCheck, ByteCheck, MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` | `packetcraftr_core::document::udp_profiles::…` |
+| `scan::profile::Error("reason")` | `scan::profile::Error::Invalid("reason")`; the enum also carries the document refusals |
+| reading a `packetcraftr.udp-profiles/v1` document | `scan::profile::compile(packetcraftr_core::document::udp_profiles::parse(&bytes)?)?` |

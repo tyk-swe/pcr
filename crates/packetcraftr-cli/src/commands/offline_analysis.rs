@@ -127,8 +127,8 @@ pub(super) struct Inspection<'a> {
 /// `publish` under the shared `--max-application-output-bytes` budget, and
 /// fails when a selected conversation is absent.
 ///
-/// The selector narrows the pass through the stream filter it names; IP
-/// reassembly events reach the NDJSON stream only.
+/// The selector narrows the pass to its conversation; IP reassembly events
+/// reach the NDJSON stream only.
 pub(super) fn inspect<C: analysis::Collector>(
     inspection: Inspection<'_>,
     collector: C,
@@ -143,9 +143,7 @@ pub(super) fn inspect<C: analysis::Collector>(
         application,
         selector,
     } = inspection;
-    let filter =
-        selector.map(|selected| format!("{}.stream == {}", selected.transport, selected.index));
-    let setup = prepare(limits, filter.as_deref(), decode)?;
+    let setup = prepare(limits, None, decode)?;
     // The session narrows the plan and raises the TCP/source-tracking flags
     // from the collector's declared needs.
     let session =

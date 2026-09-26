@@ -8,25 +8,11 @@ use crate::output::contract::ToolFormat;
 
 use packetcraftr_core::analysis;
 
-use self::arguments::{Args, Severity};
+use self::arguments::Args;
 use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
-
-fn matches_selector(
-    finding: &analysis::expert::Finding,
-    min_severity: Severity,
-    codes: &[String],
-) -> bool {
-    if finding.severity < min_severity.into() {
-        return false;
-    }
-    if !codes.is_empty() && !codes.iter().any(|c| c == finding.code) {
-        return false;
-    }
-    true
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -76,14 +62,16 @@ pub(super) fn run(
         None,
     );
     let mut state = rendering::State::new(arguments.limits.capture.retention_ceiling());
-    let min_severity = arguments.min_severity;
-    let codes = &arguments.codes;
+    let selector = analysis::expert::Selector {
+        min_severity: arguments.min_severity.into(),
+        codes: arguments.codes,
+    };
     let outcome = session
         .run(
             &mut reader,
             super::offline_analysis::ip_event_sink(format, stream),
             |finding| {
-                if matches_selector(&finding, min_severity, codes) {
+                if selector.matches(&finding) {
                     state.count(&finding);
                     rendering::render_record(format, finding.into(), &mut state, stream)
                         .map_err(CliError::into_boundary_error)?;

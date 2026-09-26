@@ -62,15 +62,7 @@ pub(super) fn run(
              choose --direction client or --direction server",
         ));
     }
-    // The stream filter narrows reassembly to the followed conversation
-    // while indices stay capture-global, so the index stats reports is the
-    // index extracted here.
-    let source = format!(
-        "{}.stream == {}",
-        selector.transport.as_str(),
-        selector.index
-    );
-    let prepared = prepare(arguments.limits, Some(&source), &arguments.decode)?;
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     crate::command_options::validate_output_bytes(arguments.max_application_output_bytes)?;
     // Stage one file per selected direction before any capture is read, so a
     // missing or unwritable directory fails before the run.
@@ -89,6 +81,9 @@ pub(super) fn run(
     let mut reader = open_capture(&arguments.path, arguments.limits.capture.reader)?;
 
     // Only TCP needs reassembly; the collector's declared needs cover that.
+    // The selector narrows reassembly to the followed conversation while
+    // indices stay capture-global, so the index stats reports is the index
+    // extracted here.
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(),

@@ -15,7 +15,7 @@ use packetcraftr_netio::{
     Error as LiveIoError,
     interface::Id as InterfaceId,
     link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{Decision, Scope, SelectionReason, SystemError as RouteSystemError},
+    route::{Decision, Error as RouteError, Scope, SelectionReason},
     transmit::Submission,
 };
 
@@ -766,7 +766,7 @@ fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
 #[test]
 fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     let destination = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
-    let unreachable = map_route_error(RouteSystemError::RouteNotFound { destination });
+    let unreachable = map_route_error(RouteError::RouteNotFound { destination });
 
     assert_eq!(
         unreachable.to_string(),
@@ -790,7 +790,7 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     );
 
     // An operating-system refusal keeps its own nested diagnostic too.
-    let refused = map_route_error(RouteSystemError::OperatingSystem {
+    let refused = map_route_error(RouteError::OperatingSystem {
         operation: "RTM_GETROUTE",
         message: "the operating system refused the request".to_owned(),
         source: Some(packetcraftr_core::error::Source::new(
@@ -807,7 +807,7 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
 
     // The capability arm keeps naming the replay boundary and publishes the
     // adapter's text once, in `causes`.
-    let unsupported = map_route_error(RouteSystemError::Unsupported(
+    let unsupported = map_route_error(RouteError::Unsupported(
         packetcraftr_netio::Unsupported::new(
             packetcraftr_netio::NativeCapability::Route,
             "native route selection is off",

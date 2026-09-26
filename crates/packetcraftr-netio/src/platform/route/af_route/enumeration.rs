@@ -16,12 +16,12 @@ use crate::{
     interface::{self, Id as InterfaceId},
     link::Capability,
     platform::route::os_error,
-    route::SystemError,
+    route,
 };
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 
-pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+pub(super) fn interfaces() -> Result<Vec<interface::Info>, route::Error> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
     // linked list that remains valid until the matching `freeifaddrs` below.
@@ -177,6 +177,6 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     Some(MacAddress(bytes))
 }
 
-fn last_os_error(operation: &'static str) -> SystemError {
+fn last_os_error(operation: &'static str) -> route::Error {
     os_error(operation, std::io::Error::last_os_error())
 }

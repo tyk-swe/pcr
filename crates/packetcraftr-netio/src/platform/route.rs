@@ -23,7 +23,7 @@ use packetcraftr_core::error::Source;
 
 use crate::{
     interface::{self, Id as InterfaceId},
-    route::SystemError,
+    route,
 };
 
 /// Wraps a native failure as the operating-system route diagnostic.
@@ -33,8 +33,8 @@ use crate::{
 fn os_error(
     operation: &'static str,
     error: impl std::error::Error + Send + Sync + 'static,
-) -> SystemError {
-    SystemError::OperatingSystem {
+) -> route::Error {
+    route::Error::OperatingSystem {
         operation,
         message: "the operating system refused the request".to_owned(),
         source: Some(Source::new(error)),
@@ -42,8 +42,8 @@ fn os_error(
 }
 
 /// The route failure for a full native worker pool.
-fn refused(exhausted: crate::workers::Exhausted) -> SystemError {
-    SystemError::OperatingSystem {
+fn refused(exhausted: crate::workers::Exhausted) -> route::Error {
+    route::Error::OperatingSystem {
         operation: "reserve native worker",
         message: format!("native worker capacity {} is exhausted", exhausted.capacity),
         source: Some(Source::new(exhausted)),
@@ -58,19 +58,19 @@ fn refused(exhausted: crate::workers::Exhausted) -> SystemError {
 fn on_worker<T: Send + 'static>(
     deadline: &packetcraftr_core::budget::Deadline,
     operation: &'static str,
-    query: impl FnOnce(&packetcraftr_core::budget::Deadline) -> Result<T, SystemError> + Send + 'static,
-) -> Result<T, SystemError> {
+    query: impl FnOnce(&packetcraftr_core::budget::Deadline) -> Result<T, route::Error> + Send + 'static,
+) -> Result<T, route::Error> {
     use crate::workers::{Class, Waited};
 
     let detached = crate::deadline::detach(deadline)
-        .map_err(|interrupted| SystemError::interrupted(interrupted, operation))?;
+        .map_err(|interrupted| route::Error::interrupted(interrupted, operation))?;
     let permit = crate::workers::shared()
         .admit(Class::Native)
         .map_err(refused)?;
     let task =
         permit
             .spawn(move || query(&detached))
-            .map_err(|error| SystemError::OperatingSystem {
+            .map_err(|error| route::Error::OperatingSystem {
                 operation: "start native route worker",
                 message: "the operating system refused the request".to_owned(),
                 source: Some(Source::new(error)),
@@ -78,14 +78,14 @@ fn on_worker<T: Send + 'static>(
     drop(permit);
     match task.wait(deadline) {
         Waited::Finished(Ok(result)) => result,
-        Waited::Finished(Err(_)) => Err(SystemError::InvalidResponse {
+        Waited::Finished(Err(_)) => Err(route::Error::InvalidResponse {
             message: "native route worker panicked".to_owned(),
         }),
         Waited::Pending(task) => {
             task.retention_marker().mark_retained();
             Err(match deadline.check_cancelled() {
                 Err(cancelled) => cancelled.into(),
-                Ok(()) => SystemError::DeadlineExceeded { operation },
+                Ok(()) => route::Error::DeadlineExceeded { operation },
             })
         }
     }
@@ -97,7 +97,7 @@ fn on_worker<T: Send + 'static>(
 fn find_interface(
     interfaces: &[interface::Info],
     requested: &InterfaceId,
-) -> Result<interface::Info, SystemError> {
+) -> Result<interface::Info, route::Error> {
     if let Some(interface) = interfaces
         .iter()
         .find(|interface| interface.id == *requested)
@@ -107,14 +107,14 @@ fn find_interface(
     if let Some(actual) = interfaces.iter().find(|interface| {
         interface.id.name == requested.name || interface.id.index == requested.index
     }) {
-        return Err(SystemError::InterfaceMismatch {
+        return Err(route::Error::InterfaceMismatch {
             requested: requested.name.clone(),
             requested_index: requested.index,
             actual: actual.id.name.clone(),
             actual_index: actual.id.index,
         });
     }
-    Err(SystemError::InterfaceNotFound {
+    Err(route::Error::InterfaceNotFound {
         name: requested.name.clone(),
         index: requested.index,
     })
@@ -142,7 +142,7 @@ fn constrain_by_preferred_source<T: InterfaceCandidate>(
     interface_hint: Option<&InterfaceId>,
     requested: Option<T>,
     preferred_source: Option<IpAddr>,
-) -> Result<Option<T>, SystemError> {
+) -> Result<Option<T>, route::Error> {
     let Some(source) = preferred_source else {
         return Ok(requested);
     };
@@ -157,7 +157,7 @@ fn constrain_by_preferred_source<T: InterfaceCandidate>(
         if owns_source(&requested) {
             return Ok(Some(requested));
         }
-        return Err(SystemError::SourceUnavailable {
+        return Err(route::Error::SourceUnavailable {
             preferred_source: source,
             interface: requested.interface().id.name.clone(),
         });
@@ -167,7 +167,7 @@ fn constrain_by_preferred_source<T: InterfaceCandidate>(
         .find(|candidate| owns_source(candidate))
         .cloned()
         .map(Some)
-        .ok_or_else(|| SystemError::SourceUnavailable {
+        .ok_or_else(|| route::Error::SourceUnavailable {
             preferred_source: source,
             interface: interface_hint
                 .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
@@ -264,7 +264,7 @@ mod tests {
         ] {
             assert!(matches!(
                 find_interface(std::slice::from_ref(&available), &requested),
-                Err(SystemError::InterfaceMismatch { .. })
+                Err(route::Error::InterfaceMismatch { .. })
             ));
         }
         assert!(matches!(
@@ -275,7 +275,7 @@ mod tests {
                     index: 99,
                 }
             ),
-            Err(SystemError::InterfaceNotFound { .. })
+            Err(route::Error::InterfaceNotFound { .. })
         ));
     }
 }
@@ -303,7 +303,7 @@ mod pooled_tests {
             },
         );
         match result {
-            Err(error @ SystemError::DeadlineExceeded { .. }) => {
+            Err(error @ route::Error::DeadlineExceeded { .. }) => {
                 assert_eq!(error.classification().code, "io.deadline_exceeded");
             }
             other => panic!("a stalled query must report the caller's deadline: {other:?}"),
@@ -319,7 +319,7 @@ mod pooled_tests {
         let cancelled = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal));
         assert!(matches!(
             on_worker(&cancelled, "testing", |_| Ok(())),
-            Err(SystemError::Cancelled(_))
+            Err(route::Error::Cancelled(_))
         ));
         let answer = on_worker(
             &Deadline::new(Duration::from_secs(5)),

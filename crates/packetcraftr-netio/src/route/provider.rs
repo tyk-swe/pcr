@@ -3,7 +3,7 @@
 
 use std::net::IpAddr;
 
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
 use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind, Source};
@@ -15,9 +15,9 @@ use super::models::{Decision, Provider};
 
 /// Native route/interface errors. An operating-system refusal keeps the
 /// platform's own error as its `source`.
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
-pub enum SystemError {
+pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] Cancelled),
     /// The caller's deadline expired before the native lookup answered.
@@ -61,7 +61,7 @@ pub enum SystemError {
     },
 }
 
-impl SystemError {
+impl Error {
     /// The failure a backend reports when its caller's deadline stopped it
     /// while `operation` was in progress.
     pub(crate) fn interrupted(interrupted: Interrupted, operation: &'static str) -> Self {
@@ -79,7 +79,7 @@ impl SystemError {
 pub struct SystemProvider;
 
 impl Provider for SystemProvider {
-    type Error = SystemError;
+    type Error = Error;
 
     fn lookup_with_preferences(
         &self,
@@ -105,10 +105,10 @@ impl Provider for SystemProvider {
 
 /// Refuses a lookup whose caller is already cancelled or out of time, before
 /// any backend is asked.
-fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), SystemError> {
+fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
     crate::deadline::remaining(deadline)
         .map(drop)
-        .map_err(|interrupted| SystemError::interrupted(interrupted, operation))
+        .map_err(|interrupted| Error::interrupted(interrupted, operation))
 }
 
 /// Rejects a preferred source of the wrong address family before any backend
@@ -116,11 +116,11 @@ fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), SystemError
 fn validate_preferred_source_family(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,
-) -> Result<(), SystemError> {
+) -> Result<(), Error> {
     if let Some(source) = preferred_source
         && source.is_ipv4() != destination.is_ipv4()
     {
-        return Err(SystemError::SourceFamilyMismatch {
+        return Err(Error::SourceFamilyMismatch {
             preferred_source: source,
             destination,
         });
@@ -128,7 +128,7 @@ fn validate_preferred_source_family(
     Ok(())
 }
 
-impl Classified for SystemError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
@@ -211,7 +211,7 @@ mod tests {
         ] {
             assert!(matches!(
                 error,
-                SystemError::Unsupported(Unsupported {
+                Error::Unsupported(Unsupported {
                     capability: NativeCapability::Route,
                     ref message,
                     source: None,
@@ -257,7 +257,7 @@ mod family_tests {
 
         assert!(matches!(
             error,
-            SystemError::SourceFamilyMismatch {
+            Error::SourceFamilyMismatch {
                 preferred_source: rejected,
                 destination: requested,
             } if rejected == preferred_source && requested == destination
@@ -278,7 +278,7 @@ mod family_tests {
                 .lookup_interface(&interface(), &spent)
                 .expect_err("spent deadline"),
         ] {
-            assert!(matches!(error, SystemError::DeadlineExceeded { .. }));
+            assert!(matches!(error, Error::DeadlineExceeded { .. }));
             let classification = error.classification();
             assert_eq!(classification.code, "io.deadline_exceeded");
             assert_eq!(classification.kind, Kind::Io);
@@ -290,6 +290,6 @@ mod family_tests {
         let error = SystemProvider
             .lookup_with_preferences(destination, None, None, &cancelled)
             .expect_err("cancelled caller");
-        assert!(matches!(error, SystemError::Cancelled(_)));
+        assert!(matches!(error, Error::Cancelled(_)));
     }
 }

@@ -25,7 +25,7 @@ pub enum NativeCapability {
 /// it, or a provider, interface, or device refused it as unsupported.
 ///
 /// This is the one representation of "unsupported" that
-/// [`Error`](crate::Error), [`route::SystemError`](crate::route::SystemError),
+/// [`Error`](crate::Error), [`route::Error`](crate::route::Error),
 /// and [`interface::Error`](crate::interface::Error) carry, and its
 /// [`capability`](Self::capability) decides its classification:
 /// `capability.route` for [`NativeCapability::Route`], and

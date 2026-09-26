@@ -228,7 +228,7 @@ recovers the typed cause.
 
 Wrapped errors display route context; inspect `std::error::Error::source()` or
 `Classified::causes()` for the validation detail. Native interface-snapshot
-validation similarly retains its original `SystemError` as a shared
+validation similarly retains its original `route::Error` as a shared
 `packetcraftr_core::error::Source`. Classification codes are unchanged.
 
 ## Explicit DNS TCP providers
@@ -1013,12 +1013,12 @@ and materializes routes over it.
 | `frame.route().plan.decision`, `.plan.mode`, `.plan.lookup_destination` | `frame.route().decision`, `.mode`, `.lookup_destination` |
 
 `packetcraftr_netio::route::{Provider, Decision, Scope, SelectionReason,
-SystemProvider, SystemError}` are unchanged, and so are variant names,
+SystemProvider}` are unchanged (the native error is `route::Error`), and so are variant names,
 messages, and classification codes. `Client::plan` and `send::Options::plan`
 use the `packetcraftr::route` types.
 
 `SystemProvider` checks a preferred source's address family once, before any
-native backend runs, and still reports `SystemError::SourceFamilyMismatch`
+native backend runs, and still reports `route::Error::SourceFamilyMismatch`
 (`io.route_selection`).
 
 ## Neighbor resolution in packetcraftr
@@ -1173,7 +1173,7 @@ A fake provider that ignores time takes `_deadline: &Deadline`. A fake that
 recorded or slept for its timeout reads `deadline.remaining()` instead, and
 one that stalls until expiry can loop on
 `packetcraftr_netio::deadline::remaining(deadline)`. A system backend stopped
-by the deadline reports `route::SystemError::DeadlineExceeded`,
+by the deadline reports `route::Error::DeadlineExceeded`,
 `interface::Error::DeadlineExceeded`, or `Error::DeadlineExceeded`, all
 classified `io.deadline_exceeded`; a cancelled one reports the `Cancelled`
 variant (`io.cancelled`). `tcp::start_connect` refuses a spent deadline with
@@ -1185,13 +1185,13 @@ now means only a remainder above one hour.
 Every public netio error implements `Classified` and keeps its source.
 
 **One unsupported representation.** `packetcraftr_netio::Error`,
-`route::SystemError`, and `interface::Error` carry the same
+`route::Error`, and `interface::Error` carry the same
 `packetcraftr_netio::Unsupported`, and its capability decides the class.
 
 | Before | After |
 |---|---|
 | `Error::Unsupported { message, source }` | `Error::Unsupported(Unsupported { capability, message, source })` |
-| `route::SystemError::Unsupported { message }` | `SystemError::Unsupported(Unsupported::new(NativeCapability::Route, message))` |
+| `route::SystemError::Unsupported { message }` | `route::Error::Unsupported(Unsupported::new(NativeCapability::Route, message))` |
 | `interface::Error::Unsupported { message }` | `interface::Error::Unsupported(Unsupported::new(NativeCapability::InterfaceEnumeration, message))` |
 | `matches!(error, Error::Unsupported { .. })` | `matches!(error, Error::Unsupported(_))` |
 
@@ -1757,3 +1757,13 @@ A replay frame whose rules name different interfaces fails with
 fallback fails with `replay::Error::Unmapped` (replacing `InvalidLimit {
 field: "interface" }`); both are `cli.error`. `replay::Error::Selection`
 carries the `filter::Error` that stopped the request's filter or a filter rule.
+
+## One error per module
+
+Each module has one error type, named `Error` and used module-qualified.
+Variants, messages, and classification codes are unchanged unless a row says
+otherwise.
+
+| Before | After |
+|---|---|
+| `packetcraftr_netio::route::SystemError` | `packetcraftr_netio::route::Error` |

@@ -6,8 +6,8 @@ use std::{fmt, io, net::IpAddr, time::Duration};
 use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode,
-    route::SystemError, tcp,
+    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode, route,
+    tcp,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
@@ -43,7 +43,7 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     // A route adapter refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Some(Source::new(SystemError::OperatingSystem {
+        source: Some(Source::new(route::Error::OperatingSystem {
             operation: "RTM_GETLINK",
             message: "the operating system refused the request".to_owned(),
             source: Some(Source::new(io::Error::other("operation not permitted"))),
@@ -135,7 +135,7 @@ fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
 
         let carriers: [Box<dyn Classified>; 3] = [
             Box::new(Error::from(unsupported.clone())),
-            Box::new(SystemError::from(unsupported.clone())),
+            Box::new(route::Error::from(unsupported.clone())),
             Box::new(interface::Error::from(unsupported.clone())),
         ];
         for carrier in carriers {
@@ -228,25 +228,25 @@ fn assert_row(
     assert!(!error.to_string().is_empty());
 }
 
-/// `route::SystemError` is `#[non_exhaustive]`; the table lists all 10
+/// `route::Error` is `#[non_exhaustive]`; the table lists all 10
 /// variants exactly once, so a new variant must add a row here.
 #[test]
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
         (
-            SystemError::Unsupported(Unsupported::new(NativeCapability::Route, "fixture")),
+            route::Error::Unsupported(Unsupported::new(NativeCapability::Route, "fixture")),
             "capability.route",
             Kind::Capability,
         ),
         (
-            SystemError::RouteNotFound {
+            route::Error::RouteNotFound {
                 destination: ipv4("192.0.2.9"),
             },
             "io.route_not_found",
             Kind::Io,
         ),
         (
-            SystemError::InterfaceNotFound {
+            route::Error::InterfaceNotFound {
                 name: "fixture0".to_owned(),
                 index: 1,
             },
@@ -254,7 +254,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::InterfaceMismatch {
+            route::Error::InterfaceMismatch {
                 requested: "fixture0".to_owned(),
                 requested_index: 1,
                 actual: "fixture1".to_owned(),
@@ -264,7 +264,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::SourceFamilyMismatch {
+            route::Error::SourceFamilyMismatch {
                 preferred_source: ipv4("192.0.2.2"),
                 destination: ipv6("2001:db8::9"),
             },
@@ -272,7 +272,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::SourceUnavailable {
+            route::Error::SourceUnavailable {
                 preferred_source: ipv4("192.0.2.2"),
                 interface: "fixture0".to_owned(),
             },
@@ -280,14 +280,14 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::InvalidResponse {
+            route::Error::InvalidResponse {
                 message: "fixture".to_owned(),
             },
             "internal.route_response",
             Kind::Internal,
         ),
         (
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "fixture operation",
                 message: "fixture".to_owned(),
                 source: Some(Source::new(io::Error::other("kernel refused the request"))),
@@ -296,13 +296,13 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::DeadlineExceeded {
+            route::Error::DeadlineExceeded {
                 operation: "fixture operation",
             },
             "io.deadline_exceeded",
             Kind::Io,
         ),
-        (SystemError::Cancelled(Cancelled), "io.cancelled", Kind::Io),
+        (route::Error::Cancelled(Cancelled), "io.cancelled", Kind::Io),
     ];
 
     for (error, code, kind) in cases {

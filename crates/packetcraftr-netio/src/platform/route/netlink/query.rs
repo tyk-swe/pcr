@@ -23,7 +23,7 @@ use crate::route::normalize::{NativeRouteSnapshot, finish_route};
 use crate::{
     interface::{self, Id as InterfaceId},
     link::Capability,
-    route::{Decision, SelectionReason, SystemError},
+    route::{self, Decision, SelectionReason},
 };
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
@@ -33,11 +33,11 @@ pub(super) async fn query_route(
     destination: IpAddr,
     interface_hint: Option<InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     let message = route_request(destination, interface_hint.as_ref(), preferred_source);
     let mut replies = handle.route().get(message).execute();
     let reply = match replies.try_next().await {
-        Ok(reply) => reply.ok_or(SystemError::RouteNotFound { destination })?,
+        Ok(reply) => reply.ok_or(route::Error::RouteNotFound { destination })?,
         Err(error) => {
             let unowned_source = unowned_preferred_source(&handle, preferred_source, &error).await;
             return Err(refine_route_lookup_error(
@@ -89,12 +89,12 @@ pub(super) async fn query_route(
     }
     let output_index = output_index
         .or_else(|| interface_hint.as_ref().map(|interface| interface.index))
-        .ok_or_else(|| SystemError::InvalidResponse {
+        .ok_or_else(|| route::Error::InvalidResponse {
             message: "Linux route response omitted its output interface".to_owned(),
         })?;
     let interface = query_interface(&handle, output_index, interface_hint.as_ref()).await?;
     let selection_reason = route_selection_reason(&reply.header.kind, next_hop.is_some())
-        .ok_or(SystemError::RouteNotFound { destination })?;
+        .ok_or(route::Error::RouteNotFound { destination })?;
     let local_addresses = if needs_local_addresses(
         selection_reason,
         destination,
@@ -152,9 +152,9 @@ fn refine_route_lookup_error(
     interface_hint: Option<&InterfaceId>,
     unowned_source: Option<IpAddr>,
     error: rtnetlink::Error,
-) -> SystemError {
+) -> route::Error {
     if let Some(preferred_source) = unowned_source {
-        return SystemError::SourceUnavailable {
+        return route::Error::SourceUnavailable {
             preferred_source,
             interface: interface_hint
                 .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
@@ -163,7 +163,7 @@ fn refine_route_lookup_error(
     if let Some(hint) = interface_hint
         && netlink_errno(&error) == Some(libc::ENODEV)
     {
-        return SystemError::InterfaceNotFound {
+        return route::Error::InterfaceNotFound {
             name: hint.name.clone(),
             index: hint.index,
         };
@@ -173,7 +173,7 @@ fn refine_route_lookup_error(
 
 /// Reports the kernel's "no route" errnos as `RouteNotFound`, so an
 /// unreachable destination classifies as `io.route_not_found` on every target.
-fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemError {
+fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> route::Error {
     const NO_ROUTE: [i32; 4] = [
         libc::ENETUNREACH,
         libc::EHOSTUNREACH,
@@ -181,7 +181,7 @@ fn route_lookup_error(destination: IpAddr, error: rtnetlink::Error) -> SystemErr
         libc::ESRCH,
     ];
     if netlink_errno(&error).is_some_and(|errno| NO_ROUTE.contains(&errno)) {
-        return SystemError::RouteNotFound { destination };
+        return route::Error::RouteNotFound { destination };
     }
     os_error("RTM_GETROUTE", error)
 }
@@ -222,7 +222,9 @@ fn route_selection_reason(kind: &RouteType, has_next_hop: bool) -> Option<Select
     }
 }
 
-pub(super) async fn query_interfaces(handle: &Handle) -> Result<Vec<interface::Info>, SystemError> {
+pub(super) async fn query_interfaces(
+    handle: &Handle,
+) -> Result<Vec<interface::Info>, route::Error> {
     let mut interfaces = query_links(handle, None).await?;
     query_addresses(handle, None, &mut interfaces).await?;
     Ok(interfaces.into_values().collect())
@@ -235,8 +237,8 @@ async fn query_interface(
     handle: &Handle,
     index: u32,
     interface_hint: Option<&InterfaceId>,
-) -> Result<interface::Info, SystemError> {
-    let not_found = || SystemError::InterfaceNotFound {
+) -> Result<interface::Info, route::Error> {
+    let not_found = || route::Error::InterfaceNotFound {
         name: interface_hint.map_or_else(|| format!("index-{index}"), |hint| hint.name.clone()),
         index,
     };
@@ -244,14 +246,14 @@ async fn query_interface(
         .await
         .map_err(|error| match error {
             // Attach the hinted name to the ENODEV translation.
-            SystemError::InterfaceNotFound { .. } => not_found(),
+            route::Error::InterfaceNotFound { .. } => not_found(),
             error => error,
         })?;
     query_addresses(handle, Some(index), &mut interfaces).await?;
     interfaces.remove(&index).ok_or_else(not_found)
 }
 
-async fn query_local_addresses(handle: &Handle) -> Result<Vec<IpAddr>, SystemError> {
+async fn query_local_addresses(handle: &Handle) -> Result<Vec<IpAddr>, route::Error> {
     Ok(query_interfaces(handle)
         .await?
         .into_iter()
@@ -267,7 +269,7 @@ async fn query_local_addresses(handle: &Handle) -> Result<Vec<IpAddr>, SystemErr
 async fn query_links(
     handle: &Handle,
     index_filter: Option<u32>,
-) -> Result<BTreeMap<u32, interface::Info>, SystemError> {
+) -> Result<BTreeMap<u32, interface::Info>, route::Error> {
     let request = handle.link().get();
     let mut links = match index_filter {
         Some(index) => request.match_index(index).execute(),
@@ -296,7 +298,7 @@ async fn query_links(
                 _ => {}
             }
         }
-        let name = name.ok_or_else(|| SystemError::InvalidResponse {
+        let name = name.ok_or_else(|| route::Error::InvalidResponse {
             message: format!("Linux link {} has no interface name", message.header.index),
         })?;
         let loopback = message.header.flags.contains(LinkFlags::Loopback)
@@ -338,12 +340,12 @@ async fn query_links(
 
 /// A filtered link get reports an interface that vanished since the route
 /// lookup as ENODEV, matching the full dump that would have omitted it.
-fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> SystemError {
+fn link_lookup_error(index_filter: Option<u32>, error: rtnetlink::Error) -> route::Error {
     if let Some(index) = index_filter
         && let rtnetlink::Error::NetlinkError(reply) = &error
         && reply.raw_code().checked_abs() == Some(libc::ENODEV)
     {
-        return SystemError::InterfaceNotFound {
+        return route::Error::InterfaceNotFound {
             name: format!("index-{index}"),
             index,
         };
@@ -355,7 +357,7 @@ async fn query_addresses(
     handle: &Handle,
     index_filter: Option<u32>,
     interfaces: &mut BTreeMap<u32, interface::Info>,
-) -> Result<(), SystemError> {
+) -> Result<(), route::Error> {
     let request = handle.address().get();
     let mut addresses = match index_filter {
         Some(index) => request.set_link_index_filter(index).execute(),
@@ -464,20 +466,20 @@ mod tests {
         ] {
             assert!(matches!(
                 route_lookup_error(destination, netlink_error(-errno)),
-                SystemError::RouteNotFound { destination: actual } if actual == destination
+                route::Error::RouteNotFound { destination: actual } if actual == destination
             ));
         }
 
         assert!(matches!(
             route_lookup_error(destination, netlink_error(-libc::EPERM)),
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "RTM_GETROUTE",
                 ..
             }
         ));
         assert!(matches!(
             route_lookup_error(destination, rtnetlink::Error::RequestFailed),
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "RTM_GETROUTE",
                 ..
             }
@@ -488,18 +490,18 @@ mod tests {
     fn a_filtered_link_get_maps_a_missing_interface_to_not_found() {
         assert!(matches!(
             link_lookup_error(Some(4), netlink_error(-libc::ENODEV)),
-            SystemError::InterfaceNotFound { index: 4, .. }
+            route::Error::InterfaceNotFound { index: 4, .. }
         ));
         assert!(matches!(
             link_lookup_error(None, netlink_error(-libc::ENODEV)),
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "RTM_GETLINK",
                 ..
             }
         ));
         assert!(matches!(
             link_lookup_error(Some(4), netlink_error(-libc::EPERM)),
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "RTM_GETLINK",
                 ..
             }
@@ -578,7 +580,7 @@ mod tests {
                 Some(source),
                 netlink_error(-libc::ENETUNREACH)
             ),
-            SystemError::SourceUnavailable { preferred_source, ref interface }
+            route::Error::SourceUnavailable { preferred_source, ref interface }
                 if preferred_source == source && interface == "any interface"
         ));
         assert!(matches!(
@@ -588,7 +590,7 @@ mod tests {
                 Some(source),
                 netlink_error(-libc::ENETUNREACH)
             ),
-            SystemError::SourceUnavailable { ref interface, .. } if interface == "fixture0"
+            route::Error::SourceUnavailable { ref interface, .. } if interface == "fixture0"
         ));
         assert!(matches!(
             refine_route_lookup_error(
@@ -597,11 +599,11 @@ mod tests {
                 None,
                 netlink_error(-libc::ENODEV)
             ),
-            SystemError::InterfaceNotFound { ref name, index: 9 } if name == "fixture0"
+            route::Error::InterfaceNotFound { ref name, index: 9 } if name == "fixture0"
         ));
         assert!(matches!(
             refine_route_lookup_error(destination, None, None, netlink_error(-libc::ENETUNREACH)),
-            SystemError::RouteNotFound { .. }
+            route::Error::RouteNotFound { .. }
         ));
     }
 

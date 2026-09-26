@@ -14,7 +14,7 @@ use self::{
 use super::find_interface;
 use crate::{
     interface::{self, Id as InterfaceId},
-    route::{Decision, SystemError, normalize::interface_decision},
+    route::{self, Decision, normalize::interface_decision},
 };
 
 mod query;
@@ -26,7 +26,7 @@ pub(in crate::platform) fn interfaces(
     snapshot(deadline).map_err(interface::Error::native)
 }
 
-fn snapshot(deadline: &Deadline) -> Result<Vec<interface::Info>, SystemError> {
+fn snapshot(deadline: &Deadline) -> Result<Vec<interface::Info>, route::Error> {
     with_netlink(
         deadline,
         |handle| async move { query_interfaces(&handle).await },
@@ -38,7 +38,7 @@ pub(in crate::platform) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     let interface_hint = interface_hint.cloned();
     with_netlink(deadline, move |handle| {
         query_route(handle, destination, interface_hint, preferred_source)
@@ -48,6 +48,6 @@ pub(in crate::platform) fn route(
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     interface_decision(find_interface(&snapshot(deadline)?, requested)?)
 }

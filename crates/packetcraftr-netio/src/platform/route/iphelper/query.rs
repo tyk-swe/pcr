@@ -24,7 +24,7 @@ use crate::platform::route::{InterfaceCandidate, constrain_by_preferred_source};
 use crate::route::normalize::{NativeRouteSnapshot, finish_route, interface_decision};
 use crate::{
     interface::Id as InterfaceId,
-    route::{Decision, SelectionReason, SystemError},
+    route::{self, Decision, SelectionReason},
 };
 use packetcraftr_core::budget::Deadline;
 
@@ -35,11 +35,11 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     let available = adapter_snapshots()?;
     let constrained_interface = constrain_interface(&available, interface_hint, preferred_source)?;
     crate::deadline::remaining(deadline).map_err(|interrupted| {
-        SystemError::interrupted(interrupted, "selecting the Windows best route")
+        route::Error::interrupted(interrupted, "selecting the Windows best route")
     })?;
     let BestRoute {
         row: best_route,
@@ -81,7 +81,7 @@ pub(super) fn route(
                     .cloned()
             })
         })
-        .ok_or_else(|| SystemError::InterfaceNotFound {
+        .ok_or_else(|| route::Error::InterfaceNotFound {
             name: constrained_interface.as_ref().map_or_else(
                 || format!("index-{output_index}"),
                 |adapter| adapter.interface.id.name.clone(),
@@ -122,7 +122,7 @@ fn constrain_interface(
     available: &[WindowsAdapter],
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
-) -> Result<Option<WindowsAdapter>, SystemError> {
+) -> Result<Option<WindowsAdapter>, route::Error> {
     let requested = interface_hint
         .map(|requested| find_windows_adapter(available, requested))
         .transpose()?;
@@ -144,7 +144,7 @@ fn query_best_route(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,
     constrained_interface: Option<&WindowsAdapter>,
-) -> Result<BestRoute, SystemError> {
+) -> Result<BestRoute, route::Error> {
     let interface_index =
         constrained_interface.map_or(0, |adapter| adapter_index_for(adapter, destination));
     let destination_address = encode_address(destination, interface_index);
@@ -173,7 +173,7 @@ fn query_best_route(
                 | ERROR_HOST_UNREACHABLE
                 | ERROR_ADDRESS_NOT_ASSOCIATED
         ) {
-            return Err(SystemError::RouteNotFound { destination });
+            return Err(route::Error::RouteNotFound { destination });
         }
         return Err(win32_error("GetBestRoute2", result));
     }
@@ -181,7 +181,7 @@ fn query_best_route(
 }
 
 /// One synchronous `GetAdaptersAddresses` snapshot, run on the worker pool.
-pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, SystemError> {
+pub(super) fn interface_route(requested: &InterfaceId) -> Result<Decision, route::Error> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }

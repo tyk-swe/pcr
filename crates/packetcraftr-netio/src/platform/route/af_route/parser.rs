@@ -8,7 +8,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use crate::route::SystemError;
+use crate::route;
 
 pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr stores `sa_family` after its leading length byte.
@@ -65,7 +65,7 @@ fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
 pub(super) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
-) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], SystemError> {
+) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], route::Error> {
     let mut output = [None; libc::RTAX_MAX as usize];
     let address_slots = output.len();
     let mut offset = 0;
@@ -74,14 +74,14 @@ pub(super) fn parse_route_addresses(
             continue;
         }
         let Some(&length_byte) = bytes.get(offset) else {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: "macOS route response truncated its sockaddr list".to_owned(),
             });
         };
         let length = usize::from(length_byte);
         let empty_netmask = index == libc::RTAX_NETMASK as usize && length == 0;
         if length < 2 && !empty_netmask {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
                 ),
@@ -89,12 +89,12 @@ pub(super) fn parse_route_addresses(
         }
         let stride = roundup(length);
         let Some(address_end) = offset.checked_add(length) else {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: "macOS route response sockaddr length overflowed".to_owned(),
             });
         };
         if address_end > bytes.len() {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
                     bytes.len()
@@ -109,7 +109,7 @@ pub(super) fn parse_route_addresses(
             // Darwin may omit the unused alignment trailer after the final sockaddr.
             _ if !empty_netmask && !has_later_address && address_end == bytes.len() => address_end,
             _ => {
-                return Err(SystemError::InvalidResponse {
+                return Err(route::Error::InvalidResponse {
                     message: format!(
                         "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
                         bytes.len()
@@ -119,7 +119,7 @@ pub(super) fn parse_route_addresses(
         };
         if empty_netmask {
             if bytes[offset..next_offset].iter().any(|byte| *byte != 0) {
-                return Err(SystemError::InvalidResponse {
+                return Err(route::Error::InvalidResponse {
                     message: "macOS route response zero-length netmask slot contains nonzero bytes"
                         .to_owned(),
                 });
@@ -228,7 +228,7 @@ mod tests {
         ] {
             assert!(matches!(
                 parse_route_addresses(&bytes, address_mask),
-                Err(SystemError::InvalidResponse { .. })
+                Err(route::Error::InvalidResponse { .. })
             ));
         }
     }
@@ -244,7 +244,7 @@ mod tests {
                 &bytes,
                 mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
             ),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 
@@ -259,7 +259,7 @@ mod tests {
                 &bytes,
                 mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
             ),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 }

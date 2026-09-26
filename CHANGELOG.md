@@ -228,7 +228,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr::route` (ADR 0001): `plan`, `Plan`, `Options`, `Error`,
   `materialize`, and `Materialized`. netio keeps the route contract
   (`Provider`, `Decision`, `Scope`, `SelectionReason`, `SystemProvider`,
-  `SystemError`). `Client::plan` returns `packetcraftr::route::Plan`.
+  `Error`). `Client::plan` returns `packetcraftr::route::Plan`.
   Transmission frames take a borrowed `transmit::Route` view (decision, link
   mode, lookup destination) instead of `&route::Materialized`, and
   `Frame::route()` returns it; build one with `Materialized::transmit_route`.
@@ -290,13 +290,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   native capture waits honor the deadline's cancellation themselves. `packetcraftr::route::plan`,
   `Client::plan`, and `replay::Transmitter::plan_frame` take the deadline their
   lookups receive, and `neighbor::Request` loses its `deadline` field.
-  `route::SystemError` and `interface::Error` gain `Cancelled` and
+  `route::Error` and `interface::Error` gain `Cancelled` and
   `DeadlineExceeded` variants, and `tcp::ConnectError` gains
   `DeadlineExceeded` (`io.deadline_exceeded`). See
   `docs/migration-unreleased.md`.
 - netio errors follow the workspace error convention:
   - One unsupported representation: `packetcraftr_netio::Error::Unsupported`,
-    `route::SystemError::Unsupported`, and `interface::Error::Unsupported`
+    `route::Error::Unsupported`, and `interface::Error::Unsupported`
     each carry the new `packetcraftr_netio::Unsupported { capability,
     message, source }`. Its `NativeCapability` (`Route`,
     `InterfaceEnumeration`, `Capture`, `Transmission(Mode)`) decides the
@@ -521,6 +521,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   nowhere.
 
   See `docs/migration-unreleased.md`.
+- Each module has one error type, named `Error` and used module-qualified:
+  `packetcraftr_netio::route::SystemError` is `route::Error`. Variants,
+  messages, and classification codes are unchanged. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

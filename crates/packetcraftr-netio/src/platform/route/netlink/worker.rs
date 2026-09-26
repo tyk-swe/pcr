@@ -33,7 +33,7 @@ use rtnetlink::{Handle, new_connection};
 
 use crate::{
     platform::route::{os_error, refused},
-    route::SystemError,
+    route,
     workers::{self, Class, Task, Waited},
 };
 
@@ -44,7 +44,7 @@ const NETLINK_QUEUE_DEPTH: usize = crate::workers::CAPACITY;
 /// The channel boundary erases each operation's result type behind `Any`; the
 /// caller's downcast restores it and can only fail if the worker answered a
 /// different call's request.
-type OperationResult = Result<Box<dyn Any + Send>, SystemError>;
+type OperationResult = Result<Box<dyn Any + Send>, route::Error>;
 type OperationFuture = Pin<Box<dyn Future<Output = OperationResult> + Send>>;
 type Operation = Box<dyn FnOnce(Handle) -> OperationFuture + Send>;
 
@@ -87,7 +87,7 @@ struct InboxState {
 enum Refused {
     /// The worker stopped; the undelivered request comes back.
     Stopped(NetlinkRequest),
-    Interrupted(SystemError),
+    Interrupted(route::Error),
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -193,7 +193,7 @@ struct Namespace {
 }
 
 impl Namespace {
-    fn current() -> Result<Self, SystemError> {
+    fn current() -> Result<Self, route::Error> {
         let file = File::open("/proc/thread-self/ns/net")
             .map_err(|error| os_error("open caller network namespace", error))?;
         let metadata = file
@@ -253,14 +253,14 @@ static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 /// Runs `operation` on this namespace's worker. The caller's deadline bounds
 /// every step (admission, worker start, queueing, execution, and the reply);
 /// cancellation is checked while the caller waits.
-pub(super) fn with_netlink<F, Fut, T>(caller: &Deadline, operation: F) -> Result<T, SystemError>
+pub(super) fn with_netlink<F, Fut, T>(caller: &Deadline, operation: F) -> Result<T, route::Error>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<T, SystemError>> + Send + 'static,
+    Fut: Future<Output = Result<T, route::Error>> + Send + 'static,
     T: Send + 'static,
 {
     let deadline = expires_at(caller).map_err(|interrupted| {
-        SystemError::interrupted(interrupted, "submitting the netlink request")
+        route::Error::interrupted(interrupted, "submitting the netlink request")
     })?;
     let namespace = Namespace::current()?;
     let (respond, finished) = mpsc::sync_channel(1);
@@ -313,13 +313,13 @@ where
         value
             .downcast::<T>()
             .map(|value| *value)
-            .map_err(|_| SystemError::InvalidResponse {
+            .map_err(|_| route::Error::InvalidResponse {
                 message: "Linux netlink worker returned a mismatched result type".to_owned(),
             })
     })
 }
 
-fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, SystemError> {
+fn shared_workers(caller: &Deadline, deadline: Instant) -> Result<Checkout, route::Error> {
     let mut workers = lock(&REGISTRY.workers);
     loop {
         if let Some(checked_out) = workers.take() {
@@ -344,7 +344,7 @@ fn worker_inbox(
     namespace: &Namespace,
     caller: &Deadline,
     deadline: Instant,
-) -> Result<(u64, Arc<Inbox>), SystemError> {
+) -> Result<(u64, Arc<Inbox>), route::Error> {
     let mut workers = shared_workers(caller, deadline)?;
     // A finished worker's pooled thread has already returned to the pool.
     workers.retain(|_, worker| worker.worker.try_take().is_none());
@@ -359,9 +359,9 @@ fn worker_inbox(
     Ok((worker.generation, Arc::clone(&worker.inbox)))
 }
 
-fn check_namespace_capacity(count: usize) -> Result<(), SystemError> {
+fn check_namespace_capacity(count: usize) -> Result<(), route::Error> {
     if count >= crate::workers::CAPACITY {
-        return Err(SystemError::OperatingSystem {
+        return Err(route::Error::OperatingSystem {
             operation: "reserve netlink namespace worker",
             message: "network namespace worker capacity is exhausted".to_owned(),
             source: None,
@@ -375,7 +375,7 @@ fn restart_worker(
     generation: u64,
     caller: &Deadline,
     deadline: Instant,
-) -> Result<(), SystemError> {
+) -> Result<(), route::Error> {
     let mut workers = shared_workers(caller, deadline)?;
     if workers
         .get(&namespace.id)
@@ -392,7 +392,7 @@ fn restart_worker(
     Ok(())
 }
 
-fn start_worker(namespace: &Namespace, deadline: Instant) -> Result<WorkerSlot, SystemError> {
+fn start_worker(namespace: &Namespace, deadline: Instant) -> Result<WorkerSlot, route::Error> {
     remaining_before(deadline).ok_or_else(|| netlink_timeout("initializing netlink"))?;
     let namespace = namespace
         .file
@@ -443,7 +443,7 @@ fn settle(worker: Task<()>, deadline: Instant) {
     }
 }
 
-fn run_worker(setup: &SyncSender<Result<(), SystemError>>, inbox: &Inbox) {
+fn run_worker(setup: &SyncSender<Result<(), route::Error>>, inbox: &Inbox) {
     let _stop = StopOnExit(inbox);
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
@@ -472,7 +472,7 @@ fn run_worker(setup: &SyncSender<Result<(), SystemError>>, inbox: &Inbox) {
 
 fn open_connection(
     runtime: &tokio::runtime::Runtime,
-) -> Result<(Handle, tokio::task::JoinHandle<()>), SystemError> {
+) -> Result<(Handle, tokio::task::JoinHandle<()>), route::Error> {
     let (connection, handle, _) = runtime
         .block_on(async { new_connection() })
         .map_err(|error| os_error("open route netlink socket", error))?;
@@ -525,9 +525,9 @@ fn serve_requests(
             Ok(result) => {
                 let timed_out = matches!(
                     &result,
-                    Err(SystemError::DeadlineExceeded {
+                    Err(route::Error::DeadlineExceeded {
                         operation: EXECUTING_OPERATION,
-                    } | SystemError::Cancelled(_))
+                    } | route::Error::Cancelled(_))
                 );
                 (result, timed_out)
             }
@@ -551,16 +551,16 @@ async fn await_netlink_operation<F, T>(
     connection: &mut tokio::task::JoinHandle<()>,
     timeout: Duration,
     cancellation: Option<&Cancellation>,
-) -> Result<T, SystemError>
+) -> Result<T, route::Error>
 where
-    F: Future<Output = Result<T, SystemError>>,
+    F: Future<Output = Result<T, route::Error>>,
 {
     let operation = std::pin::pin!(tokio::time::timeout(timeout, operation));
     let cancelled = std::pin::pin!(cancelled(cancellation));
     match select(connection, select(operation, cancelled)).await {
         Either::Left((joined, _)) => {
             joined.map_err(|error| os_error("drive netlink connection", error))?;
-            Err(SystemError::OperatingSystem {
+            Err(route::Error::OperatingSystem {
                 operation: "drive netlink connection",
                 message: "route netlink connection stopped".to_owned(),
                 source: None,
@@ -587,8 +587,8 @@ async fn cancelled(cancellation: Option<&Cancellation>) -> Cancelled {
     }
 }
 
-fn netlink_worker_panicked() -> SystemError {
-    SystemError::InvalidResponse {
+fn netlink_worker_panicked() -> route::Error {
+    route::Error::InvalidResponse {
         message: "Linux netlink worker panicked".to_owned(),
     }
 }
@@ -597,8 +597,8 @@ const STARTING_OPERATION: &str = "starting the netlink operation";
 const EXECUTING_OPERATION: &str = "executing the netlink operation";
 
 /// The caller's deadline expired during `operation`.
-fn netlink_timeout(operation: &'static str) -> SystemError {
-    SystemError::DeadlineExceeded { operation }
+fn netlink_timeout(operation: &'static str) -> route::Error {
+    route::Error::DeadlineExceeded { operation }
 }
 
 #[cfg(test)]
@@ -619,16 +619,16 @@ mod tests {
     #[test]
     fn a_lookup_that_outlives_the_callers_deadline_reports_the_deadline() {
         let started = Instant::now();
-        let result: Result<(), SystemError> =
+        let result: Result<(), route::Error> =
             with_netlink(&Deadline::new(Duration::from_millis(100)), |_handle| {
                 std::future::pending()
             });
         match result {
             // A host that refuses the socket cannot exercise the worker.
-            Err(error @ SystemError::OperatingSystem { .. }) => {
+            Err(error @ route::Error::OperatingSystem { .. }) => {
                 eprintln!("skipping netlink deadline check: {error}");
             }
-            Err(error @ SystemError::DeadlineExceeded { .. }) => {
+            Err(error @ route::Error::DeadlineExceeded { .. }) => {
                 assert_eq!(error.classification().code, "io.deadline_exceeded");
                 assert!(started.elapsed() < Duration::from_secs(2));
             }
@@ -645,14 +645,14 @@ mod tests {
             signal.cancel();
         });
         let started = Instant::now();
-        let result: Result<(), SystemError> =
+        let result: Result<(), route::Error> =
             with_netlink(&caller, |_handle| std::future::pending());
         canceller.join().unwrap();
         match result {
-            Err(error @ SystemError::OperatingSystem { .. }) => {
+            Err(error @ route::Error::OperatingSystem { .. }) => {
                 eprintln!("skipping netlink cancellation check: {error}");
             }
-            Err(SystemError::Cancelled(_)) => {
+            Err(route::Error::Cancelled(_)) => {
                 assert!(started.elapsed() < Duration::from_secs(5));
             }
             other => panic!("a cancelled caller must stop waiting: {other:?}"),
@@ -668,12 +668,12 @@ mod tests {
         let mut connection = runtime.spawn(std::future::pending());
         assert!(matches!(
             runtime.block_on(await_netlink_operation(
-                std::future::pending::<Result<(), SystemError>>(),
+                std::future::pending::<Result<(), route::Error>>(),
                 &mut connection,
                 Duration::ZERO,
                 None,
             )),
-            Err(SystemError::DeadlineExceeded {
+            Err(route::Error::DeadlineExceeded {
                 operation: EXECUTING_OPERATION,
             })
         ));
@@ -690,7 +690,7 @@ mod tests {
             tokio::time::timeout(
                 Duration::from_secs(1),
                 await_netlink_operation(
-                    std::future::pending::<Result<(), SystemError>>(),
+                    std::future::pending::<Result<(), route::Error>>(),
                     &mut connection,
                     Duration::from_secs(60),
                     None,
@@ -701,7 +701,7 @@ mod tests {
         });
         assert!(matches!(
             result,
-            Err(SystemError::OperatingSystem {
+            Err(route::Error::OperatingSystem {
                 operation: "drive netlink connection",
                 ..
             })
@@ -847,7 +847,7 @@ mod tests {
         let soon = started + Duration::from_millis(30);
         let (request, _) = request_with(later, noop());
         match inbox.submit(request, &caller(), soon) {
-            Err(Refused::Interrupted(error @ SystemError::DeadlineExceeded { .. })) => {
+            Err(Refused::Interrupted(error @ route::Error::DeadlineExceeded { .. })) => {
                 assert_eq!(error.classification().code, "io.deadline_exceeded");
             }
             _ => panic!("a full inbox must hold the submitter until its deadline"),
@@ -923,16 +923,16 @@ mod tests {
     fn a_reused_worker_answers_typed_results_for_sequential_operations() {
         // A host that refuses the socket cannot exercise the worker; that is
         // an environment limit, not a submission-plumbing failure.
-        let first: Result<u32, SystemError> =
+        let first: Result<u32, route::Error> =
             match with_netlink(&caller(), |_handle| async move { Ok(7_u32) }) {
-                Err(error @ SystemError::OperatingSystem { .. }) => {
+                Err(error @ route::Error::OperatingSystem { .. }) => {
                     eprintln!("skipping shared-worker round trip: {error}");
                     return;
                 }
                 first => first,
             };
         assert!(matches!(first, Ok(7)));
-        let second: Result<String, SystemError> =
+        let second: Result<String, route::Error> =
             with_netlink(&caller(), |_handle| async move { Ok("route".to_owned()) });
         assert!(matches!(second, Ok(ref value) if value == "route"));
     }

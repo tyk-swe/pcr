@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use crate::interface::validation::validate_native_interface;
 use crate::{
     interface::{self, Id as InterfaceId},
-    route::{Decision, Scope, SelectionReason, SystemError},
+    route::{self, Decision, Scope, SelectionReason},
 };
 
 pub(crate) struct NativeRouteSnapshot {
@@ -26,7 +26,7 @@ pub(crate) fn finish_route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     snapshot: NativeRouteSnapshot,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     validate_native_interface(&snapshot.interface)?;
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
@@ -35,21 +35,21 @@ pub(crate) fn finish_route(
         .next_hop
         .is_some_and(|next_hop| next_hop.is_ipv4() != destination.is_ipv4())
     {
-        return Err(SystemError::InvalidResponse {
+        return Err(route::Error::InvalidResponse {
             message: "next-hop family differs from destination family".to_owned(),
         });
     }
     let selected_source = preferred_source
         .or(snapshot.selected_source)
         .or_else(|| fallback_source(&snapshot.interface.addresses, destination))
-        .ok_or_else(|| SystemError::InvalidResponse {
+        .ok_or_else(|| route::Error::InvalidResponse {
             message: format!(
                 "interface {} has no source address for {destination}",
                 snapshot.interface.id.name
             ),
         })?;
     if selected_source.is_ipv4() != destination.is_ipv4() {
-        return Err(SystemError::InvalidResponse {
+        return Err(route::Error::InvalidResponse {
             message: "selected source family differs from destination family".to_owned(),
         });
     }
@@ -62,12 +62,12 @@ pub(crate) fn finish_route(
         && snapshot.local_addresses.contains(&selected_source);
     if !assigned_to_output && !assigned_locally {
         return Err(if let Some(preferred_source) = preferred_source {
-            SystemError::SourceUnavailable {
+            route::Error::SourceUnavailable {
                 preferred_source,
                 interface: snapshot.interface.id.name.clone(),
             }
         } else {
-            SystemError::InvalidResponse {
+            route::Error::InvalidResponse {
                 message: format!(
                     "selected source {selected_source} is not assigned to interface {}",
                     snapshot.interface.id.name
@@ -81,7 +81,7 @@ pub(crate) fn finish_route(
         (Some(route), Some(interface)) => route.min(interface),
         (Some(mtu), None) | (None, Some(mtu)) => mtu,
         (None, None) => {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "interface {} reported no usable MTU",
                     snapshot.interface.id.name
@@ -134,13 +134,13 @@ fn is_interface_broadcast(destination: IpAddr, interface: &interface::Info) -> b
         })
 }
 
-pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision, SystemError> {
+pub(crate) fn interface_decision(interface: interface::Info) -> Result<Decision, route::Error> {
     validate_native_interface(&interface)?;
     let mtu =
         interface
             .mtu
             .filter(|mtu| *mtu != 0)
-            .ok_or_else(|| SystemError::InvalidResponse {
+            .ok_or_else(|| route::Error::InvalidResponse {
                 message: format!("interface {} reported no usable MTU", interface.id.name),
             })?;
     Ok(Decision {
@@ -179,11 +179,11 @@ fn classify_destination(address: IpAddr) -> Scope {
 fn validate_interface_hint(
     requested: &InterfaceId,
     actual: &InterfaceId,
-) -> Result<(), SystemError> {
+) -> Result<(), route::Error> {
     if requested == actual {
         return Ok(());
     }
-    Err(SystemError::InterfaceMismatch {
+    Err(route::Error::InterfaceMismatch {
         requested: requested.name.clone(),
         requested_index: requested.index,
         actual: actual.name.clone(),
@@ -407,7 +407,7 @@ mod tests {
 
         assert!(matches!(
             finish_route(local_address, None, None, local),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 
@@ -446,25 +446,25 @@ mod tests {
         };
         assert!(matches!(
             finish_route(destination, Some(&wrong_interface), None, snapshot()),
-            Err(SystemError::InterfaceMismatch { .. })
+            Err(route::Error::InterfaceMismatch { .. })
         ));
 
         let mut invalid = snapshot();
         invalid.next_hop = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
 
         let mut invalid = snapshot();
         invalid.selected_source = Some(v4(192, 0, 2, 8));
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
         assert!(matches!(
             finish_route(destination, None, Some(v4(192, 0, 2, 8)), snapshot()),
-            Err(SystemError::SourceUnavailable { .. })
+            Err(route::Error::SourceUnavailable { .. })
         ));
 
         let mut invalid = snapshot();
@@ -472,7 +472,7 @@ mod tests {
         invalid.interface.mtu = None;
         assert!(matches!(
             finish_route(destination, None, None, invalid),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 
@@ -488,7 +488,7 @@ mod tests {
         invalid.mtu = Some(0);
         assert!(matches!(
             interface_decision(invalid),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 }

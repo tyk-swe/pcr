@@ -15,7 +15,7 @@ use packetcraftr_core::budget::Deadline;
 use crate::{
     Error, interface,
     interface::Id as InterfaceId,
-    route::{Decision, SystemError},
+    route::{self, Decision},
     transmit::{self, Layer2Frame, Layer3Frame},
 };
 #[cfg(not(all(native_route, native_layer2, native_layer3)))]
@@ -62,7 +62,7 @@ pub(crate) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     route_backend::route(destination, interface_hint, preferred_source, deadline)
 }
 
@@ -72,7 +72,7 @@ pub(crate) fn route(
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
     _deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     Err(unsupported(
         NativeCapability::Route,
         cfg!(feature = "native-route"),
@@ -86,7 +86,7 @@ pub(crate) fn route(
 pub(crate) fn interface_route(
     interface: &InterfaceId,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     route_backend::interface_route(interface, deadline)
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn interface_route(
 pub(crate) fn interface_route(
     _interface: &InterfaceId,
     _deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     Err(unsupported(
         NativeCapability::Route,
         cfg!(feature = "native-route"),

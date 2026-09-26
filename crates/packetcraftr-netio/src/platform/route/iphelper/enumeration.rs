@@ -16,17 +16,17 @@ use windows::Win32::NetworkManagement::IpHelper::{
 use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
 use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
-use crate::{interface, route::SystemError};
+use crate::{interface, route};
 use packetcraftr_core::error::Source;
 
-pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+pub(super) fn interfaces() -> Result<Vec<interface::Info>, route::Error> {
     Ok(adapter_snapshots()?
         .into_iter()
         .map(|adapter| adapter.interface)
         .collect())
 }
 
-pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
+pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, route::Error> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
             | GAA_FLAG_SKIP_ANYCAST.0
@@ -50,7 +50,7 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
             .ok()
             .map(|bytes| bytes.div_ceil(align_of::<usize>()))
             .filter(|words| *words != 0)
-            .ok_or_else(|| SystemError::InvalidResponse {
+            .ok_or_else(|| route::Error::InvalidResponse {
                 message: "Windows reported an invalid adapter buffer size".to_owned(),
             })?;
         // A usize vector supplies alignment at least as strict as every IP
@@ -76,17 +76,17 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
         if result != NO_ERROR.0 {
             return Err(win32_error("GetAdaptersAddresses", WIN32_ERROR(result)));
         }
-        let initialized = usize::try_from(supplied).map_err(|_| SystemError::InvalidResponse {
+        let initialized = usize::try_from(supplied).map_err(|_| route::Error::InvalidResponse {
             message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
         })?;
         let allocated = storage
             .len()
             .checked_mul(size_of::<usize>())
-            .ok_or_else(|| SystemError::InvalidResponse {
+            .ok_or_else(|| route::Error::InvalidResponse {
                 message: "Windows adapter buffer size overflowed".to_owned(),
             })?;
         if initialized == 0 || initialized > allocated {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "Windows initialized {initialized} bytes of a {allocated}-byte adapter buffer"
                 ),
@@ -95,7 +95,7 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
         let bounds = BufferBounds::new(storage.as_ptr().cast(), initialized)?;
         return parse_adapters(head, bounds);
     }
-    Err(SystemError::OperatingSystem {
+    Err(route::Error::OperatingSystem {
         operation: "GetAdaptersAddresses",
         message: "adapter list changed during four consecutive reads".to_owned(),
         // Every read ended with the buffer-overflow status.
@@ -105,8 +105,8 @@ pub(super) fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, SystemError> {
     })
 }
 
-pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> SystemError {
-    SystemError::OperatingSystem {
+pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> route::Error {
+    route::Error::OperatingSystem {
         operation,
         message: format!("Win32 error {}", error.0),
         source: Some(Source::new(std::io::Error::from_raw_os_error(

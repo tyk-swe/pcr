@@ -85,7 +85,7 @@ mod tests {
     use packetcraftr_core::{error::Classified, frame::LinkType};
 
     use super::*;
-    use crate::route::SystemError;
+    use crate::route;
 
     #[test]
     fn discovery_retains_actual_snapshot_validation_failures() {
@@ -123,9 +123,9 @@ mod tests {
             let source = error
                 .source()
                 .unwrap()
-                .downcast_ref::<SystemError>()
+                .downcast_ref::<route::Error>()
                 .unwrap();
-            assert!(matches!(source, SystemError::InvalidResponse { .. }));
+            assert!(matches!(source, route::Error::InvalidResponse { .. }));
             assert_eq!(error.classification().code, "io.interface_discovery");
             assert_eq!(source.classification().code, "internal.route_response");
             assert_eq!(error.causes(), [source.to_string()]);

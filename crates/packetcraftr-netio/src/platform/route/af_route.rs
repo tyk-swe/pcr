@@ -14,7 +14,7 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::{
     interface::{self, Id as InterfaceId},
-    route::{Decision, SystemError},
+    route::{self, Decision},
 };
 
 pub(in crate::platform) use query::interface_route;
@@ -25,7 +25,7 @@ pub(in crate::platform) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
+) -> Result<Decision, route::Error> {
     let interface_hint = interface_hint.cloned();
     super::on_worker(
         deadline,

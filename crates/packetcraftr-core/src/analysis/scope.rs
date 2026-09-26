@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::frame::GlobalInterfaceId;
 
 /// One semantic identifier in the ordered encapsulation path enclosing a flow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -80,7 +79,7 @@ impl ScopeId {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Definition {
     pub id: ScopeId,
-    pub interface: Option<GlobalInterfaceId>,
+    pub interface: Option<u32>,
     pub encapsulation: Arc<[EncapsulationIdentifier]>,
 }
 
@@ -164,7 +163,7 @@ impl Limits {
 /// Exact interner for semantic encapsulation paths and capture scopes.
 #[derive(Debug, Default)]
 pub struct Interner {
-    scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
+    scopes: HashMap<(Option<u32>, Vec<EncapsulationIdentifier>), ScopeId>,
     definitions: Vec<Definition>,
     retained_bytes: usize,
     limits: Limits,
@@ -202,7 +201,7 @@ impl Interner {
     /// Returns the compact ID for an exact interface and encapsulation path.
     pub fn intern(
         &mut self,
-        interface: Option<GlobalInterfaceId>,
+        interface: Option<u32>,
         encapsulation: Vec<EncapsulationIdentifier>,
     ) -> Result<ScopeId, Error> {
         let scope = (interface, encapsulation);

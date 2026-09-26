@@ -16,7 +16,7 @@ use super::{
 };
 use crate::budget::{Cancellation, Deadline};
 use crate::field::FieldValue;
-use crate::frame::{GlobalInterfaceId, LinkType};
+use crate::frame::LinkType;
 
 /// Statements the report repeats verbatim so consumers never have to infer
 /// the comparison's epistemic limits.
@@ -115,7 +115,7 @@ pub struct Summary {
 pub struct Evidence {
     pub frame: u64,
     pub timestamp: std::time::SystemTime,
-    pub interface: Option<GlobalInterfaceId>,
+    pub interface: Option<u32>,
     pub link_type: LinkType,
     pub incomplete: Option<Incomplete>,
     /// Dissection diagnostic codes attached to this frame.

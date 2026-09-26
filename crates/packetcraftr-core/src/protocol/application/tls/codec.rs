@@ -498,7 +498,7 @@ fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
 mod tests {
 
     use super::*;
-    use crate::protocol::application::tls::test_wire::{TLS_1_2, record};
+    use crate::protocol::application::tls::test_support::{TLS_1_2, record};
 
     #[test]
     fn a_segment_without_a_record_header_has_no_dissection() {

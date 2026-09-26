@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::fixtures::Data;
+use super::test_support::Data;
 use super::*;
 use std::sync::mpsc;
 

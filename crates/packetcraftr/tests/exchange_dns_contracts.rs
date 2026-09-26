@@ -219,7 +219,6 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Re
     let client = Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         Io {
             state: state.clone(),
         },

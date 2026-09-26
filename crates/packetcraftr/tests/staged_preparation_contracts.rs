@@ -25,26 +25,26 @@ use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::template::Template;
 use packetcraftr_netio::link::Mode;
 
-use common::{
-    FixedRoutes, NEIGHBOR_MAC, RecordingNeighbors, RecordingTransmit, SELECTED_SOURCE, Step, Steps,
-};
+use common::{FixedRoutes, NEIGHBOR_MAC, RecordingTransmit, SELECTED_SOURCE, Step, Steps};
 
 const FIRST: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
 const SECOND: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 11);
 const THIRD: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 12);
 
-type RecordingClient = Client<FixedRoutes, RecordingNeighbors, RecordingTransmit>;
+type RecordingClient = Client<FixedRoutes, RecordingTransmit>;
 
 fn client(policy: Policy) -> (RecordingClient, Steps) {
-    let steps = Steps::default();
-    let client = Client::new(
-        builtin::registry(),
-        FixedRoutes,
-        RecordingNeighbors(steps.clone()),
-        RecordingTransmit(steps.clone()),
-        policy,
-    );
+    let (client, steps, _) = recording_client(policy);
     (client, steps)
+}
+
+/// A client over recording I/O, the steps it records, and a handle on that
+/// I/O for counting capture sessions.
+fn recording_client(policy: Policy) -> (RecordingClient, Steps, RecordingTransmit) {
+    let steps = Steps::default();
+    let io = RecordingTransmit::new(steps.clone());
+    let client = Client::new(builtin::registry(), FixedRoutes, io.clone(), policy);
+    (client, steps, io)
 }
 
 /// One UDP datagram per destination, framed at Layer 2 so each needs its
@@ -134,6 +134,32 @@ fn late_denials() -> [(Policy, &'static str); 2] {
             "policy.byte_limit",
         ),
     ]
+}
+
+#[test]
+fn a_policy_rejected_packet_causes_no_neighbor_discovery_traffic() {
+    let policy = Policy {
+        allowed_destinations: vec![DestinationConstraint::Exact(IpAddr::V4(SECOND))],
+        ..Policy::default()
+    };
+    let (client, steps, io) = recording_client(policy);
+    let packet = template(&[FIRST])
+        .expand(1)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+
+    let error = client
+        .send(packet, layer2_send())
+        .expect_err("the destination is outside the allowlist");
+
+    assert_eq!(
+        error.classification().code,
+        "policy.destination_not_allowed"
+    );
+    assert_eq!(steps.take(), [], "no ARP request and no transmission");
+    assert_eq!(io.armed(), 0, "no discovery capture was armed");
 }
 
 #[test]

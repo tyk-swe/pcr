@@ -1,6 +1,5 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use packetcraftr::neighbor;
 use packetcraftr::{
     Client,
     clock::SystemClock,
@@ -73,12 +72,6 @@ impl route::Provider for Routes {
             capability: Capability::Layer3,
             link_type: LinkType::RAW,
         })
-    }
-}
-struct NoNeighbors;
-impl neighbor::Resolver for NoNeighbors {
-    fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
-        panic!("layer-3 fixture must not discover neighbors")
     }
 }
 impl transmit::Sender for Io {
@@ -233,13 +226,7 @@ fn execute(
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(
-        registry.clone(),
-        Routes,
-        NoNeighbors,
-        Io(state),
-        policy.clone(),
-    );
+    let client = Client::new(registry.clone(), Routes, Io(state), policy.clone());
     let mut options = packetcraftr::exchange::Options::default();
     options.send.plan.link_mode = Mode::Layer3;
     options.capture.snap_length = 1500;
@@ -282,13 +269,7 @@ fn queued_replies_keep_their_ingress_verdict_across_callback_latency() {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(
-        registry.clone(),
-        Routes,
-        NoNeighbors,
-        Io(state),
-        policy.clone(),
-    );
+    let client = Client::new(registry.clone(), Routes, Io(state), policy.clone());
     let mut options = packetcraftr::exchange::Options::default();
     options.send.plan.link_mode = Mode::Layer3;
     options.capture.snap_length = 1500;
@@ -429,7 +410,7 @@ fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
 }
 
 /// Delegates to the scan executor with each batch's probe removed.
-struct Reshaping<'c>(ExchangeExecutor<'c, Routes, NoNeighbors, Io>);
+struct Reshaping<'c>(ExchangeExecutor<'c, Routes, Io>);
 
 impl Executor<scan::Batch> for Reshaping<'_> {
     fn execute(&mut self, batch: &scan::Batch) -> Result<Execution, BoundaryError> {
@@ -450,13 +431,7 @@ fn a_scan_batch_without_exactly_one_probe_is_rejected_before_any_send() {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(
-        registry.clone(),
-        Routes,
-        NoNeighbors,
-        Io(state.clone()),
-        policy.clone(),
-    );
+    let client = Client::new(registry.clone(), Routes, Io(state.clone()), policy.clone());
     let mut options = packetcraftr::exchange::Options::default();
     options.send.plan.link_mode = Mode::Layer3;
 

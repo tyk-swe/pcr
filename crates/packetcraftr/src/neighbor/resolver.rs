@@ -49,53 +49,57 @@ struct ExchangeOutcome {
     evidence_truncated: bool,
 }
 
-pub trait Resolver: Send + Sync {
+/// The seam [`crate::route::materialize`] resolves through, so in-crate tests
+/// can script resolution without capture or transmission.
+pub(crate) trait Resolver {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error>;
 }
 
-/// Injectable active resolver; production uses `System*` providers.
+/// Client-owned resolution state: validated options and the cache that every
+/// operation of one client (and each operation-local view of it) shares.
 #[derive(Clone, Debug)]
-pub struct ActiveResolver<L, C> {
-    layer2: L,
-    capture: C,
+pub(crate) struct State {
     options: Options,
     cache: Arc<NeighborCache>,
 }
 
-impl<L, C> ActiveResolver<L, C> {
-    pub fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
+impl State {
+    /// Validates `options` and starts with an empty cache.
+    pub(crate) fn try_new(options: Options) -> Result<Self, Error> {
         options.validate()?;
         Ok(Self {
-            layer2,
-            capture,
             options,
             cache: Arc::new(NeighborCache::default()),
         })
     }
-}
 
-impl<L, C> Default for ActiveResolver<L, C>
-where
-    L: Default,
-    C: Default,
-{
-    fn default() -> Self {
-        Self::try_new(L::default(), C::default(), Options::default())
-            .expect("default neighbor resolution options are valid")
+    /// Resolves over `io`: capture is armed on it before each request is
+    /// sent through it.
+    pub(crate) fn over<'a, I>(&'a self, io: &'a I) -> Active<'a, I> {
+        Active { io, state: self }
     }
 }
 
-pub type SystemResolver = ActiveResolver<transmit::SystemLayer2, capture::SystemProvider>;
+impl Default for State {
+    fn default() -> Self {
+        Self::try_new(Options::default()).expect("default neighbor resolution options are valid")
+    }
+}
 
-impl<L, C> Resolver for ActiveResolver<L, C>
+/// Active ARP/NDP resolution over one client's transmit and capture providers.
+pub(crate) struct Active<'a, I> {
+    io: &'a I,
+    state: &'a State,
+}
+
+impl<I> Resolver for Active<'_, I>
 where
-    L: transmit::Layer2Sender,
-    C: capture::Provider,
+    I: transmit::Sender + capture::Provider,
 {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
-        if let Some(mac_address) = self.cache.get(&cache_key)? {
+        if let Some(mac_address) = self.state.cache.get(&cache_key)? {
             return Ok(Resolution {
                 mac_address,
                 attempts: 0,
@@ -110,13 +114,13 @@ where
         let decision = discovery_decision(request);
         let capture_request = capture::Request {
             interface: request.interface.clone(),
-            limits: self.options.capture_limits(),
+            limits: self.state.options.capture_limits(),
             filter: None,
             promiscuous: false,
             native: Default::default(),
         };
         let mut capture = self
-            .capture
+            .io
             .arm_capture(&capture_request)
             .map_err(|error| map_io_error(request, "arming capture", error))?;
         let primary = self.exchange(
@@ -172,7 +176,9 @@ where
                 capture_statistics: statistics,
             });
         };
-        self.cache.insert(mac_address, cache_key, &self.options)?;
+        self.state
+            .cache
+            .insert(mac_address, cache_key, &self.state.options)?;
         Ok(Resolution {
             mac_address,
             attempts: outcome.attempts,
@@ -184,10 +190,9 @@ where
     }
 }
 
-impl<L, C> ActiveResolver<L, C>
+impl<I> Active<'_, I>
 where
-    L: transmit::Layer2Sender,
-    C: capture::Provider,
+    I: transmit::Sender + capture::Provider,
 {
     fn exchange<S: Session>(
         &self,
@@ -209,11 +214,11 @@ where
         capture
             .wait_ready(ready_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
-        let mut evidence = EvidenceBuffer::new(&self.options);
+        let mut evidence = EvidenceBuffer::new(&self.state.options);
         self.drain_pre_request(request, capture, &mut evidence)?;
 
         let mut attempts = 0;
-        for attempt in 1..=self.options.max_attempts {
+        for attempt in 1..=self.state.options.max_attempts {
             let Some(attempt_budget) = self.remaining_attempt_budget(request) else {
                 break;
             };
@@ -224,8 +229,8 @@ where
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
-                .layer2
-                .send_layer2(frame)
+                .io
+                .send(transmit::Frame::Layer2(frame))
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();
@@ -241,7 +246,7 @@ where
                 let capture::Captured {
                     frame, received_at, ..
                 } = captured_frame;
-                validate_captured_frame(request, &frame, self.options.snap_length)?;
+                validate_captured_frame(request, &frame, self.state.options.snap_length)?;
                 if received_at.is_none_or(|received_at| {
                     received_at < freshness_marker || received_at > deadline
                 }) {
@@ -280,9 +285,9 @@ where
     /// once that deadline has passed, so no further attempt starts.
     fn remaining_attempt_budget(&self, request: &Request) -> Option<Duration> {
         match request.deadline {
-            None => Some(self.options.attempt_timeout),
+            None => Some(self.state.options.attempt_timeout),
             Some(deadline) => remaining_before(deadline)
-                .map(|remaining| remaining.min(self.options.attempt_timeout)),
+                .map(|remaining| remaining.min(self.state.options.attempt_timeout)),
         }
     }
 
@@ -292,14 +297,18 @@ where
         capture: &mut S,
         evidence: &mut EvidenceBuffer,
     ) -> Result<(), Error> {
-        for _ in 0..self.options.max_capture_queue_frames {
+        for _ in 0..self.state.options.max_capture_queue_frames {
             let Some(captured_frame) = capture
                 .next_captured_frame(Duration::ZERO)
                 .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
             else {
                 break;
             };
-            validate_captured_frame(request, &captured_frame.frame, self.options.snap_length)?;
+            validate_captured_frame(
+                request,
+                &captured_frame.frame,
+                self.state.options.snap_length,
+            )?;
             evidence.retain(captured_frame.frame);
         }
         Ok(())

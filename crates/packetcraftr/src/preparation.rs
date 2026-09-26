@@ -42,14 +42,13 @@ mod materialize;
 use std::net::IpAddr;
 use std::time::Instant;
 
-use crate::neighbor;
 use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::route::Provider as RouteProvider;
-use packetcraftr_netio::{Error as LiveIoError, interface, transmit};
+use packetcraftr_netio::{Error as LiveIoError, capture, interface, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
@@ -274,8 +273,8 @@ impl Budget {
 
 /// State shared by both orders: the client, one builder, the per-packet send
 /// options, and the operation's stop conditions.
-struct Stages<'c, R, N, I> {
-    client: &'c Client<R, N, I>,
+struct Stages<'c, R, I> {
+    client: &'c Client<R, I>,
     builder: Builder,
     options: &'c send::Options,
     deadline: Option<Instant>,
@@ -283,14 +282,13 @@ struct Stages<'c, R, N, I> {
     cancellation: Option<Cancellation>,
 }
 
-impl<'c, R, N, I> Stages<'c, R, N, I>
+impl<'c, R, I> Stages<'c, R, I>
 where
     R: RouteProvider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     fn new(
-        client: &'c Client<R, N, I>,
+        client: &'c Client<R, I>,
         options: &'c send::Options,
         deadline: Option<Instant>,
         cancellation: Option<Cancellation>,
@@ -396,7 +394,11 @@ where
         self.check()?;
         // The resolver stops at the deadline on its own; a failure it reports
         // after the deadline passed is the deadline, not a neighbor verdict.
-        let route = match route::materialize(plan, &self.client.neighbors, self.deadline) {
+        let route = match route::materialize(
+            plan,
+            &self.client.neighbors.over(&self.client.io),
+            self.deadline,
+        ) {
             Ok(route) => route,
             Err(error) => {
                 self.check()?;
@@ -417,16 +419,15 @@ where
 
 /// All-before-discovery order, admission phase: packets are planned,
 /// preliminarily authorized, and charged, and none is materialized.
-pub(crate) struct Admission<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Admission<'c, R, I> {
+    stages: Stages<'c, R, I>,
     budget: Budget,
 }
 
-impl<'c, R, N, I> Admission<'c, R, N, I>
+impl<'c, R, I> Admission<'c, R, I>
 where
     R: RouteProvider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     /// Checks cancellation and the operation deadline between packets.
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -478,7 +479,7 @@ where
 
     /// Ends admission. Discovery traffic can be emitted only from here on,
     /// and no further packet can be admitted into this operation.
-    pub(crate) fn discover(self) -> Discovery<'c, R, N, I> {
+    pub(crate) fn discover(self) -> Discovery<'c, R, I> {
         Discovery {
             stages: self.stages,
         }
@@ -487,15 +488,14 @@ where
 
 /// All-before-discovery order, discovery phase: admitted packets are
 /// materialized and finally authorized.
-pub(crate) struct Discovery<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Discovery<'c, R, I> {
+    stages: Stages<'c, R, I>,
 }
 
-impl<R, N, I> Discovery<'_, R, N, I>
+impl<R, I> Discovery<'_, R, I>
 where
     R: RouteProvider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         self.stages.materialize(admitted)
@@ -543,16 +543,15 @@ impl From<Error> for RebuildError {
 /// Streaming order: each packet is admitted, materialized, and finally
 /// authorized by [`prepare`](Self::prepare), then sent by
 /// [`transmit`](Self::transmit), before the next packet is planned.
-pub(crate) struct Streaming<'c, R, N, I> {
-    stages: Stages<'c, R, N, I>,
+pub(crate) struct Streaming<'c, R, I> {
+    stages: Stages<'c, R, I>,
     budget: Budget,
 }
 
-impl<R, N, I> Streaming<'_, R, N, I>
+impl<R, I> Streaming<'_, R, I>
 where
     R: RouteProvider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     /// Checks the client's and the operation's cancellation signals.
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -575,11 +574,10 @@ where
     }
 }
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: RouteProvider,
-    N: neighbor::Resolver,
-    I: transmit::Sender,
+    I: transmit::Sender + capture::Provider,
 {
     /// Starts an all-before-discovery preparation of `packets` packets,
     /// authorizing the count-only budget first.
@@ -588,7 +586,7 @@ where
         options: &'c send::Options,
         packets: u64,
         deadline: Instant,
-    ) -> Result<Admission<'c, R, N, I>, Error> {
+    ) -> Result<Admission<'c, R, I>, Error> {
         let (stages, budget) = self.open_stages(options, packets, Some(deadline), None)?;
         Ok(Admission { stages, budget })
     }
@@ -601,7 +599,7 @@ where
         options: &'c send::Options,
         packets: u64,
         cancellation: Option<Cancellation>,
-    ) -> Result<Streaming<'c, R, N, I>, Error> {
+    ) -> Result<Streaming<'c, R, I>, Error> {
         let (stages, budget) = self.open_stages(options, packets, None, cancellation)?;
         Ok(Streaming { stages, budget })
     }
@@ -612,7 +610,7 @@ where
         packets: u64,
         deadline: Option<Instant>,
         cancellation: Option<Cancellation>,
-    ) -> Result<(Stages<'c, R, N, I>, Budget), Error> {
+    ) -> Result<(Stages<'c, R, I>, Budget), Error> {
         let stages = Stages::new(self, options, deadline, cancellation);
         stages.check()?;
         let budget = Budget::open(&self.policy, packets)?;
@@ -669,19 +667,19 @@ mod tests {
         }
     }
 
-    struct NoNeighbors;
-
-    impl neighbor::Resolver for NoNeighbors {
-        fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
-            panic!("a Layer 3 route needs no neighbor discovery")
-        }
-    }
-
     struct NoTransmit;
 
     impl transmit::Sender for NoTransmit {
         fn send(&self, _: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
             panic!("preparation never transmits on its own")
+        }
+    }
+
+    impl capture::Provider for NoTransmit {
+        type Capture = capture::SystemSession;
+
+        fn arm_capture(&self, _: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+            panic!("a Layer 3 route needs no neighbor discovery")
         }
     }
 
@@ -706,7 +704,6 @@ mod tests {
         let client = Client::new(
             builtin::registry(),
             Layer3Routes,
-            NoNeighbors,
             NoTransmit,
             Policy::default(),
         );

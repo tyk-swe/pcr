@@ -8,16 +8,21 @@ use packetcraftr_core::registry::Registry;
 use packetcraftr_netio::transmit::Sender as PacketIo;
 
 use crate::Error;
+use crate::neighbor;
 use crate::policy::Policy;
 
 /// High-level composition of packet construction, passive route planning,
-/// explicit neighbor materialization, policy, and packet I/O.
+/// neighbor resolution, policy, and packet I/O.
+///
+/// The client resolves neighbors itself, over the transmit and capture
+/// providers of `io`, and only for routes that policy has already admitted.
 #[derive(Debug)]
-pub struct Client<R, N, I> {
+pub struct Client<R, I> {
     pub(crate) registry: Arc<Registry>,
     pub(crate) routes: R,
-    pub(crate) neighbors: N,
     pub(crate) io: I,
+    /// Neighbor-resolution bounds and the cache every operation shares.
+    pub(crate) neighbors: neighbor::State,
     pub(crate) policy: Arc<Policy>,
     /// Owns the worker budget behind
     /// [`exchange_with_events`](Self::exchange_with_events). It starts no
@@ -27,24 +32,18 @@ pub struct Client<R, N, I> {
     pub(crate) cancellation: Option<packetcraftr_core::budget::Cancellation>,
 }
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: crate::neighbor::Resolver,
     I: PacketIo,
 {
-    pub fn new(
-        registry: Arc<Registry>,
-        routes: R,
-        neighbors: N,
-        io: I,
-        policy: impl Into<Arc<Policy>>,
-    ) -> Self {
+    /// Composes a client with default [`neighbor::Options`].
+    pub fn new(registry: Arc<Registry>, routes: R, io: I, policy: impl Into<Arc<Policy>>) -> Self {
         Self {
             registry,
             routes,
-            neighbors,
             io,
+            neighbors: neighbor::State::default(),
             policy: policy.into(),
             runtime: Runtime::default(),
             cancellation: None,
@@ -65,7 +64,17 @@ where
     }
 }
 
-impl<R, N, I> Client<R, N, I> {
+impl<R, I> Client<R, I> {
+    /// Replaces the neighbor-resolution bounds, validating them first, and
+    /// starts a fresh neighbor cache under them.
+    pub fn with_neighbor_options(
+        mut self,
+        options: neighbor::Options,
+    ) -> Result<Self, neighbor::Error> {
+        self.neighbors = neighbor::State::try_new(options)?;
+        Ok(self)
+    }
+
     /// Selects a shared callback admission budget. The default constructor
     /// creates an isolated runtime; cloning a supplied runtime shares it.
     #[must_use]

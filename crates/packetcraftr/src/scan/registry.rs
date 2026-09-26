@@ -4,7 +4,6 @@
 //! agree with strict building. The original client and registry remain intact.
 use super::Batch;
 use crate::Client;
-use crate::neighbor;
 use packetcraftr_core::{
     error::BoundaryError,
     layer::Id,
@@ -71,7 +70,6 @@ pub(super) fn configured(
     })
 }
 pub(super) struct Routes<'a, R>(&'a R);
-pub(super) struct Neighbors<'a, N>(&'a N);
 pub(super) struct Io<'a, I>(&'a I);
 impl<R: route::Provider> route::Provider for Routes<'_, R> {
     type Error = R::Error;
@@ -83,14 +81,6 @@ impl<R: route::Provider> route::Provider for Routes<'_, R> {
     ) -> Result<route::Decision, Self::Error> {
         self.0
             .lookup_with_preferences(destination, interface, source)
-    }
-}
-impl<N: neighbor::Resolver> neighbor::Resolver for Neighbors<'_, N> {
-    fn resolve(
-        &self,
-        request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        self.0.resolve(request)
     }
 }
 impl<I: transmit::Sender> transmit::Sender for Io<'_, I> {
@@ -110,15 +100,16 @@ impl<I: capture::Provider> capture::Provider for Io<'_, I> {
         self.0.arm_capture(request)
     }
 }
-pub(super) fn client<R, N, I>(
-    client: &Client<R, N, I>,
+pub(super) fn client<R, I>(
+    client: &Client<R, I>,
     registry: Arc<Registry>,
-) -> Client<Routes<'_, R>, Neighbors<'_, N>, Io<'_, I>> {
+) -> Client<Routes<'_, R>, Io<'_, I>> {
     Client {
         registry,
         routes: Routes(&client.routes),
-        neighbors: Neighbors(&client.neighbors),
         io: Io(&client.io),
+        // A clone shares the cache, so the view resolves no neighbor twice.
+        neighbors: client.neighbors.clone(),
         policy: client.policy.clone(),
         runtime: client.runtime.clone(),
         cancellation: client.cancellation.clone(),

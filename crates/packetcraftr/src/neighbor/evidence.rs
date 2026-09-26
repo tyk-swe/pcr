@@ -11,8 +11,8 @@ use super::Request as NeighborRequest;
 use super::error::{invalid_request, map_io_error, resolution_error};
 use super::options::Options;
 use super::wire::is_unicast_mac;
+use crate::route::MAX_VLAN_TAGS;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_netio::link::MAX_VLAN_TAGS;
 use packetcraftr_netio::transmit;
 
 #[cfg(test)]

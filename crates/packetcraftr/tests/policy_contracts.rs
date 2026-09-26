@@ -9,7 +9,6 @@ use std::sync::{
 };
 
 use packetcraftr::Client;
-use packetcraftr::neighbor;
 use packetcraftr::policy;
 use packetcraftr::policy::Authorizer;
 use packetcraftr::target::Hostname;
@@ -22,6 +21,7 @@ use packetcraftr_core::{
     protocol::{link::Ethernet, network::Ipv4},
 };
 use packetcraftr_netio::{
+    capture,
     interface::Id as InterfaceId,
     route::{Decision, Provider},
     transmit,
@@ -50,17 +50,6 @@ impl Provider for CountingRoutes {
     }
 }
 
-struct NeverNeighbors;
-
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("denied targets must not reach neighbor discovery")
-    }
-}
-
 struct NeverTransmit;
 
 impl transmit::Sender for NeverTransmit {
@@ -69,6 +58,17 @@ impl transmit::Sender for NeverTransmit {
         _frame: transmit::Frame<'_>,
     ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         unreachable!("denied targets must not reach transmission")
+    }
+}
+
+impl capture::Provider for NeverTransmit {
+    type Capture = capture::SystemSession;
+
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        unreachable!("denied targets must not reach neighbor discovery")
     }
 }
 
@@ -138,7 +138,6 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         CountingRoutes {
             calls: Arc::clone(&route_calls),
         },
-        NeverNeighbors,
         NeverTransmit,
         policy.clone(),
     );
@@ -199,13 +198,10 @@ impl Provider for FixedRoutes {
     }
 }
 
-fn source_client(
-    allow_source_spoofing: bool,
-) -> Client<FixedRoutes, NeverNeighbors, NeverTransmit> {
+fn source_client(allow_source_spoofing: bool) -> Client<FixedRoutes, NeverTransmit> {
     Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         policy::Policy {
             allow_source_spoofing,
@@ -329,7 +325,6 @@ fn both_authorization_seams_refuse_a_malformed_policy_identically() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         malformed,
     );
@@ -490,7 +485,6 @@ fn final_wire_destination_outside_allowlist_is_denied_even_when_target_passed() 
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         constrained_policy(&["10.0.0.0/24"]),
     );
@@ -535,7 +529,6 @@ fn passive_planning_validates_the_destination_constraint_count() {
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        NeverNeighbors,
         NeverTransmit,
         policy,
     );

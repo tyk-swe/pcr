@@ -17,6 +17,71 @@ use packetcraftr_netio::route::Decision;
 
 use super::*;
 
+/// Composes a Layer 2 fake and a capture fake into the one I/O value a
+/// client resolves over.
+struct FixtureIo<L, C> {
+    layer2: L,
+    capture: C,
+}
+
+impl<L: transmit::Layer2Sender, C: Send + Sync> transmit::Sender for FixtureIo<L, C> {
+    fn send(
+        &self,
+        frame: transmit::Frame<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
+        match frame {
+            transmit::Frame::Layer2(frame) => self.layer2.send_layer2(frame),
+            transmit::Frame::Layer3(_) => panic!("neighbor discovery transmits only at Layer 2"),
+        }
+    }
+}
+
+impl<L: Send + Sync, C: capture::Provider> capture::Provider for FixtureIo<L, C> {
+    type Capture = C::Capture;
+
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        self.capture.arm_capture(request)
+    }
+}
+
+/// Client-owned resolution state over one fixture I/O pair.
+struct ActiveResolver<L, C> {
+    io: FixtureIo<L, C>,
+    state: State,
+}
+
+impl<L, C> ActiveResolver<L, C>
+where
+    L: transmit::Layer2Sender,
+    C: capture::Provider,
+{
+    fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
+        Ok(Self {
+            io: FixtureIo { layer2, capture },
+            state: State::try_new(options)?,
+        })
+    }
+
+    fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
+        self.state.over(&self.io).resolve(request)
+    }
+
+    fn exchange<S: Session>(
+        &self,
+        request: &Request,
+        request_bytes: &Bytes,
+        route: transmit::Route<'_>,
+        capture: &mut S,
+    ) -> Result<ExchangeOutcome, Error> {
+        self.state
+            .over(&self.io)
+            .exchange(request, request_bytes, route, capture)
+    }
+}
+
 /// Compares every field through `Debug`, including the non-comparable
 /// platform source a netio failure retains.
 fn same_failure(left: &packetcraftr_netio::Error, right: &packetcraftr_netio::Error) -> bool {

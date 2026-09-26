@@ -37,9 +37,9 @@ use self::{
     },
 };
 #[cfg(test)]
-use packetcraftr_core::packet::VlanKind;
+use crate::route::MAX_VLAN_TAGS;
 #[cfg(test)]
-use packetcraftr_netio::link::MAX_VLAN_TAGS;
+use packetcraftr_core::packet::VlanKind;
 pub(super) fn build_request_frame(
     request: &NeighborRequest,
 ) -> Result<(Bytes, MacAddress), crate::neighbor::Error> {

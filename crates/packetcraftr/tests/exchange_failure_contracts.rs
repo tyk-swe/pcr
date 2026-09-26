@@ -127,7 +127,7 @@ impl capture::Session for Capture {
     }
 }
 
-type FixtureClient = Client<common::FixedRoutes, common::NeverNeighbors, Io>;
+type FixtureClient = Client<common::FixedRoutes, Io>;
 
 fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
     let state = Arc::new(Mutex::new(State::default()));
@@ -135,7 +135,6 @@ fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
     let client = Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         Io {
             fault,
             state: state.clone(),

@@ -89,13 +89,13 @@ pub enum PipelineEvent<E> {
 }
 
 /// Shared client and exchange options for live workflow executors.
-pub struct ExchangeExecutor<'a, R, N, I> {
-    pub(crate) client: &'a crate::Client<R, N, I>,
+pub struct ExchangeExecutor<'a, R, I> {
+    pub(crate) client: &'a crate::Client<R, I>,
     pub(crate) options: crate::exchange::Options,
 }
 
-impl<'a, R, N, I> ExchangeExecutor<'a, R, N, I> {
-    pub fn new(client: &'a crate::Client<R, N, I>, options: crate::exchange::Options) -> Self {
+impl<'a, R, I> ExchangeExecutor<'a, R, I> {
+    pub fn new(client: &'a crate::Client<R, I>, options: crate::exchange::Options) -> Self {
         Self { client, options }
     }
 }
@@ -113,10 +113,9 @@ pub(crate) struct WorkflowOverrides {
     pub(crate) max_responses: Option<usize>,
 }
 
-impl<R, N, I> ExchangeExecutor<'_, R, N, I>
+impl<R, I> ExchangeExecutor<'_, R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: crate::neighbor::Resolver,
     I: packetcraftr_netio::transmit::Sender + packetcraftr_netio::capture::Provider,
 {
     /// Runs one capture-ready exchange for a workflow, with the executor's

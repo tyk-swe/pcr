@@ -8,6 +8,9 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, SelectionReason};
 
+/// Maximum explicit VLAN headers carried by one planned link-layer route.
+pub const MAX_VLAN_TAGS: usize = 8;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub link_mode: Mode,

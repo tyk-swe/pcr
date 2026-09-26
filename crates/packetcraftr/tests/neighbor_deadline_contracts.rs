@@ -9,42 +9,79 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr::neighbor;
-use packetcraftr::{Client, policy};
+use packetcraftr::{Client, neighbor, policy};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
-use packetcraftr_netio::capture;
+use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::link::Mode;
+use packetcraftr_netio::{capture, transmit};
 
 mod common;
 
-use common::{FixedRoutes, NeverTransmit, SELECTED_SOURCE};
+use common::{FixedRoutes, SELECTED_SOURCE};
 
-/// A resolver that records the propagated deadline and immediately refuses discovery.
-#[derive(Default)]
-struct DeadlineBoundNeighbors {
-    deadline: Arc<Mutex<Option<Instant>>>,
+/// I/O on a link where no neighbor ever answers. It confirms every send, and
+/// each capture wait records its timeout and then waits all of it out.
+#[derive(Clone, Default)]
+struct SilentLink {
+    waits: Arc<Mutex<Vec<Duration>>>,
 }
 
-impl neighbor::Resolver for DeadlineBoundNeighbors {
-    fn resolve(
-        &self,
-        request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        let deadline = request
-            .deadline
-            .expect("bounded exchanges must hand the resolver their deadline");
-        *self.deadline.lock().unwrap() = Some(deadline);
-        Err(neighbor::Error::NotFound {
-            interface: request.interface.name.clone(),
-            target: request.target,
-            attempts: 1,
-            captured: Vec::new(),
-            evidence_truncated: false,
-            capture_statistics: capture::Statistics::default(),
+impl transmit::Sender for SilentLink {
+    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+        let bytes = frame.bytes();
+        Ok(transmit::Submission::start().complete(bytes.len(), bytes.clone()))
+    }
+}
+
+impl capture::Provider for SilentLink {
+    type Capture = SilentCapture;
+
+    fn arm_capture(&self, request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        Ok(SilentCapture {
+            metadata: capture::Metadata {
+                interface: request.interface.clone(),
+                link_type: packetcraftr_core::frame::LinkType::ETHERNET,
+                snap_length: request.limits.snap_length,
+                native: Default::default(),
+            },
+            waits: Arc::clone(&self.waits),
         })
+    }
+}
+
+struct SilentCapture {
+    metadata: capture::Metadata,
+    waits: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl capture::Session for SilentCapture {
+    fn metadata(&self) -> &capture::Metadata {
+        &self.metadata
+    }
+
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+        self.waits.lock().unwrap().push(timeout);
+        Ok(())
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<capture::Captured>, LiveIoError> {
+        self.waits.lock().unwrap().push(timeout);
+        std::thread::sleep(timeout);
+        Ok(None)
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        Ok(())
+    }
+
+    fn statistics(&self) -> capture::Statistics {
+        capture::Statistics::default()
     }
 }
 
@@ -67,17 +104,21 @@ fn template() -> packetcraftr_core::template::Template {
 
 #[test]
 fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
-    let deadline = Arc::new(Mutex::new(None));
+    let link = SilentLink::default();
+    // Each discovery attempt alone may wait far longer than the exchange.
+    let attempt_timeout = Duration::from_secs(30);
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
         FixedRoutes,
-        DeadlineBoundNeighbors {
-            deadline: Arc::clone(&deadline),
-        },
-        NeverTransmit,
+        link.clone(),
         policy::Policy::default(),
-    );
-    let timeout = Duration::from_secs(30);
+    )
+    .with_neighbor_options(neighbor::Options {
+        attempt_timeout,
+        ..neighbor::Options::default()
+    })
+    .expect("bounded neighbor options");
+    let timeout = Duration::from_millis(200);
     // An IP-rooted packet on a dual-capability link defaults to Layer 3;
     // Layer 2 framing is what needs the neighbor's MAC address.
     let mut send = packetcraftr::send::Options::default();
@@ -91,13 +132,14 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
     let started = Instant::now();
     let _error = client
         .exchange(&template(), options)
-        .expect_err("scripted discovery refuses the neighbor");
-    let finished = Instant::now();
+        .expect_err("no neighbor answers on the silent link");
+    let elapsed = started.elapsed();
 
-    let deadline = deadline
-        .lock()
-        .unwrap()
-        .expect("the resolver received the exchange deadline");
-    assert!(deadline >= started + timeout);
-    assert!(deadline <= finished + timeout);
+    let waits = link.waits.lock().unwrap();
+    assert!(!waits.is_empty(), "discovery waited on its capture");
+    assert!(
+        waits.iter().all(|wait| *wait <= timeout),
+        "every wait is clipped to the exchange deadline: {waits:?}"
+    );
+    assert!(elapsed < attempt_timeout / 2, "{elapsed:?}");
 }

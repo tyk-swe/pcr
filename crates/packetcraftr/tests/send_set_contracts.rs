@@ -17,7 +17,7 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::template::Template;
 use packetcraftr_netio::link::Mode as LinkMode;
-use packetcraftr_netio::transmit;
+use packetcraftr_netio::{capture, transmit};
 
 /// A sender that records each submitted wire in order and fails on the
 /// `fail_at`-th (zero-based) transmission when set.
@@ -41,6 +41,17 @@ impl transmit::Sender for RecordingSender {
         }
         sent.push(frame.bytes().to_vec());
         Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+impl capture::Provider for RecordingSender {
+    type Capture = capture::SystemSession;
+
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
+        unreachable!("Layer 3 sends never resolve neighbors")
     }
 }
 
@@ -89,13 +100,10 @@ fn options(repeat: u32, rate: Option<u32>) -> send::SetOptions {
     }
 }
 
-fn client(
-    sender: RecordingSender,
-) -> Client<common::FixedRoutes, common::NeverNeighbors, RecordingSender> {
+fn client(sender: RecordingSender) -> Client<common::FixedRoutes, RecordingSender> {
     Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         sender,
         packetcraftr::policy::Policy::default(),
     )
@@ -170,7 +178,6 @@ fn cumulative_byte_budget_stops_the_run_and_keeps_emitted_evidence() {
     let client = Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         RecordingSender::default(),
         // Two 20-byte IPv4 frames fit; the third crosses the operation budget.
         packetcraftr::policy::Policy {
@@ -259,7 +266,6 @@ fn expansion_times_repetition_is_one_bounded_budget() {
     let client = Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         RecordingSender::default(),
         policy,
     );
@@ -297,7 +303,6 @@ fn cancellation_between_frames_stops_the_set() {
     let client = Client::new(
         builtin::registry(),
         common::FixedRoutes,
-        common::NeverNeighbors,
         sender,
         packetcraftr::policy::Policy::default(),
     )

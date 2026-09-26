@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
 use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
-use crate::neighbor;
 use crate::{
     Client, SentPacket, Stats,
     evidence::ExecutionPermit,
@@ -216,10 +215,9 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
         Vec::new(),
     )
 }
-fn check<R, N, I>(client: &Client<R, N, I>, deadline: Instant) -> Result<(), BoundaryError>
+fn check<R, I>(client: &Client<R, I>, deadline: Instant) -> Result<(), BoundaryError>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
     I: transmit::Sender,
 {
     client
@@ -234,15 +232,14 @@ where
     }
     Ok(())
 }
-pub(super) fn run<R, N, I>(
-    executor: &mut ExchangeExecutor<'_, R, N, I>,
+pub(super) fn run<R, I>(
+    executor: &mut ExchangeExecutor<'_, R, I>,
     batches: &[Batch],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
 ) -> Result<Stats, BoundaryError>
 where
     R: route::Provider,
-    N: neighbor::Resolver,
     I: transmit::Sender + capture::Provider,
 {
     validate_options(batches, &options)?;

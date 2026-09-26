@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use bytes::Bytes;
-use packetcraftr::neighbor;
 use packetcraftr::{
     Client,
     clock::SystemClock,
@@ -158,12 +157,6 @@ impl route::Provider for Routes {
         })
     }
 }
-struct NoNeighbors;
-impl neighbor::Resolver for NoNeighbors {
-    fn resolve(&self, _: &neighbor::Request) -> Result<neighbor::Resolution, neighbor::Error> {
-        panic!("no layer-3 discovery")
-    }
-}
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
@@ -290,13 +283,7 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(
-        registry.clone(),
-        Routes,
-        NoNeighbors,
-        Io(state.clone()),
-        policy.clone(),
-    );
+    let client = Client::new(registry.clone(), Routes, Io(state.clone()), policy.clone());
     let mut options = packetcraftr::exchange::Options::default();
     options.send.plan.link_mode = Mode::Layer3;
     options.capture.snap_length = 1500;

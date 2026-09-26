@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Composes a `Client` over explicitly local providers — a fixed route
-//! decision, a resolver that never sends neighbor traffic, and a sender that
-//! records submissions — gated by an explicit `Policy` carrying a destination
-//! allowlist and finite per-operation budgets. Nothing touches the network.
+//! decision and I/O that records submissions and never captures — gated by an
+//! explicit `Policy` carrying a destination allowlist and finite
+//! per-operation budgets. Nothing touches the network.
 //!
-//! Production composition swaps in the `SystemProvider`/`SystemResolver`/
-//! `SystemLayer*`/`PacketIo` adapters behind the `native-*` features; the
-//! policy and budget contract is identical either way.
+//! Production composition swaps in the `SystemProvider`/`SystemLayer*`/
+//! `PacketIo` adapters behind the `native-*` features, and the client
+//! resolves neighbors over that I/O; the policy and budget contract is
+//! identical either way.
 //!
 //!     cargo run -p packetcraftr --example client_composition
 
@@ -17,7 +18,6 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 
 use packetcraftr::Client;
-use packetcraftr::neighbor;
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::send;
 use packetcraftr_core::expression;
@@ -25,6 +25,7 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_netio::Error as LiveIoError;
+use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
@@ -64,19 +65,6 @@ impl Provider for DocumentationRoutes {
     }
 }
 
-/// Neighbor discovery must never run in this example: the sender observes
-/// Layer 3 frames only, so resolution would prove the wiring wrong.
-struct NeverNeighbors;
-
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("Layer 3 sends never resolve neighbors")
-    }
-}
-
 /// A sender that retains each submitted wire so the example can report what
 /// transmission would have emitted.
 #[derive(Clone, Default)]
@@ -91,6 +79,16 @@ impl transmit::Sender for RecordingSender {
             .expect("sent lock")
             .push(frame.bytes().to_vec());
         Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+impl capture::Provider for RecordingSender {
+    type Capture = capture::SystemSession;
+
+    /// The client arms capture only to resolve a neighbor; this example's
+    /// Layer 3 sends never need one, so arming would prove the wiring wrong.
+    fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+        unreachable!("Layer 3 sends never resolve neighbors")
     }
 }
 
@@ -121,16 +119,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    let client = Client::new(
-        builtin::registry(),
-        DocumentationRoutes,
-        NeverNeighbors,
-        sender,
-        policy,
-    );
+    let client = Client::new(builtin::registry(), DocumentationRoutes, sender, policy);
 
-    // Layer 3 planning skips link materialization entirely, so the composed
-    // client is fully exercised without capture or neighbor providers.
+    // Layer 3 planning skips neighbor resolution entirely, so the composed
+    // client never arms capture on the recording I/O.
     let options = send::Options {
         plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,

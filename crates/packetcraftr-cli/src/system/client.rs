@@ -10,14 +10,9 @@ use packetcraftr_netio as net;
 type SystemSender =
     net::transmit::ModeSender<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
 type ExchangeIo = net::PacketIo<SystemSender, net::capture::SystemProvider>;
-pub(crate) type Client =
-    WorkflowClient<net::route::SystemProvider, packetcraftr::neighbor::SystemResolver, ExchangeIo>;
-pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<
-    'a,
-    net::route::SystemProvider,
-    packetcraftr::neighbor::SystemResolver,
-    ExchangeIo,
->;
+pub(crate) type Client = WorkflowClient<net::route::SystemProvider, ExchangeIo>;
+pub(crate) type Exchange<'a> =
+    packetcraftr::probe::ExchangeExecutor<'a, net::route::SystemProvider, ExchangeIo>;
 
 pub(crate) fn client(
     registry: Arc<core::registry::Registry>,
@@ -26,7 +21,6 @@ pub(crate) fn client(
     WorkflowClient::new(
         registry,
         net::route::SystemProvider,
-        packetcraftr::neighbor::SystemResolver::default(),
         net::PacketIo::new(
             net::transmit::ModeSender::new(
                 net::transmit::SystemLayer2,

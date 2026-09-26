@@ -4,7 +4,10 @@
 use std::time::Instant;
 
 use packetcraftr_core::{packet::Packet, template::Template};
-use packetcraftr_netio::{capture::Statistics, transmit::Sender as PacketIo};
+use packetcraftr_netio::{
+    capture::{Provider as CaptureProvider, Statistics},
+    transmit::Sender as PacketIo,
+};
 
 use crate::Client;
 use crate::Error;
@@ -12,11 +15,10 @@ use crate::Stats;
 use crate::clock::{CancellableClock, Clock, SystemClock};
 use crate::send::{Options, Report, SentFrame, SetOptions, SetReport};
 
-impl<R, N, I> Client<R, N, I>
+impl<R, I> Client<R, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: crate::neighbor::Resolver,
-    I: PacketIo,
+    I: PacketIo + CaptureProvider,
 {
     pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {
         let started = Instant::now();

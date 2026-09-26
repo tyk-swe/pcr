@@ -5,41 +5,35 @@
 //! CLI relies on, and the budget and wire-authorization variants are reached
 //! through the public replay and send seams, not only constructed by hand.
 
-use std::convert::Infallible;
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
-use packetcraftr::Client;
 use packetcraftr::Error;
-use packetcraftr::clock::Clock;
 use packetcraftr::policy;
-use packetcraftr::policy::{Authorizer, Operation};
-use packetcraftr::replay::{
-    Error as ReplayError, Limits, Options as ReplayOptions, Timing, Transmission, Transmitter,
-    run_with_selector,
-};
-use packetcraftr::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
+use packetcraftr::replay::{self, Error as ReplayError, Limits, Options as ReplayOptions, Timing};
 use packetcraftr::send;
-use packetcraftr_core::budget::Deadline;
+use packetcraftr::{Client, ProviderSet};
+use packetcraftr_core::build::{self, Builder};
 use packetcraftr_core::capture_file::{Reader, Writer};
+use packetcraftr_core::codec::Context;
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::packet::MacAddress;
-use packetcraftr_core::{packet::Packet, protocol};
-use packetcraftr_netio::{
-    Error as LiveIoError,
-    interface::Id as InterfaceId,
-    link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{Decision, Scope, SelectionReason},
-    transmit::Submission,
+use packetcraftr_core::protocol::{
+    link::Ethernet,
+    network::{Icmpv4, Ipv4},
 };
+use packetcraftr_core::{packet::Packet, protocol};
+use packetcraftr_netio::{Error as LiveIoError, interface::Address, link::Mode as LinkMode};
 
 mod common;
 
-use common::{FixedRoutes, NeverTransmit};
+use common::{
+    FixedRoutes, INTERFACE_MAC, Interfaces, NeverTransmit, RecordingTransmit, SELECTED_SOURCE,
+    Step, Steps,
+};
 
 fn assert_message_is_stable(message: &str, variant: &str) {
     assert!(!message.is_empty(), "{variant} must render a message");
@@ -162,110 +156,51 @@ fn operation_and_capture_shutdown_reports_the_operation_and_both_causes() {
     );
 }
 
-#[derive(Default)]
-struct CountingAuthorizer {
-    operations: usize,
-    final_wires: usize,
-}
-
-impl Authorizer for CountingAuthorizer {
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
-        self.operations += 1;
-        Ok(())
-    }
-
-    fn authorize_final_wire(
-        &mut self,
-        _frame: &Frame,
-        _route: &RoutePlan,
-    ) -> Result<(), BoundaryError> {
-        self.final_wires += 1;
-        Ok(())
+/// The fixture interface, up and owning [`SELECTED_SOURCE`], so a captured
+/// frame from it passes every replay check but the one under test.
+fn replay_interfaces() -> Interfaces {
+    let mut interface = common::fixture_interface();
+    interface.flags.up = true;
+    interface.addresses = vec![Address {
+        address: IpAddr::V4(SELECTED_SOURCE),
+        prefix_length: 24,
+    }];
+    Interfaces {
+        list: vec![interface],
+        steps: Steps::default(),
     }
 }
 
-#[derive(Default)]
-struct CountingTransmitter {
-    transmitted_bytes: Vec<usize>,
-}
-
-fn replay_interface() -> InterfaceId {
-    InterfaceId {
-        name: "replay0".to_owned(),
-        index: 3,
-    }
-}
-
-impl Transmitter for CountingTransmitter {
-    fn plan_frame(
-        &mut self,
-        interface: &InterfaceId,
-        mode: LinkMode,
-        frame: &Frame,
-        _deadline: &Deadline,
-    ) -> Result<MaterializedRoute, LiveIoError> {
-        let source_mac = MacAddress([0x02, 0, 0, 0, 0, 3]);
-        Ok(MaterializedRoute {
-            plan: RoutePlan {
-                decision: Decision {
-                    interface: interface.clone(),
-                    source_mac: Some(source_mac),
-                    selected_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
-                    preferred_source: None,
-                    next_hop: None,
-                    selection_reason: SelectionReason::InterfaceOnly,
-                    destination_scope: Scope::Link,
-                    mtu: 1_500,
-                    capability: LinkCapability::Layer2AndLayer3,
-                    link_type: frame.link_type,
-                },
-                mode,
-                lookup_destination: None,
-                final_destination: None,
-                visited_destinations: Vec::new(),
-                packet_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
-                neighbor_source: None,
-                neighbor_target: None,
-                destination_mac: None,
-                source_mac: Some(source_mac),
-                neighbor_vlan_tags: Vec::new(),
-                synthesized_ethernet: false,
-            },
-            neighbor_resolution: None,
+/// A 42-byte ICMP echo the fixture interface owns, identified by `ttl`.
+fn owned_ethernet_frame(ttl: u8) -> Vec<u8> {
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            source: INTERFACE_MAC.0,
+            destination: [0x02, 0, 0, 0, 0, 2],
+            ..Ethernet::default()
         })
-    }
-
-    fn transmit(
-        &mut self,
-        route: &MaterializedRoute,
-        frame: &Frame,
-    ) -> Result<Transmission, LiveIoError> {
-        self.transmitted_bytes.push(frame.bytes().len());
-        Ok(Transmission {
-            interface: route.plan.decision.interface.clone(),
-            report: Submission::start().complete(frame.bytes().len(), frame.bytes().clone()),
+        .push(Ipv4 {
+            source: SELECTED_SOURCE,
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ttl,
+            ..Ipv4::default()
         })
-    }
+        .push(Icmpv4::default());
+    Builder::new(protocol::builtin::registry())
+        .build(packet, Context::default(), build::Options::default())
+        .expect("replay fixture builds")
+        .bytes
+        .to_vec()
 }
 
-#[derive(Clone)]
-struct InstantClock;
-
-impl Clock for InstantClock {
-    type Error = Infallible;
-
-    fn sleep(&self, _delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
-fn ethernet_capture(frames: &[&[u8]]) -> Reader<Cursor<Vec<u8>>> {
+fn ethernet_capture(frames: &[Vec<u8>]) -> Reader<Cursor<Vec<u8>>> {
     let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).expect("pcap writer");
     for (index, bytes) in frames.iter().enumerate() {
         let frame = Frame::new(
             UNIX_EPOCH + Duration::from_millis(index as u64),
             LinkType::ETHERNET,
-            bytes.to_vec(),
+            bytes.clone(),
         )
         .expect("capture frame");
         writer.write_frame(&frame).expect("write capture frame");
@@ -275,57 +210,68 @@ fn ethernet_capture(frames: &[&[u8]]) -> Reader<Cursor<Vec<u8>>> {
 
 #[test]
 fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() {
-    let mut reader = ethernet_capture(&[&[1, 2, 3], &[4, 5, 6], &[7, 8, 9]]);
+    let frames = [
+        owned_ethernet_frame(1),
+        owned_ethernet_frame(2),
+        owned_ethernet_frame(3),
+    ];
     let options = ReplayOptions {
-        interface: Some(replay_interface()),
+        interface: Some(common::fixture_interface().id),
         repeat: 1,
         inter_pass_delay: Duration::ZERO,
         link_mode: LinkMode::Layer2,
         timing: Timing::Immediate,
         limits: Limits {
             max_source_frames: 10,
-            max_transmitted_bytes: 5,
-            max_frame_bytes: 4,
+            max_transmitted_bytes: 83,
+            max_frame_bytes: 42,
             max_duration: Duration::from_secs(1),
         },
+        allow_permissive_live: true,
     };
-    let mut authorizer = CountingAuthorizer::default();
-    let mut transmitter = CountingTransmitter::default();
-    let mut evidence = Vec::new();
-
-    let error = run_with_selector(
-        &mut reader,
-        &options,
-        None,
-        &mut authorizer,
-        &mut transmitter,
-        &mut InstantClock,
-        |frame| {
-            evidence.push(frame.source_index);
-            Ok(())
+    let steps = Steps::default();
+    let client = Client::new(
+        protocol::builtin::registry(),
+        policy::Policy {
+            allow_permissive_packets: true,
+            ..policy::Policy::default()
         },
-    )
-    .expect_err("the second frame would carry the total past the byte ceiling");
+        ProviderSet {
+            interface: replay_interfaces(),
+            ..common::providers(FixedRoutes, RecordingTransmit::new(steps.clone()))
+        },
+    );
+    let published = steps.clone();
+
+    let error = client
+        .replay(
+            replay::Request::new(replay::Source::stream(ethernet_capture(&frames)), options),
+            move |replay::Event::Frame(frame): replay::Event| {
+                published.push(Step::Published(frame.source_index as usize));
+                Ok(())
+            },
+        )
+        .expect_err("the second frame would carry the total past the byte ceiling");
 
     assert!(
         matches!(
             error,
             ReplayError::TransmittedByteLimit {
                 source_index: 1,
-                actual: 6,
-                limit: 5,
+                actual: 84,
+                limit: 83,
             }
         ),
         "{error:?}"
     );
     assert_eq!(error.classification().code, "policy.replay_limit");
     assert_eq!(error.context(), Some(Coordinate::SourceFrame(2)));
-    // Only the frame that fit was authorized and transmitted; the ceiling is
+    // Only the frame that fit was admitted and transmitted; the ceiling is
     // enforced before the offending frame reaches policy or the wire.
-    assert_eq!(transmitter.transmitted_bytes, [3]);
-    assert_eq!(authorizer.operations, 1);
-    assert_eq!(authorizer.final_wires, 1);
-    assert_eq!(evidence, [0]);
+    assert_eq!(
+        steps.take(),
+        [Step::Transmit(frames[0].clone()), Step::Published(0)]
+    );
 }
 
 /// An IPv4 header whose IHL promises 8 option bytes that the wire does not

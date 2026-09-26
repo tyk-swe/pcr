@@ -1,21 +1,19 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Duration, SystemTime};
+use std::io::{Read, Seek};
+use std::time::Duration;
 
-use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::capture_file::{
-    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Format, Interface,
+    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
 };
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
 use packetcraftr_netio::{
-    Error as LiveIoError, capture::MAX_TIMEOUT, interface::Id as InterfaceId,
-    link::Mode as LinkMode, transmit::Report as IoSendReport,
+    capture::MAX_TIMEOUT, interface::Id as InterfaceId, link::Mode as LinkMode,
 };
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
-use crate::route::Materialized as MaterializedRoute;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -52,84 +50,6 @@ impl Timing {
             }
             _ => Ok(()),
         }
-    }
-
-    pub(super) fn delay_between(
-        self,
-        previous: Option<SystemTime>,
-        current: Option<SystemTime>,
-        source_index: u64,
-        transmitted_bytes: u64,
-        scheduled_duration: Duration,
-    ) -> Result<Duration, Error> {
-        self.validate()?;
-        match self {
-            Self::Original => {
-                let (previous, current) =
-                    required_times(previous, current, source_index, "original")?;
-                Ok(current.duration_since(previous).unwrap_or(Duration::ZERO))
-            }
-            Self::Scaled(factor) => {
-                let (previous, current) =
-                    required_times(previous, current, source_index, "scaled")?;
-                let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
-                let delay =
-                    Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
-                        Error::InvalidTiming {
-                            mode: "scaled",
-                            value: factor,
-                        }
-                    })?;
-                if !original.is_zero() && delay.is_zero() {
-                    return Err(Error::InvalidTiming {
-                        mode: "scaled",
-                        value: factor,
-                    });
-                }
-                Ok(delay)
-            }
-            Self::FixedRate(rate) => {
-                let delay =
-                    Duration::try_from_secs_f64(1.0 / rate).map_err(|_| Error::InvalidTiming {
-                        mode: "fixed_rate",
-                        value: rate,
-                    })?;
-                if delay.is_zero() {
-                    return Err(Error::InvalidTiming {
-                        mode: "fixed_rate",
-                        value: rate,
-                    });
-                }
-                Ok(delay)
-            }
-            Self::Immediate => Ok(Duration::ZERO),
-            Self::BitRate(rate) => {
-                // u64 bytes * eight bits * one billion nanoseconds fits u128.
-                // Round the cumulative target, rather than each frame's gap,
-                // so fractional nanoseconds do not accumulate scheduling drift.
-                let nanos =
-                    (u128::from(transmitted_bytes) * 8 * 1_000_000_000).div_ceil(u128::from(rate));
-                let seconds =
-                    u64::try_from(nanos / 1_000_000_000).map_err(|_| Error::InvalidTiming {
-                        mode: "bit_rate",
-                        value: rate as f64,
-                    })?;
-                let fraction = (nanos % 1_000_000_000) as u32;
-                Ok(Duration::new(seconds, fraction).saturating_sub(scheduled_duration))
-            }
-        }
-    }
-}
-
-fn required_times(
-    previous: Option<SystemTime>,
-    current: Option<SystemTime>,
-    source_index: u64,
-    mode: &'static str,
-) -> Result<(SystemTime, SystemTime), Error> {
-    match (previous, current) {
-        (Some(previous), Some(current)) => Ok((previous, current)),
-        _ => Err(Error::TimestampUnavailable { source_index, mode }),
     }
 }
 
@@ -208,7 +128,9 @@ impl Limits {
     }
 }
 
-/// Complete replay request after the caller has selected an interface.
+/// How every selected frame of a replay is scheduled, bounded, and sent.
+/// These settings do not depend on the capture, so a caller can validate them
+/// before it opens one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
     /// Fallback when the selector supplies no per-frame interface.
@@ -218,6 +140,10 @@ pub struct Options {
     pub link_mode: LinkMode,
     pub timing: Timing,
     pub limits: Limits,
+    /// Second explicit opt-in required in addition to policy approval.
+    /// Replay rebuilds every captured frame permissively, so live replay
+    /// needs it.
+    pub allow_permissive_live: bool,
 }
 
 impl Options {
@@ -245,40 +171,46 @@ impl Options {
     }
 }
 
-/// Per-frame evidence emitted only after exact transmission is confirmed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FrameEvidence {
-    /// One-based pass identity; source_index remains relative to the input capture.
-    pub pass: u32,
-    pub source_index: u64,
-    pub source_interface_id: Option<u32>,
-    pub capture_interface: Interface,
-    pub link_mode: LinkMode,
-    pub scheduled_delay: Duration,
-    pub frame: Frame,
-    pub(super) transmission: Transmission,
+/// Rewinds a seekable capture to its first frame.
+type Rewind<R> = fn(&mut Reader<R>) -> Result<(), CaptureError>;
+
+/// The capture a replay reads. A streaming source is read once, front to
+/// back; only a seekable source can be repeated, because each pass rewinds
+/// it.
+pub struct Source<R> {
+    pub(super) reader: Reader<R>,
+    pub(super) rewind: Option<Rewind<R>>,
 }
 
-impl FrameEvidence {
-    pub fn transmission(&self) -> &Transmission {
-        &self.transmission
+impl<R: Read> Source<R> {
+    /// A capture read once. A request over it must not repeat.
+    #[must_use]
+    pub fn stream(reader: Reader<R>) -> Self {
+        Self {
+            reader,
+            rewind: None,
+        }
     }
 }
 
-/// Terminal counters for a completed replay stream.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Summary {
-    pub passes_completed: u32,
-    pub interfaces_used: Vec<InterfaceId>,
-    pub source_format: Format,
-    pub timing: Timing,
-    #[serde(rename = "frames_attempted")]
-    pub frames_read: u64,
-    #[serde(rename = "frames_completed")]
-    pub frames_transmitted: u64,
-    #[serde(rename = "bytes_completed")]
-    pub bytes_transmitted: u64,
-    pub scheduled_duration: Duration,
+impl<R: Read + Seek> Source<R> {
+    /// A stable capture, rewound before every pass. The caller owns its
+    /// immutability between passes; the CLI supplies an anonymous validated
+    /// snapshot.
+    #[must_use]
+    pub fn seekable(reader: Reader<R>) -> Self {
+        Self {
+            reader,
+            rewind: Some(Reader::rewind),
+        }
+    }
+}
+
+impl<R> Source<R> {
+    /// The capture's reader, for its format and interface metadata.
+    pub fn reader(&self) -> &Reader<R> {
+        &self.reader
+    }
 }
 
 /// Selects a one-based capture frame before byte accounting, authorization, delay,
@@ -299,32 +231,76 @@ pub trait Selector {
     }
 }
 
-/// Exact-frame transmission. The engine authorizes the route returned by
-/// [`plan_frame`](Transmitter::plan_frame) and passes that same route to
-/// [`transmit`](Transmitter::transmit).
-pub trait Transmitter {
-    /// Resolve and validate the concrete interface, then passively select and
-    /// materialize the final route, before any intentional delay. Interface
-    /// and route lookups receive the replay's `deadline`.
-    fn plan_frame(
-        &mut self,
-        interface: &InterfaceId,
-        mode: LinkMode,
-        frame: &Frame,
-        deadline: &Deadline,
-    ) -> Result<MaterializedRoute, LiveIoError>;
+impl<T: Selector + ?Sized> Selector for &mut T {
+    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, crate::BoundaryError> {
+        (**self).select(number, frame)
+    }
 
-    /// Transmit the exact frame through the route that was authorized.
-    fn transmit(
+    fn interface(
         &mut self,
-        route: &MaterializedRoute,
+        number: u64,
         frame: &Frame,
-    ) -> Result<Transmission, LiveIoError>;
+    ) -> Result<Option<InterfaceId>, crate::BoundaryError> {
+        (**self).interface(number, frame)
+    }
 }
 
-/// Exact provider report plus the concrete interface selected for a send.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Transmission {
-    pub interface: InterfaceId,
-    pub report: IoSendReport,
+/// Selects every frame and maps none, so each uses the fallback interface.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AllFrames;
+
+impl Selector for AllFrames {
+    fn select(&mut self, _number: u64, _frame: &Frame) -> Result<bool, crate::BoundaryError> {
+        Ok(true)
+    }
+}
+
+/// One replay: the capture, the frames selected from it, and how they are
+/// sent.
+pub struct Request<R, S = AllFrames> {
+    pub source: Source<R>,
+    pub selector: S,
+    pub options: Options,
+}
+
+impl<R> Request<R> {
+    /// Replays every frame of `source` under `options`.
+    #[must_use]
+    pub fn new(source: Source<R>, options: Options) -> Self {
+        Self {
+            source,
+            selector: AllFrames,
+            options,
+        }
+    }
+}
+
+impl<R, S> Request<R, S> {
+    /// Replays only the frames `selector` selects, on the interfaces it maps.
+    #[must_use]
+    pub fn with_selector<T: Selector>(self, selector: T) -> Request<R, T> {
+        Request {
+            source: self.source,
+            selector,
+            options: self.options,
+        }
+    }
+
+    /// Validates the options, and that only a seekable source repeats,
+    /// without reading the capture.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first invalid bound.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.options.validate()?;
+        if self.options.repeat != 1 && self.source.rewind.is_none() {
+            return Err(Error::InvalidLimit {
+                field: "repeat",
+                value: u64::from(self.options.repeat),
+                reason: "repetition requires a stable seekable capture source",
+            });
+        }
+        Ok(())
+    }
 }

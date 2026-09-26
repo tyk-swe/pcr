@@ -1524,3 +1524,29 @@ collector finished with another run's report. Other codes are unchanged; a
 pipeline failure still reaches the caller as
 `scan::Error::PipelineExecution`, whose source chain holds the
 `scan::PipelineFailure` with the pending evidence.
+
+## Replay on the client
+
+Replay is `client.replay(request, sink)`. The client's policy admits every
+frame, and its interface, route, and transmit providers carry it, so the
+authorizer and transmitter arguments are gone.
+
+| Before | After |
+|---|---|
+| `replay::run_with_selector(&mut reader, &options, selector, &mut authorizer, &mut transmitter, &mut clock, emit)` | `client.replay(replay::Request::new(replay::Source::stream(reader), options).with_selector(selector), sink)` |
+| `replay::run_repeated_with_selector(..)` over a `Read + Seek` reader | the same with `replay::Source::seekable(reader)`; only a seekable source may set `repeat > 1` |
+| `SystemAuthorizer::new(registry, policy, allow_malformed_live)` | the client's registry and policy, and `options.allow_permissive_live` |
+| `SystemTransmitter::new()`, a custom `replay::Transmitter` | the client's `Providers`; tests compose fake interface, route, and transmit providers |
+| a `None` selector | `replay::AllFrames` (the `Request::new` default) |
+| `emit: FnMut(FrameEvidence) -> Result<(), replay::Error>` | `S: Sink<replay::Event, Ack = ()>`; events are `Event::Frame(FrameEvidence)` |
+| `replay::Summary` | `replay::Report` (serialized names unchanged) |
+| every frame plus the summary | `replay::Collector`, finished into `replay::Aggregate { frames, report }` |
+| `replay::Error::output_at_source_index(index, message)` | a sink returns a `BoundaryError`; the replay reports it as `Error::Output { source_index, source }` |
+
+A sink whose `BoundaryError` has a `Cancelled`, `DeadlineExceeded`, or
+`Interrupted` source stops the replay as `Error::Cancelled` or
+`Error::DurationLimit` rather than as an output failure. `&mut S` is a
+`Selector` whenever `S` is, so a caller can keep its selector.
+
+`policy::Authorizer::authorize_final_wire` is removed; only replay checked
+the final wire, and it now does so internally.

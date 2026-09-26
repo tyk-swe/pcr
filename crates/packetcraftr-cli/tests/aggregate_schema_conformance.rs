@@ -519,7 +519,7 @@ fn replay_case() -> Value {
             .expect("in-range capture evidence converts"),
     }];
     let report = replay_output::Report::try_from((
-        packetcraftr::replay::Summary {
+        packetcraftr::replay::Report {
             passes_completed: 1,
             interfaces_used: vec![InterfaceId {
                 name: "lab0".to_owned(),

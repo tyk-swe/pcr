@@ -370,25 +370,6 @@ pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) 
 pub trait Authorizer {
     /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
-
-    /// Applies source policy to the final route after destination/limits
-    /// authorization and before replay delay or transmission. Defaults to
-    /// denial for authorizers without route-aware validation.
-    fn authorize_final_wire(
-        &mut self,
-        _frame: &Frame,
-        _route: &crate::route::Plan,
-    ) -> Result<(), BoundaryError> {
-        Err(BoundaryError::new(
-            "this authorizer does not authorize final wire routes",
-            packetcraftr_core::error::Classification::new(
-                "internal.final_wire_authorization",
-                packetcraftr_core::error::Kind::Internal,
-                Some("route final wire bytes through a route-aware authorizer"),
-            ),
-            Vec::new(),
-        ))
-    }
 }
 
 /// Missing resolver is a caller wiring fault, not a policy or I/O failure.

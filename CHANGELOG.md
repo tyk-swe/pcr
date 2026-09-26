@@ -420,6 +420,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   renamed `CorrelatedResponse`. `traceroute::Completion` is renamed
   `traceroute::Termination`, and the report and aggregate field `completion`
   is `termination`; the published `completion` field is unchanged.
+- Replay runs on the client: `client.replay(replay::Request, S)` publishes
+  `replay::Event::Frame(FrameEvidence)` to a `Sink` and returns
+  `replay::Report` (the former `replay::Summary`); `replay::Collector` rebuilds
+  the `replay::Aggregate`. The request carries a `replay::Source` (`stream` or
+  `seekable` for repetition), a `Selector` (default `AllFrames`), and
+  `replay::Options`, which gains `allow_permissive_live`. `run_with_selector`,
+  `run_repeated_with_selector`, `SystemAuthorizer`, `SystemTransmitter`, and
+  `replay::Transmitter` are removed: the client's policy admits each frame and
+  its interface, route, and transmit providers carry it.
+  `policy::Authorizer::authorize_final_wire` is removed. `replay::Error::Output`
+  keeps the sink's `BoundaryError` as its `source` (still `io.replay`), and
+  `Error::output_at_source_index` is removed; `replay::Error` adds
+  `IncoherentEvents` (`internal.replay_event_coherence`).
 
   See `docs/migration-unreleased.md`.
 
@@ -723,6 +736,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `replay` publishes each transmitted frame from a runtime worker, so a
+  replay's `resources` report lists the `client_progress` runtime, and the
+  replay deadline runs on the client's clock and cancellation.
 - A pipelined scan (`max_in_flight` above one) reads its duration limit and
   probe start schedule from the client's clock, like a serial scan, instead
   of the system clock; waits for captured frames stay on the capture group.

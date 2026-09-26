@@ -3,36 +3,117 @@
 
 //! Streams, authorizes, schedules, and transmits without retaining more than one frame.
 
-use std::io::{Read, Seek};
-use std::time::{Duration, Instant, SystemTime};
+use std::io::Read;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::capture_file::{Format, Interface, Reader};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_netio::link::Mode as LinkMode;
 
 use crate::clock::Clock;
 use crate::execution::{self, Paused};
-use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
-
-use super::error::Error;
-use super::model::{
-    FrameEvidence, Limits, Options, Selector, Summary, Timing, Transmission, Transmitter,
-};
-use super::wire::{replay_link_mode, requested_interface_matches, validate_transmission_evidence};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
+use crate::providers::Providers;
+use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
+use crate::{BoundaryError, Client, Sink};
 
-#[derive(Default)]
-struct Progress {
-    frames_read: u64,
-    frames_transmitted: u64,
-    bytes_transmitted: u64,
-    scheduled_duration: Duration,
-    pause_duration: Duration,
-    passes_completed: u32,
-    interfaces_used: Vec<packetcraftr_netio::interface::Id>,
-    previous_timestamp: Option<SystemTime>,
-    has_previous: bool,
+use super::admission::{FinalWire, FrameAdmission};
+use super::error::Error;
+use super::evidence::{FrameEvidence, Transmission, validate_transmission};
+use super::executor::{Executor, ProviderExecutor, requested_interface_matches};
+use super::plan::{FramePlan, Tally, plan_frame};
+use super::report::{Event, Report};
+use super::request::{Limits, Options, Request, Selector, Timing};
+
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Replays the request's capture: every selected frame is admitted by the
+    /// client's policy, routed through the client's providers, authorized
+    /// again against its final route, and transmitted exactly as captured.
+    ///
+    /// Each frame is admitted before any provider is consulted for it, and the
+    /// replay keeps no more than one frame. Each confirmed frame is published
+    /// to `sink` on a worker admitted by the client's runtime, and the replay
+    /// waits for the sink's answer before it reads the next frame, so
+    /// evidence published before a failure is preserved. The request's
+    /// timing runs on the client's clock, within one deadline of
+    /// `limits.max_duration`.
+    ///
+    /// A sink that fails because the run was interrupted (its error's source
+    /// is a [`Cancelled`], [`DeadlineExceeded`], or [`Interrupted`]) stops the
+    /// replay as interrupted rather than as an output failure, and so does any
+    /// sink failure once the replay's own deadline is spent or cancelled.
+    ///
+    /// # Errors
+    ///
+    /// Returns the invalid request, the capture, policy, provider, or clock
+    /// failure, the sink's failure, or the interruption, each at the source
+    /// frame it stopped at.
+    pub fn replay<R, S, E>(&self, request: Request<R, S>, sink: E) -> Result<Report, Error>
+    where
+        R: Read,
+        S: Selector,
+        E: Sink<Event, Ack = ()>,
+    {
+        request.validate()?;
+        let deadline = self.deadline(request.options.limits.max_duration);
+        enforce_deadline(&deadline, 0)?;
+        let mut publish =
+            execution::publisher(&self.runtime, sink, BoundaryError::from_error, |source| {
+                source
+            })
+            .map_err(|source| publication_error(0, &deadline, source))?;
+        let mut admission = FrameAdmission::new(
+            self.admission(),
+            Arc::clone(&self.registry),
+            request.options.allow_permissive_live,
+        );
+        run(
+            request,
+            &mut admission,
+            &mut ProviderExecutor::new(self.providers.as_ref()),
+            &mut self.clock.clone(),
+            deadline,
+            |evidence, deadline| {
+                let source_index = evidence.source_index;
+                publish(Event::Frame(evidence), deadline)
+                    .map_err(|source| publication_error(source_index, deadline, source))
+            },
+        )
+    }
+}
+
+/// A failed publication at `source_index`. An interruption wins over the
+/// output failure it caused: the sink's own interruption, or the replay's.
+fn publication_error(source_index: u64, deadline: &Deadline, source: BoundaryError) -> Error {
+    if let Some(interruption) = interruption(&source) {
+        return interrupted(source_index, interruption);
+    }
+    if let Err(interruption) = deadline.enforce() {
+        return interrupted(source_index, interruption);
+    }
+    Error::Output {
+        source_index,
+        source,
+    }
+}
+
+/// The interruption a sink failure reports as its source, if any.
+fn interruption(error: &BoundaryError) -> Option<Interrupted> {
+    let source = std::error::Error::source(error)?;
+    source
+        .downcast_ref::<Interrupted>()
+        .copied()
+        .or_else(|| {
+            source
+                .downcast_ref::<Cancelled>()
+                .map(|cancelled| Interrupted::Cancelled(*cancelled))
+        })
+        .or_else(|| {
+            source
+                .downcast_ref::<DeadlineExceeded>()
+                .map(|exceeded| Interrupted::Exceeded(*exceeded))
+        })
 }
 
 struct ReadFrame {
@@ -41,126 +122,72 @@ struct ReadFrame {
     number: u64,
 }
 
-struct FramePlan {
-    mode: LinkMode,
-    delay: Duration,
-    next_completed: u64,
-    next_bytes: u64,
-    next_duration: Duration,
-}
-
-impl Progress {
-    fn complete(&mut self, plan: &FramePlan, timestamp: Option<SystemTime>) {
-        self.frames_transmitted = plan.next_completed;
-        self.bytes_transmitted = plan.next_bytes;
-        self.scheduled_duration = plan.next_duration;
-        self.previous_timestamp = timestamp;
-        self.has_previous = true;
-    }
-}
-
+/// One replay in progress: its deadline, totals, and schedule anchor.
 struct Session {
     deadline: Deadline,
-    progress: Progress,
+    tally: Tally,
     anchor: Instant,
     pass: u32,
 }
-impl Session {
-    fn new<C: Clock>(options: &Options, clock: &mut C) -> Result<Self, Error> {
-        options.validate()?;
-        let deadline =
-            Deadline::new(options.limits.max_duration).with_cancellation(clock.cancellation());
-        enforce_deadline(&deadline, 0)?;
-        Ok(Self {
-            deadline,
-            progress: Progress::default(),
-            anchor: clock.now(),
-            pass: 1,
-        })
-    }
-}
-struct Run<'o, 's, 'a, 't, 'c, A, T, C, F> {
-    options: &'o Options,
-    selector: Option<&'s mut dyn Selector>,
+
+struct Run<'a, 'x, 'c, S, A, X, C, F> {
+    options: &'a Options,
+    selector: S,
     authorizer: &'a mut A,
-    transmitter: &'t mut T,
+    executor: &'x mut X,
     clock: &'c mut C,
     emit: F,
 }
 
-/// Replays one streaming input. Repetition uses the seekable entry point.
-pub fn run_with_selector<R, A, T, C, F>(
-    reader: &mut Reader<R>,
-    options: &Options,
-    selector: Option<&mut dyn Selector>,
+/// Replays `request` under `deadline`, authorizing through `authorizer`,
+/// sending through `executor`, and handing each confirmed frame to `emit`.
+/// A seekable source is rewound before every pass under one aggregate budget
+/// and schedule.
+pub(crate) fn run<R, S, A, X, C, F>(
+    request: Request<R, S>,
     authorizer: &mut A,
-    transmitter: &mut T,
+    executor: &mut X,
     clock: &mut C,
+    deadline: Deadline,
     emit: F,
-) -> Result<Summary, Error>
+) -> Result<Report, Error>
 where
     R: Read,
-    A: Authorizer,
-    T: Transmitter,
+    S: Selector,
+    A: Authorizer + FinalWire,
+    X: Executor,
     C: Clock,
-    F: FnMut(FrameEvidence) -> Result<(), Error>,
+    F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
-    let mut session = Session::new(options, clock)?;
-    if options.repeat != 1 {
-        return Err(Error::InvalidLimit {
-            field: "repeat",
-            value: u64::from(options.repeat),
-            reason: "repetition requires run_repeated_with_selector and a stable seekable capture",
-        });
-    }
-    let source_format = reader.format();
-    let end_index = Run {
-        options,
-        selector,
-        authorizer,
-        transmitter,
-        clock,
-        emit,
-    }
-    .pass(reader, &mut session)?;
-    finish_summary(
-        &session.deadline,
-        end_index,
-        session.progress,
-        source_format,
-        options.timing,
-    )
-}
-
-/// Replays a stable seekable capture under one aggregate budget and schedule.
-/// The caller owns source immutability; the CLI supplies an anonymous validated snapshot.
-pub fn run_repeated_with_selector<R, A, T, C, F>(
-    reader: &mut Reader<R>,
-    options: &Options,
-    selector: Option<&mut dyn Selector>,
-    authorizer: &mut A,
-    transmitter: &mut T,
-    clock: &mut C,
-    emit: F,
-) -> Result<Summary, Error>
-where
-    R: Read + Seek,
-    A: Authorizer,
-    T: Transmitter,
-    C: Clock,
-    F: FnMut(FrameEvidence) -> Result<(), Error>,
-{
-    let mut session = Session::new(options, clock)?;
-    reader.rewind().map_err(|source| Error::Capture {
-        source_index: 0,
+    request.validate()?;
+    enforce_deadline(&deadline, 0)?;
+    let Request {
         source,
-    })?;
+        selector,
+        options,
+    } = request;
+    let mut reader = source.reader;
+    let rewind = source.rewind;
+    let mut session = Session {
+        deadline,
+        tally: Tally::default(),
+        anchor: clock.now(),
+        pass: 1,
+    };
+    let rewound = |reader: &mut Reader<R>| match rewind {
+        Some(rewind) => rewind(reader).map_err(|source| Error::Capture {
+            source_index: 0,
+            source,
+        }),
+        None => Ok(()),
+    };
+    rewound(&mut reader)?;
     let source_format = reader.format();
     let mut run = Run {
-        options,
+        options: &options,
         selector,
         authorizer,
-        transmitter,
+        executor,
         clock,
         emit,
     };
@@ -169,65 +196,73 @@ where
         session.pass = pass;
         if pass > 1 {
             enforce_deadline(&session.deadline, 0)?;
-            reader.rewind().map_err(|source| Error::Capture {
-                source_index: 0,
-                source,
-            })?;
+            rewound(&mut reader)?;
             if reader.format() != source_format {
                 return Err(Error::InvalidEvidence {
                     source_index: 0,
                     message: "capture format changed between passes".to_owned(),
                 });
             }
-            pace(
-                run.clock,
-                &mut session.deadline,
-                0,
-                options.inter_pass_delay,
-            )?;
-            session.progress.scheduled_duration = session
-                .progress
-                .scheduled_duration
-                .checked_add(options.inter_pass_delay)
-                .ok_or(Error::InvalidDuration {
-                    value: Duration::MAX,
-                    maximum: options.limits.max_duration,
-                })?;
-            session.progress.pause_duration = session
-                .progress
-                .pause_duration
-                .checked_add(options.inter_pass_delay)
-                .ok_or(Error::InvalidDuration {
-                    value: Duration::MAX,
-                    maximum: options.limits.max_duration,
-                })?;
-            session.anchor = run
-                .clock
-                .now()
-                .checked_sub(session.progress.scheduled_duration)
-                .ok_or(Error::InvalidDuration {
-                    value: Duration::MAX,
-                    maximum: options.limits.max_duration,
-                })?;
-            if matches!(options.timing, Timing::Original | Timing::Scaled(_)) {
-                session.progress.has_previous = false;
-                session.progress.previous_timestamp = None;
-            }
+            run.pause_between_passes(&mut session)?;
         }
-        end_index = run.pass(reader, &mut session)?;
+        end_index = run.pass(&mut reader, &mut session)?;
     }
-    finish_summary(
-        &session.deadline,
-        end_index,
-        session.progress,
+    enforce_deadline(&session.deadline, end_index)?;
+    let tally = session.tally;
+    Ok(Report {
+        passes_completed: tally.passes_completed,
+        interfaces_used: tally.interfaces_used,
         source_format,
-        options.timing,
-    )
+        timing: options.timing,
+        frames_read: tally.frames_read,
+        frames_transmitted: tally.frames_transmitted,
+        bytes_transmitted: tally.bytes_transmitted,
+        scheduled_duration: tally.scheduled_duration,
+    })
 }
 
-impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<(), Error>>
-    Run<'_, '_, '_, '_, '_, A, T, C, F>
+impl<S, A, X, C, F> Run<'_, '_, '_, S, A, X, C, F>
+where
+    S: Selector,
+    A: Authorizer + FinalWire,
+    X: Executor,
+    C: Clock,
+    F: FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
 {
+    /// Waits the inter-pass delay and restarts the schedule's anchor after it.
+    fn pause_between_passes(&mut self, session: &mut Session) -> Result<(), Error> {
+        let options = self.options;
+        let overflow = || Error::InvalidDuration {
+            value: Duration::MAX,
+            maximum: options.limits.max_duration,
+        };
+        pace(
+            self.clock,
+            &mut session.deadline,
+            0,
+            options.inter_pass_delay,
+        )?;
+        let tally = &mut session.tally;
+        tally.scheduled_duration = tally
+            .scheduled_duration
+            .checked_add(options.inter_pass_delay)
+            .ok_or_else(overflow)?;
+        tally.pause_duration = tally
+            .pause_duration
+            .checked_add(options.inter_pass_delay)
+            .ok_or_else(overflow)?;
+        session.anchor = self
+            .clock
+            .now()
+            .checked_sub(tally.scheduled_duration)
+            .ok_or_else(overflow)?;
+        if matches!(options.timing, Timing::Original | Timing::Scaled(_)) {
+            tally.has_previous = false;
+            tally.previous_timestamp = None;
+        }
+        Ok(())
+    }
+
     /// Replays one pass and returns the source index one past its last
     /// frame, the coordinate its end-of-capture deadline gate reports.
     fn pass<R: Read>(
@@ -236,7 +271,6 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
         session: &mut Session,
     ) -> Result<u64, Error> {
         let limits = self.options.limits;
-        let timing = self.options.timing;
         let mut source_index = 0u64;
         loop {
             let Some(read) = read_frame(
@@ -244,67 +278,33 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
                 &limits,
                 &session.deadline,
                 source_index,
-                session.progress.frames_read,
+                session.tally.frames_read,
             )?
             else {
                 break;
             };
-            session.progress.frames_read += 1;
+            session.tally.frames_read += 1;
             source_index = read.number - 1;
-            if !select_frame(
-                &mut self.selector,
-                &session.deadline,
-                source_index,
-                read.number,
-                &read.frame,
-            )? {
+            if !self.select(&session.deadline, source_index, &read)? {
                 source_index += 1;
                 continue;
             }
 
-            let plan = plan_frame(
-                self.options,
-                &limits,
-                timing,
-                &session.progress,
-                &read.frame,
-                source_index,
-            )?;
+            let plan = plan_frame(self.options, &session.tally, &read.frame, source_index)?;
             authorize_frame(
                 self.authorizer,
                 &session.deadline,
                 source_index,
-                plan.next_completed,
-                plan.next_bytes,
+                &plan,
                 &read.frame,
-                plan.mode,
             )?;
-            let mapped = match self.selector.as_deref_mut() {
-                Some(selector) => {
-                    selector
-                        .interface(read.number, &read.frame)
-                        .map_err(|source| Error::Selection {
-                            source_index,
-                            source,
-                        })?
-                }
-                None => None,
-            };
-            let interface =
-                mapped
-                    .as_ref()
-                    .or(self.options.interface.as_ref())
-                    .ok_or(Error::InvalidLimit {
-                        field: "interface",
-                        value: 0,
-                        reason: "selected frame has no mapped or fallback interface",
-                    })?;
+            let interface = self.interface(source_index, &read)?;
             let route = plan_frame_route(
-                self.transmitter,
-                interface,
+                self.executor,
+                &interface,
                 &session.deadline,
                 source_index,
-                plan.mode,
+                &plan,
                 &read.frame,
             )?;
             authorize_final_wire(
@@ -330,40 +330,74 @@ impl<A: Authorizer, T: Transmitter, C: Clock, F: FnMut(FrameEvidence) -> Result<
             let remaining = target.saturating_duration_since(self.clock.now());
             pace(self.clock, &mut session.deadline, source_index, remaining)?;
             let transmission = transmit_frame(
-                self.transmitter,
+                self.executor,
                 &session.deadline,
                 source_index,
                 &route,
                 &read.frame,
             )?;
 
-            session.progress.complete(&plan, read.frame.timestamp);
-            if !session
-                .progress
-                .interfaces_used
-                .contains(&transmission.interface)
-            {
-                session
-                    .progress
-                    .interfaces_used
-                    .push(transmission.interface.clone());
-            }
-            (self.emit)(FrameEvidence {
-                pass: session.pass,
-                source_index,
-                source_interface_id: read.frame.interface,
-                capture_interface: read.capture_interface,
-                link_mode: plan.mode,
-                scheduled_delay: plan.delay,
-                frame: read.frame,
-                transmission,
-            })?;
+            session.tally.complete(&plan, read.frame.timestamp);
+            session.tally.used(&transmission.interface);
+            (self.emit)(
+                FrameEvidence {
+                    pass: session.pass,
+                    source_index,
+                    source_interface_id: read.frame.interface,
+                    capture_interface: read.capture_interface,
+                    link_mode: plan.mode,
+                    scheduled_delay: plan.delay,
+                    frame: read.frame,
+                    transmission,
+                },
+                &session.deadline,
+            )?;
             enforce_deadline(&session.deadline, source_index)?;
             source_index += 1;
         }
 
-        session.progress.passes_completed += 1;
+        session.tally.passes_completed += 1;
         Ok(source_index)
+    }
+
+    fn select(
+        &mut self,
+        deadline: &Deadline,
+        source_index: u64,
+        read: &ReadFrame,
+    ) -> Result<bool, Error> {
+        enforce_deadline(deadline, source_index)?;
+        let selected = self
+            .selector
+            .select(read.number, &read.frame)
+            .map_err(|source| Error::Selection {
+                source_index,
+                source,
+            })?;
+        enforce_deadline(deadline, source_index)?;
+        Ok(selected)
+    }
+
+    /// The selector's interface for the frame, or the request's fallback.
+    fn interface(
+        &mut self,
+        source_index: u64,
+        read: &ReadFrame,
+    ) -> Result<packetcraftr_netio::interface::Id, Error> {
+        let mapped = self
+            .selector
+            .interface(read.number, &read.frame)
+            .map_err(|source| Error::Selection {
+                source_index,
+                source,
+            })?;
+        mapped
+            .or_else(|| self.options.interface.clone())
+            .ok_or(Error::InvalidLimit {
+                field: "interface",
+                value: 0,
+                reason: "selected frame has no mapped or fallback interface",
+            })
     }
 }
 
@@ -440,128 +474,18 @@ fn capture_interface<R: Read>(
         })
 }
 
-fn select_frame(
-    selector: &mut Option<&mut dyn Selector>,
-    deadline: &Deadline,
-    source_index: u64,
-    number: u64,
-    frame: &Frame,
-) -> Result<bool, Error> {
-    let Some(selector) = selector.as_deref_mut() else {
-        return Ok(true);
-    };
-    enforce_deadline(deadline, source_index)?;
-    let selected = selector
-        .select(number, frame)
-        .map_err(|source| Error::Selection {
-            source_index,
-            source,
-        })?;
-    enforce_deadline(deadline, source_index)?;
-    Ok(selected)
-}
-
-fn plan_frame(
-    options: &Options,
-    limits: &Limits,
-    timing: Timing,
-    progress: &Progress,
-    frame: &Frame,
-    source_index: u64,
-) -> Result<FramePlan, Error> {
-    let next_bytes = progress
-        .bytes_transmitted
-        .checked_add(u64::from(frame.captured_length()))
-        .ok_or(Error::TransmittedByteLimit {
-            source_index,
-            actual: u64::MAX,
-            limit: limits.max_transmitted_bytes,
-        })?;
-    if next_bytes > limits.max_transmitted_bytes {
-        return Err(Error::TransmittedByteLimit {
-            source_index,
-            actual: next_bytes,
-            limit: limits.max_transmitted_bytes,
-        });
-    }
-    let mode = replay_link_mode(source_index, frame.link_type, options.link_mode)?;
-    let delay = scheduled_delay(timing, progress, frame, source_index)?;
-    let next_duration =
-        progress
-            .scheduled_duration
-            .checked_add(delay)
-            .ok_or(Error::DurationLimit {
-                source_index,
-                actual: Duration::MAX,
-                limit: limits.max_duration,
-            })?;
-    if next_duration > limits.max_duration {
-        return Err(Error::DurationLimit {
-            source_index,
-            actual: next_duration,
-            limit: limits.max_duration,
-        });
-    }
-    let next_completed =
-        progress
-            .frames_transmitted
-            .checked_add(1)
-            .ok_or(Error::SourceFrameLimit {
-                source_index,
-                actual: u64::MAX,
-                limit: limits.max_source_frames,
-            })?;
-    Ok(FramePlan {
-        mode,
-        delay,
-        next_completed,
-        next_bytes,
-        next_duration,
-    })
-}
-
-fn scheduled_delay(
-    timing: Timing,
-    progress: &Progress,
-    frame: &Frame,
-    source_index: u64,
-) -> Result<Duration, Error> {
-    if !progress.has_previous {
-        return Ok(Duration::ZERO);
-    }
-    match timing.delay_between(
-        progress.previous_timestamp,
-        frame.timestamp,
-        source_index,
-        progress.bytes_transmitted,
-        progress
-            .scheduled_duration
-            .saturating_sub(progress.pause_duration),
-    ) {
-        Ok(delay) => Ok(delay),
-        Err(Error::InvalidTiming { mode, value }) => Err(Error::Timing {
-            source_index,
-            mode,
-            value,
-        }),
-        Err(error) => Err(error),
-    }
-}
-
 fn authorize_frame<A: Authorizer>(
     authorizer: &mut A,
     deadline: &Deadline,
     source_index: u64,
-    packets: u64,
-    wire_bytes: u64,
+    plan: &FramePlan,
     frame: &Frame,
-    mode: LinkMode,
 ) -> Result<(), Error> {
     enforce_deadline(deadline, source_index)?;
     let authorization = authorizer.authorize_operation(Operation::Replay(ReplayFrame::new(
-        WireLimits::new(packets, wire_bytes),
+        WireLimits::new(plan.next_completed, plan.next_bytes),
         frame,
-        mode,
+        plan.mode,
     )));
     enforce_deadline(deadline, source_index)?;
     authorization.map_err(|source| Error::Authorization {
@@ -570,23 +494,23 @@ fn authorize_frame<A: Authorizer>(
     })
 }
 
-fn plan_frame_route<T: Transmitter>(
-    transmitter: &mut T,
+fn plan_frame_route<X: Executor>(
+    executor: &mut X,
     interface: &packetcraftr_netio::interface::Id,
     deadline: &Deadline,
     source_index: u64,
-    mode: LinkMode,
+    plan: &FramePlan,
     frame: &Frame,
 ) -> Result<MaterializedRoute, Error> {
     enforce_deadline(deadline, source_index)?;
-    let route = transmitter.plan_frame(interface, mode, frame, deadline);
+    let route = executor.plan_frame(interface, plan.mode, frame, deadline);
     enforce_deadline(deadline, source_index)?;
     let route = route.map_err(|source| Error::Transmission {
         source_index,
         source,
     })?;
     // The caller's selector may name only the interface's name or index; the
-    // transmitter resolves it to the complete identity it will use.
+    // executor resolves it to the complete identity it will use.
     if !requested_interface_matches(&route.plan.decision.interface, interface) {
         return Err(Error::InvalidEvidence {
             source_index,
@@ -596,7 +520,7 @@ fn plan_frame_route<T: Transmitter>(
     Ok(route)
 }
 
-fn authorize_final_wire<A: Authorizer>(
+fn authorize_final_wire<A: FinalWire>(
     authorizer: &mut A,
     deadline: &Deadline,
     source_index: u64,
@@ -613,7 +537,7 @@ fn authorize_final_wire<A: Authorizer>(
 }
 
 /// Waits a source-timing delay in the shared pacing order. Replay keeps its
-/// own schedule in [`Progress`] and no execution statistics.
+/// own schedule in its [`Tally`] and no execution statistics.
 fn pace<C: Clock>(
     clock: &mut C,
     deadline: &mut Deadline,
@@ -630,8 +554,8 @@ fn pace<C: Clock>(
     })
 }
 
-fn transmit_frame<T: Transmitter>(
-    transmitter: &mut T,
+fn transmit_frame<X: Executor>(
+    executor: &mut X,
     deadline: &Deadline,
     source_index: u64,
     route: &MaterializedRoute,
@@ -639,13 +563,12 @@ fn transmit_frame<T: Transmitter>(
 ) -> Result<Transmission, Error> {
     enforce_deadline(deadline, source_index)?;
     let interface = &route.plan.decision.interface;
-    let transmission =
-        transmitter
-            .transmit(route, frame)
-            .map_err(|source| Error::Transmission {
-                source_index,
-                source,
-            })?;
+    let transmission = executor
+        .transmit(route, frame)
+        .map_err(|source| Error::Transmission {
+            source_index,
+            source,
+        })?;
     if &transmission.interface != interface {
         return Err(Error::InvalidEvidence {
             source_index,
@@ -658,28 +581,8 @@ fn transmit_frame<T: Transmitter>(
             ),
         });
     }
-    validate_transmission_evidence(source_index, frame, &transmission.report)?;
+    validate_transmission(source_index, frame, &transmission.report)?;
     Ok(transmission)
-}
-
-fn finish_summary(
-    deadline: &Deadline,
-    end_index: u64,
-    progress: Progress,
-    source_format: Format,
-    timing: Timing,
-) -> Result<Summary, Error> {
-    enforce_deadline(deadline, end_index)?;
-    Ok(Summary {
-        passes_completed: progress.passes_completed,
-        interfaces_used: progress.interfaces_used,
-        source_format,
-        timing,
-        frames_read: progress.frames_read,
-        frames_transmitted: progress.frames_transmitted,
-        bytes_transmitted: progress.bytes_transmitted,
-        scheduled_duration: progress.scheduled_duration,
-    })
 }
 
 fn enforce_deadline(deadline: &Deadline, source_index: u64) -> Result<(), Error> {

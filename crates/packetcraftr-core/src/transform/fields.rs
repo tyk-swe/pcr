@@ -32,7 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::decode::{self, Dissector};
+use crate::decode::{self, DecodedPacket, Dissector};
 use crate::field::FieldValue;
 use crate::frame::Frame;
 use crate::layout::{ByteRange, PacketLayout};
@@ -249,7 +249,8 @@ impl FieldEdit {
         })
     }
 
-    fn resolve(&self, layout: &PacketLayout, frame_len: usize) -> Result<Resolved, Error> {
+    fn resolve(&self, decoded: &DecodedPacket, frame_len: usize) -> Result<Resolved, Error> {
+        let layout = &decoded.layout;
         let mut matched = 0_usize;
         let mut layer_index = None;
         for (index, layer) in layout.layers.iter().enumerate() {
@@ -267,9 +268,8 @@ impl FieldEdit {
         // Every layer on the path to the target must be a typed decoded
         // layer. Opaque preservation layers never carry children, so one
         // appearing at or before the target means the layout is inconsistent.
-        if layout.layers[..=index].iter().any(|layer| {
-            BuiltinProtocol::from_id(layer.protocol)
-                .is_some_and(BuiltinProtocol::preserves_opaque_bytes)
+        if (0..=index).any(|layer| {
+            builtin(decoded, layer).is_some_and(BuiltinProtocol::preserves_opaque_bytes)
         }) {
             return Err(Error::Unsupported("field edit crosses an opaque layer"));
         }
@@ -372,11 +372,10 @@ impl FieldEdits {
                 max_packet_size: limits.max_output_bytes,
             },
         )?;
-        let layout = &decoded.layout;
-        screen_stack(layout)?;
+        screen_stack(&decoded)?;
         let mut resolved = Vec::with_capacity(self.edits.len());
         for edit in &self.edits {
-            resolved.push(edit.resolve(layout, frame.bytes().len())?);
+            resolved.push(edit.resolve(&decoded, frame.bytes().len())?);
         }
         let mut ordered: Vec<ByteRange> = resolved.iter().map(|edit| edit.range).collect();
         ordered.sort_unstable_by_key(|range| (range.start, range.end));
@@ -404,12 +403,18 @@ impl FieldEdits {
             }
             write_uint(&mut bytes, resolved.range, edit.value);
             if self.checksums == ChecksumMode::Repair {
-                collect_repairs(layout, resolved.layer, resolved.range, &bytes, &mut repairs)?;
+                collect_repairs(
+                    &decoded,
+                    resolved.layer,
+                    resolved.range,
+                    &bytes,
+                    &mut repairs,
+                )?;
             }
         }
         // Repair inner layers first so enclosing checksums cover final bytes.
         for repair in repairs.values().rev() {
-            if let Some(change) = repair.run(&mut bytes, layout)? {
+            if let Some(change) = repair.run(&mut bytes, &decoded)? {
                 changes.push(change);
             }
         }
@@ -431,10 +436,10 @@ struct Resolved {
 
 /// Rejects stacks that contain authentication or encryption layers, whose
 /// integrity coverage the bounded model cannot recompute.
-fn screen_stack(layout: &PacketLayout) -> Result<(), Error> {
-    for layer in &layout.layers {
+fn screen_stack(decoded: &DecodedPacket) -> Result<(), Error> {
+    for layer in decoded.packet.iter() {
         if matches!(
-            BuiltinProtocol::from_id(layer.protocol),
+            BuiltinProtocol::of(layer),
             Some(BuiltinProtocol::Ah | BuiltinProtocol::Esp)
         ) {
             return Err(Error::Unsupported(
@@ -450,33 +455,36 @@ fn screen_stack(layout: &PacketLayout) -> Result<(), Error> {
 /// The edited layer's checksum coverage contributes its header or transport
 /// checksum. Each TCP/UDP ancestor contributes its pseudo-header checksum
 /// whenever its declared span covers the change — this is what keeps tunneled
-/// inner fields faithful by also repairing the outer datagram. An ancestor
-/// carrying a `checksum` field of any other kind (ICMP quotes, GRE, SCTP)
-/// protects bytes this bounded model cannot recompute, so the edit is refused.
+/// inner fields faithful by also repairing the outer datagram. Layers are
+/// identified by their concrete type. Any other target or ancestor carrying a
+/// `checksum` field (ICMP quotes, GRE, SCTP, or a custom layer registered
+/// under a built-in name) protects bytes this bounded model cannot recompute,
+/// so the edit is refused.
 fn collect_repairs(
-    layout: &PacketLayout,
+    decoded: &DecodedPacket,
     target: usize,
     range: ByteRange,
     bytes: &[u8],
     repairs: &mut BTreeMap<usize, Repair>,
 ) -> Result<(), Error> {
-    match BuiltinProtocol::from_id(layout.layers[target].protocol) {
+    let layout = &decoded.layout;
+    match builtin(decoded, target) {
         Some(BuiltinProtocol::Ipv4) => {
             repairs.insert(target, Repair::Ipv4Header(target));
         }
         Some(BuiltinProtocol::Tcp | BuiltinProtocol::Udp) => {
             repairs.insert(target, Repair::Transport(target));
         }
-        _ => {}
+        _ => refuse_unrepairable(&layout.layers[target])?,
     }
     for ancestor in &layout.layers[..target] {
-        match BuiltinProtocol::from_id(ancestor.protocol) {
+        match builtin(decoded, ancestor.index) {
             // An IPv4 header checksum covers only the header itself, never a
             // descendant layer's bytes; IPv6 has no checksum field at all.
             Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6) => {}
             Some(BuiltinProtocol::Tcp | BuiltinProtocol::Udp) => {
                 let index = ancestor.index;
-                let span = transport_span(layout, index, bytes)?;
+                let span = transport_span(decoded, index, bytes)?;
                 if range.start < span.start || range.end > span.end {
                     return Err(Error::Invalid(
                         "field edit lies outside an enclosing transport span",
@@ -484,29 +492,29 @@ fn collect_repairs(
                 }
                 repairs.insert(index, Repair::Transport(index));
             }
-            _ => {
-                if ancestor.fields.iter().any(|field| field.name == "checksum") {
-                    return Err(Error::Unsupported(
-                        "field edit is covered by a checksum it cannot repair",
-                    ));
-                }
-            }
+            _ => refuse_unrepairable(ancestor)?,
         }
+    }
+    Ok(())
+}
+
+/// Refuses a layer carrying a `checksum` field this model cannot recompute,
+/// including a custom layer that only borrows a built-in protocol name.
+fn refuse_unrepairable(layer: &crate::layout::LayerLayout) -> Result<(), Error> {
+    if layer.fields.iter().any(|field| field.name == "checksum") {
+        return Err(Error::Unsupported(
+            "field edit is covered by a checksum it cannot repair",
+        ));
     }
     Ok(())
 }
 
 /// The nearest IPv4/IPv6 ancestor of `layer`. Every preceding layer in the
 /// nested decode chain is an ancestor, so the last matching index wins.
-fn enclosing_network(layout: &PacketLayout, layer: usize) -> Result<usize, Error> {
+fn enclosing_network(decoded: &DecodedPacket, layer: usize) -> Result<usize, Error> {
     (0..layer)
         .rev()
-        .find(|index| {
-            matches!(
-                BuiltinProtocol::from_id(layout.layers[*index].protocol),
-                Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6)
-            )
-        })
+        .find(|index| builtin(decoded, *index).is_some_and(BuiltinProtocol::is_ip))
         .ok_or(Error::Unsupported(
             "transport checksum needs an IPv4 or IPv6 envelope",
         ))
@@ -536,18 +544,19 @@ fn walk_network(
 /// The byte span a TCP/UDP layer's checksum covers: the segment start through
 /// the end of its declared datagram, bounded by the enclosing IP payload.
 fn transport_span(
-    layout: &PacketLayout,
+    decoded: &DecodedPacket,
     transport: usize,
     bytes: &[u8],
 ) -> Result<ByteRange, Error> {
+    let layout = &decoded.layout;
     let layer = &layout.layers[transport];
-    let network = enclosing_network(layout, transport)?;
+    let network = enclosing_network(decoded, transport)?;
     let end_of_payload = network_end(layout, network, bytes)?;
     let start = layer.range.start;
     if start < layout.layers[network].range.end || end_of_payload > bytes.len() {
         return Err(Error::Invalid("transport coverage exceeds captured bytes"));
     }
-    let end = match BuiltinProtocol::from_id(layer.protocol) {
+    let end = match builtin(decoded, transport) {
         Some(BuiltinProtocol::Udp) => {
             let length = read_uint(bytes, ByteRange::new(start + 4, start + 6))?;
             if length < 8 {
@@ -590,10 +599,10 @@ impl Repair {
     /// Recomputes the checksum over the patched bytes and writes it.
     ///
     /// Returns the derived change when the stored value actually changed.
-    fn run(&self, bytes: &mut [u8], layout: &PacketLayout) -> Result<Option<FieldChange>, Error> {
+    fn run(&self, bytes: &mut [u8], decoded: &DecodedPacket) -> Result<Option<FieldChange>, Error> {
         match *self {
-            Self::Ipv4Header(layer) => repair_ipv4(bytes, layout, layer),
-            Self::Transport(layer) => repair_transport(bytes, layout, layer),
+            Self::Ipv4Header(layer) => repair_ipv4(bytes, &decoded.layout, layer),
+            Self::Transport(layer) => repair_transport(bytes, decoded, layer),
         }
     }
 }
@@ -634,22 +643,22 @@ fn repair_ipv4(
 
 fn repair_transport(
     bytes: &mut [u8],
-    layout: &PacketLayout,
+    decoded: &DecodedPacket,
     transport: usize,
 ) -> Result<Option<FieldChange>, Error> {
+    let layout = &decoded.layout;
     let layer = &layout.layers[transport];
-    let network = enclosing_network(layout, transport)?;
+    let network = enclosing_network(decoded, transport)?;
     ensure_transport_computable(layout, network, bytes)?;
-    let span = transport_span(layout, transport, bytes)?;
+    let span = transport_span(decoded, transport, bytes)?;
     let checksum_range = checksum_field_range(layout, transport)?;
     if checksum_range.end > span.end || checksum_range.start < span.start {
         return Err(Error::Invalid(
             "transport checksum field is outside its segment",
         ));
     }
-    let ipv6 =
-        BuiltinProtocol::from_id(layout.layers[network].protocol) == Some(BuiltinProtocol::Ipv6);
-    let udp = BuiltinProtocol::from_id(layer.protocol) == Some(BuiltinProtocol::Udp);
+    let ipv6 = builtin(decoded, network) == Some(BuiltinProtocol::Ipv6);
+    let udp = builtin(decoded, transport) == Some(BuiltinProtocol::Udp);
     let old = read_uint(bytes, checksum_range)?;
     if udp && !ipv6 && old == 0 {
         // An IPv4 UDP checksum of zero stays disabled.
@@ -720,6 +729,12 @@ fn repair_transport(
         new: u64::from(value),
         origin: ChangeOrigin::Derived,
     }))
+}
+
+/// The built-in protocol of the decoded layer at `index`, by its concrete
+/// type. Layout and packet share indices, so a layout entry names its layer.
+fn builtin(decoded: &DecodedPacket, index: usize) -> Option<BuiltinProtocol> {
+    decoded.packet.layer(index).and_then(BuiltinProtocol::of)
 }
 
 /// The 1-based position of `target` among same-protocol layers.

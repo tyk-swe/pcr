@@ -4,9 +4,7 @@
 use std::time::Duration;
 use thiserror::Error;
 
-use crate::analysis::pcap::Error as CaptureError;
-use crate::analysis::reassembly::ip::Error as IpError;
-use crate::analysis::reassembly::tcp::Error as TcpError;
+use crate::capture_file::Error as CaptureError;
 
 use crate::error::{Classification, Classified, Kind};
 
@@ -21,33 +19,36 @@ pub enum Error {
     InvalidLimit {
         field: &'static str,
         value: u64,
-        reason: &'static str,
+        reason: Constraint,
     },
-    #[error("capture read failed at frame {number}: {source}")]
+    /// A server-name pattern puts `*` somewhere other than its ends.
+    #[error("SNI pattern '{pattern}' has '*' somewhere other than its start or end")]
+    SniPattern { pattern: String },
+    #[error("capture read failed at frame {number}")]
     Capture {
         number: u64,
         #[source]
         source: CaptureError,
     },
-    #[error("dissection failed at frame {number}: {source}")]
+    #[error("dissection failed at frame {number}")]
     Decode {
         number: u64,
         #[source]
         source: crate::decode::Error,
     },
-    #[error("derived IP datagram construction failed at frame {number}: {source}")]
+    #[error("derived IP datagram construction failed at frame {number}")]
     DerivedFrame {
         number: u64,
         #[source]
         source: crate::frame::Error,
     },
-    #[error("derived IP datagram dissection failed at frame {number}: {source}")]
+    #[error("derived IP datagram dissection failed at frame {number}")]
     DerivedDecode {
         number: u64,
         #[source]
         source: crate::decode::Error,
     },
-    #[error("display filter failed at frame {number}: {source}")]
+    #[error("display filter failed at frame {number}")]
     Filter {
         number: u64,
         #[source]
@@ -57,19 +58,19 @@ pub enum Error {
         "capture-global conversation index reached its limit of {limit} distinct conversations per transport at frame {number}"
     )]
     StreamLimit { number: u64, limit: usize },
-    #[error("capture scope indexing failed at frame {number}: {source}")]
+    #[error("capture scope indexing failed at frame {number}")]
     Scope {
         number: u64,
         #[source]
         source: crate::analysis::scope::Error,
     },
-    #[error("TCP reassembly failed at frame {number}: {source}")]
+    #[error("TCP reassembly failed at frame {number}")]
     Reassembly {
         number: u64,
         #[source]
         source: crate::analysis::reassembly::tcp::Error,
     },
-    #[error("IP reassembly failed at frame {number}: {source}")]
+    #[error("IP reassembly failed at frame {number}")]
     IpReassembly {
         number: u64,
         #[source]
@@ -81,12 +82,54 @@ pub enum Error {
     TimestampRange { number: u64 },
     #[error("capture frame {number} has no timestamp required by offline analysis")]
     TimestampUnavailable { number: u64 },
-    #[error("analysis consumer failed at frame {number}: {source}")]
+    #[error("analysis consumer failed at frame {number}")]
     Sink {
         number: u64,
         #[source]
         source: crate::error::BoundaryError,
     },
+    /// A [`Session`](super::Session) collector's `finish` or its trailing
+    /// event drain failed after the run completed.
+    #[error(transparent)]
+    Collector(crate::error::BoundaryError),
+}
+
+/// The rule an [`Error::InvalidLimit`] value breaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Constraint {
+    NonZero,
+    /// The per-frame byte limit cannot exceed the total byte limit.
+    AtMostMaxBytes,
+    /// A TCP per-flow window must stay below the serial-number half-space.
+    BelowSerialHalfSpace,
+    /// A duration must fit the platform monotonic clock.
+    WithinClockRange,
+    /// A TLS buffer must hold one direction's largest handshake.
+    AtLeastTlsDirectionBuffer,
+    /// A duration cannot exceed the one-hour invocation ceiling.
+    AtMostOneHour,
+}
+
+impl std::fmt::Display for Constraint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonZero => formatter.write_str("must be non-zero"),
+            Self::AtMostMaxBytes => formatter.write_str("cannot exceed max_bytes"),
+            Self::BelowSerialHalfSpace => {
+                formatter.write_str("reaches the TCP serial-number half-space")
+            }
+            Self::WithinClockRange => {
+                formatter.write_str("exceeds the platform monotonic-clock range")
+            }
+            Self::AtLeastTlsDirectionBuffer => write!(
+                formatter,
+                "cannot be below the per-direction handshake buffer of {} bytes",
+                super::tls::MAX_DIRECTION_BUFFER
+            ),
+            Self::AtMostOneHour => formatter.write_str("exceeds the one-hour ceiling"),
+        }
+    }
 }
 
 impl Classified for Error {
@@ -101,8 +144,13 @@ impl Classified for Error {
             ),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.analysis_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
+            ),
+            Self::SniPattern { .. } => Classification::new(
+                "cli.error",
+                Kind::Usage,
+                Some("write '*' only at the start, the end, or both ends of the pattern"),
             ),
             Self::Capture { source, .. } => source.classification(),
             // Refusals for exceeding a configured finite budget are resource
@@ -117,13 +165,6 @@ impl Classified for Error {
                 source:
                     crate::decode::Error::PacketSizeLimit { .. }
                     | crate::decode::Error::LayerLimit { .. },
-                ..
-            }
-            | Self::Scope {
-                source:
-                    crate::analysis::scope::Error::Capacity
-                    | crate::analysis::scope::Error::Limit { .. }
-                    | crate::analysis::scope::Error::Bytes { .. },
                 ..
             }
             | Self::StreamLimit { .. } => resource_limit(GENERAL_RESOURCE_REMEDIATION),
@@ -148,28 +189,10 @@ impl Classified for Error {
                 Some("use timestamped packet blocks for time-dependent offline analysis"),
             ),
             Self::Filter { source, .. } => source.classification(),
-            Self::Scope { .. } => Classification::new(
-                "internal.scope_composition",
-                Kind::Internal,
-                Some("report the capture and command as an internal scope-composition failure"),
-            ),
-            // Reassembly fails for two distinct reasons: a finite budget was
-            // exhausted, or the capture itself carries conflicting data. Only
-            // the former is answered by raising budgets.
-            Self::Reassembly { source, .. } => match source {
-                TcpError::Resource(_) => resource_limit(TCP_RESOURCE_REMEDIATION),
-                TcpError::Malformed(_) => malformed_reassembly(),
-            },
-            Self::IpReassembly { source, .. } => match source {
-                IpError::Resource(_) => resource_limit(IP_RESOURCE_REMEDIATION),
-                IpError::Malformed(_) => malformed_reassembly(),
-                IpError::Inconsistent { .. } => Classification::new(
-                    "internal.ip_reassembly",
-                    Kind::Internal,
-                    Some("report the capture and command as an internal IP reassembly failure"),
-                ),
-            },
-            Self::Sink { source, .. } => source.classification(),
+            Self::Scope { source, .. } => source.classification(),
+            Self::Reassembly { source, .. } => source.classification(),
+            Self::IpReassembly { source, .. } => source.classification(),
+            Self::Sink { source, .. } | Self::Collector(source) => source.classification(),
         }
     }
 
@@ -180,21 +203,17 @@ impl Classified for Error {
     /// [`BoundaryError`]: crate::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Sink { source, .. } => source.causes(),
+            Self::Sink { source, .. } => source.as_causes(),
+            Self::Collector(source) => source.causes(),
             error => crate::error::source_chain(error),
         }
     }
 }
 
-crate::deadline_error_conversions!(Error);
+crate::budget::deadline_error_conversions!(Error);
 
-const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
-const IP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
-                                       relevant finite --max-ip-* analysis budget";
-const TCP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \
-                                        relevant finite --max-tcp-* analysis budget";
-
-fn resource_limit(remediation: &'static str) -> Classification {
+pub(super) const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
+pub(super) fn resource_limit(remediation: &'static str) -> Classification {
     Classification::new(
         "policy.analysis_resource_limit",
         Kind::Policy,
@@ -202,7 +221,10 @@ fn resource_limit(remediation: &'static str) -> Classification {
     )
 }
 
-fn malformed_reassembly() -> Classification {
+/// Reassembly fails for two distinct reasons: a finite budget was exhausted,
+/// or the capture itself carries conflicting data. Only the former is
+/// answered by raising budgets, so the latter has its own classification.
+pub(super) fn malformed_reassembly() -> Classification {
     Classification::new(
         "packet.reassembly",
         Kind::Packet,

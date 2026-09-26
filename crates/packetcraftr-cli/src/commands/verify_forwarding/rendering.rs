@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::ToolFormat;
-use packetcraftr_cli::output::{self, forwarding::Report};
+use crate::output::contract::ToolFormat;
+use crate::output::{self, verify_forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
 
@@ -16,7 +16,7 @@ pub(super) fn render(
     stream: &StreamEncoder,
     report: &analysis::Report,
     arguments: &Args,
-    sources: analysis::Sided<output::forwarding::CaptureSource>,
+    sources: analysis::Sided<output::verify_forwarding::CaptureSource>,
 ) -> Result<(), CliError> {
     match format {
         ToolFormat::Text => {
@@ -30,21 +30,26 @@ pub(super) fn render(
             Ok(())
         }
         ToolFormat::Json | ToolFormat::Ndjson => {
-            let mut document = Report::from_report(
+            let document = Report::try_from((
                 report,
                 analysis::Sided {
-                    ingress: arguments.ingress.display().to_string(),
-                    egress: arguments.egress.display().to_string(),
+                    ingress: output::verify_forwarding::Input {
+                        path: arguments.ingress.display().to_string(),
+                        source: Some(sources.ingress),
+                        selection_filter: arguments.ingress_filter.clone(),
+                    },
+                    egress: output::verify_forwarding::Input {
+                        path: arguments.egress.display().to_string(),
+                        source: Some(sources.egress),
+                        selection_filter: arguments.egress_filter.clone(),
+                    },
                 },
-            )?;
-            document.captures.ingress.source = Some(sources.ingress);
-            document.captures.egress.source = Some(sources.egress);
-            document.captures.ingress.selection_filter = arguments.ingress_filter.clone();
-            document.captures.egress.selection_filter = arguments.egress_filter.clone();
-            document.decode = Some(output::forwarding::DecodeContext {
-                tls_ports: arguments.decode.ports.clone(),
-                bindings: arguments.decode.bindings.clone(),
-            });
+                Some(output::verify_forwarding::DecodeContext::from((
+                    arguments.decode.ports.clone(),
+                    arguments.decode.bindings.clone(),
+                ))),
+            ))
+            .map_err(CliError::classified)?;
             let diagnostics = omitted_diagnostic(
                 "verify_forwarding.details_omitted",
                 "report detail entries",

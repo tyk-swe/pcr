@@ -8,6 +8,7 @@ use thiserror::Error;
 use crate::error::{BoundaryError, Classification, Classified, Coordinate, Kind};
 
 use super::request::Target;
+use super::{MAX_STRATEGIES, MAX_TARGET_FIELDS};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -18,7 +19,7 @@ pub enum Error {
     InvalidLimit {
         field: &'static str,
         value: u64,
-        reason: String,
+        reason: Constraint,
     },
     #[error("fuzz strategies cannot be empty")]
     InvalidStrategies,
@@ -26,10 +27,20 @@ pub enum Error {
     CaseIndexOverflow,
     #[error("fuzz duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
-    #[error("fuzz target {target} is invalid: {message}")]
-    InvalidTarget { target: Target, message: String },
-    #[error("fuzz base packet is invalid: {message}")]
-    InvalidBasePacket { message: String },
+    #[error("fuzz target {target} is invalid: {reason}")]
+    InvalidTarget { target: Target, reason: TargetFault },
+    #[error("invalid fuzz target {target:?}; expected LAYER.FIELD")]
+    TargetSeparator { target: String },
+    #[error("invalid fuzz target {target:?}; the layer must be a decimal index")]
+    TargetLayer { target: String },
+    #[error("invalid fuzz target {target:?}; the field must be a bounded reflective path")]
+    TargetField {
+        target: String,
+        #[source]
+        source: crate::field::Error,
+    },
+    #[error("fuzz base packet is invalid: {reason}")]
+    InvalidBasePacket { reason: BaseFault },
     #[error("packet has no field compatible with the selected fuzz strategies")]
     NoCompatibleTargets,
     #[error("fuzz retained/wire bytes {actual} exceed the configured limit of {limit}")]
@@ -40,7 +51,7 @@ pub enum Error {
     ValueTooLarge { limit: usize },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("fuzz progressive output failed: {source}")]
+    #[error("fuzz progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -57,11 +68,20 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTarget { .. } => Classification::new(
                 "cli.fuzz_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),
             ),
+            Self::TargetSeparator { .. } | Self::TargetLayer { .. } | Self::TargetField { .. } => {
+                Classification::new(
+                    "cli.fuzz_limit",
+                    Kind::Usage,
+                    Some(
+                        "use LAYER.FIELD targets naming a layer index and a reflective field path",
+                    ),
+                )
+            }
             Self::InvalidBasePacket { .. } => Classification::new(
                 "packet.fuzz_recipe",
                 Kind::Packet,
@@ -98,10 +118,103 @@ impl Classified for Error {
     /// captured `causes` snapshot its own source chain no longer holds.
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Output { source } => source.causes(),
+            Self::Output { source } => source.as_causes(),
             error => crate::error::source_chain(error),
         }
     }
 }
 
-crate::deadline_error_conversions!(Error);
+crate::budget::deadline_error_conversions!(Error);
+
+/// The rule an [`Error::InvalidLimit`] value breaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Constraint {
+    /// The value must be within `1..=maximum`.
+    Within { maximum: u64 },
+    /// The per-packet byte limit cannot exceed the total byte limit.
+    AtMostMaxTotalBytes,
+    /// At most [`MAX_STRATEGIES`] strategies may be selected.
+    AtMostMaxStrategies,
+}
+
+impl std::fmt::Display for Constraint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Within { maximum } => write!(formatter, "must be within 1..={maximum}"),
+            Self::AtMostMaxTotalBytes => formatter.write_str("cannot exceed max_total_bytes"),
+            Self::AtMostMaxStrategies => {
+                write!(
+                    formatter,
+                    "at most {MAX_STRATEGIES} strategies may be selected"
+                )
+            }
+        }
+    }
+}
+
+/// Why an [`Error::InvalidTarget`] cannot be resolved against the base packet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TargetFault {
+    /// The target's layer index is not below the packet's `layers`.
+    LayerOutOfRange { layers: usize },
+    /// The field path is not registered in the layer's schema.
+    UnregisteredPath,
+    /// The layer does not return a value for the field path.
+    Unreadable,
+}
+
+impl std::fmt::Display for TargetFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LayerOutOfRange { layers } => {
+                write!(formatter, "layer index is outside packet length {layers}")
+            }
+            Self::UnregisteredPath => formatter.write_str("unregistered reflective path"),
+            Self::Unreadable => formatter.write_str("field is not reflectively readable"),
+        }
+    }
+}
+
+/// Why an [`Error::InvalidBasePacket`] cannot be fuzzed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BaseFault {
+    /// The packet has more layers than the build's `max_layers`.
+    Layers { layers: usize, max_layers: usize },
+    /// Counting the packet's schema fields overflowed.
+    FieldCountOverflow,
+    /// The packet's schemas declare more than [`MAX_TARGET_FIELDS`] fields.
+    SchemaFields { fields: usize },
+    /// The packet reflects more than [`MAX_TARGET_FIELDS`] fields.
+    ReflectedFields,
+    /// The request selects more than [`MAX_TARGET_FIELDS`] targets.
+    Targets { targets: usize },
+}
+
+impl std::fmt::Display for BaseFault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Layers { layers, max_layers } => write!(
+                formatter,
+                "packet has {layers} layers, exceeding build.max_layers={max_layers}"
+            ),
+            Self::FieldCountOverflow => {
+                formatter.write_str("reflected field-count arithmetic overflowed")
+            }
+            Self::SchemaFields { fields } => write!(
+                formatter,
+                "packet schema exposes {fields} fields, exceeding hard limit {MAX_TARGET_FIELDS}"
+            ),
+            Self::ReflectedFields => write!(
+                formatter,
+                "packet exposes more than {MAX_TARGET_FIELDS} reflected fields"
+            ),
+            Self::Targets { targets } => write!(
+                formatter,
+                "request selects {targets} fields, exceeding hard limit {MAX_TARGET_FIELDS}"
+            ),
+        }
+    }
+}

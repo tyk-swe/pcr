@@ -3,7 +3,7 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use packetcraftr_core::analysis::pcap::{Error as CaptureError, Format, Writer};
+use packetcraftr_core::capture_file::{Error as CaptureError, Format, Writer};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 
@@ -38,7 +38,7 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "capture-file output requires at least one captured or transmitted frame",
         )
     })?;

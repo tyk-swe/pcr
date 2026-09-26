@@ -10,14 +10,14 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::registry::Registry;
 
-use crate::probe::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
-use crate::probe::validation::{
-    format_exchange_evidence_error, validate_response_frames_and_deadlines,
-};
+use crate::execution::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
+use crate::execution::validation::validate_response_frames_and_deadlines;
 
-use super::error::{Error, duration_limit};
-use super::execution::Execution;
-use super::{Case, CaseOutcome, LiveLimits};
+use super::error::{CaseErrors, Error, duration_limit};
+use super::executor::CaseEvidence;
+use super::{Evidence, Outcome};
+use crate::execution::Errors as _;
+use crate::execution::limits::EvidenceLimits;
 
 /// Fuzz keeps undecodable frames as case evidence under the frame budget
 /// alone, so its undecoded-limit code is never raised.
@@ -27,9 +27,10 @@ const EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor = EvidenceDiagnosticDes
     "fuzz response",
 );
 
-/// Turns each validated live execution into its case's evidence: the decoded
-/// sent packet, the exact frames retained under the campaign-wide evidence
-/// budget, and the response-or-timeout outcome.
+/// Turns each validated live execution into its case's evidence: the exact
+/// frames retained under the campaign-wide evidence budget and the
+/// response-or-timeout outcome, recording on the case the packet actually
+/// sent.
 pub(super) struct Recorder {
     dissector: Dissector,
     decode_limits: packet_fuzz::Limits,
@@ -40,48 +41,53 @@ impl Recorder {
     pub(super) fn new(
         registry: Arc<Registry>,
         decode_limits: packet_fuzz::Limits,
-        retention: LiveLimits,
+        retention: EvidenceLimits,
     ) -> Self {
         Self {
             dissector: Dissector::new(registry),
             decode_limits,
-            evidence: EvidenceState::new(retention.evidence(), EVIDENCE_DIAGNOSTICS),
+            evidence: EvidenceState::new(retention, EVIDENCE_DIAGNOSTICS),
         }
     }
 
     pub(super) fn record(
         &mut self,
-        case: &mut Case,
-        execution: Execution,
+        case: &mut packet_fuzz::Case,
+        execution: CaseEvidence,
         deadline: &Deadline,
-    ) -> Result<(), Error> {
+    ) -> Result<Evidence, Error> {
         let had_response = !execution.responses.is_empty();
-        case.prepared.diagnostics = execution.sent.built().diagnostics.clone();
-        case.prepared.decoded = packet_fuzz::dissect_built(
+        case.diagnostics = execution.sent.built().diagnostics.clone();
+        case.decoded = packet_fuzz::dissect_built(
             &self.dissector,
             execution.sent.built(),
             self.decode_limits,
-            &mut case.prepared.diagnostics,
+            &mut case.diagnostics,
         );
         deadline.enforce()?;
-        case.prepared.built = Some(execution.sent.built().clone());
-        case.sent = Some(execution.sent.frame().clone());
-        case.prepared.diagnostics.extend(execution.diagnostics);
+        case.built = Some(execution.sent.built().clone());
+        case.diagnostics.extend(execution.diagnostics);
+        let mut evidence = Evidence {
+            sent: execution.sent.frame().clone(),
+            outcome: if had_response {
+                Outcome::Response
+            } else {
+                Outcome::Timeout
+            },
+            responses: Vec::new(),
+            unmatched: Vec::new(),
+            undecoded: Vec::new(),
+        };
         let responses = execution
             .responses
             .into_iter()
             .map(|response| response.response.frame);
-        self.retain(responses, &mut case.responses, deadline)?;
-        self.retain(execution.unmatched, &mut case.unmatched, deadline)?;
-        self.retain(execution.undecoded, &mut case.undecoded, deadline)?;
+        self.retain(responses, &mut evidence.responses, deadline)?;
+        self.retain(execution.unmatched, &mut evidence.unmatched, deadline)?;
+        self.retain(execution.undecoded, &mut evidence.undecoded, deadline)?;
         deadline.check().map_err(duration_limit)?;
-        case.outcome = if had_response {
-            CaseOutcome::Response
-        } else {
-            CaseOutcome::Timeout
-        };
         deadline.enforce()?;
-        Ok(())
+        Ok(evidence)
     }
 
     /// Retains exact frames while the campaign-wide evidence budget allows,
@@ -101,36 +107,39 @@ impl Recorder {
 
     /// Campaign-level diagnostics reach the caller on the case they were
     /// raised during; the campaign never republishes them.
-    pub(super) fn publish_diagnostics(&mut self, case: &mut Case) -> Result<(), Error> {
+    pub(super) fn publish_diagnostics(
+        &mut self,
+        case: &mut packet_fuzz::Case,
+    ) -> Result<(), Error> {
         self.evidence.publish_diagnostics::<Error>(|diagnostic| {
-            case.prepared.diagnostics.push(diagnostic);
+            case.diagnostics.push(diagnostic);
             Ok(())
         })
     }
 }
 
 pub(super) fn validate_execution(
-    case: &Case,
-    execution: &Execution,
+    case: &packet_fuzz::Case,
+    execution: &CaseEvidence,
     timeout: Duration,
     max_packet_bytes: usize,
     deadline: &Deadline,
 ) -> Result<(), Error> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            case_index: case.index,
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
     if execution.stats.bytes != u64::try_from(execution.sent.bytes_sent()).unwrap_or(u64::MAX) {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            case_index: case.index,
             message: "sent receipt and byte statistics disagree".to_owned(),
         });
     }
     if execution.sent.built().bytes.len() > max_packet_bytes {
         return Err(Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            case_index: case.index,
             message: format!(
                 "executor built {} bytes, exceeding max_packet_bytes={}",
                 execution.sent.built().bytes.len(),
@@ -143,16 +152,12 @@ pub(super) fn validate_execution(
         .capture
         .validate()
         .map_err(|source| Error::InvalidEvidence {
-            case_index: case.prepared.index,
+            case_index: case.index,
             message: format!("invalid capture statistics: {source}"),
         })?;
     deadline.check().map_err(duration_limit)?;
-    validate_response_frames_and_deadlines(&execution.responses, &[], timeout).map_err(
-        |error| Error::InvalidEvidence {
-            case_index: case.prepared.index,
-            message: format_exchange_evidence_error(error, "case", "fuzz"),
-        },
-    )?;
+    validate_response_frames_and_deadlines(&execution.responses, &[], timeout)
+        .map_err(|error| CaseErrors.invalid_evidence(case.index, error))?;
     deadline.check().map_err(duration_limit)?;
     Ok(())
 }

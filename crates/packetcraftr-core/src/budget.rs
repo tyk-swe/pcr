@@ -75,6 +75,18 @@ impl Deadline {
         self
     }
 
+    /// The operation's total allowance.
+    #[must_use]
+    pub fn limit(&self) -> Duration {
+        self.limit
+    }
+
+    /// The cooperative stop signal shared with this operation, if any.
+    #[must_use]
+    pub fn cancellation(&self) -> Option<&Cancellation> {
+        self.cancellation.as_ref()
+    }
+
     pub fn check_cancelled(&self) -> Result<(), Cancelled> {
         for parent in &self.parents {
             parent.check_cancelled()?;
@@ -184,34 +196,6 @@ impl Deadline {
         Ok(remaining)
     }
 
-    /// Clips a child boundary's `requested` timeout to the wall-clock budget
-    /// still available, so the child can never outlive the operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeadlineExceeded`] after the operation budget is spent or
-    /// when nothing remains for the child to spend.
-    pub fn bounded_timeout(&self, requested: Duration) -> Result<Duration, DeadlineExceeded> {
-        let timeout = requested.min(self.remaining()?);
-        if timeout.is_zero() {
-            return Err(DeadlineExceeded {
-                actual: self.limit,
-                limit: self.limit,
-            });
-        }
-        Ok(timeout)
-    }
-
-    /// Starts a real-time boundary wait capped by the remaining operation
-    /// budget, carrying the same cancellation signal. Deterministic parent
-    /// accounting allocates the allowance; the actual wait uses wall time.
-    pub fn for_wait(&self, requested: Duration) -> Result<Self, DeadlineExceeded> {
-        Ok(
-            Self::new(self.bounded_timeout(requested)?)
-                .with_cancellation(self.cancellation.clone()),
-        )
-    }
-
     /// Commits a completed phase, charging whichever of wall time or reported
     /// elapsed time is larger.
     ///
@@ -230,20 +214,21 @@ impl Deadline {
     }
 }
 
-/// Wall-clock time remaining, or `None` at or after `deadline`. Treat `None` as
-/// expiry before calling providers that reject a zero timeout.
-#[must_use]
-pub fn remaining_before(deadline: Instant) -> Option<Duration> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .filter(|remaining| !remaining.is_zero())
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("operation took {actual:?}, exceeding its {limit:?} budget")]
 pub struct DeadlineExceeded {
     pub actual: Duration,
     pub limit: Duration,
+}
+
+impl crate::error::Classified for DeadlineExceeded {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "policy.duration_limit",
+            crate::error::Kind::Policy,
+            Some("reduce input or raise the finite invocation duration"),
+        )
+    }
 }
 
 /// Why a [`Deadline::enforce`] gate refused to continue.
@@ -266,8 +251,17 @@ impl Interrupted {
     }
 }
 
-#[macro_export]
-#[doc(hidden)]
+impl crate::error::Classified for Interrupted {
+    fn classification(&self) -> crate::error::Classification {
+        match self {
+            Self::Cancelled(source) => source.classification(),
+            Self::Exceeded(source) => source.classification(),
+        }
+    }
+}
+
+/// Implements the two conversions a core error with a `DurationLimit` variant
+/// needs to accept [`Interrupted`] through `?`.
 macro_rules! deadline_error_conversions {
     ($error:ty) => {
         impl ::std::convert::From<$crate::budget::DeadlineExceeded> for $error {
@@ -287,16 +281,14 @@ macro_rules! deadline_error_conversions {
     };
 }
 
+pub(crate) use deadline_error_conversions;
+
 /// Cloneable cooperative stop signal. Construction starts no threads, and
 /// cancelling one operation does not affect independently constructed signals.
 #[derive(Clone, Debug, Default)]
 pub struct Cancellation(Arc<std::sync::atomic::AtomicBool>);
 
 impl Cancellation {
-    /// Longest slice an uninterruptible wait should take between checks of
-    /// the signal, so a stop request is honored promptly without spinning.
-    pub const POLL_INTERVAL: Duration = Duration::from_millis(25);
-
     pub fn cancel(&self) {
         self.0.store(true, std::sync::atomic::Ordering::Release);
     }
@@ -328,37 +320,18 @@ impl crate::error::Classified for Cancelled {
     }
 }
 
-impl Cancelled {
-    pub fn into_boundary_error(self) -> crate::error::BoundaryError {
-        use crate::error::Classified;
-        crate::error::BoundaryError::with_source(
-            self.to_string(),
-            self.classification(),
-            Vec::new(),
-            self,
-        )
-    }
-}
-
 #[cfg(test)]
-mod cancellation_tests {
+mod tests {
     use super::*;
 
-    #[test]
-    fn remaining_before_treats_the_boundary_as_arrived() {
-        let now = Instant::now();
-        assert!(remaining_before(now - Duration::from_secs(1)).is_none());
-        assert!(remaining_before(now).is_none());
-        let remaining = remaining_before(now + Duration::from_secs(3600)).expect("future deadline");
-        assert!(remaining > Duration::from_secs(3599));
-    }
     #[test]
     fn cancellation_is_shared_only_with_clones_and_never_fakes_elapsed_time() {
         let signal = Cancellation::default();
         let independent = Cancellation::default();
         let deadline =
             Deadline::new(Duration::from_secs(60)).with_cancellation(Some(signal.clone()));
-        let wait = deadline.for_wait(Duration::from_secs(1)).unwrap();
+        let wait = Deadline::new(Duration::from_secs(1))
+            .with_cancellation(deadline.cancellation().cloned());
         signal.cancel();
         assert!(wait.check_cancelled().is_err());
         assert!(matches!(signal.check(), Err(Cancelled)));

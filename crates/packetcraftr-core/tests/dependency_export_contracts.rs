@@ -6,8 +6,8 @@ use packetcraftr_core::{
     analysis::{
         self, StreamRef, StreamTransport,
         export::{self, Selection},
-        pcap,
     },
+    capture_file,
     filter::Filter,
     frame::Frame,
     transform::{FragmentOptions, fragment},
@@ -79,12 +79,13 @@ fn conversation_export_keeps_fragments_control_direction_and_exact_source_record
     assert_eq!(plan.matched_streams, [selected]);
     assert_eq!(plan.selected_complete_datagrams, 1);
     input.rewind().unwrap();
-    let (wire, report) = pcap::select(&mut input, Vec::new(), Default::default(), |number, _| {
-        Ok(plan.source_frames.contains(&number))
-    })
-    .unwrap();
+    let (wire, report) =
+        capture_file::select(&mut input, Vec::new(), Default::default(), |number, _| {
+            Ok(plan.source_frames.contains(&number))
+        })
+        .unwrap();
     assert_eq!(report.frames_selected, count as u64 + 1);
-    let mut copied = pcap::Reader::new(Cursor::new(wire)).unwrap();
+    let mut copied = capture_file::Reader::new(Cursor::new(wire)).unwrap();
     for source in &frames[1..] {
         assert_eq!(
             copied.next_frame().unwrap().unwrap().bytes(),

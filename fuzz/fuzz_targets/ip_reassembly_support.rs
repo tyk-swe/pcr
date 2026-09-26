@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use packetcraftr_core::analysis::reassembly::ip::{
     Error, Fragment, FragmentDisposition, Ipv4DatagramKey, Ipv4Fragment, Ipv6DatagramKey,
-    Ipv6Fragment, Limits as ReassemblyLimits, MalformedError, OverlapPolicy, PushOutcome,
-    Reassembler,
+    Ipv6Fragment, Limits as ReassemblyLimits, Malformed, OverlapPolicy, PushOutcome, Reassembler,
 };
 use packetcraftr_core::analysis::scope::Interner;
 
@@ -52,9 +51,9 @@ pub(crate) fn run(data: &[u8]) -> Coverage {
             .expect("three bounded fixture scopes fit")
     });
     let mut reassemblers = [
-        Reassembler::new(limits.clone(), OverlapPolicy::Reject),
-        Reassembler::new(limits.clone(), OverlapPolicy::First),
-        Reassembler::new(limits, OverlapPolicy::Last),
+        Reassembler::new(limits.clone(), OverlapPolicy::Reject).unwrap(),
+        Reassembler::new(limits.clone(), OverlapPolicy::First).unwrap(),
+        Reassembler::new(limits, OverlapPolicy::Last).unwrap(),
     ];
     let start = Instant::now();
     let mut cursor = CONFIG_BYTES.min(data.len());
@@ -137,7 +136,7 @@ fn observe(result: Result<PushOutcome, Error>, coverage: &mut Coverage) {
             coverage.completed = true;
             note_disposition(&fragment.disposition, coverage);
         }
-        Err(Error::Malformed(MalformedError::ConflictingOverlap { .. })) => {
+        Err(Error::Malformed(Malformed::ConflictingOverlap { .. })) => {
             coverage.overlap = true;
         }
         Err(_) => {}

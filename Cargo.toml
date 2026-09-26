@@ -25,6 +25,7 @@ redundant_closure_for_method_calls = "warn"
 needless_raw_string_hashes = "warn"
 items_after_statements = "warn"
 match_same_arms = "warn"
+mod_module_files = "deny"
 
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
@@ -32,6 +33,7 @@ match_same_arms = "warn"
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
 packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.3" }
 packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.3" }
+packetcraftr-cli = { path = "crates/packetcraftr-cli", version = "0.5.0-beta.3", default-features = false }
 
 anstream = "1.0.0"
 getrandom = { version = "0.4.3", features = ["std"] }

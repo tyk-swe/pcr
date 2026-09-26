@@ -24,13 +24,13 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("fuzz authorization failed: {0}")]
-    Authorization(#[from] crate::BoundaryError),
-    #[error("fuzz execution failed at case {case_index}: {source}")]
+    #[error("fuzz authorization failed")]
+    Authorization(#[source] packetcraftr_core::error::BoundaryError),
+    #[error("fuzz execution failed at case {case_index}")]
     Execution {
         case_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     #[error("fuzz rate clock failed before case {case_index}")]
     Clock {
@@ -42,7 +42,7 @@ pub enum Error {
     InvalidEvidence { case_index: u64, message: String },
     /// The case's exact bytes could not be prepared on the route the executor
     /// reported, so its transmission cannot be verified.
-    #[error("fuzz executor returned invalid evidence at case {case_index}: {source}")]
+    #[error("fuzz executor returned invalid evidence at case {case_index}")]
     UnverifiableRoute {
         case_index: u64,
         #[source]
@@ -50,14 +50,14 @@ pub enum Error {
     },
     #[error("fuzz statistic accounting overflowed at case {case_index}")]
     StatisticsOverflow { case_index: u64 },
-    #[error("fuzz progressive output failed: {source}")]
+    #[error("fuzz progressive output failed")]
     Output {
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
 }
 
-packetcraftr_core::deadline_error_conversions!(Error);
+crate::deadline::deadline_error_conversions!(Error);
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
@@ -66,7 +66,7 @@ impl Classified for Error {
             Self::Campaign(error) => error.classification(),
             Self::InvalidLimit { .. } | Self::InvalidTimeout { .. } => Classification::new(
                 "cli.fuzz_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero rate, timeout, evidence, and duration limits"),
             ),
             Self::DurationLimit { .. } => Classification::new(
@@ -105,16 +105,16 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
-    /// carries a captured `causes` snapshot its own source chain no longer
-    /// holds.
+    /// The boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot instead, which its own source chain no
+    /// longer holds.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Campaign(error) => error.causes(),
-            Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
+            Self::Authorization(error) => error.as_causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }
@@ -131,9 +131,21 @@ pub(super) fn duration_limit(error: DeadlineExceeded) -> Error {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CaseErrors;
 
-impl crate::execution::PacingErrors for CaseErrors {
+impl crate::execution::Errors for CaseErrors {
     type Error = Error;
     type Step = u64;
+
+    fn invalid_limit(&self, field: &'static str, value: u64, reason: String) -> Error {
+        Error::InvalidLimit {
+            field,
+            value,
+            reason,
+        }
+    }
+
+    fn authorization(&self, source: packetcraftr_core::error::BoundaryError) -> Error {
+        Error::Authorization(source)
+    }
 
     fn duration_limit(&self, _case_index: u64, source: DeadlineExceeded) -> Error {
         duration_limit(source)
@@ -146,17 +158,15 @@ impl crate::execution::PacingErrors for CaseErrors {
     fn clock(&self, case_index: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Error {
         Error::Clock { case_index, source }
     }
-}
 
-impl crate::execution::Errors for CaseErrors {
-    fn execution(&self, case_index: u64, source: crate::BoundaryError) -> Error {
+    fn execution(&self, case_index: u64, source: packetcraftr_core::error::BoundaryError) -> Error {
         Error::Execution { case_index, source }
     }
 
-    fn invalid_evidence(&self, case_index: u64, message: String) -> Error {
+    fn invalid_evidence(&self, case_index: u64, source: crate::evidence::Error) -> Error {
         Error::InvalidEvidence {
             case_index,
-            message,
+            message: source.describe("case", "fuzz"),
         }
     }
 

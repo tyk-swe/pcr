@@ -1,19 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::error::Error as StdError;
-use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error as ThisError;
 
+use super::capture::Phase as CapturePhase;
+use super::interface::Id as InterfaceId;
 use super::link::Mode;
-use packetcraftr_core::error::{Classification, Classified, Kind};
-
-/// Shared native error source. Sharing keeps [`Error`] cloneable so capture
-/// sessions can return terminal failures repeatedly. An absent source on an
-/// error means a PacketcraftR invariant failed rather than a platform call.
-pub type SystemFault = Arc<dyn StdError + Send + Sync>;
+use super::unsupported::Unsupported;
+use packetcraftr_core::error::{Classification, Classified, Kind, Source, source_chain};
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
 ///
@@ -26,54 +22,54 @@ pub enum SendEvidenceFault {
     AcceptedBytesDiffer,
     #[error("provider timing has inconsistent monotonic endpoints")]
     InconsistentTiming,
-    #[error("provider-accepted bytes cannot form a capture record: {0}")]
+    #[error("provider-accepted bytes cannot form a capture record")]
     UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
 }
 
-/// Live interface, transmission, and capture failures. Native errors retain
-/// their typed [`SystemFault`] through rendering.
+/// Live interface, transmission, and capture failures.
+///
+/// A native failure keeps the platform's own error as its `source`, a shared
+/// [`Source`] handle so capture sessions can return a terminal failure
+/// repeatedly. An absent source means one of PacketcraftR's own checks failed
+/// (an invariant, a limit, or a provider's answer) rather than a platform call.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    #[error("live packet I/O is unavailable: {message}")]
-    Unsupported {
-        message: String,
-        #[source]
-        source: Option<SystemFault>,
-    },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     #[error("interface discovery failed: {message}")]
     InterfaceDiscovery {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("native dependency {dependency} is unavailable: {message}")]
     MissingDependency {
         dependency: &'static str,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("network device {interface} is unavailable: {message}")]
     Device {
         interface: String,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("live packet I/O requires additional privileges: {message}")]
     Privilege {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("packet transmission failed: {message}")]
     Send {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "packet transmission mode mismatch: expected {expected:?}, materialized route uses {actual:?}"
@@ -92,7 +88,7 @@ pub enum Error {
         bytes_sent: usize,
         wire_bytes: usize,
     },
-    #[error("packet transmission wire evidence is inconsistent: {fault}")]
+    #[error("packet transmission wire evidence is inconsistent")]
     InvalidSendEvidence {
         #[source]
         fault: SendEvidenceFault,
@@ -103,10 +99,12 @@ pub enum Error {
     Capture {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("native capture filter was rejected for {interface}: {message}")]
     InvalidCaptureFilter { interface: String, message: String },
+    #[error("capture filter is {length} bytes; the maximum is {maximum}")]
+    CaptureFilterTooLong { length: usize, maximum: usize },
     #[error("native capture filter installation failed for {interface}: {message}")]
     CaptureFilterInstallation { interface: String, message: String },
     #[error("capture did not become ready: {message}")]
@@ -155,17 +153,43 @@ pub enum Error {
     },
     #[error("capture backend returned invalid statistics: {message}")]
     InvalidCaptureStatistics { message: String },
+    #[error("invalid capture group: {reason}")]
+    InvalidCaptureGroup { reason: &'static str },
+    /// One source of a capture group failed; `source` is that session's own
+    /// failure and decides the classification.
+    #[error("capture source {index} ({}) failed during {phase}", .interface.name)]
+    CaptureSource {
+        index: usize,
+        interface: InterfaceId,
+        phase: CapturePhase,
+        #[source]
+        source: Box<Self>,
+    },
+    #[error("capture source {index} broke its provider contract: {reason}")]
+    CaptureSourceContract { index: usize, reason: &'static str },
+    #[error("capture group is not armed, not ready, or has been shut down")]
+    CaptureGroupState,
+    /// Stopping a capture group failed for more than one source: `first` in
+    /// source order, then every `remaining` failure.
+    #[error("capture group cleanup failed for {} sources", .remaining.len() + 1)]
+    CaptureCleanup {
+        #[source]
+        first: Box<Self>,
+        remaining: Vec<Self>,
+    },
+}
+
+impl Classified for SendEvidenceFault {
+    fn classification(&self) -> Classification {
+        live_io_invariant()
+    }
 }
 
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::Unsupported { .. } => classified(
-                "capability.unsupported",
-                Kind::Capability,
-                "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
-            ),
+            Self::Unsupported(unsupported) => unsupported.classification(),
             Self::MissingDependency { .. } => classified(
                 "capability.missing_dependency",
                 Kind::Capability,
@@ -204,6 +228,10 @@ impl Classified for Error {
             Self::InvalidCaptureFilter { .. } => classified_cli(
                 "cli.capture_filter",
                 "use a valid libpcap/Npcap BPF capture-filter expression",
+            ),
+            Self::CaptureFilterTooLong { .. } => classified_cli(
+                "cli.capture_filter",
+                "shorten the capture filter to the documented 64 KiB maximum",
             ),
             Self::CaptureFilterInstallation { .. } => classified(
                 "io.capture_filter",
@@ -252,17 +280,60 @@ impl Classified for Error {
                 Kind::Packet,
                 "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
             ),
+            Self::InvalidCaptureGroup { .. } => classified_cli(
+                "cli.capture_group",
+                "select 1 to 16 distinct interfaces whose shared queue limits hold one full snapshot each",
+            ),
+            Self::CaptureSourceContract { .. } | Self::CaptureGroupState => classified(
+                "internal.capture_group",
+                Kind::Internal,
+                "report the inconsistent capture provider or call order; do not treat the capture as complete",
+            ),
+            Self::CaptureSource { source, .. } => source.classification(),
+            Self::CaptureCleanup { first, .. } => first.classification(),
+            Self::InvalidSendEvidence { fault } => fault.classification(),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
-            | Self::InvalidSendEvidence { .. }
-            | Self::InvalidCaptureStatistics { .. } => classified(
-                "internal.live_io_invariant",
-                Kind::Internal,
-                "report the inconsistent provider result; do not reinterpret it as a successful operation",
-            ),
+            | Self::InvalidCaptureStatistics { .. } => live_io_invariant(),
         }
     }
+
+    /// A multi-source cleanup failure lists every remaining failure after the
+    /// first one's source chain.
+    fn causes(&self) -> Vec<String> {
+        let mut causes = source_chain(self);
+        if let Self::CaptureCleanup { remaining, .. } = self {
+            for failure in remaining {
+                causes.push(failure.to_string());
+                causes.extend(failure.causes());
+            }
+        }
+        causes
+    }
+}
+
+impl Error {
+    /// The failure a provider reports when its caller's deadline stopped it
+    /// while `operation` was in progress.
+    #[cfg(native_layer2)]
+    pub(crate) fn interrupted(
+        interrupted: packetcraftr_core::budget::Interrupted,
+        operation: &'static str,
+    ) -> Self {
+        match interrupted {
+            packetcraftr_core::budget::Interrupted::Cancelled(cancelled) => cancelled.into(),
+            _ => Self::DeadlineExceeded { operation },
+        }
+    }
+}
+
+fn live_io_invariant() -> Classification {
+    classified(
+        "internal.live_io_invariant",
+        Kind::Internal,
+        "report the inconsistent provider result; do not reinterpret it as a successful operation",
+    )
 }
 
 fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {
@@ -270,19 +341,12 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
 }
 
 fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
-    classified(code, Kind::Cli, remediation)
+    classified(code, Kind::Usage, remediation)
 }
 
 #[cfg(test)]
-pub(crate) mod testing {
+pub(crate) mod test_support {
     use super::Error;
-
-    /// Compares every field through `Debug`, including the non-comparable
-    /// [`SystemFault`](super::SystemFault) source.
-    #[must_use]
-    pub(crate) fn same_failure(left: &Error, right: &Error) -> bool {
-        format!("{left:?}") == format!("{right:?}")
-    }
 
     #[track_caller]
     pub(crate) fn assert_same_failure(actual: &Error, expected: &Error) {

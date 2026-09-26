@@ -9,14 +9,14 @@ use crate::error::{Classification, Kind};
 use crate::{
     build::Builder,
     decode::Dissector,
-    field::{FieldKind, FieldValue},
+    field::{FieldKind, FieldValue, Path},
     packet::Packet,
     registry::Registry,
 };
 
 use super::MAX_TARGET_FIELDS;
 use super::decode::dissect_built;
-use super::error::Error;
+use super::error::{BaseFault, Error, TargetFault};
 use super::mutation::{bounded_value_size, index_from, mutation_value, shrink_values};
 use super::report::{Case, CaseFailure, CaseOutcome, Mutation};
 use super::request::{Limits, Request, Strategy, Target};
@@ -27,6 +27,8 @@ use super::rng::case_seed;
 #[derive(Clone)]
 pub(super) struct ResolvedField {
     pub(super) target: Target,
+    /// `target.field`, parsed once when the target is resolved.
+    pub(super) path: Path,
     pub(super) protocol: String,
     pub(super) kind: FieldKind,
     pub(super) is_derived: bool,
@@ -47,7 +49,7 @@ where
         .start_accounting(Duration::ZERO)
         .map_err(Error::from)?;
     let started = Instant::now();
-    validate_base_shape(&packet, request.build.max_layers)?;
+    validate_base_shape(&packet, request.build.limits.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
     let fields = resolve_fields(&packet, &request.targets)?;
     let compatible_mutations = request
@@ -150,13 +152,15 @@ fn prepare_case(
     let field = &inputs.fields[field_index];
     let mut recipe = inputs.packet.clone();
     let Some(layer) = recipe.layer_mut(field.target.layer) else {
-        return Err(unresolved_target(field, "layer is outside the packet"));
-    };
-    let Some(original) = layer.field_path(&field.target.field) else {
         return Err(unresolved_target(
             field,
-            "field is not reflectively readable",
+            TargetFault::LayerOutOfRange {
+                layers: inputs.packet.len(),
+            },
         ));
+    };
+    let Some(original) = layer.field_path(&field.path) else {
+        return Err(unresolved_target(field, TargetFault::Unreadable));
     };
     let mutated_value = mutation_value(
         strategy,
@@ -175,7 +179,7 @@ fn prepare_case(
         value: mutated_value.clone(),
     };
     let shrink_values = shrink_values(&mutated_value, request.limits.max_shrink_steps);
-    let mutation_result = layer.set_field_path(&field.target.field, mutated_value);
+    let mutation_result = layer.set_field_path(&field.path, mutated_value);
     let retained_value_bytes =
         retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
     charge_retained_bytes(
@@ -222,9 +226,9 @@ fn new_case(
     }
 }
 
-fn mutation_failure(source: impl std::fmt::Display) -> CaseFailure {
-    CaseFailure::new(
-        format!("mutation was rejected: {source}"),
+fn mutation_failure(source: crate::field::Error) -> CaseFailure {
+    CaseFailure::with_source(
+        "mutation was rejected",
         Classification::new(
             "packet.fuzz_mutation",
             Kind::Packet,
@@ -232,7 +236,7 @@ fn mutation_failure(source: impl std::fmt::Display) -> CaseFailure {
                 "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
             ),
         ),
-        Vec::new(),
+        source,
     )
 }
 
@@ -281,8 +285,8 @@ fn build_case(
             counters.built_bytes = next_built_bytes;
         }
         Err(source) => {
-            case.error = Some(CaseFailure::new(
-                format!("mutated packet was rejected: {source}"),
+            case.error = Some(CaseFailure::with_source(
+                "mutated packet was rejected",
                 Classification::new(
                     "packet.fuzz_build",
                     Kind::Packet,
@@ -290,7 +294,7 @@ fn build_case(
                         "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
                     ),
                 ),
-                Vec::new(),
+                source,
             ));
         }
     }
@@ -300,10 +304,10 @@ fn build_case(
 fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> {
     if packet.len() > max_layers {
         return Err(Error::InvalidBasePacket {
-            message: format!(
-                "packet has {} layers, exceeding build.max_layers={max_layers}",
-                packet.len()
-            ),
+            reason: BaseFault::Layers {
+                layers: packet.len(),
+                max_layers,
+            },
         });
     }
     let mut fields = 0_usize;
@@ -311,13 +315,11 @@ fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), Error> 
         fields = fields
             .checked_add(layer.schema().fields.len())
             .ok_or_else(|| Error::InvalidBasePacket {
-                message: "reflected field-count arithmetic overflowed".to_owned(),
+                reason: BaseFault::FieldCountOverflow,
             })?;
         if fields > MAX_TARGET_FIELDS {
             return Err(Error::InvalidBasePacket {
-                message: format!(
-                    "packet schema exposes {fields} fields, exceeding hard limit {MAX_TARGET_FIELDS}"
-                ),
+                reason: BaseFault::SchemaFields { fields },
             });
         }
     }
@@ -393,10 +395,10 @@ fn charge_retained_bytes(total: &mut u64, value: u64, limit: u64) -> Result<(), 
     Ok(())
 }
 
-fn unresolved_target(field: &ResolvedField, message: &str) -> Error {
+fn unresolved_target(field: &ResolvedField, reason: TargetFault) -> Error {
     Error::InvalidTarget {
         target: field.target.clone(),
-        message: message.to_owned(),
+        reason,
     }
 }
 
@@ -414,9 +416,7 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                 }
                 if fields.len() >= MAX_TARGET_FIELDS {
                     return Err(Error::InvalidBasePacket {
-                        message: format!(
-                            "packet exposes more than {MAX_TARGET_FIELDS} reflected fields"
-                        ),
+                        reason: BaseFault::ReflectedFields,
                     });
                 }
                 fields.push(ResolvedField {
@@ -424,6 +424,7 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                         layer: layer_index,
                         field: field.name.to_owned(),
                     },
+                    path: Path::top_level(field.name),
                     protocol: layer.protocol_id().to_string(),
                     kind: field.kind,
                     is_derived: field.derived,
@@ -438,10 +439,9 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
 
     if requested.len() > MAX_TARGET_FIELDS {
         return Err(Error::InvalidBasePacket {
-            message: format!(
-                "request selects {} fields, exceeding hard limit {MAX_TARGET_FIELDS}",
-                requested.len()
-            ),
+            reason: BaseFault::Targets {
+                targets: requested.len(),
+            },
         });
     }
     let mut fields = Vec::with_capacity(requested.len());
@@ -456,36 +456,40 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
             .layer(target.layer)
             .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
-                message: format!("layer index is outside packet length {}", packet.len()),
+                reason: TargetFault::LayerOutOfRange {
+                    layers: packet.len(),
+                },
             })?;
         let path = target
             .field
-            .parse::<crate::field::Path>()
-            .map_err(|source| Error::InvalidTarget {
-                target: target.clone(),
-                message: source.to_string(),
+            .parse::<Path>()
+            .map_err(|source| Error::TargetField {
+                target: target.to_string(),
+                source,
             })?;
         let schema = path
             .schema(layer.schema())
             .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
-                message: "unregistered reflective path".to_owned(),
+                reason: TargetFault::UnregisteredPath,
             })?;
         let value = layer
-            .field_path(&target.field)
+            .field_path(&path)
             .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
-                message: "field is not reflectively readable".to_owned(),
+                reason: TargetFault::Unreadable,
             })?;
+        let kind = if path.is_nested() {
+            value.kind()
+        } else {
+            schema.kind
+        };
         fields.push(ResolvedField {
             target: target.clone(),
             protocol: layer.protocol_id().to_string(),
-            kind: if path.is_nested() {
-                value.kind()
-            } else {
-                schema.kind
-            },
+            kind,
             is_derived: schema.derived,
+            path,
         });
     }
     Ok(fields)

@@ -6,14 +6,31 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_core::diagnostic::Diagnostic as PacketDiagnostic;
-
 use super::contract::Error;
+use super::envelope::Published;
 use super::frame::{Captured, Timestamp};
-use packetcraftr::Stats;
+use super::probe::{ProbeStatus, Transport};
 
-use packetcraftr::probe::{ProbeStatus, Transport};
-use packetcraftr::traceroute::{Completion, ResponseKind};
+use packetcraftr::traceroute as library;
+
+published_enum! {
+    /// What kind of node answered a traceroute probe.
+    pub enum ResponseKind from library::ResponseKind {
+        Intermediate => "intermediate",
+        DestinationReached => "destination_reached",
+        Unreachable => "unreachable",
+    }
+}
+
+published_enum! {
+    /// Why a traceroute stopped.
+    pub enum Completion from library::Termination {
+        DestinationReached => "destination_reached",
+        Unreachable => "unreachable",
+        MaximumHops => "maximum_hops",
+        Timeout => "timeout",
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Probe {
@@ -64,11 +81,12 @@ pub struct Report {
     pub completion: Completion,
 }
 
-impl Report {
-    pub fn try_from_traceroute(
-        result: packetcraftr::traceroute::Report,
-    ) -> Result<(Self, Vec<PacketDiagnostic>, Stats), Error> {
-        let packetcraftr::traceroute::Report {
+/// A traceroute, with its diagnostics and totals.
+impl TryFrom<library::Aggregate> for Published<Report> {
+    type Error = Error;
+
+    fn try_from(result: library::Aggregate) -> Result<Self, Error> {
+        let library::Aggregate {
             target,
             resolved_addresses,
             destination,
@@ -76,21 +94,20 @@ impl Report {
             destination_port,
             hops,
             undecoded,
-            completion,
+            termination,
             diagnostics,
             stats,
         } = result;
         let hop_outputs = hops
             .into_iter()
             .map(|hop| {
-                let probe_outputs = hop
-                    .probes
-                    .into_iter()
-                    .map(try_from_probe)
-                    .collect::<Result<Vec<_>, Error>>()?;
                 Ok(Hop {
                     hop_limit: hop.hop_limit,
-                    probes: probe_outputs,
+                    probes: hop
+                        .probes
+                        .into_iter()
+                        .map(Probe::try_from)
+                        .collect::<Result<Vec<_>, Error>>()?,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -99,24 +116,24 @@ impl Report {
             .map(|evidence| {
                 Ok(Undecoded {
                     hop_limit: evidence.hop_limit,
-                    frame: Captured::try_from_frame(evidence.frame)?,
+                    frame: evidence.frame.try_into()?,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
-        Ok((
-            Self {
+        Ok(Self::new(
+            Report {
                 target,
                 resolved_addresses,
                 destination,
-                strategy,
+                strategy: strategy.into(),
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
-                completion,
+                completion: termination.into(),
             },
             diagnostics,
-            stats,
-        ))
+        )
+        .with_stats(stats))
     }
 }
 
@@ -143,67 +160,72 @@ pub enum Event {
     },
 }
 
-impl Event {
-    pub fn try_from_traceroute(
-        event: packetcraftr::traceroute::Event,
-    ) -> Result<(Self, Vec<PacketDiagnostic>), Error> {
-        let (event, diagnostics) = match event {
-            packetcraftr::traceroute::Event::Probe { target, probe } => (
-                Self::Probe {
-                    target: target.to_string(),
-                    probe: try_from_probe(probe)?,
-                },
-                Vec::new(),
-            ),
-            packetcraftr::traceroute::Event::Undecoded(evidence) => (
-                Self::Undecoded {
-                    hop_limit: evidence.hop_limit,
-                    frame: Captured::try_from_frame(evidence.frame)?,
-                },
-                Vec::new(),
-            ),
-            packetcraftr::traceroute::Event::Diagnostic(diagnostic) => {
-                (Self::Diagnostic {}, vec![diagnostic])
-            }
-        };
-        Ok((event, diagnostics))
-    }
+/// One traceroute event, with any diagnostic it carried for the envelope.
+impl TryFrom<library::Event> for Published<Event> {
+    type Error = Error;
 
-    pub fn complete_from_traceroute(
-        summary: packetcraftr::traceroute::Summary,
-    ) -> (Self, Vec<PacketDiagnostic>, Stats) {
-        (
-            Self::Complete {
-                target: summary.target,
-                resolved_addresses: summary.resolved_addresses,
-                destination: summary.destination,
-                strategy: summary.strategy,
-                destination_port: summary.destination_port,
-                completion: summary.completion,
-            },
-            Vec::new(),
-            summary.stats,
-        )
+    fn try_from(event: library::Event) -> Result<Self, Error> {
+        Ok(match event {
+            library::Event::Probe { target, probe } => Self::new(
+                Event::Probe {
+                    target: target.to_string(),
+                    probe: probe.try_into()?,
+                },
+                Vec::new(),
+            ),
+            library::Event::Undecoded(evidence) => Self::new(
+                Event::Undecoded {
+                    hop_limit: evidence.hop_limit,
+                    frame: evidence.frame.try_into()?,
+                },
+                Vec::new(),
+            ),
+            library::Event::Diagnostic(diagnostic) => {
+                Self::new(Event::Diagnostic {}, vec![diagnostic])
+            }
+        })
     }
 }
 
-fn try_from_probe(probe: packetcraftr::traceroute::ProbeEvidence) -> Result<Probe, Error> {
-    Ok(Probe {
-        sequence: probe.sequence,
-        hop_limit: probe.hop_limit,
-        attempt: probe.attempt,
-        strategy: probe.strategy,
-        destination: probe.destination,
-        destination_port: probe.destination_port,
-        status: probe.status,
-        response_kind: probe.response_kind,
-        responder: probe.responder,
-        sent_at: probe.sent_at.try_into()?,
-        received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
-        latency: probe.latency,
-        frame: probe.response.map(Captured::try_from_frame).transpose()?,
-        reason: probe.reason,
-    })
+/// The terminal record, with the run's totals.
+impl From<library::Report> for Published<Event> {
+    fn from(summary: library::Report) -> Self {
+        Self::new(
+            Event::Complete {
+                target: summary.target,
+                resolved_addresses: summary.resolved_addresses,
+                destination: summary.destination,
+                strategy: summary.strategy.into(),
+                destination_port: summary.destination_port,
+                completion: summary.termination.into(),
+            },
+            Vec::new(),
+        )
+        .with_stats(summary.stats)
+    }
+}
+
+impl TryFrom<library::ProbeEvidence> for Probe {
+    type Error = Error;
+
+    fn try_from(probe: library::ProbeEvidence) -> Result<Self, Error> {
+        Ok(Self {
+            sequence: probe.sequence,
+            hop_limit: probe.hop_limit,
+            attempt: probe.attempt,
+            strategy: probe.strategy.into(),
+            destination: probe.destination,
+            destination_port: probe.destination_port,
+            status: probe.status.into(),
+            response_kind: probe.response_kind.map(Into::into),
+            responder: probe.responder,
+            sent_at: probe.sent_at.try_into()?,
+            received_at: probe.received_at.map(Timestamp::try_from).transpose()?,
+            latency: probe.latency,
+            frame: probe.response.map(Captured::try_from).transpose()?,
+            reason: probe.reason,
+        })
+    }
 }
 
 impl crate::output::stream::StreamRecord for Event {

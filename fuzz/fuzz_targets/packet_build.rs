@@ -55,8 +55,10 @@ fn build_both_modes(registry: &Arc<Registry>, packet: &Packet) {
     for mode in [Mode::Strict, Mode::Permissive] {
         let options = BuildOptions {
             mode,
-            max_layers: MAX_LAYERS,
-            max_packet_size: MAX_PACKET_SIZE,
+            limits: packetcraftr_core::packet::Limits {
+                max_layers: MAX_LAYERS,
+                max_packet_size: MAX_PACKET_SIZE,
+            },
         };
         let Ok(built) = builder.build(packet.clone(), Context::default(), options) else {
             continue;
@@ -78,8 +80,10 @@ fn build_both_modes(registry: &Arc<Registry>, packet: &Packet) {
         let dissector = Dissector::new(Arc::clone(registry));
         if let Ok(frame) = Frame::new(SystemTime::now(), link_type, Bytes::clone(&built.bytes)) {
             let decode_options = DecodeOptions {
-                max_layers: MAX_LAYERS,
-                max_packet_size: MAX_PACKET_SIZE,
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: MAX_LAYERS,
+                    max_packet_size: MAX_PACKET_SIZE,
+                },
             };
             assert!(
                 dissector.decode(frame, decode_options).is_ok(),

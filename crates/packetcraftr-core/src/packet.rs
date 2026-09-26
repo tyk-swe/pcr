@@ -1,0 +1,281 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Ordered layer stacks, their size limits, and the link-layer values
+//! ([`MacAddress`], [`VlanTag`]) that packet inspection, routing, and neighbor
+//! discovery share.
+
+use std::fmt;
+
+use crate::layer::{Layer, Padding};
+
+mod limits;
+mod link;
+pub use limits::Limits;
+pub use link::{MacAddress, VlanKind, VlanTag};
+
+/// Exactly one ordered, arbitrary wire stack.
+///
+/// Cached encoded payload lengths are invalidated by every public operation
+/// that can change the layers or a layer's fields.
+#[derive(Clone, Default)]
+pub struct Packet {
+    layers: Vec<Box<dyn Layer>>,
+    encoded_payload_lengths: Vec<Option<usize>>,
+}
+
+impl Packet {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            layers: Vec::with_capacity(capacity),
+            encoded_payload_lengths: Vec::new(),
+        }
+    }
+
+    pub(crate) fn from_encoded_layers(
+        layers: Vec<Box<dyn Layer>>,
+        encoded_payload_lengths: Vec<Option<usize>>,
+    ) -> Self {
+        debug_assert_eq!(encoded_payload_lengths.len(), layers.len());
+        Self {
+            layers,
+            encoded_payload_lengths,
+        }
+    }
+
+    pub(crate) fn set_encoded_payload_lengths(
+        &mut self,
+        encoded_payload_lengths: Vec<Option<usize>>,
+    ) {
+        debug_assert_eq!(encoded_payload_lengths.len(), self.layers.len());
+        self.encoded_payload_lengths = encoded_payload_lengths;
+    }
+
+    pub fn len(&self) -> usize {
+        self.layers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+
+    pub fn push<L: Layer>(&mut self, layer: L) -> &mut Self {
+        self.push_boxed(Box::new(layer))
+    }
+
+    pub fn push_boxed(&mut self, layer: Box<dyn Layer>) -> &mut Self {
+        self.layers.push(layer);
+        self.invalidate_encoded_payload_lengths();
+        self
+    }
+
+    pub fn insert<L: Layer>(&mut self, index: usize, layer: L) -> Result<&mut Self, Error> {
+        if index > self.layers.len() {
+            return Err(Error::IndexOutOfBounds {
+                index,
+                len: self.layers.len(),
+            });
+        }
+        shift_padding_for_insert(&mut self.layers, index);
+        self.layers.insert(index, Box::new(layer));
+        self.invalidate_encoded_payload_lengths();
+        Ok(self)
+    }
+
+    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, Error> {
+        if index >= self.layers.len() {
+            return Err(Error::IndexOutOfBounds {
+                index,
+                len: self.layers.len(),
+            });
+        }
+        if removal_would_orphan_padding(&self.layers, index) {
+            return Err(Error::PaddingBoundaryRemoval { index });
+        }
+        let removed = self.layers.remove(index);
+        shift_padding_for_remove(&mut self.layers, index);
+        self.invalidate_encoded_payload_lengths();
+        Ok(removed)
+    }
+
+    pub fn replace<L: Layer>(&mut self, index: usize, layer: L) -> Result<Box<dyn Layer>, Error> {
+        let mut layer: Box<dyn Layer> = Box::new(layer);
+        let len = self.layers.len();
+        let slot = self
+            .layers
+            .get_mut(index)
+            .ok_or(Error::IndexOutOfBounds { index, len })?;
+        std::mem::swap(slot, &mut layer);
+        self.invalidate_encoded_payload_lengths();
+        Ok(layer)
+    }
+
+    pub fn get<T: Layer>(&self) -> Option<&T> {
+        self.layers
+            .iter()
+            .find_map(|layer| layer.downcast_ref::<T>())
+    }
+
+    /// Returns the first layer of type `T` for mutation.
+    ///
+    /// Obtaining mutable layer access invalidates cached encoded payload
+    /// lengths before the reference is returned. A failed type lookup does
+    /// not change the packet.
+    pub fn get_mut<T: Layer>(&mut self) -> Option<&mut T> {
+        let index = self.layers.iter().position(|layer| layer.is::<T>())?;
+        self.invalidate_encoded_payload_lengths();
+        self.layers.get_mut(index)?.downcast_mut::<T>()
+    }
+
+    pub fn layer(&self, index: usize) -> Option<&dyn Layer> {
+        self.layers.get(index).map(Box::as_ref)
+    }
+
+    /// Returns a layer at `index` for mutation.
+    ///
+    /// Obtaining mutable layer access invalidates cached encoded payload
+    /// lengths before the reference is returned. An out-of-bounds index does
+    /// not change the packet.
+    pub fn layer_mut(&mut self, index: usize) -> Option<&mut dyn Layer> {
+        if index >= self.layers.len() {
+            return None;
+        }
+        self.invalidate_encoded_payload_lengths();
+        Some(self.layers.get_mut(index)?.as_mut())
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {
+        self.layers.iter().map(Box::as_ref)
+    }
+
+    /// Returns the cached number of encoded bytes after the layer at `index`.
+    ///
+    /// The value includes trailing padding and is available only for packets
+    /// produced by the decoder or builder without subsequent mutable access.
+    pub fn encoded_payload_length(&self, index: usize) -> Option<usize> {
+        self.encoded_payload_lengths.get(index).copied().flatten()
+    }
+
+    fn invalidate_encoded_payload_lengths(&mut self) {
+        // Empty means every length is unknown; mutation neither scans the
+        // layer stack nor allocates placeholder entries.
+        self.encoded_payload_lengths.clear();
+    }
+}
+
+impl fmt::Debug for Packet {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = formatter.debug_list();
+        for layer in &self.layers {
+            list.entry(layer);
+        }
+        list.finish()
+    }
+}
+
+impl<L: Layer> FromIterator<L> for Packet {
+    fn from_iter<T: IntoIterator<Item = L>>(iter: T) -> Self {
+        let layers = iter
+            .into_iter()
+            .map(|layer| Box::new(layer) as Box<dyn Layer>)
+            .collect::<Vec<_>>();
+        let encoded_payload_lengths = Vec::new();
+        Self {
+            layers,
+            encoded_payload_lengths,
+        }
+    }
+}
+
+impl<L: Layer> Extend<L> for Packet {
+    fn extend<T: IntoIterator<Item = L>>(&mut self, iter: T) {
+        self.layers.extend(
+            iter.into_iter()
+                .map(|layer| Box::new(layer) as Box<dyn Layer>),
+        );
+        self.invalidate_encoded_payload_lengths();
+    }
+}
+
+impl<'a> IntoIterator for &'a Packet {
+    type Item = &'a dyn Layer;
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, Box<dyn Layer>>,
+        fn(&'a Box<dyn Layer>) -> &'a dyn Layer,
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.layers.iter().map(Box::as_ref)
+    }
+}
+
+/// Why a structural [`crate::packet::Packet`] operation was refused.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("layer index {index} is outside packet length {len}")]
+    IndexOutOfBounds { index: usize, len: usize },
+    #[error(
+        "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
+    )]
+    PaddingBoundaryRemoval { index: usize },
+}
+
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        use crate::error::{Classification, Kind};
+        match self {
+            Self::IndexOutOfBounds { .. } => Classification::new(
+                "cli.layer_index",
+                Kind::Usage,
+                Some("address a layer index inside the packet"),
+            ),
+            Self::PaddingBoundaryRemoval { .. } => Classification::new(
+                "packet.padding_boundary",
+                Kind::Packet,
+                Some("remove the padding layer before the layer its boundary depends on"),
+            ),
+        }
+    }
+}
+
+/// Whether removing the layer at `index` would leave a padding layer whose
+/// declared boundary no longer has a layer to sit outside of.
+fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
+    layers.iter().enumerate().any(|(padding_index, layer)| {
+        layer.downcast_ref::<Padding>().is_some_and(|padding| {
+            padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
+        })
+    })
+}
+
+fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
+    for layer in layers {
+        let Some(padding) = layer.downcast_mut::<Padding>() else {
+            continue;
+        };
+        if let Some(outside_layer) = &mut padding.outside_layer
+            && *outside_layer >= index
+        {
+            *outside_layer = outside_layer.saturating_add(1);
+        }
+    }
+}
+
+fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
+    for layer in layers {
+        let Some(padding) = layer.downcast_mut::<Padding>() else {
+            continue;
+        };
+        padding.outside_layer = match padding.outside_layer {
+            Some(outside_layer) if outside_layer > index => Some(outside_layer.saturating_sub(1)),
+            // The successor now occupies the removed index.
+            Some(outside_layer) if outside_layer == index => Some(index),
+            value => value,
+        };
+    }
+}

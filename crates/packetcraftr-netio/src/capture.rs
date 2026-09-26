@@ -2,16 +2,40 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Owned live-capture sessions and bounded queue configuration.
+//!
+//! A [`Session`] reads one or more sources. A provider arms a single-interface
+//! session; a [`Group`] composes up to [`MAX_SOURCES`] of them into one
+//! session, and each [`Captured`] record names the source that delivered it.
+//!
+//! # Native settings
+//!
+//! [`NativeSettings`], [`TimestampSource`], [`TimestampPrecision`],
+//! [`TimestampType`], [`Realized`], and [`RealizedSettings`] name pcap-API
+//! concepts (`pcap_set_buffer_size`, `pcap_set_tstamp_type`,
+//! `pcap_set_tstamp_precision`). They are public capture API by decision:
+//! both native backends are pcap-API backends, callers select these settings
+//! per request, and a report publishes the advertised timestamp types and
+//! what the backend realized. Every setting is optional, and `None` keeps the
+//! backend default, so a provider without such controls serves every default
+//! request; an explicit request it cannot apply is refused as
+//! [`Error::UnsupportedCaptureSetting`].
 
-pub mod group;
+#[cfg(native_layer2)]
+mod filter;
+mod group;
+#[cfg(native_layer2)]
+pub(crate) mod live;
+mod system;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use super::Error;
 use super::interface::Id as InterfaceId;
-use packetcraftr_core::budget::Cancellation;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::{Frame as CaptureFrame, LinkType};
+
+pub use group::{Group, GroupRequest, MAX_SOURCES, Phase, Source};
 
 /// Aggregate backend capture-queue frame ceiling; also the value
 /// [`Limits::default`] uses.
@@ -24,13 +48,17 @@ pub const MAX_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 /// [`Limits::default`] uses.
 pub const MAX_SNAP_LENGTH: usize = 16 * 1024 * 1024;
 
-/// Maximum blocking wait accepted by an owned capture session.
+/// Longest remainder a capture wait accepts from its caller's deadline.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// Longest native capture filter, in bytes, that a single session or a group
+/// accepts.
+pub const MAX_FILTER_BYTES: usize = 64 * 1024;
 
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub received_frames: u64,
     pub received_bytes: u64,
     pub dropped_frames: u64,
@@ -40,7 +68,7 @@ pub struct Statistics {
     pub receiver_dropped_frames: u64,
 }
 
-impl Statistics {
+impl Stats {
     /// Returns the fieldwise sum, or `None` if any counter would overflow.
     pub fn checked_add(self, value: Self) -> Option<Self> {
         Some(Self {
@@ -94,24 +122,46 @@ impl Statistics {
     }
 }
 
-/// Owned capture session: arm through [`Provider`], pass
-/// [`Session::wait_ready`] before transmission, read records, then call
-/// [`Session::shutdown`] to join the backend exactly once. Statistics are final
-/// only after successful shutdown.
+/// Owned capture session: arm through [`Provider`] (or compose a [`Group`]),
+/// pass [`Session::wait_ready`] before transmission, read records, then call
+/// [`Session::shutdown`] to join every backend. Stats are final only
+/// after successful shutdown.
+///
+/// A session reads [`Session::source_count`] sources, numbered from zero; a
+/// provider's single-interface session has exactly one. Every record carries
+/// its source number in [`Captured::source`].
+///
+/// Waits follow the [deadline convention](crate::deadline): they end at the
+/// caller's deadline and stop with [`Error::Cancelled`] once its cancellation
+/// is signaled. Shutdown keeps its own bounded lifecycle so cleanup still runs
+/// after cancellation.
 pub trait Session: Send {
-    /// Returns the backend-confirmed properties fixed when the session was activated.
+    /// Returns the backend-confirmed properties fixed when the session was
+    /// activated. A multi-source session reports its first source here.
     fn metadata(&self) -> &Metadata;
+    /// Number of activated sources.
+    fn source_count(&self) -> usize {
+        1
+    }
+    /// Activation metadata of `source`, the number a record carries in
+    /// [`Captured::source`]; `None` outside `0..source_count()`.
+    fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+        (source == 0).then(|| self.metadata())
+    }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
-    /// Waits up to `timeout` for a record. `Ok(None)` means no record was
+    /// A session not ready by `deadline` fails.
+    fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), Error>;
+    /// Waits until `deadline` for a record. `Ok(None)` means no record was
     /// delivered during this wait, not that none was captured or that the
-    /// session ended. Only [`Session::shutdown`] ends the session;
-    /// [`Session::statistics`] reports loss.
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
+    /// session ended. A spent deadline waits for nothing: it delivers a record
+    /// that is already queued, or `Ok(None)`. Only [`Session::shutdown`] ends
+    /// the session; [`Session::stats`] reports loss.
+    fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error>;
     /// Stops and joins capture; errors leave cleanup unconfirmed.
     fn shutdown(&mut self) -> Result<(), Error>;
-    /// Returns cumulative counters, including undelivered queue loss.
-    fn statistics(&self) -> Statistics;
+    /// Returns cumulative counters, including undelivered queue loss, summed
+    /// over every source.
+    fn stats(&self) -> Stats;
 }
 
 impl<T: Session + ?Sized> Session for Box<T> {
@@ -119,92 +169,28 @@ impl<T: Session + ?Sized> Session for Box<T> {
         (**self).metadata()
     }
 
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
-        (**self).wait_ready(timeout)
+    fn source_count(&self) -> usize {
+        (**self).source_count()
     }
 
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        (**self).next_captured_frame(timeout)
+    fn source_metadata(&self, source: usize) -> Option<&Metadata> {
+        (**self).source_metadata(source)
+    }
+
+    fn wait_ready(&mut self, deadline: &Deadline) -> Result<(), Error> {
+        (**self).wait_ready(deadline)
+    }
+
+    fn next_captured_frame(&mut self, deadline: &Deadline) -> Result<Option<Captured>, Error> {
+        (**self).next_captured_frame(deadline)
     }
 
     fn shutdown(&mut self) -> Result<(), Error> {
         (**self).shutdown()
     }
 
-    fn statistics(&self) -> Statistics {
-        (**self).statistics()
-    }
-}
-
-/// Capture adapter that polls cooperatively for user cancellation. Provider
-/// readiness and shutdown retain their original bounded lifecycle contracts.
-/// A provider must honor each requested wait; arbitrary blocked provider code
-/// cannot be preempted by this adapter.
-pub struct Cancellable<C> {
-    inner: C,
-    cancellation: Option<packetcraftr_core::budget::Cancellation>,
-}
-
-impl<C: Session> Cancellable<C> {
-    pub fn new(inner: C, cancellation: Option<packetcraftr_core::budget::Cancellation>) -> Self {
-        Self {
-            inner,
-            cancellation,
-        }
-    }
-
-    fn check(&self) -> Result<(), Error> {
-        if let Some(signal) = &self.cancellation {
-            signal.check()?;
-        }
-        Ok(())
-    }
-}
-
-impl<C: Session> Session for Cancellable<C> {
-    fn metadata(&self) -> &Metadata {
-        self.inner.metadata()
-    }
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
-        self.check()?;
-        self.inner.wait_ready(timeout)?;
-        self.check()
-    }
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        let start = Instant::now();
-        // Validate the original request before slicing it into polls: otherwise
-        // cancellation would accidentally admit waits beyond the provider contract.
-        if timeout > MAX_TIMEOUT || start.checked_add(timeout).is_none() {
-            return Err(Error::InvalidCaptureTimeout {
-                timeout,
-                maximum: MAX_TIMEOUT,
-            });
-        }
-        if self.cancellation.is_none() {
-            return self.inner.next_captured_frame(timeout);
-        }
-        loop {
-            self.check()?;
-            let poll_started = Instant::now();
-            let remaining = timeout.saturating_sub(poll_started.duration_since(start));
-            let poll_timeout = remaining.min(Cancellation::POLL_INTERVAL);
-            let frame = self.inner.next_captured_frame(poll_timeout)?;
-            self.check()?;
-            if frame.is_none() {
-                // Empty polls may return early, including after a backend stops.
-                std::thread::sleep(poll_timeout.saturating_sub(poll_started.elapsed()));
-                self.check()?;
-            }
-            if frame.is_some() || start.elapsed() >= timeout {
-                return Ok(frame);
-            }
-        }
-    }
-    fn shutdown(&mut self) -> Result<(), Error> {
-        self.inner.shutdown()
-    }
-    fn statistics(&self) -> Statistics {
-        self.inner.statistics()
+    fn stats(&self) -> Stats {
+        (**self).stats()
     }
 }
 
@@ -230,7 +216,11 @@ impl TimestampPrecision {
     }
 }
 
-packetcraftr_core::display_via_as_str!(TimestampPrecision);
+impl std::fmt::Display for TimestampPrecision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// Timestamp sources synchronized with the host system clock. Unsynchronized
 /// sources cannot be converted to host monotonic or Unix time; discovery
@@ -270,7 +260,11 @@ impl TimestampSource {
     }
 }
 
-packetcraftr_core::display_via_as_str!(TimestampSource);
+impl std::fmt::Display for TimestampSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// One packet timestamp type a native backend advertises for an interface.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -413,6 +407,27 @@ pub struct Request {
     pub native: NativeSettings,
 }
 
+impl Request {
+    /// Checks everything that needs no interface: queue limits, native
+    /// settings, and the [`MAX_FILTER_BYTES`] filter limit.
+    pub fn validate(&self) -> Result<(), Error> {
+        validate_filter_length(self.filter.as_deref())?;
+        self.limits.validate()?;
+        self.native.validate(&self.limits)
+    }
+}
+
+/// The filter-size limit single sessions and groups share.
+fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
+    match filter {
+        Some(filter) if filter.len() > MAX_FILTER_BYTES => Err(Error::CaptureFilterTooLong {
+            length: filter.len(),
+            maximum: MAX_FILTER_BYTES,
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Backend-confirmed properties of an activated capture session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Metadata {
@@ -434,6 +449,9 @@ static NEXT_RECORD_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, Debug)]
 pub struct Captured {
     identity: RecordIdentity,
+    /// The session source that delivered this record; `0` for a
+    /// single-interface session. A [`Group`] sets its own source number.
+    pub source: usize,
     pub frame: CaptureFrame,
     /// Monotonic ingress time; `None` cannot prove freshness.
     pub received_at: Option<Instant>,
@@ -458,6 +476,7 @@ impl Captured {
             .expect("capture record identity space exhausted");
         Self {
             identity: RecordIdentity(identity),
+            source: 0,
             frame,
             received_at,
         }
@@ -495,7 +514,11 @@ impl OverflowPolicy {
     }
 }
 
-packetcraftr_core::display_via_as_str!(OverflowPolicy);
+impl std::fmt::Display for OverflowPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -560,16 +583,24 @@ impl Limits {
 pub trait Provider: Send + Sync {
     type Capture: Session;
 
-    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error>;
+    /// Arms and activates one session, following the
+    /// [deadline convention](crate::deadline).
+    fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error>;
 
     /// The packet timestamp types this provider's backend advertises for
     /// `interface`, in backend order. Providers without native timestamp-type
-    /// discovery reject with [`Error::Unsupported`].
-    fn timestamp_types(&self, _interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-        Err(Error::Unsupported {
-            message: "this capture provider cannot enumerate timestamp types".to_owned(),
-            source: None,
-        })
+    /// discovery reject with [`Error::Unsupported`]. Discovery follows the
+    /// [deadline convention](crate::deadline).
+    fn timestamp_types(
+        &self,
+        _interface: &InterfaceId,
+        _deadline: &Deadline,
+    ) -> Result<Vec<TimestampType>, Error> {
+        Err(crate::Unsupported::new(
+            crate::NativeCapability::Capture,
+            "this capture provider cannot enumerate timestamp types",
+        )
+        .into())
     }
 }
 
@@ -583,28 +614,16 @@ pub struct SystemProvider;
 impl Provider for SystemProvider {
     type Capture = SystemSession;
 
-    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(request)
+    fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error> {
+        system::open(request, deadline)
     }
 
-    fn timestamp_types(&self, interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-        super::platform::capture_timestamp_types(interface)
-    }
-}
-
-impl<S, C> Provider for crate::PacketIo<S, C>
-where
-    S: Send + Sync,
-    C: Provider,
-{
-    type Capture = C::Capture;
-
-    fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
-        self.capture.arm_capture(request)
-    }
-
-    fn timestamp_types(&self, interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-        self.capture.timestamp_types(interface)
+    fn timestamp_types(
+        &self,
+        interface: &InterfaceId,
+        deadline: &Deadline,
+    ) -> Result<Vec<TimestampType>, Error> {
+        system::timestamp_types(interface, deadline)
     }
 }
 
@@ -613,73 +632,7 @@ fn is_zero(value: &u64) -> bool {
 }
 
 #[cfg(test)]
-mod cancellation_tests {
-    use super::*;
-    use packetcraftr_core::budget::Cancellation;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
-
-    struct Capture {
-        metadata: Metadata,
-        signal: Cancellation,
-        stopped: Arc<AtomicBool>,
-    }
-    impl Session for Capture {
-        fn metadata(&self) -> &Metadata {
-            &self.metadata
-        }
-        fn wait_ready(&mut self, _: Duration) -> Result<(), Error> {
-            Ok(())
-        }
-        fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-            assert!(timeout <= Duration::from_millis(25));
-            self.signal.cancel();
-            Ok(None)
-        }
-        fn shutdown(&mut self) -> Result<(), Error> {
-            self.stopped.store(true, Ordering::Release);
-            Ok(())
-        }
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
-        }
-    }
-    #[test]
-    fn cancellation_during_capture_wait_still_allows_explicit_shutdown() {
-        let signal = Cancellation::default();
-        let stopped = Arc::new(AtomicBool::new(false));
-        let capture = Capture {
-            metadata: Metadata {
-                interface: InterfaceId {
-                    name: "fixture".to_owned(),
-                    index: 1,
-                },
-                link_type: LinkType::IPV4,
-                snap_length: 128,
-                native: Default::default(),
-            },
-            signal: signal.clone(),
-            stopped: stopped.clone(),
-        };
-        let mut capture = Cancellable::new(capture, Some(signal));
-        capture.wait_ready(Duration::from_secs(1)).unwrap();
-        assert!(matches!(
-            capture.next_captured_frame(Duration::MAX),
-            Err(Error::InvalidCaptureTimeout { .. })
-        ));
-        assert!(matches!(
-            capture.next_captured_frame(Duration::from_secs(60)),
-            Err(Error::Cancelled(_))
-        ));
-        capture.shutdown().unwrap();
-        assert!(stopped.load(Ordering::Acquire));
-    }
-}
-
-#[cfg(test)]
-mod native_settings_tests {
+mod tests {
     use super::*;
 
     fn limits() -> Limits {

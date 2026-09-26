@@ -10,24 +10,22 @@ pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, O
 use std::borrow::BorrowMut;
 use std::time::Duration;
 
-use crate::progress::{EmitError, Runtime, Sink};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
-use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
-use crate::clock::{Clock, rate_delay};
+use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
-use crate::execution::{Context, Grant, Receipt};
-use crate::probe::{Error, ErrorKind, Executor};
-use crate::{SentPacket, Stats};
+use crate::execution::Executor;
+use crate::execution::{Context, Errors, Grant, Receipt, rate_delay};
+use crate::{Stats, evidence::SentPacket};
 
 /// A planned batch of probes executed together: one probe per scan batch,
 /// one hop's probes per traceroute batch. Never empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Batch<P> {
-    pub probes: Vec<P>,
-    pub timeout: Duration,
+pub(crate) struct Batch<P> {
+    pub(crate) probes: Vec<P>,
+    pub(crate) timeout: Duration,
     pub(crate) permit: ExecutionPermit,
     /// The first probe's operation-local sequence, recorded by the planner
     /// that built the batch; it names the batch in every error the runner
@@ -46,7 +44,7 @@ impl<P> Batch<P> {
 
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
-pub struct Execution {
+pub(crate) struct Evidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -56,9 +54,12 @@ pub struct Execution {
     pub(crate) stats: Stats,
 }
 
-impl Execution {
-    pub(crate) fn from_exchange(permit: ExecutionPermit, result: crate::exchange::Report) -> Self {
-        let crate::exchange::Report {
+impl Evidence {
+    pub(crate) fn from_exchange(
+        permit: ExecutionPermit,
+        result: crate::exchange::Aggregate,
+    ) -> Self {
+        let crate::exchange::Aggregate {
             sent,
             responses,
             unanswered: _,
@@ -83,7 +84,7 @@ impl Execution {
     }
 }
 
-impl Receipt for Execution {
+impl Receipt for Evidence {
     fn permit(&self) -> ExecutionPermit {
         self.permit
     }
@@ -92,33 +93,8 @@ impl Receipt for Execution {
     }
 }
 
-impl<P> crate::probe::Request for Batch<P> {
-    type Execution = Execution;
-}
-
-/// Wraps a caller's progressive callback in a bounded [`Sink`] and adapts both
-/// of its failures into the workflow's own error type, so every `run_with_events`
-/// entry point differs only in those two constructors.
-pub(crate) fn sink_observer<T, E>(
-    runtime: &Runtime,
-    emit: impl FnMut(T) -> Result<(), BoundaryError> + Send + 'static,
-    on_deadline: impl Fn(DeadlineExceeded) -> E,
-    on_output: impl Fn(BoundaryError) -> E,
-) -> Result<impl FnMut(T, &Deadline) -> Result<(), E>, E>
-where
-    T: Send + 'static,
-{
-    let sink = match Sink::new_in(runtime, emit) {
-        Ok(sink) => sink,
-        Err(source) => return Err(on_output(source)),
-    };
-    Ok(
-        move |event, deadline: &Deadline| match sink.emit(event, deadline) {
-            Ok(()) => Ok(()),
-            Err(EmitError::Deadline(error)) => Err(on_deadline(error)),
-            Err(EmitError::Output(source)) => Err(on_output(source)),
-        },
-    )
+impl<P> crate::execution::Step for Batch<P> {
+    type Evidence = Evidence;
 }
 
 pub(crate) trait Sequenced {
@@ -131,22 +107,23 @@ pub(crate) trait Sequenced {
 /// inside the step and processes it after. The runner supplies the pacing
 /// input: each batch waits for the previous batch's probe count at
 /// `probes_per_second`. A batch whose processing breaks ends the operation.
-pub(crate) fn run_batches<E, C, K, F>(
+pub(crate) fn run_batches<E, C, K, F, G>(
     batches: impl IntoIterator<Item = impl BorrowMut<Batch<K::Probe>>>,
     probes_per_second: Option<u32>,
     deadline: &mut Deadline,
     clock: &mut C,
     executor: &mut E,
-    evidence: &mut BatchEvidence<K, F>,
-) -> Result<Stats, Error>
+    evidence: &mut BatchEvidence<K, F, G>,
+) -> Result<Stats, G::Error>
 where
     E: Executor<Batch<K::Probe>>,
     C: Clock,
     K: Classifier,
-    F: FnMut(K::Event, &Deadline) -> Result<(), Error>,
+    F: FnMut(K::Event, &Deadline) -> Result<(), G::Error>,
+    G: Errors<Step = u64> + Copy,
 {
-    let workflow = evidence.workflow();
-    let mut context = Context::new(deadline, clock, workflow);
+    let errors = evidence.errors();
+    let mut context = Context::new(deadline, clock, errors);
     let mut previous_probes = None;
     let mut last_sequence = 0;
 
@@ -155,16 +132,12 @@ where
         let sequence = batch.sequence;
         context.enforce(sequence)?;
         if let Some(previous_probes) = previous_probes {
-            let delay = rate_delay(previous_probes, probes_per_second).ok_or_else(|| {
-                Error::new(
-                    workflow,
-                    ErrorKind::InvalidLimit {
-                        field: "probes_per_second",
-                        value: u64::from(probes_per_second.unwrap_or_default()),
-                        reason: "rate-delay arithmetic overflowed".to_owned(),
-                    },
-                )
-            })?;
+            let delay = rate_delay(
+                &errors,
+                "probes_per_second",
+                previous_probes,
+                probes_per_second,
+            )?;
             context.pace(sequence, delay)?;
         }
         previous_probes = Some(batch.probes.len());

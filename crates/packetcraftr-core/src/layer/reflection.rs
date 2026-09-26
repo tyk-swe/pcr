@@ -5,16 +5,69 @@
 
 use bytes::Bytes;
 
-use super::{FieldError, Schema};
-use crate::field::{FieldValue, WireValue, parse_mac};
+use super::Schema;
+use crate::field::{self, FieldValue, WireValue, parse_mac};
 
-/// Declares a layer's schema, getter/setter dispatch, and static layout.
-/// Encoding and decoding remain handwritten in protocol modules.
+/// Declares a layer's reflective schema, its [`Layer`](crate::layer::Layer)
+/// implementation, and a function returning its static field layout.
 ///
-/// Exported so sibling workspace crates can declare their own layers; it is not
-/// part of the documented public API.
+/// Built-in and custom protocols use the same declaration. Encoding and
+/// decoding stay handwritten in the protocol's
+/// [`LayerCodec`](crate::codec::LayerCodec).
+///
+/// The declaration names the schema function and the layer's protocol
+/// [`Id`](crate::layer::Id) and display name, then lists the fields in their
+/// public schema order. Each field gives its
+/// [`FieldKind`](crate::field::FieldKind) variant, whether it is derived by
+/// the encoder or required when building, a description, optional nested
+/// `children` schemas, and how it reflects:
+///
+/// - `reflect: member` reads and writes a struct member through
+///   [`ReflectiveField`];
+/// - `reflect_bounded: member, MAX` does the same but refuses unsigned values
+///   above a wire-width maximum;
+/// - `get |layer| expr, set |layer, value, name| expr` supplies handwritten
+///   accessors, which usually call [`reflect_get`]
+///   and [`reflect_set`].
+///
+/// A field may also give its byte range relative to the layer start with
+/// `layout: (start, end)`; the declared layout function returns those ranges
+/// in wire order. Aliases follow the field name as `"name" | "alias"`.
+///
+/// # Examples
+///
+/// ```
+/// use packetcraftr_core::field::FieldValue;
+/// use packetcraftr_core::layer::{Id, Layer};
+/// use packetcraftr_core::layout::ByteRange;
+/// use packetcraftr_core::reflective_layer;
+///
+/// #[derive(Clone, Debug, Default)]
+/// struct Beacon {
+///     interval: u16,
+/// }
+///
+/// reflective_layer! {
+///     fn beacon_schema() => { protocol: Id::new("beacon"), name: "Beacon" }
+///     impl Beacon {
+///         "interval" | "period" => {
+///             kind: Unsigned, derived: false, required: true,
+///             description: "Seconds between beacons",
+///             reflect: interval,
+///             layout: (0, 2)
+///         }
+///     }
+///     layout fn beacon_layout();
+/// }
+///
+/// let mut beacon = Beacon::default();
+/// beacon.set_field("period", FieldValue::Unsigned(30)).unwrap();
+/// assert_eq!(beacon.field("interval"), Some(FieldValue::Unsigned(30)));
+/// // The member is a `u16`, so a wider value is refused and named.
+/// assert!(beacon.set_field("interval", FieldValue::Unsigned(70_000)).is_err());
+/// assert_eq!(beacon_layout()[0].range, ByteRange::new(0, 2));
+/// ```
 #[macro_export]
-#[doc(hidden)]
 macro_rules! reflective_layer {
     (
         $schema_vis:vis fn $schema:ident() => {
@@ -73,14 +126,6 @@ macro_rules! reflective_layer {
                 Box::new(self.clone())
             }
 
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-                self
-            }
-
             fn field(&self, name: &str) -> Option<$crate::field::FieldValue> {
                 match name {
                     $(
@@ -99,7 +144,7 @@ macro_rules! reflective_layer {
                 &mut self,
                 name: &str,
                 value: $crate::field::FieldValue,
-            ) -> Result<(), $crate::layer::FieldError> {
+            ) -> Result<(), $crate::field::Error> {
                 match name {
                     $(
                         $field $(| $alias)* => $crate::reflective_layer!(
@@ -109,7 +154,7 @@ macro_rules! reflective_layer {
                             $(explicit $setter, $value, $field_name => $set)?
                         ),
                     )*
-                    _ => Err($crate::layer::FieldError::UnknownField {
+                    _ => Err($crate::field::Error::UnknownField {
                         protocol: $schema().protocol,
                         field: name.to_owned(),
                     }),
@@ -182,39 +227,64 @@ pub(crate) use reflective_layer;
 
 /// Why a reflective setter refused a value, before the field name and
 /// protocol that [`reflect_set`] attaches are known.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+///
+/// A refusal is not an error on its own: [`reflect_set`] turns it into a
+/// [`field::Error`] once the field is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ReflectiveFieldError {
-    #[error("value is not {0}")]
+pub enum Refusal {
+    /// The value is not of the named kind.
     WrongType(&'static str),
-    #[error("value is outside the field's range")]
+    /// The value has the right kind but does not fit the member.
     OutOfRange,
 }
 
-pub trait ReflectiveField: Sized {
-    fn reflective_value(&self) -> FieldValue;
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError>;
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongType(expected) => write!(formatter, "value is not {expected}"),
+            Self::OutOfRange => formatter.write_str("value is outside the field's range"),
+        }
+    }
 }
 
+/// A layer member that converts to and from a reflected [`FieldValue`].
+///
+/// Implemented for the unsigned integers, `i8`, `bool`, `String`, [`Bytes`],
+/// IPv4 and IPv6 addresses, six-byte MAC and eight-byte arrays, and
+/// [`WireValue`] over the unsigned integers. A custom member type implements
+/// it to be declared with `reflect:` in
+/// [`reflective_layer!`](crate::reflective_layer).
+pub trait ReflectiveField: Sized {
+    /// The member as a reflected value.
+    fn reflective_value(&self) -> FieldValue;
+    /// Replaces the member with `value`, or says why it cannot hold it.
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal>;
+}
+
+/// Reads a reflective member; the getter counterpart of [`reflect_set`] for
+/// handwritten accessors.
 pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
     value.reflective_value()
 }
 
+/// Writes a reflective member, turning a [`Refusal`] into a [`field::Error`]
+/// that names `field` in `schema`'s protocol.
 pub fn reflect_set<T: ReflectiveField>(
     target: &mut T,
     schema: &'static Schema,
     field: &str,
     value: FieldValue,
-) -> Result<(), FieldError> {
+) -> Result<(), field::Error> {
     target
         .set_reflective_value(value)
         .map_err(|error| match error {
-            ReflectiveFieldError::WrongType(expected) => FieldError::WrongType {
+            Refusal::WrongType(expected) => field::Error::WrongType {
                 protocol: schema.protocol,
                 field: field.to_owned(),
                 expected,
             },
-            ReflectiveFieldError::OutOfRange => FieldError::OutOfRange {
+            Refusal::OutOfRange => field::Error::OutOfRange {
                 protocol: schema.protocol,
                 field: field.to_owned(),
             },
@@ -229,11 +299,11 @@ pub fn reflect_set_bounded<T: ReflectiveField>(
     field: &str,
     value: FieldValue,
     maximum: u64,
-) -> Result<(), FieldError> {
+) -> Result<(), field::Error> {
     if let FieldValue::Unsigned(value) = value
         && value > maximum
     {
-        return Err(FieldError::OutOfRange {
+        return Err(field::Error::OutOfRange {
             protocol: schema.protocol,
             field: field.to_owned(),
         });
@@ -252,12 +322,12 @@ macro_rules! unsigned_reflective_field {
                 fn set_reflective_value(
                     &mut self,
                     value: FieldValue,
-                ) -> Result<(), ReflectiveFieldError> {
+                ) -> Result<(), Refusal> {
                     let FieldValue::Unsigned(value) = value else {
-                        return Err(ReflectiveFieldError::WrongType("unsigned"));
+                        return Err(Refusal::WrongType("unsigned"));
                     };
                     *self = <$ty>::try_from(value)
-                        .map_err(|_| ReflectiveFieldError::OutOfRange)?;
+                        .map_err(|_| Refusal::OutOfRange)?;
                     Ok(())
                 }
             }
@@ -272,15 +342,13 @@ impl ReflectiveField for i8 {
         FieldValue::Signed(i64::from(*self))
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let value = match value {
             FieldValue::Signed(value) => value,
-            FieldValue::Unsigned(value) => {
-                i64::try_from(value).map_err(|_| ReflectiveFieldError::OutOfRange)?
-            }
-            _ => return Err(ReflectiveFieldError::WrongType("signed")),
+            FieldValue::Unsigned(value) => i64::try_from(value).map_err(|_| Refusal::OutOfRange)?,
+            _ => return Err(Refusal::WrongType("signed")),
         };
-        *self = Self::try_from(value).map_err(|_| ReflectiveFieldError::OutOfRange)?;
+        *self = Self::try_from(value).map_err(|_| Refusal::OutOfRange)?;
         Ok(())
     }
 }
@@ -290,9 +358,9 @@ impl ReflectiveField for bool {
         (*self).into()
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let FieldValue::Bool(value) = value else {
-            return Err(ReflectiveFieldError::WrongType("bool"));
+            return Err(Refusal::WrongType("bool"));
         };
         *self = value;
         Ok(())
@@ -304,9 +372,9 @@ impl ReflectiveField for String {
         self.clone().into()
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let FieldValue::Text(value) = value else {
-            return Err(ReflectiveFieldError::WrongType("text"));
+            return Err(Refusal::WrongType("text"));
         };
         *self = value;
         Ok(())
@@ -318,9 +386,9 @@ impl ReflectiveField for Bytes {
         self.clone().into()
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let FieldValue::Bytes(value) = value else {
-            return Err(ReflectiveFieldError::WrongType("bytes"));
+            return Err(Refusal::WrongType("bytes"));
         };
         *self = value;
         Ok(())
@@ -334,16 +402,13 @@ macro_rules! ip_reflective_field {
                 (*self).into()
             }
 
-            fn set_reflective_value(
-                &mut self,
-                value: FieldValue,
-            ) -> Result<(), ReflectiveFieldError> {
+            fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
                 *self = match value {
                     FieldValue::$variant(value) => value,
-                    FieldValue::Text(value) => value
-                        .parse()
-                        .map_err(|_| ReflectiveFieldError::WrongType($expected))?,
-                    _ => return Err(ReflectiveFieldError::WrongType($expected)),
+                    FieldValue::Text(value) => {
+                        value.parse().map_err(|_| Refusal::WrongType($expected))?
+                    }
+                    _ => return Err(Refusal::WrongType($expected)),
                 };
                 Ok(())
             }
@@ -359,13 +424,13 @@ impl ReflectiveField for [u8; 6] {
         FieldValue::Mac(*self)
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let value = match value {
             FieldValue::Mac(value) => value,
             FieldValue::Text(value) => {
-                parse_mac(&value).ok_or(ReflectiveFieldError::WrongType("mac address"))?
+                parse_mac(&value).ok_or(Refusal::WrongType("mac address"))?
             }
-            _ => return Err(ReflectiveFieldError::WrongType("mac address")),
+            _ => return Err(Refusal::WrongType("mac address")),
         };
         *self = value;
         Ok(())
@@ -377,12 +442,12 @@ impl ReflectiveField for [u8; 8] {
         FieldValue::Bytes(Bytes::copy_from_slice(self))
     }
 
-    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), ReflectiveFieldError> {
+    fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
         let FieldValue::Bytes(value) = value else {
-            return Err(ReflectiveFieldError::WrongType("eight bytes"));
+            return Err(Refusal::WrongType("eight bytes"));
         };
         if value.len() != self.len() {
-            return Err(ReflectiveFieldError::WrongType("eight bytes"));
+            return Err(Refusal::WrongType("eight bytes"));
         }
         self.copy_from_slice(&value);
         Ok(())
@@ -400,22 +465,17 @@ macro_rules! wire_reflective_field {
                 }
             }
 
-            fn set_reflective_value(
-                &mut self,
-                value: FieldValue,
-            ) -> Result<(), ReflectiveFieldError> {
+            fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal> {
                 *self = match value {
                     FieldValue::Text(value) if value.eq_ignore_ascii_case("auto") => {
                         WireValue::Auto
                     }
-                    FieldValue::Unsigned(value) => WireValue::Exact(
-                        <$ty>::try_from(value).map_err(|_| ReflectiveFieldError::OutOfRange)?,
-                    ),
+                    FieldValue::Unsigned(value) => {
+                        WireValue::Exact(<$ty>::try_from(value).map_err(|_| Refusal::OutOfRange)?)
+                    }
                     FieldValue::Bytes(value) => WireValue::Raw(value),
                     _ => {
-                        return Err(ReflectiveFieldError::WrongType(
-                            "unsigned, bytes, or 'auto'",
-                        ));
+                        return Err(Refusal::WrongType("unsigned, bytes, or 'auto'"));
                     }
                 };
                 Ok(())

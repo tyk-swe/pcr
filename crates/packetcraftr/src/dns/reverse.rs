@@ -64,7 +64,8 @@ mod tests {
         ] {
             let name = reverse_name(address);
             assert!(name.len() <= 253);
-            crate::dns::canonical_query_name(&name).expect("derived name is a valid DNS name");
+            crate::dns::wire::canonical_query_name(&name)
+                .expect("derived name is a valid DNS name");
         }
     }
 }

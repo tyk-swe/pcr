@@ -352,9 +352,9 @@ fn validate_parent(
         )?;
     }
     if layer.version == 1
-        && parent.is_some_and(|parent| {
-            BuiltinProtocol::Gre.identifies(parent) && parent.field("sequence").is_none()
-        })
+        && parent
+            .and_then(|parent| parent.downcast_ref::<super::Gre>())
+            .is_some_and(|gre| gre.sequence.is_none())
     {
         strict_or_diagnostic(
             NAME,
@@ -477,10 +477,7 @@ mod tests {
         assert!(decoded.stop);
         assert!(decoded.diagnostics.is_empty());
         assert_eq!(decoded.next, [Discriminator(0)]);
-        assert_eq!(
-            decoded.layer.as_any().downcast_ref::<Erspan>(),
-            Some(&layer)
-        );
+        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
     }
 
     #[test]
@@ -527,10 +524,7 @@ mod tests {
 
         let decoded = decode(&encoded.prefix, Some(TYPE_III_PROTOCOL)).unwrap();
         assert_eq!(decoded.consumed, 20);
-        assert_eq!(
-            decoded.layer.as_any().downcast_ref::<Erspan>(),
-            Some(&layer)
-        );
+        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
     }
 
     #[test]

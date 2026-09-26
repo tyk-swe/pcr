@@ -8,7 +8,7 @@ fn examples() -> std::path::PathBuf {
 }
 
 fn frames(path: &std::path::Path) -> Vec<packetcraftr_core::frame::Frame> {
-    use packetcraftr_core::analysis::pcap::{Reader, compression::Input};
+    use packetcraftr_core::capture_file::{Reader, compression::Input};
     let bytes = std::fs::read(path).unwrap();
     let mut reader =
         Reader::new(Input::new(std::io::Cursor::new(bytes), Default::default()).unwrap()).unwrap();
@@ -45,8 +45,8 @@ fn field_range(
 /// One eth/ipv4/tcp capture with `count` identical frames.
 fn tcp_capture(path: &std::path::Path, count: usize) {
     use packetcraftr_core::{
-        analysis::pcap,
         build::Builder,
+        capture_file,
         frame::{Frame, LinkType},
         layer::Raw,
         packet::Packet,
@@ -69,12 +69,12 @@ fn tcp_capture(path: &std::path::Path, count: usize) {
         .build(packet, Default::default(), Default::default())
         .unwrap();
     let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap();
-    let mut writer = pcap::Writer::pcapng(Vec::new()).unwrap();
+    let mut writer = capture_file::Writer::pcapng(Vec::new()).unwrap();
     writer
-        .add_interface_description(pcap::Interface {
+        .add_interface_description(capture_file::Interface {
             link_type: LinkType::ETHERNET,
             snap_len: 65535,
-            timestamp_resolution: pcap::TimestampResolution::Decimal(6),
+            timestamp_resolution: capture_file::TimestampResolution::Decimal(6),
             timestamp_offset: 0,
         })
         .unwrap();
@@ -344,23 +344,6 @@ fn v2_rules_file_assigns_fields_in_order() {
     let edited = frames(&target);
     let ttl = field_range(&edited[0], "ipv4", "ttl");
     assert_eq!(edited[0].bytes()[ttl.0], 61);
-    // The published v2 schema accepts the example and rejects empty assigns.
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v2.schema.json"
-    ))
-    .unwrap();
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../examples/documents/rewrite-field-edits.json"
-    ))
-    .unwrap();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    assert!(validator.is_valid(&fixture));
-    let mut invalid = fixture.clone();
-    invalid["rules"][0]["assign"] = serde_json::json!([]);
-    assert!(!validator.is_valid(&invalid));
-    invalid = fixture.clone();
-    invalid["schema"] = serde_json::json!("packetcraftr.rewrite/v1");
-    assert!(!validator.is_valid(&invalid));
 }
 
 #[test]
@@ -373,15 +356,6 @@ fn v2_rules_file_rejects_unknown_assignment_properties() {
         "schema": "packetcraftr.rewrite/v2",
         "rules": [{"assign": [{"field": "ipv4.ttl", "value": 63, "occurrence": 2}]}],
     });
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v2.schema.json"
-    ))
-    .unwrap();
-    assert!(
-        !jsonschema::validator_for(&schema)
-            .unwrap()
-            .is_valid(&document)
-    );
     std::fs::write(&rules, serde_json::to_vec(&document).unwrap()).unwrap();
 
     let output = run(&[

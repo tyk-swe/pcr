@@ -5,9 +5,7 @@
 //! exact network-header reconstruction after a complete payload is admitted.
 
 use super::validation::{FAMILY_MISMATCH, IPV6_HEADER_LENGTH, Incoming, IncomingReconstruction};
-use super::{
-    Bytes, DatagramState, Ecn, Error, Family, MalformedError, Reconstruction, ResourceError,
-};
+use super::{Bytes, DatagramState, Ecn, Error, Family, Malformed, Reconstruction, Resource};
 
 /// A complete IPv4 datagram covers offset zero, so the fragment that filled
 /// it recorded the header every reconstruction needs.
@@ -29,7 +27,7 @@ pub(super) fn reconstructed_length(
     };
     prefix
         .checked_add(payload_length)
-        .ok_or(MalformedError::OffsetOverflow.into())
+        .ok_or(Malformed::OffsetOverflow.into())
 }
 
 /// Reconstructs the datagram from its complete payload, given as up to two
@@ -195,7 +193,7 @@ pub(super) fn materialize_reconstruction(
 fn copy_bytes(source: &[u8]) -> Result<Bytes, Error> {
     let mut copy = Vec::new();
     copy.try_reserve_exact(source.len())
-        .map_err(|_| ResourceError::AllocationFailed {
+        .map_err(|_| Resource::AllocationFailed {
             requested: source.len(),
         })?;
     copy.extend_from_slice(source);
@@ -206,7 +204,7 @@ fn payload_length(payload: [&[u8]; 2]) -> Result<usize, Error> {
     payload
         .iter()
         .try_fold(0usize, |total, part| total.checked_add(part.len()))
-        .ok_or(MalformedError::OffsetOverflow.into())
+        .ok_or(Malformed::OffsetOverflow.into())
 }
 
 fn reconstruct_ipv4(
@@ -220,47 +218,47 @@ fn reconstruct_ipv4(
         .len()
         .checked_add(payload_length)
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or(MalformedError::ReconstructedLength {
+        .ok_or(Malformed::ReconstructedLength {
             family: Family::Ipv4,
         })?;
     let mut datagram = Vec::new();
     let requested = usize::from(total_length);
     datagram
         .try_reserve_exact(requested)
-        .map_err(|_| ResourceError::AllocationFailed { requested })?;
+        .map_err(|_| Resource::AllocationFailed { requested })?;
     datagram.extend_from_slice(header);
     for part in payload {
         datagram.extend_from_slice(part);
     }
     datagram
         .get_mut(2..4)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .copy_from_slice(&total_length.to_be_bytes());
-    let tos = datagram.get_mut(1).ok_or(MalformedError::OffsetOverflow)?;
+    let tos = datagram.get_mut(1).ok_or(Malformed::OffsetOverflow)?;
     *tos = (*tos & 0xfc) | ecn.ipv4_tos_bits();
     let flags = datagram
         .get(6..8)
         .and_then(<[u8]>::first_chunk::<2>)
         .copied()
         .map(u16::from_be_bytes)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         & 0xc000;
     datagram
         .get_mut(6..8)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .copy_from_slice(&flags.to_be_bytes());
     datagram
         .get_mut(10..12)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .fill(0);
     let checksum = crate::protocol::checksum(
         datagram
             .get(..header.len())
-            .ok_or(MalformedError::OffsetOverflow)?,
+            .ok_or(Malformed::OffsetOverflow)?,
     );
     datagram
         .get_mut(10..12)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .copy_from_slice(&checksum.to_be_bytes());
     Ok(Bytes::from(datagram))
 }
@@ -275,34 +273,34 @@ fn reconstruct_ipv6(
     let extension_length = prefix
         .len()
         .checked_sub(IPV6_HEADER_LENGTH)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let payload_bytes = payload_length(payload)?;
     let payload_length = extension_length
         .checked_add(payload_bytes)
         .and_then(|length| u16::try_from(length).ok())
-        .ok_or(MalformedError::ReconstructedLength {
+        .ok_or(Malformed::ReconstructedLength {
             family: Family::Ipv6,
         })?;
     let requested = prefix
         .len()
         .checked_add(payload_bytes)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let mut datagram = Vec::new();
     datagram
         .try_reserve_exact(requested)
-        .map_err(|_| ResourceError::AllocationFailed { requested })?;
+        .map_err(|_| Resource::AllocationFailed { requested })?;
     datagram.extend_from_slice(prefix);
     for part in payload {
         datagram.extend_from_slice(part);
     }
     datagram
         .get_mut(4..6)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .copy_from_slice(&payload_length.to_be_bytes());
-    let traffic_class = datagram.get_mut(1).ok_or(MalformedError::OffsetOverflow)?;
+    let traffic_class = datagram.get_mut(1).ok_or(Malformed::OffsetOverflow)?;
     *traffic_class = (*traffic_class & !0x30) | ecn.ipv6_traffic_class_bits();
     *datagram
         .get_mut(predecessor_next_header_offset)
-        .ok_or(MalformedError::OffsetOverflow)? = next_header;
+        .ok_or(Malformed::OffsetOverflow)? = next_header;
     Ok(Bytes::from(datagram))
 }

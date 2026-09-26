@@ -147,7 +147,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     if !matches!(value, WireValue::Auto)
         || context
             .child
-            .is_none_or(|child| child.protocol_id().as_str() != "raw")
+            .is_none_or(|child| !child.is::<crate::layer::Raw>())
     {
         return Ok(());
     }
@@ -174,6 +174,23 @@ pub(crate) fn strict_or_diagnostic(
         return Err(invalid(name, message));
     }
     diagnostics.push(Diagnostic::warning(code, message).at_field(field));
+    Ok(())
+}
+
+/// Like [`strict_or_diagnostic`] for a typed failure: strict mode keeps it as
+/// the codec error's source, and permissive mode publishes its rendered chain.
+pub(crate) fn strict_or_diagnostic_error(
+    name: &'static str,
+    code: &'static str,
+    field: &'static str,
+    error: impl std::error::Error + Send + Sync + 'static,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), crate::codec::Error> {
+    if context.mode == crate::codec::Mode::Strict {
+        return Err(super::rejected(name, error));
+    }
+    diagnostics.push(Diagnostic::warning(code, crate::error::render(&error)).at_field(field));
     Ok(())
 }
 

@@ -191,7 +191,7 @@ impl Classified for Error {
         match self {
             Self::InvalidHostname { .. } => Classification::new(
                 "cli.live_target",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(
@@ -234,6 +234,21 @@ impl Classified for Error {
 /// operation deadline can stop subsequent work but cannot interrupt this call.
 pub trait Resolver: Send + Sync {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error>;
+}
+
+/// Resolves a declared target and authorizes every address it yields, for a
+/// workflow that takes a declared target (DNS servers, scan and traceroute
+/// targets).
+pub(crate) trait ResolveTarget {
+    /// Resolves `target` and authorizes each resolved address.
+    ///
+    /// # Errors
+    ///
+    /// Returns the resolution failure or the policy denial of any address.
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+    ) -> Result<Authorized, packetcraftr_core::error::BoundaryError>;
 }
 
 #[derive(Clone, Copy, Debug, Default)]

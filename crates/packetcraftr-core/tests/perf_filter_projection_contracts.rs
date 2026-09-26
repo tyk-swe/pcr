@@ -14,19 +14,18 @@
 mod common;
 
 use common::registry;
-use std::any::Any;
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use bytes::Bytes;
 use packetcraftr_core::decode::{self, DecodedPacket};
-use packetcraftr_core::field::FieldValue;
+use packetcraftr_core::field::{self, FieldValue};
 use packetcraftr_core::filter::{
-    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection, ProjectionError,
+    Context, DerivedPacket, Error, Filter, MAX_FILTER_TERMS, Options, Projection,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{FieldError, Layer, Malformed, Raw, Schema};
+use packetcraftr_core::layer::{Layer, Malformed, Raw, Schema};
 use packetcraftr_core::layout::PacketLayout;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_core::protocol::application::dns::{Dns, Question, Record, RecordValue};
@@ -233,17 +232,11 @@ impl Layer for CountedLayer {
             reads: Arc::clone(&self.reads),
         })
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
     fn field(&self, name: &str) -> Option<FieldValue> {
         self.reads.lock().expect("reads lock").push(name.to_owned());
         self.inner.field(name)
     }
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
         self.inner.set_field(name, value)
     }
 }
@@ -402,8 +395,8 @@ fn missing_timestamp_fails_the_whole_filter_before_any_short_circuit() {
         ("frame.number == 7 || (frame.time_epoch == 0 && udp)", true),
     ] {
         assert_eq!(
-            compiled(source).matches(&context(&tunnelled())),
-            Ok(expected),
+            compiled(source).matches(&context(&tunnelled())).ok(),
+            Some(expected),
             "{source}"
         );
     }
@@ -457,7 +450,11 @@ const LEAVES: &[&str] = &[
 fn assert_on_all(source: &str, expected: bool, contexts: &[(&str, Context<'_>)]) {
     let filter = compiled(source);
     for (name, context) in contexts {
-        assert_eq!(filter.matches(context), Ok(expected), "{source} on {name}");
+        assert_eq!(
+            filter.matches(context).ok(),
+            Some(expected),
+            "{source} on {name}"
+        );
     }
 }
 
@@ -498,8 +495,8 @@ fn two_leaf_combinations_match_per_leaf_semantics() {
                 ];
                 for (source, expected) in forms {
                     assert_eq!(
-                        compiled(&source).matches(context),
-                        Ok(expected),
+                        compiled(&source).matches(context).ok(),
+                        Some(expected),
                         "{source} on {name}"
                     );
                 }
@@ -536,8 +533,8 @@ fn three_leaf_combinations_match_per_leaf_semantics() {
                 ];
                 for (source, expected) in forms {
                     assert_eq!(
-                        compiled(&source).matches(&context),
-                        Ok(expected),
+                        compiled(&source).matches(&context).ok(),
+                        Some(expected),
                         "{source}"
                     );
                 }
@@ -613,8 +610,8 @@ fn seeded_deep_expressions_match_per_leaf_semantics() {
         for case in 0..400 {
             let (source, expected) = generated(&mut rng, &leaves, 4);
             assert_eq!(
-                compiled(&source).matches(context),
-                Ok(expected),
+                compiled(&source).matches(context).ok(),
+                Some(expected),
                 "generated case {case} on {name}: {source}"
             );
         }
@@ -650,17 +647,23 @@ fn parser_limits_long_chains_and_nested_not_hold() {
     ] {
         let source = format!("{}ipv4", "!".repeat(count));
         assert_eq!(
-            compiled(&source).matches(&context(&tunnelled)),
-            Ok(expected),
+            compiled(&source).matches(&context(&tunnelled)).ok(),
+            Some(expected),
             "{count} negations"
         );
     }
 
     // A long chain of the same operator stays left-associative and correct.
     let ors = vec!["ipv6"; 500].join(" || ");
-    assert_eq!(compiled(&ors).matches(&context(&tunnelled)), Ok(false));
+    assert_eq!(
+        compiled(&ors).matches(&context(&tunnelled)).ok(),
+        Some(false)
+    );
     let mixed = format!("{} || ipv4", vec!["ipv6"; 500].join(" || "));
-    assert_eq!(compiled(&mixed).matches(&context(&tunnelled)), Ok(true));
+    assert_eq!(
+        compiled(&mixed).matches(&context(&tunnelled)).ok(),
+        Some(true)
+    );
 
     for malformed in [
         "(",
@@ -730,17 +733,26 @@ fn repeated_layers_occurrences_inequality_and_derived_packets_hold() {
     // The UDP layer exists only on the derived packet; the suppressed ipv4
     // prefix means `ipv4.source` still reads the physical header's address.
     assert_eq!(
-        compiled("udp.dstport == 9 && ipv4.source == 192.0.2.1").matches(&context),
-        Ok(false)
-    );
-    assert_eq!(compiled("udp.dstport == 9").matches(&context), Ok(true));
-    assert_eq!(
-        compiled("ipv4.source == 192.0.2.1 || udp.dstport == 9").matches(&context),
-        Ok(true)
+        compiled("udp.dstport == 9 && ipv4.source == 192.0.2.1")
+            .matches(&context)
+            .ok(),
+        Some(false)
     );
     assert_eq!(
-        compiled("udp.stream == 11 && udp.dstport == 9").matches(&context),
-        Ok(true)
+        compiled("udp.dstport == 9").matches(&context).ok(),
+        Some(true)
+    );
+    assert_eq!(
+        compiled("ipv4.source == 192.0.2.1 || udp.dstport == 9")
+            .matches(&context)
+            .ok(),
+        Some(true)
+    );
+    assert_eq!(
+        compiled("udp.stream == 11 && udp.dstport == 9")
+            .matches(&context)
+            .ok(),
+        Some(true)
     );
 }
 
@@ -764,8 +776,8 @@ fn missing_fields_and_flag_semantics_are_unchanged() {
     ];
     for (source, expected) in cases {
         assert_eq!(
-            compiled(source).matches(&context(&ipv6_tcp)),
-            Ok(*expected),
+            compiled(source).matches(&context(&ipv6_tcp)).ok(),
+            Some(*expected),
             "{source}"
         );
     }
@@ -903,7 +915,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(single.values(&tunnelled_context, 1).is_ok());
     assert!(matches!(
         single.values(&tunnelled_context, 0),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Two repeated IPv4 addresses: `"192.0.2.1"` is 11, `"10.0.0.1"` is 10,
@@ -912,7 +924,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(list.values(&tunnelled_context, 24).is_ok());
     assert!(matches!(
         list.values(&tunnelled_context, 23),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // A missing column accounts for a `null` cell: exactly four bytes.
@@ -920,7 +932,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(missing.values(&tunnelled_context, 4).is_ok());
     assert!(matches!(
         missing.values(&tunnelled_context, 3),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Escaped text counts escape bytes, not runes: `a"b\n` encodes as the
@@ -937,7 +949,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert_eq!(row, vec![Some(FieldValue::Text("a\"b\n".to_owned()))]);
     assert!(matches!(
         escaped.values(&context(&text), 7),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 
     // Raw bytes cost two hex digits each plus quotes.
@@ -946,7 +958,7 @@ fn projection_budget_is_enforced_at_exact_cell_boundaries() {
     assert!(raw.values(&context(&bytes), 8).is_ok());
     assert!(matches!(
         raw.values(&context(&bytes), 7),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 }
 
@@ -1011,7 +1023,7 @@ fn projection_values_match_rendered_cells_at_numeric_and_address_edges() {
     assert!(v6_projection.values(&context(&v6), 28).is_ok());
     assert!(matches!(
         v6_projection.values(&context(&v6), 27),
-        Err(ProjectionError::Limit { .. })
+        Err(Error::ProjectionLimit { .. })
     ));
 }
 

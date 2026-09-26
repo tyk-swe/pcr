@@ -1,22 +1,48 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use crate::analysis::pcap::{DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as CaptureLimits};
-use crate::analysis::reassembly::ip::{Limits as IpReassemblyLimits, OverlapPolicy};
-use crate::analysis::reassembly::tcp::{
-    Limits as TcpReassemblyLimits, MAX_BYTES_PER_FLOW as MAX_TCP_BYTES_PER_FLOW,
+use crate::analysis::reassembly::ip::{self, Limits as IpReassemblyLimits, OverlapPolicy};
+use crate::analysis::reassembly::tcp::{self, Limits as TcpReassemblyLimits};
+use crate::capture_file::{
+    Budget as CaptureBudget, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError,
+    Limits as CaptureLimits,
 };
 use crate::filter::Filter;
 use crate::frame::DEFAULT_SIZE_LIMIT;
 
-use crate::analysis::Error;
+use crate::analysis::{Constraint, Error};
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
+/// A TCP conversation occupies one reassembly flow per direction.
+pub(super) const DIRECTIONS_PER_CONVERSATION: usize = 2;
+
+/// The offline analysis name of a TCP reassembly limit.
+const fn tcp_field(field: tcp::Field) -> &'static str {
+    match field {
+        tcp::Field::MaxFlows => "max_tcp_flows",
+        tcp::Field::MaxBytesPerFlow => "max_tcp_bytes_per_flow",
+        tcp::Field::MaxAggregateBytes => "max_tcp_reassembly_bytes",
+        tcp::Field::MaxSegmentsPerFlow => "max_tcp_segments_per_flow",
+        tcp::Field::IdleExpiry => "tcp_idle_expiry",
+    }
+}
+
+/// The offline analysis name of an IP reassembly limit.
+const fn ip_field(field: ip::Field) -> &'static str {
+    match field {
+        ip::Field::MaxDatagrams => "max_ip_datagrams",
+        ip::Field::MaxFragmentsPerDatagram => "max_ip_fragments_per_datagram",
+        ip::Field::MaxBytesPerDatagram => "max_ip_bytes_per_datagram",
+        ip::Field::MaxAggregateBytes => "max_ip_reassembly_bytes",
+        ip::Field::MaxRetainedOutcomes => "max_ip_outcomes",
+        ip::Field::IdleExpiry => "ip_idle_expiry",
+    }
+}
 
 /// Complete per-run resource limits, including both reassembly engines. Frame
-/// and byte budgets count all input, including filtered frames; duration bounds
+/// and byte limits count all input, including filtered frames; duration bounds
 /// processing time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -29,41 +55,22 @@ pub struct Limits {
     pub max_frame_bytes: usize,
     /// Capture-global cumulative distinct conversations per transport. Expiry
     /// releases payload state, not these indices. A TCP conversation additionally
-    /// occupies one reassembly flow per direction.
+    /// occupies one reassembly flow per direction, so the default
+    /// [`tcp.max_flows`](TcpReassemblyLimits::max_flows) is twice this default.
     pub max_flows: usize,
     /// Conservative retained scope/path metadata charge, separate from payload state.
     pub max_scope_bytes: usize,
-    /// Retained TCP payload bytes in one direction. This is also the
-    /// reordering window, so it may not exceed
-    /// [`reassembly::tcp::MAX_BYTES_PER_FLOW`](crate::analysis::reassembly::tcp::MAX_BYTES_PER_FLOW).
-    pub max_tcp_bytes_per_flow: usize,
-    /// Retained TCP payload and conservatively charged metadata across the
-    /// run. This is the largest single memory ceiling an analysis run has.
-    pub max_tcp_reassembly_bytes: usize,
-    /// Pending out-of-order segments retained for any one TCP direction.
-    pub max_tcp_segments_per_flow: usize,
-    /// Capture-time inactivity after which a TCP flow is evicted.
-    pub tcp_idle_expiry: Duration,
-    /// Concurrent IPv4 and IPv6 datagrams retained for fragment reassembly.
-    pub max_ip_datagrams: usize,
-    /// Physical fragments accepted for any one retained datagram.
-    pub max_ip_fragments_per_datagram: usize,
-    /// Fragmentable payload bytes accepted for any one datagram.
-    pub max_ip_bytes_per_datagram: usize,
-    /// Retained IP payload, derived cascade buffers, and conservatively
-    /// charged metadata across the run.
-    pub max_ip_reassembly_bytes: usize,
-    /// Per-datagram terminal outcomes retained for aggregate reporting.
-    pub max_ip_outcomes: usize,
-    /// Capture-time inactivity after which an incomplete datagram expires.
-    pub ip_idle_expiry: Duration,
+    /// The TCP reassembler's limits. Its aggregate byte ceiling is the largest
+    /// single memory ceiling an analysis run has.
+    pub tcp: TcpReassemblyLimits,
+    /// The IP fragment reassembler's limits. Its aggregate byte ceiling also
+    /// covers derived cascade buffers.
+    pub ip: IpReassemblyLimits,
     pub max_duration: Duration,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        let ip = IpReassemblyLimits::default();
-        let tcp = TcpReassemblyLimits::default();
         Self {
             max_provenance_bytes: 16 * 1024 * 1024,
             max_frames: DEFAULT_STREAM_FRAMES,
@@ -71,22 +78,21 @@ impl Default for Limits {
             max_frame_bytes: DEFAULT_SIZE_LIMIT,
             max_flows: DEFAULT_MAX_ANALYSIS_FLOWS,
             max_scope_bytes: 16 * 1024 * 1024,
-            max_tcp_bytes_per_flow: tcp.max_bytes_per_flow,
-            max_tcp_reassembly_bytes: tcp.max_aggregate_bytes,
-            max_tcp_segments_per_flow: tcp.max_segments_per_flow,
-            tcp_idle_expiry: tcp.idle_expiry,
-            max_ip_datagrams: ip.max_datagrams,
-            max_ip_fragments_per_datagram: ip.max_fragments_per_datagram,
-            max_ip_bytes_per_datagram: ip.max_bytes_per_datagram,
-            max_ip_reassembly_bytes: ip.max_aggregate_bytes,
-            max_ip_outcomes: ip.max_retained_outcomes,
-            ip_idle_expiry: ip.idle_expiry,
+            tcp: TcpReassemblyLimits {
+                max_flows: DEFAULT_MAX_ANALYSIS_FLOWS * DIRECTIONS_PER_CONVERSATION,
+                ..TcpReassemblyLimits::default()
+            },
+            ip: IpReassemblyLimits::default(),
             max_duration: Duration::from_secs(3_600),
         }
     }
 }
 
 impl Limits {
+    /// Rejects a zero limit, a per-frame byte limit above `max_bytes`, and
+    /// any reassembly limit its engine refuses. Reassembly fields are named
+    /// as the offline analysis options spell them, such as
+    /// `max_tcp_bytes_per_flow`.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
@@ -95,113 +101,106 @@ impl Limits {
             ("max_flows", self.max_flows as u64),
             ("max_scope_bytes", self.max_scope_bytes as u64),
             ("max_provenance_bytes", self.max_provenance_bytes as u64),
-            ("max_tcp_bytes_per_flow", self.max_tcp_bytes_per_flow as u64),
+            (tcp_field(tcp::Field::MaxFlows), self.tcp.max_flows as u64),
             (
-                "max_tcp_reassembly_bytes",
-                self.max_tcp_reassembly_bytes as u64,
+                tcp_field(tcp::Field::MaxBytesPerFlow),
+                self.tcp.max_bytes_per_flow as u64,
             ),
             (
-                "max_tcp_segments_per_flow",
-                self.max_tcp_segments_per_flow as u64,
-            ),
-            ("max_ip_datagrams", self.max_ip_datagrams as u64),
-            (
-                "max_ip_fragments_per_datagram",
-                self.max_ip_fragments_per_datagram as u64,
+                tcp_field(tcp::Field::MaxAggregateBytes),
+                self.tcp.max_aggregate_bytes as u64,
             ),
             (
-                "max_ip_bytes_per_datagram",
-                self.max_ip_bytes_per_datagram as u64,
+                tcp_field(tcp::Field::MaxSegmentsPerFlow),
+                self.tcp.max_segments_per_flow as u64,
             ),
             (
-                "max_ip_reassembly_bytes",
-                self.max_ip_reassembly_bytes as u64,
+                ip_field(ip::Field::MaxDatagrams),
+                self.ip.max_datagrams as u64,
             ),
-            ("max_ip_outcomes", self.max_ip_outcomes as u64),
+            (
+                ip_field(ip::Field::MaxFragmentsPerDatagram),
+                self.ip.max_fragments_per_datagram as u64,
+            ),
+            (
+                ip_field(ip::Field::MaxBytesPerDatagram),
+                self.ip.max_bytes_per_datagram as u64,
+            ),
+            (
+                ip_field(ip::Field::MaxAggregateBytes),
+                self.ip.max_aggregate_bytes as u64,
+            ),
+            (
+                ip_field(ip::Field::MaxRetainedOutcomes),
+                self.ip.max_retained_outcomes as u64,
+            ),
         ] {
             if value == 0 {
                 return Err(Error::InvalidLimit {
                     field,
                     value,
-                    reason: "must be non-zero",
+                    reason: Constraint::NonZero,
                 });
             }
+        }
+        for (field, expiry) in [
+            (tcp_field(tcp::Field::IdleExpiry), self.tcp.idle_expiry),
+            (ip_field(ip::Field::IdleExpiry), self.ip.idle_expiry),
+        ] {
+            if expiry.is_zero() {
+                return Err(Error::InvalidLimit {
+                    field,
+                    value: 0,
+                    reason: Constraint::NonZero,
+                });
+            }
+        }
+        if let Some((field, value, reason)) = self.tcp.violation() {
+            return Err(Error::InvalidLimit {
+                field: tcp_field(field),
+                value,
+                reason,
+            });
+        }
+        if let Some((field, value, reason)) = self.ip.violation() {
+            return Err(Error::InvalidLimit {
+                field: ip_field(field),
+                value,
+                reason,
+            });
         }
         if self.max_frame_bytes as u64 > self.max_bytes {
             return Err(Error::InvalidLimit {
                 field: "max_frame_bytes",
                 value: self.max_frame_bytes as u64,
-                reason: "cannot exceed max_bytes",
-            });
-        }
-        // The per-flow window doubles as the reordering window, so a value
-        // reaching the TCP serial half-space makes a retransmission and a
-        // wrapped future segment indistinguishable. Refusing it here means a
-        // run fails before reading input rather than on its first segment.
-        if self.max_tcp_bytes_per_flow > MAX_TCP_BYTES_PER_FLOW {
-            return Err(Error::InvalidLimit {
-                field: "max_tcp_bytes_per_flow",
-                value: self.max_tcp_bytes_per_flow as u64,
-                reason: "reaches the TCP serial-number half-space",
+                reason: Constraint::AtMostMaxBytes,
             });
         }
         if self.max_duration.is_zero() {
             return Err(Error::InvalidLimit {
                 field: "max_duration",
                 value: 0,
-                reason: "must be non-zero",
+                reason: Constraint::NonZero,
             });
-        }
-        for (field, expiry) in [
-            ("tcp_idle_expiry", self.tcp_idle_expiry),
-            ("ip_idle_expiry", self.ip_idle_expiry),
-        ] {
-            if expiry.is_zero() {
-                return Err(Error::InvalidLimit {
-                    field,
-                    value: 0,
-                    reason: "must be non-zero",
-                });
-            }
-            if Instant::now().checked_add(expiry).is_none() {
-                return Err(Error::InvalidLimit {
-                    field,
-                    value: u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
-                    reason: "exceeds the platform monotonic-clock range",
-                });
-            }
         }
         Ok(())
     }
 
-    pub(super) fn capture(&self) -> CaptureLimits {
-        CaptureLimits {
+    /// The input frame and byte budget. Its limits are this struct's
+    /// `max_frames` and `max_bytes`, so a refusal names those fields.
+    pub(super) fn capture_budget(&self) -> Result<CaptureBudget, Error> {
+        CaptureBudget::new(CaptureLimits {
             max_frames: self.max_frames,
             max_bytes: self.max_bytes,
-        }
-    }
-
-    pub(super) fn ip_reassembly(&self) -> IpReassemblyLimits {
-        IpReassemblyLimits {
-            max_datagrams: self.max_ip_datagrams,
-            max_fragments_per_datagram: self.max_ip_fragments_per_datagram,
-            max_bytes_per_datagram: self.max_ip_bytes_per_datagram,
-            max_aggregate_bytes: self.max_ip_reassembly_bytes,
-            max_retained_outcomes: self.max_ip_outcomes,
-            idle_expiry: self.ip_idle_expiry,
-        }
-    }
-
-    /// The TCP reassembler's complete budget set. `max_flows` counts
-    /// conversations, which occupy one reassembly flow per direction.
-    pub(super) fn tcp_reassembly(&self, directions: usize) -> TcpReassemblyLimits {
-        TcpReassemblyLimits {
-            max_flows: self.max_flows.saturating_mul(directions),
-            max_bytes_per_flow: self.max_tcp_bytes_per_flow,
-            max_aggregate_bytes: self.max_tcp_reassembly_bytes,
-            max_segments_per_flow: self.max_tcp_segments_per_flow,
-            idle_expiry: self.tcp_idle_expiry,
-        }
+        })
+        .map_err(|error| match error {
+            CaptureError::InvalidLimit { field, value } => Error::InvalidLimit {
+                field,
+                value,
+                reason: Constraint::NonZero,
+            },
+            source => Error::Capture { number: 0, source },
+        })
     }
 }
 
@@ -271,6 +270,12 @@ pub struct Options<'a> {
     /// or SNI selection to completed sessions instead. Matching observations may
     /// first expose stream indices out of numerical order.
     pub filter: Option<&'a Filter>,
+    /// Keeps only the frames of one conversation, applied with the filter
+    /// and matching exactly what `tcp.stream == N` or `udp.stream == N`
+    /// matches. Indices are assigned before selection, so the plan must
+    /// index the selected transport; [`Session`](crate::analysis::Session) derives
+    /// such a plan from its selector.
+    pub stream: Option<crate::analysis::StreamRef>,
     /// Inclusive capture-time bounds applied with the filter. Comparison uses
     /// the timestamp's full precision and assumes nothing about ordering, so
     /// regressing clocks still select by value. Like the filter, bounds apply

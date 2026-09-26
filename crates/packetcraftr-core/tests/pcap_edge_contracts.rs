@@ -7,9 +7,9 @@ use common::pcap::{frame_at, pcap_bytes};
 use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{
-    Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader,
-    ReaderOptions, TimestampResolution, Writer,
+use packetcraftr_core::capture_file::{
+    Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader, ReaderLimits,
+    TimestampResolution, Writer,
 };
 use packetcraftr_core::frame::{Direction, LinkType};
 
@@ -570,11 +570,11 @@ fn classic_reader_rejects_header_and_record_corruption_then_stays_finished() {
     let reader = Reader::new(Cursor::new(flagged_link)).expect("flagged network word is valid");
     assert_eq!(reader.interfaces()[0].link_type, LinkType::ETHERNET);
     assert!(matches!(
-        Reader::with_options(
+        Reader::with_limits(
             Cursor::new(reader.into_inner().into_inner()),
-            ReaderOptions {
+            ReaderLimits {
                 max_total_interfaces: 0,
-                ..ReaderOptions::default()
+                ..ReaderLimits::default()
             }
         ),
         Err(Error::TotalInterfaceLimit { limit: 0 })
@@ -669,11 +669,11 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
             enhanced_packet_block(endianness, 0, 0, 1, b"x", &[]),
         ],
     );
-    let mut blocks = Reader::with_options(
+    let mut blocks = Reader::with_limits(
         Cursor::new(bytes.clone()),
-        ReaderOptions {
+        ReaderLimits {
             max_metadata_blocks_per_frame: 0,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
     )
     .expect("section opens");
@@ -682,11 +682,11 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
         Err(Error::MetadataBlockLimit { limit: 0 })
     ));
 
-    let mut metadata_bytes = Reader::with_options(
+    let mut metadata_bytes = Reader::with_limits(
         Cursor::new(bytes.clone()),
-        ReaderOptions {
+        ReaderLimits {
             max_metadata_bytes_per_frame: 11,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
     )
     .expect("section opens");
@@ -696,16 +696,16 @@ fn pcapng_reader_enforces_metadata_and_interface_budgets() {
     ));
 
     for options in [
-        ReaderOptions {
+        ReaderLimits {
             max_interfaces_per_section: 0,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
-        ReaderOptions {
+        ReaderLimits {
             max_total_interfaces: 0,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
     ] {
-        let mut reader = Reader::with_options(Cursor::new(bytes.clone()), options)
+        let mut reader = Reader::with_limits(Cursor::new(bytes.clone()), options)
             .expect("section header itself fits");
         assert!(matches!(
             reader.next_frame(),
@@ -750,11 +750,11 @@ fn pcapng_structural_corruption_fails_closed() {
         })
     ));
     assert!(matches!(
-        Reader::with_options(
+        Reader::with_limits(
             Cursor::new(section_header(endianness, 1, 0, -1, &[])),
-            ReaderOptions {
+            ReaderLimits {
                 max_size: 27,
-                ..ReaderOptions::default()
+                ..ReaderLimits::default()
             }
         ),
         Err(Error::SizeLimitExceeded { limit: 27, .. })

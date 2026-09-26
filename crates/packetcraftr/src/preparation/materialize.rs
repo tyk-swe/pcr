@@ -4,16 +4,14 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::protocol::link::Ethernet;
+use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::{
-    field::FieldValue, packet::Packet, packet::semantics, protocol::BuiltinProtocol,
+    layer::Layer, packet::Packet, protocol::BuiltinProtocol, protocol::semantics,
 };
 
 use crate::Error;
-use crate::target::Family;
 
-pub(super) fn build_context(
-    plan: &packetcraftr_netio::route::Plan,
-) -> packetcraftr_core::codec::Context {
+pub(super) fn build_context(plan: &crate::route::Plan) -> packetcraftr_core::codec::Context {
     packetcraftr_core::codec::Context {
         source: plan.packet_source,
         destination: plan.final_destination,
@@ -22,7 +20,7 @@ pub(super) fn build_context(
 
 pub(super) fn materialize_link_structure(
     packet: &mut Packet,
-    plan: &packetcraftr_netio::route::Plan,
+    plan: &crate::route::Plan,
 ) -> Result<(), Error> {
     if !plan.synthesized_ethernet
         || semantics::outer_layers(packet)
@@ -43,104 +41,86 @@ pub(super) fn materialize_link_structure(
 
 pub(super) fn materialize_network_fields(
     packet: &mut Packet,
-    plan: &packetcraftr_netio::route::Plan,
+    plan: &crate::route::Plan,
 ) -> Result<(), Error> {
-    let Some((index, protocol)) =
-        semantics::outer_layers(packet)
-            .enumerate()
-            .find_map(|(index, layer)| {
-                let protocol = BuiltinProtocol::of(layer)?;
-                protocol.is_ip().then_some((index, protocol))
-            })
+    let Some(index) =
+        semantics::outer_layers(packet).position(|layer| layer.is::<Ipv4>() || layer.is::<Ipv6>())
     else {
         return Ok(());
     };
     let Some(layer) = packet.layer_mut(index) else {
         return Ok(());
     };
-    let ip_version = match protocol {
-        BuiltinProtocol::Ipv4 => Family::Ipv4,
-        BuiltinProtocol::Ipv6 => Family::Ipv6,
-        _ => return Ok(()),
-    };
-    let source_unspecified = match layer.field("source") {
-        Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
-        Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
-        _ => false,
-    };
-    if source_unspecified {
-        let value = match (ip_version, plan.packet_source) {
-            (Family::Ipv4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
-            (Family::Ipv6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
-            _ => {
-                return Err(Error::PacketMaterialization {
-                    layer: index,
-                    field: "source",
-                    message: "route source family does not match the packet layer".to_owned(),
-                    source: None,
-                });
-            }
-        };
-        layer
-            .set_field("source", value)
-            .map_err(|source| Error::PacketMaterialization {
-                layer: index,
-                field: "source",
-                message: source.to_string(),
-                source: Some(Box::new(source)),
-            })?;
-    }
-
-    let destination_unspecified = match layer.field("destination") {
-        Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
-        Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
-        _ => false,
-    };
-    if destination_unspecified {
-        let value = match (ip_version, plan.lookup_destination) {
-            (Family::Ipv4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
-            (Family::Ipv6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
-            _ => {
-                return Err(Error::PacketMaterialization {
-                    layer: index,
-                    field: "destination",
-                    message: "route destination family does not match the packet layer".to_owned(),
-                    source: None,
-                });
-            }
-        };
-        layer
-            .set_field("destination", value)
-            .map_err(|source| Error::PacketMaterialization {
-                layer: index,
-                field: "destination",
-                message: source.to_string(),
-                source: Some(Box::new(source)),
-            })?;
+    if let Some(ipv4) = layer.downcast_mut::<Ipv4>() {
+        let source = IpAddr::V4(ipv4.source);
+        if let Some(IpAddr::V4(value)) =
+            planned_address(source, plan.packet_source, index, "source")?
+        {
+            ipv4.source = value;
+        }
+        let destination = IpAddr::V4(ipv4.destination);
+        if let Some(IpAddr::V4(value)) =
+            planned_address(destination, plan.lookup_destination, index, "destination")?
+        {
+            ipv4.destination = value;
+        }
+    } else if let Some(ipv6) = layer.downcast_mut::<Ipv6>() {
+        let source = IpAddr::V6(ipv6.source);
+        if let Some(IpAddr::V6(value)) =
+            planned_address(source, plan.packet_source, index, "source")?
+        {
+            ipv6.source = value;
+        }
+        let destination = IpAddr::V6(ipv6.destination);
+        if let Some(IpAddr::V6(value)) =
+            planned_address(destination, plan.lookup_destination, index, "destination")?
+        {
+            ipv6.destination = value;
+        }
     }
     Ok(())
 }
 
+/// The route's address for an unspecified packet address, which must be of
+/// the packet layer's family; `None` keeps an address the recipe specified.
+fn planned_address(
+    current: IpAddr,
+    planned: Option<IpAddr>,
+    layer: usize,
+    field: &'static str,
+) -> Result<Option<IpAddr>, Error> {
+    if !current.is_unspecified() {
+        return Ok(None);
+    }
+    match planned {
+        Some(planned) if planned.is_ipv4() == current.is_ipv4() => Ok(Some(planned)),
+        _ => Err(Error::PacketMaterialization {
+            layer,
+            field,
+            message: format!("route {field} family does not match the packet layer"),
+            source: None,
+        }),
+    }
+}
+
 pub(super) fn materialize_link_fields(
     packet: &mut Packet,
-    route: &packetcraftr_netio::route::Materialized,
+    route: &crate::route::Materialized,
 ) -> Result<bool, Error> {
     if route.plan.mode != packetcraftr_netio::link::Mode::Layer2 {
         return Ok(false);
     }
-    let Some(index) = semantics::outer_layers(packet)
-        .position(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
+    let Some(index) = semantics::outer_layers(packet).position(<dyn Layer>::is::<Ethernet>) else {
+        return Ok(false);
+    };
+    let Some(ethernet) = packet
+        .layer_mut(index)
+        .and_then(|layer| layer.downcast_mut::<Ethernet>())
     else {
         return Ok(false);
     };
-    let Some(layer) = packet.layer_mut(index) else {
-        return Ok(false);
-    };
     let mut changed = false;
-    if matches!(
-        layer.field("source"),
-        Some(FieldValue::Mac(value)) if value == [0; 6]
-    ) {
+    if ethernet.source == [0; 6] {
         let source_mac = route
             .plan
             .source_mac
@@ -150,20 +130,10 @@ pub(super) fn materialize_link_fields(
                 message: "route has no interface-owned source MAC".to_owned(),
                 source: None,
             })?;
-        layer
-            .set_field("source", FieldValue::Mac(source_mac.0))
-            .map_err(|source| Error::PacketMaterialization {
-                layer: index,
-                field: "source",
-                message: source.to_string(),
-                source: Some(Box::new(source)),
-            })?;
+        ethernet.source = source_mac.0;
         changed = true;
     }
-    if matches!(
-        layer.field("destination"),
-        Some(FieldValue::Mac(value)) if value == [0; 6]
-    ) {
+    if ethernet.destination == [0; 6] {
         let destination_mac =
             route
                 .plan
@@ -174,14 +144,7 @@ pub(super) fn materialize_link_fields(
                     message: "route has no resolved destination MAC".to_owned(),
                     source: None,
                 })?;
-        layer
-            .set_field("destination", FieldValue::Mac(destination_mac.0))
-            .map_err(|source| Error::PacketMaterialization {
-                layer: index,
-                field: "destination",
-                message: source.to_string(),
-                source: Some(Box::new(source)),
-            })?;
+        ethernet.destination = destination_mac.0;
         changed = true;
     }
     Ok(changed)
@@ -211,12 +174,14 @@ mod tests {
 
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::packet::MacAddress;
     use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::packet::link::MacAddress;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, network::Ipv6};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::{Capability, Mode};
-    use packetcraftr_netio::route::{Decision, Materialized, Plan, Scope, SelectionReason};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
+
+    use crate::route::{Materialized, Plan};
 
     use super::*;
 

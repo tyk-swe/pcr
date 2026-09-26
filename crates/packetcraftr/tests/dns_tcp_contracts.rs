@@ -44,7 +44,7 @@ fn ipv4_loopback_handles_fragmented_response_io() {
         }
     });
 
-    let response = dns_tcp::exchange(
+    let response = dns_tcp::query(
         dns_tcp::Request {
             endpoint,
             query: QUERY,
@@ -53,7 +53,7 @@ fn ipv4_loopback_handles_fragmented_response_io() {
         },
         &packetcraftr_netio::tcp::SystemProvider,
     )
-    .expect("bounded loopback exchange");
+    .expect("bounded loopback query");
     server.join().expect("loopback server");
     assert!(endpoint.is_ipv4());
     assert_eq!(response.peer_address, endpoint);

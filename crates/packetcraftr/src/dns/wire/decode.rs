@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::application::dns::{DecodeError, decode_name, read_u16};
+use packetcraftr_core::protocol::application::dns::{self as core_dns, decode_name};
 
+use super::Error;
 use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
-use crate::dns::error::WireError;
 use crate::dns::{
     CLASS_IN, FLAG_AUTHENTICATED_DATA, FLAG_AUTHORITATIVE, FLAG_CHECKING_DISABLED,
     FLAG_RECURSION_AVAILABLE, FLAG_RECURSION_DESIRED, FLAG_RESPONSE, FLAG_TRUNCATED, HEADER_BYTES,
@@ -23,33 +23,33 @@ pub fn decode_tcp_frame(
     query_type: QueryType,
     transaction_id: u16,
     limits: MessageLimits,
-) -> Result<ValidatedResponse, WireError> {
+) -> Result<ValidatedResponse, Error> {
     let (prefix, payload) =
         frame
             .split_first_chunk::<2>()
-            .ok_or(WireError::Decode(DecodeError::MessageTooShort {
+            .ok_or(Error::Decode(core_dns::Error::MessageTooShort {
                 actual: frame.len(),
                 minimum: 2,
             }))?;
     let declared = usize::from(u16::from_be_bytes(*prefix));
     if declared == 0 {
-        return Err(WireError::TcpFrameZeroLength);
+        return Err(Error::TcpFrameZeroLength);
     }
     if declared > limits.max_message_bytes {
-        return Err(WireError::Decode(DecodeError::MessageTooLarge {
+        return Err(Error::Decode(core_dns::Error::MessageTooLarge {
             actual: declared,
             maximum: limits.max_message_bytes,
         }));
     }
     if declared != payload.len() {
-        return Err(WireError::TcpFrameLength {
+        return Err(Error::TcpFrameLength {
             declared,
             actual: payload.len(),
         });
     }
     let response = decode_response(payload, query_name, query_type, transaction_id, limits)?;
     if response.metadata.truncated {
-        return Err(WireError::TcpResponseTruncated);
+        return Err(Error::TcpResponseTruncated);
     }
     Ok(response)
 }
@@ -62,7 +62,7 @@ pub fn decode_response(
     query_type: QueryType,
     transaction_id: u16,
     limits: MessageLimits,
-) -> Result<ValidatedResponse, WireError> {
+) -> Result<ValidatedResponse, Error> {
     let query_name = canonical_query_name(query_name)?;
     let expected_name = Name::from_labels(
         query_name
@@ -137,25 +137,39 @@ struct ResponseSections {
     edns: Option<Edns>,
 }
 
-fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, WireError> {
+fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Error> {
     offset
         .checked_add(delta)
-        .ok_or(WireError::Decode(DecodeError::TruncatedField {
+        .ok_or(Error::Decode(core_dns::Error::TruncatedField {
             field,
             offset,
             needed: offset.saturating_add(delta),
         }))
 }
 
-fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), WireError> {
+/// Reads the big-endian `u16` at `offset`, naming `field` when the message
+/// ends first.
+fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
+    message
+        .get(offset..offset.saturating_add(2))
+        .and_then(|bytes| <[u8; 2]>::try_from(bytes).ok())
+        .map(u16::from_be_bytes)
+        .ok_or(Error::Decode(core_dns::Error::TruncatedField {
+            field,
+            offset,
+            needed: offset.saturating_add(2),
+        }))
+}
+
+fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), Error> {
     if message.len() < HEADER_BYTES {
-        return Err(WireError::Decode(DecodeError::MessageTooShort {
+        return Err(Error::Decode(core_dns::Error::MessageTooShort {
             actual: message.len(),
             minimum: HEADER_BYTES,
         }));
     }
     if message.len() > limits.max_message_bytes {
-        return Err(WireError::Decode(DecodeError::MessageTooLarge {
+        return Err(Error::Decode(core_dns::Error::MessageTooLarge {
             actual: message.len(),
             maximum: limits.max_message_bytes,
         }));
@@ -163,28 +177,28 @@ fn validate_message_bounds(message: &[u8], limits: MessageLimits) -> Result<(), 
     Ok(())
 }
 
-fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, WireError> {
+fn decode_header(message: &[u8], transaction_id: u16) -> Result<ResponseHeader, Error> {
     let actual_id = read_u16(message, 0, "transaction ID")?;
     let flags = read_u16(message, 2, "flags")?;
     if flags & FLAG_RESPONSE == 0 {
-        return Err(WireError::NotResponse);
+        return Err(Error::NotResponse);
     }
     let opcode = u8::try_from((flags & OPCODE_MASK) >> 11).unwrap_or_default();
     if opcode != 0 {
-        return Err(WireError::UnsupportedOpcode { opcode });
+        return Err(Error::UnsupportedOpcode { opcode });
     }
     if flags & RESERVED_MASK != 0 {
-        return Err(WireError::ReservedHeaderBits);
+        return Err(Error::ReservedHeaderBits);
     }
     if actual_id != transaction_id {
-        return Err(WireError::TransactionIdMismatch {
+        return Err(Error::TransactionIdMismatch {
             expected: transaction_id,
             actual: actual_id,
         });
     }
     let question_count = read_u16(message, 4, "question count")?;
     if question_count != 1 {
-        return Err(WireError::QuestionCount {
+        return Err(Error::QuestionCount {
             actual: question_count,
         });
     }
@@ -197,10 +211,10 @@ fn decode_question(
     expected_name: &Name,
     query_type: QueryType,
     limits: MessageLimits,
-) -> Result<(), WireError> {
+) -> Result<(), Error> {
     let (actual_name, mut offset) = decode_name(message, HEADER_BYTES, limits.into())?;
     if actual_name != *expected_name {
-        return Err(WireError::QuestionNameMismatch {
+        return Err(Error::QuestionNameMismatch {
             expected: query_name.to_owned(),
             actual: actual_name.to_string(),
         });
@@ -208,14 +222,14 @@ fn decode_question(
     let actual_type = read_u16(message, offset, "question type")?;
     offset = advance(offset, 2, "question class")?;
     if actual_type != query_type.code() {
-        return Err(WireError::QuestionTypeMismatch {
+        return Err(Error::QuestionTypeMismatch {
             expected: query_type.code(),
             actual: actual_type,
         });
     }
     let actual_class = read_u16(message, offset, "question class")?;
     if actual_class != CLASS_IN {
-        return Err(WireError::QuestionClassMismatch {
+        return Err(Error::QuestionClassMismatch {
             actual: actual_class,
         });
     }
@@ -248,13 +262,13 @@ fn validate_sections(
     answers: Vec<Record>,
     authorities: Vec<Record>,
     additionals: Vec<Record>,
-) -> Result<ResponseSections, WireError> {
+) -> Result<ResponseSections, Error> {
     if answers
         .iter()
         .chain(&authorities)
         .any(|record| matches!(record.value, RecordValue::Opt(_)))
     {
-        return Err(WireError::InvalidEdns {
+        return Err(Error::InvalidEdns {
             message: "OPT pseudo-record must appear only in the additional section".to_owned(),
         });
     }
@@ -267,25 +281,25 @@ fn validate_sections(
     })
 }
 
-fn extract_edns(additionals: Vec<Record>) -> Result<(Option<Edns>, Vec<Record>), WireError> {
+fn extract_edns(additionals: Vec<Record>) -> Result<(Option<Edns>, Vec<Record>), Error> {
     let mut edns = None;
     let mut non_opt_additionals = Vec::with_capacity(additionals.len());
     for record in additionals {
         match &record.value {
             RecordValue::Opt(value) => {
                 if value.version != 0 {
-                    return Err(WireError::UnsupportedEdnsVersion {
+                    return Err(Error::UnsupportedEdnsVersion {
                         version: value.version,
                     });
                 }
 
                 if !record.owner.is_root() {
-                    return Err(WireError::InvalidEdns {
+                    return Err(Error::InvalidEdns {
                         message: "OPT owner name must be the root".to_owned(),
                     });
                 }
                 if edns.replace(value.clone()).is_some() {
-                    return Err(WireError::DuplicateEdns);
+                    return Err(Error::DuplicateEdns);
                 }
             }
             _ => non_opt_additionals.push(record),

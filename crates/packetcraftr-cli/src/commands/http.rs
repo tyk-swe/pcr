@@ -1,47 +1,55 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::application_output::EventOutput;
-use crate::{
-    command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs},
-    errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_plain_line},
+//! `http`: inspects the cleartext HTTP/1 messages carried on captured TCP
+//! streams. Bodies are counted and discarded, never retained.
+
+pub(super) mod arguments;
+mod rendering;
+
+use packetcraftr_core::analysis::{
+    StreamTransport,
+    http::{Collector, Event},
 };
-use packetcraftr_cli::output::{
-    self,
+use packetcraftr_core::error::Kind;
+
+use self::arguments::Args;
+use super::offline_analysis::{Inspection, inspect};
+use crate::errors::CliError;
+use crate::output::{
     contract::{Command, ToolFormat},
     http as wire,
 };
-use packetcraftr_core::{
-    analysis::{
+use crate::rendering::{StreamEncoder, emit_aggregate};
+
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.limits)
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_http_body_bytes: Bytes @ Operation]);
+        self.application.resources(settings);
+        self.limits.resources(
+            settings,
+            crate::command_options::AnalysisStages::with_tcp(true),
+        );
+    }
+
+    fn run(
         self,
-        http::{Collector, Event},
-    },
-    error::Kind,
-};
-use std::path::PathBuf;
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.
-    pub(crate) path: PathBuf,
-    /// Select a whole TCP conversation, using tcp:INDEX.
-    #[arg(long)]
-    pub(crate) stream: Option<String>,
-    /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
-    /// 8080 are always inspected.
-    #[arg(long = "http-port")]
-    pub(crate) http_ports: Vec<u16>,
-    /// Maximum counted entity bytes in one message. Bodies are discarded.
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
-    pub(crate) max_http_body_bytes: u64,
-    #[command(flatten)]
-    pub(crate) application: ApplicationLimitsArgs,
-    #[command(flatten)]
-    pub(crate) decode: DecodeArgs,
-    #[command(flatten)]
-    pub(crate) limits: OfflineLimitsArgs,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
 }
-pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
+
+fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     args.application.validate_output()?;
     let mut ports = args.http_ports;
     ports.extend([80, 8080]);
@@ -49,123 +57,49 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         .map_err(CliError::classified)?;
     let selector = args
         .stream
-        .as_deref()
-        .map(super::offline_analysis::parse_stream_selector)
+        .as_ref()
+        .map(crate::command_options::Selector::get)
         .transpose()?;
-    if selector.is_some_and(|selected| selected.transport != analysis::StreamTransport::Tcp) {
+    if selector.is_some_and(|selected| selected.transport != StreamTransport::Tcp) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "HTTP/1 inspection requires --stream tcp:INDEX",
         ));
     }
-    let filter = selector.map(|selected| format!("tcp.stream == {}", selected.index));
-    let setup = super::offline_analysis::prepare(args.limits, filter.as_deref(), &args.decode)?;
-    // The session narrows the plan and raises the TCP/source-tracking flags
-    // from the collector's declared needs.
-    let session =
-        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
-    let mut reader = crate::input::open_capture(&args.path, args.limits.capture.reader)?;
     let (mut messages, mut issues) = (Vec::new(), Vec::new());
-    let mut output = EventOutput::new(
+    let outcome = inspect(
+        Inspection {
+            path: &args.path,
+            limits: args.limits,
+            decode: &args.decode,
+            application: args.application,
+            selector,
+        },
+        collector,
         format,
         stream,
-        args.application.max_application_output_bytes,
-    );
-    let mut emit = |event: Event| -> Result<(), CliError> {
-        match event {
+        |output, event| match event {
             Event::Message(message) => output.emit(
                 wire::Message::try_from(*message).map_err(CliError::classified)?,
                 &mut messages,
-                render_message,
+                rendering::render_message,
             ),
-            Event::Issue(issue) => output.emit(wire::Issue(issue), &mut issues, render_issue),
-        }
-    };
-    let outcome = session
-        .run(
-            &mut reader,
-            super::offline_analysis::ip_event_sink(format, stream),
-            |event| emit(event).map_err(CliError::into_boundary_error),
-        )
+            Event::Issue(issue) => output.emit(
+                wire::Issue::from(issue),
+                &mut issues,
+                rendering::render_issue,
+            ),
+        },
+    )?;
+    let complete = wire::Complete::try_from((&outcome.run, outcome.summary, outcome.scopes))
         .map_err(CliError::classified)?;
-    if outcome.selected_absent() {
-        return Err(CliError::new(Kind::Cli, "selected stream is not present"));
-    }
-    let run = outcome.run;
-    let scopes = outcome.scopes;
-    let summary = outcome.summary;
-    let complete = wire::Complete {
-        frames_read: run.frames_read,
-        frames_matched: run.frames_matched,
-        summary,
-        scopes,
-        incomplete_datagrams: run.incomplete_sources.len(),
-        source_outcomes_omitted: run.source_outcomes_omitted,
-        ip_reassembly: output::reassembly::Report::from_analysis(&run.ip_reassembly),
-    };
     match format {
         ToolFormat::Json => emit_aggregate(
             Command::Http,
-            wire::Report {
-                messages,
-                issues,
-                complete,
-            },
+            wire::Report::from((messages, issues, complete)),
             Vec::new(),
         ),
         ToolFormat::Ndjson => stream.complete(complete, Vec::new()).map_err(Into::into),
-        ToolFormat::Text => write_plain_line(format_args!(
-            "{} HTTP/1 messages, {} complete, {} incomplete, {} malformed; {} requests without a captured final response",
-            complete.summary.messages,
-            complete.summary.complete_messages,
-            complete.summary.incomplete_messages,
-            complete.summary.malformed_messages,
-            complete.summary.requests_without_final_response
-        )),
+        ToolFormat::Text => rendering::render_complete(&complete),
     }
-}
-fn render_message(value: &wire::Message) -> Result<(), CliError> {
-    let start = match &value.start {
-        Some(wire::StartLine::Request { method, target, .. }) => {
-            format!("{method} {}", escaped(target))
-        }
-        Some(wire::StartLine::Response { status, reason, .. }) => {
-            format!("{status} {}", escaped(reason))
-        }
-        None => "partial headers".to_owned(),
-    };
-    write_plain_line(format_args!(
-        "HTTP tcp:{} message={} {:?} {} body_bytes={} request={:?} frames={:?}",
-        value.stream,
-        value.index,
-        value.status,
-        start,
-        value.body_bytes,
-        value.request,
-        value
-            .sources
-            .iter()
-            .map(|source| source.number)
-            .collect::<Vec<_>>()
-    ))?;
-    for header in &value.headers {
-        write_plain_line(format_args!(
-            "  {}: {}",
-            header.name,
-            escaped(&header.value)
-        ))?;
-    }
-    if let Some(error) = &value.error {
-        write_plain_line(format_args!("  {error}"))?;
-    }
-    Ok(())
-}
-fn render_issue(value: &wire::Issue) -> Result<(), CliError> {
-    write_plain_line(format_args!(
-        "  TCP stream={} frame={} {:?}",
-        value.0.stream, value.0.number, value.0.status
-    ))
-}
-fn escaped(value: &str) -> String {
-    value.chars().flat_map(char::escape_default).collect()
 }

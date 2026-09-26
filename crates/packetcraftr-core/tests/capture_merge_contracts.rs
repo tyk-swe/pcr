@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::{
-    analysis::pcap::{
-        self, MergeError, MergeLimits, MergeSource, MetadataBlockKind, Reader, RecordKind, Writer,
-    },
+    capture_file::{self, MergeLimits, MergeSource, MetadataBlockKind, Reader, RecordKind, Writer},
     frame::{Frame, LinkType},
 };
 use std::{
@@ -39,7 +37,7 @@ fn merge_ties_preserve_source_order_and_distinct_interface_provenance() {
         source("right", &[(10, 2, 0), (20, 4, 0)]),
     ];
     let mut output = Writer::pcapng(Vec::new()).unwrap();
-    let report = pcap::merge(&mut sources, &mut output, MergeLimits::default()).unwrap();
+    let report = capture_file::merge(&mut sources, &mut output, MergeLimits::default()).unwrap();
     assert_eq!(report.source_frames, [2, 2]);
     assert_eq!(report.frames, 4);
     assert_eq!(report.interfaces.len(), 3);
@@ -83,8 +81,8 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
     let mut sources = [source("bad", &[(2, 1, 0), (1, 2, 0)])];
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     assert!(matches!(
-        pcap::merge(&mut sources, &mut output, Default::default()),
-        Err(MergeError::ClockRegression { input: 0, frame: 2 })
+        capture_file::merge(&mut sources, &mut output, Default::default()),
+        Err(capture_file::Error::MergeClockRegression { input: 0, frame: 2 })
     ));
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     writer.add_interface(LinkType::ETHERNET).unwrap();
@@ -100,15 +98,13 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
     }];
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     assert!(matches!(
-        pcap::merge(&mut sources, &mut output, Default::default()),
-        Err(MergeError::Source {
-            source: pcap::Error::TimestampUnavailable { .. },
-            ..
-        })
+        capture_file::merge(&mut sources, &mut output, Default::default()),
+        Err(capture_file::Error::MergeSource { source, .. })
+            if matches!(*source, capture_file::Error::TimestampUnavailable { .. })
     ));
     for limits in [
         MergeLimits {
-            streams: pcap::Limits {
+            streams: capture_file::Limits {
                 max_frames: 1,
                 max_bytes: 100,
             },
@@ -121,7 +117,7 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
     ] {
         let mut sources = [source("a", &[(1, 1, 0), (2, 2, 1)])];
         let mut output = Writer::pcapng(Vec::new()).unwrap();
-        assert!(pcap::merge(&mut sources, &mut output, limits).is_err());
+        assert!(capture_file::merge(&mut sources, &mut output, limits).is_err());
     }
 }
 
@@ -129,17 +125,17 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
 fn invalid_interface_options_fail_before_an_interface_block_is_written() {
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     let before = writer.get_ref().clone();
-    let description = pcap::Interface {
+    let description = capture_file::Interface {
         link_type: LinkType::ETHERNET,
         snap_len: 128,
-        timestamp_resolution: pcap::TimestampResolution::Decimal(9),
+        timestamp_resolution: capture_file::TimestampResolution::Decimal(9),
         timestamp_offset: 0,
     };
     assert!(
         writer
             .add_interface_description_with_options(
                 description,
-                &[pcap::PcapNgOption {
+                &[capture_file::PcapNgOption {
                     code: 9,
                     value: vec![6].into()
                 }]

@@ -3,21 +3,23 @@
 
 use crate::rendering::StreamEncoder;
 
-use packetcraftr_core as core;
-
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_debug, optional_display,
+    captured_frame_text, comma_separated, optional_display, optional_duration,
     render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
 pub(super) fn render_text(
-    result: output::traceroute::Report,
-    diagnostics: Vec<core::diagnostic::Diagnostic>,
-    stats: packetcraftr::Stats,
+    published: output::envelope::Published<output::traceroute::Report>,
 ) -> Result<(), CliError> {
+    let output::envelope::Published {
+        result,
+        diagnostics,
+        stats,
+    } = published;
+    let stats = stats.unwrap_or_default();
     write_stdout_line(format_args!(
         "target={} resolved={} destination={} strategy={} port={}",
         result.target,
@@ -36,11 +38,11 @@ pub(super) fn render_text(
                 probe.status.as_str(),
                 probe
                     .response_kind
-                    .map_or("none", packetcraftr::traceroute::ResponseKind::as_str),
+                    .map_or("none", output::traceroute::ResponseKind::as_str),
                 probe.sent_at,
                 optional_display(probe.received_at),
                 optional_display(probe.responder),
-                optional_debug(probe.latency),
+                optional_duration(probe.latency),
                 optional_display(probe.destination_port),
                 probe.reason,
             ))?;
@@ -69,15 +71,16 @@ pub(super) fn emit_event(
     event: packetcraftr::traceroute::Event,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics) =
-        output::traceroute::Event::try_from_traceroute(event).map_err(CliError::classified)?;
-    Ok(stream.emit_data(record, diagnostics)?)
+    let published = output::envelope::Published::<output::traceroute::Event>::try_from(event)
+        .map_err(CliError::classified)?;
+    Ok(stream.emit_published(published)?)
 }
 
 pub(super) fn emit_complete(
-    summary: packetcraftr::traceroute::Summary,
+    summary: packetcraftr::traceroute::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let (record, diagnostics, stats) = output::traceroute::Event::complete_from_traceroute(summary);
-    Ok(stream.complete_with_stats(record, diagnostics, stats)?)
+    Ok(stream.complete_published(
+        output::envelope::Published::<output::traceroute::Event>::from(summary),
+    )?)
 }

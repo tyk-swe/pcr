@@ -5,19 +5,19 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::probe::evidence::EvidenceLimits;
-use crate::probe::limits::{CaptureEvidenceLimits, check_limits, duration_violation};
+use crate::execution::limits::EvidenceLimits;
+use crate::execution::limits::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
 use crate::dns::error::Error;
-use crate::dns::wire::canonical_query_name;
+use crate::dns::wire::{self, canonical_query_name};
 use crate::dns::{
     DEFAULT_MAX_NAME_POINTERS, DEFAULT_MAX_RECORDS, DEFAULT_MAX_REJECTED_RECORDS,
     DEFAULT_MAX_TXT_BYTES, DEFAULT_MAX_TXT_STRINGS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
-    MAX_DURATION, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
+    MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
 };
 
 /// A DNS question's exact 16-bit wire code, including unassigned codes.
@@ -85,21 +85,12 @@ impl fmt::Display for QueryType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum QueryTypeParseError {
-    #[error("expected a DNS type alias, 1–5 decimal digits, or TYPE followed by 1–5 digits")]
-    Syntax,
-    #[error("DNS query type must be within 0..=65535")]
-    OutOfRange(#[source] std::num::ParseIntError),
-}
-
 impl std::str::FromStr for QueryType {
-    type Err = QueryTypeParseError;
+    type Err = wire::Error;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if value.len() > 9 {
-            return Err(QueryTypeParseError::Syntax);
+            return Err(wire::Error::QueryTypeSyntax);
         }
         for (query_type, alias) in Self::ALIASES {
             if value.eq_ignore_ascii_case(alias) {
@@ -118,12 +109,12 @@ impl std::str::FromStr for QueryType {
             || digits.len() > 5
             || !digits.bytes().all(|byte| byte.is_ascii_digit())
         {
-            return Err(QueryTypeParseError::Syntax);
+            return Err(wire::Error::QueryTypeSyntax);
         }
         digits
             .parse()
             .map(Self)
-            .map_err(QueryTypeParseError::OutOfRange)
+            .map_err(wire::Error::QueryTypeRange)
     }
 }
 
@@ -205,7 +196,7 @@ impl Default for Limits {
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
             max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
-            max_duration: MAX_DURATION,
+            max_duration: MAX_TIMEOUT,
         }
     }
 }
@@ -223,20 +214,16 @@ impl Limits {
     /// of bounds that cannot both hold.
     pub fn validate(&self) -> Result<(), Error> {
         self.message.validate()?;
-        CaptureEvidenceLimits {
-            max_evidence_frames: self.max_evidence_frames,
-            max_evidence_bytes: self.max_evidence_bytes,
-            max_undecoded: Some(self.max_undecoded),
-        }
-        .validate(|field, value, reason| Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        })?;
-        if duration_violation(self.max_duration, MAX_DURATION) {
+        self.evidence()
+            .validate(|field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            })?;
+        if duration_violation(self.max_duration, MAX_TIMEOUT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_DURATION,
+                maximum: MAX_TIMEOUT,
             });
         }
         Ok(())
@@ -255,9 +242,9 @@ pub struct EdnsRequest {
 
 impl EdnsRequest {
     /// Validates the advertised UDP response capacity before query construction.
-    pub fn validate(&self) -> Result<(), crate::dns::error::WireError> {
+    pub fn validate(&self) -> Result<(), wire::Error> {
         if self.udp_payload_size < 512 {
-            return Err(crate::dns::error::WireError::InvalidEdns {
+            return Err(wire::Error::InvalidEdns {
                 message: format!(
                     "request UDP payload size {} must be within 512..=65535",
                     self.udp_payload_size
@@ -305,6 +292,16 @@ pub struct Request {
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,
     pub limits: Limits,
+    /// Route selection for every UDP exchange. Direct TCP and fallback run on
+    /// a kernel socket, which accepts only the default route options. A live
+    /// setting, not part of the serialized question.
+    #[serde(skip)]
+    pub route: crate::route::Options,
+    /// The capture and retention bounds every UDP exchange runs under; they
+    /// must fit inside [`Limits`]'s evidence bounds. A live setting, not part
+    /// of the serialized question.
+    #[serde(skip)]
+    pub collection: crate::exchange::Collection,
 }
 
 impl Request {
@@ -329,10 +326,10 @@ impl Request {
                 reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+                maximum: MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.queries_per_second
@@ -369,8 +366,8 @@ impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::Deco
 }
 
 #[cfg(test)]
-mod query_type_tests {
-    use super::{QueryType, QueryTypeParseError};
+mod tests {
+    use super::{QueryType, wire};
 
     #[test]
     fn aliases_and_numeric_syntax_share_exact_codes_and_canonical_display() {
@@ -430,13 +427,13 @@ mod query_type_tests {
             "unknown",
         ] {
             assert!(
-                matches!(text.parse::<QueryType>(), Err(QueryTypeParseError::Syntax)),
+                matches!(text.parse::<QueryType>(), Err(wire::Error::QueryTypeSyntax)),
                 "{text:?}"
             );
         }
         for text in ["65536", "TYPE65536", "99999"] {
             let error = text.parse::<QueryType>().unwrap_err();
-            assert!(matches!(error, QueryTypeParseError::OutOfRange(_)));
+            assert!(matches!(error, wire::Error::QueryTypeRange(_)));
             assert!(
                 std::error::Error::source(&error)
                     .unwrap()

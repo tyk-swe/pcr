@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_core::analysis::pcap::Error as CaptureError;
+use packetcraftr_core::capture_file::Error as CaptureError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
 use thiserror::Error;
@@ -38,7 +38,7 @@ pub enum Error {
         source_index: u64,
         mode: &'static str,
     },
-    #[error("capture read failed at source index {source_index}: {source}")]
+    #[error("capture read failed at source index {source_index}")]
     Capture {
         source_index: u64,
         #[source]
@@ -88,19 +88,27 @@ pub enum Error {
         link_type: u32,
         requested: LinkMode,
     },
-    #[error("replay frame selection failed at source index {source_index}: {source}")]
+    /// The request's filter, or a filter rule of its routing, could not
+    /// judge the frame.
+    #[error("replay frame selection failed at source index {source_index}")]
     Selection {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::filter::Error,
     },
-    #[error("replay policy denied source index {source_index}: {source}")]
+    /// Routing rules that match the frame name different interfaces.
+    #[error("replay frame {} matches conflicting output interfaces", source_index.saturating_add(1))]
+    ConflictingInterfaces { source_index: u64 },
+    /// No routing rule matches the frame and the routing has no fallback.
+    #[error("replay frame {} has no output interface mapping", source_index.saturating_add(1))]
+    Unmapped { source_index: u64 },
+    #[error("replay policy denied source index {source_index}")]
     Authorization {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
-    #[error("replay transmission failed at source index {source_index}: {source}")]
+    #[error("replay transmission failed at source index {source_index}")]
     Transmission {
         source_index: u64,
         #[source]
@@ -116,18 +124,19 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("replay output failed at source index {source_index}: {message}")]
-    Output { source_index: u64, message: String },
+    /// The sink refused a frame event, or publishing it failed.
+    #[error("replay output failed at source index {source_index}")]
+    Output {
+        source_index: u64,
+        #[source]
+        source: packetcraftr_core::error::BoundaryError,
+    },
+    /// A collector saw events that disagree with the report.
+    #[error("replay events are incoherent: {message}")]
+    IncoherentEvents { message: String },
 }
 
 impl Error {
-    pub fn output_at_source_index(source_index: u64, message: impl Into<String>) -> Self {
-        Self::Output {
-            source_index,
-            message: message.into(),
-        }
-    }
-
     fn context(&self) -> Option<Coordinate> {
         let source_index = match self {
             Self::Timing { source_index, .. }
@@ -140,6 +149,8 @@ impl Error {
             | Self::UnsupportedLinkType { source_index, .. }
             | Self::LinkModeMismatch { source_index, .. }
             | Self::Selection { source_index, .. }
+            | Self::ConflictingInterfaces { source_index }
+            | Self::Unmapped { source_index }
             | Self::Authorization { source_index, .. }
             | Self::Transmission { source_index, .. }
             | Self::InvalidEvidence { source_index, .. }
@@ -148,7 +159,8 @@ impl Error {
             Self::Cancelled(_)
             | Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
-            | Self::InvalidTiming { .. } => {
+            | Self::InvalidTiming { .. }
+            | Self::IncoherentEvents { .. } => {
                 return None;
             }
         };
@@ -164,7 +176,7 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(
                 "cli.replay_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
             Self::Capture { source, .. } => source.classification(),
@@ -201,9 +213,13 @@ impl Classified for Error {
                     ),
                 )
             }
-            Self::Selection { source, .. } | Self::Authorization { source, .. } => {
-                source.classification()
+            Self::Selection { source, .. } => source.classification(),
+            // Routing is part of the request, so a frame it cannot route is
+            // the caller's to fix.
+            Self::ConflictingInterfaces { .. } | Self::Unmapped { .. } => {
+                Classification::new("cli.error", Kind::Usage, None)
             }
+            Self::Authorization { source, .. } => source.classification(),
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
                 "internal.replay_evidence",
@@ -212,6 +228,13 @@ impl Classified for Error {
                     "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
                 ),
             ),
+            Self::IncoherentEvents { .. } => Classification::new(
+                "internal.replay_event_coherence",
+                Kind::Internal,
+                Some("collect every replay event once, from one replay, in publication order"),
+            ),
+            // Output keeps the sink's failure as its source but publishes
+            // replay's own I/O code: the sink is replay's output.
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
                 "io.replay",
                 Kind::Io,
@@ -227,14 +250,14 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The two boundary-sourced variants delegate instead: a [`BoundaryError`]
-    /// carries a captured `causes` snapshot its own source chain no longer
-    /// holds.
+    /// The boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot instead, which its own source chain no
+    /// longer holds.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Selection { source, .. } | Self::Authorization { source, .. } => source.causes(),
+            Self::Authorization { source, .. } | Self::Output { source, .. } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

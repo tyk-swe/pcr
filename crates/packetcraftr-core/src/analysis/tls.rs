@@ -1,0 +1,632 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! TLS handshake assembly over reassembled TCP streams.
+//!
+//! One record per handshake, joining a client's offer to a server's decision.
+//! The per-frame `tls` layer sees one segment at a time and cannot answer
+//! "which version was negotiated" when a ClientHello spans segments; this
+//! collector consumes the TCP reassembler's in-order deliveries instead, so a
+//! hello split across seven segments produces the same record as an unsplit
+//! one.
+//!
+//! ```text
+//!                            Event::Data (per direction, after dedup)
+//!                                          │
+//!                    ┌─────────────────────▼─────────────────────┐
+//!                    │  record framing  ≤ 1 record held unframed │
+//!                    │  handshake bodies concatenated per side   │
+//!                    │  client: 1 change_cipher_spec skipped     │
+//!                    │  server: buffering stops at ServerHello   │
+//!                    └─────────────────────┬─────────────────────┘
+//!                                          │
+//!   ┌──────────────────────────────────────┴──────────────────────────────┐
+//!   │                             in flight                               │
+//!   └──┬────────────┬─────────────┬────────────┬────────────┬─────────────┘
+//!      │            │             │            │            │
+//!      │ ServerHello│ HelloRetry  │ fatal      │ unparsable │ Gap/Evicted,
+//!      │ (not HRR)  │ then FIN/RST│ alert      │ or buffer  │ ceiling, or
+//!      │            │             │            │ ceiling    │ SH with no CH
+//!      ▼            ▼             ▼            ▼            ▼
+//!   complete      retry         alert      malformed       gap
+//!
+//!      ClientHello then FIN/RST ─▶ client_only
+//!      capture ends in flight   ─▶ truncated
+//! ```
+//!
+//! Orientation follows the same rule as [`follow`](crate::analysis::follow):
+//! the client is the sender of the conversation's first captured frame. A
+//! capture that starts mid-connection can elect the wrong side, so the first
+//! hello re-orients the session once; a second contradiction is `malformed`.
+//! Deduplication edges stay bound to the captured direction across that swap,
+//! and each session owns one deduplicator, because a four-tuple reused after
+//! a clean close is a new session with its own delivery edges.
+//!
+//! Fingerprints in the assembled record are advisory. Every byte they are
+//! computed from is chosen by the peer, so treat a match as a hint about
+//! software identity, never as authentication.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use serde::Serialize;
+
+use crate::analysis::conversation_index::CanonicalFlow;
+use crate::analysis::pipeline::{FrameRecord, Summary as RunSummary};
+use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
+use crate::analysis::session::{Collector as SessionCollector, CollectorNeeds};
+use crate::error::BoundaryError;
+use crate::protocol::transport::Tcp;
+
+mod limits;
+mod selector;
+mod session;
+
+pub use limits::{Limits, MAX_DIRECTION_BUFFER};
+pub use selector::{Selector, SniPattern};
+pub use session::{
+    ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Alert, ClientSummary, MAX_ALERTS, ServerSummary,
+    Session, Status,
+};
+
+use session::{Live, Verdict};
+
+/// The UDP port QUIC uses for HTTPS. Frames on it carry TLS 1.3 handshakes
+/// this collector deliberately does not read, so they are counted instead of
+/// being silently dropped.
+const QUIC_UDP_PORT: u16 = 443;
+
+const REASON_REASSEMBLY_GAP: &str = "TCP reassembly reported missing handshake bytes";
+const REASON_FLOW_EVICTED: &str = "the TCP flow was evicted before the handshake finished";
+const REASON_SESSION_LIMIT: &str = "the session table reached its ceiling";
+const REASON_AGGREGATE_LIMIT: &str = "the aggregate handshake buffer reached its ceiling";
+const REASON_TRUNCATED: &str = "the capture ended while the handshake was in flight";
+
+/// One assembled session, delivered as soon as it reaches a terminal status.
+///
+/// Sessions are emitted progressively so a streaming consumer never has to
+/// hold the whole capture's worth of records in memory.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SessionEvent {
+    /// 1-based capture frame whose arrival ended the session. The trailing
+    /// flush attributes its events to the session's own last frame.
+    pub number: u64,
+    pub session: Session,
+}
+
+/// Terminal counters for a completed session assembly pass.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Summary {
+    pub clock: crate::analysis::ClockReport,
+    /// Sessions emitted, of every status.
+    pub sessions: u64,
+    /// Sessions per status, in [`Status`] order.
+    pub by_status: BTreeMap<Status, u64>,
+    /// TCP conversations this collector saw, whether or not they carried TLS.
+    /// A capture with streams but no sessions means the traffic was not TLS,
+    /// or the handshake itself was not captured. Each distinct observed index
+    /// counts once, even if filtering hides its first frame or TLS state was
+    /// evicted. A scoped four-tuple reused after a close still counts once.
+    pub tcp_streams: u64,
+    /// Sessions retired by a resource ceiling rather than by the capture.
+    pub evicted_sessions: u64,
+    /// Times one direction's handshake buffer reached its ceiling.
+    pub buffer_limit_hits: u64,
+    /// UDP frames seen on port 443, which are most likely QUIC. TLS over
+    /// QUIC is out of scope, so this is how under-reporting stays visible.
+    pub udp_443_frames: u64,
+}
+
+#[derive(Debug)]
+struct Entry {
+    /// Insertion rank, used to retire the oldest conversation first.
+    order: u64,
+    state: Tracked,
+}
+
+#[derive(Debug)]
+// Generation transition invariants:
+// Live + terminal verdict -> Closed, releasing its recorded bytes and emitting
+// at most one SessionEvent. Closed + SYN -> absent -> fresh Live/deduplicator.
+// Expiry/gap/replacement is folded before current data; a clean close following
+// current data is deferred until that data is folded. EOF retires all remaining
+// Live entries and releases all charges. Never reopen from stale buffered bytes.
+enum Tracked {
+    Live(Box<Live>),
+    /// Terminal: whatever it had to say has been emitted, and new bytes on
+    /// the four-tuple are ignored until a SYN retires the entry.
+    Closed,
+}
+
+/// Assembles sessions from TCP reassembly events. Feed matched frames from a
+/// run with [`Options::tcp_events`](crate::analysis::Options::tcp_events), then
+/// call [`Collector::finish`] with the run's trailing events.
+#[derive(Debug)]
+pub struct Collector {
+    limits: Limits,
+    entries: HashMap<CanonicalFlow, Entry>,
+    /// Insertion rank to conversation, so the oldest is retired in O(log n).
+    order: BTreeMap<u64, CanonicalFlow>,
+    /// Distinct visible indices, bounded by the pipeline's capture-global
+    /// indexed-flow ceiling. Retained independently of active session eviction.
+    seen_streams: HashSet<u64>,
+    next_order: u64,
+    next_session: u64,
+    buffered_bytes: usize,
+    summary: Summary,
+}
+
+impl Collector {
+    /// Creates a collector bound to finite ceilings.
+    ///
+    /// Invalid ceilings fail before the collector consumes a frame.
+    pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
+        limits.validate()?;
+        Ok(Self {
+            limits,
+            entries: HashMap::new(),
+            order: BTreeMap::new(),
+            seen_streams: HashSet::new(),
+            next_order: 0,
+            next_session: 0,
+            buffered_bytes: 0,
+            summary: Summary::default(),
+        })
+    }
+
+    /// Folds one matched frame, returning the sessions it ended.
+    pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<SessionEvent> {
+        let mut events = Vec::new();
+        if let Some(conversation) = record.udp.and_then(|view| view.conversation)
+            && let flow = conversation.flow
+            && (flow.flow.source_port == QUIC_UDP_PORT
+                || flow.flow.destination_port == QUIC_UDP_PORT)
+        {
+            self.summary.udp_443_frames = self.summary.udp_443_frames.saturating_add(1);
+        }
+        // Reassembly emits current-generation data before its clean close. Expiry
+        // and replacement events precede that data and must retain their ordering.
+        let current_flow = record
+            .tcp
+            .and_then(|view| view.conversation)
+            .map(|stream| stream.flow);
+        let last_data = record.tcp_events.iter().rposition(
+            |event| matches!(event, TcpEvent::Data { flow, .. } if Some(flow) == current_flow),
+        );
+        let deferred_close = last_data.and_then(|data| {
+            record
+                .tcp_events
+                .iter()
+                .enumerate()
+                .find_map(|(index, event)| {
+                    (index > data
+                        && matches!(event, TcpEvent::Closed { flow, reset: false }
+                    if Some(flow) == current_flow))
+                    .then_some(index)
+                })
+        });
+        self.fold_reassembly_events(
+            record.tcp_events,
+            record.number,
+            deferred_close,
+            &mut events,
+        );
+
+        let Some(tcp) = record.tcp else { return events };
+        let Some(conversation) = tcp.conversation else {
+            return events;
+        };
+        let flow = conversation.flow;
+        let stream = conversation.index;
+        self.note_stream(stream);
+        let key = CanonicalFlow::from_flow(flow);
+        if tcp.header.flags & Tcp::SYN != 0 {
+            // A connection opening on a retired four-tuple is a new session,
+            // with its own index and its own delivery edges.
+            self.discard_closed(&key);
+        }
+
+        // A conversation is tracked from its first captured frame, payload or
+        // not, because that frame is what elects the client: a capture that
+        // starts mid-connection can see the server first, and the elected
+        // roles are only corrected once a hello says otherwise.
+        match self.entries.get(&key) {
+            Some(Entry {
+                state: Tracked::Closed,
+                ..
+            }) => return events,
+            Some(_) => {}
+            None => self.track(
+                &key,
+                stream,
+                flow.clone(),
+                record
+                    .scope_definition(flow.scope)
+                    .expect("indexed scope exists")
+                    .clone(),
+                &mut events,
+            ),
+        }
+        if let Some(live) = self.live_mut(&key) {
+            live.note_frame(Some(record.timestamp));
+            let first = live.first_flow().clone();
+            live.dedup().observe_syn(flow, &first, tcp.header);
+        }
+        self.fold_deliveries(record, &key, &mut events);
+        if let Some(close) = deferred_close.and_then(|index| record.tcp_events.get(index)) {
+            self.fold_reassembly_events(
+                std::slice::from_ref(close),
+                record.number,
+                None,
+                &mut events,
+            );
+        }
+        events
+    }
+
+    /// Folds the trailing flush. Open handshakes become
+    /// [`truncated`](Status::Truncated); undeliverable captured bytes remain a
+    /// [`gap`](Status::Gap), rather than treating EOF eviction as data loss.
+    #[must_use]
+    pub fn finish(mut self, summary: &RunSummary) -> (Vec<SessionEvent>, Summary) {
+        let mut events = Vec::new();
+        let trailing = &summary.trailing_tcp_events;
+        for event in trailing {
+            if let TcpEvent::Gap { flow, .. } = event {
+                let key = CanonicalFlow::from_flow(flow);
+                let number = self.last_frame(&key);
+                self.retire(
+                    &key,
+                    Status::Gap,
+                    Some(REASON_REASSEMBLY_GAP.to_owned()),
+                    number,
+                    &mut events,
+                );
+            }
+        }
+        let remaining = self.order.values().cloned().collect::<Vec<_>>();
+        for key in remaining {
+            let number = self.last_frame(&key);
+            self.retire(
+                &key,
+                Status::Truncated,
+                Some(REASON_TRUNCATED.to_owned()),
+                number,
+                &mut events,
+            );
+        }
+        debug_assert_eq!(
+            self.buffered_bytes, 0,
+            "terminal paths release every handshake charge"
+        );
+        self.summary.clock = summary.clock.clone();
+        self.summary.tcp_streams = self.seen_streams.len() as u64;
+        (events, self.summary)
+    }
+
+    /// Folds reassembly outcomes before matching the current frame, since
+    /// expiry can concern other flows. Gap outranks close, which outranks
+    /// eviction; a reset produces both close and eviction.
+    fn fold_reassembly_events(
+        &mut self,
+        tcp_events: &[TcpEvent],
+        number: u64,
+        deferred_close: Option<usize>,
+        events: &mut Vec<SessionEvent>,
+    ) {
+        for event in tcp_events {
+            if let TcpEvent::Gap { flow, .. } = event {
+                let key = CanonicalFlow::from_flow(flow);
+                self.retire(
+                    &key,
+                    Status::Gap,
+                    Some(REASON_REASSEMBLY_GAP.to_owned()),
+                    number,
+                    events,
+                );
+            }
+        }
+        for (index, event) in tcp_events.iter().enumerate() {
+            if deferred_close == Some(index) {
+                continue;
+            }
+            if let TcpEvent::Closed { flow, reset } = event {
+                let key = CanonicalFlow::from_flow(flow);
+                let Some(live) = self.live_mut(&key) else {
+                    continue;
+                };
+                if !*reset {
+                    let first = live.first_flow().clone();
+                    live.dedup().mark_closed(flow, &first);
+                }
+                let status = live.close_status();
+                let Some(status) = status else {
+                    self.discard(&key);
+                    continue;
+                };
+                self.retire(&key, status, None, number, events);
+            }
+        }
+        for event in tcp_events {
+            if let TcpEvent::Evicted { flow, .. } = event {
+                let key = CanonicalFlow::from_flow(flow);
+                let Some(live) = self.live_mut(&key) else {
+                    self.discard_closed(&key);
+                    continue;
+                };
+                let first = live.first_flow().clone();
+                live.dedup().mark_evicted(flow, &first);
+                self.retire(
+                    &key,
+                    Status::Gap,
+                    Some(REASON_FLOW_EVICTED.to_owned()),
+                    number,
+                    events,
+                );
+                self.discard_closed(&key);
+            }
+        }
+    }
+
+    fn fold_deliveries(
+        &mut self,
+        record: &FrameRecord<'_>,
+        key: &CanonicalFlow,
+        events: &mut Vec<SessionEvent>,
+    ) {
+        let cap = MAX_DIRECTION_BUFFER;
+        for event in record.tcp_events {
+            let TcpEvent::Data {
+                flow: sender,
+                sequence,
+                bytes,
+            } = event
+            else {
+                continue;
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let Some(live) = self.live_mut(key) else {
+                return;
+            };
+            // A delivery of some other conversation rode this frame's sweep.
+            let Some(direction) = live.direction_of(sender) else {
+                continue;
+            };
+            let deduplicated = live
+                .dedup()
+                .deduplicate(direction.dedup(), *sequence, bytes);
+            let Some(payload) = deduplicated.filter(|payload| !payload.is_empty()) else {
+                continue;
+            };
+            // A direction that has stopped contributing handshake bytes keeps
+            // none of this delivery, so it charges nothing and the frame is
+            // not part of the handshake this session reports.
+            let Some(charge) = live.retainable(direction, payload.len(), cap) else {
+                continue;
+            };
+            live.note_delivery(record.number);
+
+            // Room is made before any of the delivery is buffered, so the
+            // aggregate ceiling is never exceeded even transiently. Only what
+            // the direction can still retain is charged for.
+            while self.buffered_bytes.saturating_add(charge) > self.limits.max_buffered_bytes
+                && self.evict_oldest(Some(key), REASON_AGGREGATE_LIMIT, events)
+            {}
+            if self.buffered_bytes.saturating_add(charge) > self.limits.max_buffered_bytes {
+                if self.retire(
+                    key,
+                    Status::Gap,
+                    Some(REASON_AGGREGATE_LIMIT.to_owned()),
+                    record.number,
+                    events,
+                ) {
+                    self.summary.evicted_sessions = self.summary.evicted_sessions.saturating_add(1);
+                }
+                return;
+            }
+
+            let mut limit_hits = 0;
+            let Some(live) = self.live_mut(key) else {
+                return;
+            };
+            let before = live.buffered();
+            let verdict = live.feed(direction, &payload, cap, &mut limit_hits);
+            let after = live.buffered();
+            self.buffered_bytes = self
+                .buffered_bytes
+                .saturating_sub(before)
+                .saturating_add(after);
+            self.summary.buffer_limit_hits =
+                self.summary.buffer_limit_hits.saturating_add(limit_hits);
+            if let Verdict::Finished { status, reason } = verdict {
+                self.retire(key, status, reason, record.number, events);
+            }
+        }
+    }
+
+    fn live_mut(&mut self, key: &CanonicalFlow) -> Option<&mut Live> {
+        match self.entries.get_mut(key) {
+            Some(Entry {
+                state: Tracked::Live(live),
+                ..
+            }) => Some(live),
+            _ => None,
+        }
+    }
+
+    fn last_frame(&self, key: &CanonicalFlow) -> u64 {
+        match self.entries.get(key) {
+            Some(Entry {
+                state: Tracked::Live(live),
+                ..
+            }) => live.last_frame(),
+            _ => 0,
+        }
+    }
+
+    fn track(
+        &mut self,
+        key: &CanonicalFlow,
+        stream: u64,
+        flow: ScopedFlowKey,
+        scope: crate::analysis::scope::Definition,
+        events: &mut Vec<SessionEvent>,
+    ) {
+        while self.entries.len() >= self.limits.max_sessions {
+            if !self.evict_oldest(Some(key), REASON_SESSION_LIMIT, events) {
+                break;
+            }
+        }
+        let order = self.next_order;
+        self.next_order = self.next_order.saturating_add(1);
+        self.order.insert(order, key.clone());
+        self.entries.insert(
+            key.clone(),
+            Entry {
+                order,
+                state: Tracked::Live(Box::new(Live::new(stream, flow, scope))),
+            },
+        );
+    }
+
+    /// Filtering can expose older indices after newer ones, in either direction.
+    fn note_stream(&mut self, stream: u64) {
+        self.seen_streams.insert(stream);
+    }
+
+    /// Retires the oldest tracked conversation other than `protect`,
+    /// reporting an in-flight handshake as a gap. Returns whether anything
+    /// was retired.
+    fn evict_oldest(
+        &mut self,
+        protect: Option<&CanonicalFlow>,
+        reason: &str,
+        events: &mut Vec<SessionEvent>,
+    ) -> bool {
+        let candidate = self
+            .order
+            .iter()
+            .find(|(_, key)| Some(*key) != protect)
+            .map(|(order, key)| (*order, key.clone()));
+        let Some((order, key)) = candidate else {
+            return false;
+        };
+        self.order.remove(&order);
+        let Some(entry) = self.entries.remove(&key) else {
+            return true;
+        };
+        if let Tracked::Live(live) = entry.state {
+            self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
+            if live.is_session() {
+                self.summary.evicted_sessions = self.summary.evicted_sessions.saturating_add(1);
+                let number = live.last_frame();
+                self.emit(*live, Status::Gap, Some(reason.to_owned()), number, events);
+            }
+        }
+        true
+    }
+
+    /// Ends a handshake and reports whether a session was emitted. Retains
+    /// emitted entries as closed to suppress late bytes; drops empty entries
+    /// so a gap before the hello does not prevent later tracking.
+    fn retire(
+        &mut self,
+        key: &CanonicalFlow,
+        status: Status,
+        reason: Option<String>,
+        number: u64,
+        events: &mut Vec<SessionEvent>,
+    ) -> bool {
+        let Some(entry) = self.entries.get_mut(key) else {
+            return false;
+        };
+        let Tracked::Live(live) = std::mem::replace(&mut entry.state, Tracked::Closed) else {
+            return false;
+        };
+        self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
+        if !live.is_session() {
+            self.forget(key);
+            return false;
+        }
+        self.emit(*live, status, reason, number, events);
+        true
+    }
+
+    fn forget(&mut self, key: &CanonicalFlow) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.order.remove(&entry.order);
+        }
+    }
+
+    fn emit(
+        &mut self,
+        live: Live,
+        status: Status,
+        reason: Option<String>,
+        number: u64,
+        events: &mut Vec<SessionEvent>,
+    ) {
+        let index = self.next_session;
+        self.next_session = self.next_session.saturating_add(1);
+        self.summary.sessions = self.summary.sessions.saturating_add(1);
+        let by_status = self.summary.by_status.entry(status).or_default();
+        *by_status = by_status.saturating_add(1);
+        events.push(SessionEvent {
+            number,
+            session: live.into_session(index, status, reason),
+        });
+    }
+
+    /// Closes a conversation. One that assembled nothing is forgotten
+    /// outright, so a later hello on the same four-tuple is tracked again;
+    /// one that did leaves a closed marker until a new connection opens.
+    fn discard(&mut self, key: &CanonicalFlow) {
+        if let Some(entry) = self.entries.get_mut(key)
+            && let Tracked::Live(live) = std::mem::replace(&mut entry.state, Tracked::Closed)
+        {
+            self.buffered_bytes = self.buffered_bytes.saturating_sub(live.buffered());
+            if !live.is_session() {
+                self.forget(key);
+            }
+        }
+    }
+
+    /// Drops a closed entry so the four-tuple can carry a new session.
+    fn discard_closed(&mut self, key: &CanonicalFlow) {
+        if matches!(
+            self.entries.get(key),
+            Some(Entry {
+                state: Tracked::Closed,
+                ..
+            })
+        ) {
+            self.forget(key);
+        }
+    }
+}
+
+impl SessionCollector for Collector {
+    type Event = SessionEvent;
+    type Summary = Summary;
+
+    /// Sessions are assembled from reassembled-TCP events, and UDP
+    /// conversation indexes feed the port-443 QUIC counter — without them
+    /// `udp_443_frames` silently reports zero.
+    fn needs(&self) -> CollectorNeeds {
+        CollectorNeeds {
+            tcp_stream: true,
+            udp_stream: true,
+            tcp_events: true,
+            ..CollectorNeeds::default()
+        }
+    }
+
+    fn observe(&mut self, record: &FrameRecord<'_>) -> Result<Vec<SessionEvent>, BoundaryError> {
+        Ok(Self::observe(self, record))
+    }
+
+    fn finish(self, run: &RunSummary) -> Result<(Vec<SessionEvent>, Summary), BoundaryError> {
+        Ok(Self::finish(self, run))
+    }
+}

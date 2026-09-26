@@ -1,17 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
+use std::{fmt, io, net::IpAddr, time::Duration};
 
-use packetcraftr_core::{
-    error::{Classification, Classified, Kind},
-    layer::Id as LayerId,
-};
+use packetcraftr_core::budget::Cancelled;
+use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, SendEvidenceFault, capture,
-    link::Mode,
-    neighbor::Error as NeighborError,
-    route::{Error as RouteError, SystemError},
+    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode, route,
+    tcp,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
@@ -20,7 +16,7 @@ use packetcraftr_netio::{
 fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     let error = Error::Capture {
         message: "libpcap receive failed".to_owned(),
-        source: Some(Arc::new(io::Error::other("device is not up"))),
+        source: Some(Source::new(io::Error::other("device is not up"))),
     };
     assert_eq!(error.to_string(), "capture failed: libpcap receive failed");
     assert_eq!(error.causes(), ["device is not up"]);
@@ -31,17 +27,26 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
         fault: SendEvidenceFault::AcceptedBytesDiffer,
     };
     assert_eq!(
+        invariant.to_string(),
+        "packet transmission wire evidence is inconsistent"
+    );
+    assert_eq!(
         invariant.causes(),
         ["provider-accepted bytes differ from the exact submitted frame"]
+    );
+    assert_row(
+        &SendEvidenceFault::InconsistentTiming,
+        "internal.live_io_invariant",
+        Kind::Internal,
     );
 
     // A route adapter refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Some(Arc::new(SystemError::OperatingSystem {
+        source: Some(Source::new(route::Error::OperatingSystem {
             operation: "RTM_GETLINK",
             message: "the operating system refused the request".to_owned(),
-            source: Some(Arc::new(io::Error::other("operation not permitted"))),
+            source: Some(Source::new(io::Error::other("operation not permitted"))),
         })),
     };
     assert_eq!(
@@ -51,6 +56,154 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
             "operation not permitted",
         ]
     );
+}
+
+/// Interface enumeration failures publish the live-I/O classes, and become
+/// the matching live-I/O failure with the same message and source chain.
+#[test]
+fn interface_errors_keep_live_io_classes_and_their_source() {
+    let unsupported = interface::Error::Unsupported(Unsupported::new(
+        NativeCapability::InterfaceEnumeration,
+        "enable the native-route feature for native interface enumeration",
+    ));
+    assert_row(&unsupported, "capability.unsupported", Kind::Capability);
+    let discovery = interface::Error::Discovery {
+        message: "the native route adapter refused the interface query".to_owned(),
+        source: Source::new(io::Error::other("operation not permitted")),
+    };
+    assert_row(&discovery, "io.interface_discovery", Kind::Io);
+    assert_eq!(discovery.causes(), ["operation not permitted"]);
+    let expired = interface::Error::DeadlineExceeded {
+        operation: "enumerating interfaces",
+    };
+    assert_row(&expired, "io.deadline_exceeded", Kind::Io);
+    let cancelled = interface::Error::Cancelled(Cancelled);
+    assert_row(&cancelled, "io.cancelled", Kind::Io);
+
+    for error in [unsupported, discovery, expired, cancelled] {
+        let live = Error::from(error.clone());
+        assert_eq!(live.to_string(), error.to_string());
+        assert_eq!(live.causes(), error.causes());
+        assert_eq!(live.classification(), error.classification());
+    }
+}
+
+/// Every "unsupported" failure is one [`Unsupported`] whose capability
+/// decides its class: route lookups publish `capability.route`, everything
+/// else `capability.unsupported`. The three error types that carry it publish
+/// the same message, class, and causes.
+#[test]
+fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
+    for (capability, code, subject) in [
+        (
+            NativeCapability::Route,
+            "capability.route",
+            "native route selection",
+        ),
+        (
+            NativeCapability::InterfaceEnumeration,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Capture,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer2),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer3),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+    ] {
+        let unsupported = Unsupported {
+            capability,
+            message: "fixture".to_owned(),
+            source: Some(Source::new(io::Error::other("refused by the driver"))),
+        };
+        assert_row(&unsupported, code, Kind::Capability);
+        assert_eq!(
+            unsupported.to_string(),
+            format!("{subject} is unavailable: fixture")
+        );
+        assert_eq!(unsupported.causes(), ["refused by the driver"]);
+
+        let carriers: [Box<dyn Classified>; 3] = [
+            Box::new(Error::from(unsupported.clone())),
+            Box::new(route::Error::from(unsupported.clone())),
+            Box::new(interface::Error::from(unsupported.clone())),
+        ];
+        for carrier in carriers {
+            assert_eq!(carrier.classification(), unsupported.classification());
+            assert_eq!(carrier.causes(), unsupported.causes());
+        }
+        assert_eq!(
+            Error::from(unsupported.clone()).to_string(),
+            unsupported.to_string()
+        );
+    }
+}
+
+/// `tcp::Error` is `#[non_exhaustive]`; the table lists all 9 variants
+/// exactly once. A socket failure is the provider's own error: its message
+/// and kind pass through, and every other socket error stays a source.
+#[test]
+fn tcp_errors_keep_stable_classes_and_their_socket_source() {
+    let socket = tcp::Error::from(io::Error::new(
+        io::ErrorKind::ConnectionRefused,
+        "connection refused by the peer",
+    ));
+    assert_eq!(socket.to_string(), "connection refused by the peer");
+    assert!(matches!(
+        &socket,
+        tcp::Error::Socket(source) if source.kind() == io::ErrorKind::ConnectionRefused
+    ));
+
+    let evidence = tcp::Error::Evidence {
+        operation: "peer",
+        source: io::Error::other("socket is not connected"),
+    };
+    assert_eq!(
+        evidence.to_string(),
+        "could not inspect the connected peer endpoint"
+    );
+    assert_eq!(evidence.causes(), ["socket is not connected"]);
+
+    let cases = [
+        (socket, "io.tcp_connect", Kind::Io),
+        (evidence, "io.tcp_connect_evidence", Kind::Io),
+        (tcp::Error::Timeout, "cli.tcp_connect_timeout", Kind::Usage),
+        (
+            tcp::Error::DeadlineExceeded,
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Capacity { limit: 16 },
+            "io.tcp_connect_capacity",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Spawn(io::Error::other("thread limit reached")),
+            "io.tcp_connect_worker",
+            Kind::Io,
+        ),
+        (tcp::Error::Worker, "io.tcp_connect_worker", Kind::Io),
+        (
+            tcp::Error::Completed,
+            "internal.tcp_connect_state",
+            Kind::Internal,
+        ),
+        (tcp::Error::Cancelled(Cancelled), "io.cancelled", Kind::Io),
+    ];
+    for (error, code, kind) in cases {
+        assert_row(&error, code, kind);
+    }
 }
 
 fn ipv4(value: &str) -> IpAddr {
@@ -75,216 +228,25 @@ fn assert_row(
     assert!(!error.to_string().is_empty());
 }
 
-/// `route::Error` is `#[non_exhaustive]`; the table lists all 22 variants
-/// exactly once, so a new variant must add a row here.
-#[test]
-fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
-    let provider_failure = Classification::new(
-        "fixture.route_provider",
-        Kind::Policy,
-        Some("replace the fixture route provider"),
-    );
-    let cases = [
-        (
-            RouteError::RouteLookup {
-                destination: ipv4("192.0.2.9"),
-                source: Box::new(std::io::Error::other("fixture")),
-                failure: provider_failure,
-            },
-            "fixture.route_provider",
-            Kind::Policy,
-        ),
-        (RouteError::MissingDestination, "packet.plan", Kind::Packet),
-        (
-            RouteError::MissingLayer2Interface,
-            "cli.interface_required",
-            Kind::Cli,
-        ),
-        (
-            RouteError::InterfaceLookupUnsupported {
-                interface: "fixture0".to_owned(),
-            },
-            "capability.link_mode",
-            Kind::Capability,
-        ),
-        (
-            RouteError::InterfaceLookup {
-                interface: "fixture0".to_owned(),
-                source: Box::new(std::io::Error::other("fixture")),
-                failure: provider_failure,
-            },
-            "fixture.route_provider",
-            Kind::Policy,
-        ),
-        (
-            RouteError::InterfaceMismatch {
-                requested: "fixture0".to_owned(),
-                requested_index: 1,
-                selected: "fixture1".to_owned(),
-                selected_index: 2,
-            },
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::MissingLayer2DestinationMac,
-            "packet.plan",
-            Kind::Packet,
-        ),
-        (RouteError::EthernetInLayer3, "packet.plan", Kind::Packet),
-        (
-            RouteError::OfflineOnlyLinkHeader {
-                protocol: LayerId::new("linux_sll"),
-            },
-            "packet.offline_link_header",
-            Kind::Packet,
-        ),
-        (
-            RouteError::Layer2Unsupported,
-            "capability.link_mode",
-            Kind::Capability,
-        ),
-        (
-            RouteError::Layer3Unsupported,
-            "capability.link_mode",
-            Kind::Capability,
-        ),
-        (
-            RouteError::MissingNeighborSource {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::MissingNeighborTarget {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::MissingSourceMac {
-                interface: "fixture0".to_owned(),
-            },
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::Neighbor(Box::new(NeighborError::Resolution {
-                interface: "fixture0".to_owned(),
-                target: ipv4("192.0.2.9"),
-                message: "fixture".to_owned(),
-            })),
-            "io.neighbor",
-            Kind::Io,
-        ),
-        (
-            RouteError::SourceFamilyMismatch {
-                destination: ipv6("2001:db8::9"),
-            },
-            "packet.plan",
-            Kind::Packet,
-        ),
-        (
-            RouteError::PreferredSourceFamilyMismatch {
-                preferred_source: ipv4("192.0.2.2"),
-                destination: ipv6("2001:db8::9"),
-            },
-            "packet.plan",
-            Kind::Packet,
-        ),
-        (
-            RouteError::PreferredSourceNotSelected {
-                requested: ipv4("192.0.2.2"),
-                selected: Some(ipv4("192.0.2.3")),
-            },
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::MissingPacketSource,
-            "internal.route_contract",
-            Kind::Internal,
-        ),
-        (
-            RouteError::InvalidSegmentRouting {
-                message: "fixture".to_owned(),
-                source: None,
-            },
-            "packet.plan",
-            Kind::Packet,
-        ),
-        (
-            RouteError::InvalidSourceRouting {
-                message: "fixture".to_owned(),
-                source: None,
-            },
-            "packet.plan",
-            Kind::Packet,
-        ),
-        (
-            RouteError::InvalidNeighborVlan {
-                message: "fixture".to_owned(),
-                source: None,
-            },
-            "packet.plan",
-            Kind::Packet,
-        ),
-    ];
-
-    for (error, code, kind) in cases {
-        assert_row(&error, code, kind);
-    }
-}
-
-/// The two lookup variants retain the provider failure they wrap instead of
-/// flattening it into a string, so the chain survives to the render boundary
-/// while the published message stays exactly what it was.
-#[test]
-fn route_lookup_failures_retain_the_provider_error_as_a_source() {
-    let error = RouteError::RouteLookup {
-        destination: ipv4("192.0.2.9"),
-        source: Box::new(std::io::Error::other("provider refused")),
-        failure: Classification::new("fixture.route_provider", Kind::Policy, Some("replace it")),
-    };
-
-    assert_eq!(
-        error.to_string(),
-        "route lookup for 192.0.2.9 failed: provider refused"
-    );
-    assert_eq!(error.causes(), ["provider refused"]);
-    assert!(std::error::Error::source(&error).is_some());
-
-    // A transparent variant delegates rather than repeating its own message.
-    let neighbor = RouteError::Neighbor(Box::new(NeighborError::InvalidRequest {
-        message: "fixture".to_owned(),
-    }));
-    assert!(neighbor.causes().is_empty());
-    assert_eq!(neighbor.to_string(), "neighbor request is invalid: fixture");
-}
-
-/// `route::SystemError` is `#[non_exhaustive]`; the table lists all 8
+/// `route::Error` is `#[non_exhaustive]`; the table lists all 10
 /// variants exactly once, so a new variant must add a row here.
 #[test]
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
         (
-            SystemError::Unsupported {
-                message: "fixture".to_owned(),
-            },
+            route::Error::Unsupported(Unsupported::new(NativeCapability::Route, "fixture")),
             "capability.route",
             Kind::Capability,
         ),
         (
-            SystemError::RouteNotFound {
+            route::Error::RouteNotFound {
                 destination: ipv4("192.0.2.9"),
             },
             "io.route_not_found",
             Kind::Io,
         ),
         (
-            SystemError::InterfaceNotFound {
+            route::Error::InterfaceNotFound {
                 name: "fixture0".to_owned(),
                 index: 1,
             },
@@ -292,7 +254,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::InterfaceMismatch {
+            route::Error::InterfaceMismatch {
                 requested: "fixture0".to_owned(),
                 requested_index: 1,
                 actual: "fixture1".to_owned(),
@@ -302,7 +264,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::SourceFamilyMismatch {
+            route::Error::SourceFamilyMismatch {
                 preferred_source: ipv4("192.0.2.2"),
                 destination: ipv6("2001:db8::9"),
             },
@@ -310,7 +272,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::SourceUnavailable {
+            route::Error::SourceUnavailable {
                 preferred_source: ipv4("192.0.2.2"),
                 interface: "fixture0".to_owned(),
             },
@@ -318,153 +280,34 @@ fn system_route_errors_keep_stable_provider_classes() {
             Kind::Io,
         ),
         (
-            SystemError::InvalidResponse {
+            route::Error::InvalidResponse {
                 message: "fixture".to_owned(),
             },
             "internal.route_response",
             Kind::Internal,
         ),
         (
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "fixture operation",
                 message: "fixture".to_owned(),
-                source: Some(Arc::new(io::Error::other("kernel refused the request"))),
+                source: Some(Source::new(io::Error::other("kernel refused the request"))),
             },
             "io.route",
             Kind::Io,
         ),
+        (
+            route::Error::DeadlineExceeded {
+                operation: "fixture operation",
+            },
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (route::Error::Cancelled(Cancelled), "io.cancelled", Kind::Io),
     ];
 
     for (error, code, kind) in cases {
         assert_row(&error, code, kind);
     }
-}
-
-fn not_found() -> NeighborError {
-    NeighborError::NotFound {
-        interface: "fixture0".to_owned(),
-        target: ipv4("192.0.2.9"),
-        attempts: 3,
-        captured: Vec::new(),
-        evidence_truncated: false,
-        capture_statistics: capture::Statistics::default(),
-    }
-}
-
-/// `neighbor::Error` is `#[non_exhaustive]`; the table lists all 8 variants
-/// exactly once, so a new variant must add a row here.
-#[test]
-fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
-    const NO_CAUSES: &[&str] = &[];
-    const SEND_CAUSES: &[&str] = &["packet transmission failed: send failed"];
-    const CLEANUP_CAUSES: &[&str] = &["capture failed: cleanup failed"];
-    const OPERATION_AND_CLEANUP_CAUSES: &[&str] = &[
-        "neighbor resolution returned no address for 192.0.2.9 on fixture0 after 3 attempt(s)",
-        "capture failed: cleanup failed",
-    ];
-    let cases = [
-        (
-            NeighborError::Resolution {
-                interface: "fixture0".to_owned(),
-                target: ipv4("192.0.2.9"),
-                message: "fixture".to_owned(),
-            },
-            "io.neighbor",
-            Kind::Io,
-            NO_CAUSES,
-        ),
-        (not_found(), "io.neighbor_timeout", Kind::Io, NO_CAUSES),
-        (
-            NeighborError::InvalidRequest {
-                message: "fixture".to_owned(),
-            },
-            "internal.neighbor_invariant",
-            Kind::Internal,
-            NO_CAUSES,
-        ),
-        (
-            NeighborError::InvalidOptions {
-                message: "fixture".to_owned(),
-            },
-            "cli.neighbor_limit",
-            Kind::Cli,
-            NO_CAUSES,
-        ),
-        (
-            NeighborError::State {
-                message: "fixture".to_owned(),
-            },
-            "internal.neighbor_invariant",
-            Kind::Internal,
-            NO_CAUSES,
-        ),
-        (
-            NeighborError::Io {
-                interface: "fixture0".to_owned(),
-                target: ipv4("192.0.2.9"),
-                operation: "sending request",
-                source: Error::Send {
-                    message: "send failed".to_owned(),
-                    source: None,
-                },
-            },
-            "io.send",
-            Kind::Io,
-            SEND_CAUSES,
-        ),
-        (
-            NeighborError::Cleanup {
-                interface: "fixture0".to_owned(),
-                target: ipv4("192.0.2.9"),
-                source: Error::Capture {
-                    message: "cleanup failed".to_owned(),
-                    source: None,
-                },
-            },
-            "io.capture",
-            Kind::Io,
-            CLEANUP_CAUSES,
-        ),
-        (
-            NeighborError::OperationAndCleanup {
-                interface: "fixture0".to_owned(),
-                target: ipv4("192.0.2.9"),
-                operation: Box::new(not_found()),
-                cleanup: Error::Capture {
-                    message: "cleanup failed".to_owned(),
-                    source: None,
-                },
-            },
-            "io.neighbor_timeout",
-            Kind::Io,
-            OPERATION_AND_CLEANUP_CAUSES,
-        ),
-    ];
-
-    for (error, code, kind, expected_causes) in cases {
-        assert_row(&error, code, kind);
-        let causes = error.causes();
-        let causes = causes.iter().map(String::as_str).collect::<Vec<_>>();
-        assert_eq!(causes.as_slice(), expected_causes, "{error}");
-    }
-}
-
-/// A combined operation-and-cleanup failure exposes the operation failure as
-/// its standard source, so generic error walkers see the same chain `causes`
-/// reports.
-#[test]
-fn neighbor_operation_and_cleanup_failures_expose_the_operation_as_a_source() {
-    let error = NeighborError::OperationAndCleanup {
-        interface: "fixture0".to_owned(),
-        target: ipv4("192.0.2.9"),
-        operation: Box::new(not_found()),
-        cleanup: Error::Capture {
-            message: "cleanup failed".to_owned(),
-            source: None,
-        },
-    };
-    let source = std::error::Error::source(&error).expect("the operation failure is the source");
-    assert_eq!(source.to_string(), not_found().to_string());
 }
 
 /// `packetcraftr_netio::Error` is `#[non_exhaustive]`; the table lists all 22
@@ -473,10 +316,7 @@ fn neighbor_operation_and_cleanup_failures_expose_the_operation_as_a_source() {
 fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     let cases = [
         (
-            Error::Unsupported {
-                message: "fixture".to_owned(),
-                source: None,
-            },
+            Error::Unsupported(Unsupported::new(NativeCapability::Capture, "fixture")),
             "capability.unsupported",
             Kind::Capability,
         ),
@@ -559,7 +399,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 maximum: capture::MAX_TIMEOUT,
             },
             "cli.capture_timeout",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::InvalidTransmissionFrame {
@@ -582,7 +422,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 message: "fixture".to_owned(),
             },
             "cli.capture_filter",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::CaptureFilterInstallation {
@@ -613,7 +453,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 reason: "fixture",
             },
             "cli.capture_limit",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::CaptureQueueOverflow {
@@ -645,108 +485,61 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             "internal.live_io_invariant",
             Kind::Internal,
         ),
+        (
+            Error::CaptureFilterTooLong {
+                length: capture::MAX_FILTER_BYTES + 1,
+                maximum: capture::MAX_FILTER_BYTES,
+            },
+            "cli.capture_filter",
+            Kind::Usage,
+        ),
+        (
+            Error::InvalidCaptureGroup { reason: "fixture" },
+            "cli.capture_group",
+            Kind::Usage,
+        ),
+        (
+            Error::CaptureSourceContract {
+                index: 0,
+                reason: "fixture",
+            },
+            "internal.capture_group",
+            Kind::Internal,
+        ),
+        (
+            Error::CaptureGroupState,
+            "internal.capture_group",
+            Kind::Internal,
+        ),
+        (
+            Error::CaptureSource {
+                index: 1,
+                interface: interface::Id {
+                    name: "fixture1".to_owned(),
+                    index: 8,
+                },
+                phase: capture::Phase::Receive,
+                source: Box::new(Error::CaptureReadiness {
+                    message: "fixture".to_owned(),
+                }),
+            },
+            "io.capture_readiness",
+            Kind::Io,
+        ),
+        (
+            Error::CaptureCleanup {
+                first: Box::new(Error::Capture {
+                    message: "fixture".to_owned(),
+                    source: None,
+                }),
+                remaining: vec![Error::CaptureGroupState],
+            },
+            "io.capture",
+            Kind::Io,
+        ),
     ];
 
     for (error, code, kind) in cases {
         assert_row(&error, code, kind);
     }
-}
-
-/// Packet interpretation failures retain their typed cause through the public planner,
-/// before an injected provider can perform any I/O.
-#[test]
-fn route_planning_retains_semantic_failures_before_provider_io() {
-    use packetcraftr_core::{
-        field::WireValue,
-        packet::Packet,
-        packet::semantics::Error as SemanticsError,
-        protocol::{
-            ipv6::SegmentRoutingHeader,
-            network::{Ipv4, Ipv6},
-        },
-    };
-    use packetcraftr_netio::{interface, route};
-    use std::error::Error as _;
-
-    struct NoIo;
-    impl route::Provider for NoIo {
-        type Error = io::Error;
-        fn lookup_with_preferences(
-            &self,
-            _: IpAddr,
-            _: Option<&interface::Id>,
-            _: Option<IpAddr>,
-        ) -> Result<route::Decision, Self::Error> {
-            panic!("invalid route must fail before provider I/O")
-        }
-    }
-
-    let mut ipv4_packet = Packet::new();
-    ipv4_packet.push(Ipv4 {
-        destination: "192.0.2.1".parse().unwrap(),
-        options: vec![131, 7, 5, 192, 0, 2, 2].into(),
-        ..Ipv4::default()
-    });
-    let mut ipv6_packet = Packet::new();
-    ipv6_packet.push(Ipv6 {
-        destination: "2001:db8::1".parse().unwrap(),
-        ..Ipv6::default()
-    });
-    ipv6_packet.push(SegmentRoutingHeader {
-        segments: vec!["2001:db8::1".parse().unwrap()],
-        last_entry: WireValue::Exact(1),
-        ..SegmentRoutingHeader::default()
-    });
-    for (packet, expected) in [
-        (
-            ipv4_packet,
-            SemanticsError::Ipv4SourceRoutePointer {
-                option: 131,
-                pointer: 5,
-            },
-        ),
-        (
-            ipv6_packet,
-            SemanticsError::SegmentLastEntry {
-                last_entry: 1,
-                expected: 0,
-            },
-        ),
-    ] {
-        let error = route::plan(&packet, None, &route::Options::default(), &NoIo).unwrap_err();
-        assert!(matches!(
-            (&error, &expected),
-            (
-                RouteError::InvalidSourceRouting { .. },
-                SemanticsError::Ipv4SourceRoutePointer { .. }
-            ) | (
-                RouteError::InvalidSegmentRouting { .. },
-                SemanticsError::SegmentLastEntry { .. }
-            )
-        ));
-        let source = error
-            .source()
-            .unwrap()
-            .downcast_ref::<SemanticsError>()
-            .unwrap();
-        assert_eq!(source, &expected);
-        assert_eq!(error.classification().code, "packet.plan");
-        assert_eq!(error.causes(), [expected.to_string()]);
-        assert!(!error.to_string().contains(&expected.to_string()));
-        assert!(source.source().is_none());
-    }
-
-    let mut local_failure = Packet::new();
-    local_failure.push(Ipv4 {
-        options: vec![131, 7, 4, 192, 0, 2, 2].into(),
-        ..Ipv4::default()
-    });
-    let error = route::plan(&local_failure, None, &route::Options::default(), &NoIo).unwrap_err();
-    assert!(matches!(
-        error,
-        RouteError::InvalidSourceRouting { source: None, .. }
-    ));
-    assert!(error.source().is_none());
-    assert!(error.causes().is_empty());
-    assert_eq!(error.classification().code, "packet.plan");
 }

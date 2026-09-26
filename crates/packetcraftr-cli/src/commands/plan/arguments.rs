@@ -1,7 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{RouteArgs, RoutePolicyArgs};
+use crate::command_options::{
+    DestinationAllowlistArgs, HostnameResolutionArgs, PublicDestinationArgs, RouteArgs,
+};
+use crate::resources::Settings;
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Route planning is passive: it performs no packet transmission.
 
@@ -13,5 +16,30 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) route: RouteArgs,
     #[command(flatten)]
-    pub(crate) policy: RoutePolicyArgs,
+    pub(crate) policy: PolicyArgs,
+}
+
+/// `plan`: passive, so it has no budget to spend.
+#[derive(Clone, Debug, clap::Args)]
+pub(crate) struct PolicyArgs {
+    #[command(flatten)]
+    public_destination: PublicDestinationArgs,
+    #[command(flatten)]
+    hostname_resolution: HostnameResolutionArgs,
+    #[command(flatten)]
+    destination_allowlist: DestinationAllowlistArgs,
+}
+
+impl PolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+    }
+
+    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
+        let mut policy = packetcraftr::policy::Policy::default();
+        self.public_destination.apply_to(&mut policy);
+        self.hostname_resolution.apply_to(&mut policy);
+        self.destination_allowlist.apply_to(&mut policy);
+        policy
+    }
 }

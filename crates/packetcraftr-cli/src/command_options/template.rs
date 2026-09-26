@@ -20,6 +20,8 @@ pub(crate) struct TemplateArgs {
     /// unsigned range, e.g. 0.ttl=[1,64] or 0.ttl=1..64:8. Repeat for a
     /// Cartesian product; the last axis varies fastest.
     #[arg(long = "axis", value_name = "LAYER.FIELD=[VALUES]|START..END[:STEP]")]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::broken_intra_doc_links)]
     pub(crate) axes: Vec<String>,
     /// Maximum packets in the complete Cartesian product, checked before preparation.
     #[arg(long, default_value_t = DEFAULT_MAX_TEMPLATE_PACKETS)]
@@ -43,13 +45,17 @@ pub(crate) struct ParsedTemplate {
 }
 
 impl TemplateArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_template_packets: Count @ Operation]);
+    }
+
     /// Check syntax, aggregate input size, and the complete expansion ceiling
     /// before a caller reads its recipe or performs route preparation.
     pub(crate) fn parse(self) -> Result<ParsedTemplate, CliError> {
         let maximum = self.max_template_packets;
         if maximum == 0 {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--max-template-packets must be non-zero",
             ));
         }
@@ -69,7 +75,7 @@ impl TemplateArgs {
         for source in self.axes {
             let syntax = || {
                 CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "--axis requires LAYER.FIELD=[VALUES] or LAYER.FIELD=START..END[:STEP] with a zero-based layer and a non-empty set",
                 )
             };
@@ -135,7 +141,7 @@ impl TemplateArgs {
 fn parse_range(text: &str) -> Result<NumericRange, CliError> {
     let syntax = || {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--axis range requires START..END[:STEP] with unsigned decimal or 0x-prefixed integers",
         )
     };

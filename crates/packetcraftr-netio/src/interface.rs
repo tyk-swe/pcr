@@ -3,10 +3,18 @@
 
 //! Interface discovery and portable interface descriptions.
 
+mod error;
+pub(crate) mod validation;
+
 use std::net::IpAddr;
 
-use super::Error;
-use super::link::{Capability, MacAddress};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Source;
+use packetcraftr_core::packet::MacAddress;
+
+use super::link::Capability;
+
+pub use error::Error;
 
 /// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
@@ -44,8 +52,9 @@ pub struct Info {
 }
 
 /// Enumerates interfaces without exposing a native handle or wrapper type.
+/// Enumeration follows the [deadline convention](crate::deadline).
 pub trait Provider: Send + Sync {
-    fn interfaces(&self) -> Result<Vec<Info>, Error>;
+    fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error>;
 }
 
 /// Provider backed by the adapter selected for the current target and feature
@@ -54,7 +63,83 @@ pub trait Provider: Send + Sync {
 pub struct SystemProvider;
 
 impl Provider for SystemProvider {
-    fn interfaces(&self) -> Result<Vec<Info>, Error> {
-        super::platform::system_interfaces()
+    fn interfaces(&self, deadline: &Deadline) -> Result<Vec<Info>, Error> {
+        crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+        validate_snapshot(super::platform::interfaces(deadline)?)
+    }
+}
+
+/// Refuses a native snapshot with an incomplete identity, an impossible
+/// prefix, or a duplicate interface.
+fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
+    validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
+        message: "the native route adapter returned an invalid interface snapshot".to_owned(),
+        source: Source::new(error),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use packetcraftr_core::{error::Classified, frame::LinkType};
+
+    use super::*;
+    use crate::route;
+
+    #[test]
+    fn discovery_retains_actual_snapshot_validation_failures() {
+        let valid = Info {
+            id: Id {
+                name: "fixture0".to_owned(),
+                index: 7,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: Flags::default(),
+            mtu: None,
+            capability: Capability::Layer3,
+            link_type: LinkType::RAW,
+        };
+        assert_eq!(
+            validate_snapshot(vec![valid.clone()]).unwrap(),
+            std::slice::from_ref(&valid)
+        );
+        let mut invalid_identity = valid.clone();
+        invalid_identity.id.index = 0;
+        let mut invalid_prefix = valid.clone();
+        invalid_prefix.addresses.push(Address {
+            address: "192.0.2.1".parse().unwrap(),
+            prefix_length: 33,
+        });
+        for snapshot in [
+            vec![invalid_identity],
+            vec![invalid_prefix],
+            vec![valid.clone(), valid],
+        ] {
+            let error = validate_snapshot(snapshot).unwrap_err();
+            // A `Source` field exposes the wrapped error itself.
+            let source = error
+                .source()
+                .unwrap()
+                .downcast_ref::<route::Error>()
+                .unwrap();
+            assert!(matches!(source, route::Error::InvalidResponse { .. }));
+            assert_eq!(error.classification().code, "io.interface_discovery");
+            assert_eq!(source.classification().code, "internal.route_response");
+            assert_eq!(error.causes(), [source.to_string()]);
+            assert!(!error.to_string().contains(&source.to_string()));
+            assert!(source.source().is_none());
+        }
+    }
+
+    #[test]
+    fn a_spent_caller_is_refused_before_enumeration() {
+        let frozen = std::time::Instant::now();
+        let spent = Deadline::with_time_source(std::time::Duration::ZERO, move || frozen);
+        let error = SystemProvider.interfaces(&spent).unwrap_err();
+        assert!(matches!(error, Error::DeadlineExceeded { .. }));
+        assert_eq!(error.classification().code, "io.deadline_exceeded");
     }
 }

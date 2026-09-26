@@ -47,6 +47,15 @@ pub(crate) fn deadline() -> Option<Arc<Deadline>> {
     CURRENT.with(|current| current.borrow().clone())
 }
 
+/// The deadline a passive route, interface, or timestamp-type lookup gets:
+/// the library's passive allowance, within the invocation deadline, under the
+/// installed interrupt signal.
+pub(crate) fn passive_lookup() -> Deadline {
+    Deadline::new(packetcraftr::deadline::PASSIVE_LOOKUP_TIMEOUT)
+        .with_parent(deadline())
+        .with_cancellation(Some(crate::cancellation::signal().clone()))
+}
+
 pub(crate) fn check() -> Result<(), CliError> {
     check_interrupted().map_err(interruption_error)
 }
@@ -76,8 +85,8 @@ pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
 
 /// Attach the same clock to every reader, including seekable snapshots.
 pub(crate) fn reader<R: std::io::Read>(
-    reader: packetcraftr_core::analysis::pcap::Reader<R>,
-) -> packetcraftr_core::analysis::pcap::Reader<R> {
+    reader: packetcraftr_core::capture_file::Reader<R>,
+) -> packetcraftr_core::capture_file::Reader<R> {
     match deadline() {
         Some(deadline) => reader.with_deadline(deadline),
         None => reader,

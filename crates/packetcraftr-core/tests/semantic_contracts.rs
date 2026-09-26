@@ -5,16 +5,15 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
-use packetcraftr_core::layer::{Malformed, Raw};
-use packetcraftr_core::packet::link::{VlanKind, VlanTag};
-use packetcraftr_core::packet::semantics::{
+use packetcraftr_core::layer::{Layer, Malformed, Raw};
+use packetcraftr_core::packet::{VlanKind, VlanTag};
+use packetcraftr_core::protocol::BuiltinProtocol;
+use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
+use packetcraftr_core::protocol::network::{Fragment, Ipv4, Ipv6, SegmentRoutingHeader};
+use packetcraftr_core::protocol::semantics::{
     enclosing_ip_path, live_destinations, outer_ip_path, outer_layers, outer_scope_len,
     transport_key, transport_keys_are_reversed, validate_segment_route, vlan_tags,
 };
-use packetcraftr_core::protocol::BuiltinProtocol;
-use packetcraftr_core::protocol::ipv6::{Fragment, SegmentRoutingHeader};
-use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::Vxlan;
 use packetcraftr_core::{packet::Packet, reflective_layer};
@@ -38,6 +37,28 @@ reflective_layer! {
         }
     }
     layout pub fn route_mimic_layout();
+}
+
+/// A custom layer that names itself after a built-in protocol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Ipv4Impostor {
+    destination: Ipv4Addr,
+}
+
+reflective_layer! {
+    fn ipv4_impostor_schema() => {
+        protocol: packetcraftr_core::layer::Id::new("ipv4"),
+        name: "Custom layer reusing the ipv4 name"
+    }
+    impl Ipv4Impostor {
+        "destination" => {
+            kind: Ipv4, derived: false, required: true,
+            description: "Field a built-in IPv4 layer would route by",
+            reflect: destination,
+            layout: (0, 4)
+        }
+    }
+    layout pub fn ipv4_impostor_layout();
 }
 
 fn ipv6_addr(value: &str) -> Ipv6Addr {
@@ -335,8 +356,11 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
         });
 
     let cases = [
-        (ipv4_fragment, "non-atomic ipv4 fragment"),
-        (ipv6_fragment, "non-atomic ipv6_fragment fragment"),
+        (ipv4_fragment, "the ipv4 layer is a non-atomic fragment"),
+        (
+            ipv6_fragment,
+            "the ipv6_fragment layer is a non-atomic fragment",
+        ),
         (
             [Malformed::new(
                 Some("ipv4".to_owned()),
@@ -345,7 +369,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
             )]
             .into_iter()
             .collect(),
-            "malformed ipv4 layer may hide a live destination",
+            "the ipv4 layer is malformed",
         ),
         (
             [SegmentRoutingHeader::default()].into_iter().collect(),
@@ -357,7 +381,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
             }]
             .into_iter()
             .collect(),
-            "unknown protocol route_mimic exposes route-bearing field destination",
+            "destination cannot be determined because unknown protocol route_mimic carries route-bearing field destination",
         ),
     ];
 
@@ -377,6 +401,31 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
         live_destinations(&harmless)
             .expect("malformed transport cannot hide a route")
             .is_empty()
+    );
+}
+
+#[test]
+fn built_in_identity_comes_from_the_layer_type_not_its_schema_name() {
+    let impostor = Ipv4Impostor {
+        destination: Ipv4Addr::new(198, 51, 100, 1),
+    };
+    assert_eq!(impostor.protocol_id().as_str(), "ipv4");
+    assert_eq!(BuiltinProtocol::of(&impostor), None);
+    assert!(!BuiltinProtocol::Ipv4.identifies(&impostor));
+    assert_eq!(
+        BuiltinProtocol::of(&Ipv4::default()),
+        Some(BuiltinProtocol::Ipv4)
+    );
+    assert!(BuiltinProtocol::Ipv4.identifies(&Ipv4::default()));
+
+    let packet: Packet = [impostor].into_iter().collect();
+    assert_eq!(outer_ip_path(&packet).expect("no built-in IP layer"), None);
+    let error = live_destinations(&packet).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown protocol ipv4 carries route-bearing field destination"),
+        "{error}"
     );
 }
 

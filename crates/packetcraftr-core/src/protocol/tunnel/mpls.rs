@@ -8,7 +8,7 @@ use bytes::Bytes;
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
-    layer::{Layer, reflective_layer},
+    layer::{Layer, Malformed, reflective_layer},
     registry::Discriminator,
 };
 
@@ -98,9 +98,9 @@ impl LayerCodec for MplsCodec {
         // what actually follows: another entry clears it, and anything else —
         // including nothing at all — ends the stack. A malformed child is a
         // dissected truncated stack, which must always rebuild.
-        let expected_bottom = match context.child.map(|child| child.protocol_id().as_str()) {
-            Some(NAME) => Some(false),
-            Some("malformed") => None,
+        let expected_bottom = match context.child {
+            Some(child) if child.is::<Mpls>() => Some(false),
+            Some(child) if child.is::<Malformed>() => None,
             _ => Some(true),
         };
         if let Some(expected_bottom) = expected_bottom

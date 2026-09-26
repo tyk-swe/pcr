@@ -29,29 +29,29 @@ use std::fmt::Write as _;
 
 use bytes::Bytes;
 
+use super::reflection::{tls_layout, tls_schema};
+use super::{
+    CONTENT_TYPE_HANDSHAKE, ClientHello, Error, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO,
+    Handshake, Hello, Record, ServerHello, Tls, Transport, ja3, ja4,
+};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, Raw, raw_layout, reflective_layer},
+    layer::{Layer, Raw},
+    protocol::{
+        BuiltinProtocol,
+        common::{ensure_encode_budget, invalid, typed_layer},
+    },
     registry::Discriminator,
 };
 
-use crate::protocol::common::{
-    ensure_encode_budget, invalid, protocol, read_only, text_list, typed_layer, unsigned_list,
-};
+mod hello;
+mod parse;
 
-use super::fingerprint::{Transport, ja3, ja4};
-use super::hex;
-use super::model::{
-    CONTENT_TYPE_HANDSHAKE, ClientHello, HANDSHAKE_CLIENT_HELLO, HANDSHAKE_SERVER_HELLO, Handshake,
-    Record, ServerHello,
-};
-use super::parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
+pub use parse::{Outcome, looks_like_record_start, parse_handshake, parse_record};
 
-use crate::protocol::BuiltinProtocol;
-
-const NAME: &str = BuiltinProtocol::Tls.as_str();
+pub(super) const NAME: &str = BuiltinProtocol::Tls.as_str();
 
 /// Records dissected from one segment before the remainder becomes a raw tail.
 ///
@@ -65,54 +65,6 @@ pub(crate) const RECORD_UNPARSED: &str = "tls.record_unparsed";
 pub(crate) const RECORDS_CAPPED: &str = "tls.records_capped";
 pub(crate) const SNI_INVALID: &str = "tls.sni_invalid";
 
-/// The complete TLS records carried by one TCP segment.
-///
-/// The layer covers only whole records. A record continuing into the next
-/// segment, a malformed tail, and records past the per-segment record cap all
-/// stay outside it, as a `raw` child.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tls {
-    /// Content type of the first record in the segment.
-    pub content_type: u8,
-    /// Legacy record version of the first record in the segment.
-    pub version: u16,
-    /// Complete records covered by this layer.
-    pub record_count: u16,
-    /// Handshake message type, when a whole handshake message is present.
-    pub handshake_type: Option<u8>,
-    /// Cipher suite chosen by a ServerHello.
-    pub cipher_suite: Option<u16>,
-    /// Version chosen by a ServerHello, after `supported_versions`.
-    pub selected_version: Option<u16>,
-    /// Named group of a ServerHello key share.
-    pub key_share_group: Option<u16>,
-    /// Whether a record continues past the end of this segment.
-    pub incomplete: bool,
-    /// Whether a ClientHello offered encrypted client hello.
-    pub ech: bool,
-    /// Validated server name offered by a ClientHello.
-    pub sni: Option<String>,
-    /// Verbatim server name bytes, whether or not they validated.
-    pub sni_raw: Option<Bytes>,
-    /// JA3 fingerprint of a ClientHello, as its MD5 digest.
-    pub ja3: Option<String>,
-    /// JA3 fingerprint of a ClientHello, before hashing.
-    pub ja3_raw: Option<String>,
-    /// JA4 fingerprint of a ClientHello.
-    pub ja4: Option<String>,
-    /// Application protocols offered by a ClientHello or chosen by a ServerHello.
-    pub alpn: Vec<String>,
-    /// Cipher suites offered by a ClientHello.
-    pub cipher_suites: Vec<u16>,
-    /// Versions offered by a ClientHello.
-    pub supported_versions: Vec<u16>,
-    /// Named groups offered by a ClientHello.
-    pub supported_groups: Vec<u16>,
-    /// A single complete editable hello, when it accounts for this layer.
-    pub hello: Option<super::Hello>,
-    wire: Bytes,
-}
-
 struct Dissection {
     layer: Tls,
     /// Bytes after the last complete record.
@@ -120,44 +72,36 @@ struct Dissection {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl TryFrom<super::Hello> for Tls {
-    type Error = crate::codec::Error;
+impl TryFrom<Hello> for Tls {
+    type Error = Error;
 
     /// Constructs bounded hello records and derives their inspection fields.
-    fn try_from(hello: super::Hello) -> Result<Self, Self::Error> {
+    fn try_from(hello: Hello) -> Result<Self, Self::Error> {
         let wire = hello.to_wire()?;
         let parsed = Self::from_records(&wire)
-            .ok_or_else(|| invalid(NAME, "hello did not encode complete TLS records"))?;
+            .ok_or_else(|| Error::invalid("hello did not encode complete TLS records"))?;
         if parsed.remainder != 0 || parsed.layer.hello.is_none() {
-            return Err(invalid(NAME, "hello fields contain an invalid handshake"));
+            return Err(Error::invalid("hello fields contain an invalid handshake"));
         }
         Ok(parsed.layer)
     }
 }
 
 impl TryFrom<&[u8]> for Tls {
-    type Error = crate::codec::Error;
+    type Error = Error;
 
     /// Reads exact complete TLS records, refusing unconsumed trailing bytes.
     fn try_from(wire: &[u8]) -> Result<Self, Self::Error> {
         let parsed = Self::parse_records(wire, |end| Bytes::copy_from_slice(&wire[..end]))
-            .ok_or_else(|| invalid(NAME, "no complete TLS record"))?;
+            .ok_or_else(|| Error::invalid("no complete TLS record"))?;
         if parsed.remainder != 0 {
-            return Err(invalid(NAME, "TLS records have an incomplete tail"));
+            return Err(Error::invalid("TLS records have an incomplete tail"));
         }
         Ok(parsed.layer)
     }
 }
 
 impl Tls {
-    fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::layer::FieldError> {
-        let hello = super::Hello::from_value(value)?;
-        let replacement = Self::try_from(hello)
-            .map_err(|_| crate::protocol::common::out_of_range(tls_schema(), "hello"))?;
-        *self = replacement;
-        Ok(())
-    }
-
     /// Reads every complete record from the front of `wire`.
     ///
     /// Returns `None` when no complete record is present, which is how a
@@ -263,14 +207,14 @@ impl Tls {
                 self.handshake_type = Some(HANDSHAKE_CLIENT_HELLO);
                 self.apply_client_hello(&hello, diagnostics);
                 if editable {
-                    self.hello = Some(super::Hello::from_client(&hello, self.version));
+                    self.hello = Some(Hello::from_client(&hello, self.version));
                 }
             }
             Handshake::ServerHello(hello) => {
                 self.handshake_type = Some(HANDSHAKE_SERVER_HELLO);
                 self.apply_server_hello(&hello);
                 if editable {
-                    self.hello = Some(super::Hello::from_server(&hello, self.version));
+                    self.hello = Some(Hello::from_server(&hello, self.version));
                 }
             }
             Handshake::Other { kind, .. } => self.handshake_type = Some(kind),
@@ -314,12 +258,6 @@ impl Tls {
             .iter()
             .map(|name| escape_wire_bytes(name))
             .collect();
-    }
-
-    /// The complete records this layer covers, byte for byte.
-    #[must_use]
-    pub fn wire(&self) -> &Bytes {
-        &self.wire
     }
 
     fn validate_wire_consistency(&self) -> Result<(), crate::codec::Error> {
@@ -366,39 +304,14 @@ pub(crate) fn escape_wire_bytes(value: &[u8]) -> String {
     escaped
 }
 
-fn optional_list(values: &[String]) -> Option<FieldValue> {
-    (!values.is_empty()).then(|| text_list(values))
-}
-
-fn optional_codes(values: &[u16]) -> Option<FieldValue> {
-    (!values.is_empty()).then(|| unsigned_list(values))
-}
-
-reflective_layer! {
-    pub(super) fn tls_schema() => { protocol: protocol(NAME), name: "TLS" }
-    impl Tls {
-        "hello" => { kind: Object, derived: false, required: false, description: "Complete hello fixture; extension type/data retain exact unknown bodies", children: super::construct::FIELDS, get |layer| layer.hello.as_ref().map(super::Hello::value), set |layer, value, _name| layer.set_hello(value) },
-        "wire" => { kind: Bytes, derived: false, required: false, description: "Retained TLS record bytes", get |layer| Some(layer.wire.clone().into()), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "content_type" => { kind: Unsigned, derived: false, required: false, description: "Record content type of the first record", get |layer| Some(FieldValue::from(layer.content_type)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (0, 1) },
-        "version" => { kind: Unsigned, derived: false, required: false, description: "Legacy record version of the first record", get |layer| Some(FieldValue::from(layer.version)), set |_layer, _value, name| read_only(tls_schema(), name), layout: (1, 3) },
-        "record_count" => { kind: Unsigned, derived: false, required: false, description: "Complete records in this segment", get |layer| Some(FieldValue::from(layer.record_count)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "handshake_type" => { kind: Unsigned, derived: false, required: false, description: "Handshake message type, when the whole message is in this segment", get |layer| layer.handshake_type.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "cipher_suite" => { kind: Unsigned, derived: false, required: false, description: "Cipher suite selected by a ServerHello", get |layer| layer.cipher_suite.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "selected_version" => { kind: Unsigned, derived: false, required: false, description: "Version selected by a ServerHello", get |layer| layer.selected_version.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "key_share_group" => { kind: Unsigned, derived: false, required: false, description: "Named group of a ServerHello key share", get |layer| layer.key_share_group.map(FieldValue::from), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "incomplete" => { kind: Bool, derived: false, required: false, description: "Whether a record continues past this segment", get |layer| Some(FieldValue::from(layer.incomplete)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ech" => { kind: Bool, derived: false, required: false, description: "Whether a ClientHello offered encrypted client hello", get |layer| Some(FieldValue::from(layer.ech)), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "sni" => { kind: Text, derived: false, required: false, description: "Validated server name offered by a ClientHello", get |layer| layer.sni.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "sni_raw" => { kind: Text, derived: false, required: false, description: "Verbatim server name bytes in hexadecimal", get |layer| layer.sni_raw.as_ref().map(|raw| FieldValue::Text(hex(raw))), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja3" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello (MD5 digest)", get |layer| layer.ja3.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja3_raw" => { kind: Text, derived: false, required: false, description: "Advisory JA3 fingerprint of a ClientHello before hashing", get |layer| layer.ja3_raw.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "ja4" => { kind: Text, derived: false, required: false, description: "Advisory JA4 fingerprint of a ClientHello", get |layer| layer.ja4.clone().map(FieldValue::Text), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "alpn" => { kind: List, derived: false, required: false, description: "Application protocols offered or selected", get |layer| optional_list(&layer.alpn), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "cipher_suites" => { kind: List, derived: false, required: false, description: "Cipher suites offered by a ClientHello", get |layer| optional_codes(&layer.cipher_suites), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "supported_versions" => { kind: List, derived: false, required: false, description: "Versions offered by a ClientHello", get |layer| optional_codes(&layer.supported_versions), set |_layer, _value, name| read_only(tls_schema(), name) },
-        "supported_groups" => { kind: List, derived: false, required: false, description: "Named groups offered by a ClientHello", get |layer| optional_codes(&layer.supported_groups), set |_layer, _value, name| read_only(tls_schema(), name) }
+impl From<Error> for crate::codec::Error {
+    /// Reports a TLS wire failure through the layer codec contract.
+    fn from(error: Error) -> Self {
+        match error {
+            Error::Invalid { message } => invalid(NAME, message),
+            Error::Encode(source) => source,
+        }
     }
-    layout pub(crate) fn tls_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -473,13 +386,13 @@ impl LayerCodec for TlsCodec {
         let mut layer = match fields.get("wire") {
             Some(FieldValue::Bytes(wire)) => Tls::try_from(wire.as_ref())?,
             Some(_) => return Err(invalid(NAME, "wire must be bytes")),
-            None => Tls::try_from(super::Hello::default())?,
+            None => Tls::try_from(Hello::default())?,
         };
         for (name, value) in fields {
             if name == "wire" || layer.field(name).as_ref() == Some(value) {
                 continue;
             }
-            layer.set_field_path(name, value.clone())?;
+            crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
         }
         Ok(Box::new(layer))
     }
@@ -490,7 +403,7 @@ impl LayerCodec for TlsCodec {
 /// not a defect.
 fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
     let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-    decoded.fields = raw_layout(input.len());
+    decoded.fields = Raw::layout(input.len());
     Ok(decoded)
 }
 
@@ -498,7 +411,7 @@ fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
 mod tests {
 
     use super::*;
-    use crate::protocol::application::tls::test_wire::{TLS_1_2, record};
+    use crate::protocol::application::tls::test_support::{TLS_1_2, record};
 
     #[test]
     fn a_segment_without_a_record_header_has_no_dissection() {

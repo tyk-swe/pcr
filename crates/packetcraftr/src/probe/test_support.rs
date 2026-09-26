@@ -3,16 +3,11 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
 
-use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
-use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layout::PacketLayout;
-use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
-use super::executor::{Executor, Request};
-use crate::BoundaryError;
+use crate::execution::{Executor, Step};
+use packetcraftr_core::error::BoundaryError;
 
 pub(crate) fn private_policy() -> crate::policy::Policy {
     crate::policy::Policy {
@@ -20,30 +15,6 @@ pub(crate) fn private_policy() -> crate::policy::Policy {
         max_bytes_per_operation: 1_000_000,
         ..crate::policy::Policy::default()
     }
-}
-
-/// Builds decoded evidence for `packet` with an explicit timestamp, wire bytes,
-/// and diagnostics. Scan, traceroute, and evidence-selection tests share this
-/// constructor; each keeps only a thin adapter when it needs fixed bytes.
-pub(crate) fn decoded_packet(
-    packet: Packet,
-    timestamp: SystemTime,
-    bytes: &[u8],
-    diagnostics: Vec<Diagnostic>,
-) -> DecodedPacket {
-    let frame = evidence_frame(timestamp, bytes);
-    DecodedPacket {
-        packet,
-        original: frame.bytes().clone(),
-        frame,
-        layout: PacketLayout::default(),
-        diagnostics,
-    }
-}
-
-pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
-    Frame::new(timestamp, LinkType::RAW, Bytes::copy_from_slice(bytes))
-        .expect("probe test fixture frame carries bytes")
 }
 
 /// Counts executions and shutdowns while optionally failing the `fail_at`-th
@@ -61,10 +32,10 @@ pub(crate) struct ProgressiveExecutor<I> {
 
 impl<R, I> Executor<R> for ProgressiveExecutor<I>
 where
-    R: Request,
+    R: Step,
     I: Executor<R>,
 {
-    fn execute(&mut self, request: &R) -> Result<R::Execution, BoundaryError> {
+    fn execute(&mut self, request: &R) -> Result<R::Evidence, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(

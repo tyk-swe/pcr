@@ -4,49 +4,91 @@
 //! Explicit providers for bounded TCP connections. Protocol framing belongs to
 //! the caller; providers own the connection and its native resources.
 
+mod connect;
+
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Process-wide connections that may retain worker or socket resources.
-pub const MAX_PENDING_CONNECTIONS: usize = 16;
+use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
+/// Process-wide connections that may hold a worker or an open socket at
+/// once: a named sub-limit of the native worker pool, published as its own
+/// resource row. It equals
+/// [`WORKER_CAPACITY`](crate::resources::WORKER_CAPACITY), so connects may
+/// fill the whole pool while no capture or route work holds a slot; any such
+/// work lowers what connects can be admitted.
+pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
+
+/// Why a bounded TCP connection could not be admitted, started, or
+/// completed, including the provider's own socket failure.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum ConnectError {
-    #[error("could not inspect the connected {operation} endpoint: {source}")]
+pub enum Error {
+    /// The provider's socket call failed. Its [`io::ErrorKind`] says how: the
+    /// peer refused, the attempt timed out, the destination was unreachable,
+    /// or a local failure.
+    #[error(transparent)]
+    Socket(#[from] io::Error),
+    #[error("could not inspect the connected {operation} endpoint")]
     Evidence {
         operation: &'static str,
         #[source]
         source: io::Error,
     },
+    /// The caller's deadline allows a connection longer than one hour.
     #[error("TCP connect timeout must be nonzero and at most one hour")]
     Timeout,
+    /// The caller's deadline was spent before the connection could start.
+    #[error("live operation deadline expired while starting a TCP connection")]
+    DeadlineExceeded,
     #[error("TCP connect admission reached its process-wide limit of {limit}")]
     Capacity { limit: usize },
-    #[error("TCP connect worker could not start: {0}")]
+    #[error("TCP connect worker could not start")]
     Spawn(#[source] io::Error),
     #[error("TCP connect worker stopped without an outcome")]
     Worker,
     #[error("TCP connect attempt was already completed")]
     Completed,
+    /// The caller cancelled the connection before it started.
     #[error(transparent)]
-    Cancelled(#[from] packetcraftr_core::budget::Cancelled),
+    Cancelled(#[from] Cancelled),
 }
-impl packetcraftr_core::error::Classified for ConnectError {
-    fn classification(&self) -> packetcraftr_core::error::Classification {
-        use packetcraftr_core::error::{Classification, Kind};
+
+impl Error {
+    /// The failure a connection reports when its caller's deadline stopped it
+    /// before it started.
+    fn interrupted(interrupted: Interrupted) -> Self {
+        match interrupted {
+            Interrupted::Cancelled(cancelled) => cancelled.into(),
+            _ => Self::DeadlineExceeded,
+        }
+    }
+}
+
+impl Classified for Error {
+    fn classification(&self) -> Classification {
         match self {
+            Self::Socket(_) => Classification::new(
+                "io.tcp_connect",
+                Kind::Io,
+                Some("inspect the socket failure and the destination's reachability"),
+            ),
             Self::Evidence { .. } => Classification::new(
                 "io.tcp_connect_evidence",
                 Kind::Io,
                 Some("inspect the socket endpoint query failure"),
             ),
             Self::Cancelled(source) => source.classification(),
+            Self::DeadlineExceeded => crate::Error::DeadlineExceeded {
+                operation: "starting a TCP connection",
+            }
+            .classification(),
             Self::Timeout => Classification::new(
                 "cli.tcp_connect_timeout",
-                Kind::Cli,
+                Kind::Usage,
                 Some("choose a finite nonzero connection timeout"),
             ),
             Self::Capacity { .. } => Classification::new(
@@ -68,16 +110,16 @@ impl packetcraftr_core::error::Classified for ConnectError {
     }
 }
 
-/// A socket and its process-wide admission lease. The socket closes before the lease.
+/// A socket and its worker-pool permit. The socket closes before the permit.
 pub struct Connection<S> {
     inner: S,
-    _lease: Arc<crate::platform::TcpConnectLease>,
+    _permit: crate::workers::Permit,
 }
 impl<S> Connection<S> {
-    pub(crate) fn new(inner: S, lease: Arc<crate::platform::TcpConnectLease>) -> Self {
+    fn new(inner: S, permit: crate::workers::Permit) -> Self {
         Self {
             inner,
-            _lease: lease,
+            _permit: permit,
         }
     }
 }
@@ -116,12 +158,12 @@ pub struct ConnectOutcome<S> {
     pub started_at: std::time::SystemTime,
     pub completed_at: std::time::SystemTime,
     pub elapsed: Duration,
-    pub result: io::Result<Connection<S>>,
+    pub result: Result<Connection<S>, Error>,
 }
 /// Pollable bounded connect. Dropping it cancels unstarted work; running calls
 /// retain admission until their provider and socket cleanup finish.
 pub struct PendingConnect<S> {
-    inner: crate::platform::TcpConnectPending<S>,
+    inner: connect::Pending<S>,
 }
 impl<S> PendingConnect<S> {
     /// Stops unstarted work and reports whether a provider call was admitted.
@@ -129,37 +171,43 @@ impl<S> PendingConnect<S> {
         self.inner.cancel()
     }
 
-    pub fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, ConnectError> {
+    pub fn poll(&mut self) -> Result<Option<ConnectOutcome<S>>, Error> {
         self.inner.poll()
     }
 }
+/// Starts `provider.connect` on the native worker pool, admitted under
+/// [`MAX_PENDING_CONNECTIONS`]. The worker receives what the caller's
+/// `deadline` still allows, and its cancellation signal.
 pub fn start_connect<P>(
     provider: Arc<P>,
     endpoint: SocketAddr,
-    timeout: Duration,
-    cancellation: Option<packetcraftr_core::budget::Cancellation>,
-) -> Result<PendingConnect<P::Stream>, ConnectError>
+    deadline: &Deadline,
+) -> Result<PendingConnect<P::Stream>, Error>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
 {
-    crate::platform::start_tcp_connect(provider, endpoint, timeout, cancellation)
-        .map(|inner| PendingConnect { inner })
+    connect::start(provider, endpoint, deadline).map(|inner| PendingConnect { inner })
 }
 
 /// A connected byte stream with endpoint evidence and per-call time bounds.
-pub trait Stream: Read + Write {
+/// Streams are owned by one caller at a time but may move between threads.
+pub trait Stream: Read + Write + Send {
     fn peer_addr(&self) -> io::Result<SocketAddr>;
     fn local_addr(&self) -> io::Result<SocketAddr>;
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
 }
 
-/// Opens the exact numeric endpoint within the supplied nonzero time bound.
-pub trait Provider {
+/// Opens the exact numeric endpoint before the caller's deadline, following
+/// the [deadline convention](crate::deadline). A socket failure is
+/// [`Error::Socket`]; a connection that cannot start reports
+/// [`Error::DeadlineExceeded`] for a spent deadline and [`Error::Cancelled`]
+/// for a cancelled one.
+pub trait Provider: Send + Sync {
     type Stream: Stream;
 
-    fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream>;
+    fn connect(&self, endpoint: SocketAddr, deadline: &Deadline) -> Result<Self::Stream, Error>;
 }
 
 /// Explicitly selects portable standard-library system TCP sockets.
@@ -170,8 +218,11 @@ pub struct SystemProvider;
 impl Provider for SystemProvider {
     type Stream = SystemStream;
 
-    fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream> {
-        TcpStream::connect_timeout(&endpoint, timeout).map(SystemStream)
+    fn connect(&self, endpoint: SocketAddr, deadline: &Deadline) -> Result<Self::Stream, Error> {
+        let timeout = crate::deadline::remaining(deadline).map_err(Error::interrupted)?;
+        Ok(SystemStream(TcpStream::connect_timeout(
+            &endpoint, timeout,
+        )?))
     }
 }
 

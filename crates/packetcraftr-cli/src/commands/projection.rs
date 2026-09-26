@@ -3,14 +3,14 @@
 
 //! Bounded selected-field output shared by read, dissect, and capture.
 
-use crate::{
-    errors::CliError,
-    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
-};
-use packetcraftr_cli::output::{
+use crate::output::{
     self,
     contract::{Command, Format},
     projection::{Cell, Row},
+};
+use crate::{
+    errors::CliError,
+    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
 };
 use packetcraftr_core::{self as core, filter::Projection};
 use std::io::{self, Write};
@@ -41,7 +41,7 @@ impl Projector {
             Format::Text | Format::Json | Format::Ndjson | Format::Csv | Format::Tsv
         ) {
             return Err(CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "--field requires text, JSON, NDJSON, CSV, or TSV output",
             ));
         }
@@ -49,7 +49,7 @@ impl Projector {
             .map_err(CliError::classified)?;
         if command == Command::Capture && projection.requirements().stream_index {
             return Err(CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "capture --field cannot select stream indices; save the capture and use read --field",
             ));
         }
@@ -68,7 +68,7 @@ impl Projector {
         self.remaining
     }
     fn limit(&self) -> CliError {
-        CliError::classified(core::filter::ProjectionError::Limit {
+        CliError::classified(core::filter::Error::ProjectionLimit {
             field: "projection_bytes",
             limit: self.maximum,
         })
@@ -108,10 +108,7 @@ impl Projector {
         values: Vec<Option<core::field::FieldValue>>,
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
-        let row = Row {
-            source_frame: source_frame.try_into().map_err(CliError::classified)?,
-            values,
-        };
+        let row = Row::try_from((source_frame, values)).map_err(CliError::classified)?;
         self.header()?;
         if matches!(self.format, Format::Csv | Format::Tsv | Format::Text) {
             let separator = if self.format == Format::Csv {
@@ -138,18 +135,12 @@ impl Projector {
             self.charge(buffer.bytes.len())?;
             write_raw(&buffer.bytes)?;
         } else if self.format == Format::Ndjson {
-            let event = output::projection::RowEvent {
-                columns: self.projection.columns(),
-                row: &row,
-            };
+            let event = output::projection::RowEvent::from((&self.projection, &row));
             let bytes = bounded_json_len(&event, self.remaining)
                 .map_err(|error| error.into_cli_error(|| self.limit()))?;
             self.charge(bytes)?;
             stream.emit_data(
-                output::projection::RowEvent {
-                    columns: self.projection.columns(),
-                    row: &row,
-                },
+                output::projection::RowEvent::from((&self.projection, &row)),
                 Vec::new(),
             )?;
         } else {
@@ -168,19 +159,16 @@ impl Projector {
         stream: &StreamEncoder,
     ) -> Result<(), CliError> {
         self.header()?;
-        let summary = output::projection::Complete {
-            columns: self.projection.columns().to_vec(),
-            rows_written: self.count,
+        let summary = output::projection::Complete::from((
+            &self.projection,
+            self.count,
             frames_read,
             captured_bytes_read,
-        };
+        ));
         match self.format {
             Format::Json => emit_aggregate(
                 self.command,
-                output::projection::Report {
-                    summary,
-                    rows: self.rows,
-                },
+                output::projection::Report::from((summary, self.rows)),
                 Vec::new(),
             ),
             Format::Ndjson => stream.complete(summary, Vec::new()).map_err(Into::into),
@@ -229,7 +217,7 @@ fn quoted(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
 /// selections; each command applies it to the formats it declared projected.
 pub(super) fn missing_fields_error() -> CliError {
     CliError::new(
-        core::error::Kind::Cli,
+        core::error::Kind::Usage,
         "this output format requires --field selections",
     )
 }
@@ -307,22 +295,26 @@ pub(super) fn read(
     } else {
         // The stream-capable filter takes the analysis branch above, so the
         // frame-at-a-time seam applies here.
-        let decoder = crate::filtering::FrameDecoder::new(
-            registry,
-            filter,
-            args.limits.reader.max_frame_bytes,
-        );
+        let decoder =
+            core::filter::FrameDecoder::new(registry, filter, args.limits.reader.max_frame_bytes)
+                .map_err(CliError::classified)?;
+        let mut budget = core::capture_file::Budget::new(core::capture_file::Limits {
+            max_frames: args.limits.max_frames,
+            max_bytes: args.limits.max_bytes,
+        })
+        .map_err(CliError::classified)?;
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-            (frames, bytes) = core::analysis::pcap::Limits {
-                max_frames: args.limits.max_frames,
-                max_bytes: args.limits.max_bytes,
-            }
-            .advance(frames, bytes, frame.captured_length())
-            .map_err(CliError::classified)?;
+            budget
+                .charge(frame.captured_length())
+                .map_err(CliError::classified)?;
+            (frames, bytes) = (budget.frames(), budget.captured_bytes());
             if bounds.is_some_and(|bounds| !bounds.contains(frame.timestamp)) {
                 continue;
             }
-            let Some(decoded) = decoder.decode_selected(frames, &frame)? else {
+            let Some(decoded) = decoder
+                .decode_selected(frames, &frame)
+                .map_err(|error| crate::filtering::frame_error(frames, error))?
+            else {
                 continue;
             };
             let context = core::filter::Context {

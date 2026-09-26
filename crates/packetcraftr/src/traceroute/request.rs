@@ -4,18 +4,16 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::probe::evidence::EvidenceLimits;
-use crate::probe::limits::{CaptureEvidenceLimits, check_limits, duration_violation};
+use crate::execution::limits::EvidenceLimits;
+use crate::execution::limits::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
-use crate::probe::{Error, ErrorKind, Transport};
-use crate::traceroute::WORKFLOW;
-use crate::traceroute::{
-    DEFAULT_MAX_UNDECODED_FRAMES, MAX_DURATION, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE,
-};
+use super::Error;
+use crate::probe::Transport;
+use crate::traceroute::{DEFAULT_MAX_UNDECODED_FRAMES, MAX_PROBES, MAX_PROBES_PER_HOP, MAX_RATE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
@@ -30,7 +28,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_probes: packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS,
-            max_duration: MAX_DURATION,
+            max_duration: MAX_TIMEOUT,
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
             max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
@@ -53,46 +51,31 @@ impl Limits {
         check_limits(
             &[("max_probes", self.max_probes, MAX_PROBES)],
             &[],
-            |field, value, reason| {
-                Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field,
-                        value,
-                        reason,
-                    },
-                )
+            |field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
             },
         )?;
-        CaptureEvidenceLimits {
-            max_evidence_frames: self.max_evidence_frames,
-            max_evidence_bytes: self.max_evidence_bytes,
-            max_undecoded: Some(self.max_undecoded),
-        }
-        .validate(|field, value, reason| {
-            Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field,
-                    value,
-                    reason,
-                },
-            )
-        })?;
-        if duration_violation(self.max_duration, MAX_DURATION) {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidDuration {
-                    value: self.max_duration,
-                    maximum: MAX_DURATION,
-                },
-            ));
+        self.evidence()
+            .validate(|field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            })?;
+        if duration_violation(self.max_duration, MAX_TIMEOUT) {
+            return Err(Error::InvalidDuration {
+                value: self.max_duration,
+                maximum: MAX_TIMEOUT,
+            });
         }
         Ok(())
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One trace: the target, how it is probed hop by hop, and the route and
+/// collection bounds every hop's exchange runs under.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub target: Target,
     pub strategy: Transport,
@@ -109,109 +92,87 @@ pub struct Request {
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
+    /// How each probe's route is planned.
+    pub route: crate::route::Options,
+    /// How each hop exchange's capture is armed and what it retains. It must
+    /// retain at least one response per probe of a hop.
+    pub collection: crate::exchange::Collection,
 }
 
 impl Request {
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
         if self.first_hop == 0 {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "first_hop",
-                    value: 0,
-                    reason: "must be within 1..=255".to_owned(),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "first_hop",
+                value: 0,
+                reason: "must be within 1..=255".to_owned(),
+            });
         }
         if self.max_hops < self.first_hop {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "max_hops",
-                    value: u64::from(self.max_hops),
-                    reason: format!("must be at least first_hop={}", self.first_hop),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "max_hops",
+                value: u64::from(self.max_hops),
+                reason: format!("must be at least first_hop={}", self.first_hop),
+            });
         }
         if !(1..=MAX_PROBES_PER_HOP).contains(&self.probes_per_hop) {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "probes_per_hop",
-                    value: u64::from(self.probes_per_hop),
-                    reason: format!("must be within 1..={MAX_PROBES_PER_HOP}"),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "probes_per_hop",
+                value: u64::from(self.probes_per_hop),
+                reason: format!("must be within 1..={MAX_PROBES_PER_HOP}"),
+            });
         }
         if usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX)
             > self.limits.max_evidence_frames
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "probes_per_hop",
-                    value: u64::from(self.probes_per_hop),
-                    reason: format!(
-                        "cannot exceed max_evidence_frames={} because every probe may receive a response",
-                        self.limits.max_evidence_frames
-                    ),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "probes_per_hop",
+                value: u64::from(self.probes_per_hop),
+                reason: format!(
+                    "cannot exceed max_evidence_frames={} because every probe may receive a response",
+                    self.limits.max_evidence_frames
+                ),
+            });
         }
-        if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidTimeout {
-                    value: self.timeout,
-                    maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
-                },
-            ));
+        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
+            return Err(Error::InvalidTimeout {
+                value: self.timeout,
+                maximum: MAX_TIMEOUT,
+            });
         }
         if let Some(rate) = self.probes_per_second
             && (rate == 0 || rate > MAX_RATE)
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "probes_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_RATE}"),
-                },
-            ));
+            return Err(Error::InvalidLimit {
+                field: "probes_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_RATE}"),
+            });
         }
         match (self.strategy, self.destination_port) {
             (Transport::Udp | Transport::Tcp, None) => {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidPort {
-                        message: "UDP and TCP traceroute require a destination port".to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidPort {
+                    message: "UDP and TCP traceroute require a destination port".to_owned(),
+                });
             }
             (Transport::Udp | Transport::Tcp, Some(0)) => {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidPort {
-                        message: "UDP and TCP traceroute require a non-zero destination port"
-                            .to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidPort {
+                    message: "UDP and TCP traceroute require a non-zero destination port"
+                        .to_owned(),
+                });
             }
             (Transport::Icmp, Some(_)) => {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidPort {
-                        message: "ICMP traceroute is portless".to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidPort {
+                    message: "ICMP traceroute is portless".to_owned(),
+                });
             }
             _ => {}
         }
         if self.source_port == Some(0)
             || (self.strategy == Transport::Icmp && self.source_port.is_some())
         {
-            return Err(Error::new(WORKFLOW, ErrorKind::InvalidSourcePort));
+            return Err(Error::InvalidSourcePort);
         }
         Ok(())
     }
@@ -225,13 +186,10 @@ impl Request {
     pub(in crate::traceroute) fn total_probe_count(&self) -> Result<usize, Error> {
         self.hop_count()
             .checked_mul(usize::try_from(self.probes_per_hop).unwrap_or(usize::MAX))
-            .ok_or(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidLimit {
-                    field: "probes",
-                    value: u64::MAX,
-                    reason: "probe-count arithmetic overflowed".to_owned(),
-                },
-            ))
+            .ok_or(Error::InvalidLimit {
+                field: "probes",
+                value: u64::MAX,
+                reason: "probe-count arithmetic overflowed".to_owned(),
+            })
     }
 }

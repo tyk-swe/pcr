@@ -12,97 +12,15 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 /// Version identifier emitted by every structured CLI record.
 pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
 
-/// Declares the command vocabulary once: the enum, [`Command::ALL`], and
-/// [`Command::as_str`] all come from the single list below, in canonical order.
-macro_rules! commands {
-    (
-        $(#[$enum_attribute:meta])*
-        $visibility:vis enum $name:ident {
-            $( $variant:ident = $text:literal, )*
-        }
-    ) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-        $(#[$enum_attribute])*
-        $visibility enum $name {
-            $( #[serde(rename = $text)] $variant, )*
-        }
-
-        impl $name {
-            /// Complete command vocabulary in canonical serialized order.
-            pub const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
-
-            /// The serialized name, byte-identical to what `ALL` publishes.
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $( Self::$variant => $text, )*
-                }
-            }
-        }
-    };
-}
-
-commands! {
-    /// CLI command identifier frozen into the output schema.
-    #[serde(rename_all = "snake_case")]
-    pub enum Command {
-        Build = "build",
-        Fragment = "fragment",
-        Merge = "merge",
-        Dissect = "dissect",
-        Protocols = "protocols",
-        Plan = "plan",
-        Send = "send",
-        Exchange = "exchange",
-        Capture = "capture",
-        Read = "read",
-        Replay = "replay",
-        Scan = "scan",
-        Stats = "stats",
-        Expert = "expert",
-        Follow = "follow",
-        Tls = "tls",
-        Traceroute = "traceroute",
-        Dns = "dns",
-        DnsRead = "dns-read",
-        Http = "http",
-        Export = "export",
-        Rewrite = "rewrite",
-        Fuzz = "fuzz",
-        Interfaces = "interfaces",
-        Routes = "routes",
-        VerifyForwarding = "verify-forwarding",
-    }
-}
+/// CLI command identifier frozen into the output schema.
+///
+/// The variants, their serialized names, [`Command::ALL`], and
+/// [`Command::formats`] come from the one command declaration in the CLI's
+/// command module, so the published vocabulary and the parsed command line
+/// cannot drift apart.
+pub use crate::commands::Command;
 
 impl Command {
-    /// Formats deliberately supported by this command contract.
-    pub const fn formats(self) -> &'static [Format] {
-        match self {
-            Self::Rewrite
-            | Self::Export
-            | Self::Merge
-            | Self::Http
-            | Self::DnsRead
-            | Self::Scan
-            | Self::Traceroute
-            | Self::Dns
-            | Self::Fuzz
-            | Self::Expert
-            | Self::Tls
-            | Self::VerifyForwarding => ToolFormat::FORMATS,
-            Self::Build => BuildFormat::FORMATS,
-            Self::Fragment | Self::Capture => CaptureFormat::FORMATS,
-            Self::Dissect => DissectFormat::FORMATS,
-            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
-                AggregateFormat::FORMATS
-            }
-            Self::Send => SendFormat::FORMATS,
-            Self::Exchange | Self::Replay => ExchangeFormat::FORMATS,
-            Self::Read => ReadFormat::FORMATS,
-            Self::Follow => FollowFormat::FORMATS,
-        }
-    }
-
     /// Rejects unsupported combinations before a command performs I/O,
     /// returning the format narrowed to the enum the command dispatches on so
     /// its matches are exhaustive without an `unreachable!` fallback.
@@ -111,10 +29,7 @@ impl Command {
     /// Both the command's declared [`formats`](Self::formats) and `F`'s own
     /// subset are checked, so a mismatched `F` still rejects rather than
     /// silently admitting a format the command does not support.
-    pub fn require_format<F>(self, format: Format) -> Result<F, Error>
-    where
-        F: TryFrom<Format, Error = Format>,
-    {
+    pub fn require_format<F: FormatSubset>(self, format: Format) -> Result<F, Error> {
         match F::try_from(format) {
             Ok(narrowed) if self.formats().contains(&format) => Ok(narrowed),
             _ => Err(Error::UnsupportedFormat {
@@ -125,11 +40,15 @@ impl Command {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Command);
+impl fmt::Display for Command {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// User-selectable output formats across supported commands. Never a document
 /// field: a format is chosen on the command line, so it has no default here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Format {
     Text,
     Json,
@@ -139,7 +58,6 @@ pub enum Format {
     Hex,
     Raw,
     Pcap,
-    #[value(name = "pcapng")]
     PcapNg,
 }
 
@@ -159,7 +77,11 @@ impl Format {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Format);
+impl fmt::Display for Format {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// Whether one structured value is an aggregate JSON result or an NDJSON record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -167,6 +89,13 @@ packetcraftr_core::display_via_as_str!(Format);
 pub enum Mode {
     Aggregate,
     Stream,
+}
+
+/// One command's narrow output-format enum: the subset of [`Format`] its
+/// contract admits, which the command matches exhaustively.
+pub trait FormatSubset: Copy + Into<Format> + TryFrom<Format, Error = Format> {
+    /// The subset as shared [`Format`] values, in declared order.
+    const FORMATS: &'static [Format];
 }
 
 /// Declares a narrow output-format enum covering one command's supported
@@ -187,10 +116,11 @@ macro_rules! format_subset {
             $($variant,)+
         }
 
-        impl $name {
-            /// The subset as shared [`Format`] values, in declared order.
-            pub const FORMATS: &'static [Format] = &[$(Format::$variant),+];
+        impl FormatSubset for $name {
+            const FORMATS: &'static [Format] = &[$(Format::$variant),+];
+        }
 
+        impl $name {
             /// The shared [`Format`] this narrowed value denotes.
             pub const fn as_format(self) -> Format {
                 match self {
@@ -341,8 +271,12 @@ pub enum Error {
     TimestampOutOfRange,
     #[error("source frame must be a non-zero unsigned 64-bit position")]
     InvalidSourceFrame,
-    #[error("fuzz events are incoherent: {message}")]
-    IncoherentFuzzEvents { message: String },
+    #[error("fuzz events are incoherent: {0}")]
+    IncoherentFuzzEvents(#[from] packetcraftr_core::fuzz::IncoherentReport),
+    /// A library value newer than the published output contract, which has
+    /// no spelling for it.
+    #[error("{value} has no representation in the published output contract")]
+    Unpublished { value: &'static str },
 }
 
 fn supported_formats(command: &Command) -> String {
@@ -359,7 +293,7 @@ impl Classified for Error {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
                 "cli.output_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(
@@ -372,11 +306,12 @@ impl Classified for Error {
                 Kind::Internal,
                 Some("use the one-based source position assigned while reading or capturing"),
             ),
-            Self::IncoherentFuzzEvents { .. } => Classification::new(
+            Self::IncoherentFuzzEvents(_) => Classification::new(
                 "internal.fuzz_event_coherence",
                 Kind::Internal,
                 Some("collect cases from exactly one complete campaign in publication order"),
             ),
+            Self::Unpublished { .. } => Classification::new("internal.error", Kind::Internal, None),
         }
     }
 }

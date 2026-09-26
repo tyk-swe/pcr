@@ -11,9 +11,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::analysis::{self, pcap};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
+use packetcraftr_core::{analysis, capture_file};
 
 fn clock(limit_ms: u64) -> (Arc<Deadline>, Arc<AtomicU64>) {
     let ticks = Arc::new(AtomicU64::new(0));
@@ -91,7 +91,7 @@ fn metadata_and_eof_share_the_packet_analysis_clock() {
         bytes.extend_from_slice(&12u32.to_le_bytes());
         bytes.extend_from_slice(&12u32.to_le_bytes());
     }
-    let mut reader = pcap::Reader::new(Ticking {
+    let mut reader = capture_file::Reader::new(Ticking {
         source: Cursor::new(bytes),
         ticks: ticks.clone(),
     })

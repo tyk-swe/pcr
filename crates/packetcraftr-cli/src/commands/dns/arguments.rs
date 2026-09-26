@@ -4,7 +4,8 @@
 use packetcraftr::dns::QueryType;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, RouteSelectionArgs,
+    RunTime, TimeoutArgs, Window,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -31,6 +32,8 @@ pub(crate) struct Args {
     pub(crate) reverse: Vec<std::net::IpAddr>,
     /// DNS type alias, decimal code, or TYPE<n> (0..=65535; at most five digits).
     #[arg(long = "type", default_value_t = QueryType::A)]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::invalid_html_tags)]
     pub(crate) query_type: QueryType,
     /// Select the first authorized server address or one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]
@@ -64,15 +67,13 @@ pub(crate) struct Args {
     /// Number of independently re-resolved and re-authorized attempts.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
-    /// Response window for each attempt, shared with any TCP continuation.
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<AttemptWindow>,
     /// Optional retry-rate ceiling; a UDP-to-TCP continuation is immediate.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
-    /// Maximum worst-case timeout plus intentional retry delay in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Resolution>,
     /// Maximum complete DNS message bytes decoded.
     #[arg(long, default_value_t = packetcraftr::dns::MAX_MESSAGE_BYTES)]
     pub(crate) max_message_bytes: usize,
@@ -108,13 +109,13 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
-    use crate::commands::Command;
+    use crate::commands::CommandLine;
 
     fn dns_args(extra: &[&str]) -> Args {
         let mut command = vec!["packetcraftr", "dns", "192.0.2.53", "example.test"];
         command.extend_from_slice(extra);
         let parsed = Cli::try_parse_from(command).expect("DNS arguments parse");
-        let Command::Dns(arguments) = parsed.command else {
+        let CommandLine::Dns(arguments) = parsed.command else {
             panic!("fixture must select DNS")
         };
         arguments
@@ -174,4 +175,22 @@ mod tests {
             assert!(Cli::try_parse_from(command).is_err());
         }
     }
+}
+
+/// One window per attempt.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AttemptWindow;
+
+impl Window for AttemptWindow {
+    const DEFAULT_MILLISECONDS: &'static str = "1000";
+    const HELP: &'static str = "Response window for each attempt, shared with any TCP continuation";
+}
+
+/// Every attempt window plus retry delay.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Resolution;
+
+impl RunTime for Resolution {
+    const HELP: &'static str =
+        "Maximum worst-case timeout plus intentional retry delay in milliseconds";
 }

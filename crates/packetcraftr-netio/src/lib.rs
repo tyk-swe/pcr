@@ -6,6 +6,24 @@
 //! All platform-specific and potentially unsafe I/O is contained here. Higher
 //! level transmission and diagnostic workflows remain policy-gated in
 //! `packetcraftr`.
+//!
+//! # Public paths
+//!
+//! Each capability is a module ([`route`], [`interface`], [`capture`],
+//! [`transmit`], [`tcp`]) holding its provider contract and its system
+//! provider; shared vocabulary is at the root. Public fields name core types
+//! by their core path, such as `packetcraftr_core::packet::MacAddress`.
+//!
+//! # Errors
+//!
+//! Every public error implements `packetcraftr_core::error::Classified`.
+//! A native failure keeps the platform's own error as its source, stored as
+//! `packetcraftr_core::error::Source` when it is type-erased, and its message
+//! never repeats that source. [`Error`] is the live-I/O failure capture and
+//! transmission share; [`route::Error`], [`interface::Error`], and
+//! [`tcp::Error`] are their capabilities' own. A capability this build, target,
+//! or device lacks is one [`Unsupported`], which all three live-I/O errors
+//! carry and whose [`NativeCapability`] decides its class.
 
 // This crate is the only one permitted to contain `unsafe`. Non-platform
 // modules forbid it locally; files under `platform/` that wrap a native API
@@ -14,13 +32,13 @@
 #[forbid(unsafe_code)]
 pub mod capture;
 #[forbid(unsafe_code)]
+pub mod deadline;
+#[forbid(unsafe_code)]
 mod error;
 #[forbid(unsafe_code)]
 pub mod interface;
 #[forbid(unsafe_code)]
 pub mod link;
-#[forbid(unsafe_code)]
-pub mod neighbor;
 mod platform;
 #[forbid(unsafe_code)]
 pub mod resources;
@@ -30,23 +48,10 @@ pub mod route;
 pub mod tcp;
 #[forbid(unsafe_code)]
 pub mod transmit;
-
-pub use error::{Error, SendEvidenceFault, SystemFault};
-
-/// Independently owned sender and capture provider composed into the single
-/// packet I/O value that capture-before-send exchanges require.
-///
-/// It implements [`transmit::Sender`] through `sender` and
-/// [`capture::Provider`] through `capture`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PacketIo<S, C> {
-    pub sender: S,
-    pub capture: C,
-}
-
 #[forbid(unsafe_code)]
-impl<S, C> PacketIo<S, C> {
-    pub fn new(sender: S, capture: C) -> Self {
-        Self { sender, capture }
-    }
-}
+mod unsupported;
+#[forbid(unsafe_code)]
+mod workers;
+
+pub use error::{Error, SendEvidenceFault};
+pub use unsupported::{NativeCapability, Unsupported};

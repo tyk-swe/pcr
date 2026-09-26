@@ -5,13 +5,13 @@
 //! reuse never opens or truncates an unrelated pre-existing pathname.
 
 use crate::command_options::Compression;
-use packetcraftr_cli::output::capture::{File as FileReport, Files as FilesReport, Retention};
+use crate::output::capture::{File as FileReport, Files as FilesReport, Retention};
+use packetcraftr::capture::Source;
 use packetcraftr_core::{
-    analysis::pcap::{self, compression},
+    capture_file::{self, compression},
     error::{Classification, Classified, Kind},
     frame::Frame,
 };
-use packetcraftr_netio::capture::group::Source;
 use std::{
     fs::File,
     io::{self, Seek, Write},
@@ -22,12 +22,12 @@ use std::{
 pub(super) const MAX_FILES: usize = 64;
 #[derive(Clone, Debug)]
 pub(super) struct Options {
-    pub path: PathBuf,
-    pub compression: Compression,
-    pub rotate_bytes: Option<u64>,
-    pub rotate_after: Option<Duration>,
-    pub max_files: usize,
-    pub retention: Retention,
+    pub(super) path: PathBuf,
+    pub(super) compression: Compression,
+    pub(super) rotate_bytes: Option<u64>,
+    pub(super) rotate_after: Option<Duration>,
+    pub(super) max_files: usize,
+    pub(super) retention: Retention,
 }
 impl Options {
     pub(super) fn validate(&self) -> Result<(), Error> {
@@ -102,7 +102,7 @@ pub(super) enum Error {
         source: io::Error,
     },
     #[error(transparent)]
-    Capture(#[from] pcap::Error),
+    Capture(#[from] capture_file::Error),
     #[error(transparent)]
     Compression(#[from] compression::Error),
     #[error(
@@ -124,7 +124,7 @@ impl Classified for Error {
             Self::Io { .. } | Self::Exists(_) => {
                 Classification::new("io.capture_file", Kind::Io, None)
             }
-            Self::Invalid(_) => Classification::new("cli.capture_files", Kind::Cli, None),
+            Self::Invalid(_) => Classification::new("cli.capture_files", Kind::Usage, None),
             Self::FrameTooLarge { .. } => {
                 Classification::new("policy.capture_file_bytes", Kind::Policy, None)
             }
@@ -160,20 +160,18 @@ struct Slot {
 }
 struct Active {
     failed: bool,
-    writer: pcap::Writer<Counted<compression::Output<File>>>,
+    writer: capture_file::Writer<Counted<compression::Output<File>>>,
     slot: usize,
     opened_at: Duration,
 }
 pub(super) struct Files {
     options: Options,
-    limits: pcap::Limits,
+    budget: capture_file::Budget,
     sources: Vec<Source>,
     slots: Vec<Slot>,
     active: Option<Active>,
     header_bytes: u64,
     generation: u64,
-    total_frames: u64,
-    total_bytes: u64,
     discarded_files: u64,
     discarded_frames: u64,
     discarded_bytes: u64,
@@ -181,18 +179,16 @@ pub(super) struct Files {
     stopped: bool,
 }
 impl Files {
-    pub(super) fn new(options: Options, limits: pcap::Limits) -> Result<Self, Error> {
+    pub(super) fn new(options: Options, limits: capture_file::Limits) -> Result<Self, Error> {
         options.validate()?;
         Ok(Self {
             options,
-            limits,
+            budget: capture_file::Budget::new(limits)?,
             sources: Vec::new(),
             slots: Vec::new(),
             active: None,
             header_bytes: 0,
             generation: 0,
-            total_frames: 0,
-            total_bytes: 0,
             discarded_files: 0,
             discarded_frames: 0,
             discarded_bytes: 0,
@@ -210,9 +206,9 @@ impl Files {
                 inner: io::sink(),
                 bytes: 0,
             },
-            pcap::Format::PcapNg,
+            capture_file::Format::PcapNg,
             &self.sources,
-            self.limits,
+            self.budget.limits(),
         )?;
         self.header_bytes = preview.into_inner().bytes;
         if let Some(limit) = self.options.rotate_bytes
@@ -231,8 +227,8 @@ impl Files {
         source_frame: u64,
         elapsed: Duration,
     ) -> Result<packetcraftr::capture::Control, Error> {
-        let source_frame = packetcraftr_cli::output::frame::SourceFrame::try_from(source_frame)
-            .map_err(|_| Error::State)?;
+        let source_frame =
+            crate::output::frame::SourceFrame::try_from(source_frame).map_err(|_| Error::State)?;
         if self.stopped {
             return Ok(packetcraftr::capture::Control::StopBefore);
         }
@@ -240,9 +236,7 @@ impl Files {
             return Err(Error::ElapsedRegressed);
         }
         self.last_elapsed = elapsed;
-        let (next_frames, next_bytes) =
-            self.limits
-                .advance(self.total_frames, self.total_bytes, frame.captured_length())?;
+        let budget = self.budget.after(frame.captured_length())?;
         let active = self.active.as_ref().ok_or(Error::State)?;
         let frame_bytes = active.writer.encoded_frame_size(frame)? as u64;
         let required = self
@@ -279,7 +273,7 @@ impl Files {
         }
         let active = self.active.as_mut().ok_or(Error::State)?;
         if let Err(error) = active.writer.write_frame(frame) {
-            active.failed = matches!(error, pcap::Error::Io(_));
+            active.failed = matches!(error, capture_file::Error::Io(_));
             return Err(error.into());
         }
         let report = &mut self.slots[active.slot].report;
@@ -288,8 +282,7 @@ impl Files {
         report.first_source_frame.get_or_insert(source_frame);
         report.last_source_frame = Some(source_frame);
         let capture_bytes = report.capture_bytes;
-        self.total_frames = next_frames;
-        self.total_bytes = next_bytes;
+        self.budget = budget;
         // Stop exactly at a full final slot when possible; otherwise a later
         // boundary reports its one matched but unpublished frame explicitly.
         if self.options.retention == Retention::Stop
@@ -374,8 +367,12 @@ impl Files {
             inner: compression::Output::new(handle, self.options.compression.format())?,
             bytes: 0,
         };
-        let writer =
-            super::writer::initialize(output, pcap::Format::PcapNg, &self.sources, self.limits)?;
+        let writer = super::writer::initialize(
+            output,
+            capture_file::Format::PcapNg,
+            &self.sources,
+            self.budget.limits(),
+        )?;
         self.header_bytes = writer.get_ref().bytes;
         file.report.capture_bytes = self.header_bytes;
         self.active = Some(Active {
@@ -452,8 +449,8 @@ impl Files {
                 .map(|duration| duration.as_millis() as u64),
             maximum_files: self.options.max_files,
             files,
-            frames_written: self.total_frames,
-            captured_bytes_written: self.total_bytes,
+            frames_written: self.budget.frames(),
+            captured_bytes_written: self.budget.captured_bytes(),
             discarded_files: self.discarded_files,
             discarded_frames: self.discarded_frames,
             discarded_capture_bytes: self.discarded_bytes,
@@ -471,11 +468,11 @@ impl Drop for Files {
 mod tests {
     use super::*;
     use packetcraftr_core::{
-        analysis::pcap::Reader,
+        capture_file::Reader,
         frame::{Frame, LinkType},
     };
     use packetcraftr_netio::{
-        capture::{Limits, Metadata, Statistics},
+        capture::{Limits, Metadata, Stats},
         interface::Id,
     };
     use std::time::UNIX_EPOCH;
@@ -499,9 +496,13 @@ mod tests {
             ready: true,
             shutdown_confirmed: false,
             statistics_valid: true,
-            statistics: Statistics::default(),
+            statistics: Stats::default(),
             delivered_frames: 0,
             delivered_bytes: 0,
+            admitted_frames: 0,
+            matched_frames: 0,
+            emitted_frames: 0,
+            late_frames: 0,
         }]
     }
     fn frame(value: u8) -> Frame {
@@ -514,8 +515,8 @@ mod tests {
         frame.interface = Some(0);
         frame
     }
-    fn limits() -> pcap::Limits {
-        pcap::Limits {
+    fn limits() -> capture_file::Limits {
+        capture_file::Limits {
             max_frames: 10,
             max_bytes: 1024,
         }
@@ -547,7 +548,7 @@ mod tests {
             let path = directory.path().join("trace.pcapng");
             let mut reference = super::super::writer::initialize(
                 Vec::new(),
-                pcap::Format::PcapNg,
+                capture_file::Format::PcapNg,
                 &sources(),
                 limits(),
             )

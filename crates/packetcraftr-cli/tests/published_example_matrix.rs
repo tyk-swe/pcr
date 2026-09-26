@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Required command examples and published error-code consistency.
+//! Required command examples, their validity against the output schema, and
+//! published error-code consistency.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,7 +13,7 @@ use serde_json::Value;
 
 mod common;
 
-use common::output_schema;
+use common::{output_schema, schema_validator};
 
 fn documents_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/documents")
@@ -75,6 +76,39 @@ fn every_command_publishes_its_required_example_kinds() {
             let name = format!("output-{command}-{kind}.json");
             assert!(names.contains(&name), "missing required example {name}");
         }
+    }
+}
+
+#[test]
+fn every_published_output_example_validates_against_the_schema() {
+    let validator = schema_validator();
+    let mut examples = fs::read_dir(documents_directory())
+        .expect("published examples directory must exist")
+        .map(|entry| {
+            entry
+                .expect("published example entry must be readable")
+                .path()
+        })
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("output-") && name.ends_with(".json"))
+        })
+        .collect::<Vec<_>>();
+    examples.sort();
+    assert!(!examples.is_empty(), "published output examples must exist");
+
+    for path in examples {
+        let document: Value = serde_json::from_str(
+            &fs::read_to_string(&path).expect("published example must be readable"),
+        )
+        .unwrap_or_else(|error| panic!("{} must be valid JSON: {error}", path.display()));
+        validator.validate(&document).unwrap_or_else(|error| {
+            panic!(
+                "{} must validate against the output schema: {error}",
+                path.display()
+            )
+        });
     }
 }
 

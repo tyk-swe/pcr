@@ -7,17 +7,16 @@
 mod common;
 
 use common::{CLIENT, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
-use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::build::Builder;
+use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::gre::Gre;
 use packetcraftr_core::protocol::link::Ethernet;
 use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
-use packetcraftr_core::protocol::tunnel::Vxlan;
+use packetcraftr_core::protocol::tunnel::{Gre, Vxlan};
 use std::io::Cursor;
 use std::net::Ipv4Addr;
 use std::sync::Arc;

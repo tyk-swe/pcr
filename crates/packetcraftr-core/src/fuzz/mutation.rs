@@ -421,6 +421,7 @@ mod tests {
                 layer: 0,
                 field: "fixture".to_owned(),
             },
+            path: "fixture".parse().expect("fixture path"),
             protocol: "fixture".to_owned(),
             kind,
             is_derived: false,

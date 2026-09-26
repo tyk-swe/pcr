@@ -12,15 +12,20 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use packetcraftr::{Client, exchange, policy::Policy};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
     field::FieldValue,
     frame::{Frame, LinkType},
     layer::Raw,
-    packet::{Packet, semantics},
+    packet::Packet,
     protocol::{
-        BuiltinProtocol, application::dns::Dns, builtin, icmp::Icmpv4, network::Ipv4,
+        BuiltinProtocol,
+        application::dns::Dns,
+        builtin,
+        network::{Icmpv4, Ipv4},
+        semantics,
         transport::Udp,
     },
     template::Template,
@@ -43,6 +48,7 @@ struct State {
     respond: Responder,
 }
 
+#[derive(Clone)]
 struct Io {
     state: Arc<Mutex<State>>,
 }
@@ -59,8 +65,8 @@ fn wire(packet: Packet) -> Frame {
     Frame::new(SystemTime::now(), LinkType::RAW, built.bytes).expect("fixture frame")
 }
 
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, net::Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let decoded = Dissector::new(builtin::registry())
             .decode(
                 Frame::new(SystemTime::now(), LinkType::RAW, frame.bytes().clone())
@@ -85,7 +91,11 @@ impl transmit::Sender for Io {
 
 impl capture::Provider for Io {
     type Capture = Capture;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Capture, net::Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Capture, net::Error> {
         Ok(Capture {
             state: self.state.clone(),
             metadata: capture::Metadata {
@@ -102,12 +112,12 @@ impl capture::Session for Capture {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
     fn next_captured_frame(
         &mut self,
-        _: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         Ok(self
             .state
@@ -120,8 +130,8 @@ impl capture::Session for Capture {
     fn shutdown(&mut self) -> Result<(), net::Error> {
         Ok(())
     }
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 
@@ -204,7 +214,7 @@ fn malformed_reply(request: &Packet) -> Packet {
     response
 }
 
-fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Report {
+fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Aggregate {
     let state = Arc::new(Mutex::new(State {
         requests: Vec::new(),
         sent: Vec::new(),
@@ -214,24 +224,26 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Re
     }));
     let client = Client::new(
         builtin::registry(),
-        common::FixedRoutes,
-        common::NeverNeighbors,
-        Io {
-            state: state.clone(),
-        },
         Policy::default(),
+        common::providers(
+            common::FixedRoutes,
+            Io {
+                state: state.clone(),
+            },
+        ),
     );
-    let mut options = exchange::Options {
+    let mut request = exchange::Request {
         timeout: Duration::from_secs(1),
-        ..exchange::Options::default()
+        ..exchange::Request::new(template.clone(), packetcraftr::send::Options::default())
     };
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    request.send.plan.link_mode = Mode::Layer3;
+    request.collection.capture.snap_length = 1500;
+    let collector = exchange::Collector::default();
     let report = client
-        .exchange(template, options)
+        .exchange(request, collector.clone())
         .expect("exchange completes");
     assert_eq!(state.lock().unwrap().sent.len(), expected);
-    report
+    collector.finish(report).expect("coherent exchange events")
 }
 
 #[test]

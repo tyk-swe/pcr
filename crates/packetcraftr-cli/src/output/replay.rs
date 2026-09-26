@@ -5,17 +5,69 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_netio::{interface::Id as NetworkInterfaceId, link::Mode as NetworkLinkMode};
+use packetcraftr::replay as library;
+use packetcraftr_netio::link::Mode as NetworkLinkMode;
 
 use super::contract::Error;
+use super::envelope::Stats;
 use super::frame::Captured;
-
-use packetcraftr::replay::Timing;
-use packetcraftr_core::analysis::pcap::Format as SourceFormat;
 // The schema resolves both replay interface fields to `$defs.interfaceId` and
 // both link-mode fields to `$defs.linkMode`.
-use packetcraftr_netio::interface::Id as InterfaceId;
-use packetcraftr_netio::link::Mode as LinkMode;
+use super::network::{InterfaceId, LinkMode};
+
+published_enum! {
+    /// The capture file format a replay read.
+    pub enum SourceFormat from packetcraftr_core::capture_file::Format {
+        Pcap => "pcap",
+        PcapNg => "pcap_ng",
+    }
+}
+
+/// How a replay spaced its transmissions.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub enum Timing {
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "scaled")]
+    Scaled(f64),
+    #[serde(rename = "fixed_rate")]
+    FixedRate(f64),
+    #[serde(rename = "bit_rate")]
+    BitRate(u64),
+    #[serde(rename = "immediate")]
+    Immediate,
+}
+
+impl TryFrom<library::Timing> for Timing {
+    type Error = Error;
+
+    fn try_from(value: library::Timing) -> Result<Self, Error> {
+        match value {
+            library::Timing::Original => Ok(Self::Original),
+            library::Timing::Scaled(factor) => Ok(Self::Scaled(factor)),
+            library::Timing::FixedRate(rate) => Ok(Self::FixedRate(rate)),
+            library::Timing::BitRate(rate) => Ok(Self::BitRate(rate)),
+            library::Timing::Immediate => Ok(Self::Immediate),
+            _ => Err(Error::Unpublished {
+                value: "replay timing",
+            }),
+        }
+    }
+}
+
+/// A replay publishes its source frames as packet operations: every frame
+/// read was attempted, every frame transmitted completed.
+impl From<(&library::Report, Duration)> for Stats {
+    fn from((summary, elapsed): (&library::Report, Duration)) -> Self {
+        Self {
+            packets_attempted: summary.frames_read,
+            packets_completed: summary.frames_transmitted,
+            bytes: summary.bytes_transmitted,
+            elapsed,
+            capture: Default::default(),
+        }
+    }
+}
 
 /// Aggregate result of `replay`; per-frame evidence is emitted separately.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -36,26 +88,38 @@ pub struct Report {
     pub frames: Vec<Frame>,
 }
 
-impl Report {
-    pub fn from_summary(
-        summary: packetcraftr::replay::Summary,
-        requested_interface: impl Into<Option<NetworkInterfaceId>>,
-        requested_link_mode: NetworkLinkMode,
-        frames: Vec<Frame>,
-    ) -> Self {
-        Self {
-            source_format: summary.source_format,
-            timing: summary.timing,
-            requested_interface: requested_interface.into(),
-            interfaces_used: summary.interfaces_used,
+/// A replay summary with the interface and link mode the caller requested
+/// and the per-frame evidence retained for the aggregate.
+impl<I: Into<InterfaceId>> TryFrom<(library::Report, Option<I>, NetworkLinkMode, Vec<Frame>)>
+    for Report
+{
+    type Error = Error;
+
+    fn try_from(
+        (summary, requested_interface, requested_link_mode, frames): (
+            library::Report,
+            Option<I>,
+            NetworkLinkMode,
+            Vec<Frame>,
+        ),
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            source_format: summary.source_format.into(),
+            timing: summary.timing.try_into()?,
+            requested_interface: requested_interface.map(Into::into),
+            interfaces_used: summary
+                .interfaces_used
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             passes_completed: summary.passes_completed,
-            requested_link_mode,
+            requested_link_mode: requested_link_mode.into(),
             frames_read: summary.frames_read,
             frames_transmitted: summary.frames_transmitted,
             bytes_transmitted: summary.bytes_transmitted,
             scheduled_duration: summary.scheduled_duration,
             frames,
-        }
+        })
     }
 }
 
@@ -71,17 +135,19 @@ pub struct Frame {
     pub frame: Captured,
 }
 
-impl Frame {
-    pub fn try_from_evidence(evidence: packetcraftr::replay::FrameEvidence) -> Result<Self, Error> {
+impl TryFrom<library::FrameEvidence> for Frame {
+    type Error = Error;
+
+    fn try_from(evidence: library::FrameEvidence) -> Result<Self, Error> {
         Ok(Self {
             source_index: evidence.source_index,
             pass: evidence.pass,
-            interface: evidence.transmission().interface.clone(),
-            link_mode: evidence.link_mode,
+            interface: (&evidence.transmission().interface).into(),
+            link_mode: evidence.link_mode.into(),
             scheduled_delay: evidence.scheduled_delay,
             bytes_sent: u64::try_from(evidence.transmission().report.bytes_sent())
                 .unwrap_or(u64::MAX),
-            frame: Captured::try_from_frame(evidence.frame)?,
+            frame: evidence.frame.try_into()?,
         })
     }
 }

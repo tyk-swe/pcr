@@ -5,14 +5,16 @@
 //!
 //! Every command builds its policy from the same leaf groups below, so one
 //! flag means one thing everywhere. The command-shaped groups at the bottom
-//! are the combinations the commands actually flatten.
+//! are the combinations several commands flatten; a combination only one
+//! command uses lives in that command's `arguments`.
 
 use std::fmt;
 use std::marker::PhantomData;
 
 use clap::Args;
-use packetcraftr_core::analysis::pcap as capture;
 use packetcraftr_netio as net;
+
+use crate::resources::{Settings, declare};
 
 #[derive(Clone, Debug, Args)]
 pub(crate) struct PublicDestinationArgs {
@@ -75,7 +77,7 @@ pub(crate) struct Transmitted;
 pub(crate) const DEFAULT_TRANSMITTED_PACKETS: u64 = 10_000;
 
 /// The byte ceiling the capture defaults publish, as the policy counts it.
-fn default_limit_bytes() -> u64 {
+pub(crate) fn default_limit_bytes() -> u64 {
     u64::try_from(net::capture::Limits::default().max_bytes).expect("default max bytes fits u64")
 }
 
@@ -92,44 +94,6 @@ impl Budget for Transmitted {
         "Maximum transmitted packets or bounded socket traffic units authorized";
     const BYTES_HELP: &'static str =
         "Maximum wire or socket application bytes authorized for one operation";
-}
-
-/// Frames read from a capture file and replayed onto the wire, which run to
-/// far larger counts than a hand-built operation.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Streamed;
-
-impl Budget for Streamed {
-    fn max_packets() -> u64 {
-        capture::DEFAULT_STREAM_FRAMES
-    }
-
-    fn max_bytes() -> u64 {
-        capture::DEFAULT_STREAM_BYTES
-    }
-
-    const PACKETS_HELP: &'static str = "Maximum packets authorized for one operation";
-    const BYTES_HELP: &'static str = "Maximum wire bytes this operation is authorized to transmit";
-}
-
-/// Frames this operation only receives.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Captured;
-
-/// Frames one capture may keep; independent of the transmitted ceiling.
-pub(crate) const DEFAULT_CAPTURED_FRAMES: u64 = 10_000;
-
-impl Budget for Captured {
-    fn max_packets() -> u64 {
-        DEFAULT_CAPTURED_FRAMES
-    }
-
-    fn max_bytes() -> u64 {
-        default_limit_bytes()
-    }
-
-    const PACKETS_HELP: &'static str = "Maximum frames this capture is authorized to keep";
-    const BYTES_HELP: &'static str = "Maximum captured bytes this capture is authorized to keep";
 }
 
 #[derive(Clone, Debug, Args)]
@@ -173,45 +137,33 @@ pub(crate) struct HostnamePolicyArgs {
     budgets: TrafficBudgetArgs<Transmitted>,
 }
 
-/// `plan`: passive, so it has no budget to spend.
-#[derive(Clone, Debug, Args)]
-pub(crate) struct RoutePolicyArgs {
-    #[command(flatten)]
-    public_destination: PublicDestinationArgs,
-    #[command(flatten)]
-    hostname_resolution: HostnameResolutionArgs,
-    #[command(flatten)]
-    destination_allowlist: DestinationAllowlistArgs,
+impl HostnameResolutionArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [max_resolved_addresses: Count @ Operation]);
+    }
 }
 
-/// `fuzz`: mutated packets, addressed numerically, so no hostname resolution.
-#[derive(Clone, Debug, Args)]
-pub(crate) struct FuzzPolicyArgs {
-    #[command(flatten)]
-    public_destination: PublicDestinationArgs,
-    #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
-    #[command(flatten)]
-    source_spoofing: SourceSpoofingArgs,
-    #[command(flatten)]
-    destination_allowlist: DestinationAllowlistArgs,
-    #[command(flatten)]
-    budgets: TrafficBudgetArgs<Transmitted>,
+impl<B: Budget> TrafficBudgetArgs<B> {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [
+            max_packets: Count @ Operation,
+            max_bytes: Bytes @ Operation,
+        ]);
+    }
 }
 
-/// `replay`: captured frames sent as they were captured, sources included.
-#[derive(Clone, Debug, Args)]
-pub(crate) struct ReplayPolicyArgs {
-    #[command(flatten)]
-    public_destination: PublicDestinationArgs,
-    #[command(flatten)]
-    permissive_packet: PermissivePacketArgs,
-    #[command(flatten)]
-    source_spoofing: SourceSpoofingArgs,
-    #[command(flatten)]
-    destination_allowlist: DestinationAllowlistArgs,
-    #[command(flatten)]
-    budgets: TrafficBudgetArgs<Streamed>,
+impl SendPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+        self.budgets.resources(settings);
+    }
+}
+
+impl HostnamePolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+        self.budgets.resources(settings);
+    }
 }
 
 impl PublicDestinationArgs {
@@ -282,108 +234,13 @@ impl HostnamePolicyArgs {
     }
 }
 
-impl RoutePolicyArgs {
-    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
-        let mut policy = packetcraftr::policy::Policy::default();
-        self.public_destination.apply_to(&mut policy);
-        self.hostname_resolution.apply_to(&mut policy);
-        self.destination_allowlist.apply_to(&mut policy);
-        policy
-    }
-}
-
-impl FuzzPolicyArgs {
-    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
-        let mut policy = packetcraftr::policy::Policy::default();
-        self.public_destination.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
-        self.source_spoofing.apply_to(&mut policy);
-        self.destination_allowlist.apply_to(&mut policy);
-        self.budgets.apply_to(&mut policy);
-        policy
-    }
-}
-
-impl ReplayPolicyArgs {
-    pub(crate) fn into_policy(self) -> packetcraftr::policy::Policy {
-        let mut policy = packetcraftr::policy::Policy::default();
-        self.public_destination.apply_to(&mut policy);
-        self.permissive_packet.apply_to(&mut policy);
-        self.source_spoofing.apply_to(&mut policy);
-        self.destination_allowlist.apply_to(&mut policy);
-        self.budgets.apply_to(&mut policy);
-        policy
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
     use clap::Parser as _;
 
-    use super::*;
     use crate::cli::Cli;
-    use crate::commands::Command;
-
-    /// The budget a command ends up with is the one the policy enforces, so
-    /// this walks the real clap parse rather than reading the trait back.
-    fn budgets_for(arguments: &[&str]) -> (u64, u64) {
-        let cli = Cli::try_parse_from(arguments).expect("command must parse with defaults");
-        let policy = match cli.command {
-            Command::Send(send) => send.send.policy.into_policy(),
-            Command::Exchange(exchange) => exchange.send.policy.into_policy(),
-            Command::Scan(scan) => scan.policy.into_policy(),
-            Command::Fuzz(fuzz) => fuzz.policy.into_policy(),
-            Command::Replay(replay) => replay.policy.into_policy(),
-            Command::Capture(capture) => capture.budgets.into_policy(),
-            other => panic!("unbudgeted command {:?}", other.kind()),
-        };
-        (
-            policy.max_packets_per_operation,
-            policy.max_bytes_per_operation,
-        )
-    }
-
-    #[test]
-    fn each_command_starts_from_the_budget_its_operation_calls_for() {
-        let transmitted = (Transmitted::max_packets(), Transmitted::max_bytes());
-        let captured = (Captured::max_packets(), Captured::max_bytes());
-
-        assert_eq!(
-            budgets_for(&[
-                "packetcraftr",
-                "replay",
-                "capture.pcapng",
-                "--interface",
-                "7"
-            ]),
-            (
-                capture::DEFAULT_STREAM_FRAMES,
-                capture::DEFAULT_STREAM_BYTES
-            ),
-        );
-        assert_eq!(
-            budgets_for(&["packetcraftr", "send", "--packet", "raw(hex=00)"]),
-            transmitted,
-        );
-        assert_eq!(
-            budgets_for(&["packetcraftr", "exchange", "--packet", "raw(hex=00)"]),
-            transmitted,
-        );
-        assert_eq!(
-            budgets_for(&["packetcraftr", "scan", "192.0.2.1"]),
-            transmitted,
-        );
-        assert_eq!(
-            budgets_for(&["packetcraftr", "fuzz", "--packet", "raw(hex=00)"]),
-            transmitted,
-        );
-        assert_eq!(
-            budgets_for(&["packetcraftr", "capture", "--interface", "7"]),
-            captured,
-        );
-        assert_eq!(captured, (DEFAULT_CAPTURED_FRAMES, transmitted.1));
-    }
+    use crate::commands::CommandLine;
 
     #[test]
     fn destination_allowlists_parse_and_reject_malformed_entries() {
@@ -399,7 +256,7 @@ mod tests {
             "2001:db8::1",
         ])
         .expect("allowlist entries parse");
-        let Command::Scan(scan) = cli.command else {
+        let CommandLine::Scan(scan) = cli.command else {
             panic!("scan command")
         };
         assert_eq!(scan.policy.into_policy().allowed_destinations.len(), 2);
@@ -431,7 +288,7 @@ mod tests {
             "7",
         ])
         .expect("replay defaults parse");
-        let Command::Replay(default) = default.command else {
+        let CommandLine::Replay(default) = default.command else {
             panic!("replay command")
         };
         assert!(!default.policy.into_policy().allow_source_spoofing);
@@ -445,7 +302,7 @@ mod tests {
             "--allow-source-spoofing",
         ])
         .expect("replay source-spoofing opt-in parses");
-        let Command::Replay(opted_in) = opted_in.command else {
+        let CommandLine::Replay(opted_in) = opted_in.command else {
             panic!("replay command")
         };
         assert!(opted_in.policy.into_policy().allow_source_spoofing);

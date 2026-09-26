@@ -5,12 +5,9 @@ use std::any::Any;
 use std::borrow::Borrow;
 use std::fmt;
 
-use bytes::Bytes;
 use serde::Serialize;
-use thiserror::Error;
 
-use super::reflection::reflective_layer;
-use crate::field::{FieldKind, FieldValue};
+use crate::field::{self, FieldKind, FieldValue, Path};
 
 /// Static protocol/codec name, cheaply copied. Runtime names from documents,
 /// filters, and command lines resolve through
@@ -83,51 +80,36 @@ pub struct Schema {
     pub fields: &'static [FieldSchema],
 }
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum FieldError {
-    #[error("layer {protocol} has no field named {field}")]
-    UnknownField { protocol: Id, field: String },
-    #[error("field {field} on layer {protocol} expected {expected}")]
-    WrongType {
-        protocol: Id,
-        field: String,
-        expected: &'static str,
-    },
-    #[error("field {field} on layer {protocol} is outside the allowed range")]
-    OutOfRange { protocol: Id, field: String },
-    #[error("field {field} on layer {protocol} cannot be edited reflectively")]
-    ReadOnly { protocol: Id, field: String },
-    #[error("required field {field} is absent from layer {protocol} after defaults")]
-    MissingRequired { protocol: Id, field: String },
-}
-
 /// Object-safe packet layer interface used by built-in and external protocols.
+///
+/// `dyn Layer` upcasts to `dyn Any`; its inherent `is`, `downcast_ref`, and
+/// `downcast_mut` recover the concrete layer.
 pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn schema(&self) -> &'static Schema;
+    /// Clones the layer behind a trait object. `Clone` requires `Sized` and
+    /// cannot be a supertrait of an object-safe trait, so `Box<dyn Layer>`
+    /// needs this method to implement `Clone`.
     fn clone_box(&self) -> Box<dyn Layer>;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn field(&self, name: &str) -> Option<FieldValue>;
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error>;
 
-    /// Reads a registered nested object member or zero-based list element.
-    fn field_path(&self, name: &str) -> Option<FieldValue> {
-        if let Some(value) = self.field(name) {
-            return Some(value);
+    /// Reads a field, or a registered nested object member or zero-based
+    /// list element, through a path parsed once by the caller.
+    fn field_path(&self, path: &Path) -> Option<FieldValue> {
+        if !path.is_nested() {
+            return self.field(path.root());
         }
-        let path = name.parse::<crate::field::Path>().ok()?;
         path.schema(self.schema())?;
         path.get(&self.field(path.root())?).cloned()
     }
 
-    /// Edits a nested value through its owning field's validated setter.
-    fn set_field_path(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        let unknown = || FieldError::UnknownField {
+    /// Edits a field, or a nested value through its owning field's validated
+    /// setter.
+    fn set_field_path(&mut self, path: &Path, value: FieldValue) -> Result<(), field::Error> {
+        let unknown = || field::Error::UnknownField {
             protocol: *self.protocol_id(),
-            field: name.to_owned(),
+            field: path.to_string(),
         };
-        let path = name.parse::<crate::field::Path>().map_err(|_| unknown())?;
         path.schema(self.schema()).ok_or_else(unknown)?;
         if !path.is_nested() {
             return self.set_field(path.root(), value);
@@ -141,10 +123,10 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
 
     /// Validates the stable required-field contract after codec defaults,
     /// materialization, or decoding.
-    fn validate_required_fields(&self) -> Result<(), FieldError> {
+    fn validate_required_fields(&self) -> Result<(), field::Error> {
         for field in self.schema().fields.iter().filter(|field| field.required) {
             if self.field(field.name).is_none() {
-                return Err(FieldError::MissingRequired {
+                return Err(field::Error::MissingRequired {
                     protocol: *self.protocol_id(),
                     field: field.name.to_owned(),
                 });
@@ -158,155 +140,25 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     }
 }
 
+impl dyn Layer {
+    /// Returns whether the concrete layer is `T`.
+    pub fn is<T: Layer>(&self) -> bool {
+        (self as &dyn Any).is::<T>()
+    }
+
+    /// Returns the concrete layer when it is `T`.
+    pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
+    /// Returns the concrete layer mutably when it is `T`.
+    pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
+    }
+}
+
 impl Clone for Box<dyn Layer> {
     fn clone(&self) -> Self {
         self.clone_box()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Raw {
-    pub bytes: Bytes,
-}
-
-impl Raw {
-    pub fn new(bytes: impl Into<Bytes>) -> Self {
-        Self {
-            bytes: bytes.into(),
-        }
-    }
-}
-
-reflective_layer! {
-    pub(crate) fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
-    impl Raw {
-        "bytes" => {
-            kind: Bytes, derived: false, required: false,
-            description: "Verbatim bytes",
-            reflect: bytes,
-            layout: (0, length)
-        }
-    }
-    layout pub fn raw_layout(length: usize);
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Padding {
-    pub bytes: Bytes,
-    /// First layer index whose declared coverage excludes these bytes.
-    /// `None` denotes link padding excluded from every dependent payload.
-    pub outside_layer: Option<usize>,
-}
-
-impl Padding {
-    /// Whether the layer at `layer_index` excludes these bytes from its
-    /// payload: link padding is excluded everywhere, and coverage-bounded
-    /// padding from the layer that declared the boundary onward.
-    pub fn excluded_from(&self, layer_index: usize) -> bool {
-        self.outside_layer
-            .is_none_or(|outside_layer| layer_index >= outside_layer)
-    }
-
-    pub fn new(bytes: impl Into<Bytes>) -> Self {
-        Self {
-            bytes: bytes.into(),
-            outside_layer: None,
-        }
-    }
-
-    pub fn after_layer(bytes: impl Into<Bytes>, outside_layer: usize) -> Self {
-        Self {
-            bytes: bytes.into(),
-            outside_layer: Some(outside_layer),
-        }
-    }
-}
-
-reflective_layer! {
-    pub(crate) fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
-    impl Padding {
-        "bytes" => {
-            kind: Bytes, derived: false, required: false,
-            description: "Trailing padding bytes",
-            reflect: bytes,
-            layout: (0, length)
-        },
-        "outside_layer" => {
-            kind: Unsigned, derived: false, required: false,
-            description: "First layer index whose declared length excludes the padding",
-            get |layer| layer.outside_layer.map(FieldValue::from),
-            set |layer, value, name| match value {
-                FieldValue::Unsigned(value) => {
-                    layer.outside_layer = Some(usize::try_from(value).map_err(|_| FieldError::OutOfRange {
-                        protocol: padding_schema().protocol, field: name.to_owned(),
-                    })?);
-                    Ok(())
-                }
-                _ => Err(FieldError::WrongType {
-                    protocol: padding_schema().protocol, field: name.to_owned(), expected: "unsigned",
-                }),
-            }
-        }
-    }
-    layout pub(crate) fn padding_layout(length: usize);
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Malformed {
-    pub intended_protocol: Option<String>,
-    pub bytes: Bytes,
-    pub reason: String,
-}
-
-impl Malformed {
-    pub fn new(
-        intended_protocol: Option<String>,
-        bytes: impl Into<Bytes>,
-        reason: impl Into<String>,
-    ) -> Self {
-        Self {
-            intended_protocol,
-            bytes: bytes.into(),
-            reason: reason.into(),
-        }
-    }
-}
-
-reflective_layer! {
-    pub(crate) fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
-    impl Malformed {
-        "protocol" => {
-            kind: Text, derived: false, required: false,
-            description: "Intended protocol identifier",
-            get |layer| layer.intended_protocol.clone().map(FieldValue::Text),
-            set |layer, value, name| match value {
-                FieldValue::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
-                _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol, field: name.to_owned(), expected: "text" }),
-            }
-        },
-        "bytes" => {
-            kind: Bytes, derived: false, required: false,
-            description: "Preserved malformed bytes",
-            reflect: bytes,
-            layout: (0, length)
-        },
-        "reason" => {
-            kind: Text, derived: false, required: true,
-            description: "Decode or construction finding",
-            reflect: reason
-        }
-    }
-    layout pub(crate) fn malformed_layout(length: usize);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::layout::ByteRange;
-
-    #[test]
-    fn opaque_layouts_cover_the_whole_input() {
-        assert_eq!(padding_layout(2)[0].range, ByteRange::new(0, 2));
-        assert_eq!(malformed_layout(4)[0].range, ByteRange::new(0, 4));
     }
 }

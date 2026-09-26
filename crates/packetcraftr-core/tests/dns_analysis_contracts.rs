@@ -387,7 +387,7 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
     assert_eq!(transactions[0].generation, 0);
     assert_eq!(transactions[1].generation, 1);
     let registry = registry();
-    let mut writer = analysis::pcap::Writer::pcapng(Vec::new()).unwrap();
+    let mut writer = packetcraftr_core::capture_file::Writer::pcapng(Vec::new()).unwrap();
     writer
         .add_interface(packetcraftr_core::frame::LinkType::IPV4)
         .unwrap();
@@ -416,7 +416,9 @@ fn reused_ids_and_scoped_connections_do_not_share_transactions() {
     );
     response.interface = Some(1);
     writer.write_frame(&response).unwrap();
-    let mut input = analysis::pcap::Reader::new(std::io::Cursor::new(writer.into_inner())).unwrap();
+    let mut input =
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(writer.into_inner()))
+            .unwrap();
     let mut collector = Collector::new(Limits::default(), vec![53]).unwrap();
     let run = analysis::run(
         &mut input,

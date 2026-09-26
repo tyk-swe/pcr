@@ -12,8 +12,8 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::capture::RecordIdentity;
 
-use super::model::Options;
-use crate::evidence::{Budget, BudgetError, DiagnosticLog};
+use super::{Collection, Window};
+use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
 use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy)]
@@ -33,9 +33,9 @@ pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPa
 
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
-    pub(super) pending_events: Vec<super::model::Event>,
+    pub(super) pending_events: Vec<super::report::Event>,
     pub(crate) diagnostics: DiagnosticLog,
-    pub(super) evidence_budget: Budget,
+    pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
     pub(super) response_count: usize,
     pub(super) retained_unmatched: usize,
@@ -48,9 +48,9 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedPacket],
-    pub(crate) sent: &'a [Arc<crate::SentPacket>],
-    pub(crate) deadline: Instant,
-    pub(crate) options: &'a super::model::Options,
+    pub(crate) sent: &'a [Arc<crate::evidence::SentPacket>],
+    pub(crate) window: &'a Window,
+    pub(crate) collection: &'a Collection,
 }
 
 /// The capture provider handed back an ingress record it had already
@@ -81,7 +81,7 @@ impl Accumulator {
             unsolicited: Vec::new(),
             pending_events: Vec::new(),
             diagnostics: DiagnosticLog::default(),
-            evidence_budget: Budget::default(),
+            evidence_budget: RetentionBudget::default(),
             response_counts: vec![0; requests],
             response_count: 0,
             retained_unmatched: 0,
@@ -98,44 +98,44 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::model::Event> {
+    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::report::Event> {
         self.pending_events.drain(..)
     }
 
     pub(super) fn reserve_decoded_evidence(
         &mut self,
         additional: usize,
-        options: &Options,
+        collection: &Collection,
     ) -> bool {
         let error = match self.evidence_budget.reserve(
             additional,
-            options.capture.max_frames,
-            options.capture.max_bytes,
+            collection.capture.max_frames,
+            collection.capture.max_bytes,
         ) {
             Ok(()) => return true,
             Err(error) => error,
         };
         let (code, message) = match error {
-            BudgetError::FrameCountOverflow => (
+            RetentionError::FrameCountOverflow => (
                 "exchange.capture_frame_limit",
                 "retained capture frame accounting overflowed; frame was not retained".to_owned(),
             ),
-            BudgetError::FrameLimit => (
+            RetentionError::FrameLimit => (
                 "exchange.capture_frame_limit",
                 format!(
                     "aggregate retained capture frame limit {} reached; later frames were not retained",
-                    options.capture.max_frames
+                    collection.capture.max_frames
                 ),
             ),
-            BudgetError::ByteCountOverflow => (
+            RetentionError::ByteCountOverflow => (
                 "exchange.capture_byte_limit",
                 "retained capture byte accounting overflowed; frame was not retained".to_owned(),
             ),
-            BudgetError::ByteLimit => (
+            RetentionError::ByteLimit => (
                 "exchange.capture_byte_limit",
                 format!(
                     "retained capture byte limit {} reached; later frames were not retained",
-                    options.capture.max_bytes
+                    collection.capture.max_bytes
                 ),
             ),
         };
@@ -151,19 +151,19 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         frame_bytes: usize,
-        options: &Options,
+        collection: &Collection,
     ) -> bool {
-        if self.retained_unmatched >= options.max_unmatched_frames {
+        if self.retained_unmatched >= collection.max_unmatched_frames {
             self.diagnostics.push_once(Diagnostic::warning(
                 "exchange.unsolicited_limit",
                 format!(
                     "unsolicited/undecoded frame limit {} reached; later frames were not retained",
-                    options.max_unmatched_frames
+                    collection.max_unmatched_frames
                 ),
             ));
             return false;
         }
-        if !self.reserve_decoded_evidence(frame_bytes, options) {
+        if !self.reserve_decoded_evidence(frame_bytes, collection) {
             return false;
         }
         self.mark_record_retained(identity);
@@ -179,10 +179,10 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
-        options: &Options,
+        collection: &Collection,
         freshness: Option<super::accumulator::UnsolicitedFreshness>,
     ) {
-        if self.reserve_unattributed(identity, decoded.original.len(), options) {
+        if self.reserve_unattributed(identity, decoded.original.len(), collection) {
             self.unsolicited
                 .push(UnsolicitedEvidence { decoded, freshness });
         }
@@ -192,11 +192,11 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         frame: Frame,
-        options: &Options,
+        collection: &Collection,
     ) {
-        if self.reserve_unattributed(identity, frame.bytes().len(), options) {
+        if self.reserve_unattributed(identity, frame.bytes().len(), collection) {
             self.pending_events
-                .push(super::model::Event::Undecoded { frame });
+                .push(super::report::Event::Undecoded { frame });
         }
     }
 }

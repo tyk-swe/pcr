@@ -1,29 +1,30 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Composes local route, resolver, and recording-sender providers with an
-//! explicit destination policy and finite budgets. No network traffic is sent.
+//! Composes local route and recording-I/O providers with an explicit
+//! destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production uses the
-//! `SystemProvider`/`SystemResolver`/`SystemLayer*`/`PacketIo` adapters under
-//! the same policy contract. Run with scripts/check-external-consumer.py.
+//! Production composes `SystemProviders` under the same policy
+//! contract; the client resolves neighbors over its own transmit and capture
+//! providers. Run with scripts/check-external-consumer.py.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 
-use packetcraftr::Client;
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::send;
+use packetcraftr::{Client, ProviderSet, send};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
+use packetcraftr_netio::Error as LiveIoError;
+use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
-use packetcraftr_netio::transmit;
-use packetcraftr_netio::{Error as LiveIoError, neighbor};
+use packetcraftr_netio::{interface, tcp, transmit};
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
@@ -39,6 +40,7 @@ impl Provider for DocumentationRoutes {
         destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -58,32 +60,33 @@ impl Provider for DocumentationRoutes {
     }
 }
 
-/// Neighbor discovery must never run in this example: the sender observes
-/// Layer 3 frames only, so resolution would prove the wiring wrong.
-struct NeverNeighbors;
-
-impl neighbor::Resolver for NeverNeighbors {
-    fn resolve(
-        &self,
-        _request: &neighbor::Request,
-    ) -> Result<neighbor::Resolution, neighbor::Error> {
-        unreachable!("Layer 3 sends never resolve neighbors")
-    }
-}
-
 /// Retains submitted bytes for inspection without transmitting them.
 #[derive(Clone, Default)]
 struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-impl transmit::Sender for RecordingSender {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for RecordingSender {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         self.sent
             .lock()
             .expect("sent lock")
             .push(frame.bytes().to_vec());
         Ok(transmit::Submission::start().complete(frame.bytes().len(), frame.bytes().clone()))
+    }
+}
+
+impl capture::Provider for RecordingSender {
+    type Capture = capture::SystemSession;
+
+    /// The client arms capture only to resolve a neighbor; this example's
+    /// Layer 3 sends never need one, so arming would prove the wiring wrong.
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
+        unreachable!("Layer 3 sends never resolve neighbors")
     }
 }
 
@@ -114,18 +117,23 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    let client = Client::new(
-        builtin::registry(),
-        DocumentationRoutes,
-        NeverNeighbors,
-        sender,
-        policy,
-    );
+    // The recording sender transmits and captures; this workflow never
+    // selects an interface by name, connects over TCP, or resolves a
+    // hostname, so those capabilities keep their system providers unused.
+    let providers = ProviderSet {
+        route: DocumentationRoutes,
+        interface: interface::SystemProvider,
+        capture: sender.clone(),
+        transmit: sender,
+        tcp: tcp::SystemProvider,
+        resolver: packetcraftr::target::SystemResolver,
+    };
+    let client = Client::new(builtin::registry(), policy, providers);
 
-    // Layer 3 planning skips link materialization entirely, so the composed
-    // client is fully exercised without capture or neighbor providers.
+    // Layer 3 planning skips neighbor resolution entirely, so the composed
+    // client never arms capture on the recording I/O.
     let options = send::Options {
-        plan: packetcraftr_netio::route::Options {
+        plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,
             ..Default::default()
         },
@@ -133,14 +141,24 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
-    let report = client.send(allowed, options.clone())?;
+    // The collector keeps every frame the send publishes; its aggregate joins
+    // them with the terminal report.
+    let collector = send::Collector::default();
+    let report = client.send(
+        send::Request::packet(allowed, options.clone()),
+        collector.clone(),
+    )?;
+    let sent = collector.finish(report)?;
     println!(
         "sent {} bytes to an allowed destination",
-        report.sent.bytes_sent()
+        sent.stats.bytes
     );
 
     let outside = packet(Ipv4Addr::new(198, 51, 100, 1))?;
-    match client.send(outside, options) {
+    match client.send(
+        send::Request::packet(outside, options),
+        send::Collector::default(),
+    ) {
         Err(error) => println!("denied outside the allowlist: {error}"),
         Ok(_) => unreachable!("the allowlist must reject other destinations"),
     }

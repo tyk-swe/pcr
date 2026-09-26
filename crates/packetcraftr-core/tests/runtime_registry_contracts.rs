@@ -10,10 +10,17 @@ use common::probe::{
     Child, ChildCodec, PROBE_LINK_TYPE, Probe, ProbeCodec, probe_registry, structure,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Malformed, Raw, raw_layout};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::layout::ByteRange;
+use packetcraftr_core::protocol::{
+    builtin,
+    link::{Ethernet, Vlan},
+    network::Ipv4,
+    transport::Udp,
+};
 use packetcraftr_core::registry::{Discriminator, FilterFieldBinding};
 use packetcraftr_core::{build, codec, decode, packet::Packet};
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -94,15 +101,15 @@ fn assert_failed_packet_lookups(decoded: decode::DecodedPacket) {
     assert!(failed_lookups.layer_mut(99).is_none());
     assert!(matches!(
         failed_lookups.insert(99, Probe::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.replace(99, Probe::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert!(matches!(
         failed_lookups.remove(99),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 2 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 2 })
     ));
     assert_eq!(
         structure(&failed_lookups),
@@ -144,7 +151,7 @@ fn assert_root_decode_behavior(registry: &Arc<packetcraftr_core::registry::Regis
     assert_eq!(raw.packet.encoded_payload_length(0), Some(0));
     assert_eq!(raw.layout.layers.len(), 1);
     assert_eq!(raw.layout.layers[0].range, ByteRange::new(0, 2));
-    assert_eq!(raw.layout.layers[0].fields, raw_layout(2));
+    assert_eq!(raw.layout.layers[0].fields, Raw::layout(2));
     assert_eq!(raw.diagnostics[0].code, "decode.unsupported_link_type");
 }
 
@@ -167,7 +174,10 @@ fn assert_build_decode_limits(
             one.clone(),
             codec::Context::default(),
             build::Options {
-                max_layers: 0,
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
                 ..build::Options::default()
             },
         ),
@@ -181,7 +191,10 @@ fn assert_build_decode_limits(
             one,
             codec::Context::default(),
             build::Options {
-                max_packet_size: 0,
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
                 ..build::Options::default()
             },
         ),
@@ -192,8 +205,10 @@ fn assert_build_decode_limits(
             registry,
             vec![1],
             decode::Options {
-                max_layers: 0,
-                ..decode::Options::default()
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                }
             },
         ),
         Err(decode::Error::LayerLimit { limit: 0 })
@@ -203,8 +218,10 @@ fn assert_build_decode_limits(
             registry,
             vec![1, 2],
             decode::Options {
-                max_packet_size: 1,
-                ..decode::Options::default()
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 1,
+                    ..packetcraftr_core::packet::Limits::default()
+                }
             },
         ),
         Err(decode::Error::PacketSizeLimit { .. })
@@ -444,4 +461,237 @@ fn filter_enumeration_uses_custom_registrations_in_normalized_path_order() {
             .collect::<Vec<_>>(),
         ["p.a", "p.z"]
     );
+}
+
+/// A two-byte link header naming its payload by EtherType, registered like a
+/// custom link protocol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Tag {
+    ether_type: u16,
+}
+
+impl Default for Tag {
+    fn default() -> Self {
+        Self { ether_type: 0x0800 }
+    }
+}
+
+packetcraftr_core::reflective_layer! {
+    fn tag_schema() => { protocol: packetcraftr_core::layer::Id::new("tag"), name: "Tag" }
+    impl Tag {
+        "ether_type" => {
+            kind: Unsigned, derived: false, required: true,
+            description: "Payload EtherType",
+            get |layer| Some(packetcraftr_core::layer::reflect_get(&layer.ether_type)),
+            set |layer, value, name| packetcraftr_core::layer::reflect_set(
+                &mut layer.ether_type, tag_schema(), name, value
+            ),
+            layout: (0, 2)
+        }
+    }
+    layout fn tag_layout();
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TagCodec;
+
+impl codec::LayerCodec for TagCodec {
+    fn protocol_id(&self) -> &'static packetcraftr_core::layer::Id {
+        &tag_schema().protocol
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        _context: &codec::LayerEncodeContext<'_>,
+    ) -> Result<codec::EncodedLayer, codec::Error> {
+        let tag = layer
+            .downcast_ref::<Tag>()
+            .ok_or_else(|| codec::Error::WrongLayer {
+                expected: "tag".into(),
+                actual: *layer.protocol_id(),
+            })?;
+        let mut encoded = codec::EncodedLayer::header(
+            tag.ether_type.to_be_bytes().to_vec(),
+            Box::new(tag.clone()),
+        );
+        encoded.fields = tag_layout();
+        Ok(encoded)
+    }
+
+    fn decode(
+        &self,
+        input: Bytes,
+        _context: &codec::LayerDecodeContext<'_>,
+    ) -> Result<codec::DecodedLayer, codec::Error> {
+        let Some(&[high, low]) = input.first_chunk::<2>() else {
+            return Err(codec::Error::Truncated {
+                protocol: "tag".into(),
+                needed: 2,
+                available: input.len(),
+            });
+        };
+        let ether_type = u16::from_be_bytes([high, low]);
+        let mut decoded = codec::DecodedLayer::terminal(Box::new(Tag { ether_type }), 2);
+        decoded.payload_len = input.len() - 2;
+        decoded.next = vec![Discriminator(ether_type.into())];
+        decoded.stop = false;
+        decoded.fields = tag_layout();
+        Ok(decoded)
+    }
+
+    fn make_layer(
+        &self,
+        fields: &std::collections::BTreeMap<String, packetcraftr_core::field::FieldValue>,
+    ) -> Result<Box<dyn Layer>, codec::Error> {
+        let mut layer = Tag::default();
+        for (name, value) in fields {
+            layer.set_field(name, value.clone())?;
+        }
+        Ok(Box::new(layer))
+    }
+}
+
+const TAG_LINK_TYPE: LinkType = LinkType(778);
+
+/// The built-in registry plus the `tag` link protocol, with or without the
+/// trailing-padding property.
+fn tag_registry(padding: bool) -> Arc<packetcraftr_core::registry::Registry> {
+    let registry = builtin::registry_with(|builder| {
+        builder.register_codec(TagCodec, &[])?;
+        if padding {
+            builder.allow_trailing_padding("tag");
+        }
+        builder.bind_link_type(TAG_LINK_TYPE, "tag")?;
+        builder.bind("tag", 0x0800, "ipv4", 100)?;
+        Ok(())
+    })
+    .expect("tag registry");
+    Arc::new(registry)
+}
+
+fn udp_datagram() -> Vec<Box<dyn Layer>> {
+    vec![
+        Box::new(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        }),
+        Box::new(Udp {
+            source_port: 40_000,
+            destination_port: 40_001,
+            ..Udp::default()
+        }),
+        Box::new(Raw::new(&b"hi"[..])),
+    ]
+}
+
+fn packet_of(link: Box<dyn Layer>, trailer: Option<&'static [u8]>) -> Packet {
+    let mut packet = Packet::new();
+    packet.push_boxed(link);
+    for layer in udp_datagram() {
+        packet.push_boxed(layer);
+    }
+    if let Some(trailer) = trailer {
+        packet.push(Padding::new(trailer));
+    }
+    packet
+}
+
+/// The layers after the link header, with padding bytes and ownership, plus
+/// the codes of the diagnostics reporting bytes outside a declared length.
+fn decoded_tail(
+    registry: &Arc<packetcraftr_core::registry::Registry>,
+    link_type: LinkType,
+    bytes: Bytes,
+) -> (Vec<String>, Vec<&'static str>) {
+    let frame = Frame::new(SystemTime::UNIX_EPOCH, link_type, bytes).expect("frame");
+    let decoded = decode::Dissector::new(Arc::clone(registry))
+        .decode(frame, decode::Options::default())
+        .expect("frame decodes");
+    let layers = decoded
+        .packet
+        .iter()
+        .skip(1)
+        .map(|layer| match layer.downcast_ref::<Padding>() {
+            Some(padding) => format!("padding {:?} {:?}", padding.bytes, padding.outside_layer),
+            None => layer.protocol_id().to_string(),
+        })
+        .collect();
+    let trailing = decoded
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code)
+        .filter(|code| code.starts_with("decode.trailing"))
+        .collect();
+    (layers, trailing)
+}
+
+#[test]
+fn a_custom_link_protocol_registered_with_trailing_padding_behaves_like_ethernet() {
+    const TRAILER: &[u8] = &[0, 0, 0, 0];
+    let padded = tag_registry(true);
+    let unpadded = tag_registry(false);
+    assert!(padded.allows_trailing_padding("tag"));
+    assert!(!unpadded.allows_trailing_padding("tag"));
+    for builtin_link in ["ethernet", "vlan", "linux_sll", "bsd_null"] {
+        assert!(
+            padded.allows_trailing_padding(builtin_link),
+            "{builtin_link}"
+        );
+    }
+    assert!(!padded.allows_trailing_padding("ipv4"));
+
+    let build_with = |registry: &Arc<packetcraftr_core::registry::Registry>, packet| {
+        build::Builder::new(Arc::clone(registry)).build(
+            packet,
+            codec::Context::default(),
+            build::Options::default(),
+        )
+    };
+    let tagged = build_with(&padded, packet_of(Box::new(Tag::default()), Some(TRAILER)))
+        .expect("link padding builds inside a padding link");
+    assert!(tagged.bytes.ends_with(TRAILER));
+    let ethernet = build_with(
+        &padded,
+        packet_of(Box::new(Ethernet::default()), Some(TRAILER)),
+    )
+    .expect("link padding builds inside ethernet");
+    build_with(&padded, packet_of(Box::new(Vlan::default()), Some(TRAILER)))
+        .expect("link padding builds inside a VLAN-rooted frame, as it decodes");
+    assert!(matches!(
+        build_with(
+            &unpadded,
+            packet_of(Box::new(Tag::default()), Some(TRAILER))
+        ),
+        Err(build::Error::PaddingWithoutLinkLayer { index: 4 })
+    ));
+
+    let tag_tail = decoded_tail(&padded, TAG_LINK_TYPE, tagged.bytes.clone());
+    assert_eq!(
+        tag_tail,
+        decoded_tail(&padded, LinkType::ETHERNET, ethernet.bytes.clone())
+    );
+    assert_eq!(
+        tag_tail,
+        (
+            vec![
+                "ipv4".to_owned(),
+                "udp".to_owned(),
+                "raw".to_owned(),
+                "padding b\"\\0\\0\\0\\0\" Some(1)".to_owned(),
+            ],
+            vec!["decode.trailing_padding"],
+        )
+    );
+    let (_, unpadded_trailing) = decoded_tail(&unpadded, TAG_LINK_TYPE, tagged.bytes);
+    assert_eq!(unpadded_trailing, ["decode.trailing_malformed"]);
+    let mut unknown = packetcraftr_core::registry::Builder::new();
+    unknown.allow_trailing_padding("missing");
+    assert!(matches!(
+        unknown.build(),
+        Err(packetcraftr_core::registry::Error::UnknownProtocol { protocol })
+            if protocol.as_str() == "missing"
+    ));
 }

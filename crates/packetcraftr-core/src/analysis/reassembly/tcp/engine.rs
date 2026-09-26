@@ -6,19 +6,20 @@ use std::time::Instant;
 
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
-use super::{
-    Error, Event, Limits, MAX_BYTES_PER_FLOW, Reassembler, ResourceError, ScopedFlowKey, Segment,
-};
+use super::{Error, Event, Limits, Reassembler, Resource, ScopedFlowKey, Segment};
 
 impl Reassembler {
-    pub fn new(limits: Limits) -> Self {
-        Self {
+    /// A reassembler bounded by `limits`, after [`Limits::validate`]
+    /// accepts them.
+    pub fn new(limits: Limits) -> Result<Self, crate::analysis::Error> {
+        limits.validate()?;
+        Ok(Self {
             limits,
             flows: HashMap::new(),
             expiry: Default::default(),
             aggregate_bytes: 0,
             aggregate_memory_charge: 0,
-        }
+        })
     }
 
     /// Admits one segment, returning the events its arrival resolved.
@@ -28,7 +29,6 @@ impl Reassembler {
     /// Panics only if planning and commit disagree about an unchanged flow;
     /// input errors return [`enum@Error`] without mutating the flow table.
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
-        self.validate_limits()?;
         if segment.payload.is_empty()
             && !segment.syn
             && !segment.fin
@@ -49,7 +49,7 @@ impl Reassembler {
                     .saturating_sub(usize::from(existing.is_some()))
                     >= self.limits.max_flows
             {
-                return Err(ResourceError::FlowLimit {
+                return Err(Resource::FlowLimit {
                     limit: self.limits.max_flows,
                 }
                 .into());
@@ -149,21 +149,11 @@ impl Reassembler {
         self.aggregate_memory_charge
     }
 
-    fn validate_limits(&self) -> Result<(), Error> {
-        if self.limits.max_bytes_per_flow > MAX_BYTES_PER_FLOW {
-            return Err(ResourceError::InvalidWindowLimit {
-                limit: self.limits.max_bytes_per_flow,
-            }
-            .into());
-        }
-        Ok(())
-    }
-
     fn plan_replacement_accounting(
         &self,
         existing: Option<&TcpFlowState>,
     ) -> Result<(usize, usize), Error> {
-        let accounting_error = || ResourceError::AggregateByteLimit {
+        let accounting_error = || Resource::AggregateByteLimit {
             limit: self.limits.max_aggregate_bytes,
         };
         let old_retained_bytes = existing
@@ -271,7 +261,8 @@ mod tests {
             max_flows: IDLE_FLOW_COUNT + 1,
             idle_expiry,
             ..Limits::default()
-        });
+        })
+        .unwrap();
 
         for index in 0..IDLE_FLOW_COUNT {
             let source_port = u16::try_from(10_000usize + index).expect("test port fits u16");

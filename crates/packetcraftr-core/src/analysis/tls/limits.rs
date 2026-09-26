@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::analysis::Error;
+use crate::analysis::{Constraint, Error};
 
 /// Per-direction handshake-buffer ceiling: one maximum message plus record
 /// framing. Exceeding it stops buffering and marks the session
@@ -36,7 +36,7 @@ pub struct Limits {
     /// including retained alert charges, but not parsed hello summaries or
     /// allocation capacity. Reaching it retires the oldest
     /// tracked conversations until the new bytes fit. Any positive library
-    /// budget is valid, including deliberate small-budget experiments. The CLI
+    /// limit is valid, including deliberate small-limit experiments. The CLI
     /// requires at least `MAX_DIRECTION_BUFFER` so a single direction can fit.
     pub max_buffered_bytes: usize,
 }
@@ -51,7 +51,7 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Rejects a budget that is zero or self-contradictory, before any input
+    /// Rejects a limit that is zero or self-contradictory, before any input
     /// is read.
     pub fn validate(&self) -> Result<(), Error> {
         for (field, value) in [
@@ -62,7 +62,7 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value: 0,
-                    reason: "must be non-zero",
+                    reason: Constraint::NonZero,
                 });
             }
         }

@@ -12,25 +12,25 @@ enum Component {
     Index(usize),
 }
 
-/// A layer-relative path such as `questions[0].name`.
+/// A parsed layer-relative path such as `questions[0].name`.
+///
 /// List indices are zero based; a path may contain at most 64 components.
+/// Parse a caller's spelling once with [`str::parse`] at the document or
+/// command-line edge, then read and edit with
+/// [`Layer::field_path`](crate::layer::Layer::field_path) and
+/// [`Layer::set_field_path`](crate::layer::Layer::set_field_path).
+/// [`Display`](std::fmt::Display) writes the path back in the same syntax.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Path {
     root: String,
     components: Vec<Component>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("invalid reflective field path {path:?}")]
-pub struct PathError {
-    pub path: String,
-}
-
 impl std::str::FromStr for Path {
-    type Err = PathError;
+    type Err = super::Error;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let invalid = || PathError {
+        let invalid = || super::Error::InvalidPath {
             path: input.chars().take(256).collect(),
         };
         if input.is_empty() || input.len() > 8192 {
@@ -78,7 +78,28 @@ impl std::str::FromStr for Path {
     }
 }
 
+impl std::fmt::Display for Path {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.root)?;
+        for component in &self.components {
+            match component {
+                Component::Name(name) => write!(formatter, ".{name}")?,
+                Component::Index(index) => write!(formatter, "[{index}]")?,
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Path {
+    /// The top-level field `name` of a schema, which needs no parsing.
+    pub(crate) fn top_level(name: &str) -> Self {
+        Self {
+            root: name.to_owned(),
+            components: Vec::new(),
+        }
+    }
+
     pub fn root(&self) -> &str {
         &self.root
     }
@@ -88,21 +109,11 @@ impl Path {
 
     /// Normalizes a resolved root alias and numeric indices for duplicate checks.
     pub(crate) fn canonical(&self, root: &str) -> String {
-        let mut path = root.to_owned();
-        for component in &self.components {
-            match component {
-                Component::Name(name) => {
-                    path.push('.');
-                    path.push_str(name);
-                }
-                Component::Index(index) => {
-                    path.push('[');
-                    path.push_str(&index.to_string());
-                    path.push(']');
-                }
-            }
+        Self {
+            root: root.to_owned(),
+            components: self.components.clone(),
         }
-        path
+        .to_string()
     }
 
     /// Resolves declared members; indices address an element of a list field.
@@ -160,5 +171,27 @@ impl Path {
         }
         *value = replacement;
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Path;
+
+    #[test]
+    fn a_parsed_path_displays_in_its_own_syntax() {
+        for text in [
+            "ttl",
+            "questions[0].name",
+            "options[2].value.options[10].code",
+        ] {
+            let path = text.parse::<Path>().expect("valid path");
+            assert_eq!(path.to_string(), text);
+            assert_eq!(path.to_string().parse::<Path>(), Ok(path));
+        }
+        assert_eq!(
+            "options[007]".parse::<Path>().map(|path| path.to_string()),
+            Ok("options[7]".to_owned())
+        );
     }
 }

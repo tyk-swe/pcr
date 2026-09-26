@@ -3,7 +3,7 @@
 
 mod common;
 use common::{parse_ndjson, path_text, run, run_success};
-use packetcraftr_core::analysis::pcap::{Reader, Writer, compression::Input};
+use packetcraftr_core::capture_file::{Reader, Writer, compression::Input};
 use packetcraftr_core::frame::{Frame, LinkType};
 use std::{
     io::{Cursor, Read, Write},

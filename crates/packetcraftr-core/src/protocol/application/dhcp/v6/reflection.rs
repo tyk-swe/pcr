@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, reflect_set, reflective_layer},
+    field::{self, FieldKind, FieldValue},
+    layer::{FieldSchema, reflect_set, reflective_layer},
     protocol::{
         BuiltinProtocol,
         common::{
@@ -64,7 +64,7 @@ fn duid_value(duid: &Duid) -> FieldValue {
     }
     FieldValue::Object(fields)
 }
-fn parse_duid(value: FieldValue, field: &str) -> Result<Duid, FieldError> {
+fn parse_duid(value: FieldValue, field: &str) -> Result<Duid, field::Error> {
     let mut object = Object::new(value, schema(), field)?;
     let kind = object.required_value::<u16>("type")?;
     let duid = if object.contains("data") {
@@ -200,7 +200,7 @@ fn nested(
     field: &str,
     depth: usize,
     count: &mut usize,
-) -> Result<Vec<Option6>, FieldError> {
+) -> Result<Vec<Option6>, field::Error> {
     value
         .take("options")
         .map(|value| parse_options(value, field, depth + 1, count))
@@ -212,7 +212,7 @@ fn parse_message(
     field: &str,
     depth: usize,
     count: &mut usize,
-) -> Result<Dhcpv6, FieldError> {
+) -> Result<Dhcpv6, field::Error> {
     if depth > 8 {
         return Err(out_of_range(schema(), field));
     }
@@ -241,7 +241,7 @@ fn parse_options(
     field: &str,
     depth: usize,
     count: &mut usize,
-) -> Result<Vec<Option6>, FieldError> {
+) -> Result<Vec<Option6>, field::Error> {
     let values = list(value, 4096, schema(), field)?;
     if depth > 8 && !values.is_empty() {
         return Err(out_of_range(schema(), field));
@@ -293,7 +293,7 @@ fn parse_options(
                                 reflect_set(&mut code, schema(), field, value)?;
                                 Ok(code)
                             })
-                            .collect::<Result<_, FieldError>>()?,
+                            .collect::<Result<_, field::Error>>()?,
                     ),
                     7 | 19 => Value6::Byte(value.required_value("number")?),
                     8 => Value6::Number(value.required_value("number")?),
@@ -316,7 +316,7 @@ fn parse_options(
                                 reflect_set(&mut address, schema(), field, value)?;
                                 Ok(address)
                             })
-                            .collect::<Result<_, FieldError>>()?,
+                            .collect::<Result<_, field::Error>>()?,
                     ),
                     14 | 20 => Value6::Flag,
                     _ => {
@@ -627,7 +627,7 @@ const OPTIONS_8: &[FieldSchema] = &[
 ];
 
 reflective_layer! {
-    pub(in super::super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}
+    pub(super) fn schema() => {protocol:crate::layer::Id::new(BuiltinProtocol::Dhcpv6.as_str()),name:"DHCPv6"}
     impl Dhcpv6 {
         "message_type" => {kind:Unsigned,derived:false,required:false,description:"DHCPv6 message type",reflect:message_type,layout:(0,1)},
         "transaction_id" | "xid" => {kind:Unsigned,derived:false,required:false,description:"24-bit identity in ordinary messages",get |layer| (!layer.is_relay()).then(||layer.transaction_id.into()),set |layer,value,name| reflect_set(&mut layer.transaction_id,schema(),name,value)},
@@ -637,5 +637,5 @@ reflective_layer! {
         "options" => {kind:List,derived:false,required:false,description:"Ordered nested DHCP options",children:OPTIONS_8,get |layer| Some(options_value(&layer.options)),set |layer,value,name| {layer.options=parse_options(value,name,0,&mut 0)?;Ok(())}},
         "wire" => {kind:Bytes,derived:false,required:false,description:"Retained complete DHCP wire",get |layer| (!layer.wire.is_empty()).then(||layer.wire.clone().into()),set |_layer,_value,name| read_only(schema(),name)}
     }
-    layout pub(in super::super) fn layout();
+    layout pub(super) fn layout();
 }

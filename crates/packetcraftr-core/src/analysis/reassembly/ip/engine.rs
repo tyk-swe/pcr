@@ -9,9 +9,9 @@ use bytes::Bytes;
 
 use super::{
     CompletedDatagram, DatagramKey, DatagramState, Ecn, Error, Family, Fragment,
-    FragmentDisposition, FragmentOutcome, IncompleteDatagram, IncompleteReason, Limits,
-    MalformedError, OverlapPolicy, PushOutcome, Reassembler, Reconstruction, ResourceError,
-    Retained, RetainedRange, RetiredDatagrams,
+    FragmentDisposition, FragmentOutcome, IncompleteDatagram, IncompleteReason, Limits, Malformed,
+    OverlapPolicy, PushOutcome, Reassembler, Reconstruction, Resource, Retained, RetainedRange,
+    RetiredDatagrams,
 };
 
 mod merge;
@@ -53,7 +53,7 @@ impl Reassembler {
         self.datagrams.contains_key(key)
     }
     fn aggregate_limit(&self) -> Error {
-        ResourceError::AggregateMemoryLimit {
+        Resource::AggregateMemoryLimit {
             limit: self.limits.max_aggregate_bytes,
         }
         .into()
@@ -76,7 +76,7 @@ impl Reassembler {
             UpdateKind::Replace => merge
                 .union_end
                 .checked_sub(merge.union_start)
-                .ok_or(MalformedError::OffsetOverflow)?,
+                .ok_or(Malformed::OffsetOverflow)?,
         };
         range_metadata
             .checked_add(merged_payload)
@@ -103,7 +103,7 @@ impl Reassembler {
         let unique_bytes = old_unique_bytes
             .checked_add(merge.added_bytes)
             .filter(|bytes| *bytes <= self.limits.max_bytes_per_datagram)
-            .ok_or(ResourceError::DatagramByteLimit {
+            .ok_or(Resource::DatagramByteLimit {
                 limit: self.limits.max_bytes_per_datagram,
             })?;
         let reconstruction_bytes = reconstruction_retained_bytes(existing, incoming)?;
@@ -113,7 +113,7 @@ impl Reassembler {
         let reconstruction_allocation = reconstruction_copied_bytes(existing, incoming);
         let last_update = existing.map_or(now, |state| state.last_update.max(now));
         let deadline = Some(last_update.checked_add(self.limits.idle_expiry).ok_or(
-            ResourceError::IdleExpiryRange {
+            Resource::IdleExpiryRange {
                 expiry: self.limits.idle_expiry,
             },
         )?);
@@ -181,15 +181,20 @@ impl Reassembler {
         })
     }
 
-    #[must_use]
-    pub fn new(limits: Limits, overlap_policy: OverlapPolicy) -> Self {
-        Self {
+    /// A reassembler bounded by `limits`, after [`Limits::validate`]
+    /// accepts them.
+    pub fn new(
+        limits: Limits,
+        overlap_policy: OverlapPolicy,
+    ) -> Result<Self, crate::analysis::Error> {
+        limits.validate()?;
+        Ok(Self {
             limits,
             overlap_policy,
             datagrams: Default::default(),
             expiry: Default::default(),
             retained: Retained::default(),
-        }
+        })
     }
 
     /// Admits one physical fragment and returns its classification, attaching
@@ -210,7 +215,7 @@ impl Reassembler {
         let key = incoming.key.clone();
         let existing = self.datagrams.get(&key);
         if existing.is_none() && self.datagrams.len() >= self.limits.max_datagrams {
-            return Err(ResourceError::DatagramLimit {
+            return Err(Resource::DatagramLimit {
                 limit: self.limits.max_datagrams,
             }
             .into());
@@ -220,7 +225,7 @@ impl Reassembler {
         let fragment_count = old_fragment_count
             .checked_add(1)
             .filter(|count| *count <= self.limits.max_fragments_per_datagram)
-            .ok_or(ResourceError::FragmentLimit {
+            .ok_or(Resource::FragmentLimit {
                 limit: self.limits.max_fragments_per_datagram,
             })?;
 
@@ -232,7 +237,7 @@ impl Reassembler {
         let ranges = existing.map_or(empty_ranges.as_slice(), |state| state.ranges.as_slice());
         let merge = plan_merge(ranges, &incoming)?;
         if merge.conflicting_bytes != 0 && self.overlap_policy == OverlapPolicy::Reject {
-            return Err(MalformedError::ConflictingOverlap {
+            return Err(Malformed::ConflictingOverlap {
                 bytes: merge.conflicting_bytes,
             }
             .into());
@@ -341,7 +346,7 @@ impl Reassembler {
         if existing.is_none() {
             self.datagrams
                 .try_reserve(1)
-                .map_err(|_| ResourceError::AllocationFailed {
+                .map_err(|_| Resource::AllocationFailed {
                     requested: prospective_charge,
                 })?;
         }

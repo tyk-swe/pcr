@@ -6,28 +6,128 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::probe::ErrorKind;
-use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
-use crate::progress::Runtime;
+use super::Error;
+use crate::probe::test_support::{ProgressiveExecutor, private_policy};
+use crate::runtime::Runtime;
+use crate::test_support::decoded_packet;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
-    icmp::Icmpv4,
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Ipv4, Ipv6},
     transport::Tcp,
 };
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
-use super::classification::classify_response;
-use super::engine::{run, run_with_events};
-use super::probe::probe_packet;
-use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_ports};
-use crate::policy::PolicyAuthorizer;
-use crate::probe::{Execution, Executor, ProbeStatus, Transport};
+use super::engine;
+use super::error::Probes;
+use super::evidence::classify_response;
+use super::executor::{PipelineEvent, PipelineOptions, Pipelined};
+use super::plan::packet::probe_packet;
+use super::{
+    Aggregate, Classification, Collector, Event, Limits, PortSpec, Probe, Report, Request,
+    select_ports,
+};
+use crate::Sink;
+use crate::clock::Clock;
+use crate::execution::Admission;
+use crate::execution::{Errors as _, Executor, publisher};
+use crate::policy::Authorizer;
+use crate::probe::Batch;
+use crate::probe::{Evidence, ProbeStatus, Transport};
+use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::registry::Registry;
+
+/// Runs a serial fixture executor where the engine takes a pipeline-capable
+/// one; every fixture request keeps `max_in_flight` at one.
+struct Serial<'e, E>(&'e mut E);
+
+impl<E: Executor<Batch<Probe>>> Executor<Batch<Probe>> for Serial<'_, E> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
+        self.0.execute(batch)
+    }
+}
+
+impl<E: Executor<Batch<Probe>>> Pipelined for Serial<'_, E> {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+}
+
+/// Runs the engine as the client does under the request's duration limit,
+/// collecting every event into the aggregate.
+fn run<A, E, C>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+) -> Result<Aggregate, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+{
+    let collector = Collector::default();
+    let mut sink = collector.clone();
+    let report = engine::run(
+        request,
+        authorizer,
+        registry,
+        &mut Serial(executor),
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        |event, _| {
+            sink.publish(event)
+                .map_err(|source| Error::Output { source })
+        },
+    )?;
+    collector.finish(report)
+}
+
+/// Runs the engine as the client does, publishing each event to `sink` on a
+/// worker admitted by `runtime`.
+fn run_with_events<A, E, C, S>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    runtime: &Runtime,
+    sink: S,
+) -> Result<Report, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+    S: Sink<Event, Ack = ()>,
+{
+    let publish = publisher(
+        runtime,
+        sink,
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
+    )?;
+    engine::run(
+        request,
+        authorizer,
+        registry,
+        &mut Serial(executor),
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        publish,
+    )
+}
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
@@ -42,6 +142,8 @@ fn tcp_scan_request(target: Target) -> Request {
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         limits: Limits::default(),
+        route: crate::route::Options::default(),
+        collection: crate::exchange::Collection::default(),
     }
 }
 
@@ -52,8 +154,8 @@ struct TimeoutExecutor {
     invalid_udp_payload: bool,
 }
 
-impl Executor<Batch> for TimeoutExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for TimeoutExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
             batch
@@ -85,11 +187,11 @@ impl Executor<Batch> for TimeoutExecutor {
                     .unwrap()
                     .bytes = bytes::Bytes::from_static(b"changed");
             }
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -101,7 +203,7 @@ impl Executor<Batch> for TimeoutExecutor {
                 packets_completed: 1,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }
@@ -119,7 +221,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
     let mut executor = TimeoutExecutor::default();
     let error = run(
         &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
+        &mut Admission::new(&policy, &crate::target::SystemResolver),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -142,10 +244,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
         &mut NoopClock,
     )
     .unwrap_err();
-    assert!(
-        matches!(error.kind, ErrorKind::InvalidEvidence { .. }),
-        "{error:?}"
-    );
+    assert!(matches!(error, Error::InvalidEvidence { .. }), "{error:?}");
 
     let mut executor = TimeoutExecutor::default();
     let report = run(
@@ -168,8 +267,8 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
 
 struct LateResponseExecutor(TimeoutExecutor);
 
-impl Executor<Batch> for LateResponseExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for LateResponseExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
             tcp_packet(
@@ -253,7 +352,7 @@ fn scan_single_probe_attempts_rate_and_timeout_evidence_are_deterministic() {
             (2, vec![Some(83)]),
         ]
     );
-    assert_eq!(clock.delays, vec![Duration::from_millis(500); 7]);
+    assert_eq!(clock.delays(), vec![Duration::from_millis(500); 7]);
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
         endpoint.classification == Classification::Timeout
@@ -276,7 +375,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
         calls: Arc::clone(&executor_calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -308,7 +407,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     policy.allow_hostname_resolution = true;
     let mut request = tcp_scan_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
 
     let error = run(
         &request,
@@ -323,7 +422,11 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
         packetcraftr_core::error::Classified::classification(&error).code,
         "policy.public_destination"
     );
-    assert!(error.to_string().contains("8.8.8.8"));
+    assert_eq!(error.to_string(), "scan authorization failed");
+    assert!(
+        packetcraftr_core::error::Classified::causes(&error)[0].contains("8.8.8.8"),
+        "the denied address is the first cause"
+    );
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor_calls.load(Ordering::SeqCst), 0);
 }
@@ -359,8 +462,8 @@ fn scan_one_probe_budget_executes_and_rejects_excess_probes() {
     )
     .expect_err("two probes exceed the one-probe budget");
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidLimit {
+        error,
+        Error::InvalidLimit {
             field: "probes",
             value: 2,
             ..
@@ -394,8 +497,8 @@ fn scan_probe_limit_precedes_duration_planning() {
 
     assert!(
         matches!(
-            error.kind,
-            ErrorKind::InvalidLimit {
+            error,
+            Error::InvalidLimit {
                 field: "probes",
                 ..
             }
@@ -506,8 +609,8 @@ fn scan_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     .unwrap_err();
 
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message }
+        error,
+        Error::InvalidEvidence { sequence: 1, message }
             if message == "sent packet does not preserve the scan destination and probe identity"
     ));
 }
@@ -548,10 +651,7 @@ fn scan_events_precede_later_work_and_survive_a_later_failure() {
     )
     .expect_err("the second batch must fail");
 
-    assert!(matches!(
-        error.kind,
-        ErrorKind::Execution { sequence: 1, .. }
-    ));
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -597,7 +697,7 @@ fn scan_sink_failure_stops_batches_after_cleaning_up_the_current_session() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error.kind, ErrorKind::Output { .. }));
+    assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&error).code,
         "io.test_output"
@@ -694,8 +794,8 @@ fn port_selection_stops_at_the_first_distinct_port_over_the_limit() {
     )
     .expect_err("a third distinct port exceeds the bound");
 
-    match error.kind {
-        ErrorKind::InvalidLimit {
+    match error {
+        Error::InvalidLimit {
             field,
             value,
             reason,
@@ -724,17 +824,14 @@ fn a_validated_request_selects_its_declared_ports_once_each() {
     let error = request
         .selected_ports()
         .expect_err("two distinct ports exceed max_ports=1");
-    assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidLimit { field: "ports", .. }
-    ));
+    assert!(matches!(error, Error::InvalidLimit { field: "ports", .. }));
 }
 
 #[derive(Default)]
 struct TargetSetAuthorizer {
     calls: Vec<Target>,
 }
-impl crate::policy::Authorizer for TargetSetAuthorizer {
+impl crate::target::ResolveTarget for TargetSetAuthorizer {
     fn resolve_and_authorize(
         &mut self,
         target: &Target,
@@ -750,6 +847,9 @@ impl crate::policy::Authorizer for TargetSetAuthorizer {
             },
         })
     }
+}
+
+impl crate::policy::Authorizer for TargetSetAuthorizer {
     fn authorize_operation(
         &mut self,
         _operation: crate::policy::Operation<'_>,
@@ -856,8 +956,8 @@ struct EchoReplyExecutor {
     copies: usize,
 }
 
-impl Executor<Batch> for EchoReplyExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for EchoReplyExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -945,8 +1045,8 @@ struct EveryOtherEchoExecutor {
     inner: TimeoutExecutor,
 }
 
-impl Executor<Batch> for EveryOtherEchoExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         if batch.probes[0].sequence % 2 == 1 {
             return Ok(execution);
@@ -1045,8 +1145,8 @@ struct StaleEchoExecutor {
     inner: TimeoutExecutor,
 }
 
-impl Executor<Batch> for StaleEchoExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for StaleEchoExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -1101,4 +1201,45 @@ fn scan_replies_with_a_stale_identity_count_as_lost_not_received() {
     assert_eq!(report.rtt.received, 0);
     assert_eq!(report.rtt.lost, 2);
     assert_eq!(report.rtt.min, None);
+}
+
+/// An authorized resolution without an address of the requested family fails
+/// in the scan's own vocabulary.
+#[test]
+fn a_family_miss_is_reported_as_a_scan_error() {
+    use packetcraftr_core::error::Classified as _;
+
+    let error = crate::target::FamilyGate::new(Family::Ipv4, Error::family)
+        .require(&[])
+        .expect_err("an empty resolution fails the family gate");
+    assert!(matches!(error, Error::Family { family: "IPv4" }));
+    assert_eq!(
+        error.to_string(),
+        "resolved target has no IPv4 address selected for this scan"
+    );
+    assert_eq!(error.classification().code, "packet.target_address_family");
+}
+
+#[test]
+fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
+    use packetcraftr_core::error::Classified as _;
+    let report = Report {
+        planned_duration: Duration::ZERO,
+        target: "192.0.2.2".to_owned(),
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))],
+        counts: super::ClassificationCounts::default(),
+        stats: Stats::default(),
+        rtt: super::Rtt {
+            sent: 1,
+            lost: 1,
+            ..super::Rtt::default()
+        },
+    };
+
+    let error = Collector::default()
+        .finish(report)
+        .expect_err("one sent probe but no collected outcome");
+
+    assert!(matches!(error, Error::IncoherentEvents { .. }), "{error}");
+    assert_eq!(error.classification().code, "internal.scan_event_coherence");
 }

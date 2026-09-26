@@ -3,8 +3,6 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
-use packetcraftr_core::error::Kind;
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,12 +11,17 @@ use packetcraftr_core::analysis;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::registry::Registry;
 
-use analysis::{StreamRef, StreamTransport};
+use std::path::Path;
 
-use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
+use analysis::StreamRef;
+use packetcraftr_core::error::Kind;
+
+use super::application_output::EventOutput;
+use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::validate_capture_stream_limits;
+use crate::output::contract::ToolFormat;
 use crate::rendering::StreamEncoder;
 
 /// Validated, I/O-free analysis state.
@@ -42,6 +45,7 @@ impl AnalysisSetup {
             track_sources: false,
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
+            stream: None,
             time_bounds: self.time_bounds,
             tcp_events: false,
             ip_overlap: self.ip_overlap,
@@ -58,6 +62,7 @@ pub(super) fn prepare(
     decode: &DecodeArgs,
 ) -> Result<AnalysisSetup, CliError> {
     let capture = limits.capture;
+    let duration = limits.duration;
     let ip_overlap = limits.ip_overlap.into();
     let time_bounds = limits.epoch.resolve()?;
     validate_capture_stream_limits(capture)?;
@@ -72,19 +77,32 @@ pub(super) fn prepare(
         max_frame_bytes: capture.reader.max_frame_bytes,
         max_flows: limits.max_flows,
         max_scope_bytes: limits.max_scope_bytes,
-        max_tcp_bytes_per_flow: limits.max_tcp_bytes_per_flow,
-        max_tcp_reassembly_bytes: limits.max_tcp_reassembly_bytes,
-        max_tcp_segments_per_flow: limits.max_tcp_segments_per_flow,
-        tcp_idle_expiry: Duration::from_millis(limits.tcp_idle_expiry_ms),
-        max_ip_datagrams: limits.max_ip_datagrams,
-        max_ip_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
-        max_ip_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
-        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
-        max_ip_outcomes: limits.max_ip_outcomes,
-        ip_idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
-        max_duration: Duration::from_millis(limits.max_duration_ms),
+        // Each conversation occupies one TCP reassembly flow per direction.
+        tcp: analysis::reassembly::tcp::Limits {
+            max_flows: limits.max_flows.saturating_mul(2),
+            max_bytes_per_flow: limits.max_tcp_bytes_per_flow,
+            max_aggregate_bytes: limits.max_tcp_reassembly_bytes,
+            max_segments_per_flow: limits.max_tcp_segments_per_flow,
+            idle_expiry: Duration::from_millis(limits.tcp_idle_expiry_ms),
+        },
+        ip: analysis::reassembly::ip::Limits {
+            max_datagrams: limits.max_ip_datagrams,
+            max_fragments_per_datagram: limits.max_ip_fragments_per_datagram,
+            max_bytes_per_datagram: limits.max_ip_bytes_per_datagram,
+            max_aggregate_bytes: limits.max_ip_reassembly_bytes,
+            max_retained_outcomes: limits.max_ip_outcomes,
+            idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
+        },
+        max_duration: duration.max_duration(),
     };
     limits.validate().map_err(CliError::classified)?;
+    duration.within_ceiling(|value| {
+        CliError::classified(analysis::Error::InvalidLimit {
+            field: "max_duration",
+            value,
+            reason: analysis::Constraint::AtMostOneHour,
+        })
+    })?;
 
     Ok(AnalysisSetup {
         registry,
@@ -93,6 +111,54 @@ pub(super) fn prepare(
         ip_overlap,
         limits,
     })
+}
+
+/// What one application-layer inspection (`dns-read`, `http`) reads: the
+/// capture, its bounds and decoding, and the one conversation it may keep.
+pub(super) struct Inspection<'a> {
+    pub(super) path: &'a Path,
+    pub(super) limits: OfflineLimitsArgs,
+    pub(super) decode: &'a DecodeArgs,
+    pub(super) application: ApplicationLimitsArgs,
+    pub(super) selector: Option<StreamRef>,
+}
+
+/// Runs one collector over a capture file, publishing each event through
+/// `publish` under the shared `--max-application-output-bytes` budget, and
+/// fails when a selected conversation is absent.
+///
+/// The selector narrows the pass to its conversation; IP reassembly events
+/// reach the NDJSON stream only.
+pub(super) fn inspect<C: analysis::Collector>(
+    inspection: Inspection<'_>,
+    collector: C,
+    format: ToolFormat,
+    stream: &StreamEncoder,
+    mut publish: impl FnMut(&mut EventOutput<'_>, C::Event) -> Result<(), CliError>,
+) -> Result<analysis::Outcome<C>, CliError> {
+    let Inspection {
+        path,
+        limits,
+        decode,
+        application,
+        selector,
+    } = inspection;
+    let setup = prepare(limits, None, decode)?;
+    // The session narrows the plan and raises the TCP/source-tracking flags
+    // from the collector's declared needs.
+    let session =
+        analysis::Session::new(setup.registry.clone(), setup.options(), collector, selector);
+    let mut reader = crate::input::open_capture(path, limits.capture.reader)?;
+    let mut output = EventOutput::new(format, stream, application.max_application_output_bytes);
+    let outcome = session
+        .run(&mut reader, ip_event_sink(format, stream), |event| {
+            publish(&mut output, event).map_err(CliError::into_boundary_error)
+        })
+        .map_err(CliError::classified)?;
+    if outcome.selected_absent() {
+        return Err(CliError::new(Kind::Usage, "selected stream is not present"));
+    }
+    Ok(outcome)
 }
 
 /// Retains output items under a finite ceiling while counting omissions.
@@ -147,28 +213,6 @@ pub(super) fn omitted_diagnostic(
     )]
 }
 
-/// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
-///
-/// Parsing admits both transports so each command states its own
-/// restriction: `follow` follows either, while a TCP-only command rejects a
-/// `udp:` selector with a message that says so.
-pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
-    let invalid = || {
-        CliError::new(
-            Kind::Cli,
-            format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
-        )
-    };
-    let (transport, index) = spec.split_once(':').ok_or_else(invalid)?;
-    let transport = match transport {
-        "tcp" => StreamTransport::Tcp,
-        "udp" => StreamTransport::Udp,
-        _ => return Err(invalid()),
-    };
-    let index = index.parse::<u64>().map_err(|_| invalid())?;
-    Ok(StreamRef { transport, index })
-}
-
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream
 /// carries. The other formats fold the same information into their terminal
 /// `ip_reassembly` report, so a non-NDJSON `format` drops every event.
@@ -177,17 +221,13 @@ pub(super) fn ip_event_sink<F>(
     stream: &StreamEncoder,
 ) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
 where
-    F: Into<packetcraftr_cli::output::contract::Format>,
+    F: Into<crate::output::contract::Format>,
 {
-    let stream = (format.into() == packetcraftr_cli::output::contract::Format::Ndjson)
-        .then(|| stream.clone());
+    let stream = (format.into() == crate::output::contract::Format::Ndjson).then(|| stream.clone());
     move |event| {
         if let Some(stream) = &stream {
             stream
-                .emit_data(
-                    packetcraftr_cli::output::reassembly::Event::from(event),
-                    Vec::new(),
-                )
+                .emit_data(crate::output::reassembly::Event::from(event), Vec::new())
                 .map_err(|error| CliError::from(error).into_boundary_error())?;
         }
         Ok(())
@@ -195,21 +235,22 @@ where
 }
 
 pub(super) fn render_scope(scope: &analysis::scope::Definition) -> Result<(), CliError> {
+    let scope = crate::output::analysis::Scope::try_from(scope.clone())?;
     crate::rendering::write_stdout_line(format_args!(
-        "scope {}: interface {:?}, encapsulation {:?}",
-        scope.id.get(),
-        scope.interface,
-        scope.encapsulation
+        "scope {}: interface {}, encapsulation {}",
+        scope.id,
+        crate::rendering::optional_display(scope.interface),
+        crate::rendering::encapsulation_text(&scope.encapsulation)
     ))
 }
 
 pub(super) fn render_clock(clock: &analysis::ClockReport) -> Result<(), CliError> {
     crate::rendering::write_stdout_line(format_args!(
-        "capture clock: {} regressing frame(s), largest rollback {:?}, largest forward step {:?} at frame {:?}; expiry follows the high-water mark",
+        "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
         clock.regressions,
-        clock.max_regression,
-        clock.max_forward_step,
-        clock.max_forward_step_frame,
+        crate::rendering::duration_text(clock.max_regression),
+        crate::rendering::duration_text(clock.max_forward_step),
+        crate::rendering::optional_display(clock.max_forward_step_frame),
     ))
 }
 

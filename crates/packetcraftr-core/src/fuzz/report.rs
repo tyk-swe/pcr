@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -29,12 +30,19 @@ pub struct Mutation {
     pub value: FieldValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+/// Why one fuzz case was rejected, retained in the campaign report.
+///
+/// A failure built by [`CaseFailure::new`] carries a captured `causes`
+/// snapshot; one built by [`CaseFailure::with_source`] keeps the typed source
+/// and derives its causes from the source chain.
+#[derive(Clone, Debug, PartialEq, thiserror::Error)]
 #[error("{message}")]
 pub struct CaseFailure {
     message: String,
     classification: Classification,
     causes: Vec<String>,
+    #[source]
+    source: Option<crate::error::Source>,
 }
 
 impl CaseFailure {
@@ -47,6 +55,21 @@ impl CaseFailure {
             message: message.into(),
             classification,
             causes,
+            source: None,
+        }
+    }
+
+    /// A failure whose cause is the typed `source`.
+    pub fn with_source(
+        message: impl Into<String>,
+        classification: Classification,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            classification,
+            causes: Vec::new(),
+            source: Some(crate::error::Source::new(source)),
         }
     }
 }
@@ -57,7 +80,10 @@ impl Classified for CaseFailure {
     }
 
     fn causes(&self) -> Vec<String> {
-        self.causes.clone()
+        match &self.source {
+            Some(_) => crate::error::source_chain(self),
+            None => self.causes.clone(),
+        }
     }
 }
 

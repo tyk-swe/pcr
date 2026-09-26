@@ -6,15 +6,16 @@
 
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
-use packetcraftr::clock::SystemClock;
-use packetcraftr::policy::{Policy, PolicyAuthorizer};
+use packetcraftr::policy::Policy;
 use packetcraftr::probe::Transport;
 use packetcraftr::scan::{self, connect};
-use packetcraftr::target::{Family, Target};
+use packetcraftr::target::{Family, SystemResolver, Target};
+use packetcraftr::{Client, ProviderSet};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{MAX_PENDING_CONNECTIONS, Provider, Stream};
+use packetcraftr_netio::{capture, interface, route, transmit};
 
 struct Socket;
 
@@ -54,9 +55,14 @@ struct Silent;
 
 impl Provider for Silent {
     type Stream = Socket;
-    fn connect(&self, _: SocketAddr, timeout: Duration) -> io::Result<Socket> {
+    fn connect(
+        &self,
+        _: SocketAddr,
+        deadline: &Deadline,
+    ) -> Result<Socket, packetcraftr_netio::tcp::Error> {
+        let timeout = deadline.remaining().unwrap_or_default();
         std::thread::sleep(timeout + Duration::from_millis(30));
-        Err(io::Error::from(io::ErrorKind::TimedOut))
+        Err(io::Error::from(io::ErrorKind::TimedOut).into())
     }
 }
 
@@ -77,16 +83,28 @@ fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
         probes_per_second: None,
         max_in_flight: MAX_PENDING_CONNECTIONS,
         limits: scan::Limits::default(),
+        route: Default::default(),
+        collection: Default::default(),
     };
-    let policy = Policy::default();
-    let report = connect::run(
-        &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
-        Arc::new(Silent),
-        &mut SystemClock,
-    )
-    .expect("capacity held by cancelled attempts is waited for");
-    let probes = report
+    // Connect scans reach only the TCP provider.
+    let client = Client::new(
+        packetcraftr_core::protocol::builtin::registry(),
+        Policy::default(),
+        ProviderSet {
+            route: route::SystemProvider,
+            interface: interface::SystemProvider,
+            capture: capture::SystemProvider,
+            transmit: transmit::SystemProvider,
+            tcp: Silent,
+            resolver: SystemResolver,
+        },
+    );
+    let collector = connect::Collector::default();
+    let report = client
+        .scan_connect(request, collector.clone())
+        .expect("capacity held by cancelled attempts is waited for");
+    let aggregate = collector.finish(report).unwrap();
+    let probes = aggregate
         .endpoints
         .iter()
         .flat_map(|endpoint| &endpoint.probes)

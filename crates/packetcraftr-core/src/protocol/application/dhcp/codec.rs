@@ -1,97 +1,142 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
-use super::{Dhcpv4, Dhcpv6, Limits, v4, v6};
-use crate::{
-    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
-    field::FieldValue,
-    layer::{Layer, Raw, raw_layout},
-    protocol::common::{invalid, typed_layer},
-};
-use bytes::Bytes;
+
+//! Wire helpers and layer-codec steps that the DHCPv4 and DHCPv6 codecs share.
+
 use std::collections::BTreeMap;
-macro_rules! codec {
-    ($codec:ident,$ty:ident,$module:ident,$name:literal) => {
-        #[derive(Clone, Copy, Debug, Default)]
-        pub(crate) struct $codec;
-        impl LayerCodec for $codec {
-            fn protocol_id(&self) -> &'static crate::layer::Id {
-                &$module::schema().protocol
-            }
-            fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
-                Some($module::schema())
-            }
-            fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
-                matches!(protocol.as_str(), $name | "raw")
-            }
-            fn encode(
-                &self,
-                layer: &dyn Layer,
-                payload: &[u8],
-                context: &LayerEncodeContext<'_>,
-            ) -> Result<EncodedLayer, crate::codec::Error> {
-                if !payload.is_empty() {
-                    return Err(invalid($name, "DHCP is a complete UDP payload"));
-                }
-                let layer = typed_layer::<$ty>($name, layer)?;
-                let wire = layer
-                    .to_wire_with_limits(Limits {
-                        max_message_bytes: context.remaining_packet_bytes,
-                        ..Default::default()
-                    })
-                    .map_err(|error| invalid($name, error.to_string()))?;
-                let normalized = $ty::try_from(wire.clone())
-                    .map_err(|error| invalid($name, error.to_string()))?;
-                Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized))
-                    .with_fields($module::layout()))
-            }
-            fn decode(
-                &self,
-                input: Bytes,
-                _context: &LayerDecodeContext<'_>,
-            ) -> Result<DecodedLayer, crate::codec::Error> {
-                if ($name == "dhcpv4" && input.get(236..240) != Some(b"\x63\x82\x53\x63"))
-                    || ($name == "dhcpv6" && input.len() < 4)
-                {
-                    let mut raw =
-                        DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-                    raw.fields = raw_layout(input.len());
-                    return Ok(raw);
-                }
-                let layer = $ty::try_from(input.clone())
-                    .map_err(|error| invalid($name, error.to_string()))?;
-                let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
-                decoded.fields = $module::layout();
-                Ok(decoded)
-            }
-            fn make_layer(
-                &self,
-                fields: &BTreeMap<String, FieldValue>,
-            ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-                let mut layer = match fields.get("wire") {
-                    Some(FieldValue::Bytes(wire)) => $ty::try_from(wire.clone())
-                        .map_err(|error| invalid($name, error.to_string()))?,
-                    Some(_) => return Err(invalid($name, "wire must be retained bytes")),
-                    None => $ty::default(),
-                };
-                for (name, value) in fields {
-                    if name == "wire" || layer.field(name).as_ref() == Some(value) {
-                        continue;
-                    }
-                    layer.set_field_path(name, value.clone())?;
-                }
-                if fields.contains_key("options")
-                    && let Some(message_type) = fields.get("message_type")
-                    && layer.field("message_type").as_ref() != Some(message_type)
-                {
-                    return Err(invalid(
-                        $name,
-                        "message_type conflicts with supplied options",
-                    ));
-                }
-                Ok(Box::new(layer))
-            }
-        }
-    };
+
+use bytes::Bytes;
+
+use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
+use crate::{
+    codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
+    field::FieldValue,
+    layer::{Layer, Raw},
+    layout::FieldLayout,
+    protocol::common::{invalid, rejected, typed_layer},
+};
+
+/// A complete DHCP message that fills its UDP payload and retains its wire.
+pub(super) trait Message: Layer + Default + Sized + 'static {
+    const NAME: &'static str;
+
+    fn decode_wire(wire: Bytes) -> Result<Self, Error>;
+
+    fn encode_wire(&self, limits: Limits) -> Result<Bytes, Error>;
+
+    fn layout() -> Vec<FieldLayout>;
 }
-codec!(Dhcpv4Codec, Dhcpv4, v4, "dhcpv4");
-codec!(Dhcpv6Codec, Dhcpv6, v6, "dhcpv6");
+
+pub(super) fn encode<M: Message>(
+    layer: &dyn Layer,
+    payload: &[u8],
+    context: &LayerEncodeContext<'_>,
+) -> Result<EncodedLayer, crate::codec::Error> {
+    if !payload.is_empty() {
+        return Err(invalid(M::NAME, "DHCP is a complete UDP payload"));
+    }
+    let layer = typed_layer::<M>(M::NAME, layer)?;
+    let wire = layer
+        .encode_wire(Limits {
+            // The packet may have room for more than one DHCP message can use.
+            max_message_bytes: context.remaining_packet_bytes.min(MAX_MESSAGE_BYTES),
+            ..Default::default()
+        })
+        .map_err(|error| rejected(M::NAME, error))?;
+    let normalized = M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?;
+    Ok(EncodedLayer::header(wire.to_vec(), Box::new(normalized)).with_fields(M::layout()))
+}
+
+/// Keeps a payload that cannot be this message as raw bytes.
+pub(super) fn raw(input: Bytes) -> DecodedLayer {
+    let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
+    raw.fields = Raw::layout(input.len());
+    raw
+}
+
+pub(super) fn decode<M: Message>(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
+    let layer = M::decode_wire(input.clone()).map_err(|error| rejected(M::NAME, error))?;
+    let mut decoded = DecodedLayer::terminal(Box::new(layer), input.len());
+    decoded.fields = M::layout();
+    Ok(decoded)
+}
+
+pub(super) fn make_layer<M: Message>(
+    fields: &BTreeMap<String, FieldValue>,
+) -> Result<Box<dyn Layer>, crate::codec::Error> {
+    let mut layer = match fields.get("wire") {
+        Some(FieldValue::Bytes(wire)) => {
+            M::decode_wire(wire.clone()).map_err(|error| rejected(M::NAME, error))?
+        }
+        Some(_) => return Err(invalid(M::NAME, "wire must be retained bytes")),
+        None => M::default(),
+    };
+    for (name, value) in fields {
+        if name == "wire" || layer.field(name).as_ref() == Some(value) {
+            continue;
+        }
+        crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
+    }
+    if fields.contains_key("options")
+        && let Some(message_type) = fields.get("message_type")
+        && layer.field("message_type").as_ref() != Some(message_type)
+    {
+        return Err(invalid(
+            M::NAME,
+            "message_type conflicts with supplied options",
+        ));
+    }
+    Ok(Box::new(layer))
+}
+
+pub(super) struct Budget {
+    pub(super) limits: Limits,
+    options: usize,
+}
+impl Budget {
+    /// A budget for one message of `length` bytes, after
+    /// [`Limits::validate`] accepts `limits`.
+    pub(super) fn new(limits: Limits, length: usize) -> Result<Self, Error> {
+        limits.validate()?;
+        if length > limits.max_message_bytes {
+            return Err(Error::Limit(Limit::MessageBytes));
+        }
+        Ok(Self { limits, options: 0 })
+    }
+    pub(super) fn option(&mut self, depth: usize) -> Result<(), Error> {
+        if depth > self.limits.max_nesting {
+            return Err(Error::Limit(Limit::OptionNesting));
+        }
+        if self.options >= self.limits.max_options {
+            return Err(Error::Limit(Limit::OptionCount));
+        }
+        self.options += 1;
+        Ok(())
+    }
+}
+pub(super) fn take(bytes: &[u8], offset: usize, length: usize) -> Result<&[u8], Error> {
+    bytes
+        .get(offset..offset.saturating_add(length))
+        .ok_or(Error::Truncated {
+            offset,
+            needed: length,
+            available: bytes.len().saturating_sub(offset),
+        })
+}
+pub(super) fn u16_at(bytes: &[u8], offset: usize) -> Result<u16, Error> {
+    Ok(u16::from_be_bytes(
+        take(bytes, offset, 2)?.try_into().expect("two bytes"),
+    ))
+}
+pub(super) fn u32_at(bytes: &[u8], offset: usize) -> Result<u32, Error> {
+    Ok(u32::from_be_bytes(
+        take(bytes, offset, 4)?.try_into().expect("four bytes"),
+    ))
+}
+pub(super) fn extend(output: &mut Vec<u8>, bytes: &[u8], maximum: usize) -> Result<(), Error> {
+    if output.len().saturating_add(bytes.len()) > maximum {
+        return Err(Error::Limit(Limit::EncodedBytes));
+    }
+    output.extend_from_slice(bytes);
+    Ok(())
+}

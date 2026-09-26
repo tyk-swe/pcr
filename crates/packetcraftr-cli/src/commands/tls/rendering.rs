@@ -3,17 +3,18 @@
 
 use std::fmt::Write as _;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, comma_separated, emit_aggregate, optional_display, write_stdout_line,
+    StreamEncoder, comma_separated, duration_text, emit_aggregate, encapsulation_text,
+    optional_display, write_stdout_line,
 };
 
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
@@ -37,11 +38,10 @@ impl State {
         }
     }
 
-    pub(super) const fn counts(&self) -> output::tls::SelectionCounts {
-        output::tls::SelectionCounts {
-            selected: self.selected,
-            omitted: self.retained.omitted(),
-        }
+    /// The sessions the selectors kept, and those the retention ceiling
+    /// omitted from the document.
+    pub(super) const fn counts(&self) -> (u64, u64) {
+        (self.selected, self.retained.omitted())
     }
 
     fn select(&mut self) {
@@ -56,18 +56,14 @@ pub(super) fn render_session(
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     state.select();
+    let session = Session::try_from(session).map_err(CliError::classified)?;
     match format {
-        ToolFormat::Text => {
-            write_stdout_line(format_args!("{}", session_line(&Session::from(session))))
-        }
+        ToolFormat::Text => write_stdout_line(format_args!("{}", session_line(&session))),
         ToolFormat::Json => {
-            state.retained.push(|| Session::from(session));
+            state.retained.push(|| session);
             Ok(())
         }
-        ToolFormat::Ndjson => Ok(stream.emit_data(
-            output::tls::Event::session(Session::from(session)),
-            Vec::new(),
-        )?),
+        ToolFormat::Ndjson => Ok(stream.emit_data(output::tls::Event::from(session), Vec::new())?),
     }
 }
 
@@ -83,27 +79,24 @@ pub(super) fn render_text(
         }
     }
     write_stdout_line(format_args!(
-        "{} clock_regressions={} max_rollback={:?} max_forward_step={:?}",
+        "{} clock_regressions={} max_rollback={} max_forward_step={}",
         summary_line(summary),
         summary.clock.regressions,
-        summary.clock.max_regression,
-        summary.clock.max_forward_step
+        duration_text(summary.clock.max_regression),
+        duration_text(summary.clock.max_forward_step)
     ))
 }
 
 pub(super) fn render_aggregate(state: State, summary: Summary) -> Result<(), CliError> {
     emit_aggregate(
         output::contract::Command::Tls,
-        output::tls::Report {
-            sessions: state.retained.into_items(),
-            summary,
-        },
+        output::tls::Report::from((state.retained.into_items(), summary)),
         Vec::new(),
     )
 }
 
 pub(super) fn render_stream(summary: Summary, stream: &StreamEncoder) -> Result<(), CliError> {
-    Ok(stream.complete(output::tls::Event::complete(summary), Vec::new())?)
+    Ok(stream.complete(output::tls::Event::from(summary), Vec::new())?)
 }
 
 /// The single line for selectors that kept none of the sessions that were
@@ -178,10 +171,10 @@ fn session_line(session: &Session) -> String {
     );
     let _ = write!(
         line,
-        " scope={} interface={:?} encapsulation={:?}",
-        session.scope.id.get(),
-        session.scope.interface,
-        session.scope.encapsulation
+        " scope={} interface={} encapsulation={}",
+        session.scope.id,
+        optional_display(session.scope.interface),
+        encapsulation_text(&session.scope.encapsulation)
     );
     if session.hello_retry {
         line.push_str(" hello_retry=true");
@@ -273,12 +266,12 @@ fn alert_text(alert: &output::tls::Alert) -> String {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use packetcraftr_core::analysis::tls::Status;
+    use crate::output::tls::Status;
 
     use super::*;
 
-    fn endpoint(last: u8, port: u16) -> packetcraftr_core::analysis::Endpoint {
-        packetcraftr_core::analysis::Endpoint {
+    fn endpoint(last: u8, port: u16) -> output::analysis::Endpoint {
+        output::analysis::Endpoint {
             address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
             port,
         }
@@ -288,7 +281,7 @@ mod tests {
         let mut scopes = packetcraftr_core::analysis::scope::Interner::new();
         let id = scopes.intern(None, Vec::new()).unwrap();
         Session {
-            scope: scopes.definition(id).unwrap().clone(),
+            scope: scopes.definition(id).unwrap().try_into().unwrap(),
             session: 0,
             tcp_stream: 3,
             client_endpoint: endpoint(1, 40_000),

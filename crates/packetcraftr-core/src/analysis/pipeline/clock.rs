@@ -138,11 +138,7 @@ mod tests {
         assert!(!clock.should_sweep(first));
         assert!(clock.should_sweep(first + SWEEP_GRANULARITY * 2));
     }
-}
 
-#[cfg(test)]
-mod anomaly_tests {
-    use super::*;
     #[test]
     fn forward_outlier_pins_expiry_and_reports_subsequent_rollbacks() {
         let mut clock = CaptureClock::new();

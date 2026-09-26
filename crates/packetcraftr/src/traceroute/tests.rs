@@ -6,31 +6,107 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::probe::ErrorKind;
-use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
-use crate::progress::Runtime;
+use super::Error;
+use crate::probe::test_support::{ProgressiveExecutor, private_policy};
+use crate::runtime::Runtime;
+use crate::test_support::decoded_packet;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::Udp,
 };
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::DEFAULT_UDP_PORT;
-use super::classification::classify_response;
-use super::engine::{run, run_with_events};
-use super::probe::probe_packet;
-use super::{Batch, Completion, Event, Limits, Probe, Request, ResponseKind};
+use super::engine;
+use super::error::Probes;
+use super::evidence::classify_response;
+use super::plan::packet::probe_packet;
+use super::{
+    Aggregate, Collector, Event, Limits, Probe, Report, Request, ResponseKind, Termination,
+};
+use crate::Sink;
+use crate::clock::Clock;
+use crate::execution::Admission;
+use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
-use crate::policy::PolicyAuthorizer;
-use crate::probe::{Execution, Executor, ProbeEndpoint, ProbeStatus, Transport};
+use crate::probe::Batch;
+use crate::probe::{Evidence, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
+use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::registry::Registry;
+
+/// Runs the engine as the client does under the request's duration limit,
+/// collecting every event into the aggregate.
+fn run<A, E, C>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+) -> Result<Aggregate, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+{
+    let collector = Collector::default();
+    let mut sink = collector.clone();
+    let report = engine::run(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        |event, _| {
+            sink.publish(event)
+                .map_err(|source| Error::Output { source })
+        },
+    )?;
+    collector.finish(report)
+}
+
+/// Runs the engine as the client does, publishing each event to `sink` on a
+/// worker admitted by `runtime`.
+fn run_with_events<A, E, C, S>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    runtime: &Runtime,
+    sink: S,
+) -> Result<Report, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+    S: Sink<Event, Ack = ()>,
+{
+    let publish = publisher(
+        runtime,
+        sink,
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
+    )?;
+    engine::run(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        publish,
+    )
+}
 
 fn udp_traceroute_request(target: Target) -> Request {
     Request {
@@ -45,6 +121,8 @@ fn udp_traceroute_request(target: Target) -> Request {
         timeout: Duration::from_millis(10),
         probes_per_second: None,
         limits: Limits::default(),
+        route: crate::route::Options::default(),
+        collection: crate::exchange::Collection::default(),
     }
 }
 
@@ -53,22 +131,24 @@ struct FixedAuthorizer {
     operations: Vec<(u64, u64)>,
 }
 
-impl Authorizer for FixedAuthorizer {
+impl crate::target::ResolveTarget for FixedAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for FixedAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         assert!(
-            matches!(operation, Operation::Budgeted(_)),
-            "target workflows submit budget-only requests, got {operation:?}"
+            matches!(operation, Operation::Wire(_)),
+            "target workflows submit limits-only requests, got {operation:?}"
         );
-        let budget = operation.budget();
+        let limits = operation.limits();
         self.operations
-            .push((budget.packets(), budget.wire_bytes()));
+            .push((limits.packets(), limits.wire_bytes()));
         Ok(())
     }
 }
@@ -78,8 +158,8 @@ struct NoResponseExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl Executor<Batch> for NoResponseExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for NoResponseExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
         for probe in &batch.probes {
@@ -87,7 +167,7 @@ impl Executor<Batch> for NoResponseExecutor {
             if let Some(ipv4) = packet.get_mut::<Ipv4>() {
                 ipv4.source = Ipv4Addr::new(10, 0, 0, 1);
             }
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
@@ -95,7 +175,7 @@ impl Executor<Batch> for NoResponseExecutor {
             sent[index] = sent[0].clone();
         }
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -107,7 +187,7 @@ impl Executor<Batch> for NoResponseExecutor {
                 packets_completed: count,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }
@@ -115,8 +195,8 @@ impl Executor<Batch> for NoResponseExecutor {
 
 struct MixedHopExecutor;
 
-impl Executor<Batch> for MixedHopExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for MixedHopExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -125,7 +205,7 @@ impl Executor<Batch> for MixedHopExecutor {
         for probe in &batch.probes {
             let mut packet = probe_packet(probe);
             packet.get_mut::<Ipv4>().expect("IPv4 probe").source = local;
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
@@ -151,7 +231,7 @@ impl Executor<Batch> for MixedHopExecutor {
             )
         };
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -167,7 +247,7 @@ impl Executor<Batch> for MixedHopExecutor {
                 packets_completed: count,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }
@@ -298,7 +378,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
         calls: Arc::clone(&calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -316,7 +396,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     policy.allow_hostname_resolution = true;
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &request,
         &mut authorizer,
@@ -352,7 +432,7 @@ fn traceroute_udp_port_overflow_precedes_duration_limit() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidPort { .. }));
+    assert!(matches!(error, Error::InvalidPort { .. }));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -378,7 +458,7 @@ fn traceroute_zero_source_port_is_rejected_before_authorization_or_execution() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(matches!(error, Error::InvalidSourcePort));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -406,7 +486,7 @@ fn traceroute_icmp_source_port_is_rejected_before_authorization_or_execution() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(matches!(error, Error::InvalidSourcePort));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -423,7 +503,7 @@ fn traceroute_configured_source_port_threads_into_planned_probes() {
         assert_eq!(probe.source_port, 53_333);
         let packet = probe.packet();
         assert_eq!(packet.get::<Udp>().expect("UDP probe").source_port, 53_333);
-        assert!(super::probe::sent_probe_matches(probe, &packet));
+        assert!(super::plan::packet::sent_probe_matches(probe, &packet));
     }
 
     request.source_port = None;
@@ -537,7 +617,7 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     )
     .unwrap();
 
-    assert_eq!(result.completion, Completion::DestinationReached);
+    assert_eq!(result.termination, Termination::DestinationReached);
     assert_eq!(result.hops.len(), 2);
     assert_eq!(result.hops[0].probes.len(), 2);
     assert_eq!(result.hops[1].probes.len(), 2);
@@ -573,8 +653,8 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     .unwrap_err();
 
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message }
+        error,
+        Error::InvalidEvidence { sequence: 1, message }
             if message
                 == "sent packet does not preserve the traceroute destination and probe identity"
     ));
@@ -617,10 +697,7 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
     )
     .expect_err("the second hop must fail");
 
-    assert!(matches!(
-        error.kind,
-        ErrorKind::Execution { sequence: 1, .. }
-    ));
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -667,8 +744,53 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error.kind, ErrorKind::Output { .. }));
+    assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(error.classification().code, "io.test_output");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+/// An authorized resolution without an address of the requested family fails
+/// in the traceroute's own vocabulary.
+#[test]
+fn a_family_miss_is_reported_as_a_traceroute_error() {
+    use packetcraftr_core::error::Classified as _;
+
+    let error = crate::target::FamilyGate::new(Family::Ipv4, Error::family)
+        .require(&[])
+        .expect_err("an empty resolution fails the family gate");
+    assert!(matches!(error, Error::Family { family: "IPv4" }));
+    assert_eq!(
+        error.to_string(),
+        "resolved target has no IPv4 address selected for this traceroute"
+    );
+    assert_eq!(error.classification().code, "packet.target_address_family");
+}
+
+#[test]
+fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
+    let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+    let report = Report {
+        target: "192.0.2.2".to_owned(),
+        resolved_addresses: vec![destination],
+        destination,
+        strategy: Transport::Udp,
+        destination_port: Some(DEFAULT_UDP_PORT),
+        termination: Termination::Timeout,
+        stats: Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            ..Stats::default()
+        },
+    };
+
+    let error = Collector::default()
+        .finish(report)
+        .expect_err("one attempted probe but no collected outcome");
+
+    assert!(matches!(error, Error::IncoherentEvents { .. }), "{error}");
+    assert_eq!(
+        error.classification().code,
+        "internal.traceroute_event_coherence"
+    );
 }

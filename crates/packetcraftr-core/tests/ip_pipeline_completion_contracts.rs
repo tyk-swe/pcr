@@ -18,12 +18,12 @@ use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Padding, Raw};
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::gre::Gre;
-use packetcraftr_core::protocol::ipv6::{DestinationOptions, Fragment as Ipv6Fragment};
 use packetcraftr_core::protocol::link::Ethernet;
-use packetcraftr_core::protocol::network::{Ipv4, Ipv6};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, Fragment as Ipv6Fragment, Ipv4, Ipv6,
+};
 use packetcraftr_core::protocol::transport::{Tcp, Udp};
-use packetcraftr_core::protocol::tunnel::{Ah, Vxlan};
+use packetcraftr_core::protocol::tunnel::{Ah, Gre, Vxlan};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

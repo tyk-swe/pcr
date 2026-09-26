@@ -3,10 +3,10 @@
 
 use std::net::IpAddr;
 
+use crate::route::Plan;
 use packetcraftr_core::{
-    packet::Packet, packet::link::MacAddress, packet::semantics, protocol::link::Ethernet,
+    packet::MacAddress, packet::Packet, protocol::link::Ethernet, protocol::semantics,
 };
-use packetcraftr_netio::route::Plan;
 
 use super::model::{Error, MAX_DESTINATION_CONSTRAINTS, MAX_RESOLVED_ADDRESSES, Policy};
 use crate::address::is_public;
@@ -60,10 +60,9 @@ impl Policy {
         Ok(())
     }
 
-    /// Applies the operation-wide packet and exact wire-byte budgets together.
+    /// Applies the operation-wide packet and exact wire-byte limits together.
     /// Callers provide prospective totals before starting live side effects.
-    ///
-    pub(super) fn authorize_wire_budget(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
+    pub(super) fn authorize_wire_limits(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
         if packets > self.max_packets_per_operation {
             return Err(Error::PacketLimit {
                 actual: packets,
@@ -81,7 +80,7 @@ impl Policy {
 
     /// Applies the shared policy ceilings to DNS's explicit aggregate of raw
     /// packets and bounded socket connection/message traffic units.
-    pub(super) fn authorize_traffic_budget(
+    pub(super) fn authorize_traffic_limits(
         &self,
         traffic_units: u64,
         wire_and_application_bytes: u64,
@@ -115,7 +114,7 @@ impl Policy {
     pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), Error> {
         let destinations = semantics::live_destinations(packet).map_err(|source| {
             Error::InvalidPacketSemantics {
-                reason: source.to_string(),
+                reason: "its live destinations cannot be read".to_owned(),
                 source: Some(source),
             }
         })?;
@@ -134,7 +133,7 @@ impl Policy {
         let decision = &plan.decision;
         let packet_source = semantics::outer_ip_path(packet)
             .map_err(|source| Error::InvalidPacketSemantics {
-                reason: source.to_string(),
+                reason: "its outer IP source cannot be read".to_owned(),
                 source: Some(source),
             })?
             .map(|path| path.source)
@@ -146,7 +145,7 @@ impl Policy {
                 }
             });
         let source_mac = semantics::outer_layers(packet)
-            .find_map(|layer| layer.as_any().downcast_ref::<Ethernet>())
+            .find_map(|layer| layer.downcast_ref::<Ethernet>())
             .map(|ethernet| MacAddress(ethernet.source))
             .map_or(plan.source_mac, |source| {
                 if source.0 == [0; 6] {
@@ -211,18 +210,6 @@ impl Policy {
             }
         };
         self.authorize_selected(target, addresses)
-    }
-
-    /// Authorizes a target that names its address outright, without a
-    /// resolver. The destination stage is exactly the one
-    /// [`Policy::resolve_target`] applies to a resolved answer.
-    pub(crate) fn authorize_numeric_target(
-        &self,
-        target: &Target,
-        address: IpAddr,
-    ) -> Result<Authorized, TargetError> {
-        self.validate()?;
-        self.authorize_selected(target, vec![address])
     }
 
     fn authorize_selected(

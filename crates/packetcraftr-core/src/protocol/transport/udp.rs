@@ -12,13 +12,12 @@ use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Layer, Malformed, Padding, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
 };
 
 use super::ports::child_discriminators;
-use crate::protocol::application::dns;
 use crate::protocol::common::{
     ValueExpectation, invalid, make_layer, payload_without_padding, protocol, resolve_u16,
     strict_or_diagnostic, transport_checksum, transport_checksum_parts, truncated, typed_layer,
@@ -29,6 +28,8 @@ const NAME: &str = BuiltinProtocol::Udp.as_str();
 
 const UDP_LEN: usize = 8;
 const DNS_PORT: u16 = 53;
+/// The fixed DNS message header (RFC 1035 section 4.1.1).
+const DNS_HEADER_LEN: usize = 12;
 const DNS_RESPONSE_FLAG: u16 = 0x8000;
 const DNS_RESERVED_Z_FLAG: u16 = 0x0040;
 
@@ -45,7 +46,7 @@ fn preferred_ports(source_port: u16, destination_port: u16, payload: &[u8]) -> [
 }
 
 fn dns_response_prefers_source_port(source_port: u16, payload: &[u8]) -> bool {
-    if source_port != DNS_PORT || payload.len() < dns::HEADER_LEN {
+    if source_port != DNS_PORT || payload.len() < DNS_HEADER_LEN {
         return false;
     }
     let Some(flags) = payload
@@ -252,10 +253,7 @@ fn validate_child_selection(
     let Some(child) = context.child else {
         return Ok(diagnostics);
     };
-    if matches!(
-        BuiltinProtocol::from_id(*child.protocol_id()),
-        Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-    ) {
+    if child.is::<Padding>() || child.is::<Malformed>() {
         return Ok(diagnostics);
     }
     let Some((selecting_port, selected)) = child_discriminators(preferred_ports(

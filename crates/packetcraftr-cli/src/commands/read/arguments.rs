@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{DecodeArgs, EpochBoundsArgs, OfflineCaptureLimitsArgs};
+use crate::command_options::{
+    CaptureStdout, CompressionArgs, DecodeArgs, EpochBoundsArgs, OfflineCaptureLimitsArgs,
+};
 
 pub(crate) const AFTER_LONG_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
@@ -53,9 +55,8 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 16 * 1024 * 1024)]
     pub(crate) max_projection_bytes: usize,
 
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<CaptureStdout>,
 
     /// Classic PCAP or PCAPNG input path; - reads redirected stdin.
     pub(crate) path: PathBuf,

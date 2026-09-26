@@ -4,27 +4,27 @@
 //! The single owner of state after an exchange capture has been armed.
 
 use std::sync::Arc;
-use std::time::Instant;
 
-use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::{decode::Dissector, registry::Registry};
 use packetcraftr_netio::{
     Error as LiveIoError,
-    capture::{OverflowPolicy, Session, Statistics},
-    transmit::Sender as PacketIo,
+    capture::{self, OverflowPolicy, Session},
+    transmit,
 };
 
 use super::CaptureGuard;
 use super::capture::DrainPolicy;
-use super::{Accumulator, Event, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate};
+use super::{
+    Accumulator, Collection, Error, Event, ProcessOutcome, Report, Window, WorkflowResponseMatcher,
+    WorkflowStopPredicate,
+};
 
-use crate::planning::expired;
+use crate::Stats;
 use crate::preparation::PreparedPacket;
-use crate::{Error, Stats};
 
 pub(super) enum OperationError {
     Io(LiveIoError),
-    Output(crate::BoundaryError),
+    Output(packetcraftr_core::error::BoundaryError),
 }
 
 impl From<LiveIoError> for OperationError {
@@ -34,14 +34,14 @@ impl From<LiveIoError> for OperationError {
 }
 
 impl OperationError {
-    pub(super) fn output(error: crate::BoundaryError) -> Self {
+    pub(super) fn output(error: packetcraftr_core::error::BoundaryError) -> Self {
         Self::Output(error)
     }
 
     pub(super) fn into_error(self) -> Error {
         match self {
-            Self::Io(error) => Error::Io(error),
-            Self::Output(source) => Error::ExchangeOutput {
+            Self::Io(error) => error.into(),
+            Self::Output(source) => Error::Output {
                 source: Box::new(source),
             },
         }
@@ -52,13 +52,12 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) registry: Arc<Registry>,
     pub(super) capture: CaptureGuard<C>,
     pub(super) cancellation: Option<packetcraftr_core::budget::Cancellation>,
-    pub(super) started: Instant,
-    pub(super) deadline: Instant,
-    pub(super) options: super::Options,
+    pub(super) window: Window,
+    pub(super) collection: Collection,
     pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
-    pub(super) sent: Vec<Arc<crate::SentPacket>>,
+    pub(super) sent: Vec<Arc<crate::evidence::SentPacket>>,
     pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
     pub(super) captured: Accumulator,
@@ -73,9 +72,8 @@ impl<C: Session> Transaction<C> {
             registry,
             capture: CaptureGuard::new(capture),
             cancellation: prepared.cancellation,
-            started: prepared.started,
-            deadline: prepared.deadline,
-            options: prepared.options,
+            window: prepared.window,
+            collection: prepared.collection,
             prepared: prepared.packets,
             packet_count: prepared.packet_count,
             total_bytes: prepared.total_bytes,
@@ -86,18 +84,18 @@ impl<C: Session> Transaction<C> {
         }
     }
 
-    pub(crate) fn execute<I, F>(
+    pub(crate) fn execute<T, F>(
         mut self,
-        io: &I,
+        transmit: &T,
         mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
         mut stop_predicate: Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
-    ) -> Result<super::Summary, Error>
+    ) -> Result<Report, Error>
     where
-        I: PacketIo,
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        T: transmit::Provider + ?Sized,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        let operation = self.run(io, &mut workflow_matcher, &mut stop_predicate, emit);
+        let operation = self.run(transmit, &mut workflow_matcher, &mut stop_predicate, emit);
         if let Err(operation) = operation {
             return Err(self.fail_after_shutdown(operation));
         }
@@ -106,19 +104,19 @@ impl<C: Session> Transaction<C> {
         self.finalize_exchange(emit)
     }
 
-    fn run<I, F>(
+    fn run<T, F>(
         &mut self,
-        io: &I,
+        transmit: &T,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: &mut Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
     ) -> Result<(), OperationError>
     where
-        I: PacketIo,
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        T: transmit::Provider + ?Sized,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         self.await_capture_readiness()?;
-        if self.send_requests(io, workflow_matcher, stop_predicate, emit)?
+        if self.send_requests(transmit, workflow_matcher, stop_predicate, emit)?
             == ProcessOutcome::StopCapture
         {
             return Ok(());
@@ -127,29 +125,30 @@ impl<C: Session> Transaction<C> {
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
-        let readiness_timeout =
-            remaining_before(self.deadline).ok_or(LiveIoError::DeadlineExceeded {
+        if self.window.expired() {
+            return Err(LiveIoError::DeadlineExceeded {
                 operation: "waiting for capture readiness",
-            })?;
-        self.capture.inner.wait_ready(readiness_timeout)
+            });
+        }
+        self.capture.inner.wait_ready(self.window.deadline())
     }
 }
 
 impl<C: Session> Transaction<C> {
-    pub(super) fn send_requests<I, F>(
+    pub(super) fn send_requests<T, F>(
         &mut self,
-        io: &I,
+        transmit: &T,
         workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
         stop_predicate: &mut Option<&mut WorkflowStopPredicate<'_>>,
         emit: &mut F,
     ) -> Result<ProcessOutcome, OperationError>
     where
-        I: PacketIo,
-        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+        T: transmit::Provider + ?Sized,
+        F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         for send_index in 0..self.prepared.len() {
             if self.drain(
-                DrainPolicy::Enforced(self.deadline),
+                DrainPolicy::Enforced,
                 workflow_matcher,
                 stop_predicate,
                 emit,
@@ -158,11 +157,11 @@ impl<C: Session> Transaction<C> {
                 return Ok(ProcessOutcome::StopCapture);
             }
             self.ensure_send_deadline()?;
-            self.send_one(io, send_index, emit)?;
+            self.send_one(transmit, send_index, emit)?;
             self.ensure_send_deadline()?;
 
             let policy = if send_index.saturating_add(1) < self.prepared.len() {
-                DrainPolicy::Enforced(self.deadline)
+                DrainPolicy::Enforced
             } else {
                 DrainPolicy::BestEffort
             };
@@ -177,18 +176,18 @@ impl<C: Session> Transaction<C> {
         Ok(ProcessOutcome::Continue)
     }
 
-    fn send_one<I, F>(
+    fn send_one<T, F>(
         &mut self,
-        io: &I,
+        transmit: &T,
         send_index: usize,
         emit: &mut F,
     ) -> Result<(), OperationError>
     where
-        I: PacketIo,
-        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+        T: transmit::Provider + ?Sized,
+        F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         // `send_index` is produced by `0..self.prepared.len()` in `send_requests`, the only caller
-        let sent = Arc::new(self.prepared[send_index].clone().transmit(io, || {
+        let sent = Arc::new(self.prepared[send_index].clone().transmit(transmit, || {
             if let Some(signal) = &self.cancellation {
                 signal.check().map_err(LiveIoError::from)?;
             }
@@ -211,7 +210,7 @@ impl<C: Session> Transaction<C> {
     }
 
     fn ensure_send_deadline(&self) -> Result<(), LiveIoError> {
-        if expired(self.deadline) {
+        if self.window.expired() {
             return Err(LiveIoError::DeadlineExceeded {
                 operation: "sending exchange requests",
             });
@@ -229,19 +228,19 @@ impl<C: Session> Transaction<C> {
                     operation: Box::new(operation),
                     shutdown: Box::new(shutdown),
                 },
-                OperationError::Output(output) => Error::ExchangeOutputAndCaptureShutdown {
+                OperationError::Output(output) => Error::OutputAndCaptureShutdown {
                     output: Box::new(output),
-                    shutdown,
+                    shutdown: Box::new(shutdown),
                 },
             },
         }
     }
 
-    pub(super) fn finalize_exchange<F>(mut self, emit: &mut F) -> Result<super::Summary, Error>
+    pub(super) fn finalize_exchange<F>(mut self, emit: &mut F) -> Result<Report, Error>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
-        let capture_statistics = self.capture.inner.statistics();
+        let capture_statistics = self.capture.inner.stats();
         capture_statistics.validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         self.publish_diagnostics(emit)
@@ -258,7 +257,7 @@ impl<C: Session> Transaction<C> {
             emit(super::Event::Unanswered {
                 request_index: *request_index,
             })
-            .map_err(|source| Error::ExchangeOutput {
+            .map_err(|source| Error::Output {
                 source: Box::new(source),
             })?;
         }
@@ -268,24 +267,24 @@ impl<C: Session> Transaction<C> {
         } else {
             (self.packet_count, self.total_bytes)
         };
-        Ok(super::Summary {
+        Ok(Report {
             unanswered,
             diagnostics: Vec::new(),
             stats: Stats {
                 packets_attempted,
                 packets_completed: self.completed_sends,
                 bytes,
-                elapsed: self.started.elapsed(),
+                elapsed: self.window.elapsed(),
                 capture: capture_statistics,
             },
         })
     }
 
-    fn apply_capture_loss_policy(&mut self, statistics: Statistics) -> Result<(), Error> {
+    fn apply_capture_loss_policy(&mut self, statistics: capture::Stats) -> Result<(), Error> {
         let Some(loss) = statistics.evidence_loss_error() else {
             return Ok(());
         };
-        if self.options.capture.overflow_policy == OverflowPolicy::Fail {
+        if self.collection.capture.overflow_policy == OverflowPolicy::Fail {
             return Err(loss.into());
         }
         self.captured.diagnostics.push_once(
@@ -297,7 +296,7 @@ impl<C: Session> Transaction<C> {
                     statistics.receiver_dropped_frames,
                     statistics.dropped_frames,
                     statistics.dropped_bytes,
-                    self.options.capture.overflow_policy,
+                    self.collection.capture.overflow_policy,
                 ),
             ),
         );
@@ -308,6 +307,6 @@ impl<C: Session> Transaction<C> {
 /// A live operation never aborts while accounting for traffic it has already
 /// emitted: an overflowing total is reported saturated, and the evidence
 /// validator that recomputes the same fold rejects it as an overflow there.
-fn sent_bytes(sent: &[std::sync::Arc<crate::SentPacket>]) -> u64 {
+fn sent_bytes(sent: &[std::sync::Arc<crate::evidence::SentPacket>]) -> u64 {
     crate::evidence::total_bytes_sent(sent.iter().map(std::sync::Arc::as_ref)).unwrap_or(u64::MAX)
 }

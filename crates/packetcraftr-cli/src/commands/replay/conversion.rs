@@ -10,7 +10,7 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     let timing = if let Some(rate) = arguments.bps {
         if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--bps cannot be combined with --timing immediate",
             ));
         }
@@ -18,7 +18,7 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     } else if let Some(rate) = arguments.rate {
         if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--rate cannot be combined with --timing immediate",
             ));
         }
@@ -26,7 +26,7 @@ pub(super) fn timing(arguments: &Args) -> Result<packetcraftr::replay::Timing, C
     } else if let Some(speed) = arguments.speed {
         if matches!(arguments.timing, Timing::Immediate) {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--speed cannot be combined with --timing immediate",
             ));
         }
@@ -43,7 +43,7 @@ mod tests {
     use clap::Parser;
 
     use super::*;
-    use crate::{cli::Cli, commands::Command};
+    use crate::{cli::Cli, commands::CommandLine};
 
     fn arguments(extra: &[&str]) -> Args {
         let values = [
@@ -56,7 +56,7 @@ mod tests {
         .into_iter()
         .chain(extra.iter().copied());
         let cli = Cli::try_parse_from(values).expect("fixture replay arguments must parse");
-        let Command::Replay(arguments) = cli.command else {
+        let CommandLine::Replay(arguments) = cli.command else {
             panic!("fixture must parse as replay");
         };
         arguments

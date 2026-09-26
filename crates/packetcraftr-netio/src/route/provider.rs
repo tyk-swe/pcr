@@ -3,21 +3,28 @@
 
 use std::net::IpAddr;
 
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
+use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 
+use crate::Unsupported;
 use crate::interface::Id as InterfaceId;
 
 use super::models::{Decision, Provider};
 
-/// Native route/interface errors, retaining typed
-/// [`SystemFault`](crate::SystemFault) sources through rendering.
-#[derive(Debug, Error, Clone)]
+/// Native route/interface errors. An operating-system refusal keeps the
+/// platform's own error as its `source`.
+#[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
-pub enum SystemError {
-    #[error("native route selection is unavailable: {message}")]
-    Unsupported { message: String },
+pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] Cancelled),
+    /// The caller's deadline expired before the native lookup answered.
+    #[error("live operation deadline expired while {operation}")]
+    DeadlineExceeded { operation: &'static str },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     #[error("no route to {destination} was found")]
     RouteNotFound { destination: IpAddr },
     #[error("interface {name} (index {index}) was not found")]
@@ -50,46 +57,85 @@ pub enum SystemError {
         operation: &'static str,
         message: String,
         #[source]
-        source: Option<crate::SystemFault>,
+        source: Option<Source>,
     },
 }
 
+impl Error {
+    /// The failure a backend reports when its caller's deadline stopped it
+    /// while `operation` was in progress.
+    pub(crate) fn interrupted(interrupted: Interrupted, operation: &'static str) -> Self {
+        match interrupted {
+            Interrupted::Cancelled(cancelled) => cancelled.into(),
+            _ => Self::DeadlineExceeded { operation },
+        }
+    }
+}
+
 /// Route provider backed by the adapter selected for the current target and
-/// the explicit `native-route` feature.
+/// the explicit `native-route` feature. Every backend bounds its native query
+/// by the caller's deadline; none has a timeout of its own.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemProvider;
 
 impl Provider for SystemProvider {
-    type Error = SystemError;
+    type Error = Error;
 
     fn lookup_with_preferences(
         &self,
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
-        crate::platform::system_route(destination, interface_hint, preferred_source)
+        validate_preferred_source_family(destination, preferred_source)?;
+        admit(deadline, "looking up a route")?;
+        crate::platform::route(destination, interface_hint, preferred_source, deadline)
     }
 
-    fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
-        crate::platform::system_interface_route(interface).map(Some)
-    }
-
-    fn classify_error(&self, error: &Self::Error) -> Classification {
-        error.classification()
+    fn lookup_interface(
+        &self,
+        interface: &InterfaceId,
+        deadline: &Deadline,
+    ) -> Result<Option<Decision>, Self::Error> {
+        admit(deadline, "looking up an interface route")?;
+        crate::platform::interface_route(interface, deadline).map(Some)
     }
 }
 
-impl Classified for SystemError {
+/// Refuses a lookup whose caller is already cancelled or out of time, before
+/// any backend is asked.
+fn admit(deadline: &Deadline, operation: &'static str) -> Result<(), Error> {
+    crate::deadline::remaining(deadline)
+        .map(drop)
+        .map_err(|interrupted| Error::interrupted(interrupted, operation))
+}
+
+/// Rejects a preferred source of the wrong address family before any backend
+/// sees it; the backends verify only what the operating system answers.
+fn validate_preferred_source_family(
+    destination: IpAddr,
+    preferred_source: Option<IpAddr>,
+) -> Result<(), Error> {
+    if let Some(source) = preferred_source
+        && source.is_ipv4() != destination.is_ipv4()
+    {
+        return Err(Error::SourceFamilyMismatch {
+            preferred_source: source,
+            destination,
+        });
+    }
+    Ok(())
+}
+
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
-            Self::Unsupported { .. } => Classification::new(
-                "capability.route",
-                Kind::Capability,
-                Some(
-                    "enable the native-route capability on a supported target or inject a route provider",
-                ),
-            ),
+            Self::Cancelled(source) => source.classification(),
+            Self::DeadlineExceeded { operation } => {
+                crate::Error::DeadlineExceeded { operation }.classification()
+            }
+            Self::Unsupported(unsupported) => unsupported.classification(),
             Self::RouteNotFound { .. } => Classification::new(
                 "io.route_not_found",
                 Kind::Io,
@@ -132,6 +178,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use super::*;
+    use crate::NativeCapability;
 
     fn interface() -> InterfaceId {
         InterfaceId {
@@ -144,16 +191,18 @@ mod tests {
     fn portable_system_provider_fails_closed_for_both_lookup_contracts() {
         let provider = SystemProvider;
         let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+        let deadline = Deadline::new(std::time::Duration::from_secs(5));
 
         let route = provider
             .lookup_with_preferences(
                 destination,
                 Some(&interface()),
                 Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))),
+                &deadline,
             )
             .expect_err("portable build has no native route provider");
         let interface = provider
-            .lookup_interface(&interface())
+            .lookup_interface(&interface(), &deadline)
             .expect_err("portable build has no native interface route provider");
 
         for (error, capability) in [
@@ -162,13 +211,85 @@ mod tests {
         ] {
             assert!(matches!(
                 error,
-                SystemError::Unsupported { ref message }
-                    if message.contains("enable the native-route feature")
-                        && message.contains(capability)
+                Error::Unsupported(Unsupported {
+                    capability: NativeCapability::Route,
+                    ref message,
+                    source: None,
+                }) if message.contains("enable the native-route feature")
+                    && message.contains(capability)
             ));
-            let classification = provider.classify_error(&error);
+            let classification = error.classification();
             assert_eq!(classification.code, "capability.route");
             assert_eq!(classification.kind, Kind::Capability);
         }
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::time::{Duration, Instant};
+
+    use packetcraftr_core::budget::Cancellation;
+
+    use super::*;
+
+    fn interface() -> InterfaceId {
+        InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 7,
+        }
+    }
+
+    #[test]
+    fn a_preferred_source_of_the_other_family_is_rejected_before_the_kernel_is_asked() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+        let preferred_source = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
+
+        let error = SystemProvider
+            .lookup_with_preferences(
+                destination,
+                None,
+                Some(preferred_source),
+                &Deadline::new(Duration::from_secs(5)),
+            )
+            .expect_err("mixed address families");
+
+        assert!(matches!(
+            error,
+            Error::SourceFamilyMismatch {
+                preferred_source: rejected,
+                destination: requested,
+            } if rejected == preferred_source && requested == destination
+        ));
+        assert_eq!(error.classification().code, "io.route_selection");
+    }
+
+    #[test]
+    fn a_spent_or_cancelled_caller_is_refused_before_any_backend_is_asked() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+        let frozen = Instant::now();
+        let spent = Deadline::with_time_source(Duration::ZERO, move || frozen);
+        for error in [
+            SystemProvider
+                .lookup_with_preferences(destination, None, None, &spent)
+                .expect_err("spent deadline"),
+            SystemProvider
+                .lookup_interface(&interface(), &spent)
+                .expect_err("spent deadline"),
+        ] {
+            assert!(matches!(error, Error::DeadlineExceeded { .. }));
+            let classification = error.classification();
+            assert_eq!(classification.code, "io.deadline_exceeded");
+            assert_eq!(classification.kind, Kind::Io);
+        }
+
+        let signal = Cancellation::default();
+        signal.cancel();
+        let cancelled = Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal));
+        let error = SystemProvider
+            .lookup_with_preferences(destination, None, None, &cancelled)
+            .expect_err("cancelled caller");
+        assert!(matches!(error, Error::Cancelled(_)));
     }
 }

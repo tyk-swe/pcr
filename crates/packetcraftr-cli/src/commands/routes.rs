@@ -1,27 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+pub(super) mod arguments;
+mod rendering;
 
-use packetcraftr_cli::output;
+use self::arguments::Args;
+use crate::output::contract::AggregateFormat;
+
+use crate::output;
 use packetcraftr_netio as net;
-use packetcraftr_netio::interface::Provider as _;
-use packetcraftr_netio::route::Provider as _;
 
 use crate::errors::CliError;
-use crate::rendering::optional_display;
-
-pub(super) const AFTER_LONG_HELP: &str = r"Examples:
-  packetcraftr routes
-  packetcraftr routes --all
-  packetcraftr --output json routes";
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Report all interfaces with a usable MTU, including ones that are not up.
-    #[arg(long)]
-    pub(crate) all: bool,
-}
 
 impl Args {
     fn includes(&self, interface: &net::interface::Info) -> bool {
@@ -29,47 +18,39 @@ impl Args {
     }
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::AggregateFormat;
+    const CANCELLATION: bool = false;
+
+    fn run(
+        self,
+        format: Self::Format,
+        _stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
-    let interfaces = net::interface::SystemProvider
-        .interfaces()
-        .map_err(CliError::classified)?;
-    let provider = net::route::SystemProvider;
+    let interfaces = crate::system::interfaces(None)?;
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
         .filter(|interface| arguments.includes(interface))
     {
-        let route = provider
-            .lookup_interface(&interface.id)
-            .map_err(CliError::classified)?;
-        if let Some(route) = route {
+        if let Some(route) = crate::system::interface_route(&interface.id)? {
             routes.push(route);
         }
     }
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
-    let result = output::routes::Report {
-        routes: routes.into_iter().map(Into::into).collect(),
-    };
+    let result = output::routes::Report::from(routes);
     super::render_aggregate_rows(
         output::contract::Command::Routes,
         format,
         &result,
         &result.routes,
-        route_line,
-    )
-}
-
-/// One text row per route.
-fn route_line(route: &output::network::Decision) -> String {
-    format!(
-        "{} (index {}): source={} mtu={} capability={} link_type={}",
-        route.interface.name,
-        route.interface.index,
-        optional_display(route.selected_source.or(route.preferred_source)),
-        route.mtu,
-        route.capability,
-        route.link_type
+        rendering::route_line,
     )
 }
 

@@ -1,7 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! IPv6 base header model and codec.
+//! IPv6 base header model and codec, with the extension headers it chains.
+
+mod fragment;
+mod options;
+mod srh;
+
+pub use fragment::Fragment;
+pub(crate) use fragment::FragmentCodec;
+pub use options::{DestinationOptions, HopByHop};
+pub(crate) use options::{DestinationOptionsCodec, HopByHopCodec};
+pub use srh::SegmentRoutingHeader;
+pub(crate) use srh::SegmentRoutingHeaderCodec;
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -223,11 +234,7 @@ fn resolve_addresses(
         .iter()
         .skip(context.index.saturating_add(1))
         .take_while(|candidate| is_ipv6_extension_layer(*candidate))
-        .find_map(|candidate| {
-            candidate
-                .as_any()
-                .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()
-        });
+        .find_map(|candidate| candidate.downcast_ref::<super::SegmentRoutingHeader>());
     let active_segment = routing.and_then(|routing| {
         let last = routing.segments.len().checked_sub(1)?;
         let segments_left = match routing.segments_left {

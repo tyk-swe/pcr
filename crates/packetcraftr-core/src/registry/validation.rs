@@ -73,7 +73,7 @@ impl super::builder::Builder {
                 });
             }
         }
-        for protocol in self.matchers.keys() {
+        for protocol in self.matchers.keys().chain(&self.trailing_padding) {
             if !self.codecs.contains_key(protocol) {
                 return Err(Error::UnknownProtocol {
                     protocol: *protocol,
@@ -98,6 +98,7 @@ impl super::builder::Builder {
             bindings: self.bindings,
             reverse_bindings,
             matchers: self.matchers,
+            trailing_padding: self.trailing_padding,
             schemas,
             filter_fields: self.filter_fields,
         })

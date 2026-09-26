@@ -75,6 +75,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `traceroute::Batch` already was. Executor implementations read the scan
   batch's single probe from the one-element `batch.probes` instead of
   `batch.probe`. See `docs/migration-unreleased.md`.
+- Capture-file formats move from `packetcraftr_core::analysis::pcap` to the
+  top-level `packetcraftr_core::capture_file`, with the same items. It also
+  owns link-type knowledge: `frame::LinkType` keeps its path and constants and
+  gains `BUILTIN_ROOTS`, `root_protocol`, `for_root_protocol`, and `is_raw_ip`.
+  `protocol::capture::{CaptureRoot, BUILTIN_CAPTURE_ROOTS}` are removed in
+  favor of `LinkType::BUILTIN_ROOTS`. See `docs/migration-unreleased.md`.
 
 ### Added
 

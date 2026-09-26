@@ -628,3 +628,20 @@ canonical path:
 
 The undocumented `packetcraftr_core::layer::{malformed_layout, padding_layout}`
 exports are removed; `raw_layout` remains for codecs that emit `Raw` layers.
+
+## Capture file module
+
+Capture-file formats are a top-level core module. Only the path changes; the
+items and their behavior do not.
+
+| Removed path | Import instead |
+|---|---|
+| `packetcraftr_core::analysis::pcap` | `packetcraftr_core::capture_file` |
+| `analysis::pcap::compression` | `capture_file::compression` |
+| `protocol::capture::{CaptureRoot, BUILTIN_CAPTURE_ROOTS}` | `frame::LinkType::BUILTIN_ROOTS`, a `(LinkType, BuiltinProtocol)` slice |
+
+`frame::LinkType` keeps its path, fields, and constants. The link-type ↔
+root-protocol mapping now exists once: use `LinkType::root_protocol`,
+`LinkType::for_root_protocol` (raw IP is written as `LinkType::RAW`), and
+`LinkType::is_raw_ip` instead of matching link-type constants by hand.
+`fuzz::packet_link_type` returns the same link types through that mapping.

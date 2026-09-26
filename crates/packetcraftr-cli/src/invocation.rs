@@ -76,8 +76,8 @@ pub(crate) fn check_interrupted() -> Result<(), Interrupted> {
 
 /// Attach the same clock to every reader, including seekable snapshots.
 pub(crate) fn reader<R: std::io::Read>(
-    reader: packetcraftr_core::analysis::pcap::Reader<R>,
-) -> packetcraftr_core::analysis::pcap::Reader<R> {
+    reader: packetcraftr_core::capture_file::Reader<R>,
+) -> packetcraftr_core::capture_file::Reader<R> {
     match deadline() {
         Some(deadline) => reader.with_deadline(deadline),
         None => reader,

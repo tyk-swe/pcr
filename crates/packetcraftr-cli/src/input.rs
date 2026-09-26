@@ -9,8 +9,8 @@ use std::io::{self, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::ReaderOptions;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::capture_file::ReaderOptions;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::packet::Packet;
@@ -411,14 +411,14 @@ pub(crate) fn open_capture_file(
 pub(crate) fn snapshot_capture<R: Read>(
     input: &mut Reader<R>,
     bounds: CaptureReaderBoundsArgs,
-    limits: core::analysis::pcap::Limits,
+    limits: core::capture_file::Limits,
 ) -> Result<Reader<File>, CliError> {
-    use core::analysis::pcap;
+    use core::capture_file;
     crate::cancellation::check()?;
     let snapshot = tempfile::tempfile()
-        .map_err(pcap::Error::from)
+        .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
-    let (snapshot, _) = pcap::rewrite(
+    let (snapshot, _) = capture_file::rewrite(
         input,
         io::BufWriter::with_capacity(64 * 1024, snapshot),
         limits,
@@ -426,9 +426,9 @@ pub(crate) fn snapshot_capture<R: Read>(
     .map_err(CliError::classified)?;
     let mut snapshot = snapshot
         .into_inner()
-        .map_err(|error| CliError::classified(pcap::Error::from(error.into_error())))?;
+        .map_err(|error| CliError::classified(capture_file::Error::from(error.into_error())))?;
     std::io::Seek::rewind(&mut snapshot)
-        .map_err(pcap::Error::from)
+        .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
     crate::cancellation::check()?;
     Reader::with_options(
@@ -451,9 +451,9 @@ fn capture_reader<R: Read + 'static>(
 ) -> Result<Reader<Box<dyn Read>>, CliError> {
     crate::cancellation::check()?;
     let source: Box<dyn Read> = Box::new(
-        core::analysis::pcap::compression::Input::new(
+        core::capture_file::compression::Input::new(
             source,
-            core::analysis::pcap::compression::Limits {
+            core::capture_file::compression::Limits {
                 max_decoded_bytes: bounds.max_decoded_bytes,
                 max_encoded_bytes: bounds.max_encoded_bytes,
                 ..Default::default()

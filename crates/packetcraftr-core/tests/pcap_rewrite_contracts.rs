@@ -7,7 +7,7 @@ use common::pcap::{frame_at, pcap_bytes};
 use std::io::{self, Cursor, Write};
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::capture_file::{
     Endianness, Error, Format, Limits, PcapOptions, Reader, Writer, rewrite,
 };
 use packetcraftr_core::error::{Classified, Kind};
@@ -142,7 +142,7 @@ fn capture_errors_expose_stable_classifications_and_causes() {
 
 #[test]
 fn selection_validates_rejected_input_and_preserves_predicate_failures() {
-    use packetcraftr_core::analysis::pcap::{SelectionError, select};
+    use packetcraftr_core::capture_file::{SelectionError, select};
     use packetcraftr_core::error::{BoundaryError, Classification, Coordinate};
     let frame = frame_at(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, b"one");
     let frames = [frame.clone(), frame];
@@ -194,7 +194,7 @@ fn selection_validates_rejected_input_and_preserves_predicate_failures() {
 
 #[test]
 fn selection_stops_on_write_and_flush_failures() {
-    use packetcraftr_core::analysis::pcap::select;
+    use packetcraftr_core::capture_file::select;
     #[derive(Debug)]
     struct FlushFailure;
     impl Write for FlushFailure {

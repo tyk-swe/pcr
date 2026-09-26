@@ -6,7 +6,7 @@ pub(super) mod arguments;
 use packetcraftr_cli::output::contract::SendFormat;
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::capture_file as capture;
 
 use packetcraftr_cli::output;
 

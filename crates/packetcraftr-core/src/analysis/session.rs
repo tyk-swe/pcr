@@ -27,9 +27,9 @@ use crate::error::{BoundaryError, Classification, Classified, Coordinate};
 use crate::filter::{Filter, Requirements};
 use crate::registry::Registry;
 
-use super::pcap::Reader;
 use super::scope::Definition;
 use super::{FrameRecord, IpEventRecord, Options, Plan, StreamRef, Summary, run_with_ip_events};
+use crate::capture_file::Reader;
 
 /// Pipeline work a [`Collector`] reads from the records it observes.
 ///
@@ -308,9 +308,9 @@ impl<'a, C: Collector> Session<'a, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::pcap::Writer;
     use crate::analysis::{Error as RunError, StreamTransport};
     use crate::build::{Builder, Options as BuildOptions};
+    use crate::capture_file::Writer;
     use crate::codec::Context as BuildContext;
     use crate::error::{Classification, Kind};
     use crate::field::WireValue;

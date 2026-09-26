@@ -7,7 +7,7 @@
 use crate::command_options::Compression;
 use packetcraftr_cli::output::capture::{File as FileReport, Files as FilesReport, Retention};
 use packetcraftr_core::{
-    analysis::pcap::{self, compression},
+    capture_file::{self, compression},
     error::{Classification, Classified, Kind},
     frame::Frame,
 };
@@ -102,7 +102,7 @@ pub(super) enum Error {
         source: io::Error,
     },
     #[error(transparent)]
-    Capture(#[from] pcap::Error),
+    Capture(#[from] capture_file::Error),
     #[error(transparent)]
     Compression(#[from] compression::Error),
     #[error(
@@ -160,13 +160,13 @@ struct Slot {
 }
 struct Active {
     failed: bool,
-    writer: pcap::Writer<Counted<compression::Output<File>>>,
+    writer: capture_file::Writer<Counted<compression::Output<File>>>,
     slot: usize,
     opened_at: Duration,
 }
 pub(super) struct Files {
     options: Options,
-    limits: pcap::Limits,
+    limits: capture_file::Limits,
     sources: Vec<Source>,
     slots: Vec<Slot>,
     active: Option<Active>,
@@ -181,7 +181,7 @@ pub(super) struct Files {
     stopped: bool,
 }
 impl Files {
-    pub(super) fn new(options: Options, limits: pcap::Limits) -> Result<Self, Error> {
+    pub(super) fn new(options: Options, limits: capture_file::Limits) -> Result<Self, Error> {
         options.validate()?;
         Ok(Self {
             options,
@@ -210,7 +210,7 @@ impl Files {
                 inner: io::sink(),
                 bytes: 0,
             },
-            pcap::Format::PcapNg,
+            capture_file::Format::PcapNg,
             &self.sources,
             self.limits,
         )?;
@@ -279,7 +279,7 @@ impl Files {
         }
         let active = self.active.as_mut().ok_or(Error::State)?;
         if let Err(error) = active.writer.write_frame(frame) {
-            active.failed = matches!(error, pcap::Error::Io(_));
+            active.failed = matches!(error, capture_file::Error::Io(_));
             return Err(error.into());
         }
         let report = &mut self.slots[active.slot].report;
@@ -374,8 +374,12 @@ impl Files {
             inner: compression::Output::new(handle, self.options.compression.format())?,
             bytes: 0,
         };
-        let writer =
-            super::writer::initialize(output, pcap::Format::PcapNg, &self.sources, self.limits)?;
+        let writer = super::writer::initialize(
+            output,
+            capture_file::Format::PcapNg,
+            &self.sources,
+            self.limits,
+        )?;
         self.header_bytes = writer.get_ref().bytes;
         file.report.capture_bytes = self.header_bytes;
         self.active = Some(Active {
@@ -471,7 +475,7 @@ impl Drop for Files {
 mod tests {
     use super::*;
     use packetcraftr_core::{
-        analysis::pcap::Reader,
+        capture_file::Reader,
         frame::{Frame, LinkType},
     };
     use packetcraftr_netio::{
@@ -514,8 +518,8 @@ mod tests {
         frame.interface = Some(0);
         frame
     }
-    fn limits() -> pcap::Limits {
-        pcap::Limits {
+    fn limits() -> capture_file::Limits {
+        capture_file::Limits {
             max_frames: 10,
             max_bytes: 1024,
         }
@@ -547,7 +551,7 @@ mod tests {
             let path = directory.path().join("trace.pcapng");
             let mut reference = super::super::writer::initialize(
                 Vec::new(),
-                pcap::Format::PcapNg,
+                capture_file::Format::PcapNg,
                 &sources(),
                 limits(),
             )

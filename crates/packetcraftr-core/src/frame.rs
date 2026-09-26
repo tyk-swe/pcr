@@ -16,23 +16,11 @@ pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 /// Capture-wide interface identifier normalized across PCAPNG sections.
 pub type GlobalInterfaceId = u32;
 
-/// Open numeric libpcap link-layer type.
+/// Open numeric libpcap link-layer type. The known numbers and their root
+/// protocols are defined by [`capture_file`](crate::capture_file).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LinkType(pub u32);
-
-impl LinkType {
-    pub const NULL: Self = Self(0);
-    pub const ETHERNET: Self = Self(1);
-    /// BSD raw-IP DLT, distinct from the IANA-assigned raw LINKTYPE.
-    pub const BSD_RAW: Self = Self(12);
-    pub const RAW: Self = Self(101);
-    pub const LOOP: Self = Self(108);
-    pub const LINUX_SLL: Self = Self(113);
-    pub const IPV4: Self = Self(228);
-    pub const IPV6: Self = Self(229);
-    pub const LINUX_SLL2: Self = Self(276);
-}
 
 impl std::fmt::Display for LinkType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

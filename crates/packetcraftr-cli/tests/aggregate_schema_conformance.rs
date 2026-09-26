@@ -337,7 +337,7 @@ fn merge_case() -> Value {
         Command::Merge,
         packetcraftr_cli::output::merge::Report::new(
             "merged.pcapng".to_owned(),
-            packetcraftr_core::analysis::pcap::MergeReport {
+            packetcraftr_core::capture_file::MergeReport {
                 source_frames: vec![0, 0],
                 ..Default::default()
             },
@@ -547,7 +547,7 @@ fn replay_case() -> Value {
                 name: "lab0".to_owned(),
                 index: 2,
             }],
-            source_format: packetcraftr_core::analysis::pcap::Format::Pcap,
+            source_format: packetcraftr_core::capture_file::Format::Pcap,
             timing: packetcraftr::replay::Timing::Immediate,
             frames_read: 1,
             frames_transmitted: 1,
@@ -1395,7 +1395,7 @@ fn routes_case() -> Value {
 fn verify_forwarding_case() -> Value {
     use packetcraftr_cli::output::forwarding as forwarding_output;
     use packetcraftr_core::analysis::forwarding;
-    use packetcraftr_core::analysis::{self, pcap};
+    use packetcraftr_core::{analysis, capture_file};
 
     let registry = builtin::registry();
     let rules = forwarding::Rules::compile(
@@ -1415,11 +1415,13 @@ fn verify_forwarding_case() -> Value {
     .expect("fixture frame");
     let collect = |side| {
         let mut bytes = Vec::new();
-        let mut writer = pcap::Writer::new(&mut bytes, pcap::Format::Pcap, LinkType::IPV4).unwrap();
+        let mut writer =
+            capture_file::Writer::new(&mut bytes, capture_file::Format::Pcap, LinkType::IPV4)
+                .unwrap();
         writer.write_frame(&frame).unwrap();
         writer.flush().unwrap();
         drop(writer);
-        let mut reader = pcap::Reader::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut reader = capture_file::Reader::new(std::io::Cursor::new(bytes)).unwrap();
         let mut collector = forwarding::Collector::new(&rules, side, 1024 * 1024);
         let summary = analysis::run(
             &mut reader,
@@ -1608,11 +1610,11 @@ fn frozen_vocabularies() -> Vec<Vocabulary> {
             [DnsTransport::Udp, DnsTransport::Tcp],
         ),
         vocabulary(
-            "packetcraftr_core::analysis::pcap::Format",
+            "packetcraftr_core::capture_file::Format",
             "/$defs/replayResult/properties/source_format/enum",
             [
-                packetcraftr_core::analysis::pcap::Format::Pcap,
-                packetcraftr_core::analysis::pcap::Format::PcapNg,
+                packetcraftr_core::capture_file::Format::Pcap,
+                packetcraftr_core::capture_file::Format::PcapNg,
             ],
         ),
         vocabulary(
@@ -1831,10 +1833,8 @@ fn http_case() -> Value {
 }
 
 fn export_case() -> Value {
-    use packetcraftr_core::analysis::{
-        export::Plan,
-        pcap::{Format, SelectionReport},
-    };
+    use packetcraftr_core::analysis::export::Plan;
+    use packetcraftr_core::capture_file::{Format, SelectionReport};
     let plan = Plan {
         source_frames: Default::default(),
         matched_streams: Vec::new(),

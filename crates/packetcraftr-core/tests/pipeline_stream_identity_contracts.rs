@@ -7,9 +7,9 @@
 mod common;
 
 use common::{CLIENT, TcpSpec, client_tcp, reader, registry, server_tcp, tcp_frame};
-use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::analysis::{Options, run};
 use packetcraftr_core::build::Builder;
+use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;

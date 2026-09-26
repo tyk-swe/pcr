@@ -5,7 +5,7 @@ use std::io::Write;
 
 use crate::frame::{Direction, Frame, LinkType};
 
-use crate::analysis::pcap::{
+use crate::capture_file::{
     error::Error,
     model::{Endianness, Interface, TimestampResolution},
     wire::{
@@ -18,14 +18,14 @@ use crate::analysis::pcap::{
 };
 
 #[derive(Clone, Debug)]
-pub(in crate::analysis::pcap) struct InterfacePlan {
+pub(in crate::capture_file) struct InterfacePlan {
     pub id: u32,
     pub description: Interface,
     pub requires_description_block: bool,
 }
 
 impl InterfacePlan {
-    pub(in crate::analysis::pcap) fn description_block_length(&self) -> usize {
+    pub(in crate::capture_file) fn description_block_length(&self) -> usize {
         if self.requires_description_block {
             interface_description_base_length(self.description.timestamp_offset)
         } else {
@@ -36,11 +36,11 @@ impl InterfacePlan {
 
 /// Interface description block length before custom options: header, fields,
 /// the generated timestamp options, end of options, and trailing length.
-pub(in crate::analysis::pcap) fn interface_description_base_length(timestamp_offset: i64) -> usize {
+pub(in crate::capture_file) fn interface_description_base_length(timestamp_offset: i64) -> usize {
     if timestamp_offset == 0 { 32 } else { 44 }
 }
 
-pub(in crate::analysis::pcap) fn write_section_header<W: Write>(
+pub(in crate::capture_file) fn write_section_header<W: Write>(
     writer: &mut W,
     endianness: Endianness,
 ) -> Result<(), Error> {
@@ -54,14 +54,14 @@ pub(in crate::analysis::pcap) fn write_section_header<W: Write>(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
+pub(in crate::capture_file) fn write_interface_description<W: Write>(
     writer: &mut W,
     endianness: Endianness,
     link_type: LinkType,
     snap_len: u32,
     timestamp_resolution: TimestampResolution,
     timestamp_offset: i64,
-    options: &[crate::analysis::pcap::PcapNgOption],
+    options: &[crate::capture_file::PcapNgOption],
 ) -> Result<(), Error> {
     let base = interface_description_base_length(timestamp_offset);
     let block_length = usize_to_u32_limit(
@@ -71,7 +71,7 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
                 length.checked_add(4 + option.value.len().div_ceil(4) * 4)
             })
             .ok_or(Error::InvalidData {
-                format: crate::analysis::pcap::Format::PcapNg,
+                format: crate::capture_file::Format::PcapNg,
                 reason: "interface option length overflow",
             })?,
     )?;
@@ -113,7 +113,7 @@ pub(in crate::analysis::pcap) fn write_interface_description<W: Write>(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn write_enhanced_packet<W: Write>(
+pub(in crate::capture_file) fn write_enhanced_packet<W: Write>(
     writer: &mut W,
     endianness: Endianness,
     interface_id: u32,
@@ -165,7 +165,7 @@ pub(in crate::analysis::pcap) fn write_enhanced_packet<W: Write>(
     Ok(())
 }
 
-pub(in crate::analysis::pcap) fn validate_new_interface(
+pub(in crate::capture_file) fn validate_new_interface(
     description: &Interface,
     existing_interfaces: &[Interface],
     max_size: usize,
@@ -205,7 +205,7 @@ pub(in crate::analysis::pcap) fn validate_new_interface(
     Ok(interface_id)
 }
 
-pub(in crate::analysis::pcap) fn select_interface(
+pub(in crate::capture_file) fn select_interface(
     frame: &Frame,
     interfaces: &[Interface],
     max_size: usize,

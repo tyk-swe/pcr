@@ -4,7 +4,7 @@
 use crate::frame::LinkType;
 
 use super::options::visit_options;
-use crate::analysis::pcap::{
+use crate::capture_file::{
     error::Error,
     model::{Endianness, Format, Interface, TimestampResolution},
     wire::{
@@ -13,7 +13,7 @@ use crate::analysis::pcap::{
     },
 };
 
-pub(in crate::analysis::pcap) fn parse_interface_description(
+pub(in crate::capture_file) fn parse_interface_description(
     body: &[u8],
     endianness: Endianness,
 ) -> Result<Interface, Error> {

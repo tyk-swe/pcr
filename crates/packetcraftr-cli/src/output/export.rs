@@ -5,8 +5,9 @@ use super::{
     provenance::{Source, from_source_set},
 };
 use packetcraftr_core::analysis::{
-    self, StreamRef, pcap, reassembly::ip::DatagramKey, scope::Definition,
+    self, StreamRef, reassembly::ip::DatagramKey, scope::Definition,
 };
+use packetcraftr_core::capture_file;
 use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct Incomplete {
@@ -17,7 +18,7 @@ pub struct Incomplete {
 pub struct Report {
     pub path: String,
     #[serde(flatten, serialize_with = "capture_report")]
-    pub capture: pcap::SelectionReport,
+    pub capture: capture_file::SelectionReport,
     pub source_frames: Vec<u64>,
     pub matched_streams: Vec<StreamRef>,
     pub unmatched_streams: Vec<StreamRef>,
@@ -32,7 +33,7 @@ pub struct Report {
 impl Report {
     pub fn new(
         path: String,
-        capture: pcap::SelectionReport,
+        capture: capture_file::SelectionReport,
         plan: analysis::export::Plan,
     ) -> Result<Self, Error> {
         Ok(Self {
@@ -62,7 +63,7 @@ impl Report {
 }
 
 fn capture_report<S: serde::Serializer>(
-    value: &pcap::SelectionReport,
+    value: &capture_file::SelectionReport,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     #[derive(Serialize)]

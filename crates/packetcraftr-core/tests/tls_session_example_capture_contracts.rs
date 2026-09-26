@@ -117,9 +117,9 @@ fn example_capture_frames() -> Vec<Frame> {
 }
 
 fn example_capture_bytes() -> Vec<u8> {
-    let mut writer = packetcraftr_core::analysis::pcap::Writer::new(
+    let mut writer = packetcraftr_core::capture_file::Writer::new(
         Vec::new(),
-        packetcraftr_core::analysis::pcap::Format::PcapNg,
+        packetcraftr_core::capture_file::Format::PcapNg,
         packetcraftr_core::frame::LinkType::IPV4,
     )
     .expect("example capture writer initializes");

@@ -6,8 +6,8 @@
 use std::io::{Read, Seek};
 use std::time::{Duration, Instant, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{Format, Interface, Reader};
 use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::capture_file::{Format, Interface, Reader};
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::{
     link::Mode as LinkMode, route::Materialized as MaterializedRoute, route::Plan as RoutePlan,

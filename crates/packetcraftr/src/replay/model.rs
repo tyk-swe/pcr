@@ -3,7 +3,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::capture_file::{
     DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Format, Interface,
 };
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};

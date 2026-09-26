@@ -6,12 +6,12 @@ use bytes::Bytes;
 
 use super::PcapNgState;
 use super::framing::{FramedBlock, packet_block_kind};
-use crate::analysis::pcap::pcapng::{
+use crate::capture_file::pcapng::{
     interface::parse_interface_description,
     options::parse_options,
     packet::{parse_enhanced_packet, parse_obsolete_packet, parse_simple_packet},
 };
-use crate::analysis::pcap::{
+use crate::capture_file::{
     error::Error,
     model::{
         CaptureRecord, Format, Interface, MetadataBlockKind, PacketBlockKind, ReaderOptions,

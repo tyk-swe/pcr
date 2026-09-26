@@ -9,7 +9,7 @@ use packetcraftr_cli::output::{
     self,
     contract::{Command, ToolFormat},
 };
-use packetcraftr_core::analysis::{self, pcap};
+use packetcraftr_core::{analysis, capture_file};
 use std::path::PathBuf;
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -54,7 +54,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     };
     selection.validate().map_err(CliError::classified)?;
     let mut staged = crate::staged_output::StagedFile::stage(&args.write)?;
-    let limits = pcap::Limits {
+    let limits = capture_file::Limits {
         max_frames: args.limits.capture.max_frames,
         max_bytes: args.limits.capture.max_bytes,
     };
@@ -69,7 +69,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     )
     .map_err(CliError::classified)?;
     reader.rewind().map_err(CliError::classified)?;
-    let (writer, report) = pcap::select(
+    let (writer, report) = capture_file::select(
         &mut reader,
         args.compression.writer(std::io::BufWriter::with_capacity(
             64 * 1024,

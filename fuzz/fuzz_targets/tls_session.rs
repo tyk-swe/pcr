@@ -5,8 +5,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::analysis::Options;
-use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions};
 use packetcraftr_core::analysis::tls::{Collector, Limits};
+use packetcraftr_core::capture_file::{Reader, ReaderOptions};
 use packetcraftr_core::protocol::builtin;
 use std::io::Cursor;
 

@@ -361,7 +361,7 @@ fn destination_allowlist_denies_before_route_preparation_on_every_send_command()
 
 fn read_capture(bytes: &[u8]) -> Vec<packetcraftr_core::frame::Frame> {
     let mut reader =
-        packetcraftr_core::analysis::pcap::Reader::new(std::io::Cursor::new(bytes.to_vec()))
+        packetcraftr_core::capture_file::Reader::new(std::io::Cursor::new(bytes.to_vec()))
             .expect("generated capture must open");
     let mut frames = Vec::new();
     while let Some(frame) = reader.next_frame().expect("generated record must read") {
@@ -505,7 +505,7 @@ fn build_capture_output_requires_a_compatible_explicit_link_type() {
 
 #[test]
 fn failed_builds_finalize_capture_compression_and_keep_completed_frames() {
-    use packetcraftr_core::analysis::pcap::{Reader, compression};
+    use packetcraftr_core::capture_file::{Reader, compression};
     let expected = run_success(&["--output", "raw", "build", "--packet", PACKET]);
     for format in ["pcap", "pcapng"] {
         for compression in ["none", "gzip", "zstd"] {
@@ -591,7 +591,7 @@ fn empty_icmp_rest_accepts_a_payload_file() {
 
 #[test]
 fn capture_build_rejects_a_malformed_wire_root_and_finishes_compression() {
-    use packetcraftr_core::analysis::pcap::{Reader, compression};
+    use packetcraftr_core::capture_file::{Reader, compression};
     for format in ["pcap", "pcapng"] {
         let output = run(&[
             "--output",

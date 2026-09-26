@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
-use packetcraftr_core::analysis::pcap::{Reader, Writer};
+use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::link::MacAddress;

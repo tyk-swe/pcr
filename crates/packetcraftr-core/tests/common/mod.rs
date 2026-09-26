@@ -17,8 +17,8 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use packetcraftr_core::analysis::pcap::{Reader, Writer};
 use packetcraftr_core::build::{Builder, Options};
+use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;

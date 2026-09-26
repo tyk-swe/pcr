@@ -4,9 +4,9 @@
 use std::io::{Cursor, Write};
 use std::process::Output;
 
-use packetcraftr_core::analysis::pcap::Format;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::capture_file::Format;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 
@@ -289,7 +289,7 @@ fn capture_help_describes_interface_limit_scopes() {
             help.contains("selected output interfaces"),
             "{command}: {help}"
         );
-        let total = packetcraftr_core::analysis::pcap::DEFAULT_TOTAL_INTERFACE_LIMIT.to_string();
+        let total = packetcraftr_core::capture_file::DEFAULT_TOTAL_INTERFACE_LIMIT.to_string();
         assert!(
             help.replace(',', "")
                 .contains(&format!("capture-wide input ceiling of {total}")),

@@ -314,7 +314,7 @@ impl<R: Read + Seek> Reader<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::pcap::{Limits, Writer, rewrite, select};
+    use crate::capture_file::{Limits, Writer, rewrite, select};
     use crate::error::Classified;
     use std::io::{self, Cursor};
     use std::time::UNIX_EPOCH;

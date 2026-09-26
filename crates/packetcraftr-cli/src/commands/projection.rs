@@ -313,7 +313,7 @@ pub(super) fn read(
             args.limits.reader.max_frame_bytes,
         );
         while let Some(frame) = reader.next_frame().map_err(CliError::classified)? {
-            (frames, bytes) = core::analysis::pcap::Limits {
+            (frames, bytes) = core::capture_file::Limits {
                 max_frames: args.limits.max_frames,
                 max_bytes: args.limits.max_bytes,
             }

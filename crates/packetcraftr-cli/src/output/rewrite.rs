@@ -21,7 +21,7 @@ pub struct Report {
     pub path: String,
     pub rule_matches: Vec<u64>,
     #[serde(flatten)]
-    pub capture: packetcraftr_core::analysis::pcap::MapReport,
+    pub capture: packetcraftr_core::capture_file::MapReport,
     /// Present when `--dry-run` reported without publishing the destination.
     #[serde(skip_serializing_if = "is_false")]
     pub dry_run: bool,

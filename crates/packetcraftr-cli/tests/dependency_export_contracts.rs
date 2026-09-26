@@ -4,7 +4,7 @@ mod common;
 use common::{parse_json, run, run_success};
 #[test]
 fn export_uses_a_stable_compressed_snapshot_and_publishes_only_valid_captures() {
-    use packetcraftr_core::analysis::pcap::{Reader, compression::Input};
+    use packetcraftr_core::capture_file::{Reader, compression::Input};
     let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/captures/http-stream.pcap");
     let source = source.to_str().unwrap();

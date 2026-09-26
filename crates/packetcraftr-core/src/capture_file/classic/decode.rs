@@ -8,18 +8,18 @@ use bytes::Bytes;
 
 use crate::frame::{Frame, Lengths, LinkType};
 
-use crate::analysis::pcap::error::Error;
-use crate::analysis::pcap::model::{
+use crate::capture_file::error::Error;
+use crate::capture_file::model::{
     CaptureRecord, Endianness, Format, PacketBlockKind, PcapHeader, RecordKind, TimestampPrecision,
     TimestampResolution,
 };
-use crate::analysis::pcap::reader::ReaderState;
-use crate::analysis::pcap::wire::{
+use crate::capture_file::reader::ReaderState;
+use crate::capture_file::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
     read_exact_or_eof, read_exact_vec, validate_declared_lengths,
 };
 
-pub(in crate::analysis::pcap) fn read_pcap_header<R: Read>(
+pub(in crate::capture_file) fn read_pcap_header<R: Read>(
     reader: &mut R,
     magic: [u8; 4],
     endianness: Endianness,
@@ -71,7 +71,7 @@ pub(in crate::analysis::pcap) fn read_pcap_header<R: Read>(
     ))
 }
 
-pub(in crate::analysis::pcap) fn read_next_pcap_record<R: Read>(
+pub(in crate::capture_file) fn read_next_pcap_record<R: Read>(
     reader: &mut R,
     endianness: Endianness,
     precision: TimestampPrecision,

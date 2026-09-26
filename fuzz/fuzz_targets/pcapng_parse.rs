@@ -4,7 +4,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions};
+use packetcraftr_core::capture_file::{Reader, ReaderOptions};
 use std::io::Cursor;
 
 fuzz_target!(|data: &[u8]| {

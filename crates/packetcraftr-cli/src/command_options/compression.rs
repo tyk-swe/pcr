@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::errors::CliError;
-use packetcraftr_core::analysis::pcap::compression::{self, Output};
+use packetcraftr_core::capture_file::compression::{self, Output};
 
 #[derive(Clone, Copy, Debug, Default, clap::ValueEnum)]
 pub(crate) enum Compression {

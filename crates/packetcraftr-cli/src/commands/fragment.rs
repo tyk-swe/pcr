@@ -80,9 +80,9 @@ pub(crate) fn run(
     if matches!(format, CaptureFormat::Pcap | CaptureFormat::PcapNg) {
         return write_capture_file(
             if format == CaptureFormat::Pcap {
-                core::analysis::pcap::Format::Pcap
+                core::capture_file::Format::Pcap
             } else {
-                core::analysis::pcap::Format::PcapNg
+                core::capture_file::Format::PcapNg
             },
             frames,
             args.compression,

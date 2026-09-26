@@ -14,8 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap as capture;
-use packetcraftr_core::analysis::pcap::Reader;
+use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::capture_file::Reader;
 use packetcraftr_netio as net;
 
 use self::arguments::Args;

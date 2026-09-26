@@ -3,7 +3,7 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use packetcraftr_core::analysis::pcap::{Error as CaptureError, Format, Writer};
+use packetcraftr_core::capture_file::{Error as CaptureError, Format, Writer};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::Frame;
 

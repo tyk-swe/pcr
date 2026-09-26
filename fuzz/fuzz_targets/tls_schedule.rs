@@ -5,11 +5,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use packetcraftr_core::{
-    analysis::{
-        self,
-        pcap::{Reader, Writer},
-        tls,
-    },
+    analysis::{self, tls},
+    capture_file::{Reader, Writer},
     frame::{Frame, LinkType},
     protocol::builtin,
 };

@@ -55,16 +55,7 @@ pub fn dissect_built(
     }
 }
 
+/// The link type recorded for a built packet, from its outermost layer.
 pub fn packet_link_type(packet: &Packet) -> Option<LinkType> {
-    Some(match BuiltinProtocol::of(packet.layer(0)?)? {
-        BuiltinProtocol::Ethernet => LinkType::ETHERNET,
-        BuiltinProtocol::BsdNull => LinkType::NULL,
-        BuiltinProtocol::BsdLoop => LinkType::LOOP,
-        BuiltinProtocol::LinuxSll => LinkType::LINUX_SLL,
-        BuiltinProtocol::LinuxSll2 => LinkType::LINUX_SLL2,
-        BuiltinProtocol::Ipv4 => LinkType::IPV4,
-        BuiltinProtocol::Ipv6 => LinkType::IPV6,
-        BuiltinProtocol::RawIp => LinkType::RAW,
-        _ => return None,
-    })
+    LinkType::for_root_protocol(BuiltinProtocol::of(packet.layer(0)?)?)
 }

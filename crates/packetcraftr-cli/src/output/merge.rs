@@ -22,7 +22,7 @@ pub struct Report {
     pub source_metadata_records: u64,
 }
 impl Report {
-    pub fn new(path: String, report: packetcraftr_core::analysis::pcap::MergeReport) -> Self {
+    pub fn new(path: String, report: packetcraftr_core::capture_file::MergeReport) -> Self {
         Self {
             path,
             frames: report.frames,

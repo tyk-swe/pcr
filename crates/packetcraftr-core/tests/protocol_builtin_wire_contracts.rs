@@ -5,9 +5,7 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::protocol::{
-    BuiltinProtocol, builtin, capture::BUILTIN_CAPTURE_ROOTS, network::Ipv4, transport::Udp,
-};
+use packetcraftr_core::protocol::{BuiltinProtocol, builtin, network::Ipv4, transport::Udp};
 use packetcraftr_core::{build, codec, decode, layer::Raw, packet::Packet};
 
 fn representative_packet() -> Packet {
@@ -116,14 +114,69 @@ fn advertised_protocols_and_capture_roots_are_registered() {
         matches!(error, packetcraftr_core::codec::Error::Unsupported { .. }),
         "{error}"
     );
-    for root in BUILTIN_CAPTURE_ROOTS {
+}
+
+#[test]
+fn every_mapped_link_type_maps_to_its_root_protocol_and_back() {
+    use BuiltinProtocol::{BsdLoop, BsdNull, Ethernet, Ipv4, Ipv6, LinuxSll, LinuxSll2, RawIp};
+    // (link type, root protocol, link type written for that root protocol)
+    let matrix = [
+        (0, BsdNull, 0),
+        (1, Ethernet, 1),
+        (12, RawIp, 101),
+        (101, RawIp, 101),
+        (108, BsdLoop, 108),
+        (113, LinuxSll, 113),
+        (228, Ipv4, 228),
+        (229, Ipv6, 229),
+        (276, LinuxSll2, 276),
+    ];
+    let registry = builtin::registry();
+
+    let mut mapped = LinkType::BUILTIN_ROOTS.to_vec();
+    mapped.sort();
+    let expected: Vec<_> = matrix
+        .iter()
+        .map(|&(number, protocol, _)| (LinkType(number), protocol))
+        .collect();
+    assert_eq!(mapped, expected);
+
+    for (number, protocol, written) in matrix {
+        let link_type = LinkType(number);
+        assert_eq!(link_type.root_protocol(), Some(protocol), "{link_type}");
         assert_eq!(
             registry
-                .root_for_link_type(root.link_type)
+                .root_for_link_type(link_type)
                 .map(packetcraftr_core::layer::Id::as_str),
-            Some(root.protocol.as_str())
+            Some(protocol.as_str()),
+            "{link_type}"
+        );
+        assert_eq!(
+            LinkType::for_root_protocol(protocol),
+            Some(LinkType(written)),
+            "{}",
+            protocol.as_str()
+        );
+        assert_eq!(
+            link_type.is_raw_ip(),
+            matches!(protocol, RawIp | Ipv4 | Ipv6),
+            "{link_type}"
         );
     }
+    for &protocol in BuiltinProtocol::ALL {
+        if !matrix.iter().any(|&(_, root, _)| root == protocol) {
+            assert_eq!(
+                LinkType::for_root_protocol(protocol),
+                None,
+                "{}",
+                protocol.as_str()
+            );
+        }
+    }
+    let unmapped = LinkType(147);
+    assert_eq!(unmapped.root_protocol(), None);
+    assert!(!unmapped.is_raw_ip());
+    assert!(registry.root_for_link_type(unmapped).is_none());
 }
 
 #[test]

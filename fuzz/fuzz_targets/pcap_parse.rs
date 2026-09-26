@@ -4,7 +4,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, rewrite};
+use packetcraftr_core::capture_file::{Reader, ReaderOptions, rewrite};
 use std::io::Cursor;
 
 fuzz_target!(|data: &[u8]| {
@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = rewrite(
                 &mut re_reader,
                 &mut out,
-                packetcraftr_core::analysis::pcap::Limits::default(),
+                packetcraftr_core::capture_file::Limits::default(),
             );
         }
     }

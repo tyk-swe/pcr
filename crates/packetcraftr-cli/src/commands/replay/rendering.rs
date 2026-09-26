@@ -6,12 +6,12 @@ use packetcraftr_core::error::Kind;
 use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::analysis::pcap as capture;
-use packetcraftr_core::analysis::pcap::Format;
-use packetcraftr_core::analysis::pcap::Limits;
-use packetcraftr_core::analysis::pcap::Reader;
-use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::budget::{Cancelled, Interrupted};
+use packetcraftr_core::capture_file as capture;
+use packetcraftr_core::capture_file::Format;
+use packetcraftr_core::capture_file::Limits;
+use packetcraftr_core::capture_file::Reader;
+use packetcraftr_core::capture_file::Writer;
 use packetcraftr_netio as net;
 
 use packetcraftr_cli::output;

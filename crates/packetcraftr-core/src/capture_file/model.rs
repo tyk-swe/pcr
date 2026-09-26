@@ -82,7 +82,7 @@ impl Limits {
 ///
 /// ```rust
 /// use std::io::Cursor;
-/// use packetcraftr_core::analysis::pcap::{Reader, ReaderOptions, Writer};
+/// use packetcraftr_core::capture_file::{Reader, ReaderOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
@@ -91,7 +91,7 @@ impl Limits {
 ///     ..ReaderOptions::default()
 /// };
 /// let _reader = Reader::with_options(Cursor::new(bytes), options)?;
-/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
+/// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReaderOptions {
@@ -118,7 +118,7 @@ impl Default for ReaderOptions {
 /// Classic PCAP file configuration.
 ///
 /// ```rust
-/// use packetcraftr_core::analysis::pcap::{Endianness, PcapOptions, Writer};
+/// use packetcraftr_core::capture_file::{Endianness, PcapOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let options = PcapOptions {
@@ -128,7 +128,7 @@ impl Default for ReaderOptions {
 ///     ..PcapOptions::default()
 /// };
 /// let _writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)?;
-/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
+/// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapOptions {
@@ -161,7 +161,7 @@ impl Default for PcapOptions {
 /// PCAPNG section configuration.
 ///
 /// ```rust
-/// use packetcraftr_core::analysis::pcap::{PcapNgOptions, Writer};
+/// use packetcraftr_core::capture_file::{PcapNgOptions, Writer};
 /// use packetcraftr_core::frame::LinkType;
 ///
 /// let options = PcapNgOptions {
@@ -170,7 +170,7 @@ impl Default for PcapOptions {
 /// };
 /// let mut writer = Writer::pcapng_with_options(Vec::new(), options)?;
 /// writer.add_interface(LinkType::ETHERNET)?;
-/// # Ok::<(), packetcraftr_core::analysis::pcap::Error>(())
+/// # Ok::<(), packetcraftr_core::capture_file::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PcapNgOptions {
@@ -234,7 +234,7 @@ pub enum TimestampResolution {
 
 /// Metadata associated with one capture interface.
 ///
-/// The index in [`crate::analysis::pcap::Reader::interfaces`] is the global interface
+/// The index in [`crate::capture_file::Reader::interfaces`] is the global interface
 /// ID used by [`crate::frame::Frame::interface`]. Source-local
 /// section and interface identifiers remain available on [`CaptureRecord`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

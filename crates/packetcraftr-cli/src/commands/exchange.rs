@@ -8,7 +8,7 @@ use packetcraftr_cli::output::contract::ExchangeFormat;
 
 use std::time::Duration;
 
-use packetcraftr_core::analysis::pcap as capture;
+use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::error::Kind;
 
 use packetcraftr_cli::output;

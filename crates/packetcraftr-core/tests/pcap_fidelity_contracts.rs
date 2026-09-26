@@ -4,12 +4,12 @@
 use std::io::Cursor;
 use std::time::SystemTime;
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::analysis::run;
+use packetcraftr_core::analysis::stats::Collector;
+use packetcraftr_core::capture_file::{
     CaptureHeader, CaptureRecord, Endianness, Error, Limits, MetadataBlockKind, PacketBlockKind,
     Reader, RecordKind, Writer, rewrite,
 };
-use packetcraftr_core::analysis::run;
-use packetcraftr_core::analysis::stats::Collector;
 use packetcraftr_core::protocol::builtin;
 
 fn u16_bytes(endianness: Endianness, value: u16) -> [u8; 2] {
@@ -441,7 +441,7 @@ fn statistics_reject_simple_packet_time_absence_explicitly() {
 
 #[test]
 fn selection_preserves_raw_packets_and_metadata_across_sections() {
-    use packetcraftr_core::analysis::pcap::select;
+    use packetcraftr_core::capture_file::select;
     let input = adversarial_pcapng();
     for selected in [vec![], vec![1, 3], vec![2, 4], vec![1, 2, 3, 4]] {
         let mut source = Reader::new(Cursor::new(&input)).unwrap();
@@ -486,7 +486,7 @@ fn selection_preserves_raw_packets_and_metadata_across_sections() {
 
 #[test]
 fn selection_updates_finite_section_lengths_including_empty_sections() {
-    use packetcraftr_core::analysis::pcap::select;
+    use packetcraftr_core::capture_file::select;
     let mut input = Vec::new();
     let mut expected = Vec::new();
     for endian in [Endianness::Little, Endianness::Big] {
@@ -523,7 +523,7 @@ fn selection_updates_finite_section_lengths_including_empty_sections() {
 
 #[test]
 fn selection_preserves_classic_precision_endianness_and_fcs() {
-    use packetcraftr_core::analysis::pcap::select;
+    use packetcraftr_core::capture_file::select;
     for endian in [Endianness::Little, Endianness::Big] {
         for nanos in [false, true] {
             let mut input = classic(endian, 0xa400_0001);
@@ -584,7 +584,7 @@ proptest::proptest! {
         let (rewritten, _) = rewrite(&mut source, Vec::new(), Limits::default()).unwrap();
         proptest::prop_assert_eq!(&rewritten, &input);
         let mut source = Reader::new(Cursor::new(&input)).unwrap();
-        let (filtered, report) = packetcraftr_core::analysis::pcap::select(
+        let (filtered, report) = packetcraftr_core::capture_file::select(
             &mut source, Vec::new(), Limits::default(), |number, _| Ok(mask & (1 << (number - 1)) != 0)
         ).unwrap();
         proptest::prop_assert_eq!(filtered, expected);

@@ -176,7 +176,7 @@ fn assert_capture_limits(registry: &Arc<packetcraftr_core::registry::Registry>, 
         error,
         Error::Capture {
             number: 2,
-            source: packetcraftr_core::analysis::pcap::Error::FrameLimitExceeded {
+            source: packetcraftr_core::capture_file::Error::FrameLimitExceeded {
                 actual: 2,
                 limit: 1
             }
@@ -203,7 +203,7 @@ fn assert_capture_limits(registry: &Arc<packetcraftr_core::registry::Registry>, 
         error,
         Error::Capture {
             number: 1,
-            source: packetcraftr_core::analysis::pcap::Error::StreamByteLimitExceeded { .. }
+            source: packetcraftr_core::capture_file::Error::StreamByteLimitExceeded { .. }
         }
     ));
 }

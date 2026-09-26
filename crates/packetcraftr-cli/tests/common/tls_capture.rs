@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr_core as core;
-use packetcraftr_core::analysis::pcap::Format as CaptureFormat;
-use packetcraftr_core::analysis::pcap::Writer;
+use packetcraftr_core::capture_file::Format as CaptureFormat;
+use packetcraftr_core::capture_file::Writer;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;

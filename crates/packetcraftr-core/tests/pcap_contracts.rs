@@ -4,7 +4,7 @@
 use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
-use packetcraftr_core::analysis::pcap::{
+use packetcraftr_core::capture_file::{
     Endianness, Error, Format, PcapOptions, Reader, ReaderOptions, Writer,
 };
 use packetcraftr_core::frame::{Frame, Lengths, LinkType};

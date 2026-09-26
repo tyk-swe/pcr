@@ -20,7 +20,7 @@ use packetcraftr::replay::{
     run_with_selector,
 };
 use packetcraftr::send;
-use packetcraftr_core::analysis::pcap::{Reader, Writer};
+use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};

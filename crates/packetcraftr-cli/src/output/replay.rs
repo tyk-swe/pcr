@@ -11,7 +11,7 @@ use super::contract::Error;
 use super::frame::Captured;
 
 use packetcraftr::replay::Timing;
-use packetcraftr_core::analysis::pcap::Format as SourceFormat;
+use packetcraftr_core::capture_file::Format as SourceFormat;
 // The schema resolves both replay interface fields to `$defs.interfaceId` and
 // both link-mode fields to `$defs.linkMode`.
 use packetcraftr_netio::interface::Id as InterfaceId;

@@ -1462,3 +1462,65 @@ impl ResolveTarget for Gate {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
 }
 ```
+
+## Scan and traceroute on the client
+
+Scan and traceroute are client methods that take a request and a sink, like
+send and exchange. The request carries the route and collection bounds the
+`ExchangeExecutor` held before, and the client supplies the policy, registry,
+clock, runtime, and cancellation.
+
+| Before | After |
+|---|---|
+| `scan::run(&request, &mut authorizer, &registry, &mut ExchangeExecutor::new(&client, send, collection), &mut clock)` | `let collector = scan::Collector::default(); let report = client.scan(request, collector.clone())?; collector.finish(report)?` |
+| `scan::run_with_events(&request, .., &runtime, sink)` | `client.scan(request, sink)` (the client's runtime publishes) |
+| `traceroute::run(..)`, `traceroute::run_with_events(..)` | `client.traceroute(request, collector.clone())`, `client.traceroute(request, sink)` |
+| `scan::Summary`, `traceroute::Summary` | `scan::Report`, `traceroute::Report` |
+| `scan::Report`, `traceroute::Report` (every event joined) | `scan::Aggregate`, `traceroute::Aggregate` |
+| `send.plan` of the executor's `send::Options` | `request.route` |
+| the executor's `exchange::Collection` | `request.collection` |
+| `scan::PipelineError` | `scan::PipelineFailure` |
+| `scan::ResponseClassification`, `traceroute::ResponseClassification` | `scan::CorrelatedResponse`, `traceroute::CorrelatedResponse` |
+| `traceroute::Completion`, `report.completion` | `traceroute::Termination`, `report.termination` |
+| `scan::Batch`, `traceroute::Batch` | removed; executors are internal |
+
+```rust
+// Before
+let mut send = send::Options::default();
+send.plan.link_mode = Mode::Layer3;
+let report = scan::run(
+    &request,
+    &mut PolicyAuthorizer::for_packets(&policy),
+    &registry,
+    &mut ExchangeExecutor::new(&client, send, collection),
+    &mut SystemClock,
+)?;
+// After
+let request = scan::Request {
+    route: route::Options { link_mode: Mode::Layer3, ..Default::default() },
+    collection,
+    ..request
+};
+let collector = scan::Collector::default();
+let report = client.scan(request, collector.clone())?;
+let aggregate = collector.finish(report)?;
+```
+
+The duration limit and every pacing delay are anchored on the client's clock,
+and its cancellation stops the run; a `CancellableClock` is no longer needed.
+`Request` values are no longer serde types, because the route and collection
+bounds are not.
+
+**Pipelining.** `max_in_flight` alone selects how a scan runs: one runs each
+probe as its own exchange, and up to `scan::MAX_IN_FLIGHT` overlap their
+response windows over one capture group. `probe::Executor` no longer has
+`pipeline_capacity` or `execute_pipeline`, and `probe::{PipelineOptions,
+PipelineEvent}` are gone. An `Executor` implementation that only forwarded
+them deletes those methods.
+
+**Errors.** `scan::Error` and `traceroute::Error` add `IncoherentEvents`
+(`internal.scan_event_coherence`, `internal.traceroute_event_coherence`) for a
+collector finished with another run's report. Other codes are unchanged; a
+pipeline failure still reaches the caller as
+`scan::Error::PipelineExecution`, whose source chain holds the
+`scan::PipelineFailure` with the pending evidence.

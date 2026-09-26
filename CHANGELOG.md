@@ -400,9 +400,33 @@ All notable changes to PacketcraftR are documented here. The format follows
   `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
 
   See `docs/migration-unreleased.md`.
+- Scan and traceroute run on the client: `client.scan(scan::Request, S)` and
+  `client.traceroute(traceroute::Request, S)` publish their events to a `Sink`
+  and return the terminal `Report`, and `scan::Collector` and
+  `traceroute::Collector` rebuild the `Aggregate`. `scan::{run,
+  run_with_events}` and `traceroute::{run, run_with_events}` are removed. Both
+  requests gain `route: route::Options` and `collection: exchange::Collection`
+  and no longer implement `Serialize`/`Deserialize`. The former `Summary` of
+  each is its `Report`, and the former `Report` its `Aggregate`; both gain an
+  `Error::IncoherentEvents` variant for a collector finished with another
+  run's report.
+- Pipelined scan execution is internal to the client: `probe::Executor` loses
+  `pipeline_capacity` and `execute_pipeline`, `probe::{PipelineOptions,
+  PipelineEvent}` are removed, and a request with `max_in_flight` above one
+  always runs pipelined, so `capability.probe_pipeline` is no longer reported.
+  `scan::PipelineError` is renamed `scan::PipelineFailure`. The
+  `scan::Batch` and `traceroute::Batch` aliases are removed.
+- `scan::ResponseClassification` and `traceroute::ResponseClassification` are
+  renamed `CorrelatedResponse`. `traceroute::Completion` is renamed
+  `traceroute::Termination`, and the report and aggregate field `completion`
+  is `termination`; the published `completion` field is unchanged.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
+- `scan::MAX_IN_FLIGHT` (1024) names the most probe response windows one scan
+  overlaps; request validation and the pipeline share it.
 - `packetcraftr::ExchangeEvidenceError` is public and names why the evidence an
   executor returned is inconsistent with its step, including the new
   `PermitMismatch`.
@@ -699,6 +723,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A pipelined scan (`max_in_flight` above one) reads its duration limit and
+  probe start schedule from the client's clock, like a serial scan, instead
+  of the system clock; waits for captured frames stay on the capture group.
+  A UDP-profile scan builds its operation-local registry once per scan
+  instead of once per probe.
 - `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
   the operation's destinations (and for `send` and `exchange` its budget) are
   authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer

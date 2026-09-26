@@ -49,7 +49,7 @@ where
         .start_accounting(Duration::ZERO)
         .map_err(Error::from)?;
     let started = Instant::now();
-    validate_base_shape(&packet, request.build.max_layers)?;
+    validate_base_shape(&packet, request.build.limits.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
     let fields = resolve_fields(&packet, &request.targets)?;
     let compatible_mutations = request

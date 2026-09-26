@@ -105,8 +105,10 @@ impl FrameDecoder {
             .decode(
                 frame.clone(),
                 core::decode::Options {
-                    max_packet_size: self.max_frame_bytes,
-                    ..core::decode::Options::default()
+                    limits: packetcraftr_core::packet::Limits {
+                        max_packet_size: self.max_frame_bytes,
+                        ..packetcraftr_core::packet::Limits::default()
+                    },
                 },
             )
             .map_err(CliError::classified)

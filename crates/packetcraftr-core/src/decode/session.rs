@@ -113,9 +113,9 @@ impl<'registry> DecodeSession<'registry> {
     }
 
     fn ensure_layer_capacity(&self) -> Result<(), Error> {
-        if self.packet.len() >= self.options.max_layers {
+        if self.packet.len() >= self.options.limits.max_layers {
             return Err(Error::LayerLimit {
-                limit: self.options.max_layers,
+                limit: self.options.limits.max_layers,
             });
         }
         Ok(())

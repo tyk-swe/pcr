@@ -40,8 +40,10 @@ pub fn dissect_built(
     match dissector.decode(
         frame,
         crate::decode::Options {
-            max_packet_size: limits.max_packet_bytes,
-            ..crate::decode::Options::default()
+            limits: crate::packet::Limits {
+                max_packet_size: limits.max_packet_bytes,
+                ..crate::packet::Limits::default()
+            },
         },
     ) {
         Ok(decoded) => {

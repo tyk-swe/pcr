@@ -35,8 +35,10 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(compiled) = Filter::compile(text, &registry, options) {
         let dissector = Dissector::new(registry.clone());
         let decode_options = DecodeOptions {
-            max_layers: 16,
-            max_packet_size: 64 * 1024,
+            limits: packetcraftr_core::packet::Limits {
+                max_layers: 16,
+                max_packet_size: 64 * 1024,
+            },
         };
         let frame_bytes = Bytes::copy_from_slice(frame_bytes);
         for link_type in [LinkType::ETHERNET, LinkType::IPV4, LinkType::IPV6] {

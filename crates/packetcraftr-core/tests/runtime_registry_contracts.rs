@@ -174,7 +174,10 @@ fn assert_build_decode_limits(
             one.clone(),
             codec::Context::default(),
             build::Options {
-                max_layers: 0,
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
                 ..build::Options::default()
             },
         ),
@@ -188,7 +191,10 @@ fn assert_build_decode_limits(
             one,
             codec::Context::default(),
             build::Options {
-                max_packet_size: 0,
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
                 ..build::Options::default()
             },
         ),
@@ -199,8 +205,10 @@ fn assert_build_decode_limits(
             registry,
             vec![1],
             decode::Options {
-                max_layers: 0,
-                ..decode::Options::default()
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: 0,
+                    ..packetcraftr_core::packet::Limits::default()
+                }
             },
         ),
         Err(decode::Error::LayerLimit { limit: 0 })
@@ -210,8 +218,10 @@ fn assert_build_decode_limits(
             registry,
             vec![1, 2],
             decode::Options {
-                max_packet_size: 1,
-                ..decode::Options::default()
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 1,
+                    ..packetcraftr_core::packet::Limits::default()
+                }
             },
         ),
         Err(decode::Error::PacketSizeLimit { .. })

@@ -198,12 +198,12 @@ impl Request {
         self.first_case
             .checked_add(final_case_offset)
             .ok_or(Error::CaseIndexOverflow)?;
-        if self.build.max_packet_size == 0
-            || self.build.max_packet_size > self.limits.max_packet_bytes
+        if self.build.limits.max_packet_size == 0
+            || self.build.limits.max_packet_size > self.limits.max_packet_bytes
         {
             return Err(Error::InvalidLimit {
                 field: "build.max_packet_size",
-                value: self.build.max_packet_size as u64,
+                value: self.build.limits.max_packet_size as u64,
                 reason: format!("must be within 1..={}", self.limits.max_packet_bytes),
             });
         }

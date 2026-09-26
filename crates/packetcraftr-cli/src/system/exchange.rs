@@ -23,7 +23,7 @@ pub(crate) fn options(
         capture: limits,
         decode: core::decode::Options::default(),
     };
-    options.decode.max_packet_size = limits.snap_length;
+    options.decode.limits.max_packet_size = limits.snap_length;
     options.validate().map_err(CliError::classified)?;
     Ok(options)
 }

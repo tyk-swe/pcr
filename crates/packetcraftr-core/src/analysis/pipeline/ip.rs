@@ -186,7 +186,7 @@ impl IpDispatch {
             .and_then(|charge| charge.checked_add(size_of::<Option<usize>>()))
             .and_then(|charge| charge.checked_add(LAYER_METADATA_RESERVATION))
             .ok_or_else(|| self.aggregate_memory_error())?;
-        let structural_layers = crate::decode::Options::default()
+        let structural_layers = crate::packet::Limits::default()
             .max_layers
             .min(datagram_bytes.saturating_add(1));
         let affordable_layers = available

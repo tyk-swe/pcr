@@ -368,8 +368,10 @@ impl FieldEdits {
         let decoded = dissector.decode(
             frame.clone(),
             decode::Options {
-                max_layers: crate::layout::DEFAULT_MAX_LAYERS,
-                max_packet_size: limits.max_output_bytes,
+                limits: crate::packet::Limits {
+                    max_packet_size: limits.max_output_bytes,
+                    ..crate::packet::Limits::default()
+                },
             },
         )?;
         screen_stack(&decoded)?;

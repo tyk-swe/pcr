@@ -384,8 +384,10 @@ where
             .decode(
                 frame,
                 crate::decode::Options {
-                    max_packet_size: limits.max_frame_bytes,
-                    ..crate::decode::Options::default()
+                    limits: crate::packet::Limits {
+                        max_packet_size: limits.max_frame_bytes,
+                        ..crate::packet::Limits::default()
+                    },
                 },
             )
             .map_err(|source| Error::Decode { number, source })?;
@@ -752,8 +754,10 @@ fn decode_derived(
         .decode(
             frame,
             crate::decode::Options {
-                max_layers,
-                max_packet_size: datagram.bytes.len(),
+                limits: crate::packet::Limits {
+                    max_layers,
+                    max_packet_size: datagram.bytes.len(),
+                },
             },
         )
         .map_err(|source| {
@@ -909,8 +913,10 @@ mod tests {
                 .decode(
                     frame,
                     crate::decode::Options {
-                        max_packet_size: self.max_frame_bytes,
-                        ..crate::decode::Options::default()
+                        limits: crate::packet::Limits {
+                            max_packet_size: self.max_frame_bytes,
+                            ..crate::packet::Limits::default()
+                        },
                     },
                 )
                 .expect("frame decodes");

@@ -7,7 +7,9 @@ use std::fmt;
 
 use crate::layer::{Layer, Padding};
 
+mod limits;
 pub mod link;
+pub use limits::Limits;
 
 /// Exactly one ordered, arbitrary wire stack.
 ///

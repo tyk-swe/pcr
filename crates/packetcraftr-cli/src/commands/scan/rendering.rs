@@ -129,3 +129,31 @@ pub(super) fn scan_error(error: packetcraftr::probe::Error) -> CliError {
     }
     cli
 }
+
+/// A TCP connect scan's endpoints and socket statistics.
+pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Result<(), CliError> {
+    for endpoint in &report.endpoints {
+        write_stdout_line(format_args!(
+            "{} tcp-connect/{} classification={}",
+            endpoint.address,
+            endpoint.port,
+            endpoint.classification.as_str()
+        ))?;
+    }
+    write_stdout_line(format_args!(
+        "{} socket connections attempted; {} succeeded; elapsed {:?}",
+        report.summary.socket_stats.connections_attempted,
+        report.summary.socket_stats.connections_succeeded,
+        report.summary.socket_stats.elapsed
+    ))?;
+    let rtt = &report.summary.socket_stats.rtt;
+    write_stdout_line(format_args!(
+        "probes sent={} received={} lost={} rtt min/avg/max={}/{}/{}",
+        rtt.sent,
+        rtt.received,
+        rtt.lost,
+        optional_debug(rtt.min),
+        optional_debug(rtt.avg),
+        optional_debug(rtt.max),
+    ))
+}

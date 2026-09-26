@@ -3,7 +3,7 @@
 
 //! Link-layer transmission capabilities, modes, and VLAN header limits.
 
-pub(crate) use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
+pub(crate) use packetcraftr_core::packet::MacAddress;
 
 /// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;

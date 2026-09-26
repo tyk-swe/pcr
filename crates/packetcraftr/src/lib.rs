@@ -43,6 +43,7 @@ pub mod exchange;
 mod execution;
 pub mod fuzz;
 mod mtu;
+pub mod neighbor;
 mod planning;
 pub mod policy;
 mod preparation;

@@ -116,7 +116,7 @@ pub(crate) struct WorkflowOverrides {
 impl<R, N, I> ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: packetcraftr_netio::transmit::Sender + packetcraftr_netio::capture::Provider,
 {
     /// Runs one capture-ready exchange for a workflow, with the executor's

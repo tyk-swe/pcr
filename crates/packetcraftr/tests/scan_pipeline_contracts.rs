@@ -1,5 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use packetcraftr::neighbor;
 use packetcraftr::{
     Client,
     clock::SystemClock,
@@ -20,7 +21,7 @@ use packetcraftr_netio::{
     self as net, capture,
     interface::Id,
     link::{Capability, Mode},
-    neighbor, route, transmit,
+    route, transmit,
 };
 use std::{
     collections::VecDeque,

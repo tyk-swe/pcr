@@ -1,13 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Planned, limit};
+use crate::neighbor;
 use crate::{
     BoundaryError,
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
     probe::{ExchangeExecutor, PipelineOptions},
 };
 use packetcraftr_core::{field::FieldValue, packet::Packet};
-use packetcraftr_netio::{capture::group::MAX_SOURCES, interface, neighbor, route, transmit};
+use packetcraftr_netio::{capture::group::MAX_SOURCES, interface, route, transmit};
 use std::{
     collections::{HashMap, hash_map::Entry},
     net::IpAddr,

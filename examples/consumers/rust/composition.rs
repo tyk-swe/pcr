@@ -23,7 +23,8 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr_netio::transmit;
-use packetcraftr_netio::{Error as LiveIoError, neighbor};
+use packetcraftr::neighbor;
+use packetcraftr_netio::Error as LiveIoError;
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);

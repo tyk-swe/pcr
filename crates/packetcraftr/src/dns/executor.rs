@@ -23,7 +23,7 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
 impl<R, N, I> Executor<Exchange> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
@@ -133,7 +133,7 @@ impl<R, N, I> TcpExecutor for ExchangeExecutor<'_, R, N, I> {}
 impl<R, N, I, P> Executor<Exchange> for TcpExchangeExecutor<'_, R, N, I, P>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {

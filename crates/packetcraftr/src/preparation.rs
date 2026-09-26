@@ -42,13 +42,14 @@ mod materialize;
 use std::net::IpAddr;
 use std::time::Instant;
 
+use crate::neighbor;
 use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::build::{self, Builder, BuiltPacket};
 use packetcraftr_core::codec;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::route::Provider as RouteProvider;
-use packetcraftr_netio::{Error as LiveIoError, interface, neighbor, transmit};
+use packetcraftr_netio::{Error as LiveIoError, interface, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;

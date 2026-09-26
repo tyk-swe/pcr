@@ -9,6 +9,7 @@ use std::sync::{
 };
 
 use packetcraftr::Client;
+use packetcraftr::neighbor;
 use packetcraftr::policy;
 use packetcraftr::policy::Authorizer;
 use packetcraftr::target::Hostname;
@@ -22,7 +23,6 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     interface::Id as InterfaceId,
-    neighbor,
     route::{Decision, Provider},
     transmit,
 };

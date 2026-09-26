@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use packetcraftr::neighbor;
 use packetcraftr::{Client, policy};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
@@ -16,7 +17,6 @@ use packetcraftr_core::protocol::network::Ipv4;
 use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_netio::capture;
 use packetcraftr_netio::link::Mode;
-use packetcraftr_netio::neighbor;
 
 mod common;
 

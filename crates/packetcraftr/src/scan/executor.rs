@@ -17,7 +17,7 @@ pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 impl<R, N, I> Executor<Batch> for ExchangeExecutor<'_, R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     fn pipeline_capacity(&self) -> usize {

@@ -6,8 +6,8 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
+use crate::neighbor;
 use packetcraftr_core::error::{Classification, Classified, Kind};
-use packetcraftr_netio::neighbor;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

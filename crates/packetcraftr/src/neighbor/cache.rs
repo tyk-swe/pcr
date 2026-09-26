@@ -9,11 +9,9 @@ use std::time::Instant;
 use super::Request as NeighborRequest;
 use super::error::invalid_options;
 use super::options::Options;
-use crate::{
-    interface::Id as InterfaceId,
-    link::{MacAddress, VlanTag},
-};
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::{MacAddress, VlanTag};
+use packetcraftr_netio::interface::Id as InterfaceId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NeighborCacheKey {
@@ -116,7 +114,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{interface::Id as InterfaceId, link::VlanKind};
+    use packetcraftr_core::packet::VlanKind;
+    use packetcraftr_netio::interface::Id as InterfaceId;
 
     fn request(target: IpAddr) -> NeighborRequest {
         NeighborRequest {

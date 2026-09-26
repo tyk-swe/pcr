@@ -12,7 +12,8 @@ use packetcraftr_netio::{
     transmit::Sender as PacketIo,
 };
 
-use packetcraftr_netio::{neighbor, route, transmit};
+use crate::neighbor;
+use packetcraftr_netio::{route, transmit};
 
 use super::model::Options;
 use crate::Client;
@@ -26,7 +27,7 @@ use crate::preparation::{Admitted, PreparedPacket};
 impl<R, N, I> Client<R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo + CaptureProvider,
 {
     pub fn exchange(

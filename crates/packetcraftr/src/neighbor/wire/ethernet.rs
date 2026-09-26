@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanKind, VlanTag};
+use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
+use packetcraftr_netio::link::MAX_VLAN_TAGS;
 
 pub(super) const HEADER_LENGTH: usize = 14;
 pub(super) const MINIMUM_WITHOUT_FCS: usize = 60;

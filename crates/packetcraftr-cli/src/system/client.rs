@@ -11,11 +11,11 @@ type SystemSender =
     net::transmit::ModeSender<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
 type ExchangeIo = net::PacketIo<SystemSender, net::capture::SystemProvider>;
 pub(crate) type Client =
-    WorkflowClient<net::route::SystemProvider, net::neighbor::SystemResolver, ExchangeIo>;
+    WorkflowClient<net::route::SystemProvider, packetcraftr::neighbor::SystemResolver, ExchangeIo>;
 pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<
     'a,
     net::route::SystemProvider,
-    net::neighbor::SystemResolver,
+    packetcraftr::neighbor::SystemResolver,
     ExchangeIo,
 >;
 
@@ -26,7 +26,7 @@ pub(crate) fn client(
     WorkflowClient::new(
         registry,
         net::route::SystemProvider,
-        net::neighbor::SystemResolver::default(),
+        packetcraftr::neighbor::SystemResolver::default(),
         net::PacketIo::new(
             net::transmit::ModeSender::new(
                 net::transmit::SystemLayer2,

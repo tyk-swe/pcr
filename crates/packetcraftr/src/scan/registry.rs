@@ -4,12 +4,13 @@
 //! agree with strict building. The original client and registry remain intact.
 use super::Batch;
 use crate::Client;
+use crate::neighbor;
 use packetcraftr_core::{
     error::BoundaryError,
     layer::Id,
     registry::{Discriminator, Registry},
 };
-use packetcraftr_netio::{capture, neighbor, route, transmit};
+use packetcraftr_netio::{capture, route, transmit};
 use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
 pub(super) fn configured(
     base: &Arc<Registry>,

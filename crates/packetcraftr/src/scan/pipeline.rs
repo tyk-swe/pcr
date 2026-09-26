@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
 use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
+use crate::neighbor;
 use crate::{
     Client, SentPacket, Stats,
     evidence::ExecutionPermit,
@@ -20,7 +21,7 @@ use packetcraftr_core::{
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{self, group},
-    neighbor, route, transmit,
+    route, transmit,
 };
 use prepare::AdmittedProbe;
 use std::{

@@ -4,13 +4,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::deadline::remaining_before;
 use bytes::Bytes;
 use packetcraftr_core::frame::Frame;
+use packetcraftr_netio::deadline::remaining_before;
 
-use crate::{
+use packetcraftr_core::packet::MacAddress;
+use packetcraftr_netio::{
     capture::{self, Session},
-    link::{Capability, MacAddress, Mode},
+    link::{Capability, Mode},
     route::{Decision, Scope, SelectionReason},
     transmit::{self, Layer2Frame},
 };

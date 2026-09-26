@@ -3,10 +3,8 @@
 
 use std::time::Instant;
 
+use crate::neighbor::{self, Request as NeighborRequest, Resolution as NeighborResolution};
 use packetcraftr_netio::link::Mode;
-use packetcraftr_netio::neighbor::{
-    self, Request as NeighborRequest, Resolution as NeighborResolution,
-};
 use packetcraftr_netio::transmit;
 
 use super::error::Error;

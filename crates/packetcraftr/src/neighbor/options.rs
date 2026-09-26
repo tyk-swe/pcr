@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use super::error::invalid_options;
-use crate::capture;
+use packetcraftr_netio::capture;
 
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);

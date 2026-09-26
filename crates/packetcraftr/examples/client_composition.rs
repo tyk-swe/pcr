@@ -17,17 +17,18 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 
 use packetcraftr::Client;
+use packetcraftr::neighbor;
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::send;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
+use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
 use packetcraftr_netio::transmit;
-use packetcraftr_netio::{Error as LiveIoError, neighbor};
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);

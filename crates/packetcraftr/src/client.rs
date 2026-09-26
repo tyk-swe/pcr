@@ -30,7 +30,7 @@ pub struct Client<R, N, I> {
 impl<R, N, I> Client<R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo,
 {
     pub fn new(

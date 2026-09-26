@@ -15,7 +15,7 @@ use crate::send::{Options, Report, SentFrame, SetOptions, SetReport};
 impl<R, N, I> Client<R, N, I>
 where
     R: packetcraftr_netio::route::Provider,
-    N: packetcraftr_netio::neighbor::Resolver,
+    N: crate::neighbor::Resolver,
     I: PacketIo,
 {
     pub fn send(&self, packet: Packet, options: Options) -> Result<Report, Error> {

@@ -9,7 +9,7 @@ use packetcraftr_core::{
 };
 
 use super::Request;
-use crate::{capture::Statistics, interface::Id as InterfaceId};
+use packetcraftr_netio::{capture::Statistics, interface::Id as InterfaceId};
 
 /// The provider failures this wraps retain their own platform source, which
 /// is not comparable, so these failures are matched on rather than equated.
@@ -45,7 +45,7 @@ pub enum Error {
         target: IpAddr,
         operation: &'static str,
         #[source]
-        source: crate::Error,
+        source: packetcraftr_netio::Error,
     },
     #[error(
         "neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}"
@@ -54,7 +54,7 @@ pub enum Error {
         interface: String,
         target: IpAddr,
         #[source]
-        source: crate::Error,
+        source: packetcraftr_netio::Error,
     },
     #[error(
         "neighbor resolution for {target} on {interface} failed and capture cleanup also failed: operation={operation}; cleanup={cleanup}"
@@ -64,7 +64,7 @@ pub enum Error {
         target: IpAddr,
         #[source]
         operation: Box<Self>,
-        cleanup: crate::Error,
+        cleanup: packetcraftr_netio::Error,
     },
 }
 
@@ -127,7 +127,7 @@ pub(super) fn resolution_error(interface: &InterfaceId, target: IpAddr, message:
 pub(super) fn map_io_error(
     request: &Request,
     operation: &'static str,
-    error: crate::Error,
+    error: packetcraftr_netio::Error,
 ) -> Error {
     Error::Io {
         interface: request.interface.name.clone(),

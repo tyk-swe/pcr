@@ -292,7 +292,7 @@ fn route_plan() -> Plan {
 fn materialized_route() -> Materialized {
     Materialized {
         plan: route_plan(),
-        neighbor_resolution: Some(packetcraftr_netio::neighbor::Resolution {
+        neighbor_resolution: Some(packetcraftr::neighbor::Resolution {
             mac_address: MacAddress([6, 7, 8, 9, 10, 11]),
             attempts: 2,
             cache_hit: false,

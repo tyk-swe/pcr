@@ -47,7 +47,7 @@ pub struct PendingEvidence {
 /// [`scan::Error::PipelineExecution`](crate::scan::Error::PipelineExecution).
 #[derive(Debug, thiserror::Error)]
 #[error("packet scan pipeline failed: {source}")]
-pub struct Failure {
+pub struct PipelineFailure {
     #[source]
     pub source: BoundaryError,
     pub stats: Stats,
@@ -57,7 +57,7 @@ pub struct Failure {
     /// Capture shutdown failure that followed the primary failure.
     pub cleanup: Option<Box<LiveIoError>>,
 }
-impl Classified for Failure {
+impl Classified for PipelineFailure {
     fn classification(&self) -> ErrorClassification {
         self.source.classification()
     }
@@ -606,7 +606,7 @@ pub(super) fn run<P: Providers, K: Clock>(
     });
     match result {
         Ok(()) => Ok(stats),
-        Err(source) => Err(BoundaryError::from_error(Failure {
+        Err(source) => Err(BoundaryError::from_error(PipelineFailure {
             source,
             stats,
             pending: pending_evidence(&pending, &planned),

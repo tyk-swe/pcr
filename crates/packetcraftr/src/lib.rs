@@ -12,7 +12,7 @@
 //! Live workflows run on a [`Client`]. It holds the [`policy::Policy`], the
 //! protocol registry, a [`clock::Clock`], the [`progress::Runtime`] that
 //! admits event workers, and the [`Providers`] every workflow reaches the
-//! network through ([`ProviderSet::system`] selects the native ones). Each
+//! network through ([`SystemProviders`] is the native set). Each
 //! workflow is admitted by the client's policy, with finite resource limits,
 //! before any provider is consulted; an interface selector is resolved only
 //! after that. A workflow method takes the workflow's request and a [`Sink`]

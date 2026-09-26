@@ -6,7 +6,7 @@
 //! explicit `Policy` carrying a destination allowlist and finite
 //! per-operation budgets. Nothing touches the network.
 //!
-//! Production composition uses `ProviderSet::system()`, each capability's
+//! Production composition uses `SystemProviders`, each capability's
 //! `SystemProvider` behind the `native-*` features, and the client resolves
 //! neighbors over its own transmit and capture providers; the policy and
 //! budget contract is identical either way.

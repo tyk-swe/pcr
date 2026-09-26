@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use packetcraftr::{ProviderSet, SystemProviders};
+use packetcraftr::SystemProviders;
 use packetcraftr_core as core;
 
 pub(crate) type Client = packetcraftr::Client<SystemProviders>;
@@ -16,7 +16,7 @@ pub(crate) fn client(
     policy: impl Into<Arc<packetcraftr::policy::Policy>>,
     runtime: &'static str,
 ) -> Client {
-    Client::new(registry, policy, ProviderSet::system())
+    Client::new(registry, policy, SystemProviders)
         .with_runtime(crate::resources::runtime(
             runtime,
             packetcraftr::progress::MAX_WORKER_CAPACITY,

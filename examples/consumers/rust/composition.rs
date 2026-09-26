@@ -4,7 +4,7 @@
 //! Composes local route and recording-I/O providers with an explicit
 //! destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production composes `ProviderSet::system()` under the same policy
+//! Production composes `SystemProviders` under the same policy
 //! contract; the client resolves neighbors over its own transmit and capture
 //! providers. Run with scripts/check-external-consumer.py.
 

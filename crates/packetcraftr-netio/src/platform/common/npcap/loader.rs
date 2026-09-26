@@ -36,39 +36,39 @@ use super::{
     },
     error::{error_buffer_message, interface_conversion_error},
 };
-use crate::{Error, interface::Id as InterfaceId, platform::layer2::pcap_common::Diagnostic};
+use crate::{Error, interface::Id as InterfaceId, platform::common::pcap_api::Diagnostic};
 use packetcraftr_core::error::Source;
 
-pub(super) struct NpcapApi {
+pub(in crate::platform) struct NpcapApi {
     // Keeps the DLL loaded while function pointers are used.
-    pub(super) _library: Library,
-    pub(super) pcap_create: PcapCreate,
-    pub(super) pcap_set_snaplen: PcapSetInteger,
-    pub(super) pcap_set_promisc: PcapSetInteger,
-    pub(super) pcap_set_timeout: PcapSetInteger,
-    pub(super) pcap_set_immediate_mode: PcapSetInteger,
+    pub(in crate::platform) _library: Library,
+    pub(in crate::platform) pcap_create: PcapCreate,
+    pub(in crate::platform) pcap_set_snaplen: PcapSetInteger,
+    pub(in crate::platform) pcap_set_promisc: PcapSetInteger,
+    pub(in crate::platform) pcap_set_timeout: PcapSetInteger,
+    pub(in crate::platform) pcap_set_immediate_mode: PcapSetInteger,
     // Optional capture-configuration exports: a runtime without them still
     // captures with defaults, while explicit requests fail typed.
-    pub(super) pcap_set_buffer_size: Option<PcapSetInteger>,
-    pub(super) pcap_set_tstamp_type: Option<PcapSetInteger>,
-    pub(super) pcap_set_tstamp_precision: Option<PcapSetInteger>,
-    pub(super) pcap_get_tstamp_precision: Option<PcapGetInteger>,
-    pub(super) pcap_list_tstamp_types: Option<PcapListTstampTypes>,
-    pub(super) pcap_free_tstamp_types: Option<PcapFreeTstampTypes>,
-    pub(super) pcap_tstamp_type_val_to_name: Option<PcapTstampTypeToStr>,
-    pub(super) pcap_tstamp_type_val_to_description: Option<PcapTstampTypeToStr>,
-    pub(super) pcap_activate: PcapActivate,
-    pub(super) pcap_datalink: PcapDatalink,
-    pub(super) pcap_snapshot: PcapSnapshot,
-    pub(super) pcap_compile: PcapCompile,
-    pub(super) pcap_setfilter: PcapSetFilter,
-    pub(super) pcap_freecode: PcapFreeCode,
-    pub(super) pcap_next_ex: PcapNextEx,
-    pub(super) pcap_sendpacket: PcapSendPacket,
-    pub(super) pcap_stats: PcapStats,
-    pub(super) pcap_breakloop: PcapBreakLoop,
-    pub(super) pcap_geterr: PcapGetError,
-    pub(super) pcap_close: PcapClose,
+    pub(in crate::platform) pcap_set_buffer_size: Option<PcapSetInteger>,
+    pub(in crate::platform) pcap_set_tstamp_type: Option<PcapSetInteger>,
+    pub(in crate::platform) pcap_set_tstamp_precision: Option<PcapSetInteger>,
+    pub(in crate::platform) pcap_get_tstamp_precision: Option<PcapGetInteger>,
+    pub(in crate::platform) pcap_list_tstamp_types: Option<PcapListTstampTypes>,
+    pub(in crate::platform) pcap_free_tstamp_types: Option<PcapFreeTstampTypes>,
+    pub(in crate::platform) pcap_tstamp_type_val_to_name: Option<PcapTstampTypeToStr>,
+    pub(in crate::platform) pcap_tstamp_type_val_to_description: Option<PcapTstampTypeToStr>,
+    pub(in crate::platform) pcap_activate: PcapActivate,
+    pub(in crate::platform) pcap_datalink: PcapDatalink,
+    pub(in crate::platform) pcap_snapshot: PcapSnapshot,
+    pub(in crate::platform) pcap_compile: PcapCompile,
+    pub(in crate::platform) pcap_setfilter: PcapSetFilter,
+    pub(in crate::platform) pcap_freecode: PcapFreeCode,
+    pub(in crate::platform) pcap_next_ex: PcapNextEx,
+    pub(in crate::platform) pcap_sendpacket: PcapSendPacket,
+    pub(in crate::platform) pcap_stats: PcapStats,
+    pub(in crate::platform) pcap_breakloop: PcapBreakLoop,
+    pub(in crate::platform) pcap_geterr: PcapGetError,
+    pub(in crate::platform) pcap_close: PcapClose,
 }
 
 impl NpcapApi {
@@ -167,12 +167,12 @@ impl NpcapApi {
     }
 }
 
-pub(super) fn npcap_api() -> Result<Arc<NpcapApi>, Error> {
+pub(in crate::platform) fn npcap_api() -> Result<Arc<NpcapApi>, Error> {
     static API: OnceLock<Result<Arc<NpcapApi>, Error>> = OnceLock::new();
     API.get_or_init(|| NpcapApi::load().map(Arc::new)).clone()
 }
 
-pub(super) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error> {
+pub(in crate::platform) fn npcap_device_name(interface: &InterfaceId) -> Result<String, Error> {
     let mut luid = NET_LUID_LH::default();
     // SAFETY: luid is writable and the interface index is a plain value.
     let index_result = unsafe { ConvertInterfaceIndexToLuid(interface.index, &mut luid) };

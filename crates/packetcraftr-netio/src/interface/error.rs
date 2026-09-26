@@ -42,11 +42,11 @@ impl Error {
 
     /// Wraps the failure a native backend reported while enumerating.
     #[cfg(native_route)]
-    pub(crate) fn native(error: crate::route::SystemError) -> Self {
+    pub(crate) fn native(error: crate::route::Error) -> Self {
         match error {
-            crate::route::SystemError::Unsupported(unsupported) => unsupported.into(),
-            crate::route::SystemError::Cancelled(cancelled) => cancelled.into(),
-            crate::route::SystemError::DeadlineExceeded { operation } => {
+            crate::route::Error::Unsupported(unsupported) => unsupported.into(),
+            crate::route::Error::Cancelled(cancelled) => cancelled.into(),
+            crate::route::Error::DeadlineExceeded { operation } => {
                 Self::DeadlineExceeded { operation }
             }
             error => Self::Discovery {

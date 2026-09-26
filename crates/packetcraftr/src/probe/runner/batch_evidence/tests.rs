@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 
 use crate::Stats;
 use crate::exchange::Response;
-use crate::execution::ExchangeEvidenceError;
 use crate::execution::limits::EvidenceLimits;
 use crate::probe::runner::{Evidence, Sequenced};
 use crate::test_support::{Failure, TestErrors};
@@ -50,7 +49,7 @@ fn a_response_that_differs_from_its_exact_frame_is_invalid_evidence() {
         validate(&execution, true),
         Err((
             7,
-            ExchangeEvidenceError::InvalidMatchedResponse {
+            crate::evidence::Error::InvalidMatchedResponse {
                 message: "matched response original bytes differ from its exact frame".to_owned()
             }
         ))
@@ -64,7 +63,7 @@ fn a_substituted_packet_or_misreported_byte_count_is_invalid_evidence() {
         validate(&execution, false),
         Err((
             7,
-            ExchangeEvidenceError::SentPacketMismatch { request_index: 0 }
+            crate::evidence::Error::SentPacketMismatch { request_index: 0 }
         ))
     );
 
@@ -73,7 +72,7 @@ fn a_substituted_packet_or_misreported_byte_count_is_invalid_evidence() {
         validate(&execution, true),
         Err((
             7,
-            ExchangeEvidenceError::SentByteCountMismatch {
+            crate::evidence::Error::SentByteCountMismatch {
                 reported: 1,
                 actual: 2
             }
@@ -93,7 +92,7 @@ fn untimestamped_capture_evidence_is_invalid() {
         validate(&execution, true),
         Err((
             7,
-            ExchangeEvidenceError::TimestampUnavailable {
+            crate::evidence::Error::TimestampUnavailable {
                 evidence: "matched response"
             }
         ))
@@ -105,7 +104,7 @@ fn untimestamped_capture_evidence_is_invalid() {
         validate(&execution, true),
         Err((
             7,
-            ExchangeEvidenceError::TimestampUnavailable {
+            crate::evidence::Error::TimestampUnavailable {
                 evidence: "unsolicited response"
             }
         ))
@@ -114,7 +113,7 @@ fn untimestamped_capture_evidence_is_invalid() {
 
 /// Validates `execution` as the evidence for a one-probe batch at sequence 7,
 /// reporting an invalid-evidence rejection as its sequence and typed cause.
-fn validate(execution: &Evidence, sent_matches: bool) -> Result<(), (u64, ExchangeEvidenceError)> {
+fn validate(execution: &Evidence, sent_matches: bool) -> Result<(), (u64, crate::evidence::Error)> {
     validate_batch_evidence(
         &TestErrors,
         &[Probe(7)],

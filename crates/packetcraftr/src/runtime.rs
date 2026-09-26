@@ -175,25 +175,45 @@ impl<F> Callback<F> {
 /// Publication failed before the callback acknowledged the event.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum EmitError {
+pub enum Error {
     #[error(transparent)]
     Deadline(#[from] DeadlineExceeded),
+    /// A callback or runtime failure; a cancelled publication is erased here
+    /// with its own message and classification.
     #[error(transparent)]
     Output(#[from] BoundaryError),
 }
 
-impl From<Cancelled> for EmitError {
+impl From<Cancelled> for Error {
     fn from(cancelled: Cancelled) -> Self {
-        Self::Output(BoundaryError::with_source(
-            cancelled.to_string(),
-            cancelled.classification(),
-            Vec::new(),
-            cancelled,
-        ))
+        Self::Output(BoundaryError::from_error(cancelled))
     }
 }
 
-impl From<Interrupted> for EmitError {
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Deadline(error) => error.classification(),
+            Self::Output(error) => error.classification(),
+        }
+    }
+
+    fn context(&self) -> Option<packetcraftr_core::error::Coordinate> {
+        match self {
+            Self::Deadline(error) => error.context(),
+            Self::Output(error) => error.context(),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Deadline(error) => error.causes(),
+            Self::Output(error) => error.causes(),
+        }
+    }
+}
+
+impl From<Interrupted> for Error {
     fn from(interrupted: Interrupted) -> Self {
         interrupted.into_error()
     }
@@ -231,7 +251,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
                 .spawn(move || worker.run(receiver, outcomes))
                 .map_err(|source| {
                     BoundaryError::with_source(
-                        format!("start progressive output worker failed: {source}"),
+                        "could not start progressive output worker",
                         output_classification(),
                         Vec::new(),
                         source,
@@ -248,7 +268,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
 
     /// Waits no longer than the deadline for the callback's answer. This
     /// cannot interrupt a callback already running on the worker.
-    pub fn emit(&self, event: T, deadline: &Deadline) -> Result<A, EmitError> {
+    pub fn emit(&self, event: T, deadline: &Deadline) -> Result<A, Error> {
         deadline.enforce()?;
         if self.in_flight.replace(true) {
             return Err(unavailable("progressive output already has an in-flight callback").into());
@@ -268,7 +288,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
                 match self.outcomes.recv_timeout(remaining) {
                     Ok(outcome) => {
                         self.in_flight.set(false);
-                        return outcome.map_err(EmitError::Output);
+                        return outcome.map_err(Error::Output);
                     }
                     Err(RecvTimeoutError::Disconnected) => {
                         self.in_flight.set(false);
@@ -284,7 +304,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
                 }
             }
         })();
-        if matches!(result, Err(EmitError::Deadline(_))) {
+        if matches!(result, Err(Error::Deadline(_))) {
             self.worker.mark_timed_out();
         }
         result
@@ -362,7 +382,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             worker.emit((), &deadline_after_admission()),
-            Err(EmitError::Deadline(_))
+            Err(Error::Deadline(_))
         ));
         entered.recv_timeout(Duration::from_secs(1)).unwrap();
         assert!(
@@ -413,7 +433,7 @@ mod tests {
             ))
         })
         .unwrap();
-        let Err(EmitError::Output(error)) = worker.emit((), &Deadline::new(Duration::from_secs(1)))
+        let Err(Error::Output(error)) = worker.emit((), &Deadline::new(Duration::from_secs(1)))
         else {
             panic!("expected callback failure")
         };
@@ -480,7 +500,7 @@ mod tests {
             (),
             &Deadline::new(Duration::from_secs(5)).with_cancellation(Some(signal)),
         );
-        let Err(EmitError::Output(error)) = result else {
+        let Err(Error::Output(error)) = result else {
             panic!("expected cancellation");
         };
         assert_eq!(error.classification().code, "io.cancelled");

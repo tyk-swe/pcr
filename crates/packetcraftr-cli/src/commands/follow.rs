@@ -25,12 +25,12 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.limits.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.limits)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention]);
+        crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864)]);
         // A UDP conversation never runs TCP reassembly.
         let tcp = !self.stream.text().starts_with("udp:");
         self.limits.resources(

@@ -22,8 +22,8 @@ use std::collections::hash_map::Entry;
 
 use packetcraftr_core::budget::Deadline;
 
+use crate::execution::Errors;
 use crate::execution::evidence::EvidenceDiagnosticDescriptor;
-use crate::execution::{Errors, ExchangeEvidenceError};
 
 /// The probe workflows that share this kernel. The tag selects the
 /// workflow's evidence diagnostics and the words its evidence errors use.
@@ -65,7 +65,7 @@ impl Workflow {
     }
 
     /// The message this workflow reports for inconsistent executor evidence.
-    pub(crate) fn describe_evidence(self, source: &ExchangeEvidenceError) -> String {
+    pub(crate) fn describe_evidence(self, source: &crate::evidence::Error) -> String {
         source.describe(self.batch_noun(), self.as_str())
     }
 }

@@ -31,17 +31,17 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.limits.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.limits)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            max_field_bytes: Bytes @ ObservationCollection,
-            max_evidence_bytes: Bytes @ ObservationCollection,
-            max_details: Count @ ResultRetention,
-            max_detail_bytes: Bytes @ ResultRetention,
-            max_scratch_bytes: Bytes @ Comparison,
+            max_field_bytes: Bytes @ ObservationCollection preset(16384, 65536),
+            max_evidence_bytes: Bytes @ ObservationCollection preset(8388608, 67108864),
+            max_details: Count @ ResultRetention preset(64, 256),
+            max_detail_bytes: Bytes @ ResultRetention preset(1048576, 4194304),
+            max_scratch_bytes: Bytes @ Comparison preset(16777216, 134217728),
         ]);
         // Indexing runs only when the compiled rules or filters need the stream
         // index, which `run` reports once they compile.

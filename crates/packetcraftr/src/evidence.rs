@@ -1,11 +1,110 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Evidence every live workflow shares: the exact [`SentPacket`] a
+//! transmission produced, and the [`Error`] for evidence an executor returned
+//! that is inconsistent with the step it was granted.
+
+use std::time::Duration;
+
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, SendEvidenceFault,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
+
+/// Why the evidence an executor returned for one step is inconsistent with
+/// the step it was granted: the exact sent packets and bytes, the captured
+/// responses and their timing, capture statistics, or evidence limits.
+///
+/// Workflows report it at the step it concerns, in their own error.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// The evidence is bound to a different execution permit than the one
+    /// the step was granted.
+    #[error("executor returned evidence for a different execution permit")]
+    PermitMismatch,
+    #[error("expected {expected} sent receipts, received {receipts}")]
+    SentCardinality { expected: usize, receipts: usize },
+    #[error("matched response references a request outside the executed step")]
+    ResponseOutsideBatch,
+    #[error("executor capture frame-count accounting overflowed")]
+    CapturedFrameCountOverflow,
+    #[error("executor returned {actual} captured frames beyond max_evidence_frames={limit}")]
+    CapturedFrameLimitExceeded { actual: usize, limit: usize },
+    #[error("executor capture byte accounting overflowed")]
+    CapturedByteCountOverflow,
+    #[error("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")]
+    CapturedByteLimitExceeded { actual: usize, limit: usize },
+    /// The packet at `request_index` does not carry the destination and
+    /// probe identity the step requested.
+    #[error("sent packet does not preserve the requested destination and probe identity")]
+    SentPacketMismatch { request_index: usize },
+    #[error("sent frame byte accounting overflowed")]
+    SentByteCountOverflow,
+    #[error("successful exchange reported {reported} sent bytes for {actual} exact frame bytes")]
+    SentByteCountMismatch { reported: u64, actual: u64 },
+    #[error("executor returned {evidence} without a timestamp")]
+    TimestampUnavailable { evidence: &'static str },
+    #[error("{message}")]
+    InvalidMatchedResponse { message: String },
+    #[error("matched response latency {latency:?} exceeds timeout {timeout:?}")]
+    ResponseAfterTimeout {
+        latency: Duration,
+        timeout: Duration,
+    },
+    #[error("{message}")]
+    InvalidUnsolicitedResponse { message: String },
+    #[error("{message}")]
+    InvalidCaptureStatistics { message: String },
+    #[error("successful exchange statistics do not account for every request")]
+    IncompleteStatistics,
+}
+
+impl Error {
+    pub(crate) const fn request_index(&self) -> Option<usize> {
+        match self {
+            Self::SentPacketMismatch { request_index } => Some(*request_index),
+            _ => None,
+        }
+    }
+
+    /// The message a workflow reports, naming what one executed step is
+    /// (`step`, such as "hop batch") and the workflow (`workflow`) where the
+    /// neutral [`Display`](std::fmt::Display) text leaves them generic.
+    pub(crate) fn describe(&self, step: &str, workflow: &str) -> String {
+        match self {
+            Self::ResponseOutsideBatch => {
+                format!("matched response references a request outside the {step}")
+            }
+            Self::SentPacketMismatch { .. } => {
+                format!(
+                    "sent packet does not preserve the {workflow} destination and probe identity"
+                )
+            }
+            Self::IncompleteStatistics => {
+                format!("successful exchange statistics do not account for every {workflow} probe")
+            }
+            error => error.to_string(),
+        }
+    }
+}
+
+/// Inconsistent evidence breaks the executor's contract with the workflow;
+/// each workflow reports it at the step it concerns with its own code.
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        Classification::new(
+            "internal.live_io_invariant",
+            Kind::Internal,
+            Some(
+                "report the inconsistent provider result; do not reinterpret it as a successful operation",
+            ),
+        )
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ExecutionPermit(u64);

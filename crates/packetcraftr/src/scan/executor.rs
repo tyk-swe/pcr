@@ -19,7 +19,7 @@ use crate::clock::Clock;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
 use crate::probe::{Batch, Evidence};
 use crate::providers::Providers;
-use crate::{Client, SentPacket, Stats};
+use crate::{Client, Stats, evidence::SentPacket};
 use packetcraftr_core::error::BoundaryError;
 
 use super::Probe;

@@ -13,4 +13,4 @@ pub(crate) mod normalize;
 mod provider;
 
 pub use models::{Decision, Provider, Scope, SelectionReason};
-pub use provider::{SystemError, SystemProvider};
+pub use provider::{Error, SystemProvider};

@@ -138,31 +138,83 @@ pub(crate) fn policy_value<T: ValueEnum>(value: &T) -> Option<Value> {
         .map(|value| Value::Policy(value.get_name().to_owned()))
 }
 
+/// The defaults each `--resource-preset` gives one setting, as command-line
+/// text for clap to parse and validate like any other default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PresetDefaults {
+    pub(crate) ci_v1: &'static str,
+    pub(crate) workstation_v1: &'static str,
+}
+
+impl PresetDefaults {
+    const fn value(self, preset: Preset) -> &'static str {
+        match preset {
+            Preset::CiV1 => self.ci_v1,
+            Preset::WorkstationV1 => self.workstation_v1,
+        }
+    }
+}
+
+/// One typed argument field declared as a resource setting. Build it with
+/// [`declare!`], which names the field and so its command-line argument id.
+pub(crate) struct Field {
+    pub(crate) id: &'static str,
+    pub(crate) value: Option<Value>,
+    pub(crate) unit: Unit,
+    pub(crate) stage: Stage,
+    pub(crate) enabled: Enabled,
+    pub(crate) preset: Option<PresetDefaults>,
+}
+
 /// Declares typed argument fields as resource settings:
-/// `declare!(settings, group, [field: Unit @ Stage, field: Unit @ Stage if enabled])`.
-/// Each field's name is its command-line argument id.
+/// `declare!(settings, group, [field: Unit @ Stage, field: Unit @ Stage preset(ci, ws) if enabled])`.
+/// Each field's name is its command-line argument id. `preset(ci, ws)` gives
+/// the field's `ci-v1` and `workstation-v1` defaults, which offline commands
+/// take under `--resource-preset`.
 macro_rules! declare {
     (@enabled) => { $crate::resources::Enabled::Fixed(true) };
     (@enabled $enabled:expr) => { $crate::resources::Enabled::from($enabled) };
+    (@preset) => { None };
+    (@preset $ci:literal, $workstation:literal) => {
+        Some($crate::resources::PresetDefaults {
+            ci_v1: stringify!($ci),
+            workstation_v1: stringify!($workstation),
+        })
+    };
     (
         $settings:expr, $group:expr,
-        [$($field:ident: $unit:ident @ $stage:ident $(if $enabled:expr)?),* $(,)?]
+        [$(
+            $field:ident: $unit:ident @ $stage:ident
+            $(preset($ci:literal, $workstation:literal))?
+            $(if $enabled:expr)?
+        ),* $(,)?]
     ) => {{
         $(
-            $settings.declare(
-                stringify!($field),
-                $crate::resources::SettingValue::setting_value(&$group.$field),
-                $crate::resources::Unit::$unit,
-                $crate::resources::Stage::$stage,
-                $crate::resources::declare!(@enabled $($enabled)?),
-            );
+            $settings.declare($crate::resources::Field {
+                id: stringify!($field),
+                value: $crate::resources::SettingValue::setting_value(&$group.$field),
+                unit: $crate::resources::Unit::$unit,
+                stage: $crate::resources::Stage::$stage,
+                enabled: $crate::resources::declare!(@enabled $($enabled)?),
+                preset: $crate::resources::declare!(@preset $($ci, $workstation)?),
+            });
         )*
     }};
 }
 pub(crate) use declare;
 
+/// Where declared settings go: the `--resource-diagnostics` report, or the
+/// defaults a `--resource-preset` gives the selected command.
+enum Target<'a> {
+    Diagnostics(Diagnostics<'a>),
+    Presets {
+        preset: Preset,
+        defaults: BTreeMap<&'static str, &'static str>,
+    },
+}
+
 /// The settings one invocation reports, collected from typed arguments.
-pub(crate) struct Settings<'a> {
+struct Diagnostics<'a> {
     root: (&'a clap::Command, &'a ArgMatches),
     selected: Option<(&'a clap::Command, &'a ArgMatches)>,
     preset: Option<Preset>,
@@ -171,25 +223,69 @@ pub(crate) struct Settings<'a> {
     declared: BTreeMap<String, (Setting, Enabled)>,
 }
 
+/// Collects the settings a command declares from its typed arguments.
+pub(crate) struct Settings<'a> {
+    target: Target<'a>,
+}
+
 impl Settings<'_> {
-    /// Declares one argument's effective value. `id` is the argument id; an
-    /// unset optional argument (`value` is `None`) is not reported.
-    ///
-    /// # Panics
-    ///
-    /// If `id` names no argument of the selected command or the root command.
-    pub(crate) fn declare(
-        &mut self,
-        id: &str,
-        value: Option<Value>,
-        unit: Unit,
-        stage: Stage,
-        enabled: Enabled,
-    ) {
+    /// The `--resource-preset` defaults `arguments` declare, by argument id.
+    pub(crate) fn preset_defaults<T: Spec>(
+        arguments: &T,
+        preset: Preset,
+    ) -> BTreeMap<&'static str, &'static str> {
+        let mut settings = Settings {
+            target: Target::Presets {
+                preset,
+                defaults: BTreeMap::new(),
+            },
+        };
+        arguments.resources(&mut settings);
+        match settings.target {
+            Target::Presets { defaults, .. } => defaults,
+            Target::Diagnostics(_) => BTreeMap::new(),
+        }
+    }
+
+    /// Declares one argument field. An unset optional argument (its value is
+    /// `None`) is not reported, but its preset still applies.
+    pub(crate) fn declare(&mut self, field: Field) {
+        match &mut self.target {
+            Target::Presets { preset, defaults } => {
+                if let Some(values) = field.preset {
+                    defaults.insert(field.id, values.value(*preset));
+                }
+            }
+            Target::Diagnostics(report) => report.declare(field),
+        }
+    }
+
+    /// Declares the aggregate JSON retention a command derives from its
+    /// physical frame ceiling.
+    pub(crate) fn retained_result_items(&mut self, max_frames: u64) {
+        if let Target::Diagnostics(report) = &mut self.target {
+            report.retained_result_items(max_frames);
+        }
+    }
+}
+
+impl Diagnostics<'_> {
+    fn declare(&mut self, field: Field) {
+        let Field {
+            id,
+            value,
+            unit,
+            stage,
+            enabled,
+            preset: defaults,
+        } = field;
         let Some(value) = value else {
             return;
         };
-        let (arg, matches) = self
+        // `declare!` names a typed field, whose name clap uses as its id, so
+        // every declared id is an argument; the test over every command's
+        // declarations checks it.
+        let Some((arg, matches)) = self
             .selected
             .into_iter()
             .chain(std::iter::once(self.root))
@@ -199,7 +295,10 @@ impl Settings<'_> {
                     .find(|arg| arg.get_id() == id)
                     .map(|arg| (arg, matches))
             })
-            .unwrap_or_else(|| panic!("resource setting {id} names no argument"));
+        else {
+            debug_assert!(false, "resource setting {id} names no argument");
+            return;
+        };
         let stage = if stage == Stage::PhysicalInput && !self.offline {
             Stage::Operation
         } else {
@@ -208,7 +307,7 @@ impl Settings<'_> {
         let name = format!("--{}", arg.get_long().unwrap_or(id));
         let source = if matches.value_source(id) == Some(ValueSource::CommandLine) {
             "override".to_owned()
-        } else if let Some(preset) = self.preset.filter(|preset| preset.value(id).is_some()) {
+        } else if let Some(preset) = self.preset.filter(|_| defaults.is_some()) {
             format!("preset:{}", preset.name())
         } else {
             "default".to_owned()
@@ -229,9 +328,7 @@ impl Settings<'_> {
         self.declared.insert(name, (setting, enabled));
     }
 
-    /// Declares the aggregate JSON retention a command derives from its
-    /// physical frame ceiling.
-    pub(crate) fn retained_result_items(&mut self, max_frames: u64) {
+    fn retained_result_items(&mut self, max_frames: u64) {
         let name = "retained_result_items";
         self.declared.insert(
             name.to_owned(),
@@ -314,6 +411,11 @@ pub(crate) fn configure<T: Spec>(
     });
 }
 
+/// The root option a report declares, under the name of its `Cli` field.
+struct Root {
+    output_timeout_ms: Option<u64>,
+}
+
 /// The settings `arguments` declare, with their stage enablement.
 pub(crate) fn settings<T: Spec>(
     matches: &ArgMatches,
@@ -330,25 +432,24 @@ pub(crate) fn settings<T: Spec>(
             .map(|definition| (definition, values))
     });
     let mut settings = Settings {
-        root: (&definition, matches),
-        selected,
-        preset,
-        offline: T::OFFLINE,
-        format,
-        declared: BTreeMap::new(),
+        target: Target::Diagnostics(Diagnostics {
+            root: (&definition, matches),
+            selected,
+            preset,
+            offline: T::OFFLINE,
+            format,
+            declared: BTreeMap::new(),
+        }),
     };
-    settings.declare(
-        "output_timeout_ms",
-        output_timeout_ms.setting_value(),
-        Unit::Milliseconds,
-        Stage::Output,
-        Enabled::Fixed(true),
-    );
+    declare!(settings, Root { output_timeout_ms }, [output_timeout_ms: Milliseconds @ Output]);
     arguments.resources(&mut settings);
+    let Target::Diagnostics(mut report) = settings.target else {
+        return Vec::new();
+    };
     if format == Format::Ndjson {
-        settings.stream_output();
+        report.stream_output();
     }
-    settings.declared.into_values().collect()
+    report.declared.into_values().collect()
 }
 
 /// Reports whether the comparison needs the capture stream index, which

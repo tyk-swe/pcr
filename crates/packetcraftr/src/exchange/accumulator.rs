@@ -48,7 +48,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedPacket],
-    pub(crate) sent: &'a [Arc<crate::SentPacket>],
+    pub(crate) sent: &'a [Arc<crate::evidence::SentPacket>],
     pub(crate) window: &'a Window,
     pub(crate) collection: &'a Collection,
 }

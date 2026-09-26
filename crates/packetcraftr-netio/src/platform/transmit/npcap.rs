@@ -5,14 +5,14 @@
 
 #![allow(unsafe_code)]
 
-use super::{
+use crate::platform::common::npcap::{
     abi::SEND_SNAPSHOT_LENGTH,
     handles::{PromiscuousMode, open_handle},
 };
 use crate::{
     Error,
     capture::NativeSettings,
-    platform::layer2::pcap_common::{Diagnostic, is_permission_denied},
+    platform::common::pcap_api::{Diagnostic, is_permission_denied},
     transmit::{self, Layer2Frame, Submission},
 };
 

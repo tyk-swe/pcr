@@ -57,7 +57,7 @@ pub(crate) struct Transaction<C: Session> {
     pub(super) prepared: Vec<PreparedPacket>,
     pub(super) packet_count: u64,
     pub(super) total_bytes: u64,
-    pub(super) sent: Vec<Arc<crate::SentPacket>>,
+    pub(super) sent: Vec<Arc<crate::evidence::SentPacket>>,
     pub(super) completed_sends: u64,
     pub(super) dissector: Dissector,
     pub(super) captured: Accumulator,
@@ -307,6 +307,6 @@ impl<C: Session> Transaction<C> {
 /// A live operation never aborts while accounting for traffic it has already
 /// emitted: an overflowing total is reported saturated, and the evidence
 /// validator that recomputes the same fold rejects it as an overflow there.
-fn sent_bytes(sent: &[std::sync::Arc<crate::SentPacket>]) -> u64 {
+fn sent_bytes(sent: &[std::sync::Arc<crate::evidence::SentPacket>]) -> u64 {
     crate::evidence::total_bytes_sent(sent.iter().map(std::sync::Arc::as_ref)).unwrap_or(u64::MAX)
 }

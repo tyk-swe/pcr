@@ -252,7 +252,7 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
         .replay(
             replay::Request::new(
                 replay::Source::stream(ethernet_capture(&frames)),
-                replay::Routing::from(packetcraftr::route::Interface::Id(
+                replay::routing::Routing::from(packetcraftr::route::Interface::Id(
                     common::fixture_interface().id,
                 )),
                 options,
@@ -322,12 +322,19 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
             &error,
             send::Error::Preparation(Error::Policy(policy::Error::InvalidPacketSemantics {
                 reason,
-                ..
+                source: Some(_),
             }))
-                if reason.contains("destination cannot be determined")
-                    && reason.contains("truncated ipv4 layer")
+                if reason == "its live destinations cannot be read"
         ),
         "{error:?}"
+    );
+    let causes = error.causes();
+    assert!(
+        causes
+            .iter()
+            .any(|cause| cause.contains("destination cannot be determined")
+                && cause.contains("truncated ipv4 layer")),
+        "{causes:?}"
     );
     assert_eq!(
         error.classification().code,

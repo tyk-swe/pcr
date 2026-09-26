@@ -5,6 +5,8 @@
 
 #![allow(unsafe_code)]
 
+mod bpf;
+
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
     ptr::null_mut,
@@ -15,7 +17,7 @@ use std::{
 use bytes::Bytes;
 use pcap::{Active, Capture, Error as PcapError};
 
-use super::bpf::install_capture_filter;
+use self::bpf::install_capture_filter;
 use crate::{
     Error, NativeCapability, Unsupported,
     capture::live::{
@@ -26,14 +28,14 @@ use crate::{
         Limits, MAX_TIMESTAMP_TYPES, Metadata, NativeSettings, TimestampPrecision, TimestampType,
     },
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::{
-        Diagnostic, canonical_link_type, check_setting_status, is_missing_device,
-        is_permission_denied, realize_settings, timestamp_precision_value,
-        timestamp_source_of_value, timestamp_source_value, validate_effective_snapshot_length,
+    platform::common::libpcap::{READ_TIMEOUT_MILLIS, map_open_error},
+    platform::common::pcap_api::{
+        Diagnostic, canonical_link_type, check_setting_status, realize_settings,
+        timestamp_precision_value, timestamp_source_of_value, timestamp_source_value,
+        validate_effective_snapshot_length,
     },
 };
 use packetcraftr_core::error::Source;
-pub(super) const READ_TIMEOUT_MILLIS: i32 = 50;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
 // The locked pcap crate calls pcap_set_* through private raw bindings that
@@ -364,30 +366,5 @@ struct PcapInterrupt(pcap::BreakLoop);
 impl CaptureInterrupt for PcapInterrupt {
     fn interrupt(&self) {
         self.0.breakloop();
-    }
-}
-
-pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
-    let message = error.to_string();
-    let source = Some(Source::new(error));
-    if is_permission_denied(&message) {
-        return Error::Privilege {
-            message: format!(
-                "cannot open {} through libpcap; grant capture privileges (for example CAP_NET_RAW on Linux or BPF access on macOS)",
-                interface.name
-            ),
-            source,
-        };
-    }
-    if is_missing_device(&message) {
-        return Error::Device {
-            interface: interface.name.clone(),
-            message: "libpcap could not open this interface".to_owned(),
-            source,
-        };
-    }
-    Error::Capture {
-        message: format!("could not open {} through libpcap", interface.name),
-        source,
     }
 }

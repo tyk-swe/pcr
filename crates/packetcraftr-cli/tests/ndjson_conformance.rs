@@ -299,7 +299,7 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Event) {
     (case, live)
 }
 
-fn sent_packet() -> packetcraftr::SentPacket {
+fn sent_packet() -> packetcraftr::evidence::SentPacket {
     use packetcraftr::route::{Materialized, Plan};
     use packetcraftr_netio::link::{Capability, Mode};
     use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
@@ -347,7 +347,7 @@ fn sent_packet() -> packetcraftr::SentPacket {
     };
     let report = packetcraftr_netio::transmit::Submission::start()
         .complete(built.bytes.len(), built.bytes.clone());
-    packetcraftr::SentPacket::try_new(built, route, report).expect("trusted sent fixture")
+    packetcraftr::evidence::SentPacket::try_new(built, route, report).expect("trusted sent fixture")
 }
 
 #[test]

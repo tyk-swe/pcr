@@ -84,10 +84,10 @@ pub(crate) struct CaptureReaderBoundsArgs {
 impl CaptureReaderBoundsArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
-            max_encoded_bytes: Bytes @ PhysicalInput,
-            max_decoded_bytes: Bytes @ PhysicalInput,
-            max_frame_bytes: Bytes @ PhysicalInput,
-            max_interfaces: Count @ IndexedMetadata,
+            max_encoded_bytes: Bytes @ PhysicalInput preset(33554432, 536870912),
+            max_decoded_bytes: Bytes @ PhysicalInput preset(33554432, 536870912),
+            max_frame_bytes: Bytes @ PhysicalInput preset(1048576, 16777216),
+            max_interfaces: Count @ IndexedMetadata preset(64, 1024),
         ]);
     }
 }
@@ -95,8 +95,8 @@ impl CaptureReaderBoundsArgs {
 impl OfflineCaptureLimitsArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
         declare!(settings, self, [
-            max_frames: Count @ PhysicalInput,
-            max_bytes: Bytes @ PhysicalInput,
+            max_frames: Count @ PhysicalInput preset(10000, 1000000),
+            max_bytes: Bytes @ PhysicalInput preset(16777216, 268435456),
         ]);
         self.reader.resources(settings);
     }
@@ -208,6 +208,12 @@ impl RunTime for Analysis {
     const HELP: &'static str = "Maximum analysis run time in milliseconds";
 }
 
+impl super::Bounded for OfflineLimitsArgs {
+    fn max_duration(&self) -> std::time::Duration {
+        self.duration.max_duration()
+    }
+}
+
 impl OfflineLimitsArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>, stages: AnalysisStages) {
         let AnalysisStages {
@@ -217,19 +223,19 @@ impl OfflineLimitsArgs {
         } = stages;
         self.capture.resources(settings);
         declare!(settings, self, [
-            max_provenance_bytes: Bytes @ IndexedMetadata if provenance,
-            max_flows: Count @ IndexedMetadata if index,
-            max_scope_bytes: Bytes @ IndexedMetadata if index,
-            max_tcp_bytes_per_flow: Bytes @ ActiveState if tcp,
-            max_tcp_reassembly_bytes: Bytes @ ActiveState if tcp,
-            max_tcp_segments_per_flow: Count @ ActiveState if tcp,
+            max_provenance_bytes: Bytes @ IndexedMetadata preset(2097152, 16777216) if provenance,
+            max_flows: Count @ IndexedMetadata preset(1024, 8192) if index,
+            max_scope_bytes: Bytes @ IndexedMetadata preset(2097152, 16777216) if index,
+            max_tcp_bytes_per_flow: Bytes @ ActiveState preset(262144, 4194304) if tcp,
+            max_tcp_reassembly_bytes: Bytes @ ActiveState preset(4194304, 33554432) if tcp,
+            max_tcp_segments_per_flow: Count @ ActiveState preset(128, 1024) if tcp,
             tcp_idle_expiry_ms: Milliseconds @ ActiveState if tcp,
             ip_overlap: Policy @ ActiveState if index,
-            max_ip_datagrams: Count @ ActiveState if index,
-            max_ip_fragments_per_datagram: Count @ ActiveState if index,
-            max_ip_bytes_per_datagram: Bytes @ ActiveState if index,
-            max_ip_reassembly_bytes: Bytes @ ActiveState if index,
-            max_ip_outcomes: Count @ ResultRetention if index,
+            max_ip_datagrams: Count @ ActiveState preset(256, 4096) if index,
+            max_ip_fragments_per_datagram: Count @ ActiveState preset(64, 256) if index,
+            max_ip_bytes_per_datagram: Bytes @ ActiveState preset(65535, 1048576) if index,
+            max_ip_reassembly_bytes: Bytes @ ActiveState preset(4194304, 33554432) if index,
+            max_ip_outcomes: Count @ ResultRetention preset(128, 1024) if index,
             ip_idle_expiry_ms: Milliseconds @ ActiveState if index,
         ]);
         self.duration.resources(settings);

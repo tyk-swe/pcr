@@ -55,7 +55,7 @@ use crate::planning::ensure_preparation_deadline;
 use crate::policy::{Operation, WireLimits};
 use crate::providers::Providers;
 use crate::route;
-use crate::{Client, Error, SentPacket, send};
+use crate::{Client, Error, evidence::SentPacket, send};
 use materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
     require_fixed_width_link_materialization,

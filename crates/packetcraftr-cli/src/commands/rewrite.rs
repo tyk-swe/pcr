@@ -24,7 +24,10 @@ use packetcraftr_core::{
     capture_file,
     decode::Dissector,
     error::{BoundaryError, Kind},
-    transform::{self, ChecksumMode, HeaderRewrite, Rules},
+    transform::{
+        self, ChecksumMode, HeaderRewrite,
+        rules::{self, Rules},
+    },
 };
 
 impl super::Spec for Args {
@@ -32,8 +35,8 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.duration)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -80,7 +83,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             ));
         }
         let document =
-            crate::input::read_bounded_json_document(path, transform::MAX_REWRITE_DOCUMENT_BYTES)?;
+            crate::input::read_bounded_json_document(path, rules::MAX_REWRITE_DOCUMENT_BYTES)?;
         Rules::parse(&document, checksum_mode, &registry).map_err(CliError::classified)?
     } else {
         if patch.is_empty() && args.sets.is_empty() {

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 use crate::errors::CliError;
-use packetcraftr::scan::profile::{self, MAX_PROFILE_BYTES, UdpProfile};
+use packetcraftr::scan::profile::{self, UdpProfile};
+use packetcraftr_core::document::udp_profiles::{self, MAX_PROFILE_BYTES};
 use packetcraftr_core::error::Kind;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
@@ -20,5 +21,6 @@ pub(super) fn load(
         ));
     }
     let document = crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?;
-    profile::parse_document(&document).map_err(CliError::classified)
+    let assignments = udp_profiles::parse(&document).map_err(CliError::classified)?;
+    profile::compile(assignments).map_err(CliError::classified)
 }

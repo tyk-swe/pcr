@@ -85,7 +85,7 @@ with `QueryType::new(code)` and `.code()`. Constants are `A`, `AAAA`, `CAA`, `CN
 Use `Display` for presentation and integer serde values for data. The CLI
 contract constant is now `SCHEMA_V6`.
 The `.as_str()` method is removed; use `Display` or `.to_string()` instead.
-Text parsing returns `QueryTypeParseError`, preserving the original integer
+Text parsing returns `dns::wire::Error` (`QueryTypeSyntax` or `QueryTypeRange`), preserving the original integer
 parse error for out-of-range values.
 CLI DNS output structs store `query_type` as `u16`; use `.code()` when
 constructing their summaries or events from a `QueryType`.
@@ -175,7 +175,7 @@ these core types. `Name::from_labels` now returns core `dns::Error`.
 Name failures use `dns::Error::Name(name::Error)`, retaining their original
 offsets and typed source, including the distinction between self-pointers and
 pointer loops.
-Structural live-decoder failures are wrapped in `WireError::Decode(dns::Error)`;
+Structural live-decoder failures are wrapped in `dns::wire::Error::Decode(dns::Error)`;
 match the core error inside that variant. Query correlation, TCP framing, and
 live EDNS policy errors remain workflow-owned.
 
@@ -228,7 +228,7 @@ recovers the typed cause.
 
 Wrapped errors display route context; inspect `std::error::Error::source()` or
 `Classified::causes()` for the validation detail. Native interface-snapshot
-validation similarly retains its original `SystemError` as a shared
+validation similarly retains its original `route::Error` as a shared
 `packetcraftr_core::error::Source`. Classification codes are unchanged.
 
 ## Explicit DNS TCP providers
@@ -391,7 +391,7 @@ array on `statsResult`.
 `Request::udp_profiles` maps ports to validated `Arc<profile::UdpProfile>` values.
 `Probe` retains its selected profile, and `ProbeEvidence::application` reports
 application validation independently of reachability. Configuration serializes
-through `profile::Config`; private compiled state is revalidated on deserialization.
+through `packetcraftr_core::document::udp_profiles::Config`; private compiled state is revalidated on deserialization.
 `Registry::to_builder` derives isolated bindings for explicit byte/DNS profiles,
 without changing the caller's registry. UDP profile documents use independent
 `packetcraftr.udp-profiles/v1` and ship with a schema and example.
@@ -399,7 +399,7 @@ without changing the caller's registry. UDP profile documents use independent
 ## Replay mapping and repetition
 
 Route every frame through the old `replay::Options::interface` value with
-`replay::Routing::from(route::Interface::Id(interface))`, and add `repeat: 1`
+`replay::routing::Routing::from(route::Interface::Id(interface))`, and add `repeat: 1`
 and `inter_pass_delay: Duration::ZERO` for one pass. Routing rules may send
 each selected frame through its own interface (see
 [Selectors and replay routing](#selectors-and-replay-routing)). Replay readers now require `Read + Seek` so the
@@ -1013,12 +1013,12 @@ and materializes routes over it.
 | `frame.route().plan.decision`, `.plan.mode`, `.plan.lookup_destination` | `frame.route().decision`, `.mode`, `.lookup_destination` |
 
 `packetcraftr_netio::route::{Provider, Decision, Scope, SelectionReason,
-SystemProvider, SystemError}` are unchanged, and so are variant names,
+SystemProvider}` are unchanged (the native error is `route::Error`), and so are variant names,
 messages, and classification codes. `Client::plan` and `send::Options::plan`
 use the `packetcraftr::route` types.
 
 `SystemProvider` checks a preferred source's address family once, before any
-native backend runs, and still reports `SystemError::SourceFamilyMismatch`
+native backend runs, and still reports `route::Error::SourceFamilyMismatch`
 (`io.route_selection`).
 
 ## Neighbor resolution in packetcraftr
@@ -1173,7 +1173,7 @@ A fake provider that ignores time takes `_deadline: &Deadline`. A fake that
 recorded or slept for its timeout reads `deadline.remaining()` instead, and
 one that stalls until expiry can loop on
 `packetcraftr_netio::deadline::remaining(deadline)`. A system backend stopped
-by the deadline reports `route::SystemError::DeadlineExceeded`,
+by the deadline reports `route::Error::DeadlineExceeded`,
 `interface::Error::DeadlineExceeded`, or `Error::DeadlineExceeded`, all
 classified `io.deadline_exceeded`; a cancelled one reports the `Cancelled`
 variant (`io.cancelled`). `tcp::start_connect` refuses a spent deadline with
@@ -1185,13 +1185,13 @@ now means only a remainder above one hour.
 Every public netio error implements `Classified` and keeps its source.
 
 **One unsupported representation.** `packetcraftr_netio::Error`,
-`route::SystemError`, and `interface::Error` carry the same
+`route::Error`, and `interface::Error` carry the same
 `packetcraftr_netio::Unsupported`, and its capability decides the class.
 
 | Before | After |
 |---|---|
 | `Error::Unsupported { message, source }` | `Error::Unsupported(Unsupported { capability, message, source })` |
-| `route::SystemError::Unsupported { message }` | `SystemError::Unsupported(Unsupported::new(NativeCapability::Route, message))` |
+| `route::SystemError::Unsupported { message }` | `route::Error::Unsupported(Unsupported::new(NativeCapability::Route, message))` |
 | `interface::Error::Unsupported { message }` | `interface::Error::Unsupported(Unsupported::new(NativeCapability::InterfaceEnumeration, message))` |
 | `matches!(error, Error::Unsupported { .. })` | `matches!(error, Error::Unsupported(_))` |
 
@@ -1329,7 +1329,7 @@ a runtime admits. Its callback returns `Result<A, BoundaryError>`, and
 `emit` returns that `A`. Name the answer type when the callback never returns
 `Ok` (for example `Worker::<()>::new_in(&runtime, |_| Err(error))`).
 
-**Evidence errors.** `packetcraftr::ExchangeEvidenceError` is public. It names
+**Evidence errors.** `packetcraftr::evidence::Error` is public. It names
 why an executor's evidence disagrees with its step, including the new
 `PermitMismatch`, and its `Display` is workflow-neutral.
 
@@ -1701,7 +1701,7 @@ of fake executors or authorizers.
 | `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}` | removed; the client runs each step |
 | `policy::{Authorizer, PolicyAuthorizer}`, `policy::unsupported_operation`, `target::ResolveTarget` | removed; the client admits every workflow (`Policy::authorize` and `Policy::resolve_target` stay public) |
 | `clock::CancellableClock`, `Clock::cancellation` | removed; `Client::with_cancellation` |
-| `packetcraftr::progress::{Runtime, RuntimeSnapshot, Worker, EmitError, MAX_WORKER_CAPACITY}` | `packetcraftr::runtime::…` |
+| `packetcraftr::progress::{Runtime, RuntimeSnapshot, Worker, EmitError, MAX_WORKER_CAPACITY}` | `packetcraftr::runtime::{Runtime, RuntimeSnapshot, Worker, Error, MAX_WORKER_CAPACITY}` |
 | `SystemProviders` (an alias of `ProviderSet<…>`), `ProviderSet::system()` | `SystemProviders`, a unit struct implementing `Providers` |
 | `capture::Selector` | removed; pass the closure to `capture::Request::with_selector` |
 | `dns::AttemptTransport`, `AttemptEvidence.exchange` | `dns::TransportEvidence`, `AttemptEvidence.transport_evidence` |
@@ -1741,9 +1741,9 @@ data.
 | TLS session filtering by SNI, port, and status | `analysis::tls::Selector { sni, server_port, statuses }.matches(&session)`; `"*.example.test".parse::<analysis::tls::SniPattern>()` |
 | finding filtering by severity and code | `analysis::expert::Selector { min_severity, codes }.matches(&finding)` |
 | `impl replay::Selector for S`, `Request::with_selector(s)`, `replay::AllFrames` | `Request::new(source, routing, options).with_filter(frame_selector)` |
-| `replay::Options { interface: Some(id), .. }` | `replay::Routing::from(route::Interface::Id(id))`, or `Routing::new(rules, Some(fallback))?` |
-| a selector's `interface(number, frame)` | `replay::Rule { condition: replay::Condition::{Source(id), Filter(selector)}, interface }`, at most `replay::MAX_RULES` |
-| parsing `SOURCE_ID=IF` and `EXPR=>IF` by hand | `Rule::parse_source(text, parse_interface)` and `Rule::parse_filter(text, compile, parse_interface)`, refusing with `replay::RuleError` |
+| `replay::Options { interface: Some(id), .. }` | `replay::routing::Routing::from(route::Interface::Id(id))`, or `Routing::new(rules, Some(fallback))?` |
+| a selector's `interface(number, frame)` | `replay::routing::Rule { condition: routing::Condition::{Source(id), Filter(selector)}, interface }`, at most `routing::MAX_RULES` |
+| parsing `SOURCE_ID=IF` and `EXPR=>IF` by hand | `Rule::parse_source(text, parse_interface)` and `Rule::parse_filter(text, compile, parse_interface)`, refusing with `replay::routing::Error` |
 
 `FrameDecoder::new` and `FrameSelector::new` refuse a filter that reads
 `tcp.stream` or `udp.stream` with `filter::Error::StreamIndexUnavailable`,
@@ -1757,3 +1757,25 @@ A replay frame whose rules name different interfaces fails with
 fallback fails with `replay::Error::Unmapped` (replacing `InvalidLimit {
 field: "interface" }`); both are `cli.error`. `replay::Error::Selection`
 carries the `filter::Error` that stopped the request's filter or a filter rule.
+
+## One error per module and sub-domain placement
+
+Each module has one error type, named `Error` and used module-qualified. A
+concept with its own error and document (rewrite rules, recipes, payload
+targets, UDP profiles, replay routing, DNS wire) is a public sub-domain module
+of its owner, and the items it holds move with it (the new rewrite, recipe,
+payload, routing, and evidence APIs listed above already use these paths).
+Classification codes are unchanged.
+
+| Before | After |
+|---|---|
+| `packetcraftr_netio::route::SystemError` | `packetcraftr_netio::route::Error` |
+| `packetcraftr::progress::EmitError` | `packetcraftr::runtime::Error`, which implements `Classified` |
+| `packetcraftr::SentPacket` | `packetcraftr::evidence::SentPacket` |
+| `packetcraftr::dns::WireError` | `packetcraftr::dns::wire::Error` |
+| `dns::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` | `dns::wire::{canonical_query_name, decode_response, decode_tcp_frame, encode_query}` |
+| `dns::QueryTypeParseError::{Syntax, OutOfRange}` | `dns::wire::Error::{QueryTypeSyntax, QueryTypeRange}` (the `Err` of `QueryType::from_str`) |
+| `packetcraftr::scan::profile::{Config, Payload, ResponseCheck, ByteCheck, MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` | `packetcraftr_core::document::udp_profiles::…` |
+| `scan::profile::Error("reason")` | `scan::profile::Error::Invalid("reason")`; the enum also carries the document refusals |
+| reading a `packetcraftr.udp-profiles/v1` document | `scan::profile::compile(packetcraftr_core::document::udp_profiles::parse(&bytes)?)?` |
+| `packetcraftr_cli::output::verify_forwarding::Input` tuple `(path, source, selection_filter)` | `Input { path, source, selection_filter }` |

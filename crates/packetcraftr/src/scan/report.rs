@@ -179,7 +179,7 @@ impl RttAccumulator {
 #[derive(Clone, Debug)]
 pub struct SentProbe {
     pub probe: super::Probe,
-    pub sent: Arc<crate::SentPacket>,
+    pub sent: Arc<crate::evidence::SentPacket>,
 }
 
 /// What a scan publishes while it runs. Each event is answered before later

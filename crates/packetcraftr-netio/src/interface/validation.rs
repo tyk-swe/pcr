@@ -3,13 +3,13 @@
 
 //! Operating-system native interface snapshot validation.
 //!
-//! Every rejection is a [`SystemError::InvalidResponse`]: the snapshot came
+//! Every rejection is a [`route::Error::InvalidResponse`]: the snapshot came
 //! from the operating system, so an inconsistency in it is a native adapter
 //! fault rather than a caller error.
 
-use crate::{interface, route::SystemError};
+use crate::{interface, route};
 
-pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), SystemError> {
+pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(), route::Error> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
         return Err(invalid_response(
             "operating system returned an incomplete interface identity".to_owned(),
@@ -29,7 +29,7 @@ pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(
 
 pub(super) fn validate_native_interfaces(
     interfaces: Vec<interface::Info>,
-) -> Result<Vec<interface::Info>, SystemError> {
+) -> Result<Vec<interface::Info>, route::Error> {
     let mut identities = std::collections::HashSet::with_capacity(interfaces.len());
     for interface in &interfaces {
         validate_native_interface(interface)?;
@@ -43,8 +43,8 @@ pub(super) fn validate_native_interfaces(
     Ok(interfaces)
 }
 
-fn invalid_response(message: String) -> SystemError {
-    SystemError::InvalidResponse { message }
+fn invalid_response(message: String) -> route::Error {
+    route::Error::InvalidResponse { message }
 }
 
 #[cfg(test)]
@@ -134,7 +134,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            SystemError::InvalidResponse { ref message }
+            route::Error::InvalidResponse { ref message }
                 if message.contains("duplicate interface fixture0 (index 7)")
         ));
     }

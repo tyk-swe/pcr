@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::Error;
 use crate::layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 
 /// Ceilings on one packet, shared by decoding
@@ -23,6 +24,35 @@ impl Default for Limits {
         Self {
             max_layers: DEFAULT_MAX_LAYERS,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
+        }
+    }
+}
+
+impl Limits {
+    /// Checks the ceilings. Every value is honored as given (zero refuses
+    /// every packet), so there is nothing to refuse and this always succeeds.
+    /// It exists so every limits type validates the same way.
+    ///
+    /// # Errors
+    ///
+    /// None today.
+    pub const fn validate(&self) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_ceiling_is_a_valid_limit() {
+        for (max_layers, max_packet_size) in [(0, 0), (1, usize::MAX), (usize::MAX, 0)] {
+            let limits = Limits {
+                max_layers,
+                max_packet_size,
+            };
+            assert!(limits.validate().is_ok());
         }
     }
 }

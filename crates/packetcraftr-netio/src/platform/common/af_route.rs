@@ -1,16 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Pure bounded parsers for Darwin socket-address records.
+//! Pure bounded parsers for Darwin socket-address records, shared by the
+//! macOS route and interface backends.
 
 use std::{
     mem::{offset_of, size_of},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use crate::route::SystemError;
+use crate::route;
 
-pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
+pub(in crate::platform) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr stores `sa_family` after its leading length byte.
     let family = *bytes.get(1)? as libc::sa_family_t;
     match i32::from(family) {
@@ -36,7 +37,7 @@ pub(super) fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
 /// the shortened length (255.255.255.0 arrives with length 7), so the mask
 /// is zero-extended to the family's address width instead of requiring a
 /// complete sockaddr, and the mask's own family byte is not relied on.
-pub(super) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
+pub(in crate::platform) fn netmask_prefix(bytes: &[u8], interface_address: IpAddr) -> Option<u8> {
     let (offset, width) = match interface_address {
         IpAddr::V4(_) => (offset_of!(libc::sockaddr_in, sin_addr), 4),
         IpAddr::V6(_) => (offset_of!(libc::sockaddr_in6, sin6_addr), 16),
@@ -62,10 +63,10 @@ fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
     u8::try_from(prefix).ok()
 }
 
-pub(super) fn parse_route_addresses(
+pub(in crate::platform) fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
-) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], SystemError> {
+) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], route::Error> {
     let mut output = [None; libc::RTAX_MAX as usize];
     let address_slots = output.len();
     let mut offset = 0;
@@ -74,14 +75,14 @@ pub(super) fn parse_route_addresses(
             continue;
         }
         let Some(&length_byte) = bytes.get(offset) else {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: "macOS route response truncated its sockaddr list".to_owned(),
             });
         };
         let length = usize::from(length_byte);
         let empty_netmask = index == libc::RTAX_NETMASK as usize && length == 0;
         if length < 2 && !empty_netmask {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
                 ),
@@ -89,12 +90,12 @@ pub(super) fn parse_route_addresses(
         }
         let stride = roundup(length);
         let Some(address_end) = offset.checked_add(length) else {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: "macOS route response sockaddr length overflowed".to_owned(),
             });
         };
         if address_end > bytes.len() {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: format!(
                     "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
                     bytes.len()
@@ -109,7 +110,7 @@ pub(super) fn parse_route_addresses(
             // Darwin may omit the unused alignment trailer after the final sockaddr.
             _ if !empty_netmask && !has_later_address && address_end == bytes.len() => address_end,
             _ => {
-                return Err(SystemError::InvalidResponse {
+                return Err(route::Error::InvalidResponse {
                     message: format!(
                         "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
                         bytes.len()
@@ -119,7 +120,7 @@ pub(super) fn parse_route_addresses(
         };
         if empty_netmask {
             if bytes[offset..next_offset].iter().any(|byte| *byte != 0) {
-                return Err(SystemError::InvalidResponse {
+                return Err(route::Error::InvalidResponse {
                     message: "macOS route response zero-length netmask slot contains nonzero bytes"
                         .to_owned(),
                 });
@@ -132,7 +133,7 @@ pub(super) fn parse_route_addresses(
     Ok(output)
 }
 
-pub(super) fn roundup(length: usize) -> usize {
+pub(in crate::platform) fn roundup(length: usize) -> usize {
     // Darwin routing sockets use 32-bit sockaddr alignment, not pointer-width alignment.
     let alignment = size_of::<u32>();
     if length == 0 {
@@ -228,7 +229,7 @@ mod tests {
         ] {
             assert!(matches!(
                 parse_route_addresses(&bytes, address_mask),
-                Err(SystemError::InvalidResponse { .. })
+                Err(route::Error::InvalidResponse { .. })
             ));
         }
     }
@@ -244,7 +245,7 @@ mod tests {
                 &bytes,
                 mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
             ),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 
@@ -259,7 +260,7 @@ mod tests {
                 &bytes,
                 mask(&[libc::RTAX_DST, libc::RTAX_GATEWAY, libc::RTAX_NETMASK])
             ),
-            Err(SystemError::InvalidResponse { .. })
+            Err(route::Error::InvalidResponse { .. })
         ));
     }
 }

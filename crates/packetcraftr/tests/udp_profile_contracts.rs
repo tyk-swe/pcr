@@ -10,11 +10,12 @@ use packetcraftr::{
     probe::Transport,
     scan::{
         self,
-        profile::{ByteCheck, Config, Payload, ResponseCheck, Status, UdpProfile},
+        profile::{Status, UdpProfile},
     },
     target::Target,
 };
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::document::udp_profiles::{ByteCheck, Config, Payload, ResponseCheck};
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,

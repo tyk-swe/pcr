@@ -303,11 +303,11 @@ fn materialized_route() -> Materialized {
     }
 }
 
-fn sent_packet() -> packetcraftr::SentPacket {
+fn sent_packet() -> packetcraftr::evidence::SentPacket {
     let built = built_packet();
     let report = packetcraftr_netio::transmit::Submission::start()
         .complete(built.bytes.len(), built.bytes.clone());
-    packetcraftr::SentPacket::try_new(built, materialized_route(), report)
+    packetcraftr::evidence::SentPacket::try_new(built, materialized_route(), report)
         .expect("trusted transmission receipt")
 }
 
@@ -455,7 +455,7 @@ fn send_without_neighbor_case() -> Value {
         plan: route_plan(),
         neighbor_resolution: None,
     };
-    let sent = packetcraftr::SentPacket::try_new(built, route, report)
+    let sent = packetcraftr::evidence::SentPacket::try_new(built, route, report)
         .expect("trusted transmission receipt");
     let report = Published::<send_output::Report>::try_from(packetcraftr::send::Aggregate {
         sent: vec![packetcraftr::send::SentFrame {
@@ -1434,8 +1434,16 @@ fn verify_forwarding_case() -> Value {
     let document = forwarding_output::Report::try_from((
         &report,
         forwarding::Sided {
-            ingress: ("pre-forwarding.pcap".to_owned(), None, None),
-            egress: ("post-forwarding.pcap".to_owned(), None, None),
+            ingress: forwarding_output::Input {
+                path: "pre-forwarding.pcap".to_owned(),
+                source: None,
+                selection_filter: None,
+            },
+            egress: forwarding_output::Input {
+                path: "post-forwarding.pcap".to_owned(),
+                source: None,
+                selection_filter: None,
+            },
         },
         None,
     ))

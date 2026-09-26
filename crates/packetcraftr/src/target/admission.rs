@@ -246,7 +246,7 @@ mod tests {
 
     use super::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
     use crate::StatsOverflow;
-    use crate::execution::{Errors, ExchangeEvidenceError};
+    use crate::execution::Errors;
     use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
     use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
     use packetcraftr_core::error::BoundaryError;
@@ -361,7 +361,7 @@ mod tests {
             StubError::Step
         }
 
-        fn invalid_evidence(&self, (): (), _: ExchangeEvidenceError) -> StubError {
+        fn invalid_evidence(&self, (): (), _: crate::evidence::Error) -> StubError {
             StubError::Step
         }
 

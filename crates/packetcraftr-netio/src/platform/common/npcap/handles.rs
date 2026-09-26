@@ -22,13 +22,13 @@ use crate::{
     Error,
     capture::NativeSettings,
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::{
+    platform::common::pcap_api::{
         Diagnostic, check_setting_status, timestamp_precision_value, timestamp_source_value,
     },
 };
 
 #[derive(Clone, Copy)]
-pub(super) enum PromiscuousMode {
+pub(in crate::platform) enum PromiscuousMode {
     Disabled,
     Enabled,
 }
@@ -42,9 +42,9 @@ impl PromiscuousMode {
     }
 }
 
-pub(super) struct NpcapHandle {
-    pub(super) api: Arc<NpcapApi>,
-    pub(super) raw: NonNull<c_void>,
+pub(in crate::platform) struct NpcapHandle {
+    pub(in crate::platform) api: Arc<NpcapApi>,
+    pub(in crate::platform) raw: NonNull<c_void>,
 }
 
 // SAFETY: a handle is read only by its owning capture worker. The only
@@ -57,7 +57,7 @@ unsafe impl Send for NpcapHandle {}
 unsafe impl Sync for NpcapHandle {}
 
 impl NpcapHandle {
-    pub(super) fn error_message(&self) -> String {
+    pub(in crate::platform) fn error_message(&self) -> String {
         // SAFETY: the handle remains live through self's Arc owner and the
         // function pointer belongs to the equally live API module.
         let message = unsafe { (self.api.pcap_geterr)(self.raw.as_ptr()) };
@@ -82,7 +82,9 @@ impl Drop for NpcapHandle {
 
 /// Creates an unactivated handle for interface metadata queries; the `Drop`
 /// impl releases it through `pcap_close` like an activated one.
-pub(super) fn create_handle(interface: &InterfaceId) -> Result<Arc<NpcapHandle>, Error> {
+pub(in crate::platform) fn create_handle(
+    interface: &InterfaceId,
+) -> Result<Arc<NpcapHandle>, Error> {
     let api = npcap_api()?;
     let device_name = npcap_device_name(interface)?;
     let device_name = CString::new(device_name).map_err(|_| Error::Device {
@@ -99,7 +101,7 @@ pub(super) fn create_handle(interface: &InterfaceId) -> Result<Arc<NpcapHandle>,
     Ok(Arc::new(NpcapHandle { api, raw }))
 }
 
-pub(super) fn open_handle(
+pub(in crate::platform) fn open_handle(
     interface: &InterfaceId,
     snap_length: c_int,
     promiscuous_mode: PromiscuousMode,
@@ -249,7 +251,7 @@ fn set_native_option(
 
 /// The timestamp precision an activated handle delivers, when the runtime can
 /// report one.
-pub(super) fn reported_precision(handle: &NpcapHandle) -> Option<c_int> {
+pub(in crate::platform) fn reported_precision(handle: &NpcapHandle) -> Option<c_int> {
     // SAFETY: handle is activated and live; pcap_get_tstamp_precision only
     // reads the negotiated precision.
     handle

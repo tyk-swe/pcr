@@ -10,7 +10,6 @@ use packetcraftr_core::{layer::Raw, packet::Packet};
 
 use super::*;
 use crate::evidence::ExecutionPermit;
-use crate::execution::ExchangeEvidenceError;
 use crate::execution::limits::EvidenceLimits;
 use crate::probe::Workflow;
 use crate::test_support::{Failure, RecordingClock, TestErrors};
@@ -335,7 +334,7 @@ fn evidence_is_judged_against_the_clipped_timeout() {
     let error = run.result.expect_err("a reply after the clipped timeout");
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(1, ExchangeEvidenceError::ResponseAfterTimeout { timeout, .. })
+        Failure::InvalidEvidence(1, crate::evidence::Error::ResponseAfterTimeout { timeout, .. })
             if timeout == Duration::from_millis(300)
     ));
     assert_eq!(run.events, [probe(0)]);
@@ -363,7 +362,7 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
     let error = run.result.expect_err("foreign evidence is rejected");
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(1, ExchangeEvidenceError::PermitMismatch)
+        Failure::InvalidEvidence(1, crate::evidence::Error::PermitMismatch)
     ));
     assert_eq!(run.events, [probe(0)]);
 
@@ -390,7 +389,7 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
     drop(evidence);
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(0, ExchangeEvidenceError::PermitMismatch)
+        Failure::InvalidEvidence(0, crate::evidence::Error::PermitMismatch)
     ));
     assert!(events.is_empty());
 }

@@ -29,14 +29,14 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.limits.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.limits)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            max_tls_buffer_bytes: Bytes @ ActiveState,
-            max_tls_sessions: Count @ ActiveState,
+            max_tls_buffer_bytes: Bytes @ ActiveState preset(4194304, 33554432),
+            max_tls_sessions: Count @ ActiveState preset(128, 2048),
             max_output_sessions: Count @ ResultRetention,
         ]);
         self.limits.resources(

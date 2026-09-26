@@ -8,7 +8,9 @@ use packetcraftr_core::analysis;
 
 use crate::errors::CliError;
 use crate::output::stats::Table;
-use crate::rendering::{render_diagnostics_text, write_stdout_line, write_summary_line};
+use crate::rendering::{
+    duration_text, optional_display, render_diagnostics_text, write_stdout_line, write_summary_line,
+};
 
 pub(super) fn render_text(
     table: Table,
@@ -25,10 +27,12 @@ pub(super) fn render_text(
         // Both rates share one zero-span guard, so they are present together.
         match report.packet_rate().zip(report.byte_rate()) {
             Some((packets, bytes)) => write_stdout_line(format_args!(
-                "duration {duration:?}; {packets:.3} frame(s)/s, {bytes:.3} byte(s)/s; average packet size {average:.3} byte(s)"
+                "duration {}; {packets:.3} frame(s)/s, {bytes:.3} byte(s)/s; average packet size {average:.3} byte(s)",
+                duration_text(duration)
             ))?,
             None => write_stdout_line(format_args!(
-                "duration {duration:?}; rates unavailable (zero span); average packet size {average:.3} byte(s)"
+                "duration {}; rates unavailable (zero span); average packet size {average:.3} byte(s)",
+                duration_text(duration)
             ))?,
         }
     }
@@ -44,7 +48,7 @@ pub(super) fn render_text(
             for row in &report.conversations {
                 crate::commands::offline_analysis::render_scope(&row.scope)?;
                 write_stdout_line(format_args!(
-                    "{} stream {}: {} <-> {} frames {} ({} fwd / {} rev) bytes {} ({} fwd / {} rev) duration {:?}",
+                    "{} stream {}: {} <-> {} frames {} ({} fwd / {} rev) bytes {} ({} fwd / {} rev) duration {}",
                     row.transport.as_str(),
                     row.stream,
                     SocketAddr::new(row.address_a, row.port_a),
@@ -55,7 +59,7 @@ pub(super) fn render_text(
                     row.bytes_a_to_b.saturating_add(row.bytes_b_to_a),
                     row.bytes_a_to_b,
                     row.bytes_b_to_a,
-                    row.duration(),
+                    duration_text(row.duration()),
                 ))?;
             }
         }
@@ -91,13 +95,21 @@ pub(super) fn render_text(
         }
         Table::Io => {
             write_stdout_line(format_args!(
-                "bucket origin {:?}; {} earlier frame(s) clamped to bucket zero",
-                report.io_origin, report.io_underflow_frames
+                "bucket origin {}; {} earlier frame(s) clamped to bucket zero",
+                optional_display(
+                    report
+                        .io_origin
+                        .map(crate::output::frame::Timestamp::try_from)
+                        .transpose()?
+                ),
+                report.io_underflow_frames
             ))?;
             for row in &report.io {
                 write_stdout_line(format_args!(
-                    "+{:?}: frames {} bytes {}",
-                    row.offset, row.frames, row.bytes,
+                    "+{}: frames {} bytes {}",
+                    duration_text(row.offset),
+                    row.frames,
+                    row.bytes,
                 ))?;
             }
         }

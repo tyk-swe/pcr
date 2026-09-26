@@ -11,13 +11,13 @@ use super::abi::{
 use crate::{
     Error, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::{Diagnostic, is_missing_device, is_permission_denied},
+    platform::common::pcap_api::{Diagnostic, is_missing_device, is_permission_denied},
 };
 use packetcraftr_core::error::Source;
 
 /// Classifies a rejected activation by its status; the status and Npcap's
 /// diagnostic stay the failure's source.
-pub(super) fn map_activation_error(
+pub(in crate::platform) fn map_activation_error(
     interface: &InterfaceId,
     status: c_int,
     diagnostic: String,
@@ -60,7 +60,7 @@ pub(super) fn map_activation_error(
 
 /// Classifies a failed `pcap_create` by its diagnostic, the only thing it
 /// reports; the diagnostic stays the failure's source.
-pub(super) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> Error {
+pub(in crate::platform) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> Error {
     let privilege = is_permission_denied(&diagnostic);
     let missing = is_missing_device(&diagnostic);
     let source = Diagnostic::new(None, diagnostic).into_source();
@@ -86,7 +86,7 @@ pub(super) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> E
     }
 }
 
-pub(super) fn interface_conversion_error(
+pub(in crate::platform) fn interface_conversion_error(
     interface: &InterfaceId,
     operation: &'static str,
     code: u32,
@@ -103,7 +103,9 @@ pub(super) fn interface_conversion_error(
     }
 }
 
-pub(super) fn error_buffer_message(buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE]) -> String {
+pub(in crate::platform) fn error_buffer_message(
+    buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE],
+) -> String {
     // Bound decoding to `PCAP_ERRBUF_SIZE` if the runtime omits NUL termination.
     let bytes: Vec<u8> = buffer
         .iter()

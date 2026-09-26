@@ -17,7 +17,7 @@ use crate::execution::Context;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
 };
-use crate::execution::{ExchangeEvidenceError, ExchangeExecutor, Executor, publisher};
+use crate::execution::{ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::Providers;
@@ -27,14 +27,14 @@ use crate::{Client, Sink, Stats, StatsOverflow};
 use packetcraftr_core::error::BoundaryError;
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::classification::{
-    ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
-};
 use super::error::{Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
+use super::evidence::{
+    ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
+};
 use super::executor::{Exchange, ExchangeEvidence, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
-use super::probe::{Probe, rotated_source_port};
+use super::plan::{Probe, rotated_source_port};
 use super::{
     AttemptEvidence, Event, EventContext, Limits, Outcome, Record, Report, Request, Section,
     Transport, TransportMode, UndecodedEvidence, ValidatedResponse, batch,
@@ -666,7 +666,7 @@ impl crate::execution::Errors for Attempts {
         Error::Execution { attempt, source }
     }
 
-    fn invalid_evidence(&self, attempt: u32, source: ExchangeEvidenceError) -> Error {
+    fn invalid_evidence(&self, attempt: u32, source: crate::evidence::Error) -> Error {
         Error::InvalidEvidence {
             attempt,
             fault: EvidenceFault::Exchange(source),

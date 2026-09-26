@@ -37,7 +37,7 @@ impl crate::execution::Step for CaseStep {
 #[derive(Clone, Debug)]
 pub(crate) struct CaseEvidence {
     pub(crate) permit: ExecutionPermit,
-    pub(crate) sent: crate::SentPacket,
+    pub(crate) sent: crate::evidence::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unmatched: Vec<Frame>,
     pub(crate) undecoded: Vec<Frame>,

@@ -18,7 +18,7 @@ use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::execution::Executor;
 use crate::execution::{Context, Errors, Grant, Receipt, rate_delay};
-use crate::{SentPacket, Stats};
+use crate::{Stats, evidence::SentPacket};
 
 /// A planned batch of probes executed together: one probe per scan batch,
 /// one hop's probes per traceroute batch. Never empty.

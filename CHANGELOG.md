@@ -181,7 +181,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   is replaced by `capture_file::Budget` (`new`, `charge`, `after`, `frames`,
   `captured_bytes`). `capture_file::Limits`, `MergeLimits` (whose source
   ceiling is the new `capture_file::MAX_MERGE_SOURCES`), `compression::Limits`, `scope::Limits`, the IP and TCP reassembly `Limits`,
-  `dhcp::Limits`, and `dns::DecodeLimits` gain `validate()`, and
+  `dhcp::Limits`, `dns::DecodeLimits`, `packet::Limits`, and
+  `forwarding::VerifyLimits` gain `validate()` (packetcraftr's
+  `policy::WireLimits` and `policy::SocketLimits` too; for the last four every
+  value is legal, so it always succeeds), and
   `application::Limits::validate` is public. Writers, `rewrite`, `select`,
   `map_frames`, and `merge` refuse a zero stream limit with
   `capture_file::Error::InvalidLimit` (`cli.capture_limit`).
@@ -228,7 +231,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr::route` (ADR 0001): `plan`, `Plan`, `Options`, `Error`,
   `materialize`, and `Materialized`. netio keeps the route contract
   (`Provider`, `Decision`, `Scope`, `SelectionReason`, `SystemProvider`,
-  `SystemError`). `Client::plan` returns `packetcraftr::route::Plan`.
+  `Error`). `Client::plan` returns `packetcraftr::route::Plan`.
   Transmission frames take a borrowed `transmit::Route` view (decision, link
   mode, lookup destination) instead of `&route::Materialized`, and
   `Frame::route()` returns it; build one with `Materialized::transmit_route`.
@@ -290,13 +293,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   native capture waits honor the deadline's cancellation themselves. `packetcraftr::route::plan`,
   `Client::plan`, and `replay::Transmitter::plan_frame` take the deadline their
   lookups receive, and `neighbor::Request` loses its `deadline` field.
-  `route::SystemError` and `interface::Error` gain `Cancelled` and
+  `route::Error` and `interface::Error` gain `Cancelled` and
   `DeadlineExceeded` variants, and `tcp::ConnectError` gains
   `DeadlineExceeded` (`io.deadline_exceeded`). See
   `docs/migration-unreleased.md`.
 - netio errors follow the workspace error convention:
   - One unsupported representation: `packetcraftr_netio::Error::Unsupported`,
-    `route::SystemError::Unsupported`, and `interface::Error::Unsupported`
+    `route::Error::Unsupported`, and `interface::Error::Unsupported`
     each carry the new `packetcraftr_netio::Unsupported { capability,
     message, source }`. Its `NativeCapability` (`Route`,
     `InterfaceEnumeration`, `Capture`, `Transmission(Mode)`) decides the
@@ -487,8 +490,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}`,
   `clock::CancellableClock`, and `Clock::cancellation` are removed; the client
   carries cancellation to every workflow. The `progress` module is renamed
-  `runtime` (`runtime::{Runtime, RuntimeSnapshot, Worker, EmitError,
-  MAX_WORKER_CAPACITY}`). `SystemProviders` is a unit struct implementing
+  `runtime` (`runtime::{Runtime, RuntimeSnapshot, Worker, Error,
+  MAX_WORKER_CAPACITY}`; `EmitError` is `runtime::Error`). `SystemProviders` is a unit struct implementing
   `Providers` instead of an alias of `ProviderSet`, and `ProviderSet::system`
   is removed. The `capture::Selector` alias is removed (use
   `capture::Request::with_selector`), and `scan::PipelineFailure` is its
@@ -509,11 +512,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   `analysis::expert::Selector` selects findings; `analysis::Error` adds
   `SniPattern`. A `replay::Request` carries its selection as data: an
   optional `filter` (`FrameSelector`, set with `with_filter`) and a
-  `replay::Routing` of `replay::Rule`s (`Condition::Source` or
+  `replay::routing::Routing` of `routing::Rule`s (`Condition::Source` or
   `Condition::Filter`, each naming a `route::Interface`) with an optional
-  fallback, at most `replay::MAX_RULES`. `Rule::parse_source` and
+  fallback, at most `routing::MAX_RULES`. `Rule::parse_source` and
   `Rule::parse_filter` parse `SOURCE_ID=INTERFACE` and `EXPR=>INTERFACE`
-  rules and refuse with `replay::RuleError`. `replay::{Selector, AllFrames}`,
+  rules and refuse with `replay::routing::Error`. `replay::{Selector, AllFrames}`,
   `Request::with_selector`, and `replay::Options::interface` are removed.
   `replay::Error::Selection` carries a `filter::Error`, and
   `ConflictingInterfaces` and `Unmapped` (`cli.error`) replace
@@ -521,17 +524,57 @@ All notable changes to PacketcraftR are documented here. The format follows
   nowhere.
 
   See `docs/migration-unreleased.md`.
+- Each module has one error type, named `Error` and used module-qualified:
+  `packetcraftr_netio::route::SystemError` is `route::Error`, and
+  `packetcraftr::runtime::Error` (formerly `progress::EmitError`) implements
+  `Classified`. `packetcraftr::SentPacket` moves into the public `evidence`
+  module (`packetcraftr::evidence::SentPacket`) beside the evidence `Error`.
+  DNS wire handling is the `dns::wire` sub-domain: `dns::WireError` is
+  `dns::wire::Error` (now `Classified`: `packet.dns_query` for a query that
+  cannot be built, `packet.dns` for a response that breaks a wire rule, and
+  the codec's or core DNS error's own class for `Encode` and `Decode`, which
+  are transparent), `dns::{canonical_query_name, decode_response,
+  decode_tcp_frame, encode_query}` are `dns::wire::…`, and
+  `dns::QueryTypeParseError` folds into `wire::Error` (`QueryTypeSyntax`,
+  `QueryTypeRange`). The UDP profiles document's data lives in core:
+  `scan::profile::{Config, Payload, ResponseCheck, ByteCheck,
+  MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` are
+  `packetcraftr_core::document::udp_profiles::…`, and `scan::profile::Error`
+  is an enum whose `Invalid` variant replaces the tuple struct and which also
+  carries the document refusals (`Document`, `PortCount`, `Storage`,
+  `ConflictingPort`, `MappedPorts`). Classification codes are unchanged.
+  See `docs/migration-unreleased.md`.
+- `packetcraftr_cli::output::verify_forwarding::Input` is a struct with
+  `path`, `source`, and `selection_filter` fields instead of a tuple alias.
 
 ### Added
 
+- Classification codes new in this release, each for a failure that
+  previously had no classified error of its own:
+  - `cli.layer_index` (usage): `packet::Error::IndexOutOfBounds`, a layer
+    index outside the packet.
+  - `internal.registry`: `registry::Error`, a protocol, alias, link type,
+    matcher, or filter field registered twice or inconsistently.
+  - `internal.unresolved_interface`: `route::Error::UnresolvedInterface`, a
+    route planned with an interface selector no client resolved first.
+  - `internal.send_event_coherence`, `internal.scan_event_coherence`, and
+    `internal.traceroute_event_coherence`: a `Collector` given events that do
+    not form one publication, like the existing `internal.*_event_coherence`
+    codes of the other workflows.
+  - `io.send_clock`: `send::Error::Clock`, the pacing clock failing while a
+    paced send could still continue.
+  - `packet.semantics`: `protocol::semantics::Error`, route-bearing packet
+    fields that are malformed or ambiguous.
+  - `packet.tls`: `protocol::application::tls::Error::Invalid`, a TLS record
+    or handshake that breaks a wire rule or bound.
 - `packetcraftr_core::error::BoundaryError::as_causes` lists a boundary
   error's message followed by its captured causes, for a wrapper that reports
   it as its source without repeating its text.
 - `scan::MAX_IN_FLIGHT` (1024) names the most probe response windows one scan
   overlaps; request validation and the pipeline share it.
-- `packetcraftr::ExchangeEvidenceError` is public and names why the evidence an
-  executor returned is inconsistent with its step, including the new
-  `PermitMismatch`.
+- `packetcraftr::evidence::Error` is public, implements `Classified`
+  (`internal.live_io_invariant`), and names why the evidence an executor
+  returned is inconsistent with its step, including the new `PermitMismatch`.
 - `packetcraftr_netio::resources::WORKER_CAPACITY` names the capacity of the
   one native worker pool (16). `tcp::MAX_PENDING_CONNECTIONS` is defined as a
   sub-limit of it, and `capture::MAX_SOURCES` documents how a group relates to
@@ -554,26 +597,29 @@ All notable changes to PacketcraftR are documented here. The format follows
   built.
 
 - The versioned input documents and their rules are library API, so other
-  consumers read them exactly as the CLI does. Core `transform::Rules` reads
-  `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing with
-  `transform::RulesError`), builds one rule from direct edits
+  consumers read them exactly as the CLI does. Core `transform::rules::Rules`
+  reads `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing
+  with `transform::rules::Error`), builds one rule from direct edits
   (`Rules::single`), reports the VLAN growth a map needs
   (`maximum_growth`), and applies the rules in order to a frame with a
   caller-compiled filter (`try_map_filters`, `apply`).
-  `packetcraftr::scan::profile::parse_document` reads
-  `packetcraftr.udp-profiles/v1` into per-port profiles
-  (`scan::profile::DocumentError`). Core `document::parse_recipe` reads recipe
-  text as a JSON or YAML packet document or a layer expression
-  (`document::Format::{from_path, sniff}`, `document::RecipeError`), and
-  `document::PayloadTarget` fills an empty bytes field from outside the recipe
-  (`document::PayloadError`). `transform::fragment_link_type` frames an
+  Core `document::udp_profiles::parse` reads a
+  `packetcraftr.udp-profiles/v1` document into its assignments as neutral
+  data (`document::udp_profiles::Error`), and
+  `packetcraftr::scan::profile::compile` compiles them into per-port
+  profiles. Core `document::recipe::parse` reads
+  recipe text as a JSON or YAML packet document or a layer expression
+  (`document::Format::{from_path, sniff}`, `document::recipe::Error`), and
+  `document::payload::Target` fills an empty bytes field from outside the
+  recipe (`document::payload::Error`). `transform::fragment_link_type` frames an
   Ethernet, IPv4, or IPv6 recipe for `transform::fragment`. Document formats,
   CLI flags, and error codes are unchanged.
 - `protocol::network::ndp` types Neighbor Solicitation and Neighbor
   Advertisement bodies with their source and target link-layer address options
   (`NeighborSolicitation`, `NeighborAdvertisement`, `MessageOption`,
   `solicited_node_multicast`). Decoding keeps reserved bits and unknown
-  options, and a decoded body re-encodes byte for byte. The models are not
+  options, and a decoded body re-encodes byte for byte. `ndp::Error`
+  implements `Classified` (`packet.codec`). The models are not
   registered layers, so dissection output is unchanged.
 - `packet::MacAddress::for_ip_multicast` maps an IPv4 or IPv6 multicast group
   to its Ethernet group address.
@@ -827,6 +873,34 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Text output no longer shows Rust `Debug` formatting. Durations read as
+  milliseconds to the microsecond (`12.345ms`, `none` when absent) in the
+  `scan`, `traceroute`, `dns`, `replay`, `stats`, `tls`, `expert`, and
+  `follow` text renderers; scopes read `interface 3` or `interface none` and
+  `encapsulation vlan:10,network:192.0.2.1<->198.51.100.2` (or `none`); a UDP
+  profile's validation is spelled as in JSON (`confirmed`); and the stats I/O
+  bucket origin is a Unix timestamp. JSON and NDJSON are unchanged.
+- A `replay` output failure names what failed (`write stdout failed`,
+  `write replay record failed`, `write capture output failed`, or `replay
+  frame output failed`) and lists the error it carries as its first cause,
+  instead of repeating that error's text in the message. Codes are unchanged.
+- A live packet whose routing headers cannot be read is refused as
+  `traffic policy cannot authorize packet routing semantics: its live
+  destinations cannot be read` (or `its outer IP source cannot be read`) with
+  the packet's own failure as its first cause, instead of repeating that
+  failure in the message. Wire bytes that do not form a frame are refused
+  with the new `policy::Error::WireFrame`, which keeps the frame error as its
+  typed source. Codes are unchanged (`policy.invalid_packet_semantics`).
+- A `rewrite --rules-file` document that is not valid JSON of its schema's shape
+  reads `invalid rewrite rules` with the parser's reason as its first cause,
+  instead of repeating that reason in the message. An unsupported schema and
+  a rule count outside 1 to 64 now have distinct messages
+  (`unsupported rewrite rules schema S; expected ...` and `rewrite rules hold
+  N rules; expected 1 to 64`). A `scan --udp-profiles` document reads the
+  same way: `invalid UDP profiles` with the parser's reason as its cause,
+  `unsupported UDP profiles schema S; expected packetcraftr.udp-profiles/v1`,
+  and `UDP profiles hold N assignments; expected 1 to 256`. Codes and exit
+  codes are unchanged.
 - A `replay` frame that matches `--map-interface` or `--map-filter` rules
   naming different interfaces now reports `replay frame N matches conflicting
   output interfaces` as its message, and a frame no rule maps without an
@@ -1138,6 +1212,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Removed
 
+- The `internal.final_wire_authorization` and `internal.target_resolution`
+  codes are no longer reported: they classified an authorizer that lacked
+  final-wire authorization or target resolution, and those capabilities are
+  now separate internal traits, so the failure cannot occur.
 - Rust: the equivalent public paths `packetcraftr_core::{Packet, PacketError}`
   (use `packet::`), `build::{Context, Mode, DEFAULT_MAX_LAYERS,
   DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `layout::`),

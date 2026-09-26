@@ -185,7 +185,7 @@ impl Request {
             });
         }
         self.targets.validate().map_err(Error::TargetSelection)?;
-        if self.udp_profiles.len() > super::profile::MAX_PROFILE_PORTS
+        if self.udp_profiles.len() > packetcraftr_core::document::udp_profiles::MAX_PROFILE_PORTS
             || (!self.udp_profiles.is_empty() && self.transport != Transport::Udp)
         {
             return Err(Error::InvalidLimit {
@@ -201,7 +201,7 @@ impl Request {
                 profile_bytes = profile_bytes.saturating_add(profile.storage_bytes());
             }
         }
-        if profile_bytes > super::profile::MAX_PROFILE_BYTES {
+        if profile_bytes > packetcraftr_core::document::udp_profiles::MAX_PROFILE_BYTES {
             return Err(Error::InvalidLimit {
                 field: "udp_profile_bytes",
                 value: profile_bytes as u64,

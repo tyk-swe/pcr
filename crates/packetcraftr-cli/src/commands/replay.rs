@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::Providers;
 use packetcraftr::clock::Clock;
-use packetcraftr::replay::{self, Event, FrameEvidence, Request, Routing, Rule, RuleError, Source};
+use packetcraftr::replay::{
+    Event, FrameEvidence, Request, Source,
+    routing::{self, Routing, Rule},
+};
 use packetcraftr::route;
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::capture_file::{Format, Limits, Reader, Writer, compression};
@@ -46,8 +49,8 @@ impl super::Spec for Args {
     type Format = crate::output::contract::ExchangeFormat;
     const CANCELLATION: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.duration)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -119,8 +122,8 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         max_frame_bytes,
     )?;
     let rule_count = arguments.interface_maps.len() + arguments.filter_maps.len();
-    if rule_count > replay::MAX_RULES {
-        return Err(RuleError::TooMany { count: rule_count }.into());
+    if rule_count > routing::MAX_RULES {
+        return Err(routing::Error::TooMany { count: rule_count }.into());
     }
     let fallback = arguments
         .interface
@@ -177,18 +180,20 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
 }
 
 /// A refused interface rule, in its option's own words.
-impl From<RuleError> for CliError {
-    fn from(error: RuleError) -> Self {
+impl From<routing::Error> for CliError {
+    fn from(error: routing::Error) -> Self {
         let message = match &error {
-            RuleError::SourceSyntax => "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into(),
-            RuleError::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
-            RuleError::SourceId { .. } => {
+            routing::Error::SourceSyntax => {
+                "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into()
+            }
+            routing::Error::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
+            routing::Error::SourceId { .. } => {
                 "source interface must be an unsigned capture-global ID".into()
             }
-            RuleError::TooMany { .. } => {
+            routing::Error::TooMany { .. } => {
                 format!(
                     "replay permits at most {} interface rules",
-                    replay::MAX_RULES
+                    routing::MAX_RULES
                 )
             }
             _ => return Self::classified(error),
@@ -369,7 +374,7 @@ where
                 {
                     Some(writer) => render_capture_record(writer, evidence),
                     None => Err(output_failure(
-                        "replay capture output is already finished".to_owned(),
+                        "replay capture output is already finished",
                         io::Error::other("capture writer closed"),
                     )),
                 },
@@ -387,18 +392,22 @@ where
     finish_compressed_output(result, destination)
 }
 
-/// An output failure the replay reports at the frame it failed on.
+/// An output failure the replay reports at the frame it failed on: `message`
+/// names what failed, and the error it carries is the first cause.
 fn output_failure(
-    message: String,
+    message: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> BoundaryError {
-    let classification = CliError::new(Kind::Io, message.clone()).classification;
-    BoundaryError::with_source(message, classification, Vec::new(), source)
+    let classification = CliError::new(Kind::Io, message).classification;
+    let causes = std::iter::once(source.to_string())
+        .chain(packetcraftr_core::error::source_chain(&source))
+        .collect();
+    BoundaryError::with_source(message, classification, causes, source)
 }
 
 fn output_frame(evidence: FrameEvidence) -> Result<output::replay::Frame, BoundaryError> {
     output::replay::Frame::try_from(evidence)
-        .map_err(|source| output_failure(source.to_string(), source))
+        .map_err(|source| output_failure("replay frame output failed", source))
 }
 
 /// Writes one frame line. An interrupt observed while writing fails the
@@ -410,9 +419,7 @@ fn text_record_with(
     let result = output_frame(evidence)?;
     write_line(format_args!("{}", rendering::frame_line(&result))).map_err(|source| match source {
         HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
-        HumanWriteError::Write(source) => {
-            output_failure(format!("write stdout failed: {source}"), source)
-        }
+        HumanWriteError::Write(source) => output_failure("write stdout failed", source),
     })
 }
 
@@ -426,7 +433,7 @@ fn render_stream_record(
         .map_err(|error| match error {
             EncodeError::Cancelled(cancelled) => BoundaryError::from_error(cancelled),
             EncodeError::Deadline { source, .. } => BoundaryError::from_error(source),
-            error => output_failure(error.to_string(), error),
+            error => output_failure("write replay record failed", error),
         })
 }
 
@@ -498,5 +505,5 @@ fn render_capture_record<W: Write>(
             evidence.capture_interface,
             evidence.frame,
         )
-        .map_err(|source| output_failure(source.to_string(), source))
+        .map_err(|source| output_failure("write capture output failed", source))
 }

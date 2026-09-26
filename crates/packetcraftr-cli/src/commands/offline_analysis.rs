@@ -235,21 +235,22 @@ where
 }
 
 pub(super) fn render_scope(scope: &analysis::scope::Definition) -> Result<(), CliError> {
+    let scope = crate::output::analysis::Scope::try_from(scope.clone())?;
     crate::rendering::write_stdout_line(format_args!(
-        "scope {}: interface {:?}, encapsulation {:?}",
-        scope.id.get(),
-        scope.interface,
-        scope.encapsulation
+        "scope {}: interface {}, encapsulation {}",
+        scope.id,
+        crate::rendering::optional_display(scope.interface),
+        crate::rendering::encapsulation_text(&scope.encapsulation)
     ))
 }
 
 pub(super) fn render_clock(clock: &analysis::ClockReport) -> Result<(), CliError> {
     crate::rendering::write_stdout_line(format_args!(
-        "capture clock: {} regressing frame(s), largest rollback {:?}, largest forward step {:?} at frame {:?}; expiry follows the high-water mark",
+        "capture clock: {} regressing frame(s), largest rollback {}, largest forward step {} at frame {}; expiry follows the high-water mark",
         clock.regressions,
-        clock.max_regression,
-        clock.max_forward_step,
-        clock.max_forward_step_frame,
+        crate::rendering::duration_text(clock.max_regression),
+        crate::rendering::duration_text(clock.max_forward_step),
+        crate::rendering::optional_display(clock.max_forward_step_frame),
     ))
 }
 

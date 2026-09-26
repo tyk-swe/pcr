@@ -21,8 +21,8 @@ use crate::providers::Providers;
 use packetcraftr_core::error::BoundaryError;
 
 use super::Limits;
-use super::classification::{ResponseClassification, classify_response};
-use super::probe::Probe;
+use super::evidence::{ResponseClassification, classify_response};
+use super::plan::Probe;
 
 /// One bounded UDP DNS query the executor transmits with capture armed first.
 ///
@@ -39,7 +39,7 @@ pub(crate) struct Exchange {
 #[derive(Clone, Debug)]
 pub(crate) struct ExchangeEvidence {
     pub(crate) permit: ExecutionPermit,
-    pub(crate) sent: crate::SentPacket,
+    pub(crate) sent: crate::evidence::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
     pub(crate) unsolicited: Vec<DecodedPacket>,
     pub(crate) undecoded: Vec<Frame>,

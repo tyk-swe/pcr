@@ -139,7 +139,7 @@ fn batch(questions: impl IntoIterator<Item = dns::Request>) -> batch::Request {
 }
 
 fn framed_query_bytes(request: &dns::Request) -> u64 {
-    dns::encode_query(
+    dns::wire::encode_query(
         &request.query_name,
         request.query_type,
         request.transaction_id,

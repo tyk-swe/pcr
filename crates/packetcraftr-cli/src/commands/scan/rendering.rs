@@ -7,7 +7,7 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_debug, optional_display,
+    captured_frame_text, comma_separated, duration_text, optional_display, optional_duration,
     render_diagnostics_text, render_undecoded, write_stdout_line, write_summary_line,
 };
 
@@ -26,14 +26,14 @@ pub(super) fn render_text(
         comma_separated(&result.resolved_addresses)
     ))?;
     write_stdout_line(format_args!(
-        "planned timeout+pacing {:?}; achieved {:.2} probes/s over {:?}",
-        result.planned_duration,
+        "planned timeout+pacing {}; achieved {:.2} probes/s over {}",
+        duration_text(result.planned_duration),
         if stats.elapsed.is_zero() {
             0.0
         } else {
             stats.packets_completed as f64 / stats.elapsed.as_secs_f64()
         },
-        stats.elapsed
+        duration_text(stats.elapsed)
     ))?;
     for endpoint in &result.endpoints {
         // ICMP has no port, so it names itself; the port-bearing transports
@@ -60,13 +60,15 @@ pub(super) fn render_text(
                 evidence.sent_at,
                 optional_display(evidence.received_at),
                 optional_display(evidence.responder),
-                optional_debug(evidence.latency),
+                optional_duration(evidence.latency),
                 evidence.reason,
             ))?;
             if let Some(application) = &evidence.application {
                 write_stdout_line(format_args!(
-                    "    profile={} validation={:?}: {}",
-                    application.profile, application.status, application.reason
+                    "    profile={} validation={}: {}",
+                    application.profile,
+                    application.status.as_str(),
+                    application.reason
                 ))?;
             }
             if let Some(frame) = &evidence.frame {
@@ -87,9 +89,9 @@ pub(super) fn render_text(
         rtt.sent,
         rtt.received,
         rtt.lost,
-        optional_debug(rtt.min),
-        optional_debug(rtt.avg),
-        optional_debug(rtt.max),
+        optional_duration(rtt.min),
+        optional_duration(rtt.avg),
+        optional_duration(rtt.max),
     ))?;
     render_diagnostics_text(&diagnostics)
 }
@@ -146,10 +148,10 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         ))?;
     }
     write_stdout_line(format_args!(
-        "{} socket connections attempted; {} succeeded; elapsed {:?}",
+        "{} socket connections attempted; {} succeeded; elapsed {}",
         report.summary.socket_stats.connections_attempted,
         report.summary.socket_stats.connections_succeeded,
-        report.summary.socket_stats.elapsed
+        duration_text(report.summary.socket_stats.elapsed)
     ))?;
     let rtt = &report.summary.socket_stats.rtt;
     write_stdout_line(format_args!(
@@ -157,8 +159,8 @@ pub(super) fn render_connect_text(report: &output::scan::connect::Report) -> Res
         rtt.sent,
         rtt.received,
         rtt.lost,
-        optional_debug(rtt.min),
-        optional_debug(rtt.avg),
-        optional_debug(rtt.max),
+        optional_duration(rtt.min),
+        optional_duration(rtt.avg),
+        optional_duration(rtt.max),
     ))
 }

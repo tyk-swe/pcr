@@ -14,14 +14,17 @@ use std::time::Instant;
 use packetcraftr_core::budget::Deadline;
 use socket2::{Domain, Socket, Type};
 
-use super::enumeration::interfaces;
-use super::parser::{parse_route_addresses, roundup};
 use crate::deadline::{POLL_INTERVAL, expires_at, remaining_before};
-use crate::platform::route::{constrain_by_preferred_source, find_interface, os_error};
+use crate::platform::common::{
+    af_route::{parse_route_addresses, roundup},
+    os_error,
+};
+use crate::platform::interface::af_route::snapshot;
+use crate::platform::route::{constrain_by_preferred_source, find_interface};
 use crate::route::normalize::{NativeRouteSnapshot, finish_route, interface_decision};
 use crate::{
     interface::Id as InterfaceId,
-    route::{Decision, SelectionReason, SystemError},
+    route::{self, Decision, SelectionReason},
 };
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
@@ -36,8 +39,8 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
     deadline: &Deadline,
-) -> Result<Decision, SystemError> {
-    let available = interfaces()?;
+) -> Result<Decision, route::Error> {
+    let available = snapshot()?;
     let requested = interface_hint
         .map(|requested| find_interface(&available, requested))
         .transpose()?;
@@ -59,7 +62,7 @@ pub(super) fn route(
     let interface = available
         .into_iter()
         .find(|interface| interface.id.index == output_index)
-        .ok_or_else(|| SystemError::InterfaceNotFound {
+        .ok_or_else(|| route::Error::InterfaceNotFound {
             name: constrained_interface.as_ref().map_or_else(
                 || format!("index-{output_index}"),
                 |interface| interface.id.name.clone(),
@@ -100,8 +103,8 @@ pub(super) fn route(
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
     _deadline: &Deadline,
-) -> Result<Decision, SystemError> {
-    interface_decision(find_interface(&interfaces()?, requested)?)
+) -> Result<Decision, route::Error> {
+    interface_decision(find_interface(&snapshot()?, requested)?)
 }
 
 struct RouteResponse {
@@ -122,9 +125,9 @@ fn query_route(
     destination: IpAddr,
     interface_index: Option<u32>,
     caller: &Deadline,
-) -> Result<RouteResponse, SystemError> {
+) -> Result<RouteResponse, route::Error> {
     let deadline = expires_at(caller).map_err(|interrupted| {
-        SystemError::interrupted(interrupted, "querying the macOS routing socket")
+        route::Error::interrupted(interrupted, "querying the macOS routing socket")
     })?;
     let request = build_route_request(destination, interface_index)?;
     let socket = send_route_request(&request, destination, deadline)?;
@@ -132,8 +135,8 @@ fn query_route(
 }
 
 /// The caller's deadline expired during `operation`.
-fn route_timeout(operation: &'static str) -> SystemError {
-    SystemError::DeadlineExceeded { operation }
+fn route_timeout(operation: &'static str) -> route::Error {
+    route::Error::DeadlineExceeded { operation }
 }
 
 /// Whether a socket call ended because its timeout elapsed.
@@ -147,24 +150,24 @@ fn timed_out(error: &std::io::Error) -> bool {
 fn build_route_request(
     destination: IpAddr,
     interface_index: Option<u32>,
-) -> Result<RouteRequest, SystemError> {
+) -> Result<RouteRequest, route::Error> {
     let sequence = ROUTE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     // SAFETY: `getpid` has no preconditions.
     let pid = unsafe { libc::getpid() };
     let destination_address = encode_sockaddr(destination)?;
     let message_length = size_of::<libc::rt_msghdr>()
         .checked_add(roundup(destination_address.len()))
-        .ok_or_else(|| SystemError::InvalidResponse {
+        .ok_or_else(|| route::Error::InvalidResponse {
             message: "macOS route request exceeded the routing-socket limit".to_owned(),
         })?;
     let wire_message_length =
-        u16::try_from(message_length).map_err(|_| SystemError::InvalidResponse {
+        u16::try_from(message_length).map_err(|_| route::Error::InvalidResponse {
             message: "macOS route request exceeded the routing-socket limit".to_owned(),
         })?;
-    let version = u8::try_from(libc::RTM_VERSION).map_err(|_| SystemError::InvalidResponse {
+    let version = u8::try_from(libc::RTM_VERSION).map_err(|_| route::Error::InvalidResponse {
         message: "macOS RTM_VERSION does not fit its routing-socket field".to_owned(),
     })?;
-    let message_type = u8::try_from(libc::RTM_GET).map_err(|_| SystemError::InvalidResponse {
+    let message_type = u8::try_from(libc::RTM_GET).map_err(|_| route::Error::InvalidResponse {
         message: "macOS RTM_GET does not fit its routing-socket field".to_owned(),
     })?;
     // SAFETY: all-zero is a valid baseline for this C message structure; all
@@ -178,7 +181,7 @@ fn build_route_request(
     header.rtm_pid = pid;
     header.rtm_seq = sequence;
     if let Some(index) = interface_index {
-        header.rtm_index = u16::try_from(index).map_err(|_| SystemError::InvalidResponse {
+        header.rtm_index = u16::try_from(index).map_err(|_| route::Error::InvalidResponse {
             message: format!("macOS interface index {index} exceeds routing-socket width"),
         })?;
         header.rtm_flags |= libc::RTF_IFSCOPE;
@@ -208,7 +211,7 @@ fn send_route_request(
     request: &RouteRequest,
     destination: IpAddr,
     deadline: Instant,
-) -> Result<Socket, SystemError> {
+) -> Result<Socket, route::Error> {
     let socket = Socket::new(Domain::from(libc::AF_ROUTE), Type::RAW, None)
         .map_err(|error| os_error("open routing socket", error))?;
     let remaining =
@@ -220,7 +223,7 @@ fn send_route_request(
         .send(&request.bytes)
         .map_err(|error| route_write_error(destination, error))?;
     if sent != request.bytes.len() {
-        return Err(SystemError::InvalidResponse {
+        return Err(route::Error::InvalidResponse {
             message: format!(
                 "macOS routing socket accepted {sent} of {} bytes",
                 request.bytes.len()
@@ -234,9 +237,9 @@ fn send_route_request(
 /// Darwin fails the RTM_GET write itself when the lookup finds no route
 /// ("writing to routing socket: not in table"), so the no-route errnos an
 /// echoed `rtm_errno` would carry mean the same thing here.
-fn route_write_error(destination: IpAddr, error: std::io::Error) -> SystemError {
+fn route_write_error(destination: IpAddr, error: std::io::Error) -> route::Error {
     if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENETUNREACH)) {
-        return SystemError::RouteNotFound { destination };
+        return route::Error::RouteNotFound { destination };
     }
     if timed_out(&error) {
         return route_timeout("writing the RTM_GET request");
@@ -250,7 +253,7 @@ fn read_route_response(
     caller: &Deadline,
     deadline: Instant,
     request: &RouteRequest,
-) -> Result<RouteResponse, SystemError> {
+) -> Result<RouteResponse, route::Error> {
     let mut unmatched = 0;
     while unmatched < MAX_UNMATCHED_MESSAGES {
         let remaining = remaining_before(deadline)
@@ -289,13 +292,13 @@ fn read_route_response(
         }
         let declared = usize::from(response_header.rtm_msglen);
         if declared < size_of::<libc::rt_msghdr>() || declared > bytes.len() {
-            return Err(SystemError::InvalidResponse {
+            return Err(route::Error::InvalidResponse {
                 message: "macOS route response had an invalid message length".to_owned(),
             });
         }
         if response_header.rtm_errno != 0 {
             if matches!(response_header.rtm_errno, libc::ESRCH | libc::ENETUNREACH) {
-                return Err(SystemError::RouteNotFound { destination });
+                return Err(route::Error::RouteNotFound { destination });
             }
             return Err(os_error(
                 "RTM_GET",
@@ -304,7 +307,7 @@ fn read_route_response(
         }
         let payload = bytes
             .get(size_of::<libc::rt_msghdr>()..declared)
-            .ok_or_else(|| SystemError::InvalidResponse {
+            .ok_or_else(|| route::Error::InvalidResponse {
                 message: "macOS route response had an invalid message length".to_owned(),
             })?;
         let addresses = parse_route_addresses(payload, response_header.rtm_addrs)?;
@@ -317,7 +320,7 @@ fn read_route_response(
             selected_source: addresses.get(libc::RTAX_IFA as usize).copied().flatten(),
         });
     }
-    Err(SystemError::InvalidResponse {
+    Err(route::Error::InvalidResponse {
         message: "macOS routing socket returned no matching RTM_GET response".to_owned(),
     })
 }
@@ -326,16 +329,16 @@ fn read_route_response(
 ///
 /// Each field is written at the offset `libc` declares for this target's own
 /// structure, and every byte the C structure does not name stays zero.
-fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
+fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, route::Error> {
     match address {
         IpAddr::V4(address) => {
             let length = u8::try_from(size_of::<libc::sockaddr_in>()).map_err(|_| {
-                SystemError::InvalidResponse {
+                route::Error::InvalidResponse {
                     message: "macOS sockaddr_in length does not fit sin_len".to_owned(),
                 }
             })?;
             let family = libc::sa_family_t::try_from(libc::AF_INET).map_err(|_| {
-                SystemError::InvalidResponse {
+                route::Error::InvalidResponse {
                     message: "macOS AF_INET does not fit sa_family_t".to_owned(),
                 }
             })?;
@@ -359,12 +362,12 @@ fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
         }
         IpAddr::V6(address) => {
             let length = u8::try_from(size_of::<libc::sockaddr_in6>()).map_err(|_| {
-                SystemError::InvalidResponse {
+                route::Error::InvalidResponse {
                     message: "macOS sockaddr_in6 length does not fit sin6_len".to_owned(),
                 }
             })?;
             let family = libc::sa_family_t::try_from(libc::AF_INET6).map_err(|_| {
-                SystemError::InvalidResponse {
+                route::Error::InvalidResponse {
                     message: "macOS AF_INET6 does not fit sa_family_t".to_owned(),
                 }
             })?;
@@ -389,11 +392,11 @@ fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, SystemError> {
     }
 }
 
-fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result<(), SystemError> {
+fn write_sockaddr_field(bytes: &mut [u8], offset: usize, value: &[u8]) -> Result<(), route::Error> {
     offset
         .checked_add(value.len())
         .and_then(|end| bytes.get_mut(offset..end))
-        .ok_or_else(|| SystemError::InvalidResponse {
+        .ok_or_else(|| route::Error::InvalidResponse {
             message: "macOS sockaddr field does not fit its own structure".to_owned(),
         })?
         .copy_from_slice(value);
@@ -413,12 +416,12 @@ mod tests {
         for errno in [libc::ESRCH, libc::ENETUNREACH] {
             assert!(matches!(
                 route_write_error(destination, std::io::Error::from_raw_os_error(errno)),
-                SystemError::RouteNotFound { destination: actual } if actual == destination
+                route::Error::RouteNotFound { destination: actual } if actual == destination
             ));
         }
         assert!(matches!(
             route_write_error(destination, std::io::Error::from_raw_os_error(libc::EACCES)),
-            SystemError::OperatingSystem {
+            route::Error::OperatingSystem {
                 operation: "write RTM_GET",
                 ..
             }

@@ -137,7 +137,7 @@ fn resolve_recipe(
         }
         (Some(_), Some(_)) => unreachable!("clap enforces recipe source conflicts"),
     };
-    core::document::parse_recipe(&input, declared, registry, max_layers)
+    core::document::recipe::parse(&input, declared, registry, max_layers)
         .map_err(CliError::classified)
 }
 
@@ -148,7 +148,7 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let (target, path) = spec
         .split_once('=')
         .ok_or_else(|| CliError::new(Kind::Usage, PAYLOAD_FILE_SYNTAX))?;
-    let target = target.parse::<core::document::PayloadTarget>()?;
+    let target = target.parse::<core::document::payload::Target>()?;
     target.inject(packet, || {
         read_bounded_file_allow_empty(
             Path::new(path),
@@ -168,14 +168,14 @@ const PAYLOAD_FILE_SYNTAX: &str = "--payload-file requires LAYER.FIELD=PATH";
 struct PayloadFile {
     message: &'static str,
     #[source]
-    source: core::document::PayloadError,
+    source: core::document::payload::Error,
 }
 
-impl From<core::document::PayloadError> for CliError {
-    fn from(source: core::document::PayloadError) -> Self {
+impl From<core::document::payload::Error> for CliError {
+    fn from(source: core::document::payload::Error) -> Self {
         let classification = core::error::Classified::classification(&source);
         let message = match source {
-            core::document::PayloadError::Syntax => PAYLOAD_FILE_SYNTAX,
+            core::document::payload::Error::Syntax => PAYLOAD_FILE_SYNTAX,
             _ => "--payload-file cannot fill its recipe field",
         };
         let error = PayloadFile { message, source };

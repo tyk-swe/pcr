@@ -177,7 +177,9 @@ impl From<packetcraftr::exchange::Report> for Published<Event> {
     }
 }
 
-fn sent_output(sent: std::sync::Arc<packetcraftr::SentPacket>) -> (Wire, Vec<Diagnostic>) {
+fn sent_output(
+    sent: std::sync::Arc<packetcraftr::evidence::SentPacket>,
+) -> (Wire, Vec<Diagnostic>) {
     (
         sent.wire_bytes().clone().into(),
         sent.built().diagnostics.clone(),

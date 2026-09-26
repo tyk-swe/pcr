@@ -51,6 +51,19 @@ pub(crate) struct MaxDurationArgs<R: RunTime> {
     run_time: PhantomData<R>,
 }
 
+/// An argument group that bounds a command's run time; the command publishes
+/// its output under that deadline.
+pub(crate) trait Bounded {
+    /// The `--max-duration-ms` deadline.
+    fn max_duration(&self) -> Duration;
+}
+
+impl<R: RunTime> Bounded for MaxDurationArgs<R> {
+    fn max_duration(&self) -> Duration {
+        Self::max_duration(self)
+    }
+}
+
 impl<R: RunTime> MaxDurationArgs<R> {
     pub(crate) const fn max_duration(&self) -> Duration {
         Duration::from_millis(self.max_duration_ms)
@@ -73,7 +86,7 @@ impl<R: RunTime> MaxDurationArgs<R> {
     }
 
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
-        declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        declare!(settings, self, [max_duration_ms: Milliseconds @ Operation preset(30000, 300000)]);
     }
 }
 

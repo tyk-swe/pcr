@@ -13,7 +13,8 @@ use packetcraftr_core::{
     packet::Packet,
     protocol::{builtin, network::Ipv4, transport::Udp},
     transform::{
-        ChecksumMode, FieldAssignment, HeaderRewrite, RewriteLimits, Rules, RulesError, VlanRewrite,
+        ChecksumMode, FieldAssignment, HeaderRewrite, RewriteLimits, VlanRewrite,
+        rules::{self, Rules},
     },
 };
 use serde_json::json;
@@ -22,11 +23,11 @@ use std::time::UNIX_EPOCH;
 const LAB_HOST: &str = include_str!("../../../examples/documents/rewrite-lab-host.json");
 const FIELD_EDITS: &str = include_str!("../../../examples/documents/rewrite-field-edits.json");
 
-fn parse(document: &[u8]) -> Result<Rules, RulesError> {
+fn parse(document: &[u8]) -> Result<Rules, rules::Error> {
     Rules::parse(document, ChecksumMode::Repair, &builtin::registry())
 }
 
-fn parse_json(document: serde_json::Value) -> Result<Rules, RulesError> {
+fn parse_json(document: serde_json::Value) -> Result<Rules, rules::Error> {
     parse(&serde_json::to_vec(&document).unwrap())
 }
 
@@ -51,7 +52,7 @@ fn udp_frame(ttl: u8) -> Frame {
 }
 
 /// The published error: its code, kind, message, and causes.
-fn published(error: &RulesError) -> (&'static str, Kind, String, Vec<String>) {
+fn published(error: &rules::Error) -> (&'static str, Kind, String, Vec<String>) {
     let classification = error.classification();
     (
         classification.code,
@@ -93,26 +94,29 @@ fn the_published_examples_read_as_ordered_rules() {
 
 #[test]
 fn document_refusals_keep_their_published_codes_and_messages() {
-    const SHAPE: &str =
-        "rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules";
+    const COUNT: &str = "rewrite rules hold {} rules; expected 1 to 64";
+    let count = |rules: usize| COUNT.replace("{}", &rules.to_string());
     let usage = |message: &str| ("cli.error", Kind::Usage, message.to_owned(), Vec::new());
     let patch = json!({"patch": {"source_port": 1}});
     for (document, expected) in [
         (
             json!({"schema": "packetcraftr.rewrite/v3", "rules": [patch]}),
-            usage(SHAPE),
+            usage(
+                "unsupported rewrite rules schema packetcraftr.rewrite/v3; \
+                 expected packetcraftr.rewrite/v1 or packetcraftr.rewrite/v2",
+            ),
         ),
         (
             json!({"schema": "packetcraftr.rewrite/v1", "rules": []}),
-            usage(SHAPE),
+            usage(&count(0)),
         ),
         (
             json!({"schema": "packetcraftr.rewrite/v1", "rules": vec![patch.clone(); 65]}),
-            usage(SHAPE),
+            usage(&count(65)),
         ),
         (
             json!({"schema": "packetcraftr.rewrite/v2", "rules": []}),
-            usage(SHAPE),
+            usage(&count(0)),
         ),
         (
             json!({"schema": "packetcraftr.rewrite/v1", "rules": [{"patch": {}}]}),
@@ -157,18 +161,19 @@ fn syntax_refusals_name_the_parser_reason_once() {
         let error = parse(document).expect_err("refused");
         let (code, kind, message, causes) = published(&error);
         assert_eq!((code, kind), ("cli.error", Kind::Usage));
-        assert!(message.starts_with("invalid rewrite rules: "), "{message}");
-        assert!(causes.is_empty(), "{causes:?}");
+        assert_eq!(message, "invalid rewrite rules");
+        assert_eq!(causes.len(), 1, "{causes:?}");
+        assert!(!causes[0].is_empty());
         assert!(std::error::Error::source(&error).is_some());
     }
 }
 
 #[test]
 fn an_oversized_document_is_refused_before_it_is_read() {
-    let document = vec![b' '; packetcraftr_core::transform::MAX_REWRITE_DOCUMENT_BYTES + 1];
+    let document = vec![b' '; rules::MAX_REWRITE_DOCUMENT_BYTES + 1];
     assert!(matches!(
         parse(&document),
-        Err(RulesError::DocumentSize { actual, limit })
+        Err(rules::Error::DocumentSize { actual, limit })
             if actual == limit + 1
     ));
 }
@@ -184,7 +189,7 @@ fn a_single_rule_validates_its_patch_before_compiling_assignments() {
     };
     let error = Rules::single(None, mixed, &assignments, ChecksumMode::Repair, &registry)
         .expect_err("mixed families");
-    assert!(matches!(error, RulesError::Patch(_)), "{error:?}");
+    assert!(matches!(error, rules::Error::Patch(_)), "{error:?}");
     let error = Rules::single(
         None,
         HeaderRewrite::default(),
@@ -193,7 +198,7 @@ fn a_single_rule_validates_its_patch_before_compiling_assignments() {
         &registry,
     )
     .expect_err("unknown field");
-    assert!(matches!(error, RulesError::Assignment(_)), "{error:?}");
+    assert!(matches!(error, rules::Error::Assignment(_)), "{error:?}");
     assert_eq!(error.classification().code, "cli.error");
 
     let vlans = Rules::single(

@@ -17,14 +17,13 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
 use super::{Batch, Evidence, Sequenced};
-use crate::SentPacket;
+use crate::evidence::SentPacket;
 use crate::execution::Errors;
 use crate::execution::evidence::{EvidenceSink, EvidenceState, ResponseSelector};
 use crate::execution::limits::EvidenceLimits;
 use crate::execution::validation::{
-    ExchangeEvidenceError, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
+    validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
+    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 use crate::probe::{Workflow, enforce_deadline};
 
@@ -180,7 +179,7 @@ where
         if permit != batch.permit {
             return Err(self
                 .errors
-                .invalid_evidence(batch.sequence, ExchangeEvidenceError::PermitMismatch));
+                .invalid_evidence(batch.sequence, crate::evidence::Error::PermitMismatch));
         }
         self.record_diagnostics(diagnostics, deadline)?;
         self.enforce(deadline)?;
@@ -321,12 +320,12 @@ fn validate_batch_exchange_evidence<P, F>(
     max_captured_frames: usize,
     max_captured_bytes: usize,
     mut sent_packet_matches: F,
-) -> Result<(), ExchangeEvidenceError>
+) -> Result<(), crate::evidence::Error>
 where
     F: FnMut(&P, &Packet) -> bool,
 {
     if execution.sent.len() != probes.len() {
-        return Err(ExchangeEvidenceError::SentCardinality {
+        return Err(crate::evidence::Error::SentCardinality {
             expected: probes.len(),
             receipts: execution.sent.len(),
         });
@@ -336,7 +335,7 @@ where
         .iter()
         .any(|response| response.request_index >= probes.len())
     {
-        return Err(ExchangeEvidenceError::ResponseOutsideBatch);
+        return Err(crate::evidence::Error::ResponseOutsideBatch);
     }
 
     validate_aggregate_evidence_limits(
@@ -349,7 +348,7 @@ where
 
     for (request_index, (sent, probe)) in execution.sent.iter().zip(probes).enumerate() {
         if !sent_packet_matches(probe, &sent.built().packet) {
-            return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
+            return Err(crate::evidence::Error::SentPacketMismatch { request_index });
         }
     }
 
@@ -359,7 +358,7 @@ where
     if execution.stats.packets_attempted != u64::try_from(probes.len()).unwrap_or(u64::MAX)
         || execution.stats.packets_completed != u64::try_from(probes.len()).unwrap_or(u64::MAX)
     {
-        return Err(ExchangeEvidenceError::IncompleteStatistics);
+        return Err(crate::evidence::Error::IncompleteStatistics);
     }
     Ok(())
 }

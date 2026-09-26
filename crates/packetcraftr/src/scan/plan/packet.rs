@@ -367,9 +367,14 @@ mod tests {
 
     #[test]
     fn dns_payloads_use_the_exact_dns_layer_under_strict_port_binding() {
-        let payload =
-            crate::dns::encode_query("example.test", crate::dns::QueryType::A, 1234, true, None)
-                .unwrap();
+        let payload = crate::dns::wire::encode_query(
+            "example.test",
+            crate::dns::QueryType::A,
+            1234,
+            true,
+            None,
+        )
+        .unwrap();
         let probe = Probe {
             sequence: 0,
             attempt: 1,
@@ -387,9 +392,14 @@ mod tests {
         assert!(sent_probe_matches(&probe, &built.packet));
         assert_eq!(built.packet.get::<Dns>().unwrap().wire(), &payload);
         let mut changed = probe.clone();
-        changed.udp_payload =
-            crate::dns::encode_query("other.test", crate::dns::QueryType::A, 1234, true, None)
-                .unwrap();
+        changed.udp_payload = crate::dns::wire::encode_query(
+            "other.test",
+            crate::dns::QueryType::A,
+            1234,
+            true,
+            None,
+        )
+        .unwrap();
         assert!(!sent_probe_matches(&changed, &built.packet));
     }
 

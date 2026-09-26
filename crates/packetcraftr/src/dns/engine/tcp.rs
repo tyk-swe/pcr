@@ -20,12 +20,12 @@ use crate::policy::Authorizer;
 use crate::target::ResolveTarget;
 use crate::target::{Family, Target, resolve_selected};
 
-use super::super::classification::{
+use super::super::error::{Error, EvidenceFault};
+use super::super::evidence::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
-use super::super::error::{Error, EvidenceFault};
 use super::super::executor::{Exchange, TcpEvidence, TcpQuerier, TcpQuery};
-use super::super::probe::Probe;
+use super::super::plan::Probe;
 use super::super::{Event, Outcome};
 use super::{Attempts, Retries};
 

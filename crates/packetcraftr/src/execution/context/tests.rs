@@ -355,7 +355,7 @@ fn a_permit_mismatch_fails_before_validation_or_accounting() {
 
     assert!(matches!(
         error,
-        Failure::InvalidEvidence(3, ExchangeEvidenceError::PermitMismatch)
+        Failure::InvalidEvidence(3, crate::evidence::Error::PermitMismatch)
     ));
     assert!(!validated);
     assert_eq!(context.into_stats(), Stats::default());

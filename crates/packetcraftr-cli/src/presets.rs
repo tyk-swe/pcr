@@ -4,6 +4,7 @@
 //! Versioned defaults, resolved by clap before typed command construction.
 //! Explicit command-line values always win; a preset is not an RSS guarantee.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 
 use clap::{ArgMatches, CommandFactory, FromArgMatches, ValueEnum};
@@ -23,54 +24,16 @@ impl Preset {
             Self::WorkstationV1 => "workstation-v1",
         }
     }
-
-    pub(crate) fn value(self, id: &str) -> Option<&'static str> {
-        let (ci, workstation) = match id {
-            "max_frames" => ("10000", "1000000"),
-            "max_bytes" => ("16777216", "268435456"),
-            "max_encoded_bytes" | "max_decoded_bytes" => ("33554432", "536870912"),
-            "max_frame_bytes" => ("1048576", "16777216"),
-            "max_interfaces" | "max_application_streams" => ("64", "1024"),
-            "max_duration_ms" => ("30000", "300000"),
-            "max_flows" => ("1024", "8192"),
-            "max_scope_bytes" | "max_provenance_bytes" | "max_application_buffer_bytes" => {
-                ("2097152", "16777216")
-            }
-            "max_tcp_bytes_per_flow" => ("262144", "4194304"),
-            "max_tcp_reassembly_bytes" | "max_ip_reassembly_bytes" | "max_tls_buffer_bytes" => {
-                ("4194304", "33554432")
-            }
-            "max_tcp_segments_per_flow" | "max_ip_outcomes" => ("128", "1024"),
-            "max_ip_datagrams" | "max_application_messages" => ("256", "4096"),
-            "max_ip_fragments_per_datagram" | "max_details" => ("64", "256"),
-            "max_ip_bytes_per_datagram" => ("65535", "1048576"),
-            "max_tls_sessions" => ("128", "2048"),
-            "max_application_retained_bytes"
-            | "max_application_output_bytes"
-            | "max_evidence_bytes" => ("8388608", "67108864"),
-            "max_application_source_spans" => ("2048", "16384"),
-            "max_field_bytes" => ("16384", "65536"),
-            "max_detail_bytes" => ("1048576", "4194304"),
-            "max_scratch_bytes" => ("16777216", "134217728"),
-            _ => return None,
-        };
-        Some(match self {
-            Self::CiV1 => ci,
-            Self::WorkstationV1 => workstation,
-        })
-    }
 }
 
-/// The command-line definition with `preset`'s values as the defaults of the
-/// named subcommand's resource options.
-fn definition(preset: Preset, subcommand: &str) -> clap::Command {
+/// The command-line definition with `defaults`, the preset values the
+/// selected command's typed arguments declare, as the named subcommand's
+/// defaults.
+fn definition(subcommand: &str, defaults: &BTreeMap<&'static str, &'static str>) -> clap::Command {
     Cli::command().mut_subcommand(subcommand, |command| {
-        command.mut_args(|arg| {
-            if let Some(value) = preset.value(arg.get_id().as_str()) {
-                arg.default_value(value)
-            } else {
-                arg
-            }
+        command.mut_args(|arg| match defaults.get(arg.get_id().as_str()) {
+            Some(value) => arg.default_value(*value),
+            None => arg,
         })
     })
 }
@@ -90,7 +53,8 @@ pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<(Cli, ArgMatches), 
             ));
         }
     };
-    let matches = definition(preset, subcommand).try_get_matches_from(arguments)?;
+    let defaults = cli.command.preset_defaults(preset);
+    let matches = definition(subcommand, &defaults).try_get_matches_from(arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;
     Ok((cli, matches))
 }
@@ -101,9 +65,34 @@ mod tests {
 
     #[test]
     fn both_presets_build_valid_command_trees() {
+        let offline: &[&[&str]] = &[
+            &["merge", "--write", "m.pcapng", "a.pcap", "b.pcap"],
+            &["read", "a.pcap"],
+            &["expert", "a.pcap"],
+            &["follow", "--stream", "tcp:0", "a.pcap"],
+            &["stats", "a.pcap"],
+            &["tls", "a.pcap"],
+            &["dns-read", "a.pcap"],
+            &["http", "a.pcap"],
+            &["export", "--write", "e.pcapng", "a.pcap"],
+            &["rewrite", "--write", "r.pcapng", "a.pcap"],
+            &[
+                "verify-forwarding",
+                "a.pcap",
+                "b.pcap",
+                "--identity",
+                "ipv4.identification",
+            ],
+        ];
         for preset in [Preset::CiV1, Preset::WorkstationV1] {
-            for subcommand in Cli::command().get_subcommands() {
-                definition(preset, subcommand.get_name()).debug_assert();
+            for arguments in offline {
+                let cli = <Cli as clap::Parser>::try_parse_from(
+                    std::iter::once("packetcraftr").chain(arguments.iter().copied()),
+                )
+                .expect("offline command parses");
+                let defaults = cli.command.preset_defaults(preset);
+                assert!(!defaults.is_empty(), "{arguments:?}");
+                definition(arguments[0], &defaults).debug_assert();
             }
         }
     }

@@ -7,8 +7,6 @@ use packetcraftr_core::budget::{DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use thiserror::Error;
 
-use crate::execution::ExchangeEvidenceError;
-
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -165,7 +163,7 @@ impl crate::execution::Errors for CaseErrors {
         Error::Execution { case_index, source }
     }
 
-    fn invalid_evidence(&self, case_index: u64, source: ExchangeEvidenceError) -> Error {
+    fn invalid_evidence(&self, case_index: u64, source: crate::evidence::Error) -> Error {
         Error::InvalidEvidence {
             case_index,
             message: source.describe("case", "fuzz"),

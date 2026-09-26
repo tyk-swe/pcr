@@ -13,7 +13,8 @@ use crate::output;
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;
 use crate::rendering::{
-    StreamEncoder, comma_separated, emit_aggregate, optional_display, write_stdout_line,
+    StreamEncoder, comma_separated, duration_text, emit_aggregate, encapsulation_text,
+    optional_display, write_stdout_line,
 };
 
 use analysis::tls::{ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING};
@@ -78,11 +79,11 @@ pub(super) fn render_text(
         }
     }
     write_stdout_line(format_args!(
-        "{} clock_regressions={} max_rollback={:?} max_forward_step={:?}",
+        "{} clock_regressions={} max_rollback={} max_forward_step={}",
         summary_line(summary),
         summary.clock.regressions,
-        summary.clock.max_regression,
-        summary.clock.max_forward_step
+        duration_text(summary.clock.max_regression),
+        duration_text(summary.clock.max_forward_step)
     ))
 }
 
@@ -170,8 +171,10 @@ fn session_line(session: &Session) -> String {
     );
     let _ = write!(
         line,
-        " scope={} interface={:?} encapsulation={:?}",
-        session.scope.id, session.scope.interface, session.scope.encapsulation
+        " scope={} interface={} encapsulation={}",
+        session.scope.id,
+        optional_display(session.scope.interface),
+        encapsulation_text(&session.scope.encapsulation)
     );
     if session.hello_retry {
         line.push_str(" hello_retry=true");

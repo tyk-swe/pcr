@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! macOS interface enumeration via `getifaddrs(3)`.
+//! macOS interface enumeration via `getifaddrs(3)`. It performs no neighbor
+//! discovery, capture, or transmission.
 
 #![allow(unsafe_code)]
 
@@ -11,17 +12,29 @@ use std::mem::size_of;
 use std::net::IpAddr;
 use std::ptr;
 
-use super::parser::{netmask_prefix, sockaddr_ip};
 use crate::{
     interface::{self, Id as InterfaceId},
     link::Capability,
-    platform::route::os_error,
-    route::SystemError,
+    platform::common::{
+        af_route::{netmask_prefix, sockaddr_ip},
+        os_error,
+    },
+    route,
 };
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 
-pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+/// `getifaddrs(3)` answers without waiting; the interface capability has
+/// already checked the caller's deadline.
+pub(in crate::platform) fn interfaces(
+    _deadline: &Deadline,
+) -> Result<Vec<interface::Info>, interface::Error> {
+    snapshot().map_err(interface::Error::native)
+}
+
+/// One `getifaddrs(3)` snapshot, which the route backend also reads.
+pub(in crate::platform) fn snapshot() -> Result<Vec<interface::Info>, route::Error> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
     // linked list that remains valid until the matching `freeifaddrs` below.
@@ -177,6 +190,6 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     Some(MacAddress(bytes))
 }
 
-fn last_os_error(operation: &'static str) -> SystemError {
+fn last_os_error(operation: &'static str) -> route::Error {
     os_error(operation, std::io::Error::last_os_error())
 }

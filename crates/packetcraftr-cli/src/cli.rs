@@ -8,7 +8,7 @@ use crate::output;
 use crate::output::envelope::ErrorKind;
 use clap::{Parser, ValueEnum};
 
-use crate::commands::Command;
+use crate::commands::CommandLine;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
 
 const ROOT_HELP_FORMATS: &str = r"Output formats:
@@ -130,7 +130,7 @@ pub(crate) struct Cli {
     )]
     pub(crate) color: ColorChoice,
     #[command(subcommand)]
-    pub(crate) command: Command,
+    pub(crate) command: CommandLine,
 }
 
 /// The `--output` selector for [`output::contract::Format`].

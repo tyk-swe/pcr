@@ -80,6 +80,18 @@ pub enum Error {
     Reserved { value: u32 },
 }
 
+/// An NDP body the codec refuses is a codec failure: the bytes or field
+/// values break a wire rule.
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "packet.codec",
+            crate::error::Kind::Packet,
+            Some("correct the layer bytes or field values the codec refused"),
+        )
+    }
+}
+
 /// One Neighbor Discovery option, with its value after the kind and length
 /// octets.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -388,6 +400,11 @@ mod tests {
             options: Vec::new(),
         };
         assert_eq!(oversized.encode(), Err(Error::Reserved { value: 1 << 29 }));
+        let error = oversized.encode().expect_err("reserved overflow");
+        assert_eq!(
+            crate::error::Classified::classification(&error).code,
+            "packet.codec"
+        );
     }
 
     #[test]

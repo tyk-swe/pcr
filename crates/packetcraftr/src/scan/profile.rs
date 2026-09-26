@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Explicit UDP fixture payloads and bounded application response checks,
-//! and the `packetcraftr.udp-profiles/v1` document that assigns them to ports.
-//! Confirmation means the configured checks matched, not authenticated identity.
+//! compiled from the profiles a `packetcraftr.udp-profiles/v1` document
+//! ([`udp_profiles`], read by core)
+//! assigns to ports. Confirmation means the configured checks matched, not
+//! authenticated identity.
 use bytes::Bytes;
+use packetcraftr_core::document::udp_profiles::{self, Config, Payload, ResponseCheck};
 use packetcraftr_core::{
     decode::DecodedPacket,
     error::{Classification, Classified, Kind},
@@ -19,69 +22,8 @@ use packetcraftr_core::{
 use serde::{Deserialize, Serialize};
 
 mod document;
-pub use document::{
-    DocumentError, MAX_PROFILE_ASSIGNMENTS, UDP_PROFILES_SCHEMA_V1, parse_document,
-};
+pub use document::compile;
 
-pub const MAX_PROFILE_PORTS: usize = 4096;
-pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Payload {
-    Bytes {
-        #[serde(with = "hex")]
-        data: Bytes,
-    },
-    Dns {
-        name: String,
-        #[serde(default = "one")]
-        query_type: u16,
-        #[serde(default = "one")]
-        class: u16,
-        #[serde(default = "yes")]
-        recursion_desired: bool,
-        #[serde(default)]
-        id_base: u16,
-    },
-}
-fn one() -> u16 {
-    1
-}
-fn yes() -> bool {
-    true
-}
-fn maximum_response() -> usize {
-    65_535
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ByteCheck {
-    pub offset: usize,
-    #[serde(with = "hex")]
-    pub data: Bytes,
-    #[serde(default, with = "optional_hex")]
-    pub mask: Option<Bytes>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ResponseCheck {
-    Any,
-    Dns,
-    Bytes {
-        checks: Vec<ByteCheck>,
-        #[serde(default)]
-        min_length: usize,
-        #[serde(default = "maximum_response")]
-        max_length: usize,
-    },
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
-    pub name: String,
-    pub request: Payload,
-    pub response: ResponseCheck,
-}
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Compiled {
     Bytes(Bytes),
@@ -97,12 +39,49 @@ pub struct UdpProfile {
     payload: Compiled,
     charge: usize,
 }
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("invalid UDP profile: {0}")]
-pub struct Error(pub &'static str);
+/// Why a UDP profile, or a document's assignment of profiles to ports, is
+/// refused.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// One profile breaks a bound; the reason names which.
+    #[error("invalid UDP profile: {0}")]
+    Invalid(&'static str),
+    /// The document itself could not be read.
+    #[error(transparent)]
+    Document(#[from] udp_profiles::Error),
+    #[error("each UDP profile needs 1..=4096 port entries")]
+    PortCount { count: usize },
+    /// The distinct compiled profiles exceed
+    /// [`MAX_PROFILE_BYTES`](udp_profiles::MAX_PROFILE_BYTES).
+    #[error("compiled UDP profiles exceed 1 MiB")]
+    Storage,
+    /// Two different profiles claim the same port.
+    #[error("conflicting UDP profiles for port {port}")]
+    ConflictingPort { port: u16 },
+    /// The assignments map more than
+    /// [`MAX_PROFILE_PORTS`](udp_profiles::MAX_PROFILE_PORTS) ports.
+    #[error("UDP profiles exceed 4096 mapped ports")]
+    MappedPorts,
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("cli.udp_profile", Kind::Usage, None)
+        match self {
+            Self::Invalid(_) => Classification::new("cli.udp_profile", Kind::Usage, None),
+            Self::Document(source) => source.classification(),
+            Self::PortCount { .. }
+            | Self::Storage
+            | Self::ConflictingPort { .. }
+            | Self::MappedPorts => Classification::new("cli.error", Kind::Usage, None),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Document(source) => source.causes(),
+            error => packetcraftr_core::error::source_chain(error),
+        }
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -146,12 +125,14 @@ impl UdpProfile {
             || config.name.chars().count() > 128
             || config.name.chars().any(char::is_control)
         {
-            return Err(Error("name must contain 1..=128 non-control characters"));
+            return Err(Error::Invalid(
+                "name must contain 1..=128 non-control characters",
+            ));
         }
         let payload = match &config.request {
             Payload::Bytes { data } => {
                 if data.len() > super::MAX_UDP_PAYLOAD_BYTES {
-                    return Err(Error("payload exceeds UDP wire limit"));
+                    return Err(Error::Invalid("payload exceeds UDP wire limit"));
                 }
                 Compiled::Bytes(data.clone())
             }
@@ -165,7 +146,7 @@ impl UdpProfile {
                 question: Question {
                     name: name
                         .parse::<Name>()
-                        .map_err(|_| Error("invalid DNS question name"))?,
+                        .map_err(|_| Error::Invalid("invalid DNS question name"))?,
                     query_type: *query_type,
                     class: *class,
                 },
@@ -189,7 +170,7 @@ impl UdpProfile {
                 || min_length > max_length
                 || *max_length > 65_535
             {
-                return Err(Error(
+                return Err(Error::Invalid(
                     "byte validation requires 1..=64 checks and lengths within 0..=65535",
                 ));
             }
@@ -205,15 +186,15 @@ impl UdpProfile {
                         .as_ref()
                         .is_some_and(|mask| mask.len() != check.data.len())
                 {
-                    return Err(Error(
+                    return Err(Error::Invalid(
                         "byte check exceeds its offset, pattern, or mask bounds",
                     ));
                 }
                 charge += 128 + check.data.len() + check.mask.as_ref().map_or(0, Bytes::len);
             }
         }
-        if charge > MAX_PROFILE_BYTES {
-            return Err(Error("profile storage exceeds 1 MiB"));
+        if charge > udp_profiles::MAX_PROFILE_BYTES {
+            return Err(Error::Invalid("profile storage exceeds 1 MiB"));
         }
         let profile = Self {
             config,
@@ -222,9 +203,9 @@ impl UdpProfile {
         };
         if matches!(profile.config.response, ResponseCheck::Dns) {
             let query = Dns::try_from(profile.payload(0))
-                .map_err(|_| Error("DNS response validation needs a valid DNS request"))?;
+                .map_err(|_| Error::Invalid("DNS response validation needs a valid DNS request"))?;
             if query.response || query.questions.is_empty() {
-                return Err(Error(
+                return Err(Error::Invalid(
                     "DNS response validation needs a query with questions",
                 ));
             }
@@ -395,61 +376,6 @@ fn udp_payload(request: &Packet, response: &DecodedPacket) -> Option<Bytes> {
     let end = start.checked_add(usize::from(length) - 8)?;
     (end <= response.original.len()).then(|| response.original.slice(start..end))
 }
-mod hex {
-    use super::*;
-    pub(super) fn serialize<S: serde::Serializer>(
-        value: &Bytes,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        use std::fmt::Write;
-        let mut text = String::with_capacity(value.len() * 2);
-        for byte in value {
-            write!(text, "{byte:02x}").expect("string write");
-        }
-        serializer.serialize_str(&text)
-    }
-    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Bytes, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        decode(&value).map_err(serde::de::Error::custom)
-    }
-    pub(super) fn decode(value: &str) -> Result<Bytes, &'static str> {
-        if value.len() > super::super::MAX_UDP_PAYLOAD_BYTES * 2
-            || !value.len().is_multiple_of(2)
-            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
-            return Err("expected bounded even-length hexadecimal bytes");
-        }
-        Ok((0..value.len())
-            .step_by(2)
-            .map(|index| {
-                u8::from_str_radix(&value[index..index + 2], 16).expect("validated hexadecimal")
-            })
-            .collect::<Vec<_>>()
-            .into())
-    }
-}
-mod optional_hex {
-    use super::*;
-    pub(super) fn serialize<S: serde::Serializer>(
-        value: &Option<Bytes>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(value) => hex::serialize(value, serializer),
-            None => serializer.serialize_none(),
-        }
-    }
-    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<Bytes>, D::Error> {
-        Option::<String>::deserialize(deserializer)?
-            .map(|value| hex::decode(&value).map_err(serde::de::Error::custom))
-            .transpose()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

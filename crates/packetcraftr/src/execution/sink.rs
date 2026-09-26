@@ -6,7 +6,7 @@
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 
-use crate::runtime::{EmitError, Runtime, Worker};
+use crate::runtime::{self, Runtime, Worker};
 
 /// Receives the events one workflow run publishes while it runs.
 ///
@@ -61,8 +61,8 @@ where
     Ok(
         move |event, deadline: &Deadline| match worker.emit(event, deadline) {
             Ok(ack) => Ok(ack),
-            Err(EmitError::Deadline(error)) => Err(on_deadline(error)),
-            Err(EmitError::Output(source)) => Err(on_output(source)),
+            Err(runtime::Error::Deadline(error)) => Err(on_deadline(error)),
+            Err(runtime::Error::Output(source)) => Err(on_output(source)),
         },
     )
 }

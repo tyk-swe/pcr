@@ -11,7 +11,7 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_debug, optional_display,
+    captured_frame_text, comma_separated, optional_display, optional_duration,
     render_diagnostics_text, render_dns_record, render_undecoded, write_stdout_line,
 };
 
@@ -87,7 +87,7 @@ pub(super) fn render_text(
             attempt.status.as_str(),
             optional_display(attempt.sent_at),
             optional_display(attempt.received_at),
-            optional_debug(attempt.latency),
+            optional_duration(attempt.latency),
             optional_display(attempt.response_code),
             attempt.reason,
         ))?;

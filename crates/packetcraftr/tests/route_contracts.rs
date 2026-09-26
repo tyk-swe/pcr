@@ -438,7 +438,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
 struct StalledBackend;
 
 impl Provider for StalledBackend {
-    type Error = packetcraftr_netio::route::SystemError;
+    type Error = packetcraftr_netio::route::Error;
 
     fn lookup_with_preferences(
         &self,

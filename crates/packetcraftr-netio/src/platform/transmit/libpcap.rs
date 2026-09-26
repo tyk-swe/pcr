@@ -5,11 +5,11 @@
 
 use pcap::{Capture, Error as PcapError};
 
-use super::capture::{READ_TIMEOUT_MILLIS, map_open_error};
 use crate::{
     Error,
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::is_permission_denied,
+    platform::common::libpcap::{READ_TIMEOUT_MILLIS, map_open_error},
+    platform::common::pcap_api::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
 use packetcraftr_core::error::Source;

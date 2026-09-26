@@ -67,9 +67,9 @@ impl fmt::Display for Interface {
 /// shares it, so a workflow that prepares many packets enumerates interfaces
 /// once. A failed lookup is not remembered.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Resolved(Arc<Mutex<Option<(Interface, InterfaceId)>>>);
+pub(crate) struct ResolvedInterface(Arc<Mutex<Option<(Interface, InterfaceId)>>>);
 
-impl Resolved {
+impl ResolvedInterface {
     /// Resolves `selector` through `provider` under `deadline`, unless it is
     /// already an identity or was the last selector resolved.
     pub(crate) fn resolve<N: interface::Provider + ?Sized>(
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn a_failed_lookup_is_retried_and_a_resolved_one_is_remembered() {
         let provider = Flaky::default();
-        let resolved = Resolved::default();
+        let resolved = ResolvedInterface::default();
         let selector = Interface::Name("fixture0".to_owned());
 
         let error = resolved
@@ -180,7 +180,7 @@ mod tests {
         let provider = Flaky {
             calls: AtomicUsize::new(1),
         };
-        let error = Resolved::default()
+        let error = ResolvedInterface::default()
             .resolve(&Interface::Name("missing0".to_owned()), &provider, &live())
             .expect_err("nothing matches");
         assert_eq!(error.classification().code, "io.device");
@@ -195,7 +195,7 @@ mod tests {
             index: 7,
         };
         assert_eq!(
-            Resolved::default()
+            ResolvedInterface::default()
                 .resolve(&Interface::Id(id.clone()), &provider, &live())
                 .unwrap(),
             id

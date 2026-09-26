@@ -134,7 +134,7 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        if rebuilt.requires_live_opt_in {
+        if crate::policy::requires_live_opt_in(rebuilt) {
             check_permissive_live(&self.policy, self.allow_malformed_live)
                 .map_err(permissive_live_error)?;
         }
@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn exact_complete_documentation_frame_is_authorized_with_replay_opt_ins() {
         let built = built_ipv4(false);
-        assert!(!built.requires_live_opt_in);
+        assert!(!crate::policy::requires_live_opt_in(&built));
         let frame = raw_frame(&built);
         let inspecting_authorizer =
             SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
@@ -452,7 +452,7 @@ mod tests {
         let rebuilt = inspecting_authorizer
             .rebuild_frame(&decoded)
             .expect("fixture rebuilds");
-        assert!(rebuilt.requires_live_opt_in);
+        assert!(crate::policy::requires_live_opt_in(&rebuilt));
         assert!(decoded.diagnostics.is_empty());
         assert!(rebuilt.diagnostics.is_empty());
 
@@ -749,7 +749,7 @@ mod tests {
     #[test]
     fn permissive_capture_requires_both_live_opt_ins() {
         let built = built_ipv4(true);
-        assert!(built.requires_live_opt_in);
+        assert!(crate::policy::requires_live_opt_in(&built));
         let frame = raw_frame(&built);
 
         let missing_operation_opt_in =

@@ -237,6 +237,6 @@ fn fuzz_malformed_derived_fields_are_strictly_rejected_and_permissively_built() 
     assert!(permissive.cases.iter().any(|case| {
         case.built
             .as_ref()
-            .is_some_and(|built| built.requires_live_opt_in)
+            .is_some_and(|built| built.mode == Mode::Permissive)
     }));
 }

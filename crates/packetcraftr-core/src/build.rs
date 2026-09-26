@@ -6,10 +6,9 @@
 use std::sync::Arc;
 
 use crate::codec::{Context, LayerEncodeContext, Mode};
-use crate::layer::{Id, Malformed, Padding};
+use crate::layer::Id;
 use crate::layout::{ByteRange, LayerLayout, PacketLayout};
 use crate::packet::Packet;
-use crate::protocol::BuiltinProtocol;
 use crate::registry::Registry;
 
 use buffer::PacketBuffer;
@@ -206,35 +205,12 @@ impl Builder {
         encoding.layers.reverse();
         encoding.payload_lengths.reverse();
         let materialized = Packet::from_encoded_layers(encoding.layers, encoding.payload_lengths);
-        let contains_malformed = materialized
-            .iter()
-            .any(|layer| layer.as_any().is::<Malformed>());
-        let contains_network_trailer = materialized.iter().any(|layer| {
-            layer
-                .as_any()
-                .downcast_ref::<Padding>()
-                .and_then(|padding| padding.outside_layer)
-                .and_then(|outside_layer| materialized.layer(outside_layer))
-                .is_some_and(|outside| {
-                    matches!(
-                        BuiltinProtocol::of(outside),
-                        Some(
-                            BuiltinProtocol::Ipv4
-                                | BuiltinProtocol::Ipv6
-                                | BuiltinProtocol::Udp
-                                | BuiltinProtocol::Pppoe
-                        )
-                    )
-                })
-        });
         Ok(BuiltPacket {
             bytes: encoding.bytes.into_bytes(),
             packet: materialized,
             layout,
             diagnostics: encoding.diagnostics,
-            requires_live_opt_in: mode == Mode::Permissive
-                || contains_malformed
-                || contains_network_trailer,
+            mode,
         })
     }
 }

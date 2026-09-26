@@ -20,6 +20,7 @@ pub use operation::{
     PolicyAuthorizer, ReplayFrame, SocketBudget, SocketOperation, WireBudget,
     unsupported_operation,
 };
+pub use wire::requires_live_opt_in;
 pub(crate) use wire::{
     PermissiveLiveDenial, WireAuthorizationError, authorize_permissive_live, authorize_wire,
     authorize_wire_destinations, authorize_wire_sources, check_permissive_live, decode_wire,

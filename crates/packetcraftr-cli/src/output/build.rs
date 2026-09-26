@@ -21,12 +21,13 @@ pub struct Report {
 
 impl Report {
     pub fn from_built(built: BuiltPacket) -> (Self, Vec<Diagnostic>) {
+        let requires_live_opt_in = packetcraftr::policy::requires_live_opt_in(&built);
         let BuiltPacket {
             bytes,
             packet,
             layout,
             diagnostics,
-            requires_live_opt_in,
+            ..
         } = built;
         (
             Self {

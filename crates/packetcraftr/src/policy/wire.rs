@@ -6,10 +6,19 @@ use crate::Error;
 use bytes::Bytes;
 use packetcraftr_core::{
     build::BuiltPacket,
+    codec::Mode,
     decode::Dissector,
     frame::{Frame, LinkType},
 };
 use packetcraftr_netio::{Error as LiveIoError, link::Mode as LinkMode};
+
+/// Whether transmitting `built` needs the permissive-live opt-in: it was
+/// built permissively, contains a malformed layer, or carries a trailer after
+/// a network payload that a receiver may parse differently.
+#[must_use]
+pub fn requires_live_opt_in(built: &BuiltPacket) -> bool {
+    built.mode == Mode::Permissive || built.contains_malformed() || built.contains_network_trailer()
+}
 
 /// Identifies the missing permissive-live approval so callers can phrase the
 /// error.
@@ -135,7 +144,7 @@ impl Policy {
         allow_permissive_live: bool,
     ) -> Result<(), Error> {
         self.authorize_packet_destinations(&built.packet)?;
-        if built.requires_live_opt_in {
+        if requires_live_opt_in(built) {
             authorize_permissive_live(self, allow_permissive_live)?;
         }
         Ok(())

@@ -3,7 +3,8 @@
 mod prepare;
 use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
-    Client, SentPacket, Stats,
+    Client, Providers, SentPacket, Stats,
+    clock::Clock,
     evidence::ExecutionPermit,
     execution::{
         ExchangeExecutor, PipelineEvent, PipelineOptions,
@@ -22,7 +23,6 @@ use packetcraftr_core::{
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{self, Group, GroupRequest, MAX_TIMEOUT, Session as _},
-    route, transmit,
 };
 use prepare::AdmittedProbe;
 use std::{
@@ -218,11 +218,10 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
         Vec::new(),
     )
 }
-fn check<R, I>(client: &Client<R, I>, deadline: Instant) -> Result<(), BoundaryError>
-where
-    R: route::Provider,
-    I: transmit::Provider,
-{
+fn check<P: Providers, K: Clock>(
+    client: &Client<P, K>,
+    deadline: Instant,
+) -> Result<(), BoundaryError> {
     client
         .check_cancelled()
         .map_err(BoundaryError::from_error)?;
@@ -235,16 +234,12 @@ where
     }
     Ok(())
 }
-pub(super) fn run<R, I>(
-    executor: &mut ExchangeExecutor<'_, R, I>,
+pub(super) fn run<P: Providers, K: Clock>(
+    executor: &mut ExchangeExecutor<'_, P, K>,
     batches: &[Batch],
     options: PipelineOptions,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
-) -> Result<Stats, BoundaryError>
-where
-    R: route::Provider,
-    I: transmit::Provider + capture::Provider,
-{
+) -> Result<Stats, BoundaryError> {
     validate_options(batches, &options)?;
     let started = Instant::now();
     let deadline = started
@@ -254,19 +249,20 @@ where
         .iter()
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
-    let mut plan = prepare::plan(executor, &planned, options, deadline)?;
+    let cancellation = executor.client.cancellation.clone();
+    let preparation = crate::deadline::until(deadline, cancellation.clone());
+    let mut plan = prepare::plan(executor, &planned, options, deadline, &preparation)?;
     let request = GroupRequest {
         interfaces: plan.interfaces.clone(),
-        limits: executor.options.capture,
+        limits: executor.collection.capture,
         filter: None,
         promiscuous: false,
         native: Default::default(),
     };
-    let cancellation = executor.client.cancellation.clone();
     let mut group = Group::new(&request).map_err(BoundaryError::from_error)?;
     group
         .arm(
-            &executor.client.io,
+            executor.client.providers.capture(),
             &crate::deadline::until(deadline, cancellation.clone()),
         )
         .map_err(BoundaryError::from_error)?;
@@ -368,7 +364,9 @@ where
                 stats.packets_attempted += 1;
                 let sent = Arc::new(
                     prepared
-                        .transmit(&executor.client.io, || Ok::<(), LiveIoError>(()))
+                        .transmit(executor.client.providers.transmit(), || {
+                            Ok::<(), LiveIoError>(())
+                        })
                         .map_err(BoundaryError::from_error)?,
                 );
                 stats.packets_completed += 1;
@@ -449,7 +447,7 @@ where
             }
             let source = captured.source;
             let raw = captured.frame.clone();
-            let decoded = match decoder.decode(captured.frame, executor.options.decode.clone()) {
+            let decoded = match decoder.decode(captured.frame, executor.collection.decode.clone()) {
                 Ok(decoded) => decoded,
                 Err(error) => {
                     if diagnostics.insert("decode") {

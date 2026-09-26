@@ -267,7 +267,7 @@ fn run(
     Run {
         result,
         events,
-        delays: clock.delays,
+        delays: clock.delays(),
     }
 }
 

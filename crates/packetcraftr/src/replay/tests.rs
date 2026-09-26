@@ -454,7 +454,7 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
     assert_eq!(authorizer.final_wire_calls, 0);
     assert_eq!(transmitter.validation_calls, 0);
     assert_eq!(transmitter.transmission_calls, 0);
-    assert!(clock.delays.is_empty());
+    assert!(clock.delays().is_empty());
 }
 
 #[test]
@@ -489,7 +489,7 @@ fn replay_final_wire_denial_happens_after_passive_route_selection_and_before_sen
     assert_eq!(authorizer.final_wire_calls, 1);
     assert_eq!(transmitter.validation_calls, 1);
     assert_eq!(transmitter.transmission_calls, 0);
-    assert!(clock.delays.is_empty());
+    assert!(clock.delays().is_empty());
 }
 
 #[test]
@@ -528,7 +528,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     assert_eq!(selector.numbers, [1, 2, 3]);
     assert_eq!(authorizer.limits, [(1, 2), (2, 6)]);
     assert_eq!(transmitter.transmission_calls, 2);
-    assert_eq!(clock.delays, [Duration::ZERO, Duration::from_secs(2)]);
+    assert_eq!(clock.delays(), [Duration::ZERO, Duration::from_secs(2)]);
     assert_eq!(summary.frames_read, 3);
     assert_eq!(summary.frames_transmitted, 2);
     assert_eq!(summary.bytes_transmitted, 6);
@@ -614,7 +614,7 @@ fn byte_rate_uses_selected_bytes_and_cumulative_rounding() {
     )
     .unwrap();
     assert_eq!(
-        clock.delays,
+        clock.delays(),
         [
             Duration::ZERO,
             Duration::from_nanos(6),
@@ -739,28 +739,32 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
 #[test]
 fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
     use crate::clock::Clock;
-    use std::cell::Cell;
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
     use std::time::Instant;
+    #[derive(Clone)]
     struct VirtualClock {
-        now: Rc<Cell<Instant>>,
-        waits: Vec<Duration>,
+        now: Arc<Mutex<Instant>>,
+        waits: Arc<Mutex<Vec<Duration>>>,
     }
     impl Clock for VirtualClock {
         type Error = std::convert::Infallible;
-        fn now(&mut self) -> Instant {
-            self.now.get()
+        fn now(&self) -> Instant {
+            *self.now.lock().unwrap()
         }
-        fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-            self.waits.push(delay);
-            self.now.set(self.now.get() + delay);
+        fn sleep(
+            &self,
+            delay: Duration,
+            _deadline: &packetcraftr_core::budget::Deadline,
+        ) -> Result<(), Self::Error> {
+            self.waits.lock().unwrap().push(delay);
+            *self.now.lock().unwrap() += delay;
             Ok(())
         }
     }
-    let now = Rc::new(Cell::new(Instant::now()));
+    let now = Arc::new(Mutex::new(Instant::now()));
     let mut clock = VirtualClock {
-        now: Rc::clone(&now),
-        waits: Vec::new(),
+        now: Arc::clone(&now),
+        waits: Arc::default(),
     };
     let mut reader = capture_reader(
         LinkType::ETHERNET,
@@ -780,7 +784,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
         &mut RecordingTransmitter::default(),
         &mut clock,
         |_| {
-            now.set(now.get() + Duration::from_millis(overhead.next().unwrap()));
+            *now.lock().unwrap() += Duration::from_millis(overhead.next().unwrap());
             Ok(())
         },
     )
@@ -788,7 +792,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
     assert_eq!(summary.frames_transmitted, 4);
     assert_eq!(summary.scheduled_duration, Duration::from_secs(3));
     assert_eq!(
-        clock.waits,
+        *clock.waits.lock().unwrap(),
         [
             Duration::ZERO,
             Duration::from_millis(300),

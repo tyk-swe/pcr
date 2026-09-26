@@ -7,7 +7,8 @@ use crate::execution::ExchangeExecutor;
 use crate::execution::Executor;
 use crate::execution::{ExecutorFault, WorkflowOverrides};
 
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
+use crate::clock::Clock;
+use crate::providers::Providers;
 
 use super::classification::{ResponseClassification, classify_response};
 use super::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
@@ -21,25 +22,21 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
     "treat the DNS operation as incomplete because client evidence was inconsistent",
 );
 
-impl<R, I> Executor<Exchange> for ExchangeExecutor<'_, R, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo + CaptureProvider,
-{
+impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
         let max_responses = exchange.limits.max_evidence_frames;
         if max_responses == 0 {
             return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
         }
-        if max_responses > self.options.max_responses {
+        if max_responses > self.collection.max_responses {
             return Err(EXECUTOR_FAULT.invalid(format!(
                 "DNS exchange requests {} responses but the client is bounded to {}",
-                max_responses, self.options.max_responses
+                max_responses, self.collection.max_responses
             )));
         }
         // Everything the client captures is DNS evidence, which must fit the
         // request's own bounds; refuse before any I/O rather than after.
-        let capture = &self.options.capture;
+        let capture = &self.collection.capture;
         if capture.max_frames > max_responses
             || capture.max_bytes > exchange.limits.max_evidence_bytes
         {
@@ -71,7 +68,7 @@ where
                 )
             };
         let result = self.exchange_for_workflow(
-            &packetcraftr_core::template::Template::new(exchange.probe.packet()),
+            packetcraftr_core::template::Template::new(exchange.probe.packet()),
             WorkflowOverrides {
                 timeout: exchange.timeout,
                 max_template_packets: 1,
@@ -81,7 +78,7 @@ where
             &mut matches_request,
             Some(&mut stop_after_response),
         )?;
-        let crate::exchange::Report {
+        let crate::exchange::Aggregate {
             mut sent,
             responses,
             unanswered: _,
@@ -112,14 +109,14 @@ where
 }
 
 /// A client exchange with an explicitly selected DNS TCP provider.
-pub struct TcpExchangeExecutor<'a, R, I, P> {
-    udp: ExchangeExecutor<'a, R, I>,
-    tcp: P,
+pub struct TcpExchangeExecutor<'a, P, K, T> {
+    udp: ExchangeExecutor<'a, P, K>,
+    tcp: T,
 }
 
-impl<'a, R, I> ExchangeExecutor<'a, R, I> {
+impl<'a, P, K> ExchangeExecutor<'a, P, K> {
     /// Enables direct DNS TCP queries and fallback using only the supplied provider.
-    pub fn with_dns_tcp<P>(self, provider: P) -> TcpExchangeExecutor<'a, R, I, P> {
+    pub fn with_dns_tcp<T>(self, provider: T) -> TcpExchangeExecutor<'a, P, K, T> {
         TcpExchangeExecutor {
             udp: self,
             tcp: provider,
@@ -128,21 +125,17 @@ impl<'a, R, I> ExchangeExecutor<'a, R, I> {
 }
 
 // A packet provider alone never implicitly selects system TCP.
-impl<R, I> TcpExecutor for ExchangeExecutor<'_, R, I> {}
+impl<P, K> TcpExecutor for ExchangeExecutor<'_, P, K> {}
 
-impl<R, I, P> Executor<Exchange> for TcpExchangeExecutor<'_, R, I, P>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo + CaptureProvider,
-{
+impl<P: Providers, K: Clock, T> Executor<Exchange> for TcpExchangeExecutor<'_, P, K, T> {
     fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
         self.udp.execute(exchange)
     }
 }
 
-impl<R, I, P: packetcraftr_netio::tcp::Provider> TcpExecutor for TcpExchangeExecutor<'_, R, I, P> {
+impl<P, K, T: packetcraftr_netio::tcp::Provider> TcpExecutor for TcpExchangeExecutor<'_, P, K, T> {
     fn execute_tcp(&mut self, exchange: &TcpExchange) -> Result<TcpExecution, super::tcp::Error> {
-        validate_tcp_route_options(&self.udp.options.send.plan)?;
+        validate_tcp_route_options(&self.udp.send.plan)?;
         let response = super::tcp::exchange(
             super::tcp::Request {
                 endpoint: exchange.endpoint,
@@ -203,15 +196,7 @@ mod tests {
     #[test]
     fn tcp_requires_explicit_composition_and_rejects_overrides_before_provider_io() {
         use super::*;
-        let client = crate::Client {
-            registry: packetcraftr_core::protocol::builtin::registry(),
-            routes: (),
-            io: (),
-            neighbors: crate::neighbor::State::default(),
-            policy: std::sync::Arc::new(crate::policy::Policy::default()),
-            runtime: crate::progress::Runtime::default(),
-            cancellation: None,
-        };
+        let (client, _providers) = crate::test_support::fake_client();
         let exchange = TcpExchange {
             attempt: 1,
             endpoint: "127.0.0.1:53".parse().unwrap(),
@@ -220,7 +205,11 @@ mod tests {
             max_message_bytes: 512,
             permit: crate::evidence::ExecutionPermit::new(),
         };
-        let mut bare = ExchangeExecutor::new(&client, crate::exchange::Options::default());
+        let mut bare = ExchangeExecutor::new(
+            &client,
+            crate::send::Options::default(),
+            crate::exchange::Collection::default(),
+        );
         assert!(matches!(
             bare.execute_tcp(&exchange),
             Err(super::super::tcp::Error::Unsupported { .. })
@@ -229,7 +218,7 @@ mod tests {
         let error = explicit.execute_tcp(&exchange).unwrap_err();
         assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
         assert_eq!(explicit.tcp.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-        explicit.udp.options.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
+        explicit.udp.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
         assert!(matches!(
             explicit.execute_tcp(&exchange),
             Err(super::super::tcp::Error::Unsupported { .. })
@@ -247,10 +236,7 @@ mod tests {
         assert!(validate_tcp_route_options(&source).is_err());
 
         let mut interface = defaults.clone();
-        interface.interface = Some(packetcraftr_netio::interface::Id {
-            name: "fixture0".to_owned(),
-            index: 1,
-        });
+        interface.interface = Some(crate::route::Interface::Name("fixture0".to_owned()));
         assert!(validate_tcp_route_options(&interface).is_err());
 
         for link_mode in [

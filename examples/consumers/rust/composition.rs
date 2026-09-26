@@ -4,17 +4,16 @@
 //! Composes local route and recording-I/O providers with an explicit
 //! destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production uses each capability's `SystemProvider`, joined by `PacketIo`,
-//! under the same policy contract; the client resolves neighbors over that
-//! I/O itself. Run with scripts/check-external-consumer.py.
+//! Production composes `ProviderSet::system()` under the same policy
+//! contract; the client resolves neighbors over its own transmit and capture
+//! providers. Run with scripts/check-external-consumer.py.
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 
-use packetcraftr::Client;
 use packetcraftr::policy::{DestinationConstraint, Policy};
-use packetcraftr::send;
+use packetcraftr::{Client, ProviderSet, send};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
@@ -25,7 +24,7 @@ use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::route::{Decision, Provider, Scope, SelectionReason};
-use packetcraftr_netio::transmit;
+use packetcraftr_netio::{interface, tcp, transmit};
 
 /// The documentation source this composition's route selects.
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 5);
@@ -118,7 +117,18 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     let sender = RecordingSender {
         sent: Arc::clone(&recorded),
     };
-    let client = Client::new(builtin::registry(), DocumentationRoutes, sender, policy);
+    // The recording sender transmits and captures; this workflow never
+    // selects an interface by name, connects over TCP, or resolves a
+    // hostname, so those capabilities keep their system providers unused.
+    let providers = ProviderSet {
+        route: DocumentationRoutes,
+        interface: interface::SystemProvider,
+        capture: sender.clone(),
+        transmit: sender,
+        tcp: tcp::SystemProvider,
+        resolver: packetcraftr::target::SystemResolver,
+    };
+    let client = Client::new(builtin::registry(), policy, providers);
 
     // Layer 3 planning skips neighbor resolution entirely, so the composed
     // client never arms capture on the recording I/O.
@@ -131,14 +141,24 @@ fn public_provider_composition() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let allowed = packet(Ipv4Addr::new(192, 0, 2, 99))?;
-    let report = client.send(allowed, options.clone())?;
+    // The collector keeps every frame the send publishes; its aggregate joins
+    // them with the terminal report.
+    let collector = send::Collector::default();
+    let report = client.send(
+        send::Request::packet(allowed, options.clone()),
+        collector.clone(),
+    )?;
+    let sent = collector.finish(report)?;
     println!(
         "sent {} bytes to an allowed destination",
-        report.sent.bytes_sent()
+        sent.stats.bytes
     );
 
     let outside = packet(Ipv4Addr::new(198, 51, 100, 1))?;
-    match client.send(outside, options) {
+    match client.send(
+        send::Request::packet(outside, options),
+        send::Collector::default(),
+    ) {
         Err(error) => println!("denied outside the allowlist: {error}"),
         Ok(_) => unreachable!("the allowlist must reject other destinations"),
     }

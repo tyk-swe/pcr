@@ -14,7 +14,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::link::Mode as LinkMode;
 
 use super::{Error, Policy, authorize_permissive_live};
-use crate::target::{Authorized, Resolver, Target};
+use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 
 /// The packet-count and conservative wire-byte ceilings a live operation
 /// declares. Policy authorizes them before any side effect; the operation then
@@ -318,7 +318,7 @@ pub enum Operation<'a> {
     Socket(SocketOperation<'a>),
     /// Only the wire limits of a packet workflow whose destinations are
     /// authorized separately: scan and traceroute targets through
-    /// [`Authorizer::resolve_and_authorize`], and send packets as they are
+    /// [`ResolveTarget::resolve_and_authorize`], and send packets as they are
     /// prepared.
     Wire(WireLimits),
     /// DNS raw-UDP and socket limits, using [`SocketLimits::none`] without TCP
@@ -364,7 +364,9 @@ pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) 
     })
 }
 
-/// Injectable operation authorization and target resolution for live workflows.
+/// Injectable operation authorization for live workflows. Target resolution
+/// is the separate [`ResolveTarget`] seam, which only workflows that take a
+/// declared target require.
 pub trait Authorizer {
     /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
@@ -387,15 +389,6 @@ pub trait Authorizer {
             Vec::new(),
         ))
     }
-
-    /// Resolves a declared target and authorizes every address it yields.
-    ///
-    /// Workflows that never take a declared target (fuzz and replay work from
-    /// packets and captures) leave this at the fail-closed default.
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        let _ = target;
-        Err(no_resolver())
-    }
 }
 
 /// Missing resolver is a caller wiring fault, not a policy or I/O failure.
@@ -412,7 +405,7 @@ fn no_resolver() -> BoundaryError {
 }
 
 /// Applies client policy and an optional resolver to workflow operations.
-/// [`Authorizer::resolve_and_authorize`] reports a wiring fault if no resolver
+/// [`ResolveTarget::resolve_and_authorize`] reports a wiring fault if no resolver
 /// exists.
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,
@@ -445,7 +438,9 @@ impl Authorizer for PolicyAuthorizer<'_> {
             .authorize(request)
             .map_err(BoundaryError::from_error)
     }
+}
 
+impl ResolveTarget for PolicyAuthorizer<'_> {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         match (self.resolver, target) {
             (Some(resolver), _) => self
@@ -511,23 +506,16 @@ mod tests {
 
     use super::*;
 
-    struct OperationOnlyAuthorizer;
-
-    impl Authorizer for OperationOnlyAuthorizer {
-        fn authorize_operation(&mut self, _request: Operation<'_>) -> Result<(), BoundaryError> {
-            Ok(())
-        }
-    }
-
     fn hostname_target() -> Target {
         "documentation.invalid".parse().expect("hostname target")
     }
 
     #[test]
     fn an_authorizer_without_a_resolver_refuses_to_resolve_a_declared_target() {
-        let error = OperationOnlyAuthorizer
+        let policy = crate::policy::Policy::default();
+        let error = PolicyAuthorizer::for_packets(&policy)
             .resolve_and_authorize(&hostname_target())
-            .expect_err("the default resolution seam is fail-closed");
+            .expect_err("an authorizer built for packets cannot resolve names");
 
         assert_eq!(error.classification().code, "internal.target_resolution");
     }

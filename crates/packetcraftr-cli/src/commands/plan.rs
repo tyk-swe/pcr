@@ -36,7 +36,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     let Args { route, policy } = arguments;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let request = prepare_route(route, policy.into_policy(), &registry)?;
-    let client = client(Arc::clone(&registry), request.policy);
+    let client = client(Arc::clone(&registry), request.policy, "client_progress");
     let route = client
         .plan(
             &request.packet,

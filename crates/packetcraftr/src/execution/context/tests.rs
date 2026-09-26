@@ -37,6 +37,7 @@ impl Time {
 
 /// Records every sleep, advances [`Time`] by the delay plus `overrun`, and can
 /// raise a stop request or fail while sleeping.
+#[derive(Clone)]
 struct ScriptedClock {
     recording: RecordingClock,
     time: Time,
@@ -60,8 +61,8 @@ impl ScriptedClock {
 impl Clock for ScriptedClock {
     type Error = TimerFault;
 
-    fn sleep(&mut self, delay: Duration) -> Result<(), TimerFault> {
-        let Ok(()) = self.recording.sleep(delay);
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), TimerFault> {
+        let Ok(()) = self.recording.sleep(delay, deadline);
         self.time.advance(delay + self.overrun);
         if let Some(signal) = &self.cancel {
             signal.cancel();
@@ -199,7 +200,7 @@ fn cancellation_during_a_sleep_stops_before_the_delay_is_charged_or_work_runs() 
     assert!(matches!(error, Failure::Interrupted(3, _)));
     assert!(!executed);
     assert_eq!(context.into_stats().elapsed, Duration::ZERO);
-    assert_eq!(clock.recording.delays, [Duration::from_millis(250)]);
+    assert_eq!(clock.recording.delays(), [Duration::from_millis(250)]);
 }
 
 #[test]
@@ -225,7 +226,7 @@ fn scheduled_delay_is_added_to_elapsed_stats() {
 
     assert_eq!(context.into_stats(), sent(1, Duration::from_secs(1)));
     assert_eq!(
-        clock.delays,
+        clock.delays(),
         [Duration::from_millis(200), Duration::from_millis(300)]
     );
 }
@@ -249,7 +250,7 @@ fn a_delay_past_the_remaining_budget_is_refused_before_sleeping() {
         Failure::DurationLimit(2, DeadlineExceeded { limit, .. }) if limit == Duration::from_secs(1)
     ));
     assert_eq!(context.into_stats().elapsed, Duration::from_millis(600));
-    assert_eq!(clock.delays, [Duration::from_millis(600)]);
+    assert_eq!(clock.delays(), [Duration::from_millis(600)]);
 }
 
 #[test]

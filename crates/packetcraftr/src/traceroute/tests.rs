@@ -54,14 +54,16 @@ struct FixedAuthorizer {
     operations: Vec<(u64, u64)>,
 }
 
-impl Authorizer for FixedAuthorizer {
+impl crate::target::ResolveTarget for FixedAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for FixedAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         assert!(
             matches!(operation, Operation::Wire(_)),

@@ -1,17 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Operation-local protocol bindings make each explicit profile's wire intent
-//! agree with strict building. The original client and registry remain intact.
+//! agree with strict building. The original client and registry remain intact:
+//! the executor runs on a view of the client with the configured registry.
 use super::Batch;
-use crate::Client;
 use packetcraftr_core::{
-    budget::Deadline,
     error::BoundaryError,
     layer::Id,
     registry::{Discriminator, Registry},
 };
-use packetcraftr_netio::{capture, route, transmit};
-use std::{collections::BTreeMap, net::IpAddr, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 pub(super) fn configured(
     base: &Arc<Registry>,
     batches: &[Batch],
@@ -69,52 +67,4 @@ pub(super) fn configured(
             Vec::new(),
         )
     })
-}
-pub(super) struct Routes<'a, R>(&'a R);
-pub(super) struct Io<'a, I>(&'a I);
-impl<R: route::Provider> route::Provider for Routes<'_, R> {
-    type Error = R::Error;
-    fn lookup_with_preferences(
-        &self,
-        destination: IpAddr,
-        interface: Option<&packetcraftr_netio::interface::Id>,
-        source: Option<IpAddr>,
-        deadline: &Deadline,
-    ) -> Result<route::Decision, Self::Error> {
-        self.0
-            .lookup_with_preferences(destination, interface, source, deadline)
-    }
-}
-impl<I: transmit::Provider> transmit::Provider for Io<'_, I> {
-    fn send(
-        &self,
-        frame: transmit::Outbound<'_>,
-    ) -> Result<transmit::Report, packetcraftr_netio::Error> {
-        self.0.send(frame)
-    }
-}
-impl<I: capture::Provider> capture::Provider for Io<'_, I> {
-    type Capture = I::Capture;
-    fn arm_capture(
-        &self,
-        request: &capture::Request,
-        deadline: &Deadline,
-    ) -> Result<Self::Capture, packetcraftr_netio::Error> {
-        self.0.arm_capture(request, deadline)
-    }
-}
-pub(super) fn client<R, I>(
-    client: &Client<R, I>,
-    registry: Arc<Registry>,
-) -> Client<Routes<'_, R>, Io<'_, I>> {
-    Client {
-        registry,
-        routes: Routes(&client.routes),
-        io: Io(&client.io),
-        // A clone shares the cache, so the view resolves no neighbor twice.
-        neighbors: client.neighbors.clone(),
-        policy: client.policy.clone(),
-        runtime: client.runtime.clone(),
-        cancellation: client.cancellation.clone(),
-    }
 }

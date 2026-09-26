@@ -22,6 +22,7 @@ use crate::execution::{ExchangeEvidenceError, Executor};
 use crate::execution::{Sink, publisher};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
+use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
 use crate::{BoundaryError, Stats, StatsOverflow};
 
@@ -54,7 +55,7 @@ pub fn run<A, E, C>(
     clock: &mut C,
 ) -> Result<Report, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
 {
@@ -89,7 +90,7 @@ pub fn run_with_events<A, E, C, S>(
     sink: S,
 ) -> Result<Summary, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     S: Sink<Event, Ack = ()>,
@@ -109,7 +110,7 @@ fn run_observed<A, E, C, F>(
     emit: F,
 ) -> Result<Summary, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -137,7 +138,7 @@ pub(super) fn run_observed_with_deadline<A, E, C, F>(
     emit: F,
 ) -> Result<Summary, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -215,7 +216,7 @@ impl<'a> PreparedOperation<'a> {
         mut emit: F,
     ) -> Result<(), Error>
     where
-        A: Authorizer,
+        A: Authorizer + ResolveTarget,
         E: Executor<Exchange> + TcpExecutor,
         C: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -271,7 +272,7 @@ struct ProbeExecution {
 
 impl<A, E, C, F> Operation<'_, A, E, C, F>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,

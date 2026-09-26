@@ -16,6 +16,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::budget::Deadline;
 
+use super::ResolveTarget;
 use super::selection::MAX_CANDIDATES;
 use super::workflow::{SelectedTargets, approve_operation, resolve_selected};
 use super::{Family, Selection, SelectionError, Specification, Target};
@@ -89,7 +90,7 @@ pub(crate) fn admit_operation<A, G, P, Plan, Build>(
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
@@ -119,7 +120,7 @@ pub(crate) fn admit_selection<A, G, P, Plan, Build>(
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
@@ -142,7 +143,7 @@ fn admit_selected<A, G, P, Plan, Build>(
     operation: Build,
 ) -> Result<(SelectedTargets, P), G::Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     G: Errors,
     Plan: FnOnce(&SelectedTargets) -> Result<P, G::Error>,
     Build: for<'a> FnOnce(&'a P) -> Result<Operation<'a>, G::Error>,
@@ -164,7 +165,7 @@ fn resolve_selection<A, G>(
     invalid: impl Fn(SelectionError) -> G::Error,
 ) -> Result<SelectedTargets, G::Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     G: Errors,
 {
     let DeclaredTargets {
@@ -270,7 +271,7 @@ mod tests {
         expired_at: Option<Instant>,
     }
 
-    impl Authorizer for RecordingAuthorizer {
+    impl crate::target::ResolveTarget for RecordingAuthorizer {
         fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
             self.calls.push(Call::Resolve(target.clone()));
             if let Some(cancellation) = &self.cancel {
@@ -288,7 +289,9 @@ mod tests {
                 addresses,
             })
         }
+    }
 
+    impl Authorizer for RecordingAuthorizer {
         fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
             self.calls.push(Call::Approve(operation.shape()));
             if let Some(cancellation) = &self.cancel {

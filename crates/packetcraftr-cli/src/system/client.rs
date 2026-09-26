@@ -3,28 +3,24 @@
 
 use std::sync::Arc;
 
-use packetcraftr::Client as WorkflowClient;
+use packetcraftr::{ProviderSet, SystemProviders};
 use packetcraftr_core as core;
-use packetcraftr_netio as net;
 
-type ExchangeIo = net::PacketIo<net::transmit::SystemProvider, net::capture::SystemProvider>;
-pub(crate) type Client = WorkflowClient<net::route::SystemProvider, ExchangeIo>;
-pub(crate) type Exchange<'a> =
-    packetcraftr::probe::ExchangeExecutor<'a, net::route::SystemProvider, ExchangeIo>;
+pub(crate) type Client = packetcraftr::Client<SystemProviders>;
+pub(crate) type Exchange<'a> = packetcraftr::probe::ExchangeExecutor<'a, SystemProviders>;
 
+/// The one client a command runs its workflows on: every system provider,
+/// the installed cancellation signal, and one event runtime registered for
+/// the `resources` report under `runtime`.
 pub(crate) fn client(
     registry: Arc<core::registry::Registry>,
     policy: impl Into<Arc<packetcraftr::policy::Policy>>,
+    runtime: &'static str,
 ) -> Client {
-    WorkflowClient::new(
-        registry,
-        net::route::SystemProvider,
-        net::PacketIo::new(net::transmit::SystemProvider, net::capture::SystemProvider),
-        policy,
-    )
-    .with_progress_runtime(crate::resources::runtime(
-        "client_progress",
-        packetcraftr::progress::MAX_WORKER_CAPACITY,
-    ))
-    .with_cancellation(crate::cancellation::signal().clone())
+    Client::new(registry, policy, ProviderSet::system())
+        .with_runtime(crate::resources::runtime(
+            runtime,
+            packetcraftr::progress::MAX_WORKER_CAPACITY,
+        ))
+        .with_cancellation(crate::cancellation::signal().clone())
 }

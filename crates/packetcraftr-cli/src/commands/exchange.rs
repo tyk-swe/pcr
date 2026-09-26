@@ -55,20 +55,22 @@ pub(super) fn run(
         limits,
     } = arguments;
     let limits = limits.into_limits();
-    let mut options = packetcraftr::exchange::Options {
+    let mut request = packetcraftr::exchange::Request {
         timeout: timeout.timeout(),
         max_template_packets: template.max_template_packets,
-        max_responses,
-        max_unmatched_frames,
-        capture: limits,
-        ..packetcraftr::exchange::Options::default()
+        collection: packetcraftr::exchange::Collection {
+            max_responses,
+            max_unmatched_frames,
+            capture: limits,
+            ..packetcraftr::exchange::Collection::default()
+        },
+        ..packetcraftr::exchange::Request::new(
+            preparation::placeholder(),
+            packetcraftr::send::Options::default(),
+        )
     };
-    options.decode.limits.max_packet_size = limits.snap_length;
-    let preparation::Prepared {
-        template,
-        options,
-        client,
-    } = preparation::prepare(send, template, options)?;
+    request.collection.decode.limits.max_packet_size = limits.snap_length;
+    let preparation::Prepared { request, client } = preparation::prepare(send, template, request)?;
     // Exchange drives the composed client itself — authorization,
     // cancellation, and the callback runtime live inside it — so the driver
     // vends no session state.
@@ -80,13 +82,15 @@ pub(super) fn run(
         execution::Hooks {
             command: output::contract::Command::Exchange,
             run: Box::new(|_| {
-                client
-                    .exchange(&template, options.clone())
-                    .map_err(CliError::classified)
+                let collector = packetcraftr::exchange::Collector::default();
+                let report = client
+                    .exchange(request.clone(), collector.clone())
+                    .map_err(CliError::classified)?;
+                collector.finish(report).map_err(CliError::classified)
             }),
             run_with_events: Box::new(|_, emit| {
                 client
-                    .exchange_with_events(&template, options.clone(), emit)
+                    .exchange(request.clone(), emit)
                     .map_err(CliError::classified)
             }),
             on_event: rendering::emit_event,

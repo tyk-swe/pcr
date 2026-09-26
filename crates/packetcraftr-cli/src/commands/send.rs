@@ -19,27 +19,45 @@ use crate::rendering::{
     write_summary_line,
 };
 
-fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::SetOptions>, CliError> {
+fn prepare(arguments: Args) -> Result<Prepared<packetcraftr::send::Request>, CliError> {
     let Args {
         send,
         template,
         repeat,
         rate,
     } = arguments;
-    let options = packetcraftr::send::SetOptions {
+    let request = packetcraftr::send::Request {
         repeat,
         rate,
         max_template_packets: template.max_template_packets,
-        ..Default::default()
+        ..packetcraftr::send::Request::new(
+            preparation::placeholder(),
+            packetcraftr::send::Options::default(),
+        )
     };
-    preparation::prepare(send, template, options)
+    preparation::prepare(send, template, request)
 }
 
-/// Maps a per-frame rendering failure into the workflow's output channel.
-fn output_failure(error: CliError) -> packetcraftr::Error {
-    packetcraftr::Error::SendOutput {
-        source: Box::new(error.into_boundary_error()),
+/// A sink that writes each confirmed frame with `write` as the send publishes
+/// it, so partial progress is preserved when a later frame fails.
+fn writing(
+    write: impl Fn(&packetcraftr::send::SentFrame) -> Result<(), CliError> + Send + 'static,
+) -> impl packetcraftr::Sink<packetcraftr::send::Event, Ack = ()> {
+    move |packetcraftr::send::Event::Sent(frame): packetcraftr::send::Event| {
+        write(&frame).map_err(CliError::into_boundary_error)
     }
+}
+
+/// Sends the prepared request, keeping every frame for the report.
+fn collect(
+    prepared: Prepared<packetcraftr::send::Request>,
+) -> Result<packetcraftr::send::Aggregate, CliError> {
+    let collector = packetcraftr::send::Collector::default();
+    let report = prepared
+        .client
+        .send(prepared.request, collector.clone())
+        .map_err(CliError::classified)?;
+    collector.finish(report).map_err(CliError::classified)
 }
 
 impl super::Spec for Args {
@@ -65,53 +83,63 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
     let prepared = prepare(arguments)?;
     match format {
         SendFormat::Text => {
-            // Each confirmed frame is reported as it happens, so partial
-            // progress is preserved when a later frame fails.
+            // Each confirmed frame is reported as it happens, and its builder
+            // diagnostics are kept for the end of the run.
+            let diagnostics = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let collected = std::sync::Arc::clone(&diagnostics);
             let report = prepared
                 .client
-                .send_set_with_events(&prepared.template, prepared.options, |frame| {
-                    write_summary_line(format_args!("{}", rendering::sent_line(frame)))
-                        .map_err(output_failure)
-                })
+                .send(
+                    prepared.request,
+                    writing(move |frame| {
+                        let mut collected = collected
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        for diagnostic in &frame.packet.built().diagnostics {
+                            core::diagnostic::push_once(&mut collected, diagnostic.clone());
+                        }
+                        write_summary_line(format_args!("{}", rendering::sent_line(frame)))
+                    }),
+                )
                 .map_err(CliError::classified)?;
-            let diagnostics = collect_diagnostics(&report);
-            if report.sent.len() > 1 {
+            if report.stats.packets_completed > 1 {
                 write_summary_line(format_args!(
                     "sent {} frame(s), {} byte(s) across {} pass(es)",
                     report.stats.packets_completed, report.stats.bytes, report.passes_completed
                 ))?;
             }
+            let diagnostics = std::mem::take(
+                &mut *diagnostics
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            );
             render_diagnostics_text(&diagnostics)
         }
         SendFormat::Json => {
-            let report = prepared
-                .client
-                .send_set(&prepared.template, prepared.options)
-                .map_err(CliError::classified)?;
+            let report = collect(prepared)?;
             let published = output::envelope::Published::<output::send::Report>::try_from(report)
                 .map_err(CliError::classified)?;
             emit_published(output::contract::Command::Send, published)
         }
         SendFormat::Hex => prepared
             .client
-            .send_set_with_events(&prepared.template, prepared.options, |frame| {
-                write_hex_line(frame.packet.wire_bytes()).map_err(output_failure)
-            })
+            .send(
+                prepared.request,
+                writing(|frame| write_hex_line(frame.packet.wire_bytes())),
+            )
             .map_err(CliError::classified)
             .map(|_| ()),
         SendFormat::Raw => prepared
             .client
-            .send_set_with_events(&prepared.template, prepared.options, |frame| {
-                write_raw(frame.packet.wire_bytes()).map_err(output_failure)
-            })
+            .send(
+                prepared.request,
+                writing(|frame| write_raw(frame.packet.wire_bytes())),
+            )
             .map_err(CliError::classified)
             .map(|_| ()),
         SendFormat::Pcap | SendFormat::PcapNg => {
-            // The report already holds every confirmed frame, in order.
-            let report = prepared
-                .client
-                .send_set(&prepared.template, prepared.options)
-                .map_err(CliError::classified)?;
+            // The aggregate already holds every confirmed frame, in order.
+            let report = collect(prepared)?;
             let capture_format = if format == SendFormat::Pcap {
                 capture::Format::Pcap
             } else {
@@ -124,16 +152,4 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             write_capture_file(capture_format, frames, compression)
         }
     }
-}
-
-fn collect_diagnostics(
-    report: &packetcraftr::send::SetReport,
-) -> Vec<core::diagnostic::Diagnostic> {
-    let mut diagnostics = Vec::new();
-    for frame in &report.sent {
-        for diagnostic in &frame.packet.built().diagnostics {
-            core::diagnostic::push_once(&mut diagnostics, diagnostic.clone());
-        }
-    }
-    diagnostics
 }

@@ -251,7 +251,7 @@ fn scan_single_probe_attempts_rate_and_timeout_evidence_are_deterministic() {
             (2, vec![Some(83)]),
         ]
     );
-    assert_eq!(clock.delays, vec![Duration::from_millis(500); 7]);
+    assert_eq!(clock.delays(), vec![Duration::from_millis(500); 7]);
     assert_eq!(result.endpoints.len(), 4);
     assert!(result.endpoints.iter().all(|endpoint| {
         endpoint.classification == Classification::Timeout
@@ -726,7 +726,7 @@ fn a_validated_request_selects_its_declared_ports_once_each() {
 struct TargetSetAuthorizer {
     calls: Vec<Target>,
 }
-impl crate::policy::Authorizer for TargetSetAuthorizer {
+impl crate::target::ResolveTarget for TargetSetAuthorizer {
     fn resolve_and_authorize(
         &mut self,
         target: &Target,
@@ -742,6 +742,9 @@ impl crate::policy::Authorizer for TargetSetAuthorizer {
             },
         })
     }
+}
+
+impl crate::policy::Authorizer for TargetSetAuthorizer {
     fn authorize_operation(
         &mut self,
         _operation: crate::policy::Operation<'_>,

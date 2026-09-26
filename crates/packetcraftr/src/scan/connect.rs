@@ -12,6 +12,7 @@ use crate::{
     execution::Sink,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Transport, enforce_deadline},
+    target::ResolveTarget,
     target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
 };
 use packetcraftr_core::budget::Deadline;
@@ -103,7 +104,7 @@ pub fn run<P, A, C>(
 where
     P: Provider + 'static,
     P::Stream: 'static,
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     C: Clock,
 {
     let mut probes = Vec::new();
@@ -145,7 +146,7 @@ pub fn run_with_events<P, A, C, S>(
 where
     P: Provider + 'static,
     P::Stream: 'static,
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     C: Clock,
     S: Sink<Probe, Ack = ()>,
 {
@@ -200,7 +201,7 @@ struct Planned {
 
 /// Validates the connect-specific request, admits the declared targets, and
 /// approves the complete socket limits before any connection is scheduled.
-fn planned<A: Authorizer>(
+fn planned<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,
@@ -302,7 +303,7 @@ fn admit_next<P, A, C>(
 where
     P: Provider + 'static,
     P::Stream: 'static,
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     C: Clock,
 {
     let endpoint = planned.endpoints[next % planned.endpoints.len()];
@@ -383,7 +384,7 @@ fn run_observed<P, A, C, F>(
 where
     P: Provider + 'static,
     P::Stream: 'static,
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     C: Clock,
     F: FnMut(Probe, &Deadline) -> Result<(), Error>,
 {
@@ -470,10 +471,12 @@ where
                         actual: source.actual,
                         limit: source.limit,
                     })?;
-                clock.sleep(wait).map_err(|source| Error::Clock {
-                    sequence: next as u64,
-                    source: Box::new(source),
-                })?;
+                clock
+                    .sleep(wait, &deadline)
+                    .map_err(|source| Error::Clock {
+                        sequence: next as u64,
+                        source: Box::new(source),
+                    })?;
             }
         }
     }

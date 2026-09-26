@@ -109,13 +109,17 @@ impl packetcraftr::replay::Transmitter for FakeTransmitter {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct FakeClock;
 
 impl packetcraftr::clock::Clock for FakeClock {
     type Error = Infallible;
 
-    fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
+    fn sleep(
+        &self,
+        _delay: Duration,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }

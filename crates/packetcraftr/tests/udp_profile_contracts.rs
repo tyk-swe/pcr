@@ -1,5 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
+
 use bytes::Bytes;
 use packetcraftr::{
     Client,
@@ -289,10 +291,15 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(registry.clone(), Routes, Io(state.clone()), policy.clone());
-    let mut options = packetcraftr::exchange::Options::default();
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    let client = Client::new(
+        registry.clone(),
+        policy.clone(),
+        common::providers(Routes, Io(state.clone())),
+    );
+    let mut send = packetcraftr::send::Options::default();
+    send.plan.link_mode = Mode::Layer3;
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
     let request = scan::Request {
         max_in_flight: window,
         targets: Target::Address("192.0.2.2".parse().unwrap()).into(),
@@ -313,7 +320,7 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
         &request,
         &mut PolicyAuthorizer::for_packets(&policy),
         &registry,
-        &mut ExchangeExecutor::new(&client, options),
+        &mut ExchangeExecutor::new(&client, send, collection),
         &mut SystemClock,
     )
     .unwrap();

@@ -5,12 +5,14 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr::ProviderSet;
+use packetcraftr::target::{Hostname, Resolver};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::{self, Builder};
 use packetcraftr_core::codec::Context;
@@ -23,12 +25,13 @@ use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::link::{Arp, Ethernet};
 use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::capture;
-use packetcraftr_netio::interface::Id as InterfaceId;
+use packetcraftr_netio::interface::{self, Id as InterfaceId};
 use packetcraftr_netio::link::Capability as LinkCapability;
 use packetcraftr_netio::route::Decision;
 use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
+use packetcraftr_netio::tcp;
 use packetcraftr_netio::transmit;
 use serde_json::Value;
 
@@ -38,8 +41,138 @@ pub(crate) const INTERFACE_MAC: MacAddress = MacAddress([0xaa, 0xbb, 0xcc, 0xdd,
 /// the source-ownership check and fail only for the reason under test.
 pub(crate) const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 
+/// The fake provider bundle: the given route provider and one value serving
+/// transmit and capture, with the fixture interface list, scripted TCP, and a
+/// scripted resolver.
+pub(crate) type FakeProviders<R, I> =
+    ProviderSet<R, Interfaces, I, I, ScriptedTcp, ScriptedResolver>;
+
+/// Composes [`FakeProviders`] from `route` and `io`, which transmits and
+/// captures, with the default fixture interface list, refusing TCP, and a
+/// resolver that answers nothing.
+pub(crate) fn providers<R, I: Clone>(route: R, io: I) -> FakeProviders<R, I> {
+    ProviderSet {
+        route,
+        interface: Interfaces::default(),
+        capture: io.clone(),
+        transmit: io,
+        tcp: ScriptedTcp::default(),
+        resolver: ScriptedResolver::default(),
+    }
+}
+
+/// The one interface [`FixedRoutes`] selects, as an interface provider
+/// enumerates it.
+pub(crate) fn fixture_interface() -> interface::Info {
+    interface::Info {
+        id: InterfaceId {
+            name: "fixture0".to_owned(),
+            index: 1,
+        },
+        description: None,
+        mac_address: Some(INTERFACE_MAC),
+        addresses: Vec::new(),
+        flags: interface::Flags::default(),
+        mtu: Some(1_500),
+        capability: LinkCapability::Layer2AndLayer3,
+        link_type: LinkType::ETHERNET,
+    }
+}
+
+/// An interface provider answering a fixed list, [`fixture_interface`] by
+/// default, recording [`Step::Interfaces`] for each enumeration.
+#[derive(Clone)]
+pub(crate) struct Interfaces {
+    pub(crate) list: Vec<interface::Info>,
+    pub(crate) steps: Steps,
+}
+
+impl Default for Interfaces {
+    fn default() -> Self {
+        Self {
+            list: vec![fixture_interface()],
+            steps: Steps::default(),
+        }
+    }
+}
+
+impl interface::Provider for Interfaces {
+    fn interfaces(&self, _deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
+        self.steps.push(Step::Interfaces);
+        Ok(self.list.clone())
+    }
+}
+
+/// A TCP provider that records [`Step::Connect`] for each attempt and then
+/// refuses it, or with `loopback` set connects through the system provider,
+/// which it allows only for loopback endpoints.
+#[derive(Clone, Default)]
+pub(crate) struct ScriptedTcp {
+    pub(crate) loopback: bool,
+    pub(crate) steps: Steps,
+}
+
+impl tcp::Provider for ScriptedTcp {
+    type Stream = tcp::SystemStream;
+
+    fn connect(
+        &self,
+        endpoint: SocketAddr,
+        deadline: &Deadline,
+    ) -> Result<Self::Stream, tcp::Error> {
+        self.steps.push(Step::Connect(endpoint));
+        if self.loopback {
+            assert!(
+                endpoint.ip().is_loopback(),
+                "fixtures connect only to loopback"
+            );
+            return tcp::SystemProvider.connect(endpoint, deadline);
+        }
+        Err(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "fixture refusal").into())
+    }
+}
+
+/// A resolver answering every hostname with `addresses`, recording
+/// [`Step::Resolve`] for each call.
+#[derive(Clone, Default)]
+pub(crate) struct ScriptedResolver {
+    pub(crate) addresses: Vec<IpAddr>,
+    pub(crate) steps: Steps,
+}
+
+impl Resolver for ScriptedResolver {
+    fn resolve(
+        &self,
+        hostname: &Hostname,
+        _limit: usize,
+    ) -> Result<Vec<IpAddr>, packetcraftr::target::Error> {
+        self.steps.push(Step::Resolve(hostname.to_string()));
+        Ok(self.addresses.clone())
+    }
+}
+
+/// [`FixedRoutes`] that records [`Step::Route`] for each lookup.
+#[derive(Clone, Default)]
+pub(crate) struct RecordingRoutes(pub(crate) Steps);
+
+impl Provider for RecordingRoutes {
+    type Error = Infallible;
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
+    ) -> Result<Decision, Self::Error> {
+        self.0.push(Step::Route(destination));
+        FixedRoutes.lookup_with_preferences(destination, interface_hint, preferred_source, deadline)
+    }
+}
+
 /// A route provider that puts every destination on-link over one dual
 /// capability Ethernet interface.
+#[derive(Clone, Copy, Default)]
 pub(crate) struct FixedRoutes;
 
 impl Provider for FixedRoutes {
@@ -73,6 +206,7 @@ impl Provider for FixedRoutes {
 /// I/O for workflows that must fail before transmission: capture is armed
 /// before routes are materialized, so it exists but never observes anything.
 /// Neighbor discovery transmits, so it never runs over this I/O either.
+#[derive(Clone, Copy, Default)]
 pub(crate) struct NeverTransmit;
 
 impl transmit::Provider for NeverTransmit {
@@ -111,6 +245,14 @@ pub(crate) enum Step {
     Transmit(Vec<u8>),
     /// The workflow published the evidence of this confirmed send.
     Published(usize),
+    /// The route provider was asked for a route to this destination.
+    Route(IpAddr),
+    /// The interface provider enumerated interfaces.
+    Interfaces,
+    /// A TCP connection to this endpoint was attempted.
+    Connect(SocketAddr),
+    /// This hostname was resolved.
+    Resolve(String),
 }
 
 /// A shared, ordered record of provider calls.

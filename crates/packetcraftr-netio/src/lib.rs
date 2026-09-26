@@ -55,20 +55,3 @@ mod workers;
 
 pub use error::{Error, SendEvidenceFault};
 pub use unsupported::{NativeCapability, Unsupported};
-
-/// Independently owned transmit and capture providers composed into the single
-/// packet I/O value that capture-before-send exchanges require.
-///
-/// It implements [`transmit::Provider`] through `sender` and
-/// [`capture::Provider`] through `capture`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PacketIo<S, C> {
-    pub sender: S,
-    pub capture: C,
-}
-
-impl<S, C> PacketIo<S, C> {
-    pub fn new(sender: S, capture: C) -> Self {
-        Self { sender, capture }
-    }
-}

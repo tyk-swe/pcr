@@ -127,6 +127,7 @@ impl Executor<ExecutionCase> for CountingExecutor {
     }
 }
 
+#[derive(Clone)]
 struct InterruptedPacingClock {
     signal: packetcraftr_core::budget::Cancellation,
     cancel: bool,
@@ -136,7 +137,11 @@ struct InterruptedPacingClock {
 impl crate::clock::Clock for InterruptedPacingClock {
     type Error = std::io::Error;
 
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
+    fn sleep(
+        &self,
+        delay: Duration,
+        _deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), Self::Error> {
         assert!(!delay.is_zero());
         if self.cancel {
             self.signal.cancel();

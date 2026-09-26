@@ -104,6 +104,11 @@ _Avoid_: callback, observer, emitter (for the receiver)
 The terminal result of one workflow run.
 _Avoid_: set report, batch report, summary (for the terminal result)
 
+**Aggregate**:
+Every event one workflow run published, joined with its report: the full
+result a collecting sink rebuilds for a caller that wants everything at once.
+_Avoid_: report, result (for the joined whole)
+
 ### Live I/O
 
 **Provider**:

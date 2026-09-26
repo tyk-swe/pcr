@@ -76,11 +76,11 @@ pub struct Report {
 }
 
 /// A packet-set transmission, with each builder diagnostic code once.
-impl TryFrom<packetcraftr::send::SetReport> for Published<Report> {
+impl TryFrom<packetcraftr::send::Aggregate> for Published<Report> {
     type Error = Error;
 
-    fn try_from(report: packetcraftr::send::SetReport) -> Result<Self, Error> {
-        let packetcraftr::send::SetReport {
+    fn try_from(report: packetcraftr::send::Aggregate) -> Result<Self, Error> {
+        let packetcraftr::send::Aggregate {
             sent,
             passes_completed,
             stats,

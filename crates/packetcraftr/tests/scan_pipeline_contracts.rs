@@ -1,5 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
+
 use packetcraftr::{
     Client,
     clock::SystemClock,
@@ -229,15 +231,20 @@ fn execute(request: &Request, state: Arc<Mutex<State>>) -> Result<scan::Report, 
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(registry.clone(), Routes, Io(state), policy.clone());
-    let mut options = packetcraftr::exchange::Options::default();
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    let client = Client::new(
+        registry.clone(),
+        policy.clone(),
+        common::providers(Routes, Io(state)),
+    );
+    let mut send = packetcraftr::send::Options::default();
+    send.plan.link_mode = Mode::Layer3;
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
     scan::run(
         request,
         &mut PolicyAuthorizer::for_packets(&policy),
         &registry,
-        &mut ExchangeExecutor::new(&client, options),
+        &mut ExchangeExecutor::new(&client, send, collection),
         &mut SystemClock,
     )
 }
@@ -272,10 +279,15 @@ fn queued_replies_keep_their_ingress_verdict_across_callback_latency() {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(registry.clone(), Routes, Io(state), policy.clone());
-    let mut options = packetcraftr::exchange::Options::default();
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    let client = Client::new(
+        registry.clone(),
+        policy.clone(),
+        common::providers(Routes, Io(state)),
+    );
+    let mut send = packetcraftr::send::Options::default();
+    send.plan.link_mode = Mode::Layer3;
+    let mut collection = packetcraftr::exchange::Collection::default();
+    collection.capture.snap_length = 1500;
     let classifications = Arc::new(Mutex::new(Vec::new()));
     let observed = Arc::clone(&classifications);
 
@@ -283,7 +295,7 @@ fn queued_replies_keep_their_ingress_verdict_across_callback_latency() {
         &request,
         &mut PolicyAuthorizer::for_packets(&policy),
         &registry,
-        &mut ExchangeExecutor::new(&client, options),
+        &mut ExchangeExecutor::new(&client, send, collection),
         &mut SystemClock,
         &packetcraftr::progress::Runtime::default(),
         move |event| {
@@ -413,7 +425,7 @@ fn pipelined_and_serial_scans_break_a_response_tie_the_same_way() {
 }
 
 /// Delegates to the scan executor with each batch's probe removed.
-struct Reshaping<'c>(ExchangeExecutor<'c, Routes, Io>);
+struct Reshaping<'c>(ExchangeExecutor<'c, common::FakeProviders<Routes, Io>>);
 
 impl Executor<scan::Batch> for Reshaping<'_> {
     fn execute(&mut self, batch: &scan::Batch) -> Result<Execution, BoundaryError> {
@@ -434,15 +446,20 @@ fn a_scan_batch_without_exactly_one_probe_is_rejected_before_any_send() {
         ..Default::default()
     };
     let registry = builtin::registry();
-    let client = Client::new(registry.clone(), Routes, Io(state.clone()), policy.clone());
-    let mut options = packetcraftr::exchange::Options::default();
-    options.send.plan.link_mode = Mode::Layer3;
+    let client = Client::new(
+        registry.clone(),
+        policy.clone(),
+        common::providers(Routes, Io(state.clone())),
+    );
+    let mut send = packetcraftr::send::Options::default();
+    send.plan.link_mode = Mode::Layer3;
+    let collection = packetcraftr::exchange::Collection::default();
 
     let error = scan::run(
         &request,
         &mut PolicyAuthorizer::for_packets(&policy),
         &registry,
-        &mut Reshaping(ExchangeExecutor::new(&client, options)),
+        &mut Reshaping(ExchangeExecutor::new(&client, send, collection)),
         &mut SystemClock,
     )
     .expect_err("a scan batch without its probe must be rejected");

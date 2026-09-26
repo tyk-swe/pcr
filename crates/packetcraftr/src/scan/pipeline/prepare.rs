@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Planned, limit};
 use crate::{
-    BoundaryError,
+    BoundaryError, Providers,
+    clock::Clock,
     execution::{ExchangeExecutor, PipelineOptions},
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
 };
-use packetcraftr_core::{field::FieldValue, packet::Packet};
-use packetcraftr_netio::{
-    capture::{self, MAX_SOURCES},
-    interface, route, transmit,
-};
+use packetcraftr_core::{budget::Deadline, field::FieldValue, packet::Packet};
+use packetcraftr_netio::{capture::MAX_SOURCES, interface};
 use std::{
     collections::{HashMap, hash_map::Entry},
     net::IpAddr,
@@ -19,8 +17,8 @@ use std::{
 /// What the pipeline keeps after every probe was admitted: the discovery
 /// phase that rebuilds each probe at send time, one route per probe address,
 /// each probe's [`AdmittedProbe`] in send order, and the capture interfaces.
-pub(super) struct Plan<'c, R, I> {
-    pub discovery: Discovery<'c, R, I>,
+pub(super) struct Plan<'c, P, K> {
+    pub discovery: Discovery<'c, P, K>,
     pub routes: HashMap<IpAddr, AuthorizedRoute>,
     pub probes: Vec<AdmittedProbe>,
     pub interfaces: Vec<interface::Id>,
@@ -34,18 +32,16 @@ pub(super) struct AdmittedProbe {
 }
 /// Admits every probe before any neighbor discovery, charging the prepared
 /// descriptions the pipeline may hold at once against `max_prepared_bytes`.
-pub(super) fn plan<'c, R, I>(
-    executor: &'c ExchangeExecutor<'_, R, I>,
+/// Preparation runs under `preparation`, the provider view of `deadline`.
+pub(super) fn plan<'c, P: Providers, K: Clock>(
+    executor: &'c ExchangeExecutor<'_, P, K>,
     planned: &[Planned<'_>],
     options: PipelineOptions,
     deadline: Instant,
-) -> Result<Plan<'c, R, I>, BoundaryError>
-where
-    R: route::Provider,
-    I: transmit::Provider + capture::Provider,
-{
+    preparation: &'c Deadline,
+) -> Result<Plan<'c, P, K>, BoundaryError> {
     executor
-        .options
+        .collection
         .validate()
         .map_err(BoundaryError::from_error)?;
     let client = executor.client;
@@ -60,7 +56,7 @@ where
         return Err(limit("prepared descriptions", options.max_prepared_bytes));
     }
     let mut admission = client
-        .admission(&executor.options.send, planned.len() as u64, deadline)
+        .admitting(&executor.send, planned.len() as u64, preparation)
         .map_err(BoundaryError::from_error)?;
     for &Planned { probe, .. } in planned {
         super::check(client, deadline)?;

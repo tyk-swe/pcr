@@ -48,6 +48,7 @@ struct State {
     respond: Responder,
 }
 
+#[derive(Clone)]
 struct Io {
     state: Arc<Mutex<State>>,
 }
@@ -213,7 +214,7 @@ fn malformed_reply(request: &Packet) -> Packet {
     response
 }
 
-fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Report {
+fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Aggregate {
     let state = Arc::new(Mutex::new(State {
         requests: Vec::new(),
         sent: Vec::new(),
@@ -223,23 +224,26 @@ fn run(template: &Template, respond: Responder, expected: usize) -> exchange::Re
     }));
     let client = Client::new(
         builtin::registry(),
-        common::FixedRoutes,
-        Io {
-            state: state.clone(),
-        },
         Policy::default(),
+        common::providers(
+            common::FixedRoutes,
+            Io {
+                state: state.clone(),
+            },
+        ),
     );
-    let mut options = exchange::Options {
+    let mut request = exchange::Request {
         timeout: Duration::from_secs(1),
-        ..exchange::Options::default()
+        ..exchange::Request::new(template.clone(), packetcraftr::send::Options::default())
     };
-    options.send.plan.link_mode = Mode::Layer3;
-    options.capture.snap_length = 1500;
+    request.send.plan.link_mode = Mode::Layer3;
+    request.collection.capture.snap_length = 1500;
+    let collector = exchange::Collector::default();
     let report = client
-        .exchange(template, options)
+        .exchange(request, collector.clone())
         .expect("exchange completes");
     assert_eq!(state.lock().unwrap().sent.len(), expected);
-    report
+    collector.finish(report).expect("coherent exchange events")
 }
 
 #[test]

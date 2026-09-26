@@ -36,14 +36,16 @@ struct SingleAddressAuthorizer {
     address: IpAddr,
 }
 
-impl Authorizer for SingleAddressAuthorizer {
+impl crate::target::ResolveTarget for SingleAddressAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for SingleAddressAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         assert!(
             matches!(operation, Operation::Dns(_)),
@@ -59,14 +61,16 @@ struct ExpiringOperationAuthorizer {
     expired_at: std::time::Instant,
 }
 
-impl Authorizer for ExpiringOperationAuthorizer {
+impl crate::target::ResolveTarget for ExpiringOperationAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.clone(),
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for ExpiringOperationAuthorizer {
     fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
         *self.now.lock().unwrap() = self.expired_at;
         Err(BoundaryError::new(
@@ -83,7 +87,7 @@ struct SlowTcpDenyingAuthorizer {
     numeric_calls: usize,
 }
 
-impl Authorizer for SlowTcpDenyingAuthorizer {
+impl crate::target::ResolveTarget for SlowTcpDenyingAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         if matches!(target, Target::Address(_)) {
             self.numeric_calls += 1;
@@ -99,7 +103,9 @@ impl Authorizer for SlowTcpDenyingAuthorizer {
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for SlowTcpDenyingAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         assert!(matches!(operation, Operation::Dns(_)));
         Ok(())
@@ -525,7 +531,7 @@ impl RecordingAuthorizer {
     }
 }
 
-impl Authorizer for RecordingAuthorizer {
+impl crate::target::ResolveTarget for RecordingAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         self.targets.push(target.clone());
         if self.deny_numeric && matches!(target, Target::Address(_)) {
@@ -540,7 +546,9 @@ impl Authorizer for RecordingAuthorizer {
             addresses: vec![self.address],
         })
     }
+}
 
+impl Authorizer for RecordingAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         match operation {
             Operation::Wire(limits) => self.limits.push(limits),
@@ -1073,7 +1081,7 @@ fn direct_tcp_retries_validate_responses_and_charge_only_socket_traffic() {
     .unwrap();
     assert_eq!(executor.udp_calls, 0);
     assert_eq!(executor.tcp_calls, 3);
-    assert_eq!(clock.delays, [Duration::from_millis(500); 2]);
+    assert_eq!(clock.delays(), [Duration::from_millis(500); 2]);
     assert_eq!(
         report
             .attempts()

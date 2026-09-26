@@ -17,6 +17,7 @@ use crate::evidence::ExecutionPermit;
 use crate::execution::Executor;
 use crate::execution::Receipt;
 use crate::policy::Authorizer;
+use crate::target::ResolveTarget;
 use crate::target::{Family, Target, resolve_selected};
 
 use super::super::classification::{
@@ -28,7 +29,7 @@ use super::{Attempts, Operation};
 
 impl<A, E, C, F> Operation<'_, A, E, C, F>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,

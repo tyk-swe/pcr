@@ -3,15 +3,12 @@
 
 use std::net::IpAddr;
 
-use packetcraftr_core as core;
-use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::BuiltinProtocol;
-use packetcraftr_netio as net;
-
-use super::interface;
 use crate::command_options::{RouteArgs, RouteSelectionArgs};
 use crate::errors::CliError;
 use crate::input::read_recipe;
+use packetcraftr_core as core;
+use packetcraftr_core::packet::Packet;
+use packetcraftr_core::protocol::BuiltinProtocol;
 
 /// One packet with the destination, route options, and policy the CLI
 /// resolved for it, ready for a live send, exchange, or plan.
@@ -23,7 +20,8 @@ pub(crate) struct RoutedPacket {
 }
 
 /// Reads one recipe, validates `policy`, and authorizes the packet's declared
-/// destinations before hostname or interface work.
+/// destinations before hostname work. The client resolves the interface
+/// selector itself, after it admits the operation.
 pub(crate) fn prepare_route(
     arguments: RouteArgs,
     policy: packetcraftr::policy::Policy,
@@ -44,7 +42,7 @@ pub(crate) fn prepare_route(
 }
 
 /// Expands the bounded template lazily and authorizes every expanded packet's
-/// declared destinations before hostname or interface work, then prepares the
+/// declared destinations before hostname work, then prepares the
 /// route for the first packet. The caller has already validated `policy`; the
 /// library repeats these checks against every final packet before
 /// transmission.
@@ -89,8 +87,9 @@ fn authorize_expanded_destinations(
     Ok(first)
 }
 
-/// Resolves the destination and interface for a packet whose declared
-/// destinations the caller has already authorized.
+/// Resolves the destination for a packet whose declared destinations the
+/// caller has already authorized, and carries the interface selector for the
+/// client to resolve.
 fn resolve_route(
     packet: Packet,
     destination: Option<String>,
@@ -103,8 +102,7 @@ fn resolve_route(
         .as_ref()
         .map(crate::command_options::Selector::get)
         .transpose()?
-        .map(|selector| interface::resolve(selector, &net::interface::SystemProvider))
-        .transpose()?;
+        .map(Into::into);
     Ok(RoutedPacket {
         packet,
         destination,

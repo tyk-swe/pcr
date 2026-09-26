@@ -627,26 +627,6 @@ impl Provider for SystemProvider {
     }
 }
 
-impl<S, C> Provider for crate::PacketIo<S, C>
-where
-    S: Send + Sync,
-    C: Provider,
-{
-    type Capture = C::Capture;
-
-    fn arm_capture(&self, request: &Request, deadline: &Deadline) -> Result<Self::Capture, Error> {
-        self.capture.arm_capture(request, deadline)
-    }
-
-    fn timestamp_types(
-        &self,
-        interface: &InterfaceId,
-        deadline: &Deadline,
-    ) -> Result<Vec<TimestampType>, Error> {
-        self.capture.timestamp_types(interface, deadline)
-    }
-}
-
 fn is_zero(value: &u64) -> bool {
     *value == 0
 }

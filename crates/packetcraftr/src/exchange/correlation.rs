@@ -15,8 +15,8 @@ use super::accumulator::{
     Accumulator, DuplicateRecord, ProcessContext, ProcessOutcome, UnsolicitedEvidence,
     UnsolicitedFreshness, WorkflowResponseMatcher,
 };
-use super::model::{Options, Response};
-use crate::planning::expired;
+use super::report::Response;
+use super::{Collection, Window};
 use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,8 +40,8 @@ fn capture_follows_send(received_at: Instant, timing: Timing) -> bool {
     received_at >= timing.freshness_marker().monotonic()
 }
 
-fn ensure_correlation_active(deadline: Instant) -> Result<(), CorrelationDeadlineExpired> {
-    if expired(deadline) {
+fn ensure_correlation_active(deadline: &Window) -> Result<(), CorrelationDeadlineExpired> {
+    if deadline.expired() {
         return Err(CorrelationDeadlineExpired);
     }
     Ok(())
@@ -53,7 +53,7 @@ fn select_attribution(
     sent: &[std::sync::Arc<crate::SentPacket>],
     received_at: Option<Instant>,
     decoded: &DecodedPacket,
-    deadline: Instant,
+    deadline: &Window,
 ) -> Result<Attribution, CorrelationDeadlineExpired> {
     let mut best_match: Option<Match> = None;
     let mut equally_best = Vec::new();
@@ -65,7 +65,7 @@ fn select_attribution(
         // `request_index` comes from an enumerate over `prepared` truncated by `.take(sent.len())`,
         // so it is below `sent.len()`
         let timing = sent[request_index].timing();
-        if received_at > deadline || !capture_follows_send(received_at, timing) {
+        if received_at > deadline.ends_at() || !capture_follows_send(received_at, timing) {
             continue;
         }
 
@@ -114,7 +114,7 @@ impl Accumulator {
         let Captured {
             frame, received_at, ..
         } = captured;
-        if self.correlation_deadline_expired || expired(context.deadline) {
+        if self.correlation_deadline_expired || context.window.expired() {
             return Ok(self.retain_capture_after_deadline(identity, frame, context));
         }
 
@@ -135,10 +135,10 @@ impl Accumulator {
         let raw_frame = frame.clone();
         match context
             .dissector
-            .decode(frame, context.options.decode.clone())
+            .decode(frame, context.collection.decode.clone())
         {
-            Ok(decoded) => self.retain_unsolicited(identity, decoded, context.options, None),
-            Err(_) => self.retain_undecoded(identity, raw_frame, context.options),
+            Ok(decoded) => self.retain_unsolicited(identity, decoded, context.collection, None),
+            Err(_) => self.retain_undecoded(identity, raw_frame, context.collection),
         }
         ProcessOutcome::CorrelationDeadlineExpired
     }
@@ -152,18 +152,18 @@ impl Accumulator {
         let raw_frame = frame.clone();
         match context
             .dissector
-            .decode(frame, context.options.decode.clone())
+            .decode(frame, context.collection.decode.clone())
         {
             Ok(decoded) => {
-                if expired(context.deadline) {
-                    return Err(self.expire_decoded(identity, decoded, context.options));
+                if context.window.expired() {
+                    return Err(self.expire_decoded(identity, decoded, context.collection));
                 }
                 Ok(decoded)
             }
             Err(error) => {
-                if expired(context.deadline) {
+                if context.window.expired() {
                     self.mark_correlation_deadline_expired();
-                    self.retain_undecoded(identity, raw_frame, context.options);
+                    self.retain_undecoded(identity, raw_frame, context.collection);
                     return Err(ProcessOutcome::CorrelationDeadlineExpired);
                 }
                 self.diagnostics.push_once(Diagnostic::warning(
@@ -173,7 +173,7 @@ impl Accumulator {
                         packetcraftr_core::error::render(&error)
                     ),
                 ));
-                self.retain_undecoded(identity, raw_frame, context.options);
+                self.retain_undecoded(identity, raw_frame, context.collection);
                 Err(ProcessOutcome::Continue)
             }
         }
@@ -190,8 +190,8 @@ impl Accumulator {
             .diagnostics
             .iter()
             .any(Diagnostic::is_checksum_failure);
-        if expired(context.deadline) {
-            return self.expire_decoded(identity, decoded, context.options);
+        if context.window.expired() {
+            return self.expire_decoded(identity, decoded, context.collection);
         }
         if integrity_failure {
             self.diagnostics.push_once(Diagnostic::warning(
@@ -201,8 +201,8 @@ impl Accumulator {
             self.retain_unsolicited(
                 identity,
                 decoded,
-                context.options,
-                unsolicited_freshness(received_at, context.sent, context.deadline),
+                context.collection,
+                unsolicited_freshness(received_at, context.sent, context.window.ends_at()),
             );
             return ProcessOutcome::Continue;
         }
@@ -222,11 +222,11 @@ impl Accumulator {
             context.sent,
             received_at,
             &decoded,
-            context.deadline,
+            context.window,
         ) {
             Ok(attribution) => attribution,
             Err(CorrelationDeadlineExpired) => {
-                return self.expire_decoded(identity, decoded, context.options);
+                return self.expire_decoded(identity, decoded, context.collection);
             }
         };
         self.record_attribution(identity, received_at, decoded, attribution, context)
@@ -251,26 +251,26 @@ impl Accumulator {
                 self.retain_unsolicited(
                     identity,
                     decoded,
-                    context.options,
-                    unsolicited_freshness(received_at, context.sent, context.deadline),
+                    context.collection,
+                    unsolicited_freshness(received_at, context.sent, context.window.ends_at()),
                 );
             }
             Attribution::Unique(request_index) => {
                 let received_at = received_at.expect("only timestamped capture frames can match");
-                if expired(context.deadline) {
-                    return self.expire_decoded(identity, decoded, context.options);
+                if context.window.expired() {
+                    return self.expire_decoded(identity, decoded, context.collection);
                 }
-                if self.response_count >= context.options.max_responses {
+                if self.response_count >= context.collection.max_responses {
                     self.diagnostics.push_once(Diagnostic::warning(
                         "exchange.response_limit",
                         format!(
                             "matched response limit {} reached; later responses were not retained",
-                            context.options.max_responses
+                            context.collection.max_responses
                         ),
                     ));
                     return ProcessOutcome::Continue;
                 }
-                if self.reserve_decoded_evidence(decoded.original.len(), context.options) {
+                if self.reserve_decoded_evidence(decoded.original.len(), context.collection) {
                     self.mark_record_retained(identity);
                     // a unique attribution indexes a request that was already sent, so
                     // `request_index` is below both `sent.len()` and `response_counts.len()`; both
@@ -282,7 +282,7 @@ impl Accumulator {
                     // a unique attribution indexes a request that was already sent, so
                     // `request_index` is below `sent.len()`
                     self.pending_events
-                        .push(super::model::Event::Response(Response {
+                        .push(super::report::Event::Response(Response {
                             request_index,
                             response: decoded,
                             latency: received_at.duration_since(
@@ -306,8 +306,8 @@ impl Accumulator {
                 self.retain_unsolicited(
                     identity,
                     decoded,
-                    context.options,
-                    unsolicited_freshness(received_at, context.sent, context.deadline),
+                    context.collection,
+                    unsolicited_freshness(received_at, context.sent, context.window.ends_at()),
                 );
             }
         }
@@ -322,21 +322,21 @@ impl Accumulator {
         let ProcessContext {
             prepared,
             sent,
-            deadline,
-            options,
+            window: deadline,
+            collection,
             ..
         } = context;
-        let max_responses = options.max_responses;
+        let max_responses = collection.max_responses;
         if self.unsolicited.is_empty() {
             return ProcessOutcome::Continue;
         }
         let mut candidates = std::mem::take(&mut self.unsolicited).into_iter();
-        if expired(deadline) {
+        if deadline.expired() {
             return self.expire_workflow_candidates(candidates);
         }
 
         while let Some(candidate) = candidates.next() {
-            if expired(deadline) {
+            if deadline.expired() {
                 return self
                     .expire_workflow_candidates(std::iter::once(candidate).chain(candidates));
             }
@@ -359,7 +359,7 @@ impl Accumulator {
                     &prepared_request.built().packet,
                     &candidate.decoded,
                 );
-                if expired(deadline) {
+                if deadline.expired() {
                     return self
                         .expire_workflow_candidates(std::iter::once(candidate).chain(candidates));
                 }
@@ -396,7 +396,7 @@ impl Accumulator {
             // so it is below `sent.len()`
             let sent_timing_monotonic = sent[request_index].timing().freshness_marker().monotonic();
             self.pending_events
-                .push(super::model::Event::Response(Response {
+                .push(super::report::Event::Response(Response {
                     request_index,
                     response: candidate.decoded,
                     latency: freshness.received_at.duration_since(sent_timing_monotonic),
@@ -436,7 +436,7 @@ impl Accumulator {
     }
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
-        self.pending_events.push(super::model::Event::Unsolicited {
+        self.pending_events.push(super::report::Event::Unsolicited {
             frame: candidate.decoded,
         });
     }
@@ -453,10 +453,10 @@ impl Accumulator {
         &mut self,
         identity: RecordIdentity,
         decoded: DecodedPacket,
-        options: &Options,
+        collection: &Collection,
     ) -> ProcessOutcome {
         self.mark_correlation_deadline_expired();
-        self.retain_unsolicited(identity, decoded, options, None);
+        self.retain_unsolicited(identity, decoded, collection, None);
         ProcessOutcome::CorrelationDeadlineExpired
     }
 }
@@ -464,9 +464,9 @@ impl Accumulator {
 fn unsolicited_freshness(
     received_at: Option<Instant>,
     sent: &[std::sync::Arc<crate::SentPacket>],
-    deadline: Instant,
+    ends_at: Instant,
 ) -> Option<UnsolicitedFreshness> {
-    let received_at = received_at.filter(|received_at| *received_at <= deadline)?;
+    let received_at = received_at.filter(|received_at| *received_at <= ends_at)?;
     let eligible_requests =
         sent.partition_point(|sent| sent.timing().freshness_marker().monotonic() <= received_at);
     (eligible_requests != 0).then_some(UnsolicitedFreshness {

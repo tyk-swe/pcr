@@ -8,22 +8,32 @@ use packetcraftr_netio as net;
 
 use crate::errors::CliError;
 
-pub(crate) fn options(
-    send: packetcraftr::send::Options,
+/// The collection bounds every exchange of one command runs under: retention
+/// up to the aggregate capture queue, and decoding up to its snapshot length.
+/// They are validated together with the command's exchange `timeout` and
+/// `max_template_packets`, as one exchange request would be.
+pub(crate) fn collection(
     timeout: Duration,
     max_template_packets: usize,
     limits: net::capture::Limits,
-) -> Result<packetcraftr::exchange::Options, CliError> {
-    let mut options = packetcraftr::exchange::Options {
-        send,
-        timeout,
-        max_template_packets,
+) -> Result<packetcraftr::exchange::Collection, CliError> {
+    let mut collection = packetcraftr::exchange::Collection {
         max_unmatched_frames: limits.max_frames,
         max_responses: limits.max_frames,
         capture: limits,
-        decode: core::decode::Options::default(),
+        ..packetcraftr::exchange::Collection::default()
     };
-    options.decode.limits.max_packet_size = limits.snap_length;
-    options.validate().map_err(CliError::classified)?;
-    Ok(options)
+    collection.decode.limits.max_packet_size = limits.snap_length;
+    packetcraftr::exchange::Request {
+        timeout,
+        max_template_packets,
+        collection: collection.clone(),
+        ..packetcraftr::exchange::Request::new(
+            core::template::Template::new(core::packet::Packet::new()),
+            packetcraftr::send::Options::default(),
+        )
+    }
+    .validate()
+    .map_err(CliError::classified)?;
+    Ok(collection)
 }

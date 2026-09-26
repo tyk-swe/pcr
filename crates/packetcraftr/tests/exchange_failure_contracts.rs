@@ -39,6 +39,7 @@ struct State {
     shutdowns: usize,
     reads: usize,
 }
+#[derive(Clone)]
 struct Io {
     fault: Fault,
     state: Arc<Mutex<State>>,
@@ -133,20 +134,22 @@ impl capture::Session for Capture {
     }
 }
 
-type FixtureClient = Client<common::FixedRoutes, Io>;
+type FixtureClient = Client<common::FakeProviders<common::FixedRoutes, Io>>;
 
 fn fixture(fault: Fault) -> (FixtureClient, Arc<Mutex<State>>) {
     let state = Arc::new(Mutex::new(State::default()));
     let signal = Cancellation::default();
     let client = Client::new(
         builtin::registry(),
-        common::FixedRoutes,
-        Io {
-            fault,
-            state: state.clone(),
-            signal: signal.clone(),
-        },
         Policy::default(),
+        common::providers(
+            common::FixedRoutes,
+            Io {
+                fault,
+                state: state.clone(),
+                signal: signal.clone(),
+            },
+        ),
     )
     .with_cancellation(signal);
     (client, state)
@@ -167,13 +170,17 @@ fn query_packet() -> Packet {
     packet
 }
 
-fn layer3_options() -> exchange::Options {
-    let mut options = exchange::Options {
-        timeout: Duration::from_secs(1),
-        ..exchange::Options::default()
-    };
-    options.send.plan.link_mode = Mode::Layer3;
+fn layer3_send() -> packetcraftr::send::Options {
+    let mut options = packetcraftr::send::Options::default();
+    options.plan.link_mode = Mode::Layer3;
     options
+}
+
+fn layer3_request(template: Template) -> exchange::Request {
+    exchange::Request {
+        timeout: Duration::from_secs(1),
+        ..exchange::Request::new(template, layer3_send())
+    }
 }
 
 fn callback_failure() -> BoundaryError {
@@ -196,17 +203,13 @@ fn phase_failures_never_report_success_or_skip_capture_cleanup() {
         (Fault::Callback, 1, 1),
     ] {
         let (client, state) = fixture(fault);
-        let result = client.exchange_with_events(
-            &Template::new(query_packet()),
-            layer3_options(),
-            move |_| {
-                if fault == Fault::Callback {
-                    Err(callback_failure())
-                } else {
-                    Ok(())
-                }
-            },
-        );
+        let result = client.exchange(layer3_request(Template::new(query_packet())), move |_| {
+            if fault == Fault::Callback {
+                Err(callback_failure())
+            } else {
+                Ok(())
+            }
+        });
         assert!(
             result.is_err(),
             "{fault:?} must leave an incomplete exchange"
@@ -224,10 +227,10 @@ fn an_unanswered_request_is_published_after_the_collection_window() {
     let (client, state) = fixture(Fault::None);
     let events = Arc::new(Mutex::new(Vec::new()));
     let observed = Arc::clone(&events);
-    let mut options = layer3_options();
-    options.timeout = Duration::from_millis(100);
+    let mut request = layer3_request(Template::new(query_packet()));
+    request.timeout = Duration::from_millis(100);
     let summary = client
-        .exchange_with_events(&Template::new(query_packet()), options, move |event| {
+        .exchange(request, move |event| {
             observed.lock().unwrap().push(event);
             Ok(())
         })
@@ -264,14 +267,11 @@ fn cleanup_failure_after_an_output_error_reports_both_without_a_further_send() {
         vec![FieldValue::Unsigned(9999), FieldValue::Unsigned(10000)],
     );
     let error = client
-        .exchange_with_events(&template, layer3_options(), |_| Err(callback_failure()))
+        .exchange(layer3_request(template), |_| Err(callback_failure()))
         .expect_err("output failure must fail the exchange");
 
     assert!(
-        matches!(
-            error,
-            packetcraftr::Error::ExchangeOutputAndCaptureShutdown { .. }
-        ),
+        matches!(error, exchange::Error::OutputAndCaptureShutdown { .. }),
         "{error:?}"
     );
     assert_eq!(error.classification().code, "io.fixture");
@@ -300,17 +300,21 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
             ],
         )
         .axis(0, "ttl", vec![1_u8.into(), 64_u8.into()]);
-    let mut options = layer3_options();
-    options.max_template_packets = 4;
-    let error = client.exchange(&template, options.clone()).unwrap_err();
+    let mut request = layer3_request(template);
+    request.max_template_packets = 4;
+    let error = client
+        .exchange(request.clone(), exchange::Collector::default())
+        .unwrap_err();
     assert_eq!(error.classification().code, "policy.source_ownership");
     assert!(state.lock().unwrap().sent.is_empty());
     assert!(!state.lock().unwrap().ready);
 
-    options.max_template_packets = 3;
+    request.max_template_packets = 3;
     assert!(matches!(
-        client.exchange(&template, options),
-        Err(packetcraftr::Error::Template { .. })
+        client.exchange(request, exchange::Collector::default()),
+        Err(exchange::Error::Preparation(
+            packetcraftr::Error::Template { .. }
+        ))
     ));
     assert!(state.lock().unwrap().sent.is_empty());
 }
@@ -331,7 +335,8 @@ fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
     let policy = Policy::default();
     let mut authorizer = PolicyAuthorizer::for_packets(&policy);
     let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(&client, layer3_options());
+    let mut executor =
+        ExchangeExecutor::new(&client, layer3_send(), exchange::Collection::default());
     let request = dns::Request {
         server: Target::Address("10.0.0.2".parse().unwrap()),
         address_family: Family::Any,
@@ -381,13 +386,8 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
     let policy = Policy::default();
     let mut authorizer = PolicyAuthorizer::for_packets(&policy);
     let registry = Arc::clone(client.registry());
-    let mut executor = ExchangeExecutor::new(
-        &client,
-        exchange::Options {
-            max_template_packets: 1,
-            ..layer3_options()
-        },
-    );
+    let mut executor =
+        ExchangeExecutor::new(&client, layer3_send(), exchange::Collection::default());
     let request = scan::Request {
         max_in_flight: 1,
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),

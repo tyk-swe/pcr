@@ -236,6 +236,21 @@ pub trait Resolver: Send + Sync {
     fn resolve(&self, hostname: &Hostname, limit: usize) -> Result<Vec<IpAddr>, Error>;
 }
 
+/// Resolves a declared target and authorizes every address it yields, for a
+/// workflow that takes a declared target (DNS servers, scan and traceroute
+/// targets).
+pub trait ResolveTarget {
+    /// Resolves `target` and authorizes each resolved address.
+    ///
+    /// # Errors
+    ///
+    /// Returns the resolution failure or the policy denial of any address.
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+    ) -> Result<Authorized, packetcraftr_core::error::BoundaryError>;
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 /// Uses the operating system resolver and its configured timeouts.
 pub struct SystemResolver;

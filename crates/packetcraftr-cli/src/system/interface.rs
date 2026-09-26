@@ -60,6 +60,16 @@ impl InterfaceSelector {
     }
 }
 
+/// The library selector the client resolves after admission.
+impl From<InterfaceSelector> for packetcraftr::route::Interface {
+    fn from(selector: InterfaceSelector) -> Self {
+        match selector {
+            InterfaceSelector::Name(name) => Self::Name(name),
+            InterfaceSelector::Index(index) => Self::Index(index),
+        }
+    }
+}
+
 impl fmt::Display for InterfaceSelector {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

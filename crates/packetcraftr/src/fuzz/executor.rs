@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
+use crate::clock::Clock;
 use crate::execution::ExchangeExecutor;
 use crate::execution::Executor;
 use crate::execution::ExecutorFault;
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
+use crate::providers::Providers;
 
 use super::execution::{Execution, ExecutionCase};
 
@@ -14,23 +15,23 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
 
-impl<R, I> Executor<ExecutionCase> for ExchangeExecutor<'_, R, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo + CaptureProvider,
-{
+impl<P: Providers, K: Clock> Executor<ExecutionCase> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
-        let mut options = self.options.clone();
-        options.timeout = case.timeout;
-        options.max_template_packets = 1;
         let exchange = self
             .client
-            .exchange(
-                &packetcraftr_core::template::Template::new(case.packet.clone()),
-                options,
+            .exchange_hooked(
+                crate::exchange::Request {
+                    template: packetcraftr_core::template::Template::new(case.packet.clone()),
+                    send: self.send.clone(),
+                    timeout: case.timeout,
+                    max_template_packets: 1,
+                    collection: self.collection.clone(),
+                },
+                None,
+                None,
             )
             .map_err(BoundaryError::from_error)?;
-        let crate::exchange::Report {
+        let crate::exchange::Aggregate {
             sent,
             responses,
             unanswered: _,

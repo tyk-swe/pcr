@@ -20,6 +20,13 @@ struct PolicyGate {
     resolutions: usize,
 }
 
+impl packetcraftr::target::ResolveTarget for PolicyGate {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+        self.resolutions += 1;
+        PolicyAuthorizer::for_packets(&self.policy).resolve_and_authorize(target)
+    }
+}
+
 impl Authorizer for PolicyGate {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         let Operation::Dns(dns) = operation else {
@@ -27,11 +34,6 @@ impl Authorizer for PolicyGate {
         };
         self.operations.push(dns);
         PolicyAuthorizer::for_packets(&self.policy).authorize_operation(operation)
-    }
-
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        self.resolutions += 1;
-        PolicyAuthorizer::for_packets(&self.policy).resolve_and_authorize(target)
     }
 }
 
@@ -247,11 +249,16 @@ fn batch_totals_include_traffic_from_questions_that_later_fail() {
 
 #[test]
 fn batch_cancellation_during_retry_wait_retains_confirmed_traffic() {
+    #[derive(Clone)]
     struct CancellingClock(packetcraftr_core::budget::Cancellation);
     impl packetcraftr::clock::Clock for CancellingClock {
         type Error = std::io::Error;
 
-        fn sleep(&mut self, _: Duration) -> Result<(), Self::Error> {
+        fn sleep(
+            &self,
+            _: Duration,
+            _: &packetcraftr_core::budget::Deadline,
+        ) -> Result<(), Self::Error> {
             self.0.cancel();
             Err(std::io::Error::other("interrupted clock"))
         }
@@ -330,14 +337,24 @@ fn batch_rejects_mixed_server_identity_before_authorization() {
     }
 }
 
-#[derive(Default)]
-struct RecordingClock(Vec<Duration>);
+#[derive(Clone, Default)]
+struct RecordingClock(std::sync::Arc<std::sync::Mutex<Vec<Duration>>>);
+
+impl RecordingClock {
+    fn delays(&self) -> Vec<Duration> {
+        self.0.lock().unwrap().clone()
+    }
+}
 
 impl packetcraftr::clock::Clock for RecordingClock {
     type Error = std::convert::Infallible;
 
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        self.0.push(delay);
+    fn sleep(
+        &self,
+        delay: Duration,
+        _: &packetcraftr_core::budget::Deadline,
+    ) -> Result<(), Self::Error> {
+        self.0.lock().unwrap().push(delay);
         Ok(())
     }
 }
@@ -367,7 +384,7 @@ fn rate_intervals_are_shared_across_single_attempt_questions() {
     )
     .unwrap();
     assert_eq!(report.status_counts(), (3, 0, 0));
-    assert_eq!(clock.0, [Duration::from_millis(500); 2]);
+    assert_eq!(clock.delays(), [Duration::from_millis(500); 2]);
     assert!(report.stats.elapsed >= Duration::from_secs(1));
 }
 
@@ -396,5 +413,5 @@ fn the_shared_deadline_can_prevent_an_interquestion_wait() {
     assert_eq!(report.status_counts(), (1, 0, 1));
     assert_eq!(report.stats.bytes, expected_bytes);
     assert_eq!(executor.calls, 1);
-    assert!(clock.0.is_empty());
+    assert!(clock.delays().is_empty());
 }

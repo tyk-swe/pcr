@@ -32,6 +32,17 @@ pub enum Error {
         source: Box<dyn StdError + Send + Sync>,
         failure: Classification,
     },
+    /// Enumerating interfaces to resolve the requested selector failed.
+    #[error(transparent)]
+    InterfaceDiscovery(#[from] packetcraftr_netio::interface::Error),
+    #[error(
+        "network device {selector} is unavailable: no interface matches the requested name or index"
+    )]
+    UnknownInterface { selector: String },
+    /// A name or index selector reached the planner without being resolved
+    /// through an interface provider first.
+    #[error("interface selector {selector} was not resolved before route planning")]
+    UnresolvedInterface { selector: String },
     #[error(
         "route provider selected {selected} (index {selected_index}) instead of requested {requested} (index {requested_index})"
     )]
@@ -113,6 +124,17 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,
+            Self::InterfaceDiscovery(error) => error.classification(),
+            Self::UnknownInterface { .. } => Classification::new(
+                "io.device",
+                Kind::Io,
+                Some("select an existing, enabled interface that supports the requested link mode"),
+            ),
+            Self::UnresolvedInterface { .. } => Classification::new(
+                "internal.unresolved_interface",
+                Kind::Internal,
+                Some("plan through a client, which resolves the interface selector first"),
+            ),
             Self::MissingLayer2Interface => Classification::new(
                 "cli.interface_required",
                 Kind::Usage,
@@ -168,6 +190,7 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Neighbor(error) => error.causes(),
+            Self::InterfaceDiscovery(error) => error.causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

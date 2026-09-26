@@ -1032,17 +1032,16 @@ composes a second I/O stack for it.
 |---|---|
 | `packetcraftr_netio::neighbor::{Error, Request, Resolution, Options}` | `packetcraftr::neighbor::{Error, Request, Resolution, Options}` |
 | `packetcraftr_netio::neighbor::{Resolver, ActiveResolver, SystemResolver}` | nothing: the `Client` resolves over its own I/O |
-| `Client<R, N, I>`, `Client::new(registry, routes, neighbors, io, policy)` | `Client<R, I>`, `Client::new(registry, routes, io, policy)` |
+| `Client<R, N, I>`, `Client::new(registry, routes, neighbors, io, policy)` | `Client<P>`, `Client::new(registry, policy, providers)`; see [Client model](#client-model) |
 | `ActiveResolver::try_new(layer2, capture, options)` | `client.with_neighbor_options(options)?` |
-| `probe::ExchangeExecutor<'a, R, N, I>` | `probe::ExchangeExecutor<'a, R, I>` |
+| `probe::ExchangeExecutor<'a, R, N, I>` | `probe::ExchangeExecutor<'a, P>` |
 | `packetcraftr::route::materialize(plan, &resolver, deadline)` | none; `Client` send and exchange methods materialize admitted plans |
 | `packetcraftr_netio::link::MAX_VLAN_TAGS` | `packetcraftr::route::MAX_VLAN_TAGS` |
 
-`I` must implement both `transmit::Provider` and `capture::Provider` for
-`Client::send` and the send-set methods too, since a Layer 2 send may resolve
-a neighbor. `PacketIo::new(sender, capture)` composes the two. An I/O fake
-for Layer 3 sends only can implement `arm_capture` as unreachable; a fake that
-scripts resolution answers the ARP or NDP request it is sent through the
+The client resolves over its transmit and capture providers, for
+`Client::send` too, since a Layer 2 send may resolve a neighbor. A capture
+fake for Layer 3 sends only can implement `arm_capture` as unreachable; a fake
+that scripts resolution answers the ARP or NDP request it is sent through the
 capture session armed for it.
 
 `with_neighbor_options` validates the options (`cli.neighbor_limit` on
@@ -1336,3 +1335,130 @@ why an executor's evidence disagrees with its step, including the new
 **Port helpers.** `probe::EPHEMERAL_SOURCE_PORT_BASE` and
 `probe::ephemeral_source_port` are no longer public. The dynamic range starts at
 49152 (IANA); choose source ports in your own code.
+
+## Client model
+
+The `Client` owns every provider a workflow reaches the network through, and
+workflows run as client methods that take a request and a sink.
+
+**Composition.** `Client<P, K = SystemClock>` holds a `Providers` bundle.
+`ProviderSet { route, interface, capture, transmit, tcp, resolver }` composes
+six providers, and `ProviderSet::system()` (the `SystemProviders` alias)
+selects the native ones. `packetcraftr_netio::PacketIo` is removed: transmit
+and capture are separate fields.
+
+| Before | After |
+|---|---|
+| `Client::new(registry, routes, PacketIo::new(sender, capture), policy)` | `Client::new(registry, policy, ProviderSet { route: routes, interface, capture, transmit: sender, tcp, resolver })` |
+| `Client<R, I>` | `Client<P>` or `Client<P, K>` with `P: Providers`, `K: Clock` |
+| `client.with_progress_runtime(runtime)`, `client.progress_runtime()` | `client.with_runtime(runtime)`, `client.runtime()` |
+| a clock passed per call (`send_set_driven(.., clock, ..)`) | `client.with_clock(clock)` |
+| `probe::ExchangeExecutor::new(&client, exchange_options)` | `probe::ExchangeExecutor::new(&client, send_options, collection)` |
+| `ExchangeExecutor::with_dns_tcp` on `ExchangeExecutor<'a, R, I>` | the same on `ExchangeExecutor<'a, P, K>` |
+
+A provider the workflow does not use is never called, so a composition may
+fill it with the system provider. Fakes shared between transmit and capture
+implement `Clone` and fill both fields.
+
+**Send.** One entry point replaces `send`, `send_set`, `send_set_with_events`,
+and `send_set_driven`:
+
+```rust
+// Before
+let report = client.send_set_with_events(&template, set_options, |frame| { /* ... */ Ok(()) })?;
+// After
+let collector = send::Collector::default();
+let report = client.send(
+    send::Request { repeat, rate, ..send::Request::new(template, send_options) },
+    collector.clone(),
+)?;
+let aggregate = collector.finish(report)?; // every SentFrame, as SetReport held them
+```
+
+`send::Request::packet(packet, options)` sends one packet once;
+`Request::validate` and `Request::packet_count` replace `SetOptions::validate`
+and `validate_for`. Events are `send::Event::Sent(SentFrame)`, published on a
+runtime worker; the send waits for each answer before the next transmission.
+`send::Report` is the terminal `{ passes_completed, stats }`, and
+`send::Aggregate` has the former `SetReport` fields. A single send's
+`SentPacket` is `aggregate.sent[0].packet`.
+
+**Exchange.** `exchange::Options` splits: the per-run fields move to
+`exchange::Request { template, send, timeout, max_template_packets,
+collection }`, and the capture, decode, and retention bounds form
+`exchange::Collection { capture, decode, max_responses, max_unmatched_frames }`,
+which workflow executors reuse for every step.
+
+| Before | After |
+|---|---|
+| `client.exchange(&template, options)` | `let collector = exchange::Collector::default(); let report = client.exchange(request, collector.clone())?; collector.finish(report)?` |
+| `client.exchange_with_events(&template, options, sink)` | `client.exchange(request, sink)` |
+| `exchange::Summary` | `exchange::Report` |
+| `exchange::Report` (every event joined) | `exchange::Aggregate` |
+| `Collector::observe(event)` | `Collector` is a `Sink<Event>`; clone it and pass one clone |
+| `options.validate()` | `request.validate()`, `collection.validate()` |
+
+**Errors.** `packetcraftr::Error` is the preparation error both workflows
+wrap as `send::Error::Preparation` and `exchange::Error::Preparation`. Codes
+are unchanged.
+
+| Before | After |
+|---|---|
+| `Error::SendOutput { source }` | `send::Error::Output { source }` (unboxed) |
+| `Error::InvalidSendOption { field, message }` | `send::Error::InvalidRequest { field, message }` |
+| `Error::ExchangeOutput { source }` | `exchange::Error::Output { source }` |
+| `Error::ExchangeOutputAndCaptureShutdown { output, shutdown }` | `exchange::Error::OutputAndCaptureShutdown { output, shutdown }` (both boxed) |
+| `Error::OperationAndCaptureShutdown { .. }` | `exchange::Error::OperationAndCaptureShutdown { .. }` |
+| `Error::InvalidExchangeEvents { message }` | `exchange::Error::IncoherentEvents { message }` |
+| `Error::HeterogeneousExchangeRoute` | `exchange::Error::HeterogeneousRoute` |
+| `Error::InvalidExchangeOption { field, message }` | `exchange::Error::InvalidRequest { field, message }` |
+| `Error::Policy(..)` from a send | `send::Error::Preparation(Error::Policy(..))` |
+
+`send::Error` adds `IncoherentEvents` (`internal.send_event_coherence`) for a
+collector finished with another run's report, and `Clock`
+(`io.send_clock`) for a pacing clock that fails.
+
+**Clock.** `Clock` is `Clone + Send + Sync + 'static`. `now` takes `&self`, and
+`sleep` takes `&self` and the operation `Deadline`, returning early once the
+deadline's cancellation is signaled. A fake clock shares its state behind an
+`Arc` and starts from `Instant::now()`, so its deadlines and capture
+timestamps share one monotonic base:
+
+```rust
+// Before
+fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>
+// After
+fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>
+```
+
+`Clock::cancellation` and `CancellableClock` remain for the free workflow
+entry points.
+
+**Interface selectors.** `route::Options.interface` is an
+`Option<route::Interface>`: `Interface::Id(id)` for an identity a provider
+confirmed, or `Interface::Name`/`Interface::Index` for a selector the client
+resolves through its interface provider after admission, so a refused
+operation never enumerates interfaces. An unmatched selector fails with
+`route::Error::UnknownInterface` (`io.device`) and an enumeration failure with
+`route::Error::InterfaceDiscovery`. The free `route::plan` takes only
+`Interface::Id` and reports `route::Error::UnresolvedInterface` otherwise.
+
+**Target resolution.** `Authorizer::resolve_and_authorize` moves to its own
+trait, `target::ResolveTarget`. An authorizer that resolved targets implements
+both; one that relied on the failing default drops it. DNS, scan, connect
+scan, and traceroute entry points require `A: Authorizer + ResolveTarget`.
+
+```rust
+// Before
+impl Authorizer for Gate {
+    fn authorize_operation(&mut self, op: Operation<'_>) -> Result<(), BoundaryError> { /* ... */ }
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
+}
+// After
+impl Authorizer for Gate {
+    fn authorize_operation(&mut self, op: Operation<'_>) -> Result<(), BoundaryError> { /* ... */ }
+}
+impl ResolveTarget for Gate {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
+}
+```

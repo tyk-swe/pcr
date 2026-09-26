@@ -13,6 +13,7 @@ use crate::execution::Executor;
 use crate::execution::{Sink, publisher};
 use crate::policy::{Authorizer, Operation};
 use crate::progress::Runtime;
+use crate::target::ResolveTarget;
 use crate::target::approve_operation;
 
 use super::engine::{Attempts, PreparedOperation};
@@ -112,7 +113,7 @@ pub fn run_batch<A, E, C>(
     clock: &mut C,
 ) -> Result<BatchReport, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<super::Exchange> + super::TcpExecutor,
     C: Clock,
 {
@@ -143,7 +144,7 @@ pub fn run_batch_with_events<A, E, C, S>(
     sink: S,
 ) -> Result<BatchReport, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<super::Exchange> + super::TcpExecutor,
     C: Clock,
     S: Sink<Event, Ack = ()>,
@@ -209,7 +210,7 @@ pub(super) fn run_batch_observed<A, E, C, F>(
     mut observe: F,
 ) -> Result<BatchReport, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<super::Exchange> + super::TcpExecutor,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,

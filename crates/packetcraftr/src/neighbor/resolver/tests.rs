@@ -86,7 +86,9 @@ where
     }
 
     fn resolve_within(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
-        self.state.over(&self.io).resolve(request, deadline)
+        self.state
+            .over(&self.io, &self.io)
+            .resolve(request, deadline)
     }
 
     fn exchange<S: Session>(
@@ -96,9 +98,13 @@ where
         route: transmit::Route<'_>,
         capture: &mut S,
     ) -> Result<ExchangeOutcome, Error> {
-        self.state
-            .over(&self.io)
-            .exchange(request, request_bytes, route, capture, &unbounded())
+        self.state.over(&self.io, &self.io).exchange(
+            request,
+            request_bytes,
+            route,
+            capture,
+            &unbounded(),
+        )
     }
 }
 

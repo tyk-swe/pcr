@@ -28,11 +28,11 @@ pub struct Report {
 }
 
 /// An exchange, with the request builder's diagnostics and the totals.
-impl TryFrom<packetcraftr::exchange::Report> for Published<Report> {
+impl TryFrom<packetcraftr::exchange::Aggregate> for Published<Report> {
     type Error = Error;
 
-    fn try_from(result: packetcraftr::exchange::Report) -> Result<Self, Error> {
-        let packetcraftr::exchange::Report {
+    fn try_from(result: packetcraftr::exchange::Aggregate) -> Result<Self, Error> {
+        let packetcraftr::exchange::Aggregate {
             sent,
             responses,
             unanswered,
@@ -160,9 +160,9 @@ impl TryFrom<packetcraftr::exchange::Event> for Published<Event> {
 }
 
 /// The terminal record, with the exchange's diagnostics and totals.
-impl From<packetcraftr::exchange::Summary> for Published<Event> {
-    fn from(summary: packetcraftr::exchange::Summary) -> Self {
-        let packetcraftr::exchange::Summary {
+impl From<packetcraftr::exchange::Report> for Published<Event> {
+    fn from(summary: packetcraftr::exchange::Report) -> Self {
+        let packetcraftr::exchange::Report {
             unanswered,
             diagnostics,
             stats,

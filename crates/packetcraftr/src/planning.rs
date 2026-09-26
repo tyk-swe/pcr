@@ -1,32 +1,33 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::borrow::Cow;
 use std::net::IpAddr;
-use std::time::Instant;
 
-use packetcraftr_core::budget::{Cancellation, Deadline};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_netio::deadline::remaining_before;
-use packetcraftr_netio::{Error as LiveIoError, transmit::Provider as PacketIo};
+use packetcraftr_netio::Error as LiveIoError;
 
 use crate::Client;
 use crate::Error;
+use crate::clock::Clock;
+use crate::providers::Providers;
 use crate::route::{Options, Plan, plan as plan_route};
 
 /// Whether `deadline` has arrived.
 ///
-/// The boundary instant itself is expired: no time remains once
-/// `now == deadline`, as [`remaining_before`] reports. Correlation eligibility
-/// is a separate test on the capture timestamp and still accepts a frame whose
-/// `received_at <= deadline`.
-///
-/// Preparation callers retain the error vocabulary of their operation.
+/// The boundary itself is expired: no time remains once nothing is left, as
+/// [`packetcraftr_netio::deadline::remaining`] reports. Correlation
+/// eligibility is a separate test on the capture timestamp and still accepts
+/// a frame received at the window's end.
 #[must_use]
-pub(crate) fn expired(deadline: Instant) -> bool {
-    remaining_before(deadline).is_none()
+pub(crate) fn expired(deadline: &Deadline) -> bool {
+    !matches!(deadline.remaining(), Ok(remaining) if !remaining.is_zero())
 }
 
-pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error> {
+/// Refuses to continue preparing once `deadline` has arrived. Preparation
+/// callers retain the error vocabulary of their operation.
+pub(crate) fn ensure_preparation_deadline(deadline: &Deadline) -> Result<(), Error> {
     if expired(deadline) {
         return Err(LiveIoError::DeadlineExceeded {
             operation: "preparing the exchange",
@@ -36,13 +37,17 @@ pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), Error
     Ok(())
 }
 
-impl<R, I> Client<R, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo,
-{
-    /// Passive dry planning: route/source/interface lookup only. The route
-    /// lookup receives `deadline`.
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Passive dry planning: route, source, and interface lookup only.
+    ///
+    /// The declared destinations are authorized first; an interface selector
+    /// is resolved through the interface provider only after that, and the
+    /// route lookup receives `deadline`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the policy denial, the interface or route lookup failure, or
+    /// the planning refusal.
     pub fn plan(
         &self,
         packet: &Packet,
@@ -50,42 +55,26 @@ where
         options: &Options,
         deadline: &Deadline,
     ) -> Result<Plan, Error> {
-        self.authorize_and_plan(packet, destination, options, &self.routes, deadline, || {
-            Ok(())
-        })
+        self.authorize_and_plan(
+            packet,
+            destination,
+            options,
+            self.providers.route(),
+            deadline,
+            || Ok(()),
+        )
     }
 
-    /// Plans for an operation bounded by the wall-clock `deadline`, or by
-    /// [`PASSIVE_LOOKUP_TIMEOUT`](crate::deadline::PASSIVE_LOOKUP_TIMEOUT)
-    /// when it has none. The lookup honors `cancellation`.
-    pub(crate) fn plan_with_provider<P: packetcraftr_netio::route::Provider>(
+    /// Authorizes, resolves the interface selector, plans through `routes`
+    /// under `deadline`, and authorizes the plan. `before_lookup` runs after
+    /// the declared destinations are authorized and before any provider is
+    /// asked.
+    pub(crate) fn authorize_and_plan<R: packetcraftr_netio::route::Provider>(
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
         options: &Options,
-        provider: &P,
-        deadline: Option<Instant>,
-        cancellation: Option<Cancellation>,
-    ) -> Result<Plan, Error> {
-        let lookup = match deadline {
-            Some(deadline) => crate::deadline::until(deadline, cancellation),
-            None => Deadline::new(crate::deadline::PASSIVE_LOOKUP_TIMEOUT)
-                .with_cancellation(cancellation),
-        };
-        self.authorize_and_plan(packet, destination, options, provider, &lookup, || {
-            deadline.map_or(Ok(()), ensure_preparation_deadline)
-        })
-    }
-
-    /// Authorizes, plans through `provider` under `deadline`, and authorizes
-    /// the plan. `before_lookup` runs after the declared destinations are
-    /// authorized and before the provider is asked.
-    fn authorize_and_plan<P: packetcraftr_netio::route::Provider>(
-        &self,
-        packet: &Packet,
-        destination: Option<IpAddr>,
-        options: &Options,
-        provider: &P,
+        routes: &R,
         deadline: &Deadline,
         before_lookup: impl FnOnce() -> Result<(), Error>,
     ) -> Result<Plan, Error> {
@@ -93,16 +82,41 @@ where
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;
         }
-        // Authorize every declared outer and SRH destination before the route
+        // Authorize every declared outer and SRH destination before a
         // provider can observe one. The completed plan is checked again below
         // so provider-derived selections cannot bypass policy either.
         self.policy.authorize_packet_destinations(packet)?;
         before_lookup()?;
-        let plan = plan_route(packet, destination, options, provider, deadline)?;
+        let options = self.resolve_interface(options, deadline)?;
+        let plan = plan_route(packet, destination, &options, routes, deadline)?;
         self.policy.authorize_packet_sources(packet, &plan)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }
         Ok(plan)
+    }
+
+    /// `options` with its interface selector resolved through the interface
+    /// provider. A refused operation never gets here, so it never
+    /// enumerates interfaces.
+    fn resolve_interface<'o>(
+        &self,
+        options: &'o Options,
+        deadline: &Deadline,
+    ) -> Result<Cow<'o, Options>, Error> {
+        let Some(selector) = options
+            .interface
+            .as_ref()
+            .filter(|selector| selector.id().is_none())
+        else {
+            return Ok(Cow::Borrowed(options));
+        };
+        let id = self
+            .interfaces
+            .resolve(selector, self.providers.interface(), deadline)?;
+        Ok(Cow::Owned(Options {
+            interface: Some(id.into()),
+            ..options.clone()
+        }))
     }
 }

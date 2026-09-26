@@ -5,8 +5,8 @@
 //! provider composition ([`prepare`]/[`Providers`]), the per-invocation
 //! [`WorkflowSession`], and [`run_workflow`], the one driver deciding between
 //! the streaming and collecting engine entry points under the negotiated
-//! output format. The deferred interface resolves once inside [`Executor`],
-//! then delegates to the library exchange.
+//! output format. [`Executor`] delegates to the library exchange, whose client
+//! resolves the interface selector after it admits each exchange.
 
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::output;
@@ -18,60 +18,31 @@ use std::time::Duration;
 
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
-use crate::system::{Client, Exchange, InterfaceSelector, resolve};
+use crate::system::{Client, Exchange};
 
+/// The client and the exchange settings every step of one workflow runs
+/// under.
 pub(super) struct Executor {
     pub(super) client: Client,
-    pub(super) exchange: packetcraftr::exchange::Options,
-    /// Resolved against the system provider on first execution.
-    ///
-    /// The lookup is deferred so interface enumeration never precedes target
-    /// authorization: a denied target must be refused before the process
-    /// touches the platform's interface list.
-    pub(super) interface: Option<InterfaceSelector>,
+    pub(super) send: packetcraftr::send::Options,
+    pub(super) collection: packetcraftr::exchange::Collection,
 }
 
 impl Executor {
-    /// Binds the deferred `--interface` selector, once.
-    ///
-    /// The selector is cleared only after the lookup succeeds, so a failed
-    /// lookup never leaves a later attempt unconstrained.
-    fn bind_interface<P: packetcraftr_netio::interface::Provider>(
-        &mut self,
-        provider: &P,
-    ) -> Result<(), CliError> {
-        let Some(selector) = self.interface.clone() else {
-            return Ok(());
-        };
-        self.exchange.send.plan.interface = Some(resolve(selector, provider)?);
-        self.interface = None;
-        Ok(())
-    }
-
-    fn prepared(&mut self) -> Result<Exchange<'_>, CliError> {
-        self.bind_interface(&packetcraftr_netio::interface::SystemProvider)?;
-        Ok(packetcraftr::probe::ExchangeExecutor::new(
-            &self.client,
-            self.exchange.clone(),
-        ))
+    fn exchange(&self) -> Exchange<'_> {
+        Exchange::new(&self.client, self.send.clone(), self.collection.clone())
     }
 }
 
 /// Every live workflow request the library's exchange executor accepts is
-/// served the same way: bind the interface once, then delegate.
+/// served the same way: delegate to an exchange on the client.
 impl<Req> packetcraftr::probe::Executor<Req> for Executor
 where
     Req: packetcraftr::probe::Request,
     for<'a> Exchange<'a>: packetcraftr::probe::Executor<Req>,
 {
     fn pipeline_capacity(&self) -> usize {
-        // A throwaway exchange, not `self.prepared()`: capacity is intrinsic
-        // to the request type, and binding the deferred interface here would
-        // touch the platform's interface list before target authorization.
-        <Exchange<'_> as packetcraftr::probe::Executor<Req>>::pipeline_capacity(&Exchange::new(
-            &self.client,
-            self.exchange.clone(),
-        ))
+        <Exchange<'_> as packetcraftr::probe::Executor<Req>>::pipeline_capacity(&self.exchange())
     }
     fn execute_pipeline(
         &mut self,
@@ -81,17 +52,13 @@ where
             packetcraftr::probe::PipelineEvent<Req::Execution>,
         ) -> Result<(), core::error::BoundaryError>,
     ) -> Result<packetcraftr::Stats, core::error::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute_pipeline(requests, options, emit)
+        self.exchange().execute_pipeline(requests, options, emit)
     }
     fn execute(
         &mut self,
         request: &Req,
     ) -> Result<Req::Execution, packetcraftr_core::error::BoundaryError> {
-        self.prepared()
-            .map_err(CliError::into_boundary_error)?
-            .execute(request)
+        self.exchange().execute(request)
     }
 }
 
@@ -103,7 +70,7 @@ impl packetcraftr::dns::TcpExecutor for Executor {
         // Direct TCP reaches this path without preparing any UDP exchange.
         // CLI admission rejects packet-oriented overrides before execution;
         // the socket adapter independently validates materialized options.
-        Exchange::new(&self.client, self.exchange.clone())
+        self.exchange()
             .with_dns_tcp(net::tcp::SystemProvider)
             .execute_tcp(exchange)
     }
@@ -152,7 +119,8 @@ pub(super) struct WorkflowSession<'a> {
 }
 
 /// Validates the policy and interface selector, then binds an executor to the
-/// requested route.
+/// requested route. The client resolves the selector only after it admits
+/// each exchange, so a denied target never enumerates interfaces.
 ///
 /// `max_template_packets` is how many packets one exchange may hold: one query
 /// for `dns`, one probe for `scan`, one attempt per hop for `traceroute`.
@@ -169,27 +137,22 @@ pub(super) fn prepare(
         .interface
         .as_ref()
         .map(crate::command_options::Selector::get)
-        .transpose()?;
+        .transpose()?
+        .map(Into::into);
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let exchange = exchange::options(
-        packetcraftr::send::Options {
+    let executor = Executor {
+        client: client(Arc::clone(&registry), policy.clone(), "client_progress"),
+        send: packetcraftr::send::Options {
             destination: None,
             plan: packetcraftr::route::Options {
                 link_mode: route.link_mode.into(),
-                interface: None,
+                interface,
                 preferred_source: route.source,
             },
             build: core::build::Options::default(),
             allow_permissive_live: false,
         },
-        timeout,
-        max_template_packets,
-        queue_limits,
-    )?;
-    let executor = Executor {
-        client: client(Arc::clone(&registry), policy.clone()),
-        exchange,
-        interface,
+        collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
     };
     Ok(Providers {
         policy,
@@ -310,92 +273,9 @@ mod tests {
 
     use crate::output::contract::{ExchangeFormat, ToolFormat};
     use packetcraftr_core::budget::Cancellation;
-    use packetcraftr_netio as net;
 
     use super::*;
-    use crate::system::client;
     use crate::test_support::{TestRecord, assert_contiguous, stream};
-
-    #[derive(Default)]
-    struct FlakyProvider {
-        calls: std::sync::atomic::AtomicUsize,
-    }
-
-    impl net::interface::Provider for FlakyProvider {
-        fn interfaces(
-            &self,
-            _deadline: &packetcraftr_core::budget::Deadline,
-        ) -> Result<Vec<net::interface::Info>, net::interface::Error> {
-            let call = self
-                .calls
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if call == 0 {
-                return Err(net::interface::Error::Discovery {
-                    message: "fixture enumeration failure".to_owned(),
-                    source: packetcraftr_core::error::Source::new(std::io::Error::other(
-                        "fixture refusal",
-                    )),
-                });
-            }
-            Ok(vec![net::interface::Info {
-                id: net::interface::Id {
-                    name: "fixture0".to_owned(),
-                    index: 9,
-                },
-                description: None,
-                mac_address: None,
-                addresses: Vec::new(),
-                flags: net::interface::Flags::default(),
-                mtu: None,
-                capability: net::link::Capability::Layer2AndLayer3,
-                link_type: packetcraftr_core::frame::LinkType::ETHERNET,
-            }])
-        }
-    }
-
-    fn executor() -> Executor {
-        let registry = packetcraftr_core::protocol::builtin::registry();
-        let policy = packetcraftr::policy::Policy::default();
-        Executor {
-            client: client(registry, policy),
-            exchange: packetcraftr::exchange::Options::default(),
-            interface: Some(InterfaceSelector::parse("fixture0").expect("fixture selector")),
-        }
-    }
-
-    #[test]
-    fn a_failed_interface_lookup_keeps_the_selector_pending() {
-        let provider = FlakyProvider::default();
-        let mut executor = executor();
-
-        let error = executor
-            .bind_interface(&provider)
-            .expect_err("the first enumeration fails");
-        assert_eq!(error.exit_code(), 5);
-        assert!(
-            executor.interface.is_some(),
-            "a failed lookup must not discard the selector",
-        );
-        assert!(
-            executor.exchange.send.plan.interface.is_none(),
-            "a failed lookup must not leave an unconstrained plan",
-        );
-
-        executor
-            .bind_interface(&provider)
-            .expect("the second enumeration succeeds");
-        assert!(executor.interface.is_none());
-        assert_eq!(
-            executor
-                .exchange
-                .send
-                .plan
-                .interface
-                .as_ref()
-                .map(|id| id.index),
-            Some(9),
-        );
-    }
 
     /// A terminal record the scripted `complete` hook publishes.
     #[derive(serde::Serialize)]

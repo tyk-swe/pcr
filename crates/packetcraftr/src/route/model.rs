@@ -5,7 +5,6 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
-use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, SelectionReason};
 
@@ -15,7 +14,10 @@ pub const MAX_VLAN_TAGS: usize = 8;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub link_mode: Mode,
-    pub interface: Option<InterfaceId>,
+    /// The interface the route must leave through. A client resolves a name
+    /// or index selector after admission; [`plan`](super::plan) itself takes
+    /// only a resolved [`Interface::Id`](super::Interface::Id).
+    pub interface: Option<super::Interface>,
     /// Interface-owned source that constrains route selection without rewriting packet source.
     pub preferred_source: Option<IpAddr>,
 }

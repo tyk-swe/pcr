@@ -18,15 +18,15 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::input::read_recipe;
 use crate::rendering::StreamEncoder;
-use crate::system::{InterfaceSelector, client, exchange};
+use crate::system::{client, exchange};
 
 use super::execution::{self, Executor};
 
 struct PreparedLive {
     options: packetcraftr::fuzz::LiveOptions,
     policy: packetcraftr::policy::Policy,
-    exchange: packetcraftr::exchange::Options,
-    interface: Option<InterfaceSelector>,
+    send: packetcraftr::send::Options,
+    collection: packetcraftr::exchange::Collection,
 }
 
 impl super::Spec for Args {
@@ -141,27 +141,23 @@ fn prepare_live(
         .interface
         .as_ref()
         .map(crate::command_options::Selector::get)
-        .transpose()?;
-    let exchange = exchange::options(
-        packetcraftr::send::Options {
-            destination: arguments.destination,
-            plan: packetcraftr::route::Options {
-                link_mode: arguments.route.link_mode.into(),
-                interface: None,
-                preferred_source: arguments.route.source,
-            },
-            build: request.build.clone(),
-            allow_permissive_live: arguments.allow_permissive_live,
+        .transpose()?
+        .map(Into::into);
+    let send = packetcraftr::send::Options {
+        destination: arguments.destination,
+        plan: packetcraftr::route::Options {
+            link_mode: arguments.route.link_mode.into(),
+            interface,
+            preferred_source: arguments.route.source,
         },
-        arguments.timeout.timeout(),
-        1,
-        queue_limits,
-    )?;
+        build: request.build.clone(),
+        allow_permissive_live: arguments.allow_permissive_live,
+    };
     Ok(Some(PreparedLive {
         options,
         policy,
-        exchange,
-        interface,
+        send,
+        collection: exchange::collection(arguments.timeout.timeout(), 1, queue_limits)?,
     }))
 }
 
@@ -277,9 +273,13 @@ fn execute_live(
         authorizer: packetcraftr::policy::PolicyAuthorizer::for_packets(&live.policy),
         clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
         executor: Executor {
-            client: client(Arc::clone(&registry), live.policy.clone()),
-            exchange: live.exchange,
-            interface: live.interface,
+            client: client(
+                Arc::clone(&registry),
+                live.policy.clone(),
+                "client_progress",
+            ),
+            send: live.send,
+            collection: live.collection,
         },
         options: live.options,
         packet,

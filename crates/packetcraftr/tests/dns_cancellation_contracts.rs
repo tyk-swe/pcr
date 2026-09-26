@@ -19,15 +19,7 @@ struct CancellingAuthorizer {
     resolutions: usize,
 }
 
-impl Authorizer for CancellingAuthorizer {
-    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        assert!(matches!(operation, Operation::Dns(_)));
-        if !self.cancel_during_resolution {
-            self.signal.cancel();
-        }
-        Ok(())
-    }
-
+impl packetcraftr::target::ResolveTarget for CancellingAuthorizer {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         self.resolutions += 1;
         Policy {
@@ -36,6 +28,16 @@ impl Authorizer for CancellingAuthorizer {
         }
         .resolve_target(target, self)
         .map_err(BoundaryError::from_error)
+    }
+}
+
+impl Authorizer for CancellingAuthorizer {
+    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
+        assert!(matches!(operation, Operation::Dns(_)));
+        if !self.cancel_during_resolution {
+            self.signal.cancel();
+        }
+        Ok(())
     }
 }
 

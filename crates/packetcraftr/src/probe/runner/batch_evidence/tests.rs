@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::Stats;
 use crate::exchange::Response;
-use crate::probe::evidence::EvidenceLimits;
+use crate::execution::evidence::EvidenceLimits;
 use crate::probe::runner::{Execution, Sequenced};
 use crate::probe::{ErrorKind, Workflow};
 use bytes::Bytes;

@@ -97,12 +97,12 @@ impl crate::execution::Receipt for Execution {
     }
 }
 
-impl crate::probe::Request for Exchange {
+impl crate::execution::Request for Exchange {
     type Execution = Execution;
 }
 
 /// The optional DNS-over-TCP execution an executor may provide next to its
-/// UDP [`crate::probe::Executor`] implementation.
+/// UDP [`crate::execution::Executor`] implementation.
 pub trait TcpExecutor {
     /// Executes one bounded DNS-over-TCP query. Expected socket and
     /// framing failures are returned as typed data so the workflow can apply

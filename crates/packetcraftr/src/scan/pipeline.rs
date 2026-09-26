@@ -5,11 +5,12 @@ use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, SentPacket, Stats,
     evidence::ExecutionPermit,
-    preparation::RebuildError,
-    probe::{
-        ExchangeExecutor, Execution, PipelineEvent, PipelineOptions,
+    execution::{
+        ExchangeExecutor, PipelineEvent, PipelineOptions,
         evidence::{CandidateKey, candidate_precedes},
     },
+    preparation::RebuildError,
+    probe::Execution,
 };
 use packetcraftr_core::{
     budget::Deadline,

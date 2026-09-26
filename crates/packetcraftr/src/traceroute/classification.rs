@@ -7,7 +7,7 @@ use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::semantics;
 use packetcraftr_core::{decode::DecodedPacket, packet::Packet, registry::Registry};
 
-use crate::probe::{self, Correlation, Transport};
+use crate::correlation::{self, Correlation, Transport};
 
 use super::ResponseKind;
 
@@ -26,7 +26,7 @@ pub fn classify_response(
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<ResponseClassification> {
-    let observation = probe::observe(registry, strategy, request, response)?;
+    let observation = correlation::observe(registry, strategy, request, response)?;
     let destination = packet_destination(request, strategy)?;
     let kind = match observation.correlation {
         Correlation::TimeExceeded => ResponseKind::Intermediate,

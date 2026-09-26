@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
 
-use crate::probe::evidence::EvidenceLimits;
-use crate::probe::limits::CaptureEvidenceLimits;
+use crate::execution::evidence::EvidenceLimits;
+use crate::execution::limits::CaptureEvidenceLimits;
 
 use crate::fuzz::MAX_RATE;
 use crate::fuzz::error::Error;

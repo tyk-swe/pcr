@@ -9,11 +9,12 @@ use bytes::Bytes;
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
 use super::*;
+use crate::BoundaryError;
 use crate::evidence::ExecutionPermit;
+use crate::execution::evidence::EvidenceLimits;
 use crate::probe::Workflow;
-use crate::probe::evidence::EvidenceLimits;
-use crate::probe::test_support::{decoded_packet, evidence_frame};
 use crate::test_support::RecordingClock;
+use crate::test_support::{decoded_packet, evidence_frame};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestProbe(u64);

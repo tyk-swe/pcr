@@ -20,7 +20,7 @@ pub const MAX_RATE: u32 = 1_000_000;
 // The deliberately conservative value makes complete byte-policy approval
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
-const SOURCE_PORT: u16 = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
+const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;

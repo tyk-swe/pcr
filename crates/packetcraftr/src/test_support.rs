@@ -6,20 +6,25 @@ use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+use bytes::Bytes;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::build::BuiltPacket;
+use packetcraftr_core::decode::DecodedPacket;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::frame::{Frame, LinkType};
+use packetcraftr_core::layout::PacketLayout;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::transmit::Report as TransmissionReport;
 
 use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::evidence::SentPacket;
+use crate::execution::{Executor, Request};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
-use crate::probe::{Executor, Request};
 use crate::target::Authorized;
 use crate::target::Error as TargetError;
 use crate::target::Hostname;
@@ -192,4 +197,28 @@ fn materialized_route() -> crate::route::Materialized {
         },
         neighbor_resolution: None,
     }
+}
+
+/// Builds decoded evidence for `packet` with an explicit timestamp, wire bytes,
+/// and diagnostics. Scan, traceroute, fuzz, and evidence-selection tests share
+/// this constructor; each keeps only a thin adapter when it needs fixed bytes.
+pub(crate) fn decoded_packet(
+    packet: Packet,
+    timestamp: SystemTime,
+    bytes: &[u8],
+    diagnostics: Vec<Diagnostic>,
+) -> DecodedPacket {
+    let frame = evidence_frame(timestamp, bytes);
+    DecodedPacket {
+        packet,
+        original: frame.bytes().clone(),
+        frame,
+        layout: PacketLayout::default(),
+        diagnostics,
+    }
+}
+
+pub(crate) fn evidence_frame(timestamp: SystemTime, bytes: &[u8]) -> Frame {
+    Frame::new(timestamp, LinkType::RAW, Bytes::copy_from_slice(bytes))
+        .expect("probe test fixture frame carries bytes")
 }

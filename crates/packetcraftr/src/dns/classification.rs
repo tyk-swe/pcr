@@ -12,8 +12,8 @@ use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, packet::Packet, registry::Registry,
 };
 
-use crate::probe::evidence::{EvidenceState, ResponseCandidate};
-use crate::probe::{self, Transport as ProbeTransport};
+use crate::correlation::{self, Transport as ProbeTransport};
+use crate::execution::evidence::{EvidenceState, ResponseCandidate};
 
 use super::error::{Error, WireError};
 use super::wire::{decode_response, decode_tcp_frame};
@@ -91,7 +91,7 @@ pub fn classify_response(
     response: &DecodedPacket,
     limits: MessageLimits,
 ) -> Option<ResponseClassification> {
-    if let Some(observation) = probe::observe(registry, ProbeTransport::Udp, sent, response)
+    if let Some(observation) = correlation::observe(registry, ProbeTransport::Udp, sent, response)
         && observation.correlation.is_network_failure()
     {
         return Some(ResponseClassification::NetworkFailure {

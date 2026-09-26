@@ -14,9 +14,9 @@ use crate::Stats;
 use crate::clock::Clock;
 use crate::dns::tcp::{Category as TcpCategory, Error as TcpError};
 use crate::evidence::ExecutionPermit;
+use crate::execution::Executor;
 use crate::execution::Receipt;
 use crate::policy::Authorizer;
-use crate::probe::Executor;
 use crate::target::{Family, Target, resolve_selected};
 
 use super::super::classification::{

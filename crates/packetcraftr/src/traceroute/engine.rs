@@ -11,9 +11,10 @@ use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
 use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::execution::sink_observer;
 use crate::policy::Authorizer;
-use crate::probe::limits::{check_probe_count, check_probe_duration};
-use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
+use crate::probe::runner::{BatchEvidence, run_batches};
+use crate::probe::{check_probe_count, check_probe_duration};
 use crate::target::{GateErrors, admit_operation, wire_limits};
 
 use super::MAX_PROBE_BYTES;

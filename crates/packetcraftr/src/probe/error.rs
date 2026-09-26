@@ -10,7 +10,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
-use crate::probe::evidence::EvidenceDiagnosticDescriptor;
+use crate::execution::evidence::EvidenceDiagnosticDescriptor;
 use crate::{BoundaryError, StatsOverflow};
 
 /// The probe workflows that share one lifecycle, error shape, and evidence

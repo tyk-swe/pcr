@@ -8,9 +8,9 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::Context;
+use crate::execution::Executor;
+use crate::execution::sink_observer;
 use crate::policy::{Authorizer, Operation};
-use crate::probe::Executor;
-use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};

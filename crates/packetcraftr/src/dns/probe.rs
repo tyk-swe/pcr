@@ -11,7 +11,7 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
-use crate::probe::nonzero_ipv4_identification;
+use crate::correlation::nonzero_ipv4_identification;
 
 use super::DEFAULT_SERVER_PORT;
 use super::Probe;
@@ -54,7 +54,7 @@ pub(super) fn probe_packet(probe: &Probe) -> Packet {
 /// Rotates the query source port one step per retry, so a retried query is not
 /// a second chance for an off-path spoofer to guess the same tuple.
 pub(super) fn rotated_source_port(base: u16, attempt: u32) -> u16 {
-    crate::probe::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
+    crate::correlation::ephemeral_source_port(base, u64::from(attempt.saturating_sub(1)))
 }
 
 /// Draws a DNS transaction ID from the system random source.
@@ -69,8 +69,8 @@ pub fn unpredictable_transaction_id() -> Result<u16, BoundaryError> {
 /// a claim of independent entropy on each retry.
 pub fn unpredictable_source_port() -> Result<u16, BoundaryError> {
     random_u16(getrandom::fill).map(|value| {
-        crate::probe::ephemeral_source_port(
-            crate::probe::EPHEMERAL_SOURCE_PORT_BASE,
+        crate::correlation::ephemeral_source_port(
+            crate::correlation::EPHEMERAL_SOURCE_PORT_BASE,
             u64::from(value),
         )
     })
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn retries_rotate_the_source_port_within_the_dynamic_range() {
-        let base = crate::probe::EPHEMERAL_SOURCE_PORT_BASE;
+        let base = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
         assert_eq!(rotated_source_port(base, 1), base);
         assert_eq!(rotated_source_port(base, 2), base.saturating_add(1));
         assert!(rotated_source_port(base, u32::MAX) >= base);

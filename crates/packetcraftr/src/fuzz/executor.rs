@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
-use crate::probe::ExchangeExecutor;
-use crate::probe::Executor;
-use crate::probe::executor::ExecutorFault;
+use crate::execution::ExchangeExecutor;
+use crate::execution::Executor;
+use crate::execution::ExecutorFault;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
 use super::execution::{Execution, ExecutionCase};

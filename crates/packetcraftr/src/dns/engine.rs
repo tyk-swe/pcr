@@ -15,11 +15,13 @@ use packetcraftr_core::registry::Registry;
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
 use crate::execution::Context;
+use crate::execution::Executor;
+use crate::execution::evidence::{
+    EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
+};
+use crate::execution::sink_observer;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
-use crate::probe::Executor;
-use crate::probe::evidence::{EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector};
-use crate::probe::runner::sink_observer;
 use crate::target::{Family, approve_operation, require_family, resolve_selected};
 use crate::{BoundaryError, Stats, StatsOverflow};
 

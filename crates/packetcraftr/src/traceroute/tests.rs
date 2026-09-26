@@ -7,8 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::probe::ErrorKind;
-use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_policy};
+use crate::probe::test_support::{ProgressiveExecutor, private_policy};
 use crate::progress::Runtime;
+use crate::test_support::decoded_packet;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::protocol::{

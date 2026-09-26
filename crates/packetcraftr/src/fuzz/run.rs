@@ -7,9 +7,9 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{build::Builder, fuzz as packet_fuzz, packet::Packet, registry::Registry};
 
 use crate::clock::Clock;
+use crate::execution::sink_observer;
 use crate::execution::{Context, Grant};
 use crate::preparation::exact_bytes;
-use crate::probe::runner::sink_observer;
 use crate::progress::Runtime;
 
 use super::SYNTHESIZED_ETHERNET_BYTES;
@@ -18,8 +18,8 @@ use super::evidence::{Recorder, validate_execution};
 use super::execution::{Execution, ExecutionCase};
 use super::plan::{rate_delay, worst_case_duration};
 use super::{Case, LiveOptions, Report, Stats, Summary};
+use crate::execution::Executor;
 use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
-use crate::probe::Executor;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
 pub fn run<A, E, C>(

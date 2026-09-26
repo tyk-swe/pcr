@@ -10,16 +10,15 @@ pub(crate) use batch_evidence::{BatchEvidence, Classifier, NO_RESPONSE_REASON, O
 use std::borrow::BorrowMut;
 use std::time::Duration;
 
-use crate::progress::{EmitError, Runtime, Sink};
-use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
-use packetcraftr_core::error::BoundaryError;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::{Clock, rate_delay};
 use crate::evidence::ExecutionPermit;
+use crate::execution::Executor;
 use crate::execution::{Context, Grant, Receipt};
-use crate::probe::{Error, ErrorKind, Executor};
+use crate::probe::{Error, ErrorKind};
 use crate::{SentPacket, Stats};
 
 /// A planned batch of probes executed together: one probe per scan batch,
@@ -94,31 +93,6 @@ impl Receipt for Execution {
 
 impl<P> crate::probe::Request for Batch<P> {
     type Execution = Execution;
-}
-
-/// Wraps a caller's progressive callback in a bounded [`Sink`] and adapts both
-/// of its failures into the workflow's own error type, so every `run_with_events`
-/// entry point differs only in those two constructors.
-pub(crate) fn sink_observer<T, E>(
-    runtime: &Runtime,
-    emit: impl FnMut(T) -> Result<(), BoundaryError> + Send + 'static,
-    on_deadline: impl Fn(DeadlineExceeded) -> E,
-    on_output: impl Fn(BoundaryError) -> E,
-) -> Result<impl FnMut(T, &Deadline) -> Result<(), E>, E>
-where
-    T: Send + 'static,
-{
-    let sink = match Sink::new_in(runtime, emit) {
-        Ok(sink) => sink,
-        Err(source) => return Err(on_output(source)),
-    };
-    Ok(
-        move |event, deadline: &Deadline| match sink.emit(event, deadline) {
-            Ok(()) => Ok(()),
-            Err(EmitError::Deadline(error)) => Err(on_deadline(error)),
-            Err(EmitError::Output(source)) => Err(on_output(source)),
-        },
-    )
 }
 
 pub(crate) trait Sequenced {

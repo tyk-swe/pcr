@@ -374,20 +374,12 @@ fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
 #[test]
 fn scan_materializes_distinct_correlated_identities_per_probe() {
     use packetcraftr::{
-        clock::SystemClock,
-        policy::PolicyAuthorizer,
-        probe::{ExchangeExecutor, Transport},
-        progress::Runtime,
+        probe::Transport,
         scan,
         target::{Family, Target},
     };
 
     let (client, state) = fixture(Fault::None);
-    let policy = Policy::default();
-    let mut authorizer = PolicyAuthorizer::for_packets(&policy);
-    let registry = Arc::clone(client.registry());
-    let mut executor =
-        ExchangeExecutor::new(&client, layer3_send(), exchange::Collection::default());
     let request = scan::Request {
         max_in_flight: 1,
         targets: Target::Address("10.0.0.2".parse().unwrap()).into(),
@@ -400,17 +392,12 @@ fn scan_materializes_distinct_correlated_identities_per_probe() {
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         limits: scan::Limits::default(),
+        route: layer3_send().plan,
+        collection: exchange::Collection::default(),
     };
-    scan::run_with_events(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut SystemClock,
-        &Runtime::default(),
-        |_| Ok(()),
-    )
-    .expect("timed-out probes still complete the scan");
+    client
+        .scan(request, |_| Ok(()))
+        .expect("timed-out probes still complete the scan");
 
     let state = state.lock().unwrap();
     assert_eq!(state.sent.len(), 3);

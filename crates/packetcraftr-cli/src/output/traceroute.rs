@@ -24,7 +24,7 @@ published_enum! {
 
 published_enum! {
     /// Why a traceroute stopped.
-    pub enum Completion from library::Completion {
+    pub enum Completion from library::Termination {
         DestinationReached => "destination_reached",
         Unreachable => "unreachable",
         MaximumHops => "maximum_hops",
@@ -82,11 +82,11 @@ pub struct Report {
 }
 
 /// A traceroute, with its diagnostics and totals.
-impl TryFrom<library::Report> for Published<Report> {
+impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
-    fn try_from(result: library::Report) -> Result<Self, Error> {
-        let library::Report {
+    fn try_from(result: library::Aggregate) -> Result<Self, Error> {
+        let library::Aggregate {
             target,
             resolved_addresses,
             destination,
@@ -94,7 +94,7 @@ impl TryFrom<library::Report> for Published<Report> {
             destination_port,
             hops,
             undecoded,
-            completion,
+            termination,
             diagnostics,
             stats,
         } = result;
@@ -129,7 +129,7 @@ impl TryFrom<library::Report> for Published<Report> {
                 destination_port,
                 hops: hop_outputs,
                 undecoded: undecoded_outputs,
-                completion: completion.into(),
+                completion: termination.into(),
             },
             diagnostics,
         )
@@ -188,8 +188,8 @@ impl TryFrom<library::Event> for Published<Event> {
 }
 
 /// The terminal record, with the run's totals.
-impl From<library::Summary> for Published<Event> {
-    fn from(summary: library::Summary) -> Self {
+impl From<library::Report> for Published<Event> {
+    fn from(summary: library::Report) -> Self {
         Self::new(
             Event::Complete {
                 target: summary.target,
@@ -197,7 +197,7 @@ impl From<library::Summary> for Published<Event> {
                 destination: summary.destination,
                 strategy: summary.strategy.into(),
                 destination_port: summary.destination_port,
-                completion: summary.completion.into(),
+                completion: summary.termination.into(),
             },
             Vec::new(),
         )

@@ -6,13 +6,46 @@ pub(super) mod packet;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use super::Error;
-use super::error::Probes;
-use super::{Batch, Probe, Request};
-use crate::execution::rate_delay;
-use crate::probe::{ProbeEndpoint, Transport};
+use packetcraftr_core::packet::Packet;
 
-pub(super) fn build_batches(request: &Request, destination: IpAddr) -> Result<Vec<Batch>, Error> {
+use super::Error;
+use super::Request;
+use super::error::Probes;
+use crate::execution::rate_delay;
+use crate::probe::{Batch, ProbeEndpoint, Transport};
+
+/// One planned traceroute probe: the destination, the endpoint it addresses,
+/// and the hop limit and attempt it belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Probe {
+    pub sequence: u64,
+    pub address: IpAddr,
+    pub target: ProbeEndpoint,
+    pub hop_limit: u8,
+    pub attempt: u32,
+    pub source_port: u16,
+}
+
+impl Probe {
+    /// Builds the portable IPv4/IPv6 UDP, TCP, or ICMP probe represented by
+    /// this already-authorized hop plan.
+    #[must_use]
+    pub fn packet(&self) -> Packet {
+        packet::probe_packet(self)
+    }
+}
+
+impl crate::probe::runner::Sequenced for Probe {
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
+
+/// Plans one batch per hop, each holding that hop's probes.
+pub(super) fn build_batches(
+    request: &Request,
+    destination: IpAddr,
+) -> Result<Vec<Batch<Probe>>, Error> {
     let mut batches = Vec::with_capacity(request.hop_count());
     let source_port = request.source_port.unwrap_or(super::SOURCE_PORT);
     let mut sequence = 0_u64;

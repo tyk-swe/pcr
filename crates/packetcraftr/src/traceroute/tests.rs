@@ -19,19 +19,93 @@ use packetcraftr_core::protocol::{
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
 use super::DEFAULT_UDP_PORT;
-use super::classification::classify_response;
-use super::engine::{run, run_with_events};
+use super::engine;
+use super::error::Probes;
+use super::evidence::classify_response;
 use super::plan::packet::probe_packet;
-use super::{Batch, Completion, Event, Limits, Probe, Request, ResponseKind};
-use crate::execution::Executor;
+use super::{
+    Aggregate, Collector, Event, Limits, Probe, Report, Request, ResponseKind, Termination,
+};
+use crate::Sink;
+use crate::clock::Clock;
+use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::policy::PolicyAuthorizer;
+use crate::probe::Batch;
 use crate::probe::{Execution, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
+use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
 use crate::{BoundaryError, Stats, target::Family};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::registry::Registry;
+
+/// Runs the engine as the client does under the request's duration limit,
+/// collecting every event into the aggregate.
+fn run<A, E, C>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+) -> Result<Aggregate, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+{
+    let collector = Collector::default();
+    let mut sink = collector.clone();
+    let report = engine::run(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        |event, _| {
+            sink.publish(event)
+                .map_err(|source| Error::Output { source })
+        },
+    )?;
+    collector.finish(report)
+}
+
+/// Runs the engine as the client does, publishing each event to `sink` on a
+/// worker admitted by `runtime`.
+fn run_with_events<A, E, C, S>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    runtime: &Runtime,
+    sink: S,
+) -> Result<Report, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+    S: Sink<Event, Ack = ()>,
+{
+    let publish = publisher(
+        runtime,
+        sink,
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
+    )?;
+    engine::run(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        publish,
+    )
+}
 
 fn udp_traceroute_request(target: Target) -> Request {
     Request {
@@ -46,6 +120,8 @@ fn udp_traceroute_request(target: Target) -> Request {
         timeout: Duration::from_millis(10),
         probes_per_second: None,
         limits: Limits::default(),
+        route: crate::route::Options::default(),
+        collection: crate::exchange::Collection::default(),
     }
 }
 
@@ -81,8 +157,8 @@ struct NoResponseExecutor {
     invalid_sent_index: Option<usize>,
 }
 
-impl Executor<Batch> for NoResponseExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for NoResponseExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
         for probe in &batch.probes {
@@ -118,8 +194,8 @@ impl Executor<Batch> for NoResponseExecutor {
 
 struct MixedHopExecutor;
 
-impl Executor<Batch> for MixedHopExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for MixedHopExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -540,7 +616,7 @@ fn traceroute_stops_after_the_first_terminal_hop() {
     )
     .unwrap();
 
-    assert_eq!(result.completion, Completion::DestinationReached);
+    assert_eq!(result.termination, Termination::DestinationReached);
     assert_eq!(result.hops.len(), 2);
     assert_eq!(result.hops[0].probes.len(), 2);
     assert_eq!(result.hops[1].probes.len(), 2);
@@ -688,4 +764,32 @@ fn a_family_miss_is_reported_as_a_traceroute_error() {
         "resolved target has no IPv4 address selected for this traceroute"
     );
     assert_eq!(error.classification().code, "packet.target_address_family");
+}
+
+#[test]
+fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
+    let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+    let report = Report {
+        target: "192.0.2.2".to_owned(),
+        resolved_addresses: vec![destination],
+        destination,
+        strategy: Transport::Udp,
+        destination_port: Some(DEFAULT_UDP_PORT),
+        termination: Termination::Timeout,
+        stats: Stats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            ..Stats::default()
+        },
+    };
+
+    let error = Collector::default()
+        .finish(report)
+        .expect_err("one attempted probe but no collected outcome");
+
+    assert!(matches!(error, Error::IncoherentEvents { .. }), "{error}");
+    assert_eq!(
+        error.classification().code,
+        "internal.traceroute_event_coherence"
+    );
 }

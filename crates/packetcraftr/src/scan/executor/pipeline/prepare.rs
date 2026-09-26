@@ -4,8 +4,9 @@ use super::{Planned, limit};
 use crate::{
     BoundaryError, Providers,
     clock::Clock,
-    execution::{ExchangeExecutor, PipelineOptions},
+    execution::ExchangeExecutor,
     preparation::{AdmittedCost, AuthorizedRoute, Discovery},
+    scan::executor::PipelineOptions,
 };
 use packetcraftr_core::{budget::Deadline, field::FieldValue, packet::Packet};
 use packetcraftr_netio::{capture::MAX_SOURCES, interface};

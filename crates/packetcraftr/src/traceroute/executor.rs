@@ -4,21 +4,21 @@
 use crate::BoundaryError;
 use crate::execution::{ExchangeExecutor, Executor};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{Execution, Transport};
+use crate::probe::{Batch, Execution, Transport};
 
 use crate::clock::Clock;
 use crate::providers::Providers;
 
-use super::classification::classify_response;
-use super::{Batch, Probe};
+use super::Probe;
+use super::evidence::classify_response;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.traceroute_executor",
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let first = validate_batch(batch)?;
         if self.collection.max_responses < batch.probes.len() {
             return Err(EXECUTOR_FAULT.invalid(format!(
@@ -85,7 +85,7 @@ impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
     }
 }
 
-fn validate_batch(batch: &Batch) -> Result<&Probe, BoundaryError> {
+fn validate_batch(batch: &Batch<Probe>) -> Result<&Probe, BoundaryError> {
     let first = batch
         .probes
         .first()
@@ -129,7 +129,7 @@ mod tests {
     use crate::evidence::ExecutionPermit;
     use crate::probe::ProbeEndpoint;
 
-    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch {
+    fn batch(target: ProbeEndpoint, source_ports: &[u16]) -> Batch<Probe> {
         Batch {
             probes: source_ports
                 .iter()

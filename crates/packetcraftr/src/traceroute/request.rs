@@ -77,7 +77,9 @@ impl Limits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One trace: the target, how it is probed hop by hop, and the route and
+/// collection bounds every hop's exchange runs under.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
     pub target: Target,
     pub strategy: Transport,
@@ -94,6 +96,11 @@ pub struct Request {
     pub timeout: Duration,
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
+    /// How each probe's route is planned.
+    pub route: crate::route::Options,
+    /// How each hop exchange's capture is armed and what it retains. It must
+    /// retain at least one response per probe of a hop.
+    pub collection: crate::exchange::Collection,
 }
 
 impl Request {

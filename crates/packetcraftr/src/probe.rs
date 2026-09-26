@@ -17,7 +17,7 @@ pub use runner::{Batch, Execution};
 
 // The executor contract lives in the private `execution` module. It stays
 // reachable here until every workflow runs through the client.
-pub use crate::execution::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions, Request};
+pub use crate::execution::{ExchangeExecutor, Executor, Request};
 
 pub(crate) use limits::{check_probe_count, check_probe_duration};
 

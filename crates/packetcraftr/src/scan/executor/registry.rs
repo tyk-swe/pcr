@@ -3,36 +3,38 @@
 //! Operation-local protocol bindings make each explicit profile's wire intent
 //! agree with strict building. The original client and registry remain intact:
 //! the executor runs on a view of the client with the configured registry.
-use crate::scan::Batch;
+use crate::scan::Request;
 use packetcraftr_core::{
     error::BoundaryError,
     layer::Id,
     registry::{Discriminator, Registry},
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+
+/// Each scanned UDP port with a profile, and the protocol that profile
+/// decodes the port as, in port order.
+pub(super) fn bindings(request: &Request) -> Vec<(u16, Id)> {
+    request
+        .udp_profiles
+        .iter()
+        .filter(|(port, _)| request.ports.contains(port))
+        .map(|(port, profile)| {
+            (
+                *port,
+                Id::new(if profile.raw_payload() { "raw" } else { "dns" }),
+            )
+        })
+        .collect()
+}
+
+/// `base` with `bindings` applied, or `base` itself when it already decodes
+/// every bound port that way.
 pub(super) fn configured(
     base: &Arc<Registry>,
-    batches: &[Batch],
+    bindings: &[(u16, Id)],
 ) -> Result<Arc<Registry>, BoundaryError> {
-    let mut mappings = BTreeMap::new();
-    for batch in batches {
-        let probe = batch.probe()?;
-        if let Some(profile) = &probe.udp_profile
-            && let Some(port) = probe.endpoint.port()
-        {
-            let child = Id::new(if profile.raw_payload() { "raw" } else { "dns" });
-            if mappings
-                .insert(port, child)
-                .is_some_and(|previous| previous != child)
-            {
-                return Err(BoundaryError::from_error(crate::scan::profile::Error(
-                    "conflicting wire profiles for one UDP port",
-                )));
-            }
-        }
-    }
-    let overrides: Vec<_> = mappings
-        .into_iter()
+    let overrides: Vec<_> = bindings
+        .iter()
         .filter(|(port, child)| {
             base.child_for("udp", Discriminator(u64::from(*port))) != Some(*child)
         })
@@ -43,28 +45,20 @@ pub(super) fn configured(
     let mut builder = base.to_builder();
     for (port, child) in overrides {
         builder
-            .bind("udp", u64::from(port), child, i32::MAX)
-            .map_err(|error| {
-                BoundaryError::new(
-                    error.to_string(),
-                    packetcraftr_core::error::Classification::new(
-                        "cli.udp_profile",
-                        packetcraftr_core::error::Kind::Usage,
-                        None,
-                    ),
-                    Vec::new(),
-                )
-            })?;
+            .bind("udp", u64::from(*port), *child, i32::MAX)
+            .map_err(profile_error)?;
     }
-    builder.build().map(Arc::new).map_err(|error| {
-        BoundaryError::new(
-            error.to_string(),
-            packetcraftr_core::error::Classification::new(
-                "cli.udp_profile",
-                packetcraftr_core::error::Kind::Usage,
-                None,
-            ),
-            Vec::new(),
-        )
-    })
+    builder.build().map(Arc::new).map_err(profile_error)
+}
+
+fn profile_error(error: impl std::fmt::Display) -> BoundaryError {
+    BoundaryError::new(
+        error.to_string(),
+        packetcraftr_core::error::Classification::new(
+            "cli.udp_profile",
+            packetcraftr_core::error::Kind::Usage,
+            None,
+        ),
+        Vec::new(),
+    )
 }

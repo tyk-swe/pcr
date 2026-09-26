@@ -58,6 +58,9 @@ pub enum Error {
         #[source]
         source: BoundaryError,
     },
+    /// A collector saw events that disagree with the report.
+    #[error("traceroute events are incoherent: {message}")]
+    IncoherentEvents { message: String },
 }
 
 impl Error {
@@ -109,6 +112,13 @@ impl Classified for Error {
                 "internal.traceroute_evidence",
                 Kind::Internal,
                 Some("treat the trace as incomplete because executor evidence was inconsistent"),
+            ),
+            Self::IncoherentEvents { .. } => Classification::new(
+                "internal.traceroute_event_coherence",
+                Kind::Internal,
+                Some(
+                    "collect every traceroute event once, from one traceroute, in publication order",
+                ),
             ),
         }
     }

@@ -1,13 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
-use crate::scan::{Batch, Classification, SentProbe, evidence::Observation, profile};
+use super::{PipelineEvent, PipelineOptions};
+use crate::probe::Batch;
+use crate::scan::{Classification, Probe, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, Providers, SentPacket, Stats,
     clock::Clock,
     evidence::ExecutionPermit,
     execution::{
-        ExchangeExecutor, PipelineEvent, PipelineOptions,
+        ExchangeExecutor,
         evidence::{CandidateKey, candidate_precedes},
     },
     preparation::RebuildError,
@@ -32,24 +34,30 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// A probe still waiting for its response window when the pipeline failed,
+/// with the best response it had so far.
 #[derive(Clone, Debug)]
 pub struct PendingEvidence {
     pub sent: SentProbe,
     pub response: Option<Frame>,
 }
+/// Why a rolling probe window failed, with its partial statistics, every
+/// probe still pending, and each capture source's lifecycle. It reaches the
+/// caller as the source of
+/// [`scan::Error::PipelineExecution`](crate::scan::Error::PipelineExecution).
 #[derive(Debug, thiserror::Error)]
 #[error("packet scan pipeline failed: {source}")]
-pub struct Error {
+pub struct Failure {
     #[source]
     pub source: BoundaryError,
     pub stats: Stats,
     pub pending: Vec<PendingEvidence>,
-    pub failed_probe: Option<crate::scan::Probe>,
+    pub failed_probe: Option<Probe>,
     pub capture_sources: Vec<capture::Source>,
     /// Capture shutdown failure that followed the primary failure.
     pub cleanup: Option<Box<LiveIoError>>,
 }
-impl Classified for Error {
+impl Classified for Failure {
     fn classification(&self) -> ErrorClassification {
         self.source.classification()
     }
@@ -102,12 +110,12 @@ impl Best {
 /// anything is planned.
 #[derive(Clone, Copy)]
 struct Planned<'b> {
-    probe: &'b crate::scan::Probe,
+    probe: &'b Probe,
     permit: ExecutionPermit,
 }
 
 impl<'b> Planned<'b> {
-    fn new(batch: &'b Batch) -> Result<Self, BoundaryError> {
+    fn new(batch: &'b Batch<Probe>) -> Result<Self, BoundaryError> {
         Ok(Self {
             probe: batch.probe()?,
             permit: batch.permit,
@@ -118,7 +126,10 @@ impl<'b> Planned<'b> {
 /// Rejects an empty or out-of-budget pipeline configuration before any
 /// resource is armed, so a scan that cannot proceed arms no capture. The
 /// refusal names the first bound that does not hold.
-fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), BoundaryError> {
+fn validate_options(
+    batches: &[Batch<Probe>],
+    options: &PipelineOptions,
+) -> Result<(), BoundaryError> {
     let within = |value: usize, maximum: usize| (1..=maximum).contains(&value);
     let bounds = [
         (
@@ -126,7 +137,11 @@ fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), 
             crate::scan::MAX_PROBES,
             within(batches.len(), crate::scan::MAX_PROBES),
         ),
-        ("max_in_flight", 1024, within(options.max_in_flight, 1024)),
+        (
+            "max_in_flight",
+            crate::scan::MAX_IN_FLIGHT,
+            within(options.max_in_flight, crate::scan::MAX_IN_FLIGHT),
+        ),
         (
             "max_prepared_bytes",
             256 * 1024 * 1024,
@@ -218,6 +233,12 @@ pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryErr
         Vec::new(),
     )
 }
+/// The provider deadline for work bounded by `end` on the client's clock,
+/// carrying the client's cancellation.
+fn until<P: Providers, K: Clock>(client: &Client<P, K>, end: Instant) -> Deadline {
+    Deadline::new(end.saturating_duration_since(client.now()))
+        .with_cancellation(client.cancellation.clone())
+}
 fn check<P: Providers, K: Clock>(
     client: &Client<P, K>,
     deadline: Instant,
@@ -225,7 +246,7 @@ fn check<P: Providers, K: Clock>(
     client
         .check_cancelled()
         .map_err(BoundaryError::from_error)?;
-    if Instant::now() >= deadline {
+    if client.now() >= deadline {
         return Err(BoundaryError::new(
             "packet scan pipeline reached the operation deadline",
             ErrorClassification::new("policy.scan_duration_limit", Kind::Policy, None),
@@ -234,14 +255,17 @@ fn check<P: Providers, K: Clock>(
     }
     Ok(())
 }
-pub(in crate::scan) fn run<P: Providers, K: Clock>(
-    executor: &mut ExchangeExecutor<'_, P, K>,
-    batches: &[Batch],
+/// Runs every batch through one capture group, sending on the client's clock:
+/// the operation deadline and the probe start schedule are read from it,
+/// while each wait for a captured frame stays on the capture group.
+pub(super) fn run<P: Providers, K: Clock>(
+    executor: &ExchangeExecutor<'_, P, K>,
+    batches: &[Batch<Probe>],
     options: PipelineOptions,
-    emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+    emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
 ) -> Result<Stats, BoundaryError> {
     validate_options(batches, &options)?;
-    let started = Instant::now();
+    let started = executor.client.now();
     let deadline = started
         .checked_add(options.max_duration)
         .ok_or_else(|| limit("duration", 3600))?;
@@ -250,7 +274,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
         .map(Planned::new)
         .collect::<Result<Vec<_>, _>>()?;
     let cancellation = executor.client.cancellation.clone();
-    let preparation = crate::deadline::until(deadline, cancellation.clone());
+    let preparation = until(executor.client, deadline);
     let mut plan = prepare::plan(executor, &planned, options, deadline, &preparation)?;
     let request = GroupRequest {
         interfaces: plan.interfaces.clone(),
@@ -263,7 +287,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
     group
         .arm(
             executor.client.providers.capture(),
-            &crate::deadline::until(deadline, cancellation.clone()),
+            &until(executor.client, deadline),
         )
         .map_err(BoundaryError::from_error)?;
     let mut stats = Stats::default();
@@ -277,13 +301,13 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
     let result = (|| -> Result<(), BoundaryError> {
         check(executor.client, deadline)?;
         group
-            .wait_ready(&crate::deadline::until(deadline, cancellation.clone()))
+            .wait_ready(&until(executor.client, deadline))
             .map_err(BoundaryError::from_error)?;
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
             .ok_or_else(|| limit("probe rate", crate::scan::MAX_RATE as usize))?;
         let mut next = 0usize;
-        let mut next_send = Instant::now();
+        let mut next_send = executor.client.now();
         let mut retained = plan.base_bytes;
         // One admitted probe per batch, consumed in send order: the next one
         // belongs to `batches[next]`.
@@ -299,7 +323,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
         let mut draining_expired = HashSet::new();
         while next < batches.len() || !pending.is_empty() {
             check(executor.client, deadline)?;
-            let now = Instant::now();
+            let now = executor.client.now();
             let expired: Vec<_> = pending
                 .iter()
                 .filter(|(_, entry): &(&usize, &Pending)| now >= entry.deadline)
@@ -335,7 +359,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
             }
             while !draining_captures
                 && pending.len() < options.max_in_flight
-                && Instant::now() >= next_send
+                && executor.client.now() >= next_send
                 && let Some(AdmittedProbe { cost, memory }) = admitted.next_if(|probe| {
                     retained.saturating_add(probe.memory) <= options.max_prepared_bytes
                 })
@@ -395,7 +419,9 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
                 emit(PipelineEvent::Sent { index: next, sent })?;
                 failed_probe = None;
                 next += 1;
-                next_send = Instant::now()
+                next_send = executor
+                    .client
+                    .now()
                     .checked_add(spacing)
                     .ok_or_else(|| limit("pacing delay", 3600))?;
                 if !spacing.is_zero() {
@@ -420,7 +446,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
                 earliest
             };
             let mut wait = wake
-                .saturating_duration_since(Instant::now())
+                .saturating_duration_since(executor.client.now())
                 .min(Duration::from_millis(5));
             if draining_captures {
                 capture_drain_remaining -= 1;
@@ -563,7 +589,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
             break;
         }
     }
-    stats.elapsed = started.elapsed();
+    stats.elapsed = executor.client.now().saturating_duration_since(started);
     let result = result.and_then(|()| {
         for source in &capture_sources {
             if let Some(loss) = source.statistics.evidence_loss_error() {
@@ -580,7 +606,7 @@ pub(in crate::scan) fn run<P: Providers, K: Clock>(
     });
     match result {
         Ok(()) => Ok(stats),
-        Err(source) => Err(BoundaryError::from_error(Error {
+        Err(source) => Err(BoundaryError::from_error(Failure {
             source,
             stats,
             pending: pending_evidence(&pending, &planned),
@@ -612,8 +638,8 @@ fn complete(
     planned: &[Planned<'_>],
     pending: &mut BTreeMap<usize, Pending>,
     retained: &mut usize,
-    emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
-    failed: &mut Option<crate::scan::Probe>,
+    emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    failed: &mut Option<Probe>,
     usage: &mut EvidenceUsage,
 ) -> Result<(), BoundaryError> {
     let entry = pending.get_mut(&index).expect("completed pending probe");

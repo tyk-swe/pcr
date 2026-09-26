@@ -652,6 +652,8 @@ mod tests {
             probes_per_second: None,
             max_in_flight: 2,
             limits: super::super::Limits::default(),
+            route: Default::default(),
+            collection: Default::default(),
         };
         let closed = Arc::new(AtomicUsize::new(0));
         let provider = Arc::new(Concurrent {
@@ -734,6 +736,8 @@ mod tests {
             probes_per_second: None,
             max_in_flight: 1,
             limits: super::super::Limits::default(),
+            route: Default::default(),
+            collection: Default::default(),
         };
         let closed = Arc::new(AtomicUsize::new(0));
         let provider = Arc::new(Verdicts {

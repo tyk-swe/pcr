@@ -16,7 +16,8 @@ use crate::target::Selection;
 use super::Error;
 use crate::probe::Transport;
 use crate::scan::{
-    DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_PROBES, MAX_RATE,
+    DEFAULT_MAX_PORTS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS, MAX_IN_FLIGHT, MAX_PROBES,
+    MAX_RATE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,17 +142,19 @@ pub fn select_ports(
     Ok(ports)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One scan: the targets and ports to probe, how often and how fast, and the
+/// route and collection bounds every probe exchange runs under.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request {
-    /// Maximum overlapping probe response windows.
+    /// Maximum overlapping probe response windows, at most
+    /// [`MAX_IN_FLIGHT`]. One runs every probe as its own exchange; more
+    /// share one capture group across a rolling window.
     pub max_in_flight: usize,
     pub targets: Selection,
     pub transport: Transport,
     /// Exact bytes appended to each UDP probe; empty preserves an empty datagram.
     /// Non-empty payloads are rejected for TCP and ICMP.
-    #[serde(default)]
     pub udp_payload: bytes::Bytes,
-    #[serde(default)]
     pub udp_profiles: std::collections::BTreeMap<u16, std::sync::Arc<super::profile::UdpProfile>>,
     pub address_family: Family,
     /// TCP or UDP destination ports. ICMP scans require this to be empty and
@@ -162,6 +165,10 @@ pub struct Request {
     /// Maximum probe start rate; rolling windows share one pacing schedule.
     pub probes_per_second: Option<u32>,
     pub limits: Limits,
+    /// How each probe's route is planned.
+    pub route: crate::route::Options,
+    /// How each probe exchange's capture is armed and what it retains.
+    pub collection: crate::exchange::Collection,
 }
 
 impl Request {
@@ -170,11 +177,11 @@ impl Request {
     /// with the declared ports.
     pub fn validate(&self) -> Result<(), Error> {
         self.limits.validate()?;
-        if self.max_in_flight == 0 || self.max_in_flight > 1024 {
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_IN_FLIGHT {
             return Err(Error::InvalidLimit {
                 field: "max_in_flight",
                 value: self.max_in_flight as u64,
-                reason: "must be within 1..=1024".to_owned(),
+                reason: format!("must be within 1..={MAX_IN_FLIGHT}"),
             });
         }
         self.targets.validate().map_err(Error::TargetSelection)?;

@@ -77,7 +77,7 @@ pub(super) fn emit_event(
 }
 
 pub(super) fn emit_complete(
-    summary: packetcraftr::traceroute::Summary,
+    summary: packetcraftr::traceroute::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.complete_published(

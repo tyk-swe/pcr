@@ -182,11 +182,11 @@ pub struct Report {
 }
 
 /// A scan, with its diagnostics and totals.
-impl TryFrom<library::Report> for Published<Report> {
+impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
-    fn try_from(result: library::Report) -> Result<Self, Error> {
-        let library::Report {
+    fn try_from(result: library::Aggregate) -> Result<Self, Error> {
+        let library::Aggregate {
             planned_duration,
             target,
             resolved_addresses,
@@ -328,8 +328,8 @@ impl TryFrom<library::Event> for Published<Event> {
 }
 
 /// The terminal record, with the run's totals.
-impl From<library::Summary> for Published<Event> {
-    fn from(summary: library::Summary) -> Self {
+impl From<library::Report> for Published<Event> {
+    fn from(summary: library::Report) -> Self {
         Self::new(
             Event::Complete {
                 planned_duration: summary.planned_duration,
@@ -414,10 +414,10 @@ pub struct Failure {
     pub failed_probe: Option<FailedProbe>,
     pub capture_sources: Vec<CaptureSource>,
 }
-impl TryFrom<&library::PipelineError> for Failure {
+impl TryFrom<&library::PipelineFailure> for Failure {
     type Error = Error;
 
-    fn try_from(error: &library::PipelineError) -> Result<Self, Error> {
+    fn try_from(error: &library::PipelineFailure) -> Result<Self, Error> {
         Ok(Self {
             stats: (&error.stats).into(),
             pending: error

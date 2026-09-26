@@ -65,7 +65,7 @@ fn scan_output_preserves_endpoint_identity_and_port_absence() {
         ..evidence_free.clone()
     };
     let output = packetcraftr_cli::output::envelope::Published::<scan_output::Report>::try_from(
-        scan::Report {
+        scan::Aggregate {
             planned_duration: std::time::Duration::ZERO,
             target: "router.example".to_owned(),
             resolved_addresses: vec![ipv4, ipv6],

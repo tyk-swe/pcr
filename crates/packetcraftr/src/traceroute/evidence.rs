@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How traceroute reads, ranks, and reports one probe's evidence.
+//! How traceroute classifies, ranks, and reports one probe's evidence.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -10,41 +10,99 @@ use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, packet::Packet, registry::Registry,
 };
 
-use super::classification::classify_response;
+use packetcraftr_core::protocol::BuiltinProtocol;
+use packetcraftr_core::protocol::semantics;
+
 use super::plan::packet::sent_probe_matches;
-use super::{
-    Completion, Event, Probe, ProbeEvidence, ResponseClassification, ResponseKind,
-    UndecodedEvidence,
-};
+use super::{Event, Probe, ProbeEvidence, ResponseKind, Termination, UndecodedEvidence};
 use crate::SentPacket;
+use crate::correlation::{self, Correlation, Transport};
 use crate::probe::ProbeStatus;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
+
+/// A checksum-valid response correlated to one probe: what kind of hop
+/// answered, who answered, and why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CorrelatedResponse {
+    pub kind: ResponseKind,
+    pub responder: IpAddr,
+    pub reason: &'static str,
+}
+
+/// Pure traceroute classifier. Corrupt, unrelated, pre-probe, and
+/// protocol-inconsistent traffic returns `None` and cannot advance the trace.
+pub fn classify_response(
+    registry: &Registry,
+    strategy: Transport,
+    request: &Packet,
+    response: &DecodedPacket,
+) -> Option<CorrelatedResponse> {
+    let observation = correlation::observe(registry, strategy, request, response)?;
+    let destination = packet_destination(request, strategy)?;
+    let kind = match observation.correlation {
+        Correlation::TimeExceeded => ResponseKind::Intermediate,
+        correlation if correlation.is_direct_reply() => {
+            if observation.responder != destination {
+                return None;
+            }
+            ResponseKind::DestinationReached
+        }
+        Correlation::PortUnreachable
+            if strategy == Transport::Udp && observation.responder == destination =>
+        {
+            ResponseKind::DestinationReached
+        }
+        _ => ResponseKind::Unreachable,
+    };
+    Some(CorrelatedResponse {
+        kind,
+        responder: observation.responder,
+        reason: observation.reason,
+    })
+}
+
+fn packet_destination(packet: &Packet, strategy: Transport) -> Option<IpAddr> {
+    let transport = match strategy {
+        Transport::Tcp => Some(BuiltinProtocol::Tcp),
+        Transport::Udp => Some(BuiltinProtocol::Udp),
+        Transport::Icmp => None,
+    };
+    let transport_index = packet.iter().position(|layer| match transport {
+        Some(transport) => BuiltinProtocol::of(layer) == Some(transport),
+        None => matches!(
+            BuiltinProtocol::of(layer),
+            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
+        ),
+    })?;
+    let path = semantics::enclosing_ip_path(packet, transport_index).ok()??;
+    Some(path.final_destination)
+}
 
 /// Traceroute's batch-evidence hook. It also tracks how the trace completes;
 /// a destination or unreachable answer ends the trace after its hop.
 pub(super) struct ProbeClassifier<'a> {
     pub(super) registry: &'a Registry,
     pub(super) target: Arc<str>,
-    pub(super) completion: Completion,
+    pub(super) termination: Termination,
 }
 
 impl ProbeClassifier<'_> {
     fn observe(&mut self, probe: &ProbeEvidence) {
-        self.completion = match (self.completion, probe.response_kind, probe.status) {
+        self.termination = match (self.termination, probe.response_kind, probe.status) {
             (_, Some(ResponseKind::DestinationReached), _)
-            | (Completion::DestinationReached, _, _) => Completion::DestinationReached,
-            (_, Some(ResponseKind::Unreachable), _) | (Completion::Unreachable, _, _) => {
-                Completion::Unreachable
+            | (Termination::DestinationReached, _, _) => Termination::DestinationReached,
+            (_, Some(ResponseKind::Unreachable), _) | (Termination::Unreachable, _, _) => {
+                Termination::Unreachable
             }
-            (_, _, ProbeStatus::Response) => Completion::MaximumHops,
-            (completion, _, _) => completion,
+            (_, _, ProbeStatus::Response) => Termination::MaximumHops,
+            (termination, _, _) => termination,
         };
     }
 }
 
 impl Classifier for ProbeClassifier<'_> {
     type Probe = Probe;
-    type Observation = ResponseClassification;
+    type Observation = CorrelatedResponse;
     type Event = Event;
 
     fn sent_matches(&self, probe: &Probe, sent: &Packet) -> bool {
@@ -56,7 +114,7 @@ impl Classifier for ProbeClassifier<'_> {
         probe: &Probe,
         sent: &SentPacket,
         response: &DecodedPacket,
-    ) -> Option<ResponseClassification> {
+    ) -> Option<CorrelatedResponse> {
         classify_response(
             self.registry,
             probe.target.transport(),
@@ -65,11 +123,11 @@ impl Classifier for ProbeClassifier<'_> {
         )
     }
 
-    fn rank(&self, observation: &ResponseClassification) -> u8 {
+    fn rank(&self, observation: &CorrelatedResponse) -> u8 {
         observation.kind.rank()
     }
 
-    fn responder(&self, observation: &ResponseClassification) -> IpAddr {
+    fn responder(&self, observation: &CorrelatedResponse) -> IpAddr {
         observation.responder
     }
 
@@ -77,7 +135,7 @@ impl Classifier for ProbeClassifier<'_> {
         &mut self,
         probe: &Probe,
         sent: &SentPacket,
-        outcome: Outcome<ResponseClassification>,
+        outcome: Outcome<CorrelatedResponse>,
     ) -> Event {
         let mut evidence = ProbeEvidence {
             sequence: probe.sequence,

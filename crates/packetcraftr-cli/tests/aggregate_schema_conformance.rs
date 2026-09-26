@@ -1434,8 +1434,16 @@ fn verify_forwarding_case() -> Value {
     let document = forwarding_output::Report::try_from((
         &report,
         forwarding::Sided {
-            ingress: ("pre-forwarding.pcap".to_owned(), None, None),
-            egress: ("post-forwarding.pcap".to_owned(), None, None),
+            ingress: forwarding_output::Input {
+                path: "pre-forwarding.pcap".to_owned(),
+                source: None,
+                selection_filter: None,
+            },
+            egress: forwarding_output::Input {
+                path: "post-forwarding.pcap".to_owned(),
+                source: None,
+                selection_filter: None,
+            },
         },
         None,
     ))

@@ -1778,3 +1778,4 @@ Classification codes are unchanged.
 | `packetcraftr::scan::profile::{Config, Payload, ResponseCheck, ByteCheck, MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` | `packetcraftr_core::document::udp_profiles::…` |
 | `scan::profile::Error("reason")` | `scan::profile::Error::Invalid("reason")`; the enum also carries the document refusals |
 | reading a `packetcraftr.udp-profiles/v1` document | `scan::profile::compile(packetcraftr_core::document::udp_profiles::parse(&bytes)?)?` |
+| `packetcraftr_cli::output::verify_forwarding::Input` tuple `(path, source, selection_filter)` | `Input { path, source, selection_filter }` |

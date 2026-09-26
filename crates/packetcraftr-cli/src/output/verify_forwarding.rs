@@ -472,11 +472,25 @@ pub struct Report {
     pub omitted: Omissions,
 }
 
-/// One capture as invoked: its path, the digest of the stream the comparison
-/// consumed, and its selection filter.
-pub type Input = (String, Option<CaptureSource>, Option<String>);
+/// One capture as invoked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Input {
+    /// The capture path as given on the command line.
+    pub path: String,
+    /// The digest of the stream the comparison consumed, when known.
+    pub source: Option<CaptureSource>,
+    /// The side's selection filter, as written.
+    pub selection_filter: Option<String>,
+}
 
-fn capture((path, source, selection_filter): Input, census: &analysis::SideSummary) -> Capture {
+fn capture(
+    Input {
+        path,
+        source,
+        selection_filter,
+    }: Input,
+    census: &analysis::SideSummary,
+) -> Capture {
     Capture {
         source,
         selection_filter,

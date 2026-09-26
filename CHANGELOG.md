@@ -533,15 +533,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   are transparent), `dns::{canonical_query_name, decode_response,
   decode_tcp_frame, encode_query}` are `dns::wire::…`, and
   `dns::QueryTypeParseError` folds into `wire::Error` (`QueryTypeSyntax`,
-  `QueryTypeRange`).
-  The UDP profiles document's data lives in core:
+  `QueryTypeRange`). The UDP profiles document's data lives in core:
   `scan::profile::{Config, Payload, ResponseCheck, ByteCheck,
   MAX_PROFILE_PORTS, MAX_PROFILE_BYTES}` are
   `packetcraftr_core::document::udp_profiles::…`, and `scan::profile::Error`
   is an enum whose `Invalid` variant replaces the tuple struct and which also
   carries the document refusals (`Document`, `PortCount`, `Storage`,
-  `ConflictingPort`, `MappedPorts`). Variants, messages, and classification codes are unchanged. See
-  `docs/migration-unreleased.md`.
+  `ConflictingPort`, `MappedPorts`). Classification codes are unchanged.
+  See `docs/migration-unreleased.md`.
+- `packetcraftr_cli::output::verify_forwarding::Input` is a struct with
+  `path`, `source`, and `selection_filter` fields instead of a tuple alias.
 
 ### Added
 

@@ -27,8 +27,17 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
         fault: SendEvidenceFault::AcceptedBytesDiffer,
     };
     assert_eq!(
+        invariant.to_string(),
+        "packet transmission wire evidence is inconsistent"
+    );
+    assert_eq!(
         invariant.causes(),
         ["provider-accepted bytes differ from the exact submitted frame"]
+    );
+    assert_row(
+        &SendEvidenceFault::InconsistentTiming,
+        "internal.live_io_invariant",
+        Kind::Internal,
     );
 
     // A route adapter refusal survives the interface-discovery boundary.

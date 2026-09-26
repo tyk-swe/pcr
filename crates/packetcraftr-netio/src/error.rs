@@ -22,7 +22,7 @@ pub enum SendEvidenceFault {
     AcceptedBytesDiffer,
     #[error("provider timing has inconsistent monotonic endpoints")]
     InconsistentTiming,
-    #[error("provider-accepted bytes cannot form a capture record: {0}")]
+    #[error("provider-accepted bytes cannot form a capture record")]
     UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
 }
 
@@ -88,7 +88,7 @@ pub enum Error {
         bytes_sent: usize,
         wire_bytes: usize,
     },
-    #[error("packet transmission wire evidence is inconsistent: {fault}")]
+    #[error("packet transmission wire evidence is inconsistent")]
     InvalidSendEvidence {
         #[source]
         fault: SendEvidenceFault,
@@ -177,6 +177,12 @@ pub enum Error {
         first: Box<Self>,
         remaining: Vec<Self>,
     },
+}
+
+impl Classified for SendEvidenceFault {
+    fn classification(&self) -> Classification {
+        live_io_invariant()
+    }
 }
 
 impl Classified for Error {
@@ -285,15 +291,11 @@ impl Classified for Error {
             ),
             Self::CaptureSource { source, .. } => source.classification(),
             Self::CaptureCleanup { first, .. } => first.classification(),
+            Self::InvalidSendEvidence { fault } => fault.classification(),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
-            | Self::InvalidSendEvidence { .. }
-            | Self::InvalidCaptureStatistics { .. } => classified(
-                "internal.live_io_invariant",
-                Kind::Internal,
-                "report the inconsistent provider result; do not reinterpret it as a successful operation",
-            ),
+            | Self::InvalidCaptureStatistics { .. } => live_io_invariant(),
         }
     }
 
@@ -324,6 +326,14 @@ impl Error {
             _ => Self::DeadlineExceeded { operation },
         }
     }
+}
+
+fn live_io_invariant() -> Classification {
+    classified(
+        "internal.live_io_invariant",
+        Kind::Internal,
+        "report the inconsistent provider result; do not reinterpret it as a successful operation",
+    )
 }
 
 fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {

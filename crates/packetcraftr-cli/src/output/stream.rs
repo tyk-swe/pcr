@@ -498,19 +498,7 @@ impl Classified for EncodeError {
 }
 
 #[cfg(test)]
-mod fixtures;
+mod test_support;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod failure_boundaries;
-
-#[cfg(test)]
-mod trace_properties;
-
-#[cfg(test)]
-mod publication_budget_tests;
-
-#[cfg(test)]
-mod configurable_timeout_tests;

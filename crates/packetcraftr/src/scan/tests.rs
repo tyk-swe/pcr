@@ -85,7 +85,7 @@ impl Executor<Batch> for TimeoutExecutor {
                     .unwrap()
                     .bytes = bytes::Bytes::from_static(b"changed");
             }
-            let receipt = crate::evidence::test_sent_packet(packet);
+            let receipt = crate::test_support::sent_packet(packet);
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }

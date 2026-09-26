@@ -243,17 +243,23 @@ pub(crate) fn native_resource_snapshot() -> crate::resources::NativeSnapshot {
     }
 }
 
-#[cfg(all(test, native_layer2))]
+// `native_layer2` implies `native_route`: the Layer 2 feature enables the route
+// feature, and both backends need a route-capable target.
+#[cfg(all(test, native_route))]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::error::Error as _;
 
-    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::{error::Classified, frame::LinkType};
 
     use super::*;
-    use crate::link::Capability;
 
+    #[cfg(native_layer2)]
     #[test]
     fn capture_netmask_uses_the_first_ipv4_assignment() {
+        use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+        use crate::link::Capability;
+
         let interface = interface::Info {
             id: InterfaceId {
                 name: "fixture0".to_owned(),
@@ -286,15 +292,6 @@ mod tests {
         }];
         assert_eq!(capture_netmask(&ipv6_only), None);
     }
-}
-
-#[cfg(all(test, native_route))]
-mod interface_validation_tests {
-    use std::error::Error as _;
-
-    use packetcraftr_core::{error::Classified, frame::LinkType};
-
-    use super::*;
 
     #[test]
     fn discovery_retains_actual_snapshot_validation_failures() {

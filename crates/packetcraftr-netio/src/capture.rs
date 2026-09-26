@@ -613,7 +613,7 @@ fn is_zero(value: &u64) -> bool {
 }
 
 #[cfg(test)]
-mod cancellation_tests {
+mod tests {
     use super::*;
     use packetcraftr_core::budget::Cancellation;
     use std::sync::{
@@ -676,11 +676,6 @@ mod cancellation_tests {
         capture.shutdown().unwrap();
         assert!(stopped.load(Ordering::Acquire));
     }
-}
-
-#[cfg(test)]
-mod native_settings_tests {
-    use super::*;
 
     fn limits() -> Limits {
         Limits {

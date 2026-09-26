@@ -160,7 +160,7 @@ impl Executor<Batch<TestProbe>> for ScriptedExecutor {
             .map(|probe| {
                 let mut packet = Packet::new();
                 packet.push(Raw::new(Bytes::from(vec![probe.0 as u8])));
-                crate::evidence::test_sent_packet(packet)
+                crate::test_support::sent_packet(packet)
             })
             .collect();
         let responses = script

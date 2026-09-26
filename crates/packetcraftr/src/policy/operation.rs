@@ -673,11 +673,7 @@ mod tests {
             crate::policy::Error::PermissivePacket.classification().code
         );
     }
-}
 
-#[cfg(test)]
-mod budget_tests {
-    use super::*;
     #[test]
     fn aggregate_dns_budget_rejects_overflow_in_each_quantity() {
         assert!(

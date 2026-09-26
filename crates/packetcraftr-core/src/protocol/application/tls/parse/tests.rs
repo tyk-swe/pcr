@@ -8,7 +8,7 @@ use crate::protocol::application::tls::model::{
     MAX_EXTENSION_LEN, MAX_EXTENSIONS, MAX_HANDSHAKE_BODY, MAX_RECORD_BODY, RECORD_HEADER_LEN,
     ServerHello, extension,
 };
-use crate::protocol::application::tls::test_wire::{
+use crate::protocol::application::tls::test_support::{
     extension, handshake_message, record, u16_bytes, vector8, vector16,
 };
 

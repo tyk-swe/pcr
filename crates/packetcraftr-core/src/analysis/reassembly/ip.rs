@@ -181,7 +181,7 @@ pub struct Reassembler {
 }
 
 #[cfg(test)]
-mod memory_charge_tests {
+mod tests {
     use std::collections::BTreeSet;
     use std::mem::size_of;
     use std::time::Instant;

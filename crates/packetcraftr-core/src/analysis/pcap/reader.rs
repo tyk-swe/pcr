@@ -312,7 +312,7 @@ impl<R: Read + Seek> Reader<R> {
 }
 
 #[cfg(test)]
-mod cancellation_tests {
+mod tests {
     use super::*;
     use crate::analysis::pcap::{Limits, Writer, rewrite, select};
     use crate::error::Classified;

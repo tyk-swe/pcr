@@ -341,7 +341,7 @@ impl Cancelled {
 }
 
 #[cfg(test)]
-mod cancellation_tests {
+mod tests {
     use super::*;
 
     #[test]

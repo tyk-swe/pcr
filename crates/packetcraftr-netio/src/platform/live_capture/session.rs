@@ -356,7 +356,7 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
-    use crate::error::testing::assert_same_failure;
+    use crate::error::test_support::assert_same_failure;
     use crate::platform::live_capture::{
         NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics, NativeCapturedPacket,
     };

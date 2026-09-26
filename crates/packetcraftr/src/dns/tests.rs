@@ -110,7 +110,7 @@ struct TrustedReceiptExecutor;
 
 impl Executor<Exchange> for TrustedReceiptExecutor {
     fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
-        let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
+        let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         Ok(super::Execution {
             permit: exchange.permit,
@@ -341,7 +341,7 @@ fn scripted_udp_execution(
     payload: Option<Bytes>,
     elapsed: Duration,
 ) -> super::Execution {
-    let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
+    let sent = crate::test_support::sent_packet(exchange.probe.packet());
     let bytes = u64::try_from(sent.bytes_sent()).unwrap();
     let responses = payload
         .into_iter()
@@ -400,7 +400,7 @@ fn scripted_udp_execution(
 
 impl Executor<Exchange> for ClassifiedResponseExecutor {
     fn execute(&mut self, exchange: &super::Exchange) -> Result<super::Execution, BoundaryError> {
-        let sent = crate::evidence::test_sent_packet(exchange.probe.packet());
+        let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         let mut packet = Packet::new();
         packet

@@ -324,7 +324,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::error::testing::assert_same_failure;
+    use crate::error::test_support::assert_same_failure;
 
     #[test]
     fn backward_wall_clock_step_does_not_invalidate_submission_timing() {

@@ -15,7 +15,7 @@ use crate::route::Plan;
 use packetcraftr_core::frame::LinkType;
 
 use super::*;
-use crate::error::testing::same_failure;
+use crate::error::test_support::same_failure;
 
 #[derive(Clone)]
 struct SlowLayer2 {

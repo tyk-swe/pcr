@@ -33,7 +33,7 @@ pub(super) fn allocate() -> Result<Page, Error> {
         })?;
     bytes.resize(PAGE_BYTES, 0);
     #[cfg(test)]
-    work::record(|work| work.page_allocations += 1);
+    test_support::record(|work| work.page_allocations += 1);
     Ok(Page {
         bytes: bytes.into_boxed_slice(),
         live: 0,
@@ -63,7 +63,7 @@ pub(super) fn equals(pages: &BTreeMap<u64, Page>, offset: u64, bytes: &[u8]) -> 
 
 pub(super) fn copy_out(pages: &BTreeMap<u64, Page>, offset: u64, output: &mut [u8]) {
     #[cfg(test)]
-    work::record(|work| work.retained_copies += output.len());
+    test_support::record(|work| work.retained_copies += output.len());
     let mut copied = 0;
     slices(offset..offset + output.len() as u64, |key, range| {
         let len = range.len();
@@ -75,7 +75,7 @@ pub(super) fn copy_out(pages: &BTreeMap<u64, Page>, offset: u64, output: &mut [u
 /// The caller supplies only previously uncovered bytes, after admission.
 pub(super) fn insert(pages: &mut BTreeMap<u64, Page>, offset: u64, bytes: &[u8]) {
     #[cfg(test)]
-    work::record(|work| work.incoming_copies += bytes.len());
+    test_support::record(|work| work.incoming_copies += bytes.len());
     let mut copied = 0;
     slices(offset..offset + bytes.len() as u64, |key, range| {
         let page = pages
@@ -128,7 +128,8 @@ pub(super) fn remaining_count(
 }
 
 #[cfg(test)]
-pub(super) mod work {
+/// Per-thread copy and allocation counters the reassembly tests read back.
+pub(super) mod test_support {
     use std::cell::Cell;
     #[derive(Clone, Copy, Default, Debug)]
     pub(in crate::analysis::reassembly::tcp) struct Counts {
@@ -189,7 +190,7 @@ mod tests {
                 let base = u32::MAX - 64;
                 tcp.push(segment(base.wrapping_sub(1), vec![], true), now)
                     .unwrap();
-                work::take();
+                test_support::take();
                 for step in 0..size {
                     let index = if reverse { size - 1 - step } else { step };
                     assert!(
@@ -205,7 +206,7 @@ mod tests {
                         .is_empty()
                     );
                 }
-                let counts = work::take();
+                let counts = test_support::take();
                 assert_eq!(counts.incoming_copies, size * 100);
                 assert_eq!(counts.retained_copies, 0);
                 assert_eq!(counts.output_allocations, 0);
@@ -228,7 +229,7 @@ mod tests {
                 assert_eq!(output[0].len(), size * 100 + 1);
                 assert_eq!(output[0][0], 7);
                 assert!(output[0][1..].iter().all(|byte| *byte == 42));
-                let counts = work::take();
+                let counts = test_support::take();
                 assert_eq!(counts.retained_copies, size * 100);
                 assert_eq!(counts.output_allocations, 1);
                 assert!(tcp.flows[&key].pages.is_empty());
@@ -282,13 +283,13 @@ mod tests {
         tcp.push(segment(99, vec![], true), now).unwrap();
         tcp.push(segment(101, vec![42; 200], false), now).unwrap();
         let before = tcp.aggregate_memory_charge();
-        work::take();
+        test_support::take();
         // Final state fits, but old page + output + new history do not.
         assert!(tcp.push(segment(100, vec![0], false), now).is_err());
         assert_eq!(tcp.aggregate_memory_charge(), before);
         assert_eq!(tcp.aggregate_bytes(), 200);
         assert!(tcp.push(segment(5000, vec![1], false), now).is_err());
-        assert_eq!(work::take().page_allocations, 0);
+        assert_eq!(test_support::take().page_allocations, 0);
         tcp.flush();
         assert_eq!(tcp.aggregate_memory_charge(), 0);
     }

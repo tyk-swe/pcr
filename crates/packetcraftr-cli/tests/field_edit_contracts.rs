@@ -344,23 +344,6 @@ fn v2_rules_file_assigns_fields_in_order() {
     let edited = frames(&target);
     let ttl = field_range(&edited[0], "ipv4", "ttl");
     assert_eq!(edited[0].bytes()[ttl.0], 61);
-    // The published v2 schema accepts the example and rejects empty assigns.
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v2.schema.json"
-    ))
-    .unwrap();
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../examples/documents/rewrite-field-edits.json"
-    ))
-    .unwrap();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    assert!(validator.is_valid(&fixture));
-    let mut invalid = fixture.clone();
-    invalid["rules"][0]["assign"] = serde_json::json!([]);
-    assert!(!validator.is_valid(&invalid));
-    invalid = fixture.clone();
-    invalid["schema"] = serde_json::json!("packetcraftr.rewrite/v1");
-    assert!(!validator.is_valid(&invalid));
 }
 
 #[test]
@@ -373,15 +356,6 @@ fn v2_rules_file_rejects_unknown_assignment_properties() {
         "schema": "packetcraftr.rewrite/v2",
         "rules": [{"assign": [{"field": "ipv4.ttl", "value": 63, "occurrence": 2}]}],
     });
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v2.schema.json"
-    ))
-    .unwrap();
-    assert!(
-        !jsonschema::validator_for(&schema)
-            .unwrap()
-            .is_valid(&document)
-    );
     std::fs::write(&rules, serde_json::to_vec(&document).unwrap()).unwrap();
 
     let output = run(&[

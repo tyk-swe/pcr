@@ -32,9 +32,9 @@ fn decoded_evidence(bytes: &'static [u8]) -> DecodedPacket {
 #[test]
 fn unsolicited_freshness_requires_proven_ingress_after_at_least_one_send() {
     let sent = [
-        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
-        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
-        Arc::new(crate::evidence::test_sent_packet(raw_packet())),
+        Arc::new(crate::test_support::sent_packet(raw_packet())),
+        Arc::new(crate::test_support::sent_packet(raw_packet())),
+        Arc::new(crate::test_support::sent_packet(raw_packet())),
     ];
     let first_marker = sent[0].timing().freshness_marker().monotonic();
     let second_marker = sent[1].timing().freshness_marker().monotonic();
@@ -77,7 +77,7 @@ fn capture_inside_submission_interval_is_not_proven_fresh() {
     let submission = Submission::start();
     let inside = submission.started().monotonic();
     std::thread::yield_now();
-    let sent = [Arc::new(crate::evidence::test_sent_packet_with_report(
+    let sent = [Arc::new(crate::test_support::sent_packet_with_report(
         raw_packet(),
         submission.complete(1, Bytes::from_static(&[0])),
     ))];
@@ -148,7 +148,7 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
 #[test]
 fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
     let received_at = Instant::now();
-    let sent = [Arc::new(crate::evidence::test_sent_packet(raw_packet()))];
+    let sent = [Arc::new(crate::test_support::sent_packet(raw_packet()))];
     let prepared = [PreparedPacket::fixture(
         sent[0].built().clone(),
         sent[0].route().clone(),

@@ -365,11 +365,7 @@ mod tests {
             Err(Error::Limit { limit: 1 })
         );
     }
-}
 
-#[cfg(test)]
-mod byte_boundary_tests {
-    use super::*;
     #[test]
     fn scope_budget_rejects_before_admission_and_preserves_existing_identity() {
         let path = vec![EncapsulationIdentifier::Vxlan { vni: 7 }; 16];

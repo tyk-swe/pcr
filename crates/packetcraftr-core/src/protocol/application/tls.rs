@@ -28,7 +28,7 @@ pub mod model;
 pub mod names;
 pub mod parse;
 #[cfg(test)]
-mod test_wire;
+mod test_support;
 
 /// Renders bytes as lowercase hexadecimal, two characters per byte.
 ///

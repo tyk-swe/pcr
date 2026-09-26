@@ -316,10 +316,15 @@ fn emission_check(cancellation: &core::budget::Cancellation) -> Result<(), CliEr
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
+    use packetcraftr_cli::output::contract::{ExchangeFormat, ToolFormat};
+    use packetcraftr_core::budget::Cancellation;
     use packetcraftr_netio as net;
 
     use super::*;
     use crate::system::client;
+    use crate::test_support::{TestRecord, assert_contiguous, stream};
 
     #[derive(Default)]
     struct FlakyProvider {
@@ -397,222 +402,213 @@ mod tests {
         );
     }
 
-    mod workflow {
-        use std::cell::RefCell;
+    /// A terminal record the scripted `complete` hook publishes.
+    #[derive(serde::Serialize)]
+    struct Complete(u64);
 
-        use super::*;
-        use crate::test_support::{TestRecord, assert_contiguous, stream};
-        use packetcraftr_cli::output::contract::{ExchangeFormat, ToolFormat};
-        use packetcraftr_core::budget::Cancellation;
-
-        /// A terminal record the scripted `complete` hook publishes.
-        #[derive(serde::Serialize)]
-        struct Complete(u64);
-
-        impl output::stream::StreamRecord for Complete {
-            fn event_name(&self) -> &'static str {
-                "complete"
-            }
+    impl output::stream::StreamRecord for Complete {
+        fn event_name(&self) -> &'static str {
+            "complete"
         }
+    }
 
-        fn emit_event(event: u64, stream: &StreamEncoder) -> Result<(), CliError> {
-            Ok(stream.emit_data(TestRecord(event), Vec::new())?)
+    fn emit_event(event: u64, stream: &StreamEncoder) -> Result<(), CliError> {
+        Ok(stream.emit_data(TestRecord(event), Vec::new())?)
+    }
+
+    fn complete(summary: u64, stream: &StreamEncoder) -> Result<(), CliError> {
+        stream
+            .complete(Complete(summary), Vec::new())
+            .map_err(CliError::from)
+    }
+
+    /// Scripted hooks recording the entry points and adapters the driver
+    /// invokes; the wire buffer records what the stream adapters publish.
+    fn hooks<'a>(
+        log: &'a RefCell<Vec<String>>,
+        stream_engine: impl FnOnce(&mut (), Emit<u64>) -> Result<u64, CliError> + 'a,
+    ) -> Hooks<'a, (), u64, u64, u64, ToolFormat, u64> {
+        Hooks {
+            command: output::contract::Command::Scan,
+            run: Box::new(|_| {
+                log.borrow_mut().push("run".to_owned());
+                Ok(41_u64)
+            }),
+            run_with_events: Box::new(stream_engine),
+            on_event: emit_event,
+            into_result: Box::new(|report| {
+                log.borrow_mut().push("into_result".to_owned());
+                Ok((report, Vec::new(), None))
+            }),
+            render_text: Box::new(|report: u64, format| {
+                log.borrow_mut()
+                    .push(format!("render_text:{report}:{format:?}"));
+                Ok(())
+            }),
+            complete,
         }
+    }
 
-        fn complete(summary: u64, stream: &StreamEncoder) -> Result<(), CliError> {
-            stream
-                .complete(Complete(summary), Vec::new())
-                .map_err(CliError::from)
-        }
-
-        /// Scripted hooks recording the entry points and adapters the driver
-        /// invokes; the wire buffer records what the stream adapters publish.
-        fn hooks<'a>(
-            log: &'a RefCell<Vec<String>>,
-            stream_engine: impl FnOnce(&mut (), Emit<u64>) -> Result<u64, CliError> + 'a,
-        ) -> Hooks<'a, (), u64, u64, u64, ToolFormat, u64> {
-            Hooks {
-                command: output::contract::Command::Scan,
-                run: Box::new(|_| {
-                    log.borrow_mut().push("run".to_owned());
-                    Ok(41_u64)
-                }),
-                run_with_events: Box::new(stream_engine),
-                on_event: emit_event,
-                into_result: Box::new(|report| {
-                    log.borrow_mut().push("into_result".to_owned());
-                    Ok((report, Vec::new(), None))
-                }),
-                render_text: Box::new(|report: u64, format| {
-                    log.borrow_mut()
-                        .push(format!("render_text:{report}:{format:?}"));
-                    Ok(())
-                }),
-                complete,
-            }
-        }
-
-        #[test]
-        fn ndjson_streams_events_then_the_terminal_record() {
-            let (stream, output) = stream(output::contract::Command::Scan);
-            let log = RefCell::new(Vec::new());
-            run_workflow(
-                &mut (),
-                ToolFormat::Ndjson,
-                &stream,
-                &Cancellation::default(),
-                hooks(&log, |_, mut emit| {
-                    emit(10).map_err(CliError::classified)?;
-                    emit(11).map_err(CliError::classified)?;
-                    Ok(7_u64)
-                }),
-            )
-            .expect("the scripted stream run succeeds");
-
-            let records = output.records();
-            assert_contiguous(&records);
-            assert_eq!(records.len(), 3, "two events plus the terminal record");
-            assert_eq!(records[0]["event"], "frame");
-            assert_eq!(records[0]["result"], 10);
-            assert_eq!(records[1]["result"], 11);
-            assert_eq!(records[2]["event"], "complete");
-            assert_eq!(records[2]["result"], 7);
-            assert!(stream.is_complete());
-            assert_eq!(*log.borrow(), Vec::<String>::new());
-        }
-
-        #[test]
-        fn aggregate_text_collects_and_renders() {
-            let (stream, output) = stream(output::contract::Command::Scan);
-            let log = RefCell::new(Vec::new());
-            run_workflow(
-                &mut (),
-                ToolFormat::Text,
-                &stream,
-                &Cancellation::default(),
-                hooks(&log, |_, _| unreachable!("aggregate never streams")),
-            )
-            .expect("the scripted aggregate run succeeds");
-
-            assert_eq!(
-                *log.borrow(),
-                vec!["run".to_owned(), "render_text:41:Text".to_owned()]
-            );
-            assert!(
-                output.bytes().is_empty(),
-                "aggregate formats write no stream records"
-            );
-        }
-
-        #[test]
-        fn aggregate_json_collects_converts_and_emits() {
-            let (stream, output) = stream(output::contract::Command::Scan);
-            let log = RefCell::new(Vec::new());
-            run_workflow(
-                &mut (),
-                ToolFormat::Json,
-                &stream,
-                &Cancellation::default(),
-                hooks(&log, |_, _| unreachable!("aggregate never streams")),
-            )
-            .expect("the scripted aggregate run succeeds");
-
-            assert_eq!(
-                *log.borrow(),
-                vec!["run".to_owned(), "into_result".to_owned()]
-            );
-            assert!(
-                output.bytes().is_empty(),
-                "aggregate formats write no stream records"
-            );
-        }
-
-        #[test]
-        fn other_render_formats_reach_render_text_with_the_format() {
-            let (stream, _output) = stream(output::contract::Command::Exchange);
-            let log = RefCell::new(Vec::new());
-            let hooks = Hooks {
-                command: output::contract::Command::Exchange,
-                run: Box::new(|_: &mut ()| Ok(41_u64)),
-                run_with_events: Box::new(|_: &mut (), _: Emit<u64>| {
-                    unreachable!("aggregate never streams")
-                }),
-                on_event: emit_event,
-                into_result: Box::new(|report| Ok((report, Vec::new(), None))),
-                render_text: Box::new(|report: u64, format: ExchangeFormat| {
-                    log.borrow_mut()
-                        .push(format!("render_text:{report}:{format:?}"));
-                    Ok(())
-                }),
-                complete,
-            };
-            run_workflow(
-                &mut (),
-                ExchangeFormat::PcapNg,
-                &stream,
-                &Cancellation::default(),
-                hooks,
-            )
-            .expect("the scripted capture run succeeds");
-
-            assert_eq!(*log.borrow(), vec!["render_text:41:PcapNg".to_owned()]);
-        }
-
-        #[test]
-        fn cancellation_during_emission_fails_before_the_terminal_record() {
-            let (stream, output) = stream(output::contract::Command::Scan);
-            let cancellation = Cancellation::default();
-            let injector = cancellation.clone();
-            let log = RefCell::new(Vec::new());
-            let error = run_workflow(
-                &mut (),
-                ToolFormat::Ndjson,
-                &stream,
-                &cancellation,
-                hooks(&log, move |_, mut emit| {
-                    emit(10).map_err(CliError::classified)?;
-                    injector.cancel();
-                    emit(11).map_err(CliError::classified)?;
-                    Ok(0_u64)
-                }),
-            )
-            .expect_err("the cancelled emission fails the run");
-
-            assert_eq!(error.exit_code(), 5, "io.cancelled keeps the I/O exit code");
-            let records = output.records();
-            assert_eq!(records.len(), 1, "the cancelled second event never emits");
-            assert_eq!(records[0]["result"], 10);
-            assert!(stream.is_open(), "a cancelled run emits no terminal record");
-        }
-
-        #[test]
-        fn an_event_adapter_failure_aborts_the_stream() {
-            let (stream, output) = stream(output::contract::Command::Scan);
-            let log = RefCell::new(Vec::new());
-            let mut hooks = hooks(&log, |_, mut emit| {
+    #[test]
+    fn ndjson_streams_events_then_the_terminal_record() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let log = RefCell::new(Vec::new());
+        run_workflow(
+            &mut (),
+            ToolFormat::Ndjson,
+            &stream,
+            &Cancellation::default(),
+            hooks(&log, |_, mut emit| {
                 emit(10).map_err(CliError::classified)?;
                 emit(11).map_err(CliError::classified)?;
-                Ok(0_u64)
-            });
-            hooks.on_event = |event, stream| {
-                if event == 11 {
-                    return Err(CliError::new(core::error::Kind::Usage, "adapter refused"));
-                }
-                emit_event(event, stream)
-            };
-            let error = run_workflow(
-                &mut (),
-                ToolFormat::Ndjson,
-                &stream,
-                &Cancellation::default(),
-                hooks,
-            )
-            .expect_err("the adapter failure propagates");
+                Ok(7_u64)
+            }),
+        )
+        .expect("the scripted stream run succeeds");
 
-            assert_eq!(error.exit_code(), 2);
-            let records = output.records();
-            assert_eq!(records.len(), 1, "only the first event emitted");
-            assert!(stream.is_open());
-        }
+        let records = output.records();
+        assert_contiguous(&records);
+        assert_eq!(records.len(), 3, "two events plus the terminal record");
+        assert_eq!(records[0]["event"], "frame");
+        assert_eq!(records[0]["result"], 10);
+        assert_eq!(records[1]["result"], 11);
+        assert_eq!(records[2]["event"], "complete");
+        assert_eq!(records[2]["result"], 7);
+        assert!(stream.is_complete());
+        assert_eq!(*log.borrow(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn aggregate_text_collects_and_renders() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let log = RefCell::new(Vec::new());
+        run_workflow(
+            &mut (),
+            ToolFormat::Text,
+            &stream,
+            &Cancellation::default(),
+            hooks(&log, |_, _| unreachable!("aggregate never streams")),
+        )
+        .expect("the scripted aggregate run succeeds");
+
+        assert_eq!(
+            *log.borrow(),
+            vec!["run".to_owned(), "render_text:41:Text".to_owned()]
+        );
+        assert!(
+            output.bytes().is_empty(),
+            "aggregate formats write no stream records"
+        );
+    }
+
+    #[test]
+    fn aggregate_json_collects_converts_and_emits() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let log = RefCell::new(Vec::new());
+        run_workflow(
+            &mut (),
+            ToolFormat::Json,
+            &stream,
+            &Cancellation::default(),
+            hooks(&log, |_, _| unreachable!("aggregate never streams")),
+        )
+        .expect("the scripted aggregate run succeeds");
+
+        assert_eq!(
+            *log.borrow(),
+            vec!["run".to_owned(), "into_result".to_owned()]
+        );
+        assert!(
+            output.bytes().is_empty(),
+            "aggregate formats write no stream records"
+        );
+    }
+
+    #[test]
+    fn other_render_formats_reach_render_text_with_the_format() {
+        let (stream, _output) = stream(output::contract::Command::Exchange);
+        let log = RefCell::new(Vec::new());
+        let hooks = Hooks {
+            command: output::contract::Command::Exchange,
+            run: Box::new(|_: &mut ()| Ok(41_u64)),
+            run_with_events: Box::new(|_: &mut (), _: Emit<u64>| {
+                unreachable!("aggregate never streams")
+            }),
+            on_event: emit_event,
+            into_result: Box::new(|report| Ok((report, Vec::new(), None))),
+            render_text: Box::new(|report: u64, format: ExchangeFormat| {
+                log.borrow_mut()
+                    .push(format!("render_text:{report}:{format:?}"));
+                Ok(())
+            }),
+            complete,
+        };
+        run_workflow(
+            &mut (),
+            ExchangeFormat::PcapNg,
+            &stream,
+            &Cancellation::default(),
+            hooks,
+        )
+        .expect("the scripted capture run succeeds");
+
+        assert_eq!(*log.borrow(), vec!["render_text:41:PcapNg".to_owned()]);
+    }
+
+    #[test]
+    fn cancellation_during_emission_fails_before_the_terminal_record() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let cancellation = Cancellation::default();
+        let injector = cancellation.clone();
+        let log = RefCell::new(Vec::new());
+        let error = run_workflow(
+            &mut (),
+            ToolFormat::Ndjson,
+            &stream,
+            &cancellation,
+            hooks(&log, move |_, mut emit| {
+                emit(10).map_err(CliError::classified)?;
+                injector.cancel();
+                emit(11).map_err(CliError::classified)?;
+                Ok(0_u64)
+            }),
+        )
+        .expect_err("the cancelled emission fails the run");
+
+        assert_eq!(error.exit_code(), 5, "io.cancelled keeps the I/O exit code");
+        let records = output.records();
+        assert_eq!(records.len(), 1, "the cancelled second event never emits");
+        assert_eq!(records[0]["result"], 10);
+        assert!(stream.is_open(), "a cancelled run emits no terminal record");
+    }
+
+    #[test]
+    fn an_event_adapter_failure_aborts_the_stream() {
+        let (stream, output) = stream(output::contract::Command::Scan);
+        let log = RefCell::new(Vec::new());
+        let mut hooks = hooks(&log, |_, mut emit| {
+            emit(10).map_err(CliError::classified)?;
+            emit(11).map_err(CliError::classified)?;
+            Ok(0_u64)
+        });
+        hooks.on_event = |event, stream| {
+            if event == 11 {
+                return Err(CliError::new(core::error::Kind::Usage, "adapter refused"));
+            }
+            emit_event(event, stream)
+        };
+        let error = run_workflow(
+            &mut (),
+            ToolFormat::Ndjson,
+            &stream,
+            &Cancellation::default(),
+            hooks,
+        )
+        .expect_err("the adapter failure propagates");
+
+        assert_eq!(error.exit_code(), 2);
+        let records = output.records();
+        assert_eq!(records.len(), 1, "only the first event emitted");
+        assert!(stream.is_open());
     }
 }

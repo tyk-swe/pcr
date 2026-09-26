@@ -8,10 +8,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use packetcraftr_core::build::BuiltPacket;
 use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::transmit::Report as TransmissionReport;
 
 use crate::BoundaryError;
 use crate::clock::Clock;
+use crate::evidence::SentPacket;
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::probe::{Executor, Request};
@@ -114,5 +118,70 @@ impl<Req: Request> Executor<Req> for RejectingExecutor {
             Classification::new("io.test", Kind::Io, None),
             Vec::new(),
         ))
+    }
+}
+
+/// A trusted sent-packet record for `packet` on a fixed Layer 3 route.
+pub(crate) fn sent_packet(packet: Packet) -> SentPacket {
+    use packetcraftr_netio::transmit::Submission;
+
+    let built = built_packet(packet);
+    let report = Submission::start().complete(built.bytes.len(), built.bytes.clone());
+    SentPacket::try_new(built, materialized_route(), report).expect("valid trusted sent fixture")
+}
+
+/// A trusted sent-packet record carrying the given transmission report.
+pub(crate) fn sent_packet_with_report(packet: Packet, report: TransmissionReport) -> SentPacket {
+    SentPacket::try_new(built_packet(packet), materialized_route(), report)
+        .expect("valid trusted sent fixture")
+}
+
+fn built_packet(packet: Packet) -> BuiltPacket {
+    use packetcraftr_core::build::{Builder, Options};
+    use packetcraftr_core::codec::Context;
+
+    Builder::new(packetcraftr_core::protocol::builtin::registry())
+        .build(packet, Context::default(), Options::default())
+        .expect("sent-packet fixture must build")
+}
+
+fn materialized_route() -> packetcraftr_netio::route::Materialized {
+    use packetcraftr_core::frame::LinkType;
+    use packetcraftr_netio::{
+        interface::Id as InterfaceId,
+        link::{Capability, Mode},
+        route::{Decision, Materialized, Plan},
+    };
+
+    Materialized {
+        plan: Plan {
+            decision: Decision {
+                interface: InterfaceId {
+                    name: "fixture0".to_owned(),
+                    index: 1,
+                },
+                source_mac: None,
+                selected_source: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: packetcraftr_netio::route::SelectionReason::InterfaceOnly,
+                destination_scope: packetcraftr_netio::route::Scope::Link,
+                mtu: u32::MAX,
+                capability: Capability::Layer3,
+                link_type: LinkType::RAW,
+            },
+            mode: Mode::Layer3,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: None,
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        },
+        neighbor_resolution: None,
     }
 }

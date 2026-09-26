@@ -369,7 +369,7 @@ impl From<MessageLimits> for packetcraftr_core::protocol::application::dns::Deco
 }
 
 #[cfg(test)]
-mod query_type_tests {
+mod tests {
     use super::{QueryType, QueryTypeParseError};
 
     #[test]

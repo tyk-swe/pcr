@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Network-layer protocol models.
+//!
+//! [`ndp`] types the Neighbor Discovery messages an [`Icmpv6`] body carries.
 
 mod envelope;
 mod icmp;
 mod igmp;
 mod ipv4;
 mod ipv6;
+pub mod ndp;
 mod raw_ip;
 
 /// IANA IP protocol numbers that codecs and analyzers refer to by name.

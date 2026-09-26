@@ -37,7 +37,8 @@
 //! submodules (`dns::Dns`, `tls::Tls`, `packet::MacAddress`). A module nests
 //! a public module only for a sub-domain with its own vocabulary, such as the
 //! analyses under [`analysis`], the reassembly engines, the protocol groups,
-//! and [`capture_file::compression`], or for a namespace of wire constants
+//! Neighbor Discovery ([`protocol::network::ndp`]), and
+//! [`capture_file::compression`], or for a namespace of wire constants
 //! such as [`protocol::network::ip_protocol`]. Custom layers use the same
 //! [`reflective_layer!`] declaration as the built-in ones.
 

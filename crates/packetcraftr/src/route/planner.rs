@@ -11,8 +11,7 @@ use packetcraftr_netio::route::{Decision, Provider};
 
 use super::error::Error;
 use super::intent::{
-    arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_macs,
-    packet_has_link_layer_intent,
+    arp_link_macs, extract_neighbor_vlan_tags, outer_ethernet_macs, packet_has_link_layer_intent,
 };
 use super::model::{Options, Plan, is_ipv4_broadcast};
 
@@ -332,7 +331,11 @@ fn select_link(
     let destination_mac = explicit_destination_mac
         .or(arp_destination_mac)
         .or_else(|| ipv4_broadcast.then_some(MacAddress([0xff; 6])))
-        .or_else(|| intent.lookup_destination.and_then(multicast_mac));
+        .or_else(|| {
+            intent
+                .lookup_destination
+                .and_then(MacAddress::for_ip_multicast)
+        });
     if mode == Mode::Layer2 && destination_mac.is_none() {
         let Some(lookup_destination) = intent.lookup_destination else {
             return Err(Error::MissingLayer2DestinationMac);

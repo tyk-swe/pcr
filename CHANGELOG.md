@@ -319,6 +319,29 @@ All notable changes to PacketcraftR are documented here. The format follows
     their message; it appears in `causes`.
 
   See `docs/migration-unreleased.md`.
+- Policy has one error type. `Policy::authorize` returns `policy::Error`, and
+  `packetcraftr::Error::{UnsupportedOperation, Wire,
+  PermissiveLiveOptInRequired}` move to `policy::Error::{UnsupportedOperation,
+  UndecodableWire, PermissiveLiveOptIn}` (reached through
+  `packetcraftr::Error::Policy`). `policy::Error` drops `Clone`, `PartialEq`,
+  and `Eq`. Codes are unchanged.
+- Declared operation ceilings are named limits: `policy::{WireBudget,
+  SocketBudget, BudgetOverflow}` become `policy::{WireLimits, SocketLimits,
+  LimitOverflow}`, `Operation::Budgeted` becomes `Operation::Wire`, the
+  operations' `budget()` accessors become `limits()`, and
+  `dns::Error::BudgetOverflow` becomes `dns::Error::LimitOverflow`. The
+  `policy.budget_overflow` code is unchanged.
+- `Stats` is the one name for counters: `packetcraftr_netio::capture::Statistics`
+  and `packetcraftr::scan::connect::Statistics` become `Stats`, and
+  `capture::Session::statistics()` becomes `stats()`. Serialized names are
+  unchanged.
+- The per-workflow duration ceilings `scan`, `traceroute`, `dns`, and `fuzz`
+  `MAX_DURATION`, `replay::MAX_REPLAY_DURATION`, `send::MAX_SEND_DURATION`, and
+  `exchange::MAX_EXCHANGE_TIMEOUT` are removed. Each equaled
+  `packetcraftr_netio::capture::MAX_TIMEOUT`, which every workflow now checks
+  directly.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -896,7 +919,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   chart and allocation comparison under `docs/`.
 - **Breaking:** the `packetcraftr::fuzz::PolicyAuthorizer` and
   `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}`
-  re-exports; import them from `packetcraftr::policy`.
+  re-exports; import them from `packetcraftr::policy` (`WireBudget` is now
+  `WireLimits`).
 - **Breaking:** the `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}`
   re-exports; import them from `packetcraftr_core::packet`.
 - The `#[doc(hidden)]` `packetcraftr_core::layer::{malformed_layout,

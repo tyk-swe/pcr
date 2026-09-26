@@ -372,7 +372,7 @@ base executor refuses unsupported windows instead of serializing them silently.
 CLI executor delegation preserves this capability. Raw scan NDJSON adds
 `probe_sent`; failures may carry `error.scan` with confirmed pending wire.
 
-`scan::Summary`, `scan::Report`, and `connect::Statistics` gain `rtt`:
+`scan::Summary`, `scan::Report`, and `connect::Stats` gain `rtt`:
 confirmed sends, verdicts received inside their round, `lost = sent - received`,
 and min/avg/max over one sample per received probe. Rust literal constructors
 must supply `scan::Rtt::default()` or an accumulated value. The output/v6
@@ -415,7 +415,7 @@ interface is optional, and each sent frame retains its actual output route.
 Use `scan::connect::{run, run_with_events}` with an explicit TCP provider for
 kernel connections. Reports use socket outcomes and endpoint evidence, with no
 raw packet receipt or capture statistics. `policy::Operation::Socket` carries
-`SocketOperation` with the authorized numeric endpoints and a finite `SocketBudget`.
+`SocketOperation` with the authorized numeric endpoints and finite `SocketLimits`.
 Custom authorizers must handle this operation before a connection is admitted.
 
 Netio's `tcp::start_connect` returns a pollable `PendingConnect`. Cancellation or
@@ -483,7 +483,7 @@ instead of sending exactly one packet. `Client::send` is unchanged; new
 and expansion `index`, and `passes_completed` counts finished passes. The
 output/v6 `sendResult` replaces `frame`/`route` with a `frames` list plus
 `passes_completed`. Invalid repeat/rate values classify as `cli.send_limit`;
-the pacing ceiling is `send::MAX_SEND_DURATION`.
+the pacing ceiling is `packetcraftr_netio::capture::MAX_TIMEOUT`.
 
 ## DNS question batches and reverse names
 
@@ -657,7 +657,7 @@ canonical path:
 | `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
 | `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_core::error::Source` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
-| `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireBudget}` |
+| `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireLimits}` |
 | `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag}` |
 | `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `packetcraftr::dns::response_code_name(code)` |
 
@@ -926,7 +926,7 @@ so the published JSON is unchanged. Common replacements:
 | `core::error::Coordinate` (in `envelope::Error.context`) | `output::envelope::ErrorContext` |
 | `core::layout::PacketLayout`, `core::frame::Direction` | `output::frame::{Layout, Direction}` |
 | `netio::interface::Id`, `link::Mode`, `route::{Scope, SelectionReason}` | `output::network::{InterfaceId, LinkMode, Scope, SelectionReason}` |
-| `netio::capture::{Statistics, RealizedSettings}` | `output::capture::{Statistics, RealizedSettings}` |
+| `netio::capture::{Statistics, RealizedSettings}` | `output::capture::{Stats, RealizedSettings}` |
 | `core::analysis::{scope::Definition, ClockReport, StreamTransport, Endpoint, StreamRef}` | `output::analysis::{Scope, Clock, StreamTransport, Endpoint, StreamRef}` |
 | `packetcraftr::probe::{Transport, ProbeStatus}` | `output::probe::{Transport, ProbeStatus}` |
 | `packetcraftr::fuzz::CaseOutcome`, `core::fuzz::Strategy` | `output::fuzz::{Outcome, Strategy}` |
@@ -1234,3 +1234,56 @@ in the message. `tcp::Error::{Evidence, Spawn}`, `Error::InvalidSendEvidence`,
 and `SendEvidenceFault::UnrepresentableFrame` also no longer repeat their
 source in their message. `SendEvidenceFault` implements `Classified`
 (`internal.live_io_invariant`).
+
+## Policy error and workflow names
+
+**One policy error.** `Policy::authorize` returns `policy::Error` instead of
+`packetcraftr::Error`, and `policy` no longer uses the crate error at all.
+`packetcraftr::Error::Policy(policy::Error)` still wraps it for preparation
+failures. `policy::Error` no longer implements `Clone`, `PartialEq`, or `Eq`;
+compare with `matches!`.
+
+| Before | After |
+|---|---|
+| `packetcraftr::Error::UnsupportedOperation { authorizer, operation }` | `policy::Error::UnsupportedOperation { authorizer, operation }` |
+| `packetcraftr::Error::Wire(decode_error)` | `policy::Error::UndecodableWire { source: decode_error }` |
+| `packetcraftr::Error::PermissiveLiveOptInRequired` | `policy::Error::PermissiveLiveOptIn` |
+| `matches!(policy.authorize(op), Err(packetcraftr::Error::Policy(policy::Error::PacketLimit { .. })))` | `matches!(policy.authorize(op), Err(policy::Error::PacketLimit { .. }))` |
+
+A preparation failure from these reports `packetcraftr::Error::Policy(..)`
+with the same code as before (`internal.unsupported_operation`,
+`policy.invalid_packet_semantics`, `policy.permissive_live_opt_in`).
+
+**Limits and budgets.** The ceilings an operation declares for policy to
+authorize are limits; the running allowances charged against them keep
+`Budget` (`policy::CaptureBudget`).
+
+| Before | After |
+|---|---|
+| `policy::WireBudget` | `policy::WireLimits` |
+| `policy::SocketBudget` | `policy::SocketLimits` |
+| `policy::BudgetOverflow` | `policy::LimitOverflow` (code still `policy.budget_overflow`) |
+| `dns::Error::BudgetOverflow` | `dns::Error::LimitOverflow` |
+| `policy::Operation::Budgeted(limits)` | `policy::Operation::Wire(limits)`; `Operation::shape()` reports `"wire"` |
+| `Operation::budget()`, `DnsOperation::budget()`, `SocketOperation::budget()`, `DeclaredPackets::budget()`, `ReplayFrame::budget()` | `limits()` on each |
+
+**Stats.** Counter types are named `Stats`. Serialized field names are
+unchanged.
+
+| Before | After |
+|---|---|
+| `packetcraftr_netio::capture::Statistics` | `packetcraftr_netio::capture::Stats` |
+| `capture::Session::statistics()` (and every implementation) | `capture::Session::stats()` |
+| `packetcraftr::scan::connect::Statistics` | `packetcraftr::scan::connect::Stats` |
+
+**One duration ceiling.** Each workflow's duration and timeout ceiling
+restated `packetcraftr_netio::capture::MAX_TIMEOUT` (one hour). The aliases
+are removed; use that constant.
+
+| Removed | Use instead |
+|---|---|
+| `scan::MAX_DURATION`, `traceroute::MAX_DURATION`, `dns::MAX_DURATION`, `fuzz::MAX_DURATION` | `packetcraftr_netio::capture::MAX_TIMEOUT` |
+| `replay::MAX_REPLAY_DURATION`, `send::MAX_SEND_DURATION`, `exchange::MAX_EXCHANGE_TIMEOUT` | `packetcraftr_netio::capture::MAX_TIMEOUT` |
+
+`packetcraftr_core::fuzz::MAX_DURATION`, the offline campaign ceiling, is
+unchanged.

@@ -16,12 +16,12 @@ use crate::{
     layout::{ByteRange, FieldLayout},
 };
 
-use super::common::{
+use super::resolve_envelope;
+use crate::protocol::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
     out_of_range, payload_without_padding, protocol, resolve_u16, transport_checksum,
     transport_checksum_parts, truncated, typed_layer, wrong_type,
 };
-use super::network::resolve_envelope;
 
 use crate::protocol::BuiltinProtocol;
 

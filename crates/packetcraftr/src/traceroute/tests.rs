@@ -12,8 +12,7 @@ use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::protocol::{
-    icmp::{Icmpv4, Icmpv6},
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Icmpv6, Ipv4, Ipv6},
     transport::Udp,
 };
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};

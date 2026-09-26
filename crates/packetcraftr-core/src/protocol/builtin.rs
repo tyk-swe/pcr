@@ -7,8 +7,9 @@
 //! capture roots through [`super::BuiltinProtocol::ALL`] and
 //! [`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS).
 
-mod filter;
-mod registry;
+mod assembly;
+mod bindings;
+mod filter_fields;
 
-pub use registry::registration::TLS_TCP_PORTS;
-pub use registry::{registry, registry_with, registry_with_tls_ports};
+pub use assembly::{registry, registry_with, registry_with_tls_ports};
+pub use bindings::TLS_TCP_PORTS;

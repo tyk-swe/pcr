@@ -8,14 +8,13 @@ use crate::decode::DecodedPacket;
 use crate::layer::Layer;
 use crate::layer::Padding;
 use crate::packet::Packet;
-use crate::protocol::gre::Gre;
-use crate::protocol::ipv6::Fragment as Ipv6FragmentHeader;
 use crate::protocol::link::{Ethernet, Vlan, Vlan8021ad};
 use crate::protocol::network::{
-    Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension,
+    Fragment as Ipv6FragmentHeader, Ipv4, Ipv6, ip_protocol, ipv6_extension_header_length,
+    is_walkable_ipv6_extension,
 };
 use crate::protocol::transport::{Tcp, Udp};
-use crate::protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
+use crate::protocol::tunnel::{Ah, Erspan, Geneve, Gre, L2tpv3, Mpls, Pppoe, Vxlan};
 use bytes::Bytes;
 
 use crate::analysis::reassembly::ip::{

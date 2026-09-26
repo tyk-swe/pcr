@@ -94,7 +94,7 @@ pub(crate) fn resolve_envelope(
                 .take_while(|candidate| is_ipv6_extension_layer(*candidate))
                 .filter_map(|candidate| {
                     candidate
-                        .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()?
+                        .downcast_ref::<super::SegmentRoutingHeader>()?
                         .segments
                         .last()
                         .copied()

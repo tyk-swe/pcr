@@ -11,8 +11,7 @@ use crate::probe::test_support::{ProgressiveExecutor, decoded_packet, private_po
 use crate::progress::Runtime;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
-    icmp::Icmpv4,
-    network::{Ipv4, Ipv6},
+    network::{Icmpv4, Ipv4, Ipv6},
     transport::Tcp,
 };
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};

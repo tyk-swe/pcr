@@ -20,16 +20,13 @@ use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::protocol::application::dns::Dns;
 use packetcraftr_core::protocol::capture::{BsdLoop, BsdNull, LinuxSll, LinuxSll2};
-use packetcraftr_core::protocol::gre::Gre;
-use packetcraftr_core::protocol::icmp::{Icmpv4, Icmpv6};
-use packetcraftr_core::protocol::ipv6::{
-    DestinationOptions, Fragment, HopByHop, SegmentRoutingHeader,
-};
 use packetcraftr_core::protocol::link::{Arp, Ethernet, Llc, Snap, Vlan};
-use packetcraftr_core::protocol::network::{Igmp, Ipv4};
+use packetcraftr_core::protocol::network::{
+    DestinationOptions, Fragment, HopByHop, Icmpv4, Icmpv6, Igmp, Ipv4, SegmentRoutingHeader,
+};
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, TcpOption, Udp};
 use packetcraftr_core::protocol::tunnel::{
-    Ah, Erspan, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
+    Ah, Erspan, Esp, Geneve, Gre, L2tpv3, Mpls, Ppp, Pppoe, Vxlan,
 };
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{build, codec, decode, field::WireValue, packet::Packet};

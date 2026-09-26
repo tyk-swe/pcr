@@ -12,8 +12,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::protocol::ipv6::Fragment as Ipv6Fragment;
-use packetcraftr_core::protocol::network::Ipv6;
+use packetcraftr_core::protocol::network::{Fragment as Ipv6Fragment, Ipv6};
 mod common;
 #[path = "common/process.rs"]
 mod process_support;

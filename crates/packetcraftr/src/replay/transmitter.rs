@@ -264,7 +264,10 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::Packet;
     use packetcraftr_core::packet::link::MacAddress;
-    use packetcraftr_core::protocol::{icmp::Icmpv4, link::Ethernet, network::Ipv4};
+    use packetcraftr_core::protocol::{
+        link::Ethernet,
+        network::{Icmpv4, Ipv4},
+    };
     use packetcraftr_netio::interface::{Address, Flags};
     use packetcraftr_netio::link::Capability as LinkCapability;
 

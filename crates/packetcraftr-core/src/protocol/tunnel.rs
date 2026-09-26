@@ -5,6 +5,7 @@
 
 mod erspan;
 mod geneve;
+mod gre;
 mod ipsec;
 mod l2tp;
 mod mpls;
@@ -15,6 +16,8 @@ pub(crate) use erspan::ErspanCodec;
 pub use erspan::{Erspan, ErspanType3};
 pub use geneve::Geneve;
 pub(crate) use geneve::GeneveCodec;
+pub use gre::Gre;
+pub(crate) use gre::GreCodec;
 pub use ipsec::{Ah, Esp};
 pub(crate) use ipsec::{AhCodec, EspCodec};
 pub use l2tp::L2tpv3;

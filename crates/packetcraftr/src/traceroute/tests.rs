@@ -106,7 +106,7 @@ impl Executor<Batch> for NoResponseExecutor {
                 packets_completed: count,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }
@@ -166,7 +166,7 @@ impl Executor<Batch> for MixedHopExecutor {
                 packets_completed: count,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }

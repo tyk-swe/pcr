@@ -181,10 +181,10 @@ fn bounded_queue_reports_real_capture_loss() {
             .unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(3);
-    while capture.statistics().overflow_events == 0 && Instant::now() < deadline {
+    while capture.stats().overflow_events == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
-    let statistics = capture.statistics();
+    let statistics = capture.stats();
     assert!(statistics.overflow_events > 0, "{statistics:?}");
     assert!(statistics.dropped_frames > 0);
     assert!(statistics.evidence_loss_error().is_some());

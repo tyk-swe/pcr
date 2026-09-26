@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_netio::capture::Statistics;
+use packetcraftr_netio::capture;
 
 /// A counter in [`Stats`] would exceed its range; the counters were left
 /// untouched.
@@ -17,7 +17,7 @@ pub struct Stats {
     pub packets_completed: u64,
     pub bytes: u64,
     pub elapsed: Duration,
-    pub capture: Statistics,
+    pub capture: capture::Stats,
 }
 
 impl Stats {

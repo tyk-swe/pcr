@@ -21,7 +21,7 @@ use crate::workers::{Permit, Task, Waited};
 
 use crate::{
     Error,
-    capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Statistics},
+    capture::{Captured, Limits, MAX_TIMEOUT, Metadata, Session, Stats},
     workers::reaper::{ReaperClient, ReaperStartError, shared_reaper},
 };
 
@@ -254,7 +254,7 @@ impl Session for NativeCaptureSession {
         self.shutdown_with_timeout(self.shutdown_timeout)
     }
 
-    fn statistics(&self) -> Statistics {
+    fn stats(&self) -> Stats {
         self.shared.lock().statistics
     }
 }
@@ -372,7 +372,7 @@ mod tests {
 
     use super::*;
     use crate::capture::live::{
-        NativeCaptureEvent, NativeCaptureSource, NativeCaptureStatistics, NativeCapturedPacket,
+        NativeCaptureEvent, NativeCaptureSource, NativeCaptureStats, NativeCapturedPacket,
     };
     use crate::error::test_support::assert_same_failure;
     use crate::{
@@ -436,8 +436,8 @@ mod tests {
             Ok(NativeCaptureEvent::Closed)
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
-            Ok(NativeCaptureStatistics::default())
+        fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
+            Ok(NativeCaptureStats::default())
         }
     }
 
@@ -462,8 +462,8 @@ mod tests {
             Ok(NativeCaptureEvent::Closed)
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
-            Ok(NativeCaptureStatistics::default())
+        fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
+            Ok(NativeCaptureStats::default())
         }
     }
 
@@ -479,8 +479,8 @@ mod tests {
             panic!("fake capture worker panic");
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
-            Ok(NativeCaptureStatistics::default())
+        fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
+            Ok(NativeCaptureStats::default())
         }
     }
 
@@ -499,8 +499,8 @@ mod tests {
             })
         }
 
-        fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error> {
-            Ok(NativeCaptureStatistics::default())
+        fn stats(&mut self) -> Result<NativeCaptureStats, Error> {
+            Ok(NativeCaptureStats::default())
         }
     }
 
@@ -693,11 +693,11 @@ mod tests {
             &terminal,
         );
         assert_eq!(
-            session.statistics(),
-            Statistics {
+            session.stats(),
+            Stats {
                 received_frames: 1,
                 received_bytes: 3,
-                ..Statistics::default()
+                ..Stats::default()
             }
         );
         session
@@ -733,7 +733,7 @@ mod tests {
             session.next_captured_frame(&Deadline::new(Duration::ZERO)),
             Err(Error::Capture { .. })
         ));
-        assert_eq!(session.statistics(), Statistics::default());
+        assert_eq!(session.stats(), Stats::default());
         session
             .shutdown()
             .expect("observed capture error leaves no cleanup error");

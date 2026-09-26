@@ -254,8 +254,8 @@ impl capture::Session for Capture {
         self.state.lock().unwrap().stops += 1;
         Ok(())
     }
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 impl capture::Provider for Io {

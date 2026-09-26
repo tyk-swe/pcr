@@ -34,7 +34,7 @@ fn not_found() -> NeighborError {
         attempts: 3,
         captured: Vec::new(),
         evidence_truncated: false,
-        capture_statistics: capture::Statistics::default(),
+        capture_statistics: capture::Stats::default(),
     }
 }
 

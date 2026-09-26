@@ -12,7 +12,6 @@ use packetcraftr::{
 };
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_netio as net;
-use packetcraftr_netio::capture::Statistics;
 
 struct FixedResolver(Vec<IpAddr>);
 
@@ -367,7 +366,7 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
         packets_completed: 1,
         bytes: 10,
         elapsed: Duration::from_secs(1),
-        capture: Statistics {
+        capture: net::capture::Stats {
             received_frames: 1,
             received_bytes: 5,
             dropped_frames: 1,
@@ -394,9 +393,9 @@ fn stats_checked_add_is_complete_and_atomic_on_overflow() {
     assert_eq!(total, before);
 
     let overflow = Stats {
-        capture: Statistics {
+        capture: net::capture::Stats {
             receiver_dropped_frames: u64::MAX,
-            ..Statistics::default()
+            ..net::capture::Stats::default()
         },
         ..Stats::default()
     };

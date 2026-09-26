@@ -411,7 +411,7 @@ fn finish_stats(report: &mut Report, initial: CaptureBudget, started: Instant) -
         .map(|source| source.emitted_frames)
         .sum();
     report.stats.elapsed = started.elapsed();
-    let mut capture = native::Statistics::default();
+    let mut capture = native::Stats::default();
     let mut complete = report.sources.len() == report.requested_interfaces.len();
     for source in &report.sources {
         complete &= source.capture.metadata_valid

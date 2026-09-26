@@ -27,7 +27,7 @@ published_enum! {
 
 /// Socket-level accounting for one connect scan.
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
@@ -35,8 +35,8 @@ pub struct Statistics {
     pub rtt: Rtt,
 }
 
-impl From<connect::Statistics> for Statistics {
-    fn from(value: connect::Statistics) -> Self {
+impl From<connect::Stats> for Stats {
+    fn from(value: connect::Stats) -> Self {
         Self {
             connections_scheduled: value.connections_scheduled,
             connections_attempted: value.connections_attempted,
@@ -106,7 +106,7 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub planned_duration: Duration,
-    pub socket_stats: Statistics,
+    pub socket_stats: Stats,
 }
 impl From<connect::Summary> for Summary {
     fn from(summary: connect::Summary) -> Self {

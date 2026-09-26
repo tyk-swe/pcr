@@ -14,7 +14,7 @@ use crate::probe::{Error, ErrorKind, Workflow};
 use crate::probe::evidence::EvidenceLimits;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
-use packetcraftr_netio::capture::Statistics;
+use packetcraftr_netio::capture::Stats;
 
 fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
     if decoded.original != decoded.frame.bytes() {
@@ -23,7 +23,7 @@ fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), Str
     Ok(())
 }
 
-fn validate_capture_statistics(statistics: Statistics) -> Result<(), String> {
+fn validate_capture_statistics(statistics: Stats) -> Result<(), String> {
     statistics
         .validate()
         .map(|_| ())
@@ -163,7 +163,7 @@ fn validate_frame_timestamp(
 }
 
 pub(crate) fn validate_capture_statistics_evidence(
-    statistics: Statistics,
+    statistics: Stats,
 ) -> Result<(), ExchangeEvidenceError> {
     validate_capture_statistics(statistics)
         .map_err(|message| ExchangeEvidenceError::InvalidCaptureStatistics { message })

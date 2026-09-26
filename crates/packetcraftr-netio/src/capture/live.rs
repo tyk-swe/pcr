@@ -28,7 +28,7 @@ pub(crate) struct NativeCapturedPacket {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct NativeCaptureStatistics {
+pub(crate) struct NativeCaptureStats {
     pub capture_dropped_frames: u32,
     pub network_dropped_frames: u32,
     pub interface_dropped_frames: u32,
@@ -42,7 +42,7 @@ pub(crate) enum NativeCaptureEvent {
 
 pub(crate) trait NativeCaptureSource: Send {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, Error>;
-    fn statistics(&mut self) -> Result<NativeCaptureStatistics, Error>;
+    fn stats(&mut self) -> Result<NativeCaptureStats, Error>;
 }
 
 pub(crate) trait CaptureInterrupt: Send + Sync {

@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use packetcraftr_core::{packet::Packet, template::Template};
 use packetcraftr_netio::{
-    capture::{Provider as CaptureProvider, Statistics},
+    capture::{self, Provider as CaptureProvider},
     transmit::Provider as PacketIo,
 };
 
@@ -33,7 +33,7 @@ where
                 packets_completed: 1,
                 bytes: u64::try_from(bytes_sent).unwrap_or(u64::MAX),
                 elapsed: started.elapsed(),
-                capture: Statistics::default(),
+                capture: capture::Stats::default(),
             },
         })
     }
@@ -125,7 +125,7 @@ where
                 packets_completed: packets,
                 bytes,
                 elapsed: started.elapsed(),
-                capture: Statistics::default(),
+                capture: capture::Stats::default(),
             },
             passes_completed: options.repeat,
             sent,

@@ -60,7 +60,7 @@ pub struct Probe {
     pub error: Option<Arc<io::Error>>,
 }
 #[derive(Clone, Debug, Default, Serialize)]
-pub struct Statistics {
+pub struct Stats {
     pub connections_scheduled: u64,
     pub connections_attempted: u64,
     pub connections_succeeded: u64,
@@ -77,7 +77,7 @@ pub struct Summary {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub planned_duration: Duration,
-    pub stats: Statistics,
+    pub stats: Stats,
 }
 #[derive(Clone, Debug)]
 pub struct Endpoint {
@@ -411,7 +411,7 @@ where
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
     enforce_deadline(WORKFLOW, &deadline)?;
     let (resolved_addresses, planned) = planned(request, authorizer, &deadline)?;
-    let mut stats = Statistics::default();
+    let mut stats = Stats::default();
     let mut rtt = super::report::RttAccumulator::default();
     let mut active: Vec<Active<P::Stream>> = Vec::new();
     let mut next = 0usize;

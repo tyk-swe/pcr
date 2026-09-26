@@ -11,10 +11,10 @@ use std::{
 
 use crate::{
     Error,
-    capture::{Captured, Limits, OverflowPolicy, Statistics},
+    capture::{Captured, Limits, OverflowPolicy, Stats},
 };
 
-use super::NativeCaptureStatistics;
+use super::NativeCaptureStats;
 
 pub(super) struct CaptureQueue {
     state: Mutex<CaptureState>,
@@ -172,8 +172,8 @@ impl CaptureQueue {
 
     pub(super) fn add_native_drop_deltas(
         &self,
-        previous: NativeCaptureStatistics,
-        current: NativeCaptureStatistics,
+        previous: NativeCaptureStats,
+        current: NativeCaptureStats,
     ) -> Result<(), Error> {
         let capture_drop_delta = current
             .capture_dropped_frames
@@ -236,7 +236,7 @@ pub(super) struct CaptureState {
     pub(super) error: Option<Error>,
     pub(super) queue: VecDeque<Captured>,
     pub(super) queued_bytes: usize,
-    pub(super) statistics: Statistics,
+    pub(super) statistics: Stats,
 }
 
 fn accounting_error(message: &str) -> Error {
@@ -246,7 +246,7 @@ fn accounting_error(message: &str) -> Error {
 }
 
 fn record_overflow(
-    statistics: &mut Statistics,
+    statistics: &mut Stats,
     dropped_frames: u64,
     dropped_bytes: u64,
 ) -> Result<(), Error> {
@@ -263,7 +263,7 @@ fn record_overflow(
     )
 }
 
-fn record_received(statistics: &mut Statistics, received_bytes: u64) -> Result<(), Error> {
+fn record_received(statistics: &mut Stats, received_bytes: u64) -> Result<(), Error> {
     increment(&mut statistics.received_frames, 1, "received frames")?;
     increment(
         &mut statistics.received_bytes,
@@ -428,12 +428,12 @@ mod tests {
         let queue = queue(OverflowPolicy::Fail, 1, 1);
         queue
             .add_native_drop_deltas(
-                NativeCaptureStatistics {
+                NativeCaptureStats {
                     capture_dropped_frames: u32::MAX,
                     network_dropped_frames: u32::MAX,
                     interface_dropped_frames: u32::MAX,
                 },
-                NativeCaptureStatistics::default(),
+                NativeCaptureStats::default(),
             )
             .expect("each wrapped counter advanced once");
         {
@@ -445,10 +445,10 @@ mod tests {
         queue.lock().statistics.dropped_frames = u64::MAX;
         let error = queue
             .add_native_drop_deltas(
-                NativeCaptureStatistics::default(),
-                NativeCaptureStatistics {
+                NativeCaptureStats::default(),
+                NativeCaptureStats {
                     capture_dropped_frames: 1,
-                    ..NativeCaptureStatistics::default()
+                    ..NativeCaptureStats::default()
                 },
             )
             .expect_err("overflow must fail closed");
@@ -458,16 +458,16 @@ mod tests {
         assert_eq!(state.statistics.receiver_dropped_frames, 3);
 
         drop(state);
-        queue.lock().statistics = Statistics {
+        queue.lock().statistics = Stats {
             receiver_dropped_frames: u64::MAX,
-            ..Statistics::default()
+            ..Stats::default()
         };
         let error = queue
             .add_native_drop_deltas(
-                NativeCaptureStatistics::default(),
-                NativeCaptureStatistics {
+                NativeCaptureStats::default(),
+                NativeCaptureStats {
                     network_dropped_frames: 1,
-                    ..NativeCaptureStatistics::default()
+                    ..NativeCaptureStats::default()
                 },
             )
             .expect_err("the second counter overflow must not commit the first");

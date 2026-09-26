@@ -50,7 +50,7 @@ pub(super) fn capture_worker(
     interface_index: u32,
     link_type: LinkType,
 ) -> Result<(), Error> {
-    let mut native_statistics = source.statistics()?;
+    let mut native_statistics = source.stats()?;
     let mut statistics_checked_at = Instant::now();
     shared.set_ready();
 
@@ -84,14 +84,14 @@ pub(super) fn capture_worker(
         }
 
         if statistics_checked_at.elapsed() >= STATISTICS_INTERVAL {
-            let current = source.statistics()?;
+            let current = source.stats()?;
             shared.add_native_drop_deltas(native_statistics, current)?;
             native_statistics = current;
             statistics_checked_at = Instant::now();
         }
     }
 
-    shared.add_native_drop_deltas(native_statistics, source.statistics()?)?;
+    shared.add_native_drop_deltas(native_statistics, source.stats()?)?;
     shared.close();
     Ok(())
 }

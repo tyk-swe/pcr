@@ -25,7 +25,7 @@ use std::{
 struct Session {
     metadata: native::Metadata,
     frames: VecDeque<native::Captured>,
-    stats: native::Statistics,
+    stats: native::Stats,
     stops: Arc<AtomicUsize>,
 }
 impl native::Session for Session {
@@ -45,13 +45,13 @@ impl native::Session for Session {
         self.stops.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
-    fn statistics(&self) -> native::Statistics {
+    fn stats(&self) -> native::Stats {
         self.stats
     }
 }
 struct Provider {
     frames: Mutex<VecDeque<VecDeque<native::Captured>>>,
-    stats: Vec<native::Statistics>,
+    stats: Vec<native::Stats>,
     stops: Vec<Arc<AtomicUsize>>,
     opened: AtomicUsize,
     fail_arm: Option<usize>,
@@ -73,7 +73,7 @@ impl Provider {
                     })
                     .collect(),
             ),
-            stats: vec![native::Statistics::default(); 2],
+            stats: vec![native::Stats::default(); 2],
             stops: (0..2).map(|_| Arc::new(AtomicUsize::new(0))).collect(),
             opened: AtomicUsize::new(0),
             fail_arm: None,
@@ -232,7 +232,7 @@ fn sink_stops_and_byte_refusals_keep_partial_evidence_and_cleanup() {
 #[test]
 fn each_interface_reports_its_own_loss_and_consumer_failure_stops_every_source() {
     let mut provider = Provider::new(1);
-    provider.stats[1] = native::Statistics {
+    provider.stats[1] = native::Stats {
         dropped_frames: 2,
         dropped_bytes: 8,
         overflow_events: 1,

@@ -100,7 +100,7 @@ impl Executor<Batch> for TimeoutExecutor {
                 packets_completed: 1,
                 bytes,
                 elapsed: Duration::from_millis(1),
-                capture: packetcraftr_netio::capture::Statistics::default(),
+                capture: packetcraftr_netio::capture::Stats::default(),
             },
         })
     }

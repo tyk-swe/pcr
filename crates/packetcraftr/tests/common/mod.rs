@@ -264,8 +264,8 @@ impl capture::Session for ReplyCapture {
         Ok(())
     }
 
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 
@@ -292,8 +292,8 @@ impl capture::Session for IdleCapture {
         Ok(())
     }
 
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 

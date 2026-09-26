@@ -161,8 +161,8 @@ impl Session for ObservedCapture {
         Ok(())
     }
 
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 
@@ -291,8 +291,8 @@ impl Session for SilentCapture {
         Ok(())
     }
 
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 
@@ -320,7 +320,7 @@ struct FixtureCapture {
     pre_request: VecDeque<CaptureStep>,
     responses: VecDeque<CaptureStep>,
     cleanup: Result<(), packetcraftr_netio::Error>,
-    statistics: capture::Statistics,
+    statistics: capture::Stats,
     shutdowns: Arc<AtomicUsize>,
 }
 
@@ -337,7 +337,7 @@ impl FixtureCapture {
             pre_request: VecDeque::new(),
             responses: VecDeque::from([CaptureStep::End]),
             cleanup: Ok(()),
-            statistics: capture::Statistics::default(),
+            statistics: capture::Stats::default(),
             shutdowns: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -370,7 +370,7 @@ impl Session for FixtureCapture {
         self.cleanup.clone()
     }
 
-    fn statistics(&self) -> capture::Statistics {
+    fn stats(&self) -> capture::Stats {
         self.statistics
     }
 }
@@ -611,7 +611,7 @@ fn exhausted_attempts_return_bounded_not_found_evidence() {
             attempts: 2,
             ref captured,
             evidence_truncated: false,
-            capture_statistics: capture::Statistics {
+            capture_statistics: capture::Stats {
                 received_frames: 0,
                 ..
             },
@@ -662,18 +662,18 @@ fn capture_loss_and_invalid_statistics_fail_after_confirmed_cleanup() {
     let request = request();
     for (statistics, operation) in [
         (
-            capture::Statistics {
+            capture::Stats {
                 overflow_events: 1,
                 dropped_frames: 1,
                 dropped_bytes: 42,
-                ..capture::Statistics::default()
+                ..capture::Stats::default()
             },
             "checking capture completeness",
         ),
         (
-            capture::Statistics {
+            capture::Stats {
                 dropped_bytes: 1,
-                ..capture::Statistics::default()
+                ..capture::Stats::default()
             },
             "validating capture statistics",
         ),

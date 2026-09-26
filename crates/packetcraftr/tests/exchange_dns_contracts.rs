@@ -129,8 +129,8 @@ impl capture::Session for Capture {
     fn shutdown(&mut self) -> Result<(), net::Error> {
         Ok(())
     }
-    fn statistics(&self) -> capture::Statistics {
-        capture::Statistics::default()
+    fn stats(&self) -> capture::Stats {
+        capture::Stats::default()
     }
 }
 

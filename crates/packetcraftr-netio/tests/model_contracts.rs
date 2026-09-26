@@ -122,19 +122,19 @@ fn capture_limits_validate_each_bound_and_cross_field_constraint() {
 
 #[test]
 fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
-    let complete = capture::Statistics {
+    let complete = capture::Stats {
         received_frames: 2,
         received_bytes: 20,
-        ..capture::Statistics::default()
+        ..capture::Stats::default()
     };
     assert!(complete.evidence_loss_error().is_none());
     complete.validate().expect("complete statistics");
 
-    let receiver_loss = capture::Statistics {
+    let receiver_loss = capture::Stats {
         dropped_frames: 3,
         dropped_bytes: 30,
         receiver_dropped_frames: 2,
-        ..capture::Statistics::default()
+        ..capture::Stats::default()
     };
     assert!(matches!(
         receiver_loss.evidence_loss_error(),
@@ -145,9 +145,9 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
         })
     ));
 
-    let overflow = capture::Statistics {
+    let overflow = capture::Stats {
         overflow_events: 2,
-        ..capture::Statistics::default()
+        ..capture::Stats::default()
     };
     assert!(matches!(
         overflow.evidence_loss_error(),
@@ -158,10 +158,10 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
     ));
 
     assert!(matches!(
-        capture::Statistics {
+        capture::Stats {
             dropped_frames: 1,
             receiver_dropped_frames: 2,
-            ..capture::Statistics::default()
+            ..capture::Stats::default()
         }
         .validate(),
         Err(Error::InvalidCaptureStatistics { .. })
@@ -170,7 +170,7 @@ fn capture_statistics_distinguish_complete_receiver_loss_and_queue_overflow() {
 
 #[test]
 fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
-    let first = capture::Statistics {
+    let first = capture::Stats {
         received_frames: 1,
         received_bytes: 2,
         dropped_frames: 7,
@@ -178,7 +178,7 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
         overflow_events: 5,
         receiver_dropped_frames: 6,
     };
-    let second = capture::Statistics {
+    let second = capture::Stats {
         received_frames: 10,
         received_bytes: 20,
         dropped_frames: 70,
@@ -188,7 +188,7 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
     };
     assert_eq!(
         first.checked_add(second),
-        Some(capture::Statistics {
+        Some(capture::Stats {
             received_frames: 11,
             received_bytes: 22,
             dropped_frames: 77,
@@ -199,13 +199,13 @@ fn capture_statistics_checked_add_is_complete_and_detects_overflow() {
     );
 
     assert_eq!(
-        capture::Statistics {
+        capture::Stats {
             receiver_dropped_frames: u64::MAX,
-            ..capture::Statistics::default()
+            ..capture::Stats::default()
         }
-        .checked_add(capture::Statistics {
+        .checked_add(capture::Stats {
             receiver_dropped_frames: 1,
-            ..capture::Statistics::default()
+            ..capture::Stats::default()
         }),
         None
     );

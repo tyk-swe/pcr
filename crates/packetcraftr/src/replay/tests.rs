@@ -1075,7 +1075,10 @@ mod client {
     use crate::policy::Policy;
     use packetcraftr_core::filter::{Filter, FrameSelector, Options as FilterOptions};
 
-    use crate::replay::{Collector, Condition, Routing, Rule};
+    use crate::replay::{
+        Collector,
+        routing::{Condition, Routing, Rule},
+    };
     use crate::test_support::{Call, FakeProviders};
     use crate::{Client, ProviderSet};
 

@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::Providers;
 use packetcraftr::clock::Clock;
-use packetcraftr::replay::{self, Event, FrameEvidence, Request, Routing, Rule, RuleError, Source};
+use packetcraftr::replay::{
+    Event, FrameEvidence, Request, Source,
+    routing::{self, Routing, Rule},
+};
 use packetcraftr::route;
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::capture_file::{Format, Limits, Reader, Writer, compression};
@@ -119,8 +122,8 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         max_frame_bytes,
     )?;
     let rule_count = arguments.interface_maps.len() + arguments.filter_maps.len();
-    if rule_count > replay::MAX_RULES {
-        return Err(RuleError::TooMany { count: rule_count }.into());
+    if rule_count > routing::MAX_RULES {
+        return Err(routing::Error::TooMany { count: rule_count }.into());
     }
     let fallback = arguments
         .interface
@@ -177,18 +180,20 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
 }
 
 /// A refused interface rule, in its option's own words.
-impl From<RuleError> for CliError {
-    fn from(error: RuleError) -> Self {
+impl From<routing::Error> for CliError {
+    fn from(error: routing::Error) -> Self {
         let message = match &error {
-            RuleError::SourceSyntax => "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into(),
-            RuleError::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
-            RuleError::SourceId { .. } => {
+            routing::Error::SourceSyntax => {
+                "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into()
+            }
+            routing::Error::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
+            routing::Error::SourceId { .. } => {
                 "source interface must be an unsigned capture-global ID".into()
             }
-            RuleError::TooMany { .. } => {
+            routing::Error::TooMany { .. } => {
                 format!(
                     "replay permits at most {} interface rules",
-                    replay::MAX_RULES
+                    routing::MAX_RULES
                 )
             }
             _ => return Self::classified(error),

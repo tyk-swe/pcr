@@ -509,11 +509,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   `analysis::expert::Selector` selects findings; `analysis::Error` adds
   `SniPattern`. A `replay::Request` carries its selection as data: an
   optional `filter` (`FrameSelector`, set with `with_filter`) and a
-  `replay::Routing` of `replay::Rule`s (`Condition::Source` or
+  `replay::routing::Routing` of `routing::Rule`s (`Condition::Source` or
   `Condition::Filter`, each naming a `route::Interface`) with an optional
-  fallback, at most `replay::MAX_RULES`. `Rule::parse_source` and
+  fallback, at most `routing::MAX_RULES`. `Rule::parse_source` and
   `Rule::parse_filter` parse `SOURCE_ID=INTERFACE` and `EXPR=>INTERFACE`
-  rules and refuse with `replay::RuleError`. `replay::{Selector, AllFrames}`,
+  rules and refuse with `replay::routing::Error`. `replay::{Selector, AllFrames}`,
   `Request::with_selector`, and `replay::Options::interface` are removed.
   `replay::Error::Selection` carries a `filter::Error`, and
   `ConflictingInterfaces` and `Unmapped` (`cli.error`) replace

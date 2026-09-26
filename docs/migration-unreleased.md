@@ -399,7 +399,7 @@ without changing the caller's registry. UDP profile documents use independent
 ## Replay mapping and repetition
 
 Route every frame through the old `replay::Options::interface` value with
-`replay::Routing::from(route::Interface::Id(interface))`, and add `repeat: 1`
+`replay::routing::Routing::from(route::Interface::Id(interface))`, and add `repeat: 1`
 and `inter_pass_delay: Duration::ZERO` for one pass. Routing rules may send
 each selected frame through its own interface (see
 [Selectors and replay routing](#selectors-and-replay-routing)). Replay readers now require `Read + Seek` so the
@@ -1741,9 +1741,9 @@ data.
 | TLS session filtering by SNI, port, and status | `analysis::tls::Selector { sni, server_port, statuses }.matches(&session)`; `"*.example.test".parse::<analysis::tls::SniPattern>()` |
 | finding filtering by severity and code | `analysis::expert::Selector { min_severity, codes }.matches(&finding)` |
 | `impl replay::Selector for S`, `Request::with_selector(s)`, `replay::AllFrames` | `Request::new(source, routing, options).with_filter(frame_selector)` |
-| `replay::Options { interface: Some(id), .. }` | `replay::Routing::from(route::Interface::Id(id))`, or `Routing::new(rules, Some(fallback))?` |
-| a selector's `interface(number, frame)` | `replay::Rule { condition: replay::Condition::{Source(id), Filter(selector)}, interface }`, at most `replay::MAX_RULES` |
-| parsing `SOURCE_ID=IF` and `EXPR=>IF` by hand | `Rule::parse_source(text, parse_interface)` and `Rule::parse_filter(text, compile, parse_interface)`, refusing with `replay::RuleError` |
+| `replay::Options { interface: Some(id), .. }` | `replay::routing::Routing::from(route::Interface::Id(id))`, or `Routing::new(rules, Some(fallback))?` |
+| a selector's `interface(number, frame)` | `replay::routing::Rule { condition: routing::Condition::{Source(id), Filter(selector)}, interface }`, at most `routing::MAX_RULES` |
+| parsing `SOURCE_ID=IF` and `EXPR=>IF` by hand | `Rule::parse_source(text, parse_interface)` and `Rule::parse_filter(text, compile, parse_interface)`, refusing with `replay::routing::Error` |
 
 `FrameDecoder::new` and `FrameSelector::new` refuse a filter that reads
 `tcp.stream` or `udp.stream` with `filter::Error::StreamIndexUnavailable`,

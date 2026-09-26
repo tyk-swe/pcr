@@ -252,7 +252,7 @@ fn replay_stops_at_the_wire_byte_ceiling_before_the_frame_that_would_cross_it() 
         .replay(
             replay::Request::new(
                 replay::Source::stream(ethernet_capture(&frames)),
-                replay::Routing::from(packetcraftr::route::Interface::Id(
+                replay::routing::Routing::from(packetcraftr::route::Interface::Id(
                     common::fixture_interface().id,
                 )),
                 options,

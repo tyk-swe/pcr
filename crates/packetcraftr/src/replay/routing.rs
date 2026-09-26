@@ -1,18 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Which output interface each selected frame of a replay leaves through.
+//! Which output interface each selected frame of a replay leaves through:
+//! the [`Routing`] of a request, its [`Rule`]s, and the [`Error`] for a
+//! refused rule or rule set.
 
 use std::num::ParseIntError;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::filter::FrameSelector;
 use packetcraftr_core::frame::Frame;
-use thiserror::Error;
+use thiserror::Error as ThisError;
 
 use crate::route::Interface;
 
-use super::error::Error;
+use crate::replay;
 
 /// The most rules one [`Routing`] holds.
 pub const MAX_RULES: usize = 256;
@@ -41,17 +43,17 @@ impl Rule {
     ///
     /// # Errors
     ///
-    /// Returns [`RuleError::SourceSyntax`] without `=`, [`RuleError::SourceId`]
+    /// Returns [`Error::SourceSyntax`] without `=`, [`Error::SourceId`]
     /// when the source is not a `u32`, or the interface parser's failure.
     pub fn parse_source<E>(
         text: &str,
         interface: impl FnOnce(&str) -> Result<Interface, E>,
     ) -> Result<Self, E>
     where
-        E: From<RuleError>,
+        E: From<Error>,
     {
-        let (source, destination) = text.split_once('=').ok_or(RuleError::SourceSyntax)?;
-        let source = source.parse::<u32>().map_err(|error| RuleError::SourceId {
+        let (source, destination) = text.split_once('=').ok_or(Error::SourceSyntax)?;
+        let source = source.parse::<u32>().map_err(|error| Error::SourceId {
             text: source.to_owned(),
             source: error,
         })?;
@@ -66,7 +68,7 @@ impl Rule {
     ///
     /// # Errors
     ///
-    /// Returns [`RuleError::FilterSyntax`] without `=>`, or the filter or
+    /// Returns [`Error::FilterSyntax`] without `=>`, or the filter or
     /// interface parser's failure.
     pub fn parse_filter<E>(
         text: &str,
@@ -74,9 +76,9 @@ impl Rule {
         interface: impl FnOnce(&str) -> Result<Interface, E>,
     ) -> Result<Self, E>
     where
-        E: From<RuleError>,
+        E: From<Error>,
     {
-        let (expression, destination) = text.rsplit_once("=>").ok_or(RuleError::FilterSyntax)?;
+        let (expression, destination) = text.rsplit_once("=>").ok_or(Error::FilterSyntax)?;
         let condition = Condition::Filter(filter(expression)?);
         Ok(Self {
             condition,
@@ -86,9 +88,9 @@ impl Rule {
 }
 
 /// A refused routing rule or rule set.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, ThisError, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum RuleError {
+pub enum Error {
     #[error("a source rule requires SOURCE_ID=INTERFACE")]
     SourceSyntax,
     #[error("a filter rule requires EXPR=>INTERFACE")]
@@ -103,7 +105,7 @@ pub enum RuleError {
     TooMany { count: usize },
 }
 
-impl Classified for RuleError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         Classification::new(
             "cli.error",
@@ -134,10 +136,10 @@ impl Routing {
     ///
     /// # Errors
     ///
-    /// Returns [`RuleError::TooMany`] for more than [`MAX_RULES`] rules.
-    pub fn new(rules: Vec<Rule>, fallback: Option<Interface>) -> Result<Self, RuleError> {
+    /// Returns [`Error::TooMany`] for more than [`MAX_RULES`] rules.
+    pub fn new(rules: Vec<Rule>, fallback: Option<Interface>) -> Result<Self, Error> {
         if rules.len() > MAX_RULES {
-            return Err(RuleError::TooMany { count: rules.len() });
+            return Err(Error::TooMany { count: rules.len() });
         }
         Ok(Self { rules, fallback })
     }
@@ -156,7 +158,11 @@ impl Routing {
 
     /// The interface for the frame at `source_index`. Every rule is
     /// evaluated, so a conflict is found even after a match.
-    pub(super) fn interface(&self, source_index: u64, frame: &Frame) -> Result<Interface, Error> {
+    pub(super) fn interface(
+        &self,
+        source_index: u64,
+        frame: &Frame,
+    ) -> Result<Interface, replay::Error> {
         let number = source_index.saturating_add(1);
         let mut selected: Option<&Interface> = None;
         for rule in &self.rules {
@@ -165,7 +171,7 @@ impl Routing {
                 Condition::Filter(filter) => {
                     filter
                         .keep(number, frame)
-                        .map_err(|source| Error::Selection {
+                        .map_err(|source| replay::Error::Selection {
                             source_index,
                             source,
                         })?
@@ -175,14 +181,14 @@ impl Routing {
                 continue;
             }
             if selected.is_some_and(|selected| *selected != rule.interface) {
-                return Err(Error::ConflictingInterfaces { source_index });
+                return Err(replay::Error::ConflictingInterfaces { source_index });
             }
             selected = Some(&rule.interface);
         }
         selected
             .or(self.fallback.as_ref())
             .cloned()
-            .ok_or(Error::Unmapped { source_index })
+            .ok_or(replay::Error::Unmapped { source_index })
     }
 }
 
@@ -212,11 +218,11 @@ mod tests {
         Interface::Name(name.to_owned())
     }
 
-    fn by_name(text: &str) -> Result<Interface, RuleError> {
+    fn by_name(text: &str) -> Result<Interface, Error> {
         Ok(named(text))
     }
 
-    fn selector(source: &str) -> Result<FrameSelector, RuleError> {
+    fn selector(source: &str) -> Result<FrameSelector, Error> {
         let registry = builtin::registry();
         let filter = Filter::compile(source, &registry, Options::default())
             .expect("fixture filter compiles");
@@ -238,13 +244,13 @@ mod tests {
 
         assert_eq!(
             Rule::parse_source("3", by_name).unwrap_err(),
-            RuleError::SourceSyntax
+            Error::SourceSyntax
         );
         assert!(matches!(
             Rule::parse_source("-1=eth1", by_name).unwrap_err(),
-            RuleError::SourceId { text, .. } if text == "-1"
+            Error::SourceId { text, .. } if text == "-1"
         ));
-        let refused = Rule::parse_source("0=", |_| Err(RuleError::SourceSyntax));
+        let refused = Rule::parse_source("0=", |_| Err(Error::SourceSyntax));
         assert!(refused.is_err(), "the interface parser's refusal is kept");
     }
 
@@ -264,7 +270,7 @@ mod tests {
         assert_eq!(rule.interface, named("eth1"));
         assert_eq!(
             Rule::parse_filter("frame.len == 14", selector, by_name).unwrap_err(),
-            RuleError::FilterSyntax
+            Error::FilterSyntax
         );
     }
 
@@ -301,7 +307,10 @@ mod tests {
         assert_eq!(routing.interface(0, &frame(None)).unwrap(), named("eth0"));
         let error = routing.interface(1, &frame(None)).unwrap_err();
         assert!(
-            matches!(error, Error::ConflictingInterfaces { source_index: 1 }),
+            matches!(
+                error,
+                replay::Error::ConflictingInterfaces { source_index: 1 }
+            ),
             "{error:?}"
         );
         assert_eq!(
@@ -324,7 +333,7 @@ mod tests {
             .interface(4, &frame(Some(2)))
             .unwrap_err();
         assert!(
-            matches!(error, Error::Unmapped { source_index: 4 }),
+            matches!(error, replay::Error::Unmapped { source_index: 4 }),
             "{error:?}"
         );
         assert_eq!(
@@ -356,7 +365,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                Error::Selection {
+                replay::Error::Selection {
                     source_index: 0,
                     ..
                 }
@@ -372,7 +381,7 @@ mod tests {
         assert!(Routing::new(rules(MAX_RULES), None).is_ok());
         assert_eq!(
             Routing::new(rules(MAX_RULES + 1), None).unwrap_err(),
-            RuleError::TooMany {
+            Error::TooMany {
                 count: MAX_RULES + 1
             }
         );

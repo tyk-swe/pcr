@@ -3,6 +3,8 @@
 // Shared by several test binaries; each one uses a different subset.
 #![allow(dead_code)]
 
+pub(crate) mod responder;
+
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

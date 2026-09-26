@@ -3,6 +3,12 @@
 
 //! Policy-gated scanning of authorized targets with finite packet, byte,
 //! duration, and evidence budgets.
+//!
+//! [`Client::scan`](crate::Client::scan) runs a [`Request`] and publishes
+//! each [`Event`] to a sink; [`Collector`] rebuilds the [`Aggregate`]. A
+//! request with `max_in_flight` above one overlaps up to that many probe
+//! response windows over one capture group. [`connect`] is the TCP connect
+//! scan, which uses kernel sockets instead of exchanges.
 
 use crate::probe::Workflow;
 
@@ -10,6 +16,8 @@ pub const DEFAULT_ATTEMPTS: u32 = 1;
 pub const DEFAULT_MAX_PORTS: usize = 1_024;
 pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_ATTEMPTS: u32 = 32;
+/// The most probe response windows one scan may overlap.
+pub const MAX_IN_FLIGHT: usize = 1_024;
 pub const MAX_PROBES: usize = 100_000;
 pub const MAX_RATE: u32 = 1_000_000;
 /// Maximum UDP payload accepted for either IP family, before final MTU checks.
@@ -23,30 +31,24 @@ const IPV4_PROBE_BYTES: u64 = 60;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const WORKFLOW: Workflow = Workflow::Scan;
 
-mod classification;
 pub mod connect;
 mod engine;
 mod error;
 mod evidence;
-mod execution;
 mod executor;
-mod pipeline;
 mod plan;
-mod probe;
 pub mod profile;
-mod registry;
 mod report;
 mod request;
 #[cfg(test)]
 mod tests;
 
-pub use classification::{ResponseClassification, classify_response};
-pub use engine::{run, run_with_events};
 pub use error::Error;
-pub use execution::{Batch, Probe};
-pub use pipeline::{Error as PipelineError, PendingEvidence};
+pub use evidence::{CorrelatedResponse, classify_response};
+pub use executor::{PendingEvidence, PipelineFailure};
+pub use plan::Probe;
 pub use report::{
-    Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, Report, Rtt, SentProbe,
-    Summary,
+    Aggregate, Classification, ClassificationCounts, Collector, Endpoint, Event, ProbeEvidence,
+    Report, Rtt, SentProbe,
 };
 pub use request::{Limits, PortSpec, Request, select_ports};

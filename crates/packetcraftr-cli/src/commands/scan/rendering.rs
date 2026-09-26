@@ -104,7 +104,7 @@ pub(super) fn emit_event(
 }
 
 pub(super) fn emit_complete(
-    summary: packetcraftr::scan::Summary,
+    summary: packetcraftr::scan::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(
@@ -121,7 +121,7 @@ pub(super) fn scan_error(error: packetcraftr::scan::Error) -> CliError {
             .with_context(error.context());
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
     while let Some(error) = source {
-        if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineError>() {
+        if let Some(pipeline) = error.downcast_ref::<packetcraftr::scan::PipelineFailure>() {
             match output::scan::Failure::try_from(pipeline) {
                 Ok(partial) => cli = cli.with_scan(partial),
                 Err(error) => cli

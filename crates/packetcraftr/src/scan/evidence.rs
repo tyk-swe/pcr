@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! How scan reads, ranks, and reports one probe's evidence.
+//! How scan classifies, ranks, and reports one probe's evidence.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -11,19 +11,55 @@ use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, frame::Frame, packet::Packet, registry::Registry,
 };
 
-use super::classification::classify_response;
-use super::probe::sent_probe_matches;
+use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
-use super::{Classification, Event, Probe, ProbeEvidence, ResponseClassification};
+use super::{Classification, Event, Probe, ProbeEvidence};
 use crate::SentPacket;
+use crate::correlation::{Correlation, Transport};
 use crate::probe::ProbeStatus;
 use crate::probe::runner::{Classifier, NO_RESPONSE_REASON, Outcome};
+
+/// A checksum-valid response correlated to one probe: how it classifies the
+/// probed endpoint, who answered, and why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CorrelatedResponse {
+    pub classification: Classification,
+    pub responder: IpAddr,
+    pub reason: &'static str,
+}
+
+/// Classifies a valid correlated response; corrupt, unrelated, or inconsistent
+/// responses return `None`.
+pub fn classify_response(
+    registry: &Registry,
+    transport: Transport,
+    request: &Packet,
+    response: &DecodedPacket,
+) -> Option<CorrelatedResponse> {
+    let observation = crate::correlation::observe(registry, transport, request, response)?;
+    let classification = match observation.correlation {
+        Correlation::TcpReset | Correlation::PortUnreachable => Classification::Closed,
+        Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {
+            Classification::Open
+        }
+        Correlation::TcpOther => Classification::Unknown,
+        Correlation::TimeExceeded | Correlation::AdministrativelyProhibited => {
+            Classification::Filtered
+        }
+        Correlation::DestinationUnreachable => Classification::Unreachable,
+    };
+    Some(CorrelatedResponse {
+        classification,
+        responder: observation.responder,
+        reason: observation.reason,
+    })
+}
 
 /// One correlated scan response: its transport classification and, for a
 /// profiled UDP port, the application evidence it carries.
 pub(super) struct Observation {
-    pub(super) response: ResponseClassification,
+    pub(super) response: CorrelatedResponse,
     pub(super) application: Option<profile::Evidence>,
 }
 

@@ -13,8 +13,28 @@ Phase 3.
 
 **Blocked by:** 25
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The scan and scan-pipeline contract tests pass, and the new traceroute contract test passes.
-- [ ] A test shows the pipelined path's pacing driven by a recording clock.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] The scan and scan-pipeline contract tests pass, and the new traceroute contract test passes.
+- [x] A test shows the pipelined path's pacing driven by a recording clock.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- `Pipelined` has no `CAPACITY` const: the engine picks serial or pipelined from
+  `max_in_flight` alone, and `scan::MAX_IN_FLIGHT` (new, public) is the one
+  capacity. `probe::{PipelineOptions, PipelineEvent}` became scan-internal early
+  (31 had them listed); `capability.probe_pipeline` is unreachable and removed.
+- Names: scan/traceroute `ResponseClassification` -> `CorrelatedResponse`;
+  `traceroute::Completion` -> `Termination` (field `termination`). `dns::*`
+  untouched (26 owns it). `scan::PipelineError` -> `scan::PipelineFailure`.
+- `scan::Request`/`traceroute::Request` gain `route` + `collection` and drop
+  serde derives. `scan/connect.rs` test literals and `connect_scan_contracts`
+  got the two fields (expect a trivial conflict with 30).
+- The UDP-profile registry view is built once per scan from the request's
+  profiled ports, so serial scans bind all profiled ports at once (the pipeline
+  already did); "conflicting wire profiles" can no longer arise.
+- Roles: `probe.rs` -> `plan/packet.rs`; `pipeline*`/`registry.rs` under
+  `executor/`; `execution.rs` -> `plan.rs`; `classification.rs` -> `evidence.rs`.
+- The IT that reshaped a batch through the public `Executor` seam became an
+  in-crate `scan::executor` test.

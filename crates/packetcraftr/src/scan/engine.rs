@@ -6,131 +6,97 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::progress::Runtime;
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
+use packetcraftr_core::registry::Registry;
 
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::execution::Errors as _;
-use crate::execution::{Sink, publisher};
+use crate::execution::publisher;
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
-use crate::probe::{check_probe_count, check_probe_duration};
+use crate::probe::{Batch, check_probe_count, check_probe_duration};
+use crate::providers::Providers;
 use crate::target::ResolveTarget;
 use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
+use crate::{Client, Sink};
 
 use super::Error;
 use super::WORKFLOW;
 use super::error::Probes;
 use super::evidence::ProbeClassifier;
+use super::executor::{ClientExecutor, PipelineEvent, PipelineOptions, Pipelined};
+use super::plan::packet::sent_probe_matches;
 use super::plan::{build_batches, worst_case_duration};
-use super::probe::sent_probe_matches;
 use super::report::RttAccumulator;
-use super::{
-    Batch, Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, Report, Request,
-    Summary,
-};
+use super::{ClassificationCounts, Event, Probe, Report, Request};
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
-use crate::execution::{Executor, PipelineEvent, PipelineOptions};
-use crate::probe::{ProbeEndpoint, Transport, enforce_deadline, index_or_push};
+use crate::probe::{ProbeEndpoint, Transport, enforce_deadline};
+
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Scans the request's authorized targets and publishes each probe's
+    /// send and final outcome, each retained undecoded frame, and each
+    /// diagnostic to `sink`.
+    ///
+    /// Every resolved target and the complete packet, byte, and duration
+    /// budget are authorized before any probe is built or any provider is
+    /// consulted. A request with `max_in_flight` of one runs each probe as
+    /// its own exchange; a wider one overlaps that many response windows
+    /// over one capture group. The duration limit is anchored on the client's
+    /// clock, and so is the probe start schedule. Each event is published on
+    /// a worker admitted by the client's runtime, and the scan waits for the
+    /// sink's answer before later probes; the duration limit bounds that
+    /// wait, not the sink itself, and confirmed sends are not undone.
+    ///
+    /// # Errors
+    ///
+    /// Returns the invalid request, the denied target or budget, the
+    /// executor or pipeline failure, inconsistent evidence, the exhausted
+    /// duration limit or cancellation, or the sink's failure.
+    pub fn scan<S>(&self, request: Request, sink: S) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let publish = publisher(
+            &self.runtime,
+            sink,
+            |error| Probes.duration_limit(0, error),
+            |source| Error::Output { source },
+        )?;
+        run(
+            &request,
+            &mut self.admission(),
+            &self.registry,
+            &mut ClientExecutor::new(self, &request),
+            &mut self.clock.clone(),
+            &mut self.deadline(request.limits.max_duration),
+            publish,
+        )
+    }
+}
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes and classifies
-/// checksum-valid correlated responses.
-pub fn run<A, E, C>(
+/// checksum-valid correlated responses, serially or through the executor's
+/// rolling window as the request asks, until `deadline`.
+pub(crate) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
+    deadline: &mut Deadline,
+    emit: F,
 ) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Batch>,
-    C: Clock,
-{
-    let mut collector = Collector::default();
-    let summary = run_observed(
-        request,
-        authorizer,
-        registry,
-        executor,
-        clock,
-        |event, _| {
-            collector.observe(event);
-            Ok(())
-        },
-    )?;
-    Ok(collector.finish(summary))
-}
-
-/// Executes one approved scan and publishes each final probe outcome and
-/// retained undecoded frame before beginning later batches. The callback runs
-/// on a runtime-budgeted worker; `max_duration` bounds publisher waiting and
-/// live I/O, not arbitrary callback execution. Confirmed sends in the current
-/// batch are not undone, callback failure prevents later batches, and a
-/// callback may finish after this function returns while holding its permit.
-pub fn run_with_events<A, E, C, S>(
-    request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-    runtime: &Runtime,
-    sink: S,
-) -> Result<Summary, Error>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Batch>,
-    C: Clock,
-    S: Sink<Event, Ack = ()>,
-{
-    let observe = publisher(
-        runtime,
-        sink,
-        |error| Probes.duration_limit(0, error),
-        |source| Error::Output { source },
-    )?;
-    run_observed(request, authorizer, registry, executor, clock, observe)
-}
-
-fn run_observed<A, E, C, F>(
-    request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-    emit: F,
-) -> Result<Summary, Error>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Batch>,
+    E: Pipelined,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
-    let mut deadline =
-        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(&Probes, &deadline)?;
-    if (2..=1024).contains(&request.max_in_flight)
-        && request.max_in_flight > executor.pipeline_capacity()
-    {
-        return Err(Error::PipelineExecution {
-            source: BoundaryError::new(
-                "executor cannot provide the requested packet window",
-                packetcraftr_core::error::Classification::new(
-                    "capability.probe_pipeline",
-                    packetcraftr_core::error::Kind::Capability,
-                    Some("use max_in_flight=1 or a pipeline-capable executor"),
-                ),
-                Vec::new(),
-            ),
-        });
-    }
-    let approved = approve_scan(request, authorizer, &deadline)?;
+    enforce_deadline(&Probes, deadline)?;
+    let approved = approve_scan(request, authorizer, deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
-    enforce_deadline(&Probes, &deadline)?;
+    enforce_deadline(&Probes, deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
         Probes,
@@ -147,7 +113,7 @@ where
         run_batches(
             batches,
             request.probes_per_second,
-            &mut deadline,
+            deadline,
             clock,
             executor,
             &mut evidence,
@@ -157,7 +123,7 @@ where
             request,
             executor,
             &mut evidence,
-            &deadline,
+            deadline,
             batches,
             &approved,
         )
@@ -169,7 +135,7 @@ where
         counts.increment(classification);
     }
 
-    Ok(Summary {
+    Ok(Report {
         planned_duration: approved.planned_duration,
         target: approved.declared_target,
         resolved_addresses: approved.addresses,
@@ -191,18 +157,19 @@ fn run_pipelined<E, F, B>(
     approved: &ApprovedScan,
 ) -> Result<crate::Stats, Error>
 where
-    E: Executor<Batch>,
+    E: Pipelined,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
-    B: Iterator<Item = Batch>,
+    B: Iterator<Item = Batch<Probe>>,
 {
     let count = approved
         .addresses
         .len()
         .saturating_mul(approved.endpoints.len())
         .saturating_mul(request.attempts as usize);
-    if count.saturating_mul(std::mem::size_of::<Batch>()) > request.limits.max_prepared_bytes {
+    if count.saturating_mul(std::mem::size_of::<Batch<Probe>>()) > request.limits.max_prepared_bytes
+    {
         return Err(Error::PipelineExecution {
-            source: super::pipeline::limit(
+            source: super::executor::limit(
                 "prepared descriptions",
                 request.limits.max_prepared_bytes,
             ),
@@ -291,63 +258,6 @@ where
             Ok(stats)
         }
         Err(source) => Err(Error::PipelineExecution { source }),
-    }
-}
-
-#[derive(Default)]
-pub(super) struct Collector {
-    endpoints: Vec<Endpoint>,
-    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
-    undecoded: Vec<Frame>,
-    diagnostics: Vec<Diagnostic>,
-}
-
-impl Collector {
-    pub(super) fn observe(&mut self, event: Event) {
-        match event {
-            Event::Sent(_) => {}
-            Event::Probe { target: _, probe } => self.observe_probe(probe),
-            Event::Undecoded { frame } => self.undecoded.push(frame),
-            Event::Diagnostic(diagnostic) => self.diagnostics.push(diagnostic),
-        }
-    }
-
-    fn observe_probe(&mut self, evidence: ProbeEvidence) {
-        let address = evidence.address;
-        let transport = evidence.transport;
-        let port = evidence.port;
-        let endpoint = index_or_push(
-            &mut self.endpoints,
-            &mut self.endpoint_indices,
-            (address, port),
-            || Endpoint {
-                address,
-                transport,
-                port,
-                classification: Classification::Timeout,
-                probes: Vec::new(),
-            },
-        );
-        endpoint.classification.promote(evidence.classification);
-        endpoint.probes.push(evidence);
-    }
-
-    pub(super) fn finish(mut self, summary: Summary) -> Report {
-        for endpoint in &mut self.endpoints {
-            endpoint.probes.sort_by_key(|probe| probe.sequence);
-        }
-        self.endpoints
-            .sort_by_key(|endpoint| endpoint.probes.first().map(|probe| probe.sequence));
-        Report {
-            planned_duration: summary.planned_duration,
-            target: summary.target,
-            resolved_addresses: summary.resolved_addresses,
-            endpoints: self.endpoints,
-            undecoded: self.undecoded,
-            diagnostics: self.diagnostics,
-            stats: summary.stats,
-            rtt: summary.rtt,
-        }
     }
 }
 

@@ -3,11 +3,11 @@
 mod common;
 
 use bytes::Bytes;
+use common::responder::Routes;
 use packetcraftr::{
     Client,
-    clock::SystemClock,
-    policy::{Policy, PolicyAuthorizer},
-    probe::{ExchangeExecutor, Transport},
+    policy::Policy,
+    probe::Transport,
     scan::{
         self,
         profile::{ByteCheck, Config, Payload, ResponseCheck, Status, UdpProfile},
@@ -23,16 +23,9 @@ use packetcraftr_core::{
     packet::Packet,
     protocol::{application::dns::Dns, builtin, network::Ipv4, transport::Udp},
 };
-use packetcraftr_netio::{
-    self as net, capture,
-    interface::Id,
-    link::{Capability, Mode},
-    route, transmit,
-};
+use packetcraftr_netio::{self as net, capture, link::Mode, transmit};
 use std::{
     collections::{BTreeMap, VecDeque},
-    convert::Infallible,
-    net::IpAddr,
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
@@ -134,33 +127,6 @@ struct State {
 }
 #[derive(Clone)]
 struct Io(Arc<Mutex<State>>);
-struct Routes;
-impl route::Provider for Routes {
-    type Error = Infallible;
-    fn lookup_with_preferences(
-        &self,
-        _: IpAddr,
-        _: Option<&Id>,
-        _: Option<IpAddr>,
-        _deadline: &Deadline,
-    ) -> Result<route::Decision, Infallible> {
-        Ok(route::Decision {
-            interface: Id {
-                index: 1,
-                name: "fixture0".to_owned(),
-            },
-            source_mac: None,
-            selected_source: Some("192.0.2.1".parse().unwrap()),
-            preferred_source: None,
-            next_hop: None,
-            selection_reason: route::SelectionReason::OnLink,
-            destination_scope: route::Scope::Link,
-            mtu: 1500,
-            capability: Capability::Layer3,
-            link_type: LinkType::RAW,
-        })
-    }
-}
 fn registry() -> Arc<packetcraftr_core::registry::Registry> {
     Arc::new(
         builtin::registry_with(|builder| {
@@ -279,7 +245,7 @@ impl capture::Provider for Io {
         })
     }
 }
-fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
+fn run(window: usize, wrong_only: bool) -> (scan::Aggregate, Arc<Mutex<State>>) {
     let profiles = BTreeMap::from([(5353, dns_profile()), (67, bytes_profile())]);
     let state = Arc::new(Mutex::new(State {
         wrong_only,
@@ -290,14 +256,11 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
         max_bytes_per_operation: 8 * 1500,
         ..Default::default()
     };
-    let registry = builtin::registry();
     let client = Client::new(
-        registry.clone(),
-        policy.clone(),
+        builtin::registry(),
+        policy,
         common::providers(Routes, Io(state.clone())),
     );
-    let mut send = packetcraftr::send::Options::default();
-    send.plan.link_mode = Mode::Layer3;
     let mut collection = packetcraftr::exchange::Collection::default();
     collection.capture.snap_length = 1500;
     let request = scan::Request {
@@ -315,16 +278,15 @@ fn run(window: usize, wrong_only: bool) -> (scan::Report, Arc<Mutex<State>>) {
             max_duration: Duration::from_secs(3),
             ..Default::default()
         },
+        route: packetcraftr::route::Options {
+            link_mode: Mode::Layer3,
+            ..Default::default()
+        },
+        collection,
     };
-    let report = scan::run(
-        &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
-        &registry,
-        &mut ExchangeExecutor::new(&client, send, collection),
-        &mut SystemClock,
-    )
-    .unwrap();
-    (report, state)
+    let collector = scan::Collector::default();
+    let report = client.scan(request, collector.clone()).unwrap();
+    (collector.finish(report).unwrap(), state)
 }
 #[test]
 fn serial_and_rolling_scans_prefer_valid_application_replies_and_bind_custom_ports() {

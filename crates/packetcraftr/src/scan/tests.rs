@@ -17,18 +17,116 @@ use packetcraftr_core::protocol::{
 };
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::Packet};
 
-use super::classification::classify_response;
-use super::engine::{run, run_with_events};
-use super::probe::probe_packet;
-use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_ports};
-use crate::execution::Executor;
+use super::engine;
+use super::error::Probes;
+use super::evidence::classify_response;
+use super::executor::{PipelineEvent, PipelineOptions, Pipelined};
+use super::plan::packet::probe_packet;
+use super::{
+    Aggregate, Classification, Collector, Event, Limits, PortSpec, Probe, Report, Request,
+    select_ports,
+};
+use crate::Sink;
+use crate::clock::Clock;
+use crate::execution::{Errors as _, Executor, publisher};
+use crate::policy::Authorizer;
 use crate::policy::PolicyAuthorizer;
+use crate::probe::Batch;
 use crate::probe::{Execution, ProbeStatus, Transport};
+use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
 use crate::{BoundaryError, Stats, target::Family};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::registry::Registry;
+
+/// Runs a serial fixture executor where the engine takes a pipeline-capable
+/// one; every fixture request keeps `max_in_flight` at one.
+struct Serial<'e, E>(&'e mut E);
+
+impl<E: Executor<Batch<Probe>>> Executor<Batch<Probe>> for Serial<'_, E> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+        self.0.execute(batch)
+    }
+}
+
+impl<E: Executor<Batch<Probe>>> Pipelined for Serial<'_, E> {
+    fn execute_pipeline(
+        &mut self,
+        _batches: &[Batch<Probe>],
+        _options: PipelineOptions,
+        _emit: &mut dyn FnMut(PipelineEvent) -> Result<(), BoundaryError>,
+    ) -> Result<Stats, BoundaryError> {
+        unreachable!("serial fixtures run one probe in flight")
+    }
+}
+
+/// Runs the engine as the client does under the request's duration limit,
+/// collecting every event into the aggregate.
+fn run<A, E, C>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+) -> Result<Aggregate, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+{
+    let collector = Collector::default();
+    let mut sink = collector.clone();
+    let report = engine::run(
+        request,
+        authorizer,
+        registry,
+        &mut Serial(executor),
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        |event, _| {
+            sink.publish(event)
+                .map_err(|source| Error::Output { source })
+        },
+    )?;
+    collector.finish(report)
+}
+
+/// Runs the engine as the client does, publishing each event to `sink` on a
+/// worker admitted by `runtime`.
+fn run_with_events<A, E, C, S>(
+    request: &Request,
+    authorizer: &mut A,
+    registry: &Registry,
+    executor: &mut E,
+    clock: &mut C,
+    runtime: &Runtime,
+    sink: S,
+) -> Result<Report, Error>
+where
+    A: Authorizer + ResolveTarget,
+    E: Executor<Batch<Probe>>,
+    C: Clock,
+    S: Sink<Event, Ack = ()>,
+{
+    let publish = publisher(
+        runtime,
+        sink,
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
+    )?;
+    engine::run(
+        request,
+        authorizer,
+        registry,
+        &mut Serial(executor),
+        clock,
+        &mut Deadline::new(request.limits.max_duration),
+        publish,
+    )
+}
 
 fn tcp_scan_request(target: Target) -> Request {
     Request {
@@ -43,6 +141,8 @@ fn tcp_scan_request(target: Target) -> Request {
         udp_payload: bytes::Bytes::new(),
         udp_profiles: Default::default(),
         limits: Limits::default(),
+        route: crate::route::Options::default(),
+        collection: crate::exchange::Collection::default(),
     }
 }
 
@@ -53,8 +153,8 @@ struct TimeoutExecutor {
     invalid_udp_payload: bool,
 }
 
-impl Executor<Batch> for TimeoutExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for TimeoutExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
             batch
@@ -166,8 +266,8 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
 
 struct LateResponseExecutor(TimeoutExecutor);
 
-impl Executor<Batch> for LateResponseExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for LateResponseExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
             tcp_packet(
@@ -851,8 +951,8 @@ struct EchoReplyExecutor {
     copies: usize,
 }
 
-impl Executor<Batch> for EchoReplyExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for EchoReplyExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -940,8 +1040,8 @@ struct EveryOtherEchoExecutor {
     inner: TimeoutExecutor,
 }
 
-impl Executor<Batch> for EveryOtherEchoExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         if batch.probes[0].sequence % 2 == 1 {
             return Ok(execution);
@@ -1040,8 +1140,8 @@ struct StaleEchoExecutor {
     inner: TimeoutExecutor,
 }
 
-impl Executor<Batch> for StaleEchoExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
+impl Executor<Batch<Probe>> for StaleEchoExecutor {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -1113,4 +1213,28 @@ fn a_family_miss_is_reported_as_a_scan_error() {
         "resolved target has no IPv4 address selected for this scan"
     );
     assert_eq!(error.classification().code, "packet.target_address_family");
+}
+
+#[test]
+fn a_collector_refuses_a_report_counting_probes_it_never_saw() {
+    use packetcraftr_core::error::Classified as _;
+    let report = Report {
+        planned_duration: Duration::ZERO,
+        target: "192.0.2.2".to_owned(),
+        resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2))],
+        counts: super::ClassificationCounts::default(),
+        stats: Stats::default(),
+        rtt: super::Rtt {
+            sent: 1,
+            lost: 1,
+            ..super::Rtt::default()
+        },
+    };
+
+    let error = Collector::default()
+        .finish(report)
+        .expect_err("one sent probe but no collected outcome");
+
+    assert!(matches!(error, Error::IncoherentEvents { .. }), "{error}");
+    assert_eq!(error.classification().code, "internal.scan_event_coherence");
 }

@@ -137,46 +137,47 @@ pub(super) fn run(
         timeout: timeout.timeout(),
         probes_per_second: rate,
         limits: scan_limits,
+        route: packetcraftr::route::Options::default(),
+        collection: packetcraftr::exchange::Collection::default(),
     };
     if connect {
         return connect::run(&request, policy, format, stream);
     }
-    let mut providers = execution::prepare(
+    let execution::Providers {
+        executor, runtime, ..
+    } = execution::prepare(
         route,
         policy,
         request.timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    let mut session = providers.session();
+    let request = packetcraftr::scan::Request {
+        route: executor.send.plan,
+        collection: executor.collection,
+        ..request
+    };
+    // Events publish on the workflow runtime, as they did before scan ran
+    // on the client, so the `resources` report keeps its rows.
+    let client = executor.client.with_runtime(runtime);
     execution::run_workflow(
-        &mut session,
+        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Scan,
-            run: Box::new(|session| {
-                packetcraftr::scan::run(
-                    &request,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                )
-                .map_err(rendering::scan_error)
+            run: Box::new(|_| {
+                let collector = packetcraftr::scan::Collector::default();
+                let report = client
+                    .scan(request.clone(), collector.clone())
+                    .map_err(rendering::scan_error)?;
+                collector.finish(report).map_err(rendering::scan_error)
             }),
-            run_with_events: Box::new(|session, emit| {
-                packetcraftr::scan::run_with_events(
-                    &request,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                    session.runtime,
-                    emit,
-                )
-                .map_err(rendering::scan_error)
+            run_with_events: Box::new(|_, emit| {
+                client
+                    .scan(request.clone(), emit)
+                    .map_err(rendering::scan_error)
             }),
             on_event: rendering::emit_event,
             into_result: Box::new(|report| {

@@ -62,42 +62,41 @@ pub(super) fn run(
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;
-    let mut providers = execution::prepare(
+    let execution::Providers {
+        executor, runtime, ..
+    } = execution::prepare(
         arguments.route,
         arguments.policy,
         request.timeout,
         max_template_packets,
         queue_limits,
     )?;
-    let mut session = providers.session();
+    let request = packetcraftr::traceroute::Request {
+        route: executor.send.plan,
+        collection: executor.collection,
+        ..request
+    };
+    // Events publish on the workflow runtime, as they did before traceroute
+    // ran on the client, so the `resources` report keeps its rows.
+    let client = executor.client.with_runtime(runtime);
     execution::run_workflow(
-        &mut session,
+        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Traceroute,
-            run: Box::new(|session| {
-                packetcraftr::traceroute::run(
-                    &request,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                )
-                .map_err(CliError::classified)
+            run: Box::new(|_| {
+                let collector = packetcraftr::traceroute::Collector::default();
+                let report = client
+                    .traceroute(request.clone(), collector.clone())
+                    .map_err(CliError::classified)?;
+                collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|session, emit| {
-                packetcraftr::traceroute::run_with_events(
-                    &request,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                    session.runtime,
-                    emit,
-                )
-                .map_err(CliError::classified)
+            run_with_events: Box::new(|_, emit| {
+                client
+                    .traceroute(request.clone(), emit)
+                    .map_err(CliError::classified)
             }),
             on_event: rendering::emit_event,
             into_result: Box::new(|report| {
@@ -151,6 +150,8 @@ fn prepare_request(
         timeout: arguments.timeout.timeout(),
         probes_per_second: arguments.rate,
         limits: trace_limits,
+        route: packetcraftr::route::Options::default(),
+        collection: packetcraftr::exchange::Collection::default(),
     };
     request.validate().map_err(CliError::classified)?;
     Ok(request)

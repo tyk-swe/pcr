@@ -63,6 +63,9 @@ pub enum Error {
         #[source]
         source: BoundaryError,
     },
+    /// A collector saw events that disagree with the report.
+    #[error("scan events are incoherent: {message}")]
+    IncoherentEvents { message: String },
 }
 
 impl Error {
@@ -113,6 +116,11 @@ impl Classified for Error {
                 "internal.scan_evidence",
                 Kind::Internal,
                 Some("treat the scan as incomplete because executor evidence was inconsistent"),
+            ),
+            Self::IncoherentEvents { .. } => Classification::new(
+                "internal.scan_event_coherence",
+                Kind::Internal,
+                Some("collect every scan event once, from one scan, in publication order"),
             ),
         }
     }

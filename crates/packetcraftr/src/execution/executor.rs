@@ -38,54 +38,6 @@ pub trait Request {
 /// keyed by request type, so a scan executor and a DNS executor stay distinct.
 pub trait Executor<Req: Request> {
     fn execute(&mut self, request: &Req) -> Result<Req::Execution, BoundaryError>;
-    /// Maximum simultaneous packet probes supported by this executor.
-    fn pipeline_capacity(&self) -> usize {
-        1
-    }
-    /// Optional rolling packet-execution capability. The default rejects it;
-    /// executors must not silently turn a requested window into serial work.
-    fn execute_pipeline(
-        &mut self,
-        _requests: &[Req],
-        _options: PipelineOptions,
-        _emit: &mut dyn FnMut(PipelineEvent<Req::Execution>) -> Result<(), BoundaryError>,
-    ) -> Result<crate::Stats, BoundaryError> {
-        Err(BoundaryError::new(
-            "executor does not support rolling packet windows",
-            packetcraftr_core::error::Classification::new(
-                "capability.probe_pipeline",
-                packetcraftr_core::error::Kind::Capability,
-                Some("use max_in_flight=1 or a pipeline-capable executor"),
-            ),
-            Vec::new(),
-        ))
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PipelineOptions {
-    pub max_in_flight: usize,
-    pub probes_per_second: Option<u32>,
-    pub max_duration: std::time::Duration,
-    pub max_prepared_bytes: usize,
-    pub max_evidence_frames: usize,
-    pub max_evidence_bytes: usize,
-    pub max_undecoded: usize,
-}
-#[derive(Clone, Debug)]
-pub enum PipelineEvent<E> {
-    Sent {
-        index: usize,
-        sent: std::sync::Arc<crate::SentPacket>,
-    },
-    Completed {
-        index: usize,
-        execution: E,
-    },
-    Undecoded {
-        frame: packetcraftr_core::frame::Frame,
-    },
-    Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
 }
 
 /// Runs each approved workflow step as one capture-ready exchange on a

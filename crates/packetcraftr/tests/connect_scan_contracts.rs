@@ -83,6 +83,8 @@ fn timed_out_attempts_still_releasing_admission_do_not_fail_the_scan() {
         probes_per_second: None,
         max_in_flight: MAX_PENDING_CONNECTIONS,
         limits: scan::Limits::default(),
+        route: Default::default(),
+        collection: Default::default(),
     };
     let policy = Policy::default();
     let report = connect::run(

@@ -37,7 +37,7 @@ fn scan_udp_source_port(attempt: u32) -> u16 {
 // the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the probe carries;
 // sent_probe_matches applies the same reduction when comparing, so even a wrapped counter still
 // matches
-pub(super) fn probe_packet(probe: &Probe) -> Packet {
+pub(in crate::scan) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -296,7 +296,7 @@ fn payload_bytes(payload: &Packet) -> Option<Bytes> {
 
 // the observed packet is compared against the same reduction probe_packet applied, so the narrowing
 // is symmetric on both sides of the comparison
-pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+pub(in crate::scan) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     if probe.udp_profile.as_ref().is_some_and(|profile| {
         probe.endpoint.transport() != crate::probe::Transport::Udp
             || profile.payload(probe.sequence) != probe.udp_payload

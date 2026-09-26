@@ -573,7 +573,7 @@ fn scan_probe(responded: bool) -> packetcraftr::scan::ProbeEvidence {
 
 fn scan_case() -> Value {
     let address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Report {
+    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Aggregate {
         planned_duration: std::time::Duration::ZERO,
         target: "host.example".to_owned(),
         resolved_addresses: vec![address],
@@ -619,7 +619,7 @@ fn scan_icmp_case() -> Value {
         probes: vec![probe(address)],
     };
     let ipv4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
-    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Report {
+    let report = Published::<scan_output::Report>::try_from(packetcraftr::scan::Aggregate {
         planned_duration: std::time::Duration::ZERO,
         target: "host.example".to_owned(),
         resolved_addresses: vec![ipv4, ipv6],
@@ -913,7 +913,7 @@ fn trace_probe(responded: bool) -> packetcraftr::traceroute::ProbeEvidence {
 
 fn traceroute_case() -> Value {
     let report =
-        Published::<traceroute_output::Report>::try_from(packetcraftr::traceroute::Report {
+        Published::<traceroute_output::Report>::try_from(packetcraftr::traceroute::Aggregate {
             target: "host.example".to_owned(),
             resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2))],
             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
@@ -927,7 +927,7 @@ fn traceroute_case() -> Value {
                 hop_limit: 1,
                 frame: evidence_frame(),
             }],
-            completion: packetcraftr::traceroute::Completion::DestinationReached,
+            termination: packetcraftr::traceroute::Termination::DestinationReached,
             diagnostics: vec![diagnostic()],
             stats: workflow_stats(),
         })

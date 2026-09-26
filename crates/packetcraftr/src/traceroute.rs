@@ -3,6 +3,10 @@
 
 //! Policy-gated traceroute to authorized destinations, with finite hop, attempt,
 //! timeout, and evidence limits.
+//!
+//! [`Client::traceroute`](crate::Client::traceroute) runs a [`Request`] one
+//! hop at a time and publishes each [`Event`] to a sink; [`Collector`]
+//! rebuilds the [`Aggregate`].
 
 use crate::probe::Workflow;
 
@@ -23,24 +27,21 @@ const MAX_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SOURCE_PORT: u16 = crate::correlation::EPHEMERAL_SOURCE_PORT_BASE;
 const WORKFLOW: Workflow = Workflow::Traceroute;
 
-mod classification;
 mod engine;
 mod error;
 mod evidence;
-mod execution;
 mod executor;
 mod plan;
-mod probe;
 mod report;
 mod request;
 #[cfg(test)]
 mod tests;
 
-pub use classification::{ResponseClassification, classify_response};
-pub use engine::{run, run_with_events};
 pub use error::Error;
-pub use execution::{Batch, Probe};
+pub use evidence::{CorrelatedResponse, classify_response};
+pub use plan::Probe;
 pub use report::{
-    Completion, Event, Hop, ProbeEvidence, Report, ResponseKind, Summary, UndecodedEvidence,
+    Aggregate, Collector, Event, Hop, ProbeEvidence, Report, ResponseKind, Termination,
+    UndecodedEvidence,
 };
 pub use request::{Limits, Request};

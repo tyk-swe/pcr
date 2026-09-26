@@ -954,7 +954,7 @@ carries diagnostics or totals yields `output::envelope::Published<T>`
 The other command outputs follow the same pattern (exchange, traceroute, dns,
 tls, expert, http, dns-read, export, rewrite, fragment, projection,
 protocols, routes, plan, and resource workers). The fuzz campaign coherence
-check moved to `packetcraftr::fuzz::Totals`; `contract::Error::IncoherentFuzzEvents`
+check moved to `packetcraftr_core::fuzz::Totals`; `contract::Error::IncoherentFuzzEvents`
 wraps its `fuzz::IncoherentReport` source. A library value the published
 contract has no spelling for (a future variant of a `non_exhaustive` enum)
 fails with `contract::Error::Unpublished` (`internal.error`), except an error
@@ -1462,3 +1462,54 @@ impl ResolveTarget for Gate {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
 }
 ```
+
+## Fuzz on the client
+
+Live fuzz is a client workflow, and core owns the campaign: its cases, their
+offline outcomes, and the coherence check. The live types add only what a
+live run observes.
+
+```rust
+// Before
+let report = fuzz::run(
+    fuzz::RunInput { request: &campaign, live: fuzz::LiveOptions { timeout, destination, allow_malformed_live, limits, .. }, packet, registry },
+    &mut authorizer, &mut executor, &mut clock,
+)?;
+// After
+let collector = fuzz::Collector::default();
+let report = client.fuzz(
+    fuzz::Request { timeout, destination, route, collection, allow_permissive_live, ..fuzz::Request::new(campaign, packet) },
+    collector.clone(),
+)?;
+let aggregate = collector.finish(report);
+```
+
+| Before | After |
+|---|---|
+| `fuzz::run(input, &mut authorizer, &mut executor, &mut clock)` | `client.fuzz(request, collector.clone())`, then `collector.finish(report)` |
+| `fuzz::run_with_events(input, .., &runtime, sink)` | `client.fuzz(request, sink)` (the client's runtime) |
+| `fuzz::run_offline_with_events(&campaign, packet, registry, &runtime, sink)` | `packetcraftr_core::fuzz::run_observed(&campaign, packet, registry, emit)`, publishing through a `progress::Worker` if needed |
+| `fuzz::RunInput { request, live, packet, registry }` | `fuzz::Request { campaign, packet, .. }`; the registry is the client's |
+| `LiveOptions { timeout, cases_per_second, destination }` | the same `fuzz::Request` fields |
+| `LiveOptions.allow_malformed_live` | `fuzz::Request.allow_permissive_live` |
+| `LiveLimits { max_evidence_frames, max_evidence_bytes }` | the same `fuzz::Request` fields |
+| `LiveOptions::validate`, `LiveLimits::validate` | `fuzz::Request::validate` (also validates the campaign) |
+| the executor's `send::Options` and `exchange::Collection` | `fuzz::Request.route` and `.collection`; the build options are the campaign's |
+| `fuzz::Case { prepared, outcome, sent, responses, unmatched, undecoded }` | `fuzz::Trial { case, evidence: Option<fuzz::Evidence { sent, outcome, responses, unmatched, undecoded }> }` |
+| `fuzz::CaseOutcome::{Built, Rejected}` | `trial.case.outcome` (core `CaseOutcome`) for a case never sent |
+| `fuzz::CaseOutcome::{Response, Timeout}` | `evidence.outcome` (`fuzz::Outcome`) |
+| `fuzz::Summary { seed, first_case, stats }` | `fuzz::Report { seed, first_case, campaign, stats }` |
+| `fuzz::Report { seed, first_case, cases, stats }` | `fuzz::Aggregate { seed, first_case, trials, campaign, stats }` |
+| `fuzz::Stats.{cases_generated, cases_built}` | `report.campaign.{cases_generated, cases_built}` (core `fuzz::Stats`) |
+| `fuzz::Stats.{packets_attempted, packets_completed, bytes, elapsed, capture}` | `report.stats` (`packetcraftr::Stats`) |
+| `packetcraftr::fuzz::{Totals, IncoherentReport}` | `packetcraftr_core::fuzz::{Totals, IncoherentReport}` |
+| `Totals::try_from(&live_report)` | `Totals::try_from(&aggregate)` |
+| `fuzz::{Execution, ExecutionCase}`, `impl probe::Executor<ExecutionCase>` | internal; fake the client's providers instead |
+
+The events are `fuzz::Event::Case(Trial)`, one per case in case order, each
+answered before the next case is sent. A rejected case has no evidence; a
+transmitted case's `case.built` and `case.decoded` are the packet actually
+sent on its route. `campaign` holds core's preparation statistics (cases
+generated and built, built bytes, preparation time); `stats` holds the live
+traffic, including pacing delays. Codes and the published output are
+unchanged; the CLI derives the four published outcomes from the two sources.

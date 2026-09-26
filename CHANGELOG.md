@@ -398,6 +398,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   `policy::Authorizer` keeps `authorize_operation` (and
   `authorize_final_wire`), and DNS, scan, connect scan, and traceroute require
   `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
+- Live fuzz runs on the client: `client.fuzz(fuzz::Request, S)` admits the
+  campaign through the client's policy and returns `fuzz::Report`;
+  `fuzz::Collector` rebuilds the `fuzz::Aggregate`. `fuzz::Request` wraps
+  core's campaign request and replaces `RunInput`, `LiveOptions`, and
+  `LiveLimits` (`allow_malformed_live` is `allow_permissive_live`; the evidence
+  bounds are `max_evidence_frames` and `max_evidence_bytes`). The live
+  duplicates of core's campaign types are removed: `fuzz::Trial` pairs
+  `packetcraftr_core::fuzz::Case` with the optional live `fuzz::Evidence`,
+  whose `fuzz::Outcome` is `Response` or `Timeout`; `fuzz::Report` composes
+  the campaign's core `Stats` with the traffic `Stats`, replacing `fuzz::Stats`
+  and `fuzz::Summary`. `fuzz::run`, `fuzz::run_with_events`,
+  `fuzz::run_offline_with_events` (use `packetcraftr_core::fuzz::run_observed`),
+  and the public `fuzz::{Execution, ExecutionCase}` are removed.
+  `fuzz::{Totals, IncoherentReport}` move to `packetcraftr_core::fuzz`. The
+  published fuzz output is unchanged.
 
   See `docs/migration-unreleased.md`.
 
@@ -420,10 +435,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   gives `routes`, `interfaces`, and `plan` lookups that allowance within the
   invocation deadline.
 
-- `packetcraftr::fuzz::Totals` checks a live or offline campaign's case counts
-  and cases for coherence (`TryFrom<&Report>`, `TryFrom<&Stats>`, and their
-  offline counterparts), failing with `fuzz::IncoherentReport`. The CLI's
-  `internal.fuzz_event_coherence` check now uses it.
+- `packetcraftr_core::fuzz::Totals` checks a campaign's case counts and cases
+  for coherence (`TryFrom<&Report>`, `TryFrom<&Stats>`, `check_cases`, and
+  `TryFrom<&packetcraftr::fuzz::Aggregate>` for a live campaign), failing with
+  `fuzz::IncoherentReport`. The CLI's `internal.fuzz_event_coherence` check
+  now uses it. `fuzz::Campaign::stats` reports what preparation generated and
+  built.
 
 - The versioned input documents and their rules are library API, so other
   consumers read them exactly as the CLI does. Core `transform::Rules` reads
@@ -699,6 +716,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Live `fuzz` publishes its cases through its client's one runtime, so the
+  resources report lists a single `fuzz_progress` worker row in every format,
+  instead of an idle `client_progress` row plus, under NDJSON, a
+  `fuzz_progress` row.
 - `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
   the operation's destinations (and for `send` and `exchange` its budget) are
   authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer

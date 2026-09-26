@@ -549,6 +549,24 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Added
 
+- Classification codes new in this release, each for a failure that
+  previously had no classified error of its own:
+  - `cli.layer_index` (usage): `packet::Error::IndexOutOfBounds`, a layer
+    index outside the packet.
+  - `internal.registry`: `registry::Error`, a protocol, alias, link type,
+    matcher, or filter field registered twice or inconsistently.
+  - `internal.unresolved_interface`: `route::Error::UnresolvedInterface`, a
+    route planned with an interface selector no client resolved first.
+  - `internal.send_event_coherence`, `internal.scan_event_coherence`, and
+    `internal.traceroute_event_coherence`: a `Collector` given events that do
+    not form one publication, like the existing `internal.*_event_coherence`
+    codes of the other workflows.
+  - `io.send_clock`: `send::Error::Clock`, the pacing clock failing while a
+    paced send could still continue.
+  - `packet.semantics`: `protocol::semantics::Error`, route-bearing packet
+    fields that are malformed or ambiguous.
+  - `packet.tls`: `protocol::application::tls::Error::Invalid`, a TLS record
+    or handshake that breaks a wire rule or bound.
 - `packetcraftr_core::error::BoundaryError::as_causes` lists a boundary
   error's message followed by its captured causes, for a wrapper that reports
   it as its source without repeating its text.
@@ -1194,6 +1212,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Removed
 
+- The `internal.final_wire_authorization` and `internal.target_resolution`
+  codes are no longer reported: they classified an authorizer that lacked
+  final-wire authorization or target resolution, and those capabilities are
+  now separate internal traits, so the failure cannot occur.
 - Rust: the equivalent public paths `packetcraftr_core::{Packet, PacketError}`
   (use `packet::`), `build::{Context, Mode, DEFAULT_MAX_LAYERS,
   DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `layout::`),

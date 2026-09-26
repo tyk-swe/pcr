@@ -11,7 +11,7 @@
 //! changes only the bytes its edit names:
 //!
 //! - [`FieldEdits`] locates fields through the codecs' decoded layout.
-//! - [`rewrite`] and [`fragment`] locate the link, VLAN, and IP headers with
+//! - [`rewrite()`] and [`fragment()`] locate the link, VLAN, and IP headers with
 //!   the shared [`protocol::headers`](crate::protocol::headers) walker.
 //!
 //! Every byte-level edit says which faithfulness gap it avoids.

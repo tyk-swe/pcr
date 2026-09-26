@@ -15,9 +15,10 @@ PacketcraftR has four directional Rust crates:
   versioned machine-output contract.
 
 Keep types, behavior, and tests with their domain owner. Split modules by
-responsibility; there is no required filename for types. Expose capabilities,
-keep assembly details private, and avoid equivalent public paths. Core must
-remain independent of native I/O and workflows.
+responsibility; there is no required filename for types. Module files are
+self-named (`foo.rs` beside `foo/`); clippy denies `mod.rs`. Expose
+capabilities, keep assembly details private, and avoid equivalent public paths.
+Core must remain independent of native I/O and workflows.
 
 Use rustfmt and ordinary Cargo commands. Run the relevant tests while editing.
 The comprehensive Linux check (requires `libpcap-dev`) is:

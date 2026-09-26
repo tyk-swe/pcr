@@ -1130,15 +1130,14 @@ fn non_in_address_rdata_is_audited_without_in_interpretation() {
 
 #[test]
 fn structural_failures_preserve_the_core_cause_without_duplicate_messages() {
-    use std::error::Error as _;
     let error =
         dns::wire::decode_response(&[], "example.test", QueryType::A, ID, Limits::default())
             .unwrap_err();
-    let cause = error
-        .source()
-        .unwrap()
-        .downcast_ref::<DecodeError>()
-        .unwrap();
+    // The core error is the variant's transparent payload: it keeps its type
+    // and message, and nothing repeats it as a cause.
+    let wire::Error::Decode(cause) = &error else {
+        panic!("a structural failure is the core decode error: {error:?}");
+    };
     assert!(matches!(
         cause,
         DecodeError::MessageTooShort {

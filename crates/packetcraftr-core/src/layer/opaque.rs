@@ -23,6 +23,8 @@ pub struct Raw {
 }
 
 impl Raw {
+    pub(crate) const ID: Id = Id::new("raw");
+
     pub fn new(bytes: impl Into<Bytes>) -> Self {
         Self {
             bytes: bytes.into(),
@@ -31,7 +33,7 @@ impl Raw {
 }
 
 reflective_layer! {
-    pub(crate) fn raw_schema() => { protocol: Id::new("raw"), name: "Raw" }
+    fn raw_schema() => { protocol: Raw::ID, name: "Raw" }
     impl Raw {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -52,6 +54,8 @@ pub struct Padding {
 }
 
 impl Padding {
+    pub(crate) const ID: Id = Id::new("padding");
+
     /// Whether the layer at `layer_index` excludes these bytes from its
     /// payload: link padding is excluded everywhere, and coverage-bounded
     /// padding from the layer that declared the boundary onward.
@@ -76,7 +80,7 @@ impl Padding {
 }
 
 reflective_layer! {
-    pub(crate) fn padding_schema() => { protocol: Id::new("padding"), name: "Padding" }
+    fn padding_schema() => { protocol: Padding::ID, name: "Padding" }
     impl Padding {
         "bytes" => {
             kind: Bytes, derived: false, required: false,
@@ -91,12 +95,12 @@ reflective_layer! {
             set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => {
                     layer.outside_layer = Some(usize::try_from(value).map_err(|_| FieldError::OutOfRange {
-                        protocol: padding_schema().protocol, field: name.to_owned(),
+                        protocol: Padding::ID, field: name.to_owned(),
                     })?);
                     Ok(())
                 }
                 _ => Err(FieldError::WrongType {
-                    protocol: padding_schema().protocol, field: name.to_owned(), expected: "unsigned",
+                    protocol: Padding::ID, field: name.to_owned(), expected: "unsigned",
                 }),
             }
         }
@@ -112,6 +116,8 @@ pub struct Malformed {
 }
 
 impl Malformed {
+    pub(crate) const ID: Id = Id::new("malformed");
+
     pub fn new(
         intended_protocol: Option<String>,
         bytes: impl Into<Bytes>,
@@ -126,7 +132,7 @@ impl Malformed {
 }
 
 reflective_layer! {
-    pub(crate) fn malformed_schema() => { protocol: Id::new("malformed"), name: "Malformed" }
+    fn malformed_schema() => { protocol: Malformed::ID, name: "Malformed" }
     impl Malformed {
         "protocol" => {
             kind: Text, derived: false, required: false,
@@ -134,7 +140,7 @@ reflective_layer! {
             get |layer| layer.intended_protocol.clone().map(FieldValue::Text),
             set |layer, value, name| match value {
                 FieldValue::Text(value) => { layer.intended_protocol = Some(value); Ok(()) }
-                _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol, field: name.to_owned(), expected: "text" }),
+                _ => Err(FieldError::WrongType { protocol: Malformed::ID, field: name.to_owned(), expected: "text" }),
             }
         },
         "bytes" => {
@@ -154,7 +160,7 @@ reflective_layer! {
 
 /// Parses hexadecimal raw bytes with optional `0x`, whitespace, colon, or dash separators.
 pub fn parse_hex(input: &str) -> Result<Bytes, crate::codec::Error> {
-    let protocol = raw_schema().protocol;
+    let protocol = Raw::ID;
     let compact = input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
@@ -212,7 +218,7 @@ impl LayerCodec for RawCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Raw>(raw_schema().protocol, layer)?;
+        let layer = typed_layer::<Raw>(Raw::ID, layer)?;
         ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
@@ -234,7 +240,7 @@ impl LayerCodec for RawCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        with_fields(Raw::default(), raw_fields(fields, raw_schema().protocol)?)
+        with_fields(Raw::default(), raw_fields(fields, Raw::ID)?)
     }
 }
 
@@ -255,7 +261,7 @@ impl LayerCodec for MalformedCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Malformed>(malformed_schema().protocol, layer)?;
+        let layer = typed_layer::<Malformed>(Malformed::ID, layer)?;
         ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
@@ -306,7 +312,7 @@ impl LayerCodec for PaddingCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, crate::codec::Error> {
-        let layer = typed_layer::<Padding>(padding_schema().protocol, layer)?;
+        let layer = typed_layer::<Padding>(Padding::ID, layer)?;
         ensure_encode_budget(*layer.protocol_id(), layer.bytes.len(), context)?;
         Ok(
             EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()))
@@ -329,10 +335,7 @@ impl LayerCodec for PaddingCodec {
         &self,
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, crate::codec::Error> {
-        with_fields(
-            Padding::default(),
-            raw_fields(fields, padding_schema().protocol)?,
-        )
+        with_fields(Padding::default(), raw_fields(fields, Padding::ID)?)
     }
 }
 

@@ -99,6 +99,17 @@ fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::re
     for &(link_type, protocol) in LinkType::BUILTIN_ROOTS {
         builder.bind_link_type(link_type, protocol.as_str())?;
     }
+    for protocol in [
+        BuiltinProtocol::Ethernet,
+        BuiltinProtocol::Vlan,
+        BuiltinProtocol::Vlan8021ad,
+        BuiltinProtocol::BsdNull,
+        BuiltinProtocol::BsdLoop,
+        BuiltinProtocol::LinuxSll,
+        BuiltinProtocol::LinuxSll2,
+    ] {
+        builder.allow_trailing_padding(protocol.as_str());
+    }
     for parent in [
         BuiltinProtocol::Ethernet,
         BuiltinProtocol::Vlan,

@@ -11,7 +11,7 @@ use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
     field::FieldValue,
-    layer::{Layer, Raw, raw_layout},
+    layer::{Layer, Raw},
     layout::FieldLayout,
     protocol::common::{invalid, rejected, typed_layer},
 };
@@ -50,7 +50,7 @@ pub(super) fn encode<M: Message>(
 /// Keeps a payload that cannot be this message as raw bytes.
 pub(super) fn raw(input: Bytes) -> DecodedLayer {
     let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-    raw.fields = raw_layout(input.len());
+    raw.fields = Raw::layout(input.len());
     raw
 }
 

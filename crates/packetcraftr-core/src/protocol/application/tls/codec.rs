@@ -38,7 +38,7 @@ use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::Diagnostic,
     field::FieldValue,
-    layer::{Layer, Raw, raw_layout},
+    layer::{Layer, Raw},
     protocol::{
         BuiltinProtocol,
         common::{ensure_encode_budget, invalid, typed_layer},
@@ -403,7 +403,7 @@ impl LayerCodec for TlsCodec {
 /// not a defect.
 fn raw_segment(input: Bytes) -> Result<DecodedLayer, crate::codec::Error> {
     let mut decoded = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-    decoded.fields = raw_layout(input.len());
+    decoded.fields = Raw::layout(input.len());
     Ok(decoded)
 }
 

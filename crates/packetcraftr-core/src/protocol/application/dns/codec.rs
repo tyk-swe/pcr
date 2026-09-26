@@ -223,7 +223,7 @@ impl LayerCodec for DnsCodec {
                 consumed: input.len(),
                 payload_len: 0,
                 next: Vec::new(),
-                fields: crate::layer::raw_layout(input.len()),
+                fields: crate::layer::Raw::layout(input.len()),
                 diagnostics: Vec::new(),
                 stop: true,
                 network: None,

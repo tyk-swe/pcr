@@ -10,7 +10,7 @@ use common::probe::{
     Child, ChildCodec, PROBE_LINK_TYPE, Probe, ProbeCodec, probe_registry, structure,
 };
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw, raw_layout};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw};
 use packetcraftr_core::layout::ByteRange;
 use packetcraftr_core::protocol::{
     builtin,
@@ -151,7 +151,7 @@ fn assert_root_decode_behavior(registry: &Arc<packetcraftr_core::registry::Regis
     assert_eq!(raw.packet.encoded_payload_length(0), Some(0));
     assert_eq!(raw.layout.layers.len(), 1);
     assert_eq!(raw.layout.layers[0].range, ByteRange::new(0, 2));
-    assert_eq!(raw.layout.layers[0].fields, raw_layout(2));
+    assert_eq!(raw.layout.layers[0].fields, Raw::layout(2));
     assert_eq!(raw.diagnostics[0].code, "decode.unsupported_link_type");
 }
 

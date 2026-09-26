@@ -8,13 +8,66 @@ use bytes::Bytes;
 use super::Schema;
 use crate::field::{self, FieldValue, WireValue, parse_mac};
 
-/// Declares a layer's schema, getter/setter dispatch, and static layout.
-/// Encoding and decoding remain handwritten in protocol modules.
+/// Declares a layer's reflective schema, its [`Layer`](crate::layer::Layer)
+/// implementation, and a function returning its static field layout.
 ///
-/// Exported so sibling workspace crates can declare their own layers; it is not
-/// part of the documented public API.
+/// Built-in and custom protocols use the same declaration. Encoding and
+/// decoding stay handwritten in the protocol's
+/// [`LayerCodec`](crate::codec::LayerCodec).
+///
+/// The declaration names the schema function and the layer's protocol
+/// [`Id`](crate::layer::Id) and display name, then lists the fields in their
+/// public schema order. Each field gives its
+/// [`FieldKind`](crate::field::FieldKind) variant, whether it is derived by
+/// the encoder or required when building, a description, optional nested
+/// `children` schemas, and how it reflects:
+///
+/// - `reflect: member` reads and writes a struct member through
+///   [`ReflectiveField`](crate::layer::ReflectiveField);
+/// - `reflect_bounded: member, MAX` does the same but refuses unsigned values
+///   above a wire-width maximum;
+/// - `get |layer| expr, set |layer, value, name| expr` supplies handwritten
+///   accessors, which usually call [`reflect_get`](crate::layer::reflect_get)
+///   and [`reflect_set`](crate::layer::reflect_set).
+///
+/// A field may also give its byte range relative to the layer start with
+/// `layout: (start, end)`; the declared layout function returns those ranges
+/// in wire order. Aliases follow the field name as `"name" | "alias"`.
+///
+/// # Examples
+///
+/// ```
+/// use packetcraftr_core::field::FieldValue;
+/// use packetcraftr_core::layer::{Id, Layer};
+/// use packetcraftr_core::layout::ByteRange;
+/// use packetcraftr_core::reflective_layer;
+///
+/// #[derive(Clone, Debug, Default)]
+/// struct Beacon {
+///     interval: u16,
+/// }
+///
+/// reflective_layer! {
+///     fn beacon_schema() => { protocol: Id::new("beacon"), name: "Beacon" }
+///     impl Beacon {
+///         "interval" | "period" => {
+///             kind: Unsigned, derived: false, required: true,
+///             description: "Seconds between beacons",
+///             reflect: interval,
+///             layout: (0, 2)
+///         }
+///     }
+///     layout fn beacon_layout();
+/// }
+///
+/// let mut beacon = Beacon::default();
+/// beacon.set_field("period", FieldValue::Unsigned(30)).unwrap();
+/// assert_eq!(beacon.field("interval"), Some(FieldValue::Unsigned(30)));
+/// // The member is a `u16`, so a wider value is refused and named.
+/// assert!(beacon.set_field("interval", FieldValue::Unsigned(70_000)).is_err());
+/// assert_eq!(beacon_layout()[0].range, ByteRange::new(0, 2));
+/// ```
 #[macro_export]
-#[doc(hidden)]
 macro_rules! reflective_layer {
     (
         $schema_vis:vis fn $schema:ident() => {
@@ -182,6 +235,7 @@ pub(crate) use reflective_layer;
 pub enum Refusal {
     /// The value is not of the named kind.
     WrongType(&'static str),
+    /// The value has the right kind but does not fit the member.
     OutOfRange,
 }
 
@@ -194,15 +248,28 @@ impl std::fmt::Display for Refusal {
     }
 }
 
+/// A layer member that converts to and from a reflected [`FieldValue`].
+///
+/// Implemented for the unsigned integers, `i8`, `bool`, `String`, [`Bytes`],
+/// IPv4 and IPv6 addresses, six-byte MAC and eight-byte arrays, and
+/// [`WireValue`] over the unsigned integers. A custom member type implements
+/// it to be declared with `reflect:` in
+/// [`reflective_layer!`](crate::reflective_layer).
 pub trait ReflectiveField: Sized {
+    /// The member as a reflected value.
     fn reflective_value(&self) -> FieldValue;
+    /// Replaces the member with `value`, or says why it cannot hold it.
     fn set_reflective_value(&mut self, value: FieldValue) -> Result<(), Refusal>;
 }
 
+/// Reads a reflective member; the getter counterpart of [`reflect_set`] for
+/// handwritten accessors.
 pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
     value.reflective_value()
 }
 
+/// Writes a reflective member, turning a [`Refusal`] into a [`field::Error`]
+/// that names `field` in `schema`'s protocol.
 pub fn reflect_set<T: ReflectiveField>(
     target: &mut T,
     schema: &'static Schema,

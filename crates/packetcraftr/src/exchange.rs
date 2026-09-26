@@ -5,18 +5,18 @@
 
 mod accumulator;
 mod capture;
-mod client;
 mod correlation;
-mod model;
+mod engine;
+mod report;
 mod shutdown;
 mod transaction;
 
 pub(crate) use accumulator::{
     Accumulator, ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowStopPredicate,
 };
-pub(crate) use client::Prepared;
-pub(crate) use model::into_sent_packet;
-pub use model::{
+pub(crate) use engine::Prepared;
+pub(crate) use report::into_sent_packet;
+pub use report::{
     Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, Options, Report,
     Response, Summary,
 };

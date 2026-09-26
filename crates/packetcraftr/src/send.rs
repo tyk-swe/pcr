@@ -3,7 +3,7 @@
 
 //! Single-packet and template-set send contracts.
 
-mod execution;
-mod model;
+mod engine;
+mod request;
 
-pub use model::{Options, Report, SentFrame, SetOptions, SetReport};
+pub use request::{Options, Report, SentFrame, SetOptions, SetReport};

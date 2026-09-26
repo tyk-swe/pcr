@@ -12,7 +12,7 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::capture::RecordIdentity;
 
-use super::model::Options;
+use super::report::Options;
 use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
 use crate::preparation::PreparedPacket;
 
@@ -33,7 +33,7 @@ pub(crate) type WorkflowStopPredicate<'a> = dyn FnMut(usize, &Packet, &DecodedPa
 
 pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
-    pub(super) pending_events: Vec<super::model::Event>,
+    pub(super) pending_events: Vec<super::report::Event>,
     pub(crate) diagnostics: DiagnosticLog,
     pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
@@ -50,7 +50,7 @@ pub(crate) struct ProcessContext<'a> {
     pub(crate) prepared: &'a [PreparedPacket],
     pub(crate) sent: &'a [Arc<crate::SentPacket>],
     pub(crate) deadline: Instant,
-    pub(crate) options: &'a super::model::Options,
+    pub(crate) options: &'a super::report::Options,
 }
 
 /// The capture provider handed back an ingress record it had already
@@ -98,7 +98,7 @@ impl Accumulator {
         self.retained_record_identities.insert(identity);
     }
 
-    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::model::Event> {
+    pub(super) fn drain_events(&mut self) -> std::vec::Drain<'_, super::report::Event> {
         self.pending_events.drain(..)
     }
 
@@ -196,7 +196,7 @@ impl Accumulator {
     ) {
         if self.reserve_unattributed(identity, frame.bytes().len(), options) {
             self.pending_events
-                .push(super::model::Event::Undecoded { frame });
+                .push(super::report::Event::Undecoded { frame });
         }
     }
 }

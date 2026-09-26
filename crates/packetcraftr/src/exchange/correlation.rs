@@ -15,7 +15,7 @@ use super::accumulator::{
     Accumulator, DuplicateRecord, ProcessContext, ProcessOutcome, UnsolicitedEvidence,
     UnsolicitedFreshness, WorkflowResponseMatcher,
 };
-use super::model::{Options, Response};
+use super::report::{Options, Response};
 use crate::planning::expired;
 use crate::preparation::PreparedPacket;
 
@@ -282,7 +282,7 @@ impl Accumulator {
                     // a unique attribution indexes a request that was already sent, so
                     // `request_index` is below `sent.len()`
                     self.pending_events
-                        .push(super::model::Event::Response(Response {
+                        .push(super::report::Event::Response(Response {
                             request_index,
                             response: decoded,
                             latency: received_at.duration_since(
@@ -396,7 +396,7 @@ impl Accumulator {
             // so it is below `sent.len()`
             let sent_timing_monotonic = sent[request_index].timing().freshness_marker().monotonic();
             self.pending_events
-                .push(super::model::Event::Response(Response {
+                .push(super::report::Event::Response(Response {
                     request_index,
                     response: candidate.decoded,
                     latency: freshness.received_at.duration_since(sent_timing_monotonic),
@@ -436,7 +436,7 @@ impl Accumulator {
     }
 
     fn queue_unsolicited(&mut self, candidate: UnsolicitedEvidence) {
-        self.pending_events.push(super::model::Event::Unsolicited {
+        self.pending_events.push(super::report::Event::Unsolicited {
             frame: candidate.decoded,
         });
     }

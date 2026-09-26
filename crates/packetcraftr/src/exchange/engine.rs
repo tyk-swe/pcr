@@ -14,7 +14,7 @@ use packetcraftr_netio::{
 
 use packetcraftr_netio::{route, transmit};
 
-use super::model::Options;
+use super::report::Options;
 use crate::Client;
 use crate::Error;
 use crate::route::CachedProvider;

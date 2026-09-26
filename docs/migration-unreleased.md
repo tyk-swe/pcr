@@ -626,13 +626,12 @@ compatibility aliases; update imports directly:
 |---|---|
 | `scan::Executor`, `traceroute::Executor`, `dns::Executor`, `fuzz::Executor` | `probe::Executor` |
 | `scan::Execution`, `traceroute::Execution` | `probe::Execution` |
-| `scan::Error`, `traceroute::Error` | `probe::Error` |
 | `scan::ProbeEndpoint`, `traceroute::ProbeTarget` | `probe::ProbeEndpoint` |
 | `scan::ProbeStatus`, `traceroute::ProbeStatus` | `probe::ProbeStatus` |
 | `scan::Transport`, `traceroute::Strategy` | `probe::Transport` |
 
-Workflow-specific types keep their module homes: `dns::Error`,
-`dns::Execution`, `dns::Transport`, DNS execution receipts, `fuzz::Error`,
+Workflow-specific types keep their module homes: `scan::Error`,
+`traceroute::Error`, `dns::Error`, `dns::Execution`, `dns::Transport`, DNS execution receipts, `fuzz::Error`,
 `fuzz::Execution`, and the specialized `traceroute::Batch` alias are
 unchanged.
 
@@ -1287,3 +1286,53 @@ are removed; use that constant.
 
 `packetcraftr_core::fuzz::MAX_DURATION`, the offline campaign ceiling, is
 unchanged.
+
+## Execution seams and probe errors
+
+**Scan and traceroute errors.** `probe::Error { workflow, kind }` and
+`probe::ErrorKind` are gone; each workflow reports its own enum whose variants
+are the former kinds. `probe::Workflow` is no longer public.
+
+| Before | After |
+|---|---|
+| `probe::Error::new(Workflow::Scan, ErrorKind::Clock { sequence, source })` | `scan::Error::Clock { sequence, source }` |
+| `matches!(error.kind, ErrorKind::InvalidLimit { .. })` on a scan error | `matches!(error, scan::Error::InvalidLimit { .. })` |
+| the same for a traceroute error | `traceroute::Error::…` |
+| `scan::connect::run` returning `probe::Error` | `scan::Error` |
+
+Scan-only kinds (`TargetSelection`, `PipelineExecution`) exist only on
+`scan::Error`, and `InvalidSourcePort` only on `traceroute::Error`. Codes,
+messages, remediations, probe-sequence coordinates, and causes are unchanged.
+
+**One event sink.** `packetcraftr::Sink<E>` is the contract for receiving a
+workflow's events: `type Ack` (what the sink answers per event) and
+`fn publish(&mut self, event: E) -> Result<Self::Ack, BoundaryError>`. Every
+`FnMut(E) -> Result<A, BoundaryError> + Send + 'static` closure is a sink, so
+existing closures and boxed callbacks still work. Because the entry points now
+bound `S: Sink<Event, Ack = ()>` rather than a closure signature, a closure
+that relied on that signature for its argument type names it:
+
+```rust
+// Before
+scan::run_with_events(&request, &mut authorizer, &registry, &mut executor, &mut clock, &runtime, |event| { /* ... */ Ok(()) })?;
+// After
+scan::run_with_events(&request, &mut authorizer, &registry, &mut executor, &mut clock, &runtime, |event: scan::Event| { /* ... */ Ok(()) })?;
+```
+
+The same applies to `scan::connect::run_with_events` (`scan::connect::Probe`),
+`traceroute::run_with_events`, `dns::run_with_events`,
+`dns::run_batch_with_events`, `fuzz::run_with_events` (`fuzz::Case`), and
+`fuzz::run_offline_with_events` (`packetcraftr_core::fuzz::Case`).
+
+`progress::Sink<T>` is renamed `progress::Worker<T, A = ()>`: the worker thread
+a runtime admits. Its callback returns `Result<A, BoundaryError>`, and
+`emit` returns that `A`. Name the answer type when the callback never returns
+`Ok` (for example `Worker::<()>::new_in(&runtime, |_| Err(error))`).
+
+**Evidence errors.** `packetcraftr::ExchangeEvidenceError` is public. It names
+why an executor's evidence disagrees with its step, including the new
+`PermitMismatch`, and its `Display` is workflow-neutral.
+
+**Port helpers.** `probe::EPHEMERAL_SOURCE_PORT_BASE` and
+`probe::ephemeral_source_port` are no longer public. The dynamic range starts at
+49152 (IANA); choose source ports in your own code.

@@ -60,7 +60,7 @@ All notable changes to PacketcraftR are documented here. The format follows
 - `analysis::reassembly::tcp::Event::Retransmission` gains a `ranges` field
   listing the arriving segment's actual retransmitted sequence spans, which
   need not form a contiguous prefix.
-- Shared probe APIs have canonical paths: `probe::{Executor, Execution, Error,
+- Shared probe APIs have canonical paths: `probe::{Executor, Execution,
   ProbeEndpoint, ProbeStatus, Transport}`. The old `scan`, `traceroute`, `dns`,
   and `fuzz` aliases are removed without compatibility aliases. See
   `docs/migration-unreleased.md`.
@@ -342,9 +342,29 @@ All notable changes to PacketcraftR are documented here. The format follows
   directly.
 
   See `docs/migration-unreleased.md`.
+- Scan and traceroute each have their own error. `probe::Error { workflow,
+  kind }`, `probe::ErrorKind`, and `probe::Workflow` are replaced by the
+  `scan::Error` and `traceroute::Error` enums, whose variants are the former
+  kinds that workflow raises; connect scan returns `scan::Error`. Codes,
+  messages, coordinates, and causes are unchanged.
+- One event-sink contract: `packetcraftr::Sink<E>` has an `Ack` answer type
+  and `publish(event)`, and every `FnMut(E) -> Result<A, BoundaryError> +
+  Send + 'static` closure implements it. The event entry points of scan,
+  connect scan, traceroute, DNS, DNS batch, and fuzz (live and offline) take
+  `S: Sink<Event, Ack = ()>` instead of a closure bound; a closure whose
+  argument type was inferred from that bound names it. `progress::Sink` is
+  renamed `progress::Worker<T, A = ()>`, and its callback may answer a value
+  that `emit` returns.
+- `probe::{EPHEMERAL_SOURCE_PORT_BASE, ephemeral_source_port}` are no longer
+  public.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
+- `packetcraftr::ExchangeEvidenceError` is public and names why the evidence an
+  executor returned is inconsistent with its step, including the new
+  `PermitMismatch`.
 - `packetcraftr_netio::resources::WORKER_CAPACITY` names the capacity of the
   one native worker pool (16). `tcp::MAX_PENDING_CONNECTIONS` is defined as a
   sub-limit of it, and `capture::MAX_SOURCES` documents how a group relates to

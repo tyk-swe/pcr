@@ -12,7 +12,9 @@
 //! [`neighbor`] resolves an admitted route's next hop over the client's own
 //! transmit and capture providers.
 //! Live entry points such as [`scan`], [`dns`], and [`send`] require a
-//! [`policy::Policy`] and finite resource limits.
+//! [`policy::Policy`] and finite resource limits. A workflow that publishes
+//! events while it runs delivers them to a [`Sink`] on a worker admitted by a
+//! [`progress::Runtime`], and returns its terminal report.
 //!
 //! Every workflow duration and timeout is at most
 //! [`packetcraftr_netio::capture::MAX_TIMEOUT`], the longest a capture stays

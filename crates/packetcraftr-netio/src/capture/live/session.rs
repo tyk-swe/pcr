@@ -9,7 +9,6 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -17,7 +16,7 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::deadline::{POLL_INTERVAL, remaining_before};
 
-use crate::workers::{JoinAttempt, WorkerPermit, join_with_deadline};
+use crate::workers::{Permit, Task, Waited};
 
 use crate::{
     Error,
@@ -64,21 +63,19 @@ pub(crate) struct NativeCaptureSession {
     metadata: Metadata,
     shared: Arc<CaptureQueue>,
     stop: Arc<AtomicBool>,
-    /// Worker, reserved cleanup permit, and interrupt handle share one
-    /// lifetime. The permit precedes worker creation; the interrupt outlives
-    /// the worker.
+    /// Pooled worker, its permit, and interrupt handle share one lifetime.
+    /// The permit precedes worker creation; the interrupt outlives the
+    /// worker, and the session's clone of the permit outlives the interrupt.
     running: Option<RunningCapture>,
     reaper: ReaperClient,
     shutdown_timeout: Duration,
     shutdown: Shutdown,
 }
 
-const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
-
 struct RunningCapture {
-    worker: JoinHandle<()>,
+    worker: Task<()>,
     interrupt: Arc<dyn CaptureInterrupt>,
-    permit: WorkerPermit,
+    permit: Permit,
 }
 
 enum Shutdown {
@@ -114,12 +111,12 @@ impl NativeCaptureSession {
             message: "native capture cleanup is unavailable".to_owned(),
             source: Some(Arc::new(error)),
         })?;
-        let reaper_permit = reaper.reserve().map_err(|error| Error::Capture {
+        let permit = reaper.reserve().map_err(|error| Error::Capture {
             message: format!(
                 "native capture cleanup capacity {} is exhausted",
                 error.capacity
             ),
-            source: None,
+            source: Some(Arc::new(error)),
         })?;
         let NativeCaptureParts {
             source,
@@ -132,10 +129,10 @@ impl NativeCaptureSession {
         let worker_stop = Arc::clone(&stop);
         let interface_index = metadata.interface.index;
         let link_type = metadata.link_type;
-        let worker_name = format!("packetcraftr-capture-{}", metadata.interface.name);
         let mut source = source;
-        let worker = thread::Builder::new()
-            .name(worker_name)
+        // The source closes on the pooled thread, before the pool releases
+        // the worker's clone of the permit.
+        let worker = permit
             .spawn(move || {
                 let terminal_shared = Arc::clone(&worker_shared);
                 let result = catch_unwind(AssertUnwindSafe(|| {
@@ -168,7 +165,7 @@ impl NativeCaptureSession {
             running: Some(RunningCapture {
                 worker,
                 interrupt,
-                permit: reaper_permit,
+                permit,
             }),
             reaper,
             shutdown_timeout,
@@ -281,8 +278,8 @@ impl NativeCaptureSession {
                         message: "native capture interrupt panicked during shutdown".to_owned(),
                         source: None,
                     });
-                match join_with_deadline(worker, timeout, SHUTDOWN_POLL_INTERVAL) {
-                    JoinAttempt::TimedOut(worker) => {
+                match worker.wait(&Deadline::new(timeout)) {
+                    Waited::Pending(worker) => {
                         permit.retention_marker().mark_retained();
                         // The deadline expired with the worker still running,
                         // so this session keeps the complete bundle and an
@@ -298,7 +295,7 @@ impl NativeCaptureSession {
                     }
                     // The worker is finished, so the native interrupt and the
                     // cleanup permit are released here and only here.
-                    JoinAttempt::Finished(join_result) => {
+                    Waited::Finished(join_result) => {
                         // A user-supplied interrupt may own resources with a
                         // destructor. Release it before returning admission.
                         drop(interrupt);
@@ -366,6 +363,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         mpsc::{self, Receiver, Sender},
     };
+    use std::thread;
     use std::time::SystemTime;
 
     use bytes::Bytes;

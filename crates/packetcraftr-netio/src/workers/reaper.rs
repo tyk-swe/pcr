@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Shared bounded ownership service for native workers that miss shutdown.
+//! The pool's cleanup path for native work whose owner stopped waiting before
+//! it finished, such as a capture worker that missed shutdown.
 
 use std::{
     fmt,
@@ -15,7 +16,9 @@ use std::{
     time::Duration,
 };
 
-use super::{Exhausted, PermitPool, WorkerPermit, shared_budget};
+use packetcraftr_core::budget::Deadline;
+
+use super::{Class, Exhausted, Permit, Pool, Task, Waited, shared};
 
 static SHARED_REAPER: OnceLock<Result<ReaperService, ReaperStartError>> = OnceLock::new();
 
@@ -24,7 +27,7 @@ type SharedReceiver = Arc<Mutex<mpsc::Receiver<ReapTask>>>;
 #[derive(Clone)]
 pub(crate) struct ReaperClient {
     tasks: SyncSender<ReapTask>,
-    permits: Arc<PermitPool>,
+    pool: Arc<Pool>,
     retained_tasks: Arc<AtomicUsize>,
 }
 
@@ -63,23 +66,29 @@ impl std::error::Error for ReaperStartError {
 
 pub(crate) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
 
-/// Blocks until `worker` finishes, calling `on_poll` before every wait so a
-/// cleanup task can keep nudging a blocked worker.
+/// Blocks until `task` finishes, calling `on_poll` before every wait so a
+/// cleanup task can keep nudging a blocked worker. The task signals its end,
+/// but a nudge (a native capture interrupt) can arrive before the worker
+/// blocks and be missed, so it is repeated every `poll_interval`.
 pub(crate) fn wait_until_finished(
-    worker: JoinHandle<()>,
+    task: Task<()>,
     poll_interval: Duration,
     mut on_poll: impl FnMut(),
 ) {
-    while !worker.is_finished() {
+    let mut task = task;
+    loop {
         on_poll();
-        thread::park_timeout(poll_interval);
+        match task.wait(&Deadline::new(poll_interval)) {
+            Waited::Finished(_) => return,
+            Waited::Pending(pending) => task = pending,
+        }
     }
-    let _ = worker.join();
 }
 
 impl ReaperClient {
-    pub(crate) fn reserve(&self) -> Result<WorkerPermit, Exhausted> {
-        self.permits.reserve()
+    /// Admits native work to the pool this reaper cleans up after.
+    pub(crate) fn reserve(&self) -> Result<Permit, Exhausted> {
+        self.pool.admit(Class::Native)
     }
 
     /// Transfers `task` without blocking. If admission fails, retains the
@@ -105,21 +114,20 @@ impl ReaperClient {
 
 pub(crate) fn shared_reaper() -> Result<ReaperClient, ReaperStartError> {
     SHARED_REAPER
-        .get_or_init(|| start_reaper(shared_budget(), spawn_reaper_thread))
+        .get_or_init(|| start_reaper(Arc::clone(shared()), spawn_reaper_thread))
         .as_ref()
         .map(|service| service.client.clone())
         .map_err(Clone::clone)
 }
 
 fn start_reaper(
-    permits: Arc<PermitPool>,
+    pool: Arc<Pool>,
     mut spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
 ) -> Result<ReaperService, ReaperStartError> {
-    // The permit capacity bounds the native workers that may concurrently
-    // hold a cleanup reservation. The channel and cleanup pool have the same
-    // capacity, so every reserved worker can be transferred and reaped
-    // independently.
-    let capacity = permits.capacity;
+    // The pool capacity bounds the native work that may concurrently hold a
+    // slot. The channel and cleanup threads have the same capacity, so every
+    // admitted worker can be transferred and reaped independently.
+    let capacity = pool.capacity();
     let (tasks, receiver) = mpsc::sync_channel(capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let retained_tasks = Arc::new(AtomicUsize::new(0));
@@ -141,7 +149,7 @@ fn start_reaper(
     Ok(ReaperService {
         client: ReaperClient {
             tasks,
-            permits,
+            pool,
             retained_tasks,
         },
         _workers: workers,
@@ -181,7 +189,7 @@ pub(crate) mod test_support {
         (
             ReaperClient {
                 tasks,
-                permits: Arc::new(PermitPool::new(permit_capacity)),
+                pool: Arc::new(Pool::new(permit_capacity, permit_capacity)),
                 retained_tasks: Arc::new(AtomicUsize::new(0)),
             },
             receiver,
@@ -192,7 +200,7 @@ pub(crate) mod test_support {
         capacity: usize,
         spawn: impl FnMut(SharedReceiver) -> std::io::Result<JoinHandle<()>>,
     ) -> Result<ReaperClient, ReaperStartError> {
-        start_reaper(Arc::new(PermitPool::new(capacity)), spawn).map(|service| service.client)
+        start_reaper(Arc::new(Pool::new(capacity, capacity)), spawn).map(|service| service.client)
     }
 
     pub(crate) fn retained_tasks(client: &ReaperClient) -> usize {

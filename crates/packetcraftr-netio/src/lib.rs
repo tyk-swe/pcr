@@ -30,7 +30,6 @@ pub mod route;
 pub mod tcp;
 #[forbid(unsafe_code)]
 pub mod transmit;
-#[cfg(native_workers)]
 #[forbid(unsafe_code)]
 mod workers;
 

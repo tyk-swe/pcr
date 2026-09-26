@@ -29,7 +29,9 @@ static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 /// Unrelated routing-socket messages a query skips before giving up.
 const MAX_UNMATCHED_MESSAGES: usize = 64;
 
-pub(in crate::platform) fn route(
+/// Runs on the worker pool; reads are sliced by the deadline so a cancelled
+/// caller's work stops promptly.
+pub(super) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,

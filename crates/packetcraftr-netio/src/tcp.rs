@@ -6,8 +6,6 @@
 
 mod connect;
 
-pub(crate) use connect::snapshot as connect_snapshot;
-
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
@@ -15,8 +13,13 @@ use std::time::Duration;
 
 use packetcraftr_core::budget::{Deadline, Interrupted};
 
-/// Process-wide connections that may retain worker or socket resources.
-pub const MAX_PENDING_CONNECTIONS: usize = 16;
+/// Process-wide connections that may hold a worker or an open socket at
+/// once: a named sub-limit of the native worker pool, published as its own
+/// resource row. It equals
+/// [`WORKER_CAPACITY`](crate::resources::WORKER_CAPACITY), so connects may
+/// fill the whole pool while no capture or route work holds a slot; any such
+/// work lowers what connects can be admitted.
+pub const MAX_PENDING_CONNECTIONS: usize = crate::resources::WORKER_CAPACITY;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -82,16 +85,16 @@ impl packetcraftr_core::error::Classified for ConnectError {
     }
 }
 
-/// A socket and its process-wide admission lease. The socket closes before the lease.
+/// A socket and its worker-pool permit. The socket closes before the permit.
 pub struct Connection<S> {
     inner: S,
-    _lease: Arc<connect::Lease>,
+    _permit: crate::workers::Permit,
 }
 impl<S> Connection<S> {
-    fn new(inner: S, lease: Arc<connect::Lease>) -> Self {
+    fn new(inner: S, permit: crate::workers::Permit) -> Self {
         Self {
             inner,
-            _lease: lease,
+            _permit: permit,
         }
     }
 }
@@ -147,8 +150,9 @@ impl<S> PendingConnect<S> {
         self.inner.poll()
     }
 }
-/// Starts `provider.connect` on an admitted worker. The worker receives what
-/// the caller's `deadline` still allows, and its cancellation signal.
+/// Starts `provider.connect` on the native worker pool, admitted under
+/// [`MAX_PENDING_CONNECTIONS`]. The worker receives what the caller's
+/// `deadline` still allows, and its cancellation signal.
 pub fn start_connect<P>(
     provider: Arc<P>,
     endpoint: SocketAddr,

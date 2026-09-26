@@ -19,7 +19,16 @@ use std::{
 };
 
 /// Most interfaces one [`Group`] captures from.
+///
+/// A separate limit from the native worker pool
+/// ([`WORKER_CAPACITY`](crate::resources::WORKER_CAPACITY)): every armed
+/// native source holds one pool slot, so a group this large needs the whole
+/// pool and its last sources are refused while other work, such as a Linux
+/// route worker, holds a slot. Sources from other providers hold none.
 pub const MAX_SOURCES: usize = 16;
+/// Longest wait on one source before the group checks the others. A
+/// [`Session`] offers no handle to wait on several sources at once, so the
+/// group rotates short waits across them.
 const POLL_SLICE: Duration = Duration::from_millis(5);
 
 /// Configuration for a [`Group`]: the shared queue limits are partitioned
@@ -509,7 +518,8 @@ impl<C: Session> Session for Group<C> {
             if let Some(captured) = self.poll(index, &slice, caller)? {
                 return Ok(Some(captured));
             }
-            // Test/injected providers may return early. Keep an empty source
+            // Test/injected providers may return early, and there is no
+            // handle to wait on every source at once. Keep an empty source
             // from making the shared live wait a busy loop.
             if let Some(pause) = wait.checked_sub(started.elapsed()) {
                 std::thread::sleep(pause.min(Duration::from_millis(1)));

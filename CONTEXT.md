@@ -115,6 +115,12 @@ An OS- or library-specific native binding that a system provider dispatches to
 (netlink, AF_ROUTE, IP Helper, libpcap, Npcap, raw IP sockets).
 _Avoid_: provider (for a binding)
 
+**Worker pool**:
+The one process-wide set of admitted threads on which system providers run
+native calls that can block past a deadline (capture reads, route queries, TCP
+connects). A slot stays held until the work and its resources are cleaned up.
+_Avoid_: worker budget, permit pool, reaper (for admission)
+
 **Route plan**:
 The passive choice of route, source address, and link for one packet, made
 without discovery, capture, or transmission.

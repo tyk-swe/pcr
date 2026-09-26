@@ -251,7 +251,11 @@ and final query-byte checks.
 Existing client constructors remain available; the feature additions in this
 release add fields to public limits and migrate output to v6. Share callback admission with
 `client.with_progress_runtime(runtime.clone())`; inspect it with
-`client.progress_runtime().snapshot()`. Native admission remains process-wide.
+`client.progress_runtime().snapshot()`. Native admission remains process-wide:
+one worker pool of `resources::WORKER_CAPACITY` slots admits capture reads,
+route queries, and TCP connects. `native_snapshot()` (the `native_process`
+row) covers all of them and is supported in every build profile;
+`tcp_connect_snapshot()` (`tcp_connect_process`) reports the TCP sub-limit.
 
 `--resource-diagnostics` opts into an optional `resources` envelope member.
 Output/v6 schemas include this member. Resource diagnostics add no NDJSON events
@@ -417,7 +421,9 @@ Custom authorizers must handle this operation before a connection is admitted.
 Netio's `tcp::start_connect` returns a pollable `PendingConnect`. Cancellation or
 drop cancels unstarted calls; admitted calls retain their process-wide resource
 lease until worker and socket cleanup finish. Successful `Connection` values
-retain that lease until dropped. At most 16 calls/connections can retain admission.
+retain that lease until dropped. At most `tcp::MAX_PENDING_CONNECTIONS` (16)
+calls/connections can retain admission, and they share the native worker pool
+with capture and route work, so fewer are admitted while that work holds slots.
 The workflow caps `Request::max_in_flight` accordingly and rejects UDP/ICMP use.
 
 ## Offline epoch bounds

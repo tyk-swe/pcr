@@ -12,9 +12,40 @@ Phase 4.
 
 **Blocked by:** 34
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Every command matches the shape, and no `rendering.rs` runs a workflow.
-- [ ] A process test shows escape bytes in an HTTP header name or DNS name rendered safely.
-- [ ] `[Unreleased]` records the sanitization and argument-validation fixes.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Every command matches the shape, and no `rendering.rs` runs a workflow.
+- [x] A process test shows escape bytes in an HTTP header name or DNS name rendered safely.
+- [x] `[Unreleased]` records the sanitization and argument-validation fixes.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Error codes are unchanged, and a process test pins them against ca-34
+  behaviour. The shared `--max-duration-ms`/`--timeout-ms` groups define
+  the argument once, and out-of-range values still reach the code that
+  always rejected them: the workflow limit errors (`cli.scan_limit`,
+  `cli.capture_timeout`, `cli.exchange_limit`, ...). `rewrite` keeps its
+  parse-time range (`RunTime::PARSED`). Offline analysis checks the one-hour
+  ceiling with `MaxDurationArgs::within_ceiling`, which takes the owner's
+  error.
+- Behaviour fix: offline analysis now rejects `--max-duration-ms` above one
+  hour with `cli.analysis_limit`. It was unbounded before. This has its own
+  changelog entry.
+- `--interface`/`--stream` are typed as `Selector<InterfaceSelector>` and
+  `Selector<StreamRef>`: parsed once by clap, but a malformed value is
+  reported where the command reads it. So policy denial still wins over a
+  malformed interface, the format check still comes first, and messages
+  are unchanged. No existing tests needed edits.
+- The shared groups are generic over a marker for help text and defaults (as
+  `TrafficBudgetArgs` is). `--timeout-ms` defaults are text because clap's
+  `default_value_t` shares one static across generic instantiations.
+  `TrafficBudgetArgs` has the same latent issue; its defaults happen to match
+  today.
+- Core already escaped DNS names. The process test covers DNS names and TXT
+  data. HTTP header names are token-only on the wire, so the header-name
+  escape is defensive, and a unit test covers it.
+- Hex output keeps an unstyled writer (`write_hex_line`, hex-only by
+  construction). Every other text line goes through the sanitizing writer.
+- Documentation has no text output. Its `rendering.rs` renders the command
+  tree into completion and man files.

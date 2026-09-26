@@ -249,8 +249,9 @@ pub struct Summary {
 /// Dispatches matched frames to `sink`: dissects under
 /// `limits.max_frame_bytes`, updates capture-global IP state and conversation
 /// indices, filters, then drives TCP reassembly. Enforces aggregate frame,
-/// byte, flow, and processing-duration budgets; reader options bound individual
-/// frames and interfaces.
+/// byte, flow, and processing-duration limits; the reader's own
+/// [`ReaderLimits`](crate::capture_file::ReaderLimits) bound individual frames
+/// and interfaces.
 ///
 /// Reassembly idle expiry follows capture timestamps, independent of wall-clock
 /// time.

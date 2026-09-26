@@ -291,7 +291,7 @@ impl<W: Write> Writer<W> {
     }
 
     /// The aggregate ceilings this writer was opened under. They are fixed
-    /// at construction: a stream's budget cannot be raised part-way through
+    /// at construction: a stream's limits cannot be raised part-way through
     /// the output it already committed.
     pub fn stream_limits(&self) -> Limits {
         self.budget.limits()

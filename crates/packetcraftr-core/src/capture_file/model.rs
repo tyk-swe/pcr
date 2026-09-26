@@ -224,7 +224,7 @@ pub struct PcapOptions {
     /// Maximum captured packet size accepted by the writer, in bytes.
     pub max_size: usize,
     /// Aggregate frame and captured-payload ceilings for the whole stream.
-    /// Fixed at construction, so a writer's budget cannot be retuned once it
+    /// Fixed at construction, so a writer's limits cannot be retuned once it
     /// has begun producing output.
     pub stream_limits: Limits,
 }
@@ -263,7 +263,7 @@ pub struct PcapNgOptions {
     pub max_size: usize,
     pub max_interfaces: usize,
     /// Aggregate frame and captured-payload ceilings for the whole stream.
-    /// Fixed at construction, so a writer's budget cannot be retuned once it
+    /// Fixed at construction, so a writer's limits cannot be retuned once it
     /// has begun producing output.
     pub stream_limits: Limits,
 }

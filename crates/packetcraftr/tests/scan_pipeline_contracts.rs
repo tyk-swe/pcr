@@ -222,10 +222,7 @@ fn request() -> Request {
         },
     }
 }
-fn execute(
-    request: &Request,
-    state: Arc<Mutex<State>>,
-) -> Result<scan::Report, packetcraftr::probe::Error> {
+fn execute(request: &Request, state: Arc<Mutex<State>>) -> Result<scan::Report, scan::Error> {
     let policy = Policy {
         max_packets_per_operation: 32,
         max_bytes_per_operation: 32 * 1500,

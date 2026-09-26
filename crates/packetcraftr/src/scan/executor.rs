@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
+use crate::execution::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{ExchangeExecutor, Execution, Executor};
+use crate::probe::Execution;
 use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
 use super::Batch;
@@ -25,8 +26,8 @@ where
     fn execute_pipeline(
         &mut self,
         requests: &[Batch],
-        options: crate::probe::PipelineOptions,
-        emit: &mut dyn FnMut(crate::probe::PipelineEvent<Execution>) -> Result<(), BoundaryError>,
+        options: PipelineOptions,
+        emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
     ) -> Result<crate::Stats, BoundaryError> {
         let registry = super::registry::configured(self.client.registry(), requests)?;
         let client = super::registry::client(self.client, registry);

@@ -5,9 +5,10 @@ use std::time::{Duration, SystemTime};
 
 use crate::Stats;
 use crate::exchange::Response;
+use crate::execution::ExchangeEvidenceError;
 use crate::execution::evidence::EvidenceLimits;
 use crate::probe::runner::{Execution, Sequenced};
-use crate::probe::{ErrorKind, Workflow};
+use crate::test_support::{Failure, TestErrors};
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::{decode::DecodedPacket, layer::Raw, layout::PacketLayout, packet::Packet};
@@ -49,7 +50,9 @@ fn a_response_that_differs_from_its_exact_frame_is_invalid_evidence() {
         validate(&execution, true),
         Err((
             7,
-            "matched response original bytes differ from its exact frame".to_owned()
+            ExchangeEvidenceError::InvalidMatchedResponse {
+                message: "matched response original bytes differ from its exact frame".to_owned()
+            }
         ))
     );
 }
@@ -61,7 +64,7 @@ fn a_substituted_packet_or_misreported_byte_count_is_invalid_evidence() {
         validate(&execution, false),
         Err((
             7,
-            "sent packet does not preserve the scan destination and probe identity".to_owned()
+            ExchangeEvidenceError::SentPacketMismatch { request_index: 0 }
         ))
     );
 
@@ -70,7 +73,10 @@ fn a_substituted_packet_or_misreported_byte_count_is_invalid_evidence() {
         validate(&execution, true),
         Err((
             7,
-            "successful exchange reported 1 sent bytes for 2 exact frame bytes".to_owned()
+            ExchangeEvidenceError::SentByteCountMismatch {
+                reported: 1,
+                actual: 2
+            }
         ))
     );
 }
@@ -87,7 +93,9 @@ fn untimestamped_capture_evidence_is_invalid() {
         validate(&execution, true),
         Err((
             7,
-            "executor returned matched response without a timestamp".to_owned()
+            ExchangeEvidenceError::TimestampUnavailable {
+                evidence: "matched response"
+            }
         ))
     );
 
@@ -97,26 +105,27 @@ fn untimestamped_capture_evidence_is_invalid() {
         validate(&execution, true),
         Err((
             7,
-            "executor returned unsolicited response without a timestamp".to_owned()
+            ExchangeEvidenceError::TimestampUnavailable {
+                evidence: "unsolicited response"
+            }
         ))
     );
 }
 
-/// Validates `execution` as the evidence for a one-probe scan batch at
-/// sequence 7, reporting an invalid-evidence rejection as its sequence and
-/// message.
-fn validate(execution: &Execution, sent_matches: bool) -> Result<(), (u64, String)> {
+/// Validates `execution` as the evidence for a one-probe batch at sequence 7,
+/// reporting an invalid-evidence rejection as its sequence and typed cause.
+fn validate(execution: &Execution, sent_matches: bool) -> Result<(), (u64, ExchangeEvidenceError)> {
     validate_batch_evidence(
-        Workflow::Scan,
+        &TestErrors,
         &[Probe(7)],
         Duration::from_secs(1),
         execution,
         LIMITS,
         |_, _| sent_matches,
     )
-    .map_err(|error| match error.kind {
-        ErrorKind::InvalidEvidence { sequence, message } => (sequence, message),
-        kind => panic!("expected invalid evidence, got {kind:?}"),
+    .map_err(|error| match error {
+        Failure::InvalidEvidence(sequence, source) => (sequence, source),
+        error => panic!("expected invalid evidence, got {error:?}"),
     })
 }
 

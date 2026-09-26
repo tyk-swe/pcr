@@ -25,6 +25,7 @@ const WORKFLOW: Workflow = Workflow::Traceroute;
 
 mod classification;
 mod engine;
+mod error;
 mod evidence;
 mod execution;
 mod executor;
@@ -37,6 +38,7 @@ mod tests;
 
 pub use classification::{ResponseClassification, classify_response};
 pub use engine::{run, run_with_events};
+pub use error::Error;
 pub use execution::{Batch, Probe};
 pub use report::{
     Completion, Event, Hop, ProbeEvidence, Report, ResponseKind, Summary, UndecodedEvidence,

@@ -20,7 +20,9 @@ use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
 use crate::target::{DeclaredTargets, FamilyGate, admit_selection, wire_limits};
 
+use super::Error;
 use super::WORKFLOW;
+use super::error::Probes;
 use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, worst_case_duration};
 use super::probe::sent_probe_matches;
@@ -30,10 +32,8 @@ use super::{
     Summary,
 };
 use super::{IPV4_PROBE_BYTES, IPV6_PROBE_BYTES};
-use crate::probe::{
-    Error, ErrorKind, Executor, ProbeEndpoint, Transport, enforce_deadline, index_or_push,
-};
-use crate::probe::{PipelineEvent, PipelineOptions};
+use crate::execution::{Executor, PipelineEvent, PipelineOptions};
+use crate::probe::{ProbeEndpoint, Transport, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes and classifies
@@ -89,8 +89,8 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| WORKFLOW.duration_limit(0, error),
-        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
@@ -111,30 +111,28 @@ where
 {
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     if (2..=1024).contains(&request.max_in_flight)
         && request.max_in_flight > executor.pipeline_capacity()
     {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::PipelineExecution {
-                source: BoundaryError::new(
-                    "executor cannot provide the requested packet window",
-                    packetcraftr_core::error::Classification::new(
-                        "capability.probe_pipeline",
-                        packetcraftr_core::error::Kind::Capability,
-                        Some("use max_in_flight=1 or a pipeline-capable executor"),
-                    ),
-                    Vec::new(),
+        return Err(Error::PipelineExecution {
+            source: BoundaryError::new(
+                "executor cannot provide the requested packet window",
+                packetcraftr_core::error::Classification::new(
+                    "capability.probe_pipeline",
+                    packetcraftr_core::error::Kind::Capability,
+                    Some("use max_in_flight=1 or a pipeline-capable executor"),
                 ),
-            },
-        ));
+                Vec::new(),
+            ),
+        });
     }
     let approved = approve_scan(request, authorizer, &deadline)?;
     let batches = build_batches(request, &approved.addresses, &approved.endpoints)?;
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
+        Probes,
         request.limits.evidence(),
         ProbeClassifier {
             registry,
@@ -186,7 +184,7 @@ where
 fn run_pipelined<E, F, B>(
     request: &Request,
     executor: &mut E,
-    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F>,
+    evidence: &mut BatchEvidence<ProbeClassifier<'_>, F, Probes>,
     deadline: &Deadline,
     batches: B,
     approved: &ApprovedScan,
@@ -202,15 +200,12 @@ where
         .saturating_mul(approved.endpoints.len())
         .saturating_mul(request.attempts as usize);
     if count.saturating_mul(std::mem::size_of::<Batch>()) > request.limits.max_prepared_bytes {
-        return Err(Error::new(
-            WORKFLOW,
-            ErrorKind::PipelineExecution {
-                source: super::pipeline::limit(
-                    "prepared descriptions",
-                    request.limits.max_prepared_bytes,
-                ),
-            },
-        ));
+        return Err(Error::PipelineExecution {
+            source: super::pipeline::limit(
+                "prepared descriptions",
+                request.limits.max_prepared_bytes,
+            ),
+        });
     }
     let batches: Vec<_> = batches.collect();
     let mut completed = vec![false; batches.len()];
@@ -218,7 +213,7 @@ where
     let mut sent_bytes = 0u64;
     let remaining = deadline
         .remaining()
-        .map_err(|error| WORKFLOW.duration_limit(0, error))?;
+        .map_err(|error| Probes.duration_limit(0, error))?;
     let settings = PipelineOptions {
         max_in_flight: request.max_in_flight,
         probes_per_second: request.probes_per_second,
@@ -230,13 +225,10 @@ where
     };
     let result = executor.execute_pipeline(&batches, settings, &mut |event| {
         let invalid = |index| {
-            crate::BoundaryError::from_error(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidEvidence {
-                    sequence: index as u64,
-                    message: "pipeline returned an invalid or repeated request index".to_owned(),
-                },
-            ))
+            crate::BoundaryError::from_error(Error::InvalidEvidence {
+                sequence: index as u64,
+                message: "pipeline returned an invalid or repeated request index".to_owned(),
+            })
         };
         match event {
             PipelineEvent::Sent { index, sent } => {
@@ -287,23 +279,17 @@ where
                 || stats.packets_completed != batches.len() as u64
                 || stats.bytes != sent_bytes
             {
-                return Err(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidEvidence {
-                        sequence: 0,
-                        message:
-                            "pipeline completion statistics disagree with validated sends/outcomes"
-                                .to_owned(),
-                    },
-                ));
+                return Err(Error::InvalidEvidence {
+                    sequence: 0,
+                    message:
+                        "pipeline completion statistics disagree with validated sends/outcomes"
+                            .to_owned(),
+                });
             }
-            enforce_deadline(WORKFLOW, deadline)?;
+            enforce_deadline(&Probes, deadline)?;
             Ok(stats)
         }
-        Err(source) => Err(Error::new(
-            WORKFLOW,
-            ErrorKind::PipelineExecution { source },
-        )),
+        Err(source) => Err(Error::PipelineExecution { source }),
     }
 }
 
@@ -390,13 +376,13 @@ fn approve_scan<A: Authorizer>(
     let (selected, plan) = admit_selection(
         authorizer,
         deadline,
-        &WORKFLOW,
+        &Probes,
         DeclaredTargets {
             selection: &request.targets,
-            family: FamilyGate::new(request.address_family, |family| WORKFLOW.family(family)),
+            family: FamilyGate::new(request.address_family, Error::family),
             max_targets: request.limits.max_targets,
         },
-        |source| Error::new(WORKFLOW, ErrorKind::TargetSelection(source)),
+        Error::TargetSelection,
         |selected| {
             let endpoints_per_address = if request.transport == Transport::Icmp {
                 1
@@ -408,11 +394,11 @@ fn approve_scan<A: Authorizer>(
                 endpoints_per_address,
                 request.attempts,
             )?;
-            check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
+            check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
             let maximum_bytes = maximum_wire_bytes(&selected.addresses, &ports, request)?;
             let worst_case =
                 worst_case_duration(request, selected.addresses.len(), endpoints_per_address)?;
-            check_probe_duration(WORKFLOW, worst_case, request.limits.max_duration)?;
+            check_probe_duration(&Probes, worst_case, request.limits.max_duration)?;
             Ok(ScanPlan {
                 total_probes,
                 maximum_bytes,
@@ -458,14 +444,11 @@ fn probe_count(
     address_count
         .checked_mul(endpoints_per_address)
         .and_then(|value| value.checked_mul(usize::try_from(attempts).unwrap_or(usize::MAX)))
-        .ok_or(Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "probes",
-                value: u64::MAX,
-                reason: "probe-count arithmetic overflowed".to_owned(),
-            },
-        ))
+        .ok_or(Error::InvalidLimit {
+            field: "probes",
+            value: u64::MAX,
+            reason: "probe-count arithmetic overflowed".to_owned(),
+        })
 }
 
 fn maximum_wire_bytes(
@@ -473,15 +456,10 @@ fn maximum_wire_bytes(
     ports: &[u16],
     request: &Request,
 ) -> Result<u64, Error> {
-    let overflow = || {
-        Error::new(
-            WORKFLOW,
-            ErrorKind::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "scan payload accounting overflowed".to_owned(),
-            },
-        )
+    let overflow = || Error::InvalidLimit {
+        field: "wire_bytes",
+        value: u64::MAX,
+        reason: "scan payload accounting overflowed".to_owned(),
     };
     let endpoints = if request.transport == Transport::Icmp {
         1

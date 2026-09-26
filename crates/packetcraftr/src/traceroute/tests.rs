@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
-use crate::probe::ErrorKind;
+use super::Error;
 use crate::probe::test_support::{ProgressiveExecutor, private_policy};
 use crate::progress::Runtime;
 use crate::test_support::decoded_packet;
@@ -23,10 +23,11 @@ use super::classification::classify_response;
 use super::engine::{run, run_with_events};
 use super::probe::probe_packet;
 use super::{Batch, Completion, Event, Limits, Probe, Request, ResponseKind};
+use crate::execution::Executor;
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::policy::PolicyAuthorizer;
-use crate::probe::{Execution, Executor, ProbeEndpoint, ProbeStatus, Transport};
+use crate::probe::{Execution, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
@@ -352,7 +353,7 @@ fn traceroute_udp_port_overflow_precedes_duration_limit() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidPort { .. }));
+    assert!(matches!(error, Error::InvalidPort { .. }));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -378,7 +379,7 @@ fn traceroute_zero_source_port_is_rejected_before_authorization_or_execution() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(matches!(error, Error::InvalidSourcePort));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -406,7 +407,7 @@ fn traceroute_icmp_source_port_is_rejected_before_authorization_or_execution() {
     )
     .unwrap_err();
 
-    assert!(matches!(error.kind, ErrorKind::InvalidSourcePort));
+    assert!(matches!(error, Error::InvalidSourcePort));
     assert!(authorizer.operations.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -573,8 +574,8 @@ fn traceroute_invalid_sent_evidence_reports_the_exact_probe_sequence() {
     .unwrap_err();
 
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message }
+        error,
+        Error::InvalidEvidence { sequence: 1, message }
             if message
                 == "sent packet does not preserve the traceroute destination and probe identity"
     ));
@@ -617,10 +618,7 @@ fn traceroute_events_precede_later_hops_and_survive_a_later_failure() {
     )
     .expect_err("the second hop must fail");
 
-    assert!(matches!(
-        error.kind,
-        ErrorKind::Execution { sequence: 1, .. }
-    ));
+    assert!(matches!(error, Error::Execution { sequence: 1, .. }));
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(
@@ -667,8 +665,25 @@ fn traceroute_sink_failure_stops_later_hops_after_session_shutdown() {
     )
     .expect_err("the progressive sink must fail");
 
-    assert!(matches!(&error.kind, ErrorKind::Output { .. }));
+    assert!(matches!(&error, Error::Output { .. }));
     assert_eq!(error.classification().code, "io.test_output");
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+/// An authorized resolution without an address of the requested family fails
+/// in the traceroute's own vocabulary.
+#[test]
+fn a_family_miss_is_reported_as_a_traceroute_error() {
+    use packetcraftr_core::error::Classified as _;
+
+    let error = crate::target::FamilyGate::new(Family::Ipv4, Error::family)
+        .require(&[])
+        .expect_err("an empty resolution fails the family gate");
+    assert!(matches!(error, Error::Family { family: "IPv4" }));
+    assert_eq!(
+        error.to_string(),
+        "resolved target has no IPv4 address selected for this traceroute"
+    );
+    assert_eq!(error.classification().code, "packet.target_address_family");
 }

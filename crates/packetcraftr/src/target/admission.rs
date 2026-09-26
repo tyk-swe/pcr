@@ -530,44 +530,6 @@ mod tests {
         );
     }
 
-    /// The same gate failure surfaces in each workflow's own vocabulary.
-    #[test]
-    fn gate_errors_surface_the_workflow_vocabulary() {
-        for workflow in [
-            crate::probe::Workflow::Scan,
-            crate::probe::Workflow::Traceroute,
-        ] {
-            let mut authorizer = RecordingAuthorizer {
-                answers: vec![IpAddr::V6(Ipv6Addr::LOCALHOST)],
-                ..Default::default()
-            };
-            let unavailable: fn(Family) -> crate::probe::Error = match workflow {
-                crate::probe::Workflow::Scan => {
-                    |family| crate::probe::Workflow::Scan.family(family)
-                }
-                crate::probe::Workflow::Traceroute => {
-                    |family| crate::probe::Workflow::Traceroute.family(family)
-                }
-            };
-            let error = admit_operation(
-                &mut authorizer,
-                &Deadline::new(Duration::from_secs(60)),
-                &workflow,
-                &hostname(),
-                FamilyGate::new(Family::Ipv4, unavailable),
-                |_| Ok(1_u64),
-                |probes| Ok(wire_limits(*probes, 0)),
-            )
-            .expect_err("the family gate must fail");
-            assert_eq!(error.workflow, workflow);
-            assert!(matches!(
-                error.kind,
-                crate::probe::ErrorKind::Family { family: "IPv4" }
-            ));
-            assert_eq!(authorizer.calls, [Call::Resolve(hostname())]);
-        }
-    }
-
     /// An already-spent deadline fails before the authorizer is called at all.
     #[test]
     fn a_spent_deadline_precedes_target_authorization() {

@@ -9,51 +9,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::*;
 use crate::StatsOverflow;
-use crate::test_support::RecordingClock;
-
-#[derive(Debug)]
-enum Failure {
-    DurationLimit(u64, DeadlineExceeded),
-    Interrupted(u64, Interrupted),
-    Clock(u64, Box<dyn std::error::Error + Send + Sync>),
-    InvalidLimit(&'static str),
-    Authorization,
-    Execution(u64, BoundaryError),
-    InvalidEvidence(u64, ExchangeEvidenceError),
-    StatsOverflow(u64, StatsOverflow),
-}
-
-struct TestErrors;
-
-impl Errors for TestErrors {
-    type Error = Failure;
-    type Step = u64;
-
-    fn invalid_limit(&self, field: &'static str, _: u64, _: String) -> Failure {
-        Failure::InvalidLimit(field)
-    }
-    fn authorization(&self, _: BoundaryError) -> Failure {
-        Failure::Authorization
-    }
-    fn duration_limit(&self, step: u64, source: DeadlineExceeded) -> Failure {
-        Failure::DurationLimit(step, source)
-    }
-    fn interrupted(&self, step: u64, source: Interrupted) -> Failure {
-        Failure::Interrupted(step, source)
-    }
-    fn clock(&self, step: u64, source: Box<dyn std::error::Error + Send + Sync>) -> Failure {
-        Failure::Clock(step, source)
-    }
-    fn execution(&self, step: u64, source: BoundaryError) -> Failure {
-        Failure::Execution(step, source)
-    }
-    fn invalid_evidence(&self, step: u64, source: ExchangeEvidenceError) -> Failure {
-        Failure::InvalidEvidence(step, source)
-    }
-    fn stats_overflow(&self, step: u64, source: StatsOverflow) -> Failure {
-        Failure::StatsOverflow(step, source)
-    }
-}
+use crate::test_support::{Failure, RecordingClock, TestErrors};
 
 #[derive(Debug, thiserror::Error)]
 #[error("pacing timer failed")]

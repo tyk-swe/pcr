@@ -11,9 +11,10 @@ use packetcraftr_core::{layer::Raw, packet::Packet};
 use super::*;
 use crate::BoundaryError;
 use crate::evidence::ExecutionPermit;
+use crate::execution::ExchangeEvidenceError;
 use crate::execution::evidence::EvidenceLimits;
-use crate::probe::{ErrorKind, Workflow};
-use crate::test_support::RecordingClock;
+use crate::probe::Workflow;
+use crate::test_support::{Failure, RecordingClock, TestErrors};
 use crate::test_support::{decoded_packet, evidence_frame};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -227,7 +228,7 @@ const LIMITS: EvidenceLimits = EvidenceLimits {
 };
 
 struct Run {
-    result: Result<Stats, Error>,
+    result: Result<Stats, Failure>,
     events: Vec<Event>,
     delays: Vec<Duration>,
 }
@@ -244,10 +245,16 @@ fn run(
     let mut deadline = Deadline::with_time_source(budget, move || now);
     let mut clock = RecordingClock::default();
     let mut events = Vec::new();
-    let mut evidence = BatchEvidence::new(workflow, limits, classifier, |event, _: &Deadline| {
-        events.push(event);
-        Ok(())
-    });
+    let mut evidence = BatchEvidence::new(
+        workflow,
+        TestErrors,
+        limits,
+        classifier,
+        |event, _: &Deadline| {
+            events.push(event);
+            Ok(())
+        },
+    );
     let result = run_batches(
         planned,
         Some(5),
@@ -327,8 +334,9 @@ fn evidence_is_judged_against_the_clipped_timeout() {
 
     let error = run.result.expect_err("a reply after the clipped timeout");
     assert!(matches!(
-        &error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message } if message.contains("exceeds timeout 300ms")
+        error,
+        Failure::InvalidEvidence(1, ExchangeEvidenceError::ResponseAfterTimeout { timeout, .. })
+            if timeout == Duration::from_millis(300)
     ));
     assert_eq!(run.events, [probe(0)]);
 }
@@ -354,8 +362,8 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
 
     let error = run.result.expect_err("foreign evidence is rejected");
     assert!(matches!(
-        &error.kind,
-        ErrorKind::InvalidEvidence { sequence: 1, message } if message.contains("different execution permit")
+        error,
+        Failure::InvalidEvidence(1, ExchangeEvidenceError::PermitMismatch)
     ));
     assert_eq!(run.events, [probe(0)]);
 
@@ -368,6 +376,7 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
     let mut events = Vec::new();
     let mut evidence = BatchEvidence::new(
         Workflow::Scan,
+        TestErrors,
         LIMITS,
         TestClassifier::default(),
         |event, _: &Deadline| {
@@ -380,8 +389,8 @@ fn evidence_for_another_permit_is_rejected_before_anything_is_published() {
         .expect_err("foreign evidence is rejected");
     drop(evidence);
     assert!(matches!(
-        error.kind,
-        ErrorKind::InvalidEvidence { sequence: 0, .. }
+        error,
+        Failure::InvalidEvidence(0, ExchangeEvidenceError::PermitMismatch)
     ));
     assert!(events.is_empty());
 }

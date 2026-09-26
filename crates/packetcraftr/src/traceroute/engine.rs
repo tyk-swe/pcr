@@ -18,12 +18,15 @@ use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
 use crate::target::{FamilyGate, admit_operation, wire_limits};
 
+use super::Error;
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
+use super::error::Probes;
 use super::evidence::ProbeClassifier;
 use super::plan::{build_batches, worst_case_duration};
 use super::{Batch, Completion, Event, Hop, Report, Request, Summary, UndecodedEvidence};
-use crate::probe::{Error, ErrorKind, Executor, Transport, enforce_deadline, index_or_push};
+use crate::execution::Executor;
+use crate::probe::{Transport, enforce_deadline, index_or_push};
 
 /// Validates the request, authorizes every resolved target and the complete
 /// operation budget before constructing probes, then executes hop batches until
@@ -79,8 +82,8 @@ where
     let observe = sink_observer(
         runtime,
         emit,
-        |error| WORKFLOW.duration_limit(0, error),
-        |source| Error::new(WORKFLOW, ErrorKind::Output { source }),
+        |error| Probes.duration_limit(0, error),
+        |source| Error::Output { source },
     )?;
     run_observed(request, authorizer, registry, executor, clock, observe)
 }
@@ -101,12 +104,13 @@ where
 {
     let mut deadline =
         Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let approved = approve_traceroute(request, authorizer, &deadline)?;
     let mut batches = build_batches(request, approved.destination)?;
-    enforce_deadline(WORKFLOW, &deadline)?;
+    enforce_deadline(&Probes, &deadline)?;
     let mut evidence = BatchEvidence::new(
         WORKFLOW,
+        Probes,
         request.limits.evidence(),
         ProbeClassifier {
             registry,
@@ -195,23 +199,20 @@ fn approve_traceroute<A: Authorizer>(
     let (selected, _) = admit_operation(
         authorizer,
         deadline,
-        &WORKFLOW,
+        &Probes,
         &request.target,
-        FamilyGate::new(request.address_family, |family| WORKFLOW.family(family)),
+        FamilyGate::new(request.address_family, Error::family),
         |_| {
             let total_probes = request.total_probe_count()?;
             validate_probe_plan(request, total_probes)?;
             let maximum_wire_bytes = u64::try_from(total_probes)
                 .unwrap_or(u64::MAX)
                 .checked_mul(MAX_PROBE_BYTES)
-                .ok_or(Error::new(
-                    WORKFLOW,
-                    ErrorKind::InvalidLimit {
-                        field: "wire_bytes",
-                        value: u64::MAX,
-                        reason: "wire-byte accounting overflowed".to_owned(),
-                    },
-                ))?;
+                .ok_or(Error::InvalidLimit {
+                    field: "wire_bytes",
+                    value: u64::MAX,
+                    reason: "wire-byte accounting overflowed".to_owned(),
+                })?;
             Ok((total_probes, maximum_wire_bytes))
         },
         |plan| {
@@ -231,26 +232,23 @@ fn approve_traceroute<A: Authorizer>(
 }
 
 fn validate_probe_plan(request: &Request, total_probes: usize) -> Result<(), Error> {
-    check_probe_count(WORKFLOW, total_probes, request.limits.max_probes)?;
+    check_probe_count(&Probes, total_probes, request.limits.max_probes)?;
     if let (Transport::Udp, Some(base)) = (request.strategy, request.destination_port) {
         let last_offset = total_probes.saturating_sub(1);
         if usize::from(base)
             .checked_add(last_offset)
             .is_none_or(|last| last > usize::from(u16::MAX))
         {
-            return Err(Error::new(
-                WORKFLOW,
-                ErrorKind::InvalidPort {
-                    message: format!(
-                        "base UDP port {base} plus {} unique probe(s) exceeds 65535",
-                        total_probes
-                    ),
-                },
-            ));
+            return Err(Error::InvalidPort {
+                message: format!(
+                    "base UDP port {base} plus {} unique probe(s) exceeds 65535",
+                    total_probes
+                ),
+            });
         }
     }
     check_probe_duration(
-        WORKFLOW,
+        &Probes,
         worst_case_duration(request)?,
         request.limits.max_duration,
     )

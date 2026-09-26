@@ -238,7 +238,14 @@ of its `ProviderSet`); the CLI composes
 `packetcraftr_netio::tcp::SystemProvider`. A composition that must never open
 a TCP socket fills that field with a provider that refuses connections.
 
-Low-level callers pass a provider to `dns::tcp::query(request, &provider)`.
+Low-level callers pass a provider to `dns::tcp::query(request, Arc::clone(&provider))`.
+The provider and its stream must be `'static`: the admitted native worker owns
+its `Arc<P>` until the connect call and cleanup finish. Set
+`dns::tcp::Request::cancellation` to `Some(&signal)` to interrupt the connect
+wait, or `None` when no cancellation signal is needed. The client passes its
+own signal for direct TCP queries and UDP fallback. `dns::tcp::Error::Cancelled`
+and `dns::tcp::Category::Cancelled` identify cancellation (`io.cancelled`);
+these failures have written no query bytes.
 `packetcraftr_netio::tcp::{Provider, Stream}` owns the narrow connection and
 stream capability; `dns::tcp` retains framing, finite deadlines, and evidence.
 The standard-library provider works independently of native packet and route
@@ -1614,7 +1621,7 @@ let aggregate = collector.finish(report)?; // attempts, records, and evidence
 | `dns::BatchReport`, `dns::QuestionOutcome` | `dns::batch::Report`, `dns::batch::Question` (`report` is `result`) |
 | `dns::{MAX_QUESTIONS, QuestionStatus}` | `dns::batch::{MAX_QUESTIONS, QuestionStatus}` |
 | `dns::EvidenceError` | `dns::IncoherentReport` |
-| `dns::tcp::exchange(request, &provider)` | `dns::tcp::query(request, &provider)` |
+| `dns::tcp::exchange(request, &provider)` | `dns::tcp::query(request, Arc::clone(&provider))` |
 | `ExchangeExecutor::with_dns_tcp(provider)`, `TcpExchangeExecutor` | the `tcp` provider of the client's `ProviderSet` |
 
 `dns::Request` gains `route: route::Options` (the UDP exchanges' route; kernel

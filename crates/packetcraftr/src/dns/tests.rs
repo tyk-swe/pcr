@@ -334,9 +334,10 @@ impl TcpQuerier for LoopbackExecutor {
                 endpoint: exchange.endpoint,
                 query: &exchange.query,
                 timeout: exchange.timeout,
+                cancellation: None,
                 max_message_bytes: exchange.max_message_bytes,
             },
-            &packetcraftr_netio::tcp::SystemProvider,
+            std::sync::Arc::new(packetcraftr_netio::tcp::SystemProvider),
         )?;
         Ok(TcpEvidence {
             permit: exchange.permit,

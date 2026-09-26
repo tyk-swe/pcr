@@ -25,7 +25,7 @@ fn query_with_connector(
     request: Request<'_>,
     connector: &ScriptedConnector,
 ) -> Result<Response, Error> {
-    query_with_clock(request, connector, || {
+    query_with_clock(request, Arc::new(connector.clone()), || {
         connector.stream.state.lock().unwrap().now
     })
 }
@@ -212,6 +212,7 @@ fn request(query: &[u8]) -> Request<'_> {
         endpoint: ENDPOINT,
         query,
         timeout: Duration::from_secs(1),
+        cancellation: None,
         max_message_bytes: usize::from(u16::MAX),
     }
 }
@@ -220,7 +221,7 @@ fn request(query: &[u8]) -> Request<'_> {
 fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
     let mut provider = connector(vec![0, 1, 1]);
     provider.stream.peer = "127.0.0.2:53".parse().unwrap();
-    let error = query(request(b"q"), &provider).unwrap_err();
+    let error = query(request(b"q"), Arc::new(provider.clone())).unwrap_err();
     assert!(matches!(error, Error::Connect { source: None, .. }));
     assert!(provider.stream.state.lock().unwrap().output.is_empty());
 }
@@ -237,7 +238,7 @@ fn provider_read_and_write_timeouts_preserve_phase_and_query_progress() {
                 _ => unreachable!(),
             }
         }
-        let error = query(request(b"q"), &provider).unwrap_err();
+        let error = query(request(b"q"), Arc::new(provider.clone())).unwrap_err();
         assert_same_error(
             &error,
             &Error::Timeout {

@@ -49,9 +49,10 @@ fn ipv4_loopback_handles_fragmented_response_io() {
             endpoint,
             query: QUERY,
             timeout: SERVER_TIMEOUT,
+            cancellation: None,
             max_message_bytes: 512,
         },
-        &packetcraftr_netio::tcp::SystemProvider,
+        std::sync::Arc::new(packetcraftr_netio::tcp::SystemProvider),
     )
     .expect("bounded loopback query");
     server.join().expect("loopback server");

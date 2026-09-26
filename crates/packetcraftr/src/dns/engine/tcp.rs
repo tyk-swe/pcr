@@ -114,6 +114,9 @@ where
             }
             Err(error) => error,
         };
+        if let TcpError::Cancelled(cancelled) = error {
+            return Err(Error::Cancelled(cancelled));
+        }
         match error.category() {
             TcpCategory::Timeout => Ok(tcp_failure_evidence(
                 probe,

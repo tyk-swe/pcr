@@ -201,9 +201,12 @@ impl<P: Providers, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
                 endpoint: query.endpoint,
                 query: &query.query,
                 timeout: query.timeout,
+                cancellation: self.client.cancellation.as_ref(),
                 max_message_bytes: query.max_message_bytes,
             },
-            self.client.providers.tcp(),
+            std::sync::Arc::new(crate::providers::TcpOf(std::sync::Arc::clone(
+                &self.client.providers,
+            ))),
         )?;
         Ok(TcpEvidence {
             permit: query.permit,

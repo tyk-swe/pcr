@@ -8,6 +8,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Breaking
 
+- `dns::tcp::query` takes an `Arc<P>` so its admitted connect worker owns the
+  provider; `P` and its stream must be `'static`. `dns::tcp::Request` gains
+  `cancellation: Option<&Cancellation>`, and its `Error` and `Category` gain
+  `Cancelled`. See `docs/migration-unreleased.md`.
 - Error codes follow the failure's own classification. Live `send`,
   `exchange`, and other workflow build failures publish the build error's code
   (for example `policy.build_resource_limit`, `packet.codec`,
@@ -1249,6 +1253,17 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- DNS TCP connects, including UDP fallback, use the admitted native worker
+  pool and carry the client's cancellation signal. A stalled connect no
+  longer holds the workflow after cancellation or its finite wait expires.
+- TCP connect scans use the client's clock for each attempt's timeout and
+  elapsed evidence. Native route and interface worker waits use wall time
+  even when the caller supplies a frozen clock.
+- Capture activation and timestamp discovery recheck the deadline after
+  interface discovery. Unsupported capture paths honor cancellation and
+  expiry before reporting an unavailable capability.
+- Send and exchange template failures keep their detailed typed source in
+  `causes` without copying its text into the wrapper message.
 - Route lookup honors the caller's deadline and cancellation instead of the
   backends' own timeouts (2 seconds per operation and 3 seconds per response
   on Linux netlink, 2 seconds on macOS routing sockets). A lookup the deadline

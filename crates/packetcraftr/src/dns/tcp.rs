@@ -6,14 +6,16 @@
 //! Callers authorize destinations and validate DNS responses. Each query
 //! reads one declared response frame, then drops the connection.
 
-use packetcraftr_netio::tcp::{Provider, Stream};
+use packetcraftr_netio::tcp::{self, Provider, Stream};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 use thiserror::Error as ThisError;
 
@@ -29,6 +31,8 @@ pub struct Request<'a> {
     pub query: &'a [u8],
     /// Time remaining in the workflow attempt.
     pub timeout: Duration,
+    /// The operation's cancellation signal, carried into the admitted connect.
+    pub cancellation: Option<&'a Cancellation>,
     /// Maximum accepted DNS message bytes, excluding the prefix.
     pub max_message_bytes: usize,
 }
@@ -63,6 +67,8 @@ impl fmt::Display for Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Category {
+    /// The operation was cancelled before its connection completed.
+    Cancelled,
     /// The caller submitted a request that is not a runnable bounded query.
     Request,
     /// This build or route cannot execute DNS over TCP at all.
@@ -78,6 +84,8 @@ pub enum Category {
 #[derive(Clone, Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
+    #[error(transparent)]
+    Cancelled(#[from] Cancelled),
     #[error("DNS-over-TCP system I/O is unavailable: {message}")]
     Unsupported { message: String },
     #[error("DNS-over-TCP timeout {value:?} is invalid; it must be non-zero")]
@@ -160,6 +168,7 @@ impl Error {
     #[must_use]
     pub const fn category(&self) -> Category {
         match self {
+            Self::Cancelled(_) => Category::Cancelled,
             Self::Unsupported { .. } => Category::Unsupported,
             Self::InvalidTimeout { .. }
             | Self::EmptyQuery
@@ -205,7 +214,8 @@ impl Error {
             | Self::ZeroLength
             | Self::MessageTooLarge { .. }
             | Self::IncompleteMessage { .. } => framed_query_bytes,
-            Self::Unsupported { .. }
+            Self::Cancelled(_)
+            | Self::Unsupported { .. }
             | Self::InvalidTimeout { .. }
             | Self::EmptyQuery
             | Self::QueryTooLarge { .. }
@@ -227,6 +237,7 @@ impl Error {
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self.category() {
+            Category::Cancelled => Cancelled.classification(),
             Category::Request => Classification::new(
                 "internal.dns_tcp_request",
                 Kind::Internal,
@@ -281,17 +292,26 @@ pub struct Response {
 }
 
 /// Runs one bounded DNS-over-TCP query through the selected provider.
+/// The shared provider moves into an admitted native connect worker; a
+/// cancelled or expired wait returns while a stalled call retains its slot
+/// until cleanup finishes.
 /// Writes one framed query and reads the first framed response. Subsequent
 /// messages on the stream are outside this response.
-pub fn query<P: Provider>(request: Request<'_>, provider: &P) -> Result<Response, Error> {
+pub fn query<P>(request: Request<'_>, provider: Arc<P>) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
     query_with_clock(request, provider, Instant::now)
 }
 
-fn query_with_clock<P: Provider>(
+fn query_with_clock<P>(
     request: Request<'_>,
-    connector: &P,
+    connector: Arc<P>,
     now: impl Fn() -> Instant,
-) -> Result<Response, Error> {
+) -> Result<Response, Error>
+where
+    P: Provider<Stream: 'static> + 'static,
+{
     let maximum = usize::from(u16::MAX);
     if request.timeout.is_zero() {
         return Err(Error::InvalidTimeout {
@@ -319,12 +339,31 @@ fn query_with_clock<P: Provider>(
             value: request.timeout,
         })?;
     let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
-    let mut stream = connector
-        .connect(
-            request.endpoint,
-            &packetcraftr_core::budget::Deadline::new(connect_timeout),
-        )
+    let connect_deadline =
+        Deadline::new(connect_timeout).with_cancellation(request.cancellation.cloned());
+    let mut pending = tcp::start_connect(connector, request.endpoint, &connect_deadline)
         .map_err(|source| map_connect_error(request.endpoint, source))?;
+    let mut stream =
+        loop {
+            let wall_remaining = packetcraftr_netio::deadline::remaining(&connect_deadline)
+                .map_err(|interrupted| match interrupted {
+                    Interrupted::Cancelled(cancelled) => Error::Cancelled(cancelled),
+                    _ => Error::Timeout {
+                        phase: Phase::Connect,
+                        transferred: 0,
+                    },
+                })?;
+            let remaining = remaining(deadline, now(), Phase::Connect, 0)?.min(wall_remaining);
+            if let Some(outcome) = pending
+                .poll()
+                .map_err(|source| map_connect_error(request.endpoint, source))?
+            {
+                break outcome
+                    .result
+                    .map_err(|source| map_connect_error(request.endpoint, source))?;
+            }
+            std::thread::sleep(remaining.min(packetcraftr_netio::deadline::POLL_INTERVAL));
+        };
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "peer socket inspection failed".to_owned(),
@@ -455,6 +494,7 @@ fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error
         transferred: 0,
     };
     let source = match error {
+        TcpError::Cancelled(cancelled) => return Error::Cancelled(cancelled),
         TcpError::Socket(source) if is_timeout(&source) => return timeout,
         TcpError::DeadlineExceeded => return timeout,
         TcpError::Socket(source) => Source::new(source),

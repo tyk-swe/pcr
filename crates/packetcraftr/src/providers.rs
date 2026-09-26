@@ -3,6 +3,8 @@
 
 //! The provider bundle a [`Client`](crate::Client) runs every workflow over.
 
+use std::sync::Arc;
+
 use packetcraftr_netio as net;
 
 use crate::target;
@@ -117,5 +119,21 @@ impl Providers for SystemProviders {
     }
     fn resolver(&self) -> &Self::Resolver {
         &target::SystemResolver
+    }
+}
+
+/// The client's TCP provider behind the shared handle a pending connect keeps
+/// until its worker returns.
+pub(crate) struct TcpOf<P>(pub(crate) Arc<P>);
+
+impl<P: Providers> net::tcp::Provider for TcpOf<P> {
+    type Stream = <P::Tcp as net::tcp::Provider>::Stream;
+
+    fn connect(
+        &self,
+        endpoint: std::net::SocketAddr,
+        deadline: &packetcraftr_core::budget::Deadline,
+    ) -> Result<Self::Stream, net::tcp::Error> {
+        self.0.tcp().connect(endpoint, deadline)
     }
 }

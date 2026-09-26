@@ -10,7 +10,7 @@ use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::tcp::{self, Provider, Stream as _};
 
 use crate::deadline::DeadlineExt as _;
-use crate::providers::Providers;
+use crate::providers::{Providers, TcpOf};
 use crate::{
     Client, Sink,
     clock::Clock,
@@ -69,22 +69,6 @@ impl<P: Providers, K: Clock> Client<P, K> {
             started,
             |probe, deadline| publish(Event::Probe(probe), deadline),
         )
-    }
-}
-
-/// The client's TCP provider behind the shared handle a pending connect keeps
-/// until its worker returns.
-struct TcpOf<P>(Arc<P>);
-
-impl<P: Providers> Provider for TcpOf<P> {
-    type Stream = <P::Tcp as Provider>::Stream;
-
-    fn connect(
-        &self,
-        endpoint: SocketAddr,
-        deadline: &Deadline,
-    ) -> Result<Self::Stream, tcp::Error> {
-        self.0.tcp().connect(endpoint, deadline)
     }
 }
 
@@ -224,6 +208,7 @@ fn admit_next<Q, A>(
     authorizer: &mut A,
     deadline: &Deadline,
     provider: &Arc<Q>,
+    clock: &impl Clock,
 ) -> Result<Option<Active<Q::Stream>>, Error>
 where
     Q: Provider + 'static,
@@ -242,7 +227,7 @@ where
             actual: source.actual,
             limit: source.limit,
         })?;
-    let admitted = Instant::now();
+    let admitted = clock.now();
     let scheduled_at = SystemTime::now();
     let pending = match tcp::start_connect(
         Arc::clone(provider),
@@ -269,6 +254,7 @@ where
 fn settle_active<S: tcp::Stream>(
     active: &mut Vec<Active<S>>,
     index: usize,
+    now: Instant,
 ) -> Result<Option<ProbeEvidence>, Error> {
     let result = active[index]
         .pending
@@ -276,9 +262,9 @@ fn settle_active<S: tcp::Stream>(
         .map_err(|source| execution(active[index].sequence, source))?;
     if let Some(result) = result {
         let entry = active.remove(index);
-        return Ok(Some(finish_probe(entry, result)?));
+        return Ok(Some(finish_probe(entry, result, now)?));
     }
-    if active[index].started.elapsed() < active[index].timeout {
+    if now.saturating_duration_since(active[index].started) < active[index].timeout {
         return Ok(None);
     }
     let mut entry = active.remove(index);
@@ -292,7 +278,7 @@ fn settle_active<S: tcp::Stream>(
         outcome: Outcome::DeadlineExpired,
         scheduled_at: entry.scheduled_at,
         finished_at: None,
-        elapsed: entry.started.elapsed(),
+        elapsed: now.saturating_duration_since(entry.started),
         local: None,
         error: None,
     }))
@@ -331,8 +317,9 @@ where
             && active.len() < request.max_in_flight
             && clock.now() >= next_start
         {
-            let Some(admitted) =
-                admit_next(request, &planned, next, authorizer, deadline, provider)?
+            let Some(admitted) = admit_next(
+                request, &planned, next, authorizer, deadline, provider, clock,
+            )?
             else {
                 admission_held = true;
                 break;
@@ -348,7 +335,7 @@ where
         let mut index = 0;
         while index < active.len() {
             enforce_deadline(&Probes, deadline)?;
-            let Some(probe) = settle_active(&mut active, index)? else {
+            let Some(probe) = settle_active(&mut active, index, clock.now())? else {
                 index += 1;
                 continue;
             };
@@ -416,7 +403,9 @@ where
 fn finish_probe<S: tcp::Stream>(
     entry: Active<S>,
     result: tcp::ConnectOutcome<S>,
+    now: Instant,
 ) -> Result<ProbeEvidence, Error> {
+    let elapsed = now.saturating_duration_since(entry.started);
     let mut probe = ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,
@@ -426,7 +415,7 @@ fn finish_probe<S: tcp::Stream>(
         outcome: Outcome::LocalError,
         scheduled_at: result.started_at,
         finished_at: Some(result.completed_at),
-        elapsed: result.elapsed,
+        elapsed,
         local: None,
         error: None,
     };
@@ -456,7 +445,7 @@ fn finish_probe<S: tcp::Stream>(
                     },
                 )
             })?);
-            probe.outcome = if result.elapsed > entry.timeout {
+            probe.outcome = if elapsed > entry.timeout {
                 Outcome::DeadlineExpired
             } else {
                 Outcome::Connected
@@ -476,7 +465,7 @@ fn finish_probe<S: tcp::Stream>(
             probe.error = Some(Arc::new(source));
         }
     }
-    if result.elapsed > entry.timeout {
+    if elapsed > entry.timeout {
         probe.outcome = Outcome::DeadlineExpired;
     }
     Ok(probe)

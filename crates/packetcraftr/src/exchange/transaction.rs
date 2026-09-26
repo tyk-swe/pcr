@@ -11,7 +11,7 @@ use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{OverflowPolicy, Session, Statistics},
-    transmit::Sender as PacketIo,
+    transmit::Provider as PacketIo,
 };
 
 use super::CaptureGuard;

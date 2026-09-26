@@ -215,7 +215,7 @@ mod tests {
     use packetcraftr_core::{decode::DecodedPacket, packet::Packet};
     use packetcraftr_netio::capture::{Captured, Metadata, Statistics};
     use packetcraftr_netio::interface::Id as InterfaceId;
-    use packetcraftr_netio::transmit::{Frame as TransmissionFrame, Report};
+    use packetcraftr_netio::transmit::{Outbound, Report};
 
     use super::*;
     use crate::exchange::{Event, Prepared, WorkflowResponseMatcher, WorkflowStopPredicate};
@@ -273,8 +273,8 @@ mod tests {
 
     struct FixtureSender(Arc<CaptureState>);
 
-    impl packetcraftr_netio::transmit::Sender for FixtureSender {
-        fn send(&self, frame: TransmissionFrame<'_>) -> Result<Report, LiveIoError> {
+    impl packetcraftr_netio::transmit::Provider for FixtureSender {
+        fn send(&self, frame: Outbound<'_>) -> Result<Report, LiveIoError> {
             let report = Report::committed(frame.bytes().len(), frame.bytes().clone());
             self.0.sends.fetch_add(1, Ordering::SeqCst);
             Ok(report)

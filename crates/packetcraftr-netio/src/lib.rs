@@ -36,10 +36,10 @@ mod workers;
 
 pub use error::{Error, SendEvidenceFault, SystemFault};
 
-/// Independently owned sender and capture provider composed into the single
+/// Independently owned transmit and capture providers composed into the single
 /// packet I/O value that capture-before-send exchanges require.
 ///
-/// It implements [`transmit::Sender`] through `sender` and
+/// It implements [`transmit::Provider`] through `sender` and
 /// [`capture::Provider`] through `capture`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PacketIo<S, C> {

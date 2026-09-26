@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::deadline::remaining_before;
-use packetcraftr_netio::{Error as LiveIoError, transmit::Sender as PacketIo};
+use packetcraftr_netio::{Error as LiveIoError, transmit::Provider as PacketIo};
 
 use crate::Client;
 use crate::Error;

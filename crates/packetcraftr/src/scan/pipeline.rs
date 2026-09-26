@@ -218,7 +218,7 @@ pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
 fn check<R, I>(client: &Client<R, I>, deadline: Instant) -> Result<(), BoundaryError>
 where
     R: route::Provider,
-    I: transmit::Sender,
+    I: transmit::Provider,
 {
     client
         .check_cancelled()
@@ -240,7 +240,7 @@ pub(super) fn run<R, I>(
 ) -> Result<Stats, BoundaryError>
 where
     R: route::Provider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     validate_options(batches, &options)?;
     let started = Instant::now();

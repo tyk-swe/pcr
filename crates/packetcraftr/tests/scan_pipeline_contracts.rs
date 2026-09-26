@@ -74,8 +74,8 @@ impl route::Provider for Routes {
         })
     }
 }
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, net::Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let mut state = self.0.lock().unwrap();
         assert!(state.ready, "capture must be ready before every send");
         if state.fail_after == Some(state.sends) {

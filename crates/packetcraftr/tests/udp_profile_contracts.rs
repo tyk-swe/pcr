@@ -167,8 +167,8 @@ fn registry() -> Arc<packetcraftr_core::registry::Registry> {
         .unwrap(),
     )
 }
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, net::Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let decoded = Dissector::new(registry())
             .decode(
                 Frame::new(SystemTime::now(), LinkType::RAW, frame.bytes().clone()).unwrap(),

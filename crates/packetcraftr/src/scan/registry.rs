@@ -83,10 +83,10 @@ impl<R: route::Provider> route::Provider for Routes<'_, R> {
             .lookup_with_preferences(destination, interface, source)
     }
 }
-impl<I: transmit::Sender> transmit::Sender for Io<'_, I> {
+impl<I: transmit::Provider> transmit::Provider for Io<'_, I> {
     fn send(
         &self,
-        frame: transmit::Frame<'_>,
+        frame: transmit::Outbound<'_>,
     ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         self.0.send(frame)
     }

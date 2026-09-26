@@ -27,10 +27,10 @@ struct RecordingSender {
     fail_at: Option<usize>,
 }
 
-impl transmit::Sender for RecordingSender {
+impl transmit::Provider for RecordingSender {
     fn send(
         &self,
-        frame: transmit::Frame<'_>,
+        frame: transmit::Outbound<'_>,
     ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         let mut sent = self.sent.lock().expect("sent lock");
         if self.fail_at == Some(sent.len()) {

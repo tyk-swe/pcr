@@ -17,6 +17,14 @@ use packetcraftr_netio::route::Decision;
 
 use super::*;
 
+/// A Layer 2 transmit fake; neighbor discovery never transmits at Layer 3.
+trait Layer2Link: Send + Sync {
+    fn send_layer2(
+        &self,
+        frame: Layer2Frame<'_>,
+    ) -> Result<transmit::Report, packetcraftr_netio::Error>;
+}
+
 /// Composes a Layer 2 fake and a capture fake into the one I/O value a
 /// client resolves over.
 struct FixtureIo<L, C> {
@@ -24,14 +32,14 @@ struct FixtureIo<L, C> {
     capture: C,
 }
 
-impl<L: transmit::Layer2Sender, C: Send + Sync> transmit::Sender for FixtureIo<L, C> {
+impl<L: Layer2Link, C: Send + Sync> transmit::Provider for FixtureIo<L, C> {
     fn send(
         &self,
-        frame: transmit::Frame<'_>,
+        frame: transmit::Outbound<'_>,
     ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         match frame {
-            transmit::Frame::Layer2(frame) => self.layer2.send_layer2(frame),
-            transmit::Frame::Layer3(_) => panic!("neighbor discovery transmits only at Layer 2"),
+            transmit::Outbound::Layer2(frame) => self.layer2.send_layer2(frame),
+            transmit::Outbound::Layer3(_) => panic!("neighbor discovery transmits only at Layer 2"),
         }
     }
 }
@@ -55,7 +63,7 @@ struct ActiveResolver<L, C> {
 
 impl<L, C> ActiveResolver<L, C>
 where
-    L: transmit::Layer2Sender,
+    L: Layer2Link,
     C: capture::Provider,
 {
     fn try_new(layer2: L, capture: C, options: Options) -> Result<Self, Error> {
@@ -93,7 +101,7 @@ struct SlowLayer2 {
     delay: Duration,
 }
 
-impl transmit::Layer2Sender for SlowLayer2 {
+impl Layer2Link for SlowLayer2 {
     fn send_layer2(
         &self,
         frame: Layer2Frame<'_>,
@@ -181,7 +189,7 @@ impl FixtureLayer2 {
     }
 }
 
-impl transmit::Layer2Sender for FixtureLayer2 {
+impl Layer2Link for FixtureLayer2 {
     fn send_layer2(
         &self,
         frame: Layer2Frame<'_>,

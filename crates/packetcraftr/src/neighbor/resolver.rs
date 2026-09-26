@@ -94,7 +94,7 @@ pub(crate) struct Active<'a, I> {
 
 impl<I> Resolver for Active<'_, I>
 where
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
         validate_request(request)?;
@@ -192,7 +192,7 @@ where
 
 impl<I> Active<'_, I>
 where
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     fn exchange<S: Session>(
         &self,
@@ -230,7 +230,7 @@ where
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
                 .io
-                .send(transmit::Frame::Layer2(frame))
+                .send(transmit::Outbound::Layer2(frame))
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();

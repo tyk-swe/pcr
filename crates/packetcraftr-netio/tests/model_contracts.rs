@@ -19,10 +19,7 @@ use packetcraftr_netio::{
     deadline,
     link::{Capability, Mode},
     route::{Decision, Scope, SelectionReason},
-    transmit::{
-        Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, ModeSender, Report, Route,
-        Sender,
-    },
+    transmit::{Layer2Frame, Layer3Frame, Outbound, Report, Route},
 };
 
 fn interface() -> InterfaceId {
@@ -285,30 +282,8 @@ fn cancellable_capture_backs_off_after_early_empty_polls() {
     }
 }
 
-#[derive(Clone)]
-struct CountingLayer2(Arc<AtomicUsize>);
-
-impl Layer2Sender for CountingLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(packetcraftr_netio::transmit::Submission::start()
-            .complete(frame.bytes().len(), frame.bytes().clone()))
-    }
-}
-
-#[derive(Clone)]
-struct CountingLayer3(Arc<AtomicUsize>);
-
-impl Layer3Sender for CountingLayer3 {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(packetcraftr_netio::transmit::Submission::start()
-            .complete(frame.bytes().len(), frame.bytes().clone()))
-    }
-}
-
 #[test]
-fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
+fn typed_transmissions_enforce_mode_and_select_the_resolved_layer() {
     let bytes = Bytes::from_static(&[1, 2, 3]);
     let decision = decision(Capability::Layer2AndLayer3);
     let layer2_route = route(&decision, Mode::Layer2);
@@ -330,28 +305,19 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
         })
     ));
     assert!(matches!(
-        Frame::try_new(&bytes, auto_route),
+        Outbound::try_new(&bytes, auto_route),
         Err(Error::UnresolvedLinkMode)
     ));
 
-    let layer2_calls = Arc::new(AtomicUsize::new(0));
-    let layer3_calls = Arc::new(AtomicUsize::new(0));
-    let dispatch = ModeSender::new(
-        CountingLayer2(Arc::clone(&layer2_calls)),
-        CountingLayer3(Arc::clone(&layer3_calls)),
-    );
-    let frame = Frame::try_new(&bytes, layer2_route).expect("Layer 2 frame");
-    assert_eq!(frame.bytes(), &bytes);
-    assert_eq!(frame.route(), layer2_route);
-    let report = dispatch.send(frame).expect("fixture send");
-    assert_eq!(report.wire_bytes(), &bytes);
-    assert_eq!(layer2_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(layer3_calls.load(Ordering::SeqCst), 0);
+    let layer2 = Outbound::try_new(&bytes, layer2_route).expect("Layer 2 frame");
+    assert!(matches!(layer2, Outbound::Layer2(_)));
+    assert_eq!(layer2.bytes(), &bytes);
+    assert_eq!(layer2.route(), layer2_route);
 
-    dispatch
-        .send(Frame::try_new(&bytes, layer3_route).expect("Layer 3 frame"))
-        .expect("fixture send");
-    assert_eq!(layer3_calls.load(Ordering::SeqCst), 1);
+    let layer3 = Outbound::try_new(&bytes, layer3_route).expect("Layer 3 packet");
+    assert!(matches!(layer3, Outbound::Layer3(_)));
+    assert_eq!(layer3.bytes(), &bytes);
+    assert_eq!(layer3.route(), layer3_route);
 }
 
 #[test]

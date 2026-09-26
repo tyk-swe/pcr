@@ -42,7 +42,7 @@ pub(super) fn plan<'c, R, I>(
 ) -> Result<Plan<'c, R, I>, BoundaryError>
 where
     R: route::Provider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     executor
         .options

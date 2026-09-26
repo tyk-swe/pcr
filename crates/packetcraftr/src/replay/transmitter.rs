@@ -15,10 +15,7 @@ use packetcraftr_netio::{
         SystemProvider as SystemInterfaceProvider,
     },
     link::Mode as LinkMode,
-    transmit::{
-        Frame as TransmissionFrame, ModeSender, Sender, SystemLayer2 as SystemLayer2Io,
-        SystemLayer3 as SystemLayer3Io,
-    },
+    transmit::{Outbound, Provider as TransmitProvider, SystemProvider as SystemTransmitProvider},
 };
 
 use crate::policy::decode_wire;
@@ -32,14 +29,14 @@ use crate::replay::wire::{
 /// engine.
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
-    packet_io: ModeSender<SystemLayer2Io, SystemLayer3Io>,
+    packet_io: SystemTransmitProvider,
 }
 
 impl SystemTransmitter {
     pub fn new() -> Self {
         Self {
             validated_interface: None,
-            packet_io: ModeSender::new(SystemLayer2Io, SystemLayer3Io),
+            packet_io: SystemTransmitProvider,
         }
     }
 
@@ -244,10 +241,9 @@ impl Transmitter for SystemTransmitter {
                 message: "interface was not validated before replay transmission".to_owned(),
                 source: None,
             })?;
-        let report = self.packet_io.send(TransmissionFrame::try_new(
-            frame.bytes(),
-            route.transmit_route(),
-        )?)?;
+        let report = self
+            .packet_io
+            .send(Outbound::try_new(frame.bytes(), route.transmit_route())?)?;
         Ok(Transmission {
             interface: selected.id,
             report,

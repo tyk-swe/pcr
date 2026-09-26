@@ -4,7 +4,7 @@
 //! Composes local route and recording-I/O providers with an explicit
 //! destination policy and finite budgets. No network traffic is sent.
 //!
-//! Production uses the `SystemProvider`/`SystemLayer*`/`PacketIo` adapters
+//! Production uses each capability's `SystemProvider`, joined by `PacketIo`,
 //! under the same policy contract; the client resolves neighbors over that
 //! I/O itself. Run with scripts/check-external-consumer.py.
 
@@ -65,8 +65,8 @@ struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-impl transmit::Sender for RecordingSender {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for RecordingSender {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         self.sent
             .lock()
             .expect("sent lock")

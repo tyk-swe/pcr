@@ -52,10 +52,10 @@ impl Provider for CountingRoutes {
 
 struct NeverTransmit;
 
-impl transmit::Sender for NeverTransmit {
+impl transmit::Provider for NeverTransmit {
     fn send(
         &self,
-        _frame: transmit::Frame<'_>,
+        _frame: transmit::Outbound<'_>,
     ) -> Result<transmit::Report, packetcraftr_netio::Error> {
         unreachable!("denied targets must not reach transmission")
     }

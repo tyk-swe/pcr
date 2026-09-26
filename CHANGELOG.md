@@ -398,6 +398,22 @@ All notable changes to PacketcraftR are documented here. The format follows
   `policy::Authorizer` keeps `authorize_operation` (and
   `authorize_final_wire`), and DNS, scan, connect scan, and traceroute require
   `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
+- DNS runs on the client: `client.dns(dns::Request, S)` returns the terminal
+  `dns::Report` (formerly `Summary`) and `dns::Collector` rebuilds the
+  `dns::Aggregate` (formerly `Report`); `client.dns_batch(dns::batch::Request,
+  S)` returns `dns::batch::Report` (formerly `BatchReport`), publishes
+  question-tagged `dns::batch::Event`s, and `dns::batch::Collector` rebuilds
+  `dns::batch::Aggregate`. `dns::Request` gains `route` and `collection`.
+  `dns::{run, run_with_events, run_batch, run_batch_with_events}`, the
+  executor seam (`Exchange`, `Execution`, `TcpExchange`, `TcpExecution`,
+  `TcpExecutor`, `TcpExchangeExecutor`, `with_dns_tcp`) are removed from the
+  public API; DNS-over-TCP queries the client's `tcp` provider.
+  `dns::tcp::exchange` is `dns::tcp::query`, `dns::EvidenceError` is
+  `dns::IncoherentReport`, `MAX_QUESTIONS`, `QuestionStatus`, and
+  `QuestionOutcome` (now `Question`) move to `dns::batch`.
+  `dns::Error::Authorization` no longer converts from `BoundaryError`,
+  `InvalidEvidence` carries a typed `dns::EvidenceFault`, and a TCP executor
+  rejecting the workflow's own request is `TcpRequestRejected`.
 
   See `docs/migration-unreleased.md`.
 
@@ -659,8 +675,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   progress survives later failures.
 - `dns` accepts multiple NAME positionals and repeatable `--reverse ADDRESS`,
   deriving PTR questions under `in-addr.arpa`/`ip6.arpa` via the new
-  `dns::reverse_name`; `dns::run_batch`/`run_batch_with_events` execute a
-  bounded batch (up to `dns::MAX_QUESTIONS`) under one shared deadline and
+  `dns::reverse_name`; `client.dns_batch` executes a
+  bounded batch (up to `dns::batch::MAX_QUESTIONS`) under one shared deadline and
   report each question `completed`, `failed`, or `unattempted` in input order.
 - `capture` accepts `--dissect` and repeatable `--field PATH` on text and
   NDJSON output. `--dissect` decodes each emitted frame once and publishes its
@@ -699,6 +715,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- DNS `packet.dns_query` and `capability.dns_tcp` failures no longer repeat
+  their cause in the message: it reads `DNS query construction failed` or
+  `DNS-over-TCP execution is unavailable on attempt N`, and the cause appears
+  once in `causes`. Codes are unchanged.
 - `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
   the operation's destinations (and for `send` and `exchange` its budget) are
   authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer
@@ -888,8 +908,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   human-readable aliases. See [the migration notes](docs/migration-unreleased.md).
 - DNS TCP fallback requires explicit provider composition. Native socket
   ownership moves to netio; the workflow retains DNS framing, shared deadlines,
-  and evidence. Library exchange executors opt in with `.with_dns_tcp(provider)`;
-  the CLI explicitly selects the standard-library TCP provider.
+  and evidence. Library clients query over their `tcp` provider; the CLI
+  explicitly selects the standard-library TCP provider.
 - Release archives share one verifier for required assets, binary identity,
   exact offline packet bytes, and complete NDJSON output on Unix and Windows.
 - Netio interface-snapshot and packet-routing validation retain their original

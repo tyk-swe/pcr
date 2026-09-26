@@ -404,11 +404,10 @@ selection, and one `--max-duration-ms` deadline. Each question reports
 attempts keep `--timeout-ms` and `--attempts`. `--transaction-id` stays
 single-question only; batches generate a fresh identifier per question.
 
-Library callers enable TCP by composing an exchange executor with
-`.with_dns_tcp(provider)`. The CLI explicitly selects
-`packetcraftr_netio::tcp::SystemProvider`; injected UDP executors default to
-unsupported TCP execution. The standard-library TCP provider is available
-independently of the native packet-I/O feature flags.
+Library callers run DNS with `client.dns(request, sink)`, whose TCP queries use
+the client's `tcp` provider. The CLI composes
+`packetcraftr_netio::tcp::SystemProvider`, which is available independently of
+the native packet-I/O feature flags.
 
 `--type` accepts `a`, `aaaa`, `caa`, `cname`, `mx`, `ns`, `ptr`, `soa`, `srv`,
 `txt`, and `any`, or any decimal code in `0..=65535`, optionally prefixed with

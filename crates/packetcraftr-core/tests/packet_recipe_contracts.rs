@@ -6,7 +6,7 @@
 
 use bytes::Bytes;
 use packetcraftr_core::{
-    document::{Format, PayloadError, PayloadTarget, RecipeError, parse_recipe},
+    document::{Format, payload, recipe},
     error::{Classified, Kind},
     field::FieldValue,
     layout::DEFAULT_MAX_LAYERS,
@@ -18,8 +18,8 @@ const RAW_YAML: &str = include_str!("../../../examples/documents/packet-raw.yaml
 const IPV4_UDP_JSON: &str = include_str!("../../../examples/documents/packet-ipv4-udp.json");
 const RECIPE: &str = "ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=9000,dport=9001)/raw()";
 
-fn recipe(input: &str, declared: Option<Format>) -> Result<Packet, RecipeError> {
-    parse_recipe(input, declared, &builtin::registry(), DEFAULT_MAX_LAYERS)
+fn recipe(input: &str, declared: Option<Format>) -> Result<Packet, recipe::Error> {
+    recipe::parse(input, declared, &builtin::registry(), DEFAULT_MAX_LAYERS)
 }
 
 fn names(packet: &Packet) -> Vec<String> {
@@ -49,21 +49,21 @@ fn recipes_read_as_documents_or_expressions() {
 #[test]
 fn a_declared_format_is_not_second_guessed() {
     let error = recipe(RAW_YAML, Some(Format::Json)).expect_err("YAML is not JSON");
-    assert!(matches!(error, RecipeError::Document(_)), "{error:?}");
+    assert!(matches!(error, recipe::Error::Document(_)), "{error:?}");
     assert_eq!(error.classification().code, "cli.document_syntax");
     assert_eq!(
         names(&recipe(IPV4_UDP_JSON, Some(Format::Yaml)).unwrap()),
         ["ethernet", "ipv4", "udp", "raw"]
     );
     let error = recipe(RECIPE, Some(Format::Yaml)).expect_err("an expression is not YAML");
-    assert!(matches!(error, RecipeError::Document(_)), "{error:?}");
+    assert!(matches!(error, recipe::Error::Document(_)), "{error:?}");
 }
 
 #[test]
 fn unrecognized_text_reports_the_expression_failure_with_the_document_failure_as_cause() {
     let error = recipe("::: [ nope", None).expect_err("neither form");
     assert!(
-        matches!(error, RecipeError::Unrecognized { .. }),
+        matches!(error, recipe::Error::Unrecognized { .. }),
         "{error:?}"
     );
     let classification = error.classification();
@@ -80,7 +80,7 @@ fn unrecognized_text_reports_the_expression_failure_with_the_document_failure_as
     assert!(causes.len() >= 2, "{causes:?}");
 }
 
-fn target(selector: &str) -> PayloadTarget {
+fn target(selector: &str) -> payload::Target {
     selector.parse().expect("valid target")
 }
 
@@ -89,7 +89,7 @@ fn a_payload_target_fills_one_empty_bytes_field() {
     let mut packet = recipe(RECIPE, None).unwrap();
     target("2.BYTES")
         .inject(&mut packet, || {
-            Ok::<_, PayloadError>(Bytes::from_static(b"\xde\xad"))
+            Ok::<_, payload::Error>(Bytes::from_static(b"\xde\xad"))
         })
         .unwrap();
     assert_eq!(
@@ -122,7 +122,7 @@ fn a_refused_payload_target_never_loads_its_bytes() {
     ] {
         let mut packet = recipe(recipe_text, None).unwrap();
         let error = target(selector)
-            .inject(&mut packet, || -> Result<Bytes, PayloadError> {
+            .inject(&mut packet, || -> Result<Bytes, payload::Error> {
                 panic!("{selector} loaded its bytes")
             })
             .expect_err("refused");

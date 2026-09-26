@@ -13,14 +13,14 @@
 use serde::Deserialize;
 
 use super::{
-    ChecksumMode, Error, FieldAssignment, FieldChange, FieldEdits, HeaderRewrite, RewriteLimits,
-    rewrite,
+    ChecksumMode, FieldAssignment, FieldChange, FieldEdits, HeaderRewrite, RewriteLimits, rewrite,
 };
 use crate::{
     decode::Dissector,
     error::{BoundaryError, Classification, Classified, Coordinate, Kind, Source, source_chain},
     frame::Frame,
     registry::Registry,
+    transform,
 };
 
 /// The schema of a rewrite document holding header patches.
@@ -62,9 +62,9 @@ impl Rules {
         document: &[u8],
         checksums: ChecksumMode,
         registry: &Registry,
-    ) -> Result<Self, RulesError> {
+    ) -> Result<Self, Error> {
         if document.len() > MAX_REWRITE_DOCUMENT_BYTES {
-            return Err(RulesError::DocumentSize {
+            return Err(Error::DocumentSize {
                 actual: document.len(),
                 limit: MAX_REWRITE_DOCUMENT_BYTES,
             });
@@ -77,13 +77,13 @@ impl Rules {
             return Self::parse_assignments(document, checksums, registry);
         }
         let document: Document = serde_json::from_slice(document)
-            .map_err(|source| RulesError::Syntax(Source::new(source)))?;
+            .map_err(|source| Error::Syntax(Source::new(source)))?;
         check_shape(&document.schema, REWRITE_SCHEMA_V1, document.rules.len())?;
         let mut rules = Vec::with_capacity(document.rules.len());
         for rule in document.rules {
-            rule.patch.validate().map_err(RulesError::Patch)?;
+            rule.patch.validate().map_err(Error::Patch)?;
             if rule.patch.is_empty() {
-                return Err(RulesError::EmptyPatch);
+                return Err(Error::EmptyPatch);
             }
             rules.push(Rule {
                 filter: rule.filter,
@@ -98,17 +98,17 @@ impl Rules {
         document: &[u8],
         checksums: ChecksumMode,
         registry: &Registry,
-    ) -> Result<Self, RulesError> {
+    ) -> Result<Self, Error> {
         let document: AssignDocument = serde_json::from_slice(document)
-            .map_err(|source| RulesError::Syntax(Source::new(source)))?;
+            .map_err(|source| Error::Syntax(Source::new(source)))?;
         check_shape(&document.schema, REWRITE_SCHEMA_V2, document.rules.len())?;
         let mut rules = Vec::with_capacity(document.rules.len());
         for rule in document.rules {
             if rule.assign.is_empty() {
-                return Err(RulesError::EmptyAssignments);
+                return Err(Error::EmptyAssignments);
             }
             let edits = FieldEdits::compile(&rule.assign, checksums, registry)
-                .map_err(RulesError::Assignment)?;
+                .map_err(Error::Assignment)?;
             rules.push(Rule {
                 filter: rule.filter,
                 patch: HeaderRewrite::default(),
@@ -126,15 +126,12 @@ impl Rules {
         assignments: &[FieldAssignment],
         checksums: ChecksumMode,
         registry: &Registry,
-    ) -> Result<Self, RulesError> {
-        patch.validate().map_err(RulesError::Patch)?;
+    ) -> Result<Self, Error> {
+        patch.validate().map_err(Error::Patch)?;
         let edits = if assignments.is_empty() {
             None
         } else {
-            Some(
-                FieldEdits::compile(assignments, checksums, registry)
-                    .map_err(RulesError::Assignment)?,
-            )
+            Some(FieldEdits::compile(assignments, checksums, registry).map_err(Error::Assignment)?)
         };
         Ok(Self {
             rules: vec![Rule {
@@ -249,14 +246,14 @@ impl<'a, F> IntoIterator for &'a Rules<F> {
     }
 }
 
-fn check_shape(schema: &str, expected: &str, rules: usize) -> Result<(), RulesError> {
+fn check_shape(schema: &str, expected: &str, rules: usize) -> Result<(), Error> {
     if schema != expected {
-        return Err(RulesError::Schema {
+        return Err(Error::Schema {
             schema: schema.to_owned(),
         });
     }
     if rules == 0 || rules > MAX_REWRITE_RULES {
-        return Err(RulesError::RuleCount { count: rules });
+        return Err(Error::RuleCount { count: rules });
     }
     Ok(())
 }
@@ -294,19 +291,21 @@ struct AssignRule {
 /// Why rewrite rules could not be read.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum RulesError {
+pub enum Error {
     /// The document is larger than [`MAX_REWRITE_DOCUMENT_BYTES`].
     #[error("rewrite rules document has {actual} bytes, exceeding limit {limit}")]
     DocumentSize { actual: usize, limit: usize },
-    /// The document is not JSON of the declared schema's shape. The message
-    /// already names the parser's reason.
-    #[error("invalid rewrite rules: {0}")]
+    /// The document is not JSON of the declared schema's shape; the parser's
+    /// reason is the source.
+    #[error("invalid rewrite rules")]
     Syntax(#[source] Source),
     /// The document declares no supported schema.
-    #[error("rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules")]
+    #[error(
+        "unsupported rewrite rules schema {schema}; expected {REWRITE_SCHEMA_V1} or {REWRITE_SCHEMA_V2}"
+    )]
     Schema { schema: String },
     /// The document holds no rules or more than [`MAX_REWRITE_RULES`].
-    #[error("rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules")]
+    #[error("rewrite rules hold {count} rules; expected 1 to {MAX_REWRITE_RULES}")]
     RuleCount { count: usize },
     /// A `/v1` rule patches nothing.
     #[error("rewrite rules cannot contain empty patches")]
@@ -316,13 +315,13 @@ pub enum RulesError {
     EmptyAssignments,
     /// A header patch is invalid; it keeps the transform's classification.
     #[error(transparent)]
-    Patch(Error),
+    Patch(transform::Error),
     /// A field assignment does not compile against the registry.
     #[error(transparent)]
-    Assignment(Error),
+    Assignment(transform::Error),
 }
 
-impl Classified for RulesError {
+impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Patch(source) => source.classification(),
@@ -346,8 +345,6 @@ impl Classified for RulesError {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Patch(source) => source.causes(),
-            // The message already carries the parser's reason.
-            Self::Syntax(_) => Vec::new(),
             _ => source_chain(self),
         }
     }
@@ -358,7 +355,7 @@ mod tests {
     use super::*;
     use crate::protocol::builtin;
 
-    fn parse(document: serde_json::Value) -> Result<Rules, RulesError> {
+    fn parse(document: serde_json::Value) -> Result<Rules, Error> {
         Rules::parse(
             &serde_json::to_vec(&document).expect("JSON document"),
             ChecksumMode::Repair,
@@ -393,8 +390,8 @@ mod tests {
             "rules": [{"assign": ["ipv4.ttl=1"]}]
         }))
         .expect_err("assignments are not v1 rules");
-        assert!(matches!(error, RulesError::Syntax(_)), "{error:?}");
-        assert!(error.causes().is_empty());
+        assert!(matches!(error, Error::Syntax(_)), "{error:?}");
+        assert_eq!(error.causes().len(), 1);
     }
 
     #[test]

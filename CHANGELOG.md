@@ -558,19 +558,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   built.
 
 - The versioned input documents and their rules are library API, so other
-  consumers read them exactly as the CLI does. Core `transform::Rules` reads
-  `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing with
-  `transform::RulesError`), builds one rule from direct edits
+  consumers read them exactly as the CLI does. Core `transform::rules::Rules`
+  reads `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing
+  with `transform::rules::Error`), builds one rule from direct edits
   (`Rules::single`), reports the VLAN growth a map needs
   (`maximum_growth`), and applies the rules in order to a frame with a
   caller-compiled filter (`try_map_filters`, `apply`).
   `packetcraftr::scan::profile::parse_document` reads
   `packetcraftr.udp-profiles/v1` into per-port profiles
-  (`scan::profile::DocumentError`). Core `document::parse_recipe` reads recipe
-  text as a JSON or YAML packet document or a layer expression
-  (`document::Format::{from_path, sniff}`, `document::RecipeError`), and
-  `document::PayloadTarget` fills an empty bytes field from outside the recipe
-  (`document::PayloadError`). `transform::fragment_link_type` frames an
+  (`scan::profile::DocumentError`). Core `document::recipe::parse` reads
+  recipe text as a JSON or YAML packet document or a layer expression
+  (`document::Format::{from_path, sniff}`, `document::recipe::Error`), and
+  `document::payload::Target` fills an empty bytes field from outside the
+  recipe (`document::payload::Error`). `transform::fragment_link_type` frames an
   Ethernet, IPv4, or IPv6 recipe for `transform::fragment`. Document formats,
   CLI flags, and error codes are unchanged.
 - `protocol::network::ndp` types Neighbor Solicitation and Neighbor
@@ -831,6 +831,12 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A `rewrite --rules` document that is not valid JSON of its schema's shape
+  reads `invalid rewrite rules` with the parser's reason as its first cause,
+  instead of repeating that reason in the message. An unsupported schema and
+  a rule count outside 1 to 64 now have distinct messages
+  (`unsupported rewrite rules schema S; expected ...` and `rewrite rules hold
+  N rules; expected 1 to 64`). Codes and exit codes are unchanged.
 - A `replay` frame that matches `--map-interface` or `--map-filter` rules
   naming different interfaces now reports `replay frame N matches conflicting
   output interfaces` as its message, and a frame no rule maps without an

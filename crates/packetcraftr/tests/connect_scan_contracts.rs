@@ -55,10 +55,14 @@ struct Silent;
 
 impl Provider for Silent {
     type Stream = Socket;
-    fn connect(&self, _: SocketAddr, deadline: &Deadline) -> io::Result<Socket> {
+    fn connect(
+        &self,
+        _: SocketAddr,
+        deadline: &Deadline,
+    ) -> Result<Socket, packetcraftr_netio::tcp::Error> {
         let timeout = deadline.remaining().unwrap_or_default();
         std::thread::sleep(timeout + Duration::from_millis(30));
-        Err(io::Error::from(io::ErrorKind::TimedOut))
+        Err(io::Error::from(io::ErrorKind::TimedOut).into())
     }
 }
 

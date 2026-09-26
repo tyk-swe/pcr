@@ -344,7 +344,7 @@ where
         &Deadline::new(timeout).with_cancellation(clock.cancellation()),
     ) {
         Ok(pending) => pending,
-        Err(tcp::ConnectError::Capacity { .. }) => return Ok(None),
+        Err(tcp::Error::Capacity { .. }) => return Ok(None),
         Err(source) => return Err(execution(next as u64, source)),
     };
     Ok(Some(Active {
@@ -539,7 +539,7 @@ fn finish_probe<S: tcp::Stream>(
             let peer = stream.peer_addr().map_err(|source| {
                 execution(
                     entry.sequence,
-                    tcp::ConnectError::Evidence {
+                    tcp::Error::Evidence {
                         operation: "peer",
                         source,
                     },
@@ -557,7 +557,7 @@ fn finish_probe<S: tcp::Stream>(
             probe.local = Some(stream.local_addr().map_err(|source| {
                 execution(
                     entry.sequence,
-                    tcp::ConnectError::Evidence {
+                    tcp::Error::Evidence {
                         operation: "local",
                         source,
                     },
@@ -570,7 +570,8 @@ fn finish_probe<S: tcp::Stream>(
             };
             drop(stream);
         }
-        Err(source) => {
+        Err(error) => {
+            let source = socket_error(error);
             probe.outcome = match source.kind() {
                 io::ErrorKind::ConnectionRefused => Outcome::Refused,
                 io::ErrorKind::TimedOut => Outcome::TimedOut,
@@ -586,6 +587,19 @@ fn finish_probe<S: tcp::Stream>(
         probe.outcome = Outcome::DeadlineExpired;
     }
     Ok(probe)
+}
+
+/// The socket evidence a failed connection publishes: the provider's own
+/// socket error, or, for a connection that failed around it, an error of the
+/// kind that failure means (a spent deadline timed out; cancellation
+/// interrupted the attempt) that keeps it as its source.
+fn socket_error(error: tcp::Error) -> io::Error {
+    match error {
+        tcp::Error::Socket(source) => source,
+        error @ tcp::Error::DeadlineExceeded => io::Error::new(io::ErrorKind::TimedOut, error),
+        error @ tcp::Error::Cancelled(_) => io::Error::new(io::ErrorKind::Interrupted, error),
+        error => io::Error::other(error),
+    }
 }
 
 #[cfg(test)]
@@ -637,7 +651,11 @@ mod tests {
     }
     impl Provider for Concurrent {
         type Stream = Socket;
-        fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
+        fn connect(
+            &self,
+            endpoint: SocketAddr,
+            _deadline: &Deadline,
+        ) -> Result<Socket, tcp::Error> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(active, Ordering::SeqCst);
@@ -713,17 +731,20 @@ mod tests {
     }
     impl Provider for Verdicts {
         type Stream = Socket;
-        fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
+        fn connect(
+            &self,
+            endpoint: SocketAddr,
+            _deadline: &Deadline,
+        ) -> Result<Socket, tcp::Error> {
             match endpoint.port() % 3 {
                 0 => Ok(Socket {
                     peer: endpoint,
                     closed: Arc::clone(&self.closed),
                 }),
-                1 => Err(io::Error::new(
-                    io::ErrorKind::ConnectionRefused,
-                    "scripted refusal",
-                )),
-                _ => Err(io::Error::new(io::ErrorKind::TimedOut, "scripted silence")),
+                1 => {
+                    Err(io::Error::new(io::ErrorKind::ConnectionRefused, "scripted refusal").into())
+                }
+                _ => Err(io::Error::new(io::ErrorKind::TimedOut, "scripted silence").into()),
             }
         }
     }

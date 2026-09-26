@@ -444,18 +444,26 @@ fn remaining(
         .ok_or(Error::Timeout { phase, transferred })
 }
 
-fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
-    if is_timeout(&source) {
-        Error::Timeout {
-            phase: Phase::Connect,
-            transferred: 0,
-        }
-    } else {
-        Error::Connect {
-            endpoint,
-            message: "the socket could not be opened".to_owned(),
-            source: Some(Source::new(source)),
-        }
+/// A connect that timed out, at the socket or before it could start, is the
+/// connect phase's timeout; any other failure keeps its socket error, or the
+/// provider's own failure, as its source.
+fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
+    use packetcraftr_netio::tcp::Error as TcpError;
+
+    let timeout = Error::Timeout {
+        phase: Phase::Connect,
+        transferred: 0,
+    };
+    let source = match error {
+        TcpError::Socket(source) if is_timeout(&source) => return timeout,
+        TcpError::DeadlineExceeded => return timeout,
+        TcpError::Socket(source) => Source::new(source),
+        error => Source::new(error),
+    };
+    Error::Connect {
+        endpoint,
+        message: "the socket could not be opened".to_owned(),
+        source: Some(source),
     }
 }
 

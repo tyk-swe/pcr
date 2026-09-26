@@ -7,7 +7,7 @@ use packetcraftr_core::budget::Cancelled;
 use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
     Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode,
-    route::SystemError,
+    route::SystemError, tcp,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
@@ -137,6 +137,63 @@ fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
             Error::from(unsupported.clone()).to_string(),
             unsupported.to_string()
         );
+    }
+}
+
+/// `tcp::Error` is `#[non_exhaustive]`; the table lists all 9 variants
+/// exactly once. A socket failure is the provider's own error: its message
+/// and kind pass through, and every other socket error stays a source.
+#[test]
+fn tcp_errors_keep_stable_classes_and_their_socket_source() {
+    let socket = tcp::Error::from(io::Error::new(
+        io::ErrorKind::ConnectionRefused,
+        "connection refused by the peer",
+    ));
+    assert_eq!(socket.to_string(), "connection refused by the peer");
+    assert!(matches!(
+        &socket,
+        tcp::Error::Socket(source) if source.kind() == io::ErrorKind::ConnectionRefused
+    ));
+
+    let evidence = tcp::Error::Evidence {
+        operation: "peer",
+        source: io::Error::other("socket is not connected"),
+    };
+    assert_eq!(
+        evidence.to_string(),
+        "could not inspect the connected peer endpoint"
+    );
+    assert_eq!(evidence.causes(), ["socket is not connected"]);
+
+    let cases = [
+        (socket, "io.tcp_connect", Kind::Io),
+        (evidence, "io.tcp_connect_evidence", Kind::Io),
+        (tcp::Error::Timeout, "cli.tcp_connect_timeout", Kind::Usage),
+        (
+            tcp::Error::DeadlineExceeded,
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Capacity { limit: 16 },
+            "io.tcp_connect_capacity",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Spawn(io::Error::other("thread limit reached")),
+            "io.tcp_connect_worker",
+            Kind::Io,
+        ),
+        (tcp::Error::Worker, "io.tcp_connect_worker", Kind::Io),
+        (
+            tcp::Error::Completed,
+            "internal.tcp_connect_state",
+            Kind::Internal,
+        ),
+        (tcp::Error::Cancelled(Cancelled), "io.cancelled", Kind::Io),
+    ];
+    for (error, code, kind) in cases {
+        assert_row(&error, code, kind);
     }
 }
 

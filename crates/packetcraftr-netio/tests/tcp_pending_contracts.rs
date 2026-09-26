@@ -65,7 +65,7 @@ struct Gate {
 }
 impl Provider for Gate {
     type Stream = Socket;
-    fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
+    fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> Result<Socket, tcp::Error> {
         self.entered.send(()).unwrap();
         self.release
             .lock()
@@ -138,7 +138,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
         endpoint,
         &Deadline::new(Duration::from_secs(1)),
     ) {
-        Err(error @ tcp::ConnectError::Capacity { .. }) => error,
+        Err(error @ tcp::Error::Capacity { .. }) => error,
         Err(other) => panic!("a full pool must refuse admission: {other}"),
         Ok(_) => panic!("a full pool must refuse admission"),
     };
@@ -192,7 +192,7 @@ fn a_spent_or_cancelled_caller_starts_no_connection() {
     let Err(error) = tcp::start_connect(Arc::clone(&provider), endpoint, &spent) else {
         panic!("a spent deadline must not start a connection");
     };
-    assert!(matches!(error, tcp::ConnectError::DeadlineExceeded));
+    assert!(matches!(error, tcp::Error::DeadlineExceeded));
     assert_eq!(error.classification().code, "io.deadline_exceeded");
 
     let signal = Cancellation::default();
@@ -200,7 +200,7 @@ fn a_spent_or_cancelled_caller_starts_no_connection() {
     let cancelled = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal));
     assert!(matches!(
         tcp::start_connect(provider, endpoint, &cancelled),
-        Err(tcp::ConnectError::Cancelled(_))
+        Err(tcp::Error::Cancelled(_))
     ));
     assert!(started.try_recv().is_err(), "no provider call was made");
 }

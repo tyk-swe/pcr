@@ -39,9 +39,13 @@ struct ScriptedConnector {
 impl Provider for ScriptedConnector {
     type Stream = ScriptedStream;
 
-    fn connect(&self, _endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Self::Stream> {
+    fn connect(
+        &self,
+        _endpoint: SocketAddr,
+        _deadline: &Deadline,
+    ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
         if let Some(kind) = self.connect_error {
-            return Err(io::Error::from(kind));
+            return Err(io::Error::from(kind).into());
         }
         Ok(self.stream.clone())
     }

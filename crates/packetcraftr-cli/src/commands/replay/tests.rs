@@ -61,6 +61,7 @@ impl packetcraftr::replay::Transmitter for FakeTransmitter {
         interface: &net::interface::Id,
         mode: net::link::Mode,
         frame: &Frame,
+        _deadline: &Deadline,
     ) -> Result<packetcraftr::route::Materialized, net::Error> {
         let selected_source = "192.0.2.1".parse().expect("fixture source");
         let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);

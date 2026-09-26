@@ -8,7 +8,7 @@
 use super::{Captured, Limits, Metadata, NativeSettings, Provider, Session, Statistics};
 use crate::interface::Id;
 use packetcraftr_core::{
-    budget::Cancellation,
+    budget::Deadline,
     error::{Classification, Classified, Kind},
 };
 use std::{
@@ -200,13 +200,14 @@ pub struct Group<C: Session> {
     cursor: usize,
     ready: bool,
     closed: bool,
-    cancellation: Option<Cancellation>,
 }
 impl<C: Session> Group<C> {
+    /// Arms every source under the caller's `deadline`, which each provider
+    /// call receives.
     pub fn arm<P: Provider<Capture = C>>(
         provider: &P,
         request: &Request,
-        cancellation: Option<Cancellation>,
+        deadline: &Deadline,
     ) -> Result<Self, Error> {
         let requests = request.partition()?;
         let mut group = Self {
@@ -214,13 +215,12 @@ impl<C: Session> Group<C> {
             cursor: 0,
             ready: false,
             closed: false,
-            cancellation,
         };
         for (index, request) in requests.iter().enumerate() {
-            if let Err(cause) = group.check_cancelled() {
+            if let Err(cause) = check_cancelled(deadline) {
                 return Err(group.fail(cause));
             }
-            let capture = match provider.arm_capture(request) {
+            let capture = match provider.arm_capture(request, deadline) {
                 Ok(capture) => capture,
                 Err(source) => {
                     return Err(group.fail(Cause::Provider(Failure {
@@ -310,26 +310,27 @@ impl<C: Session> Group<C> {
             })
             .collect()
     }
-    pub fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
+    /// Every source must be ready by the caller's `deadline`.
+    pub fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
         if self.closed || self.ready {
             return Err(self.fail(Cause::State));
         }
-        let deadline = match Instant::now().checked_add(timeout) {
-            Some(deadline) if !timeout.is_zero() && timeout <= super::MAX_TIMEOUT => deadline,
-            _ => {
+        if let Err(cause) = check_cancelled(caller) {
+            return Err(self.fail(cause));
+        }
+        let deadline = match wait_end(caller) {
+            Some(deadline) => deadline,
+            None => {
                 return Err(self.fail(Cause::Invalid(
                     "readiness timeout must be finite and positive",
                 )));
             }
         };
         for index in 0..self.sources.len() {
-            if let Err(cause) = self.check_cancelled() {
+            if let Err(cause) = check_cancelled(caller) {
                 return Err(self.fail(cause));
             }
-            let Some(remaining) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
-            else {
+            if crate::deadline::remaining_before(deadline).is_none() {
                 return Err(self.fail(Cause::Provider(self.failure(
                     index,
                     Phase::Ready,
@@ -337,8 +338,8 @@ impl<C: Session> Group<C> {
                         message: "shared capture readiness deadline expired".to_owned(),
                     },
                 ))));
-            };
-            if let Err(source) = self.sources[index].capture.wait_ready(remaining) {
+            }
+            if let Err(source) = self.sources[index].capture.wait_ready(caller) {
                 return Err(self.fail(Cause::Provider(self.failure(index, Phase::Ready, source))));
             }
             if Instant::now() > deadline {
@@ -352,7 +353,7 @@ impl<C: Session> Group<C> {
             }
             self.sources[index].source.ready = true;
         }
-        if let Err(cause) = self.check_cancelled() {
+        if let Err(cause) = check_cancelled(caller) {
             return Err(self.fail(cause));
         }
         self.ready = true;
@@ -361,36 +362,40 @@ impl<C: Session> Group<C> {
     /// Check all sources without waiting before taking one short blocking wait.
     /// Rotation after every returned record prevents a busy interface starving
     /// the others. An empty individual source never ends the group operation.
-    pub fn next_record(&mut self, timeout: Duration) -> Result<Option<Record>, Error> {
+    ///
+    /// A spent `deadline` polls every source once without waiting.
+    pub fn next_record(&mut self, caller: &Deadline) -> Result<Option<Record>, Error> {
         if !self.ready || self.closed {
             return Err(self.fail(Cause::State));
         }
-        let deadline = match Instant::now().checked_add(timeout) {
-            Some(deadline) if timeout <= super::MAX_TIMEOUT => deadline,
-            _ => return Err(self.fail(Cause::Invalid("capture wait exceeds its finite range"))),
+        let deadline = match caller.remaining() {
+            Ok(remaining) if remaining > super::MAX_TIMEOUT => {
+                return Err(self.fail(Cause::Invalid("capture wait exceeds its finite range")));
+            }
+            _ => wait_end(caller),
         };
+        // Sources are first polled without waiting.
+        let immediate = Deadline::new(Duration::ZERO);
         loop {
-            if let Err(cause) = self.check_cancelled() {
+            if let Err(cause) = check_cancelled(caller) {
                 return Err(self.fail(cause));
             }
             for _ in 0..self.sources.len() {
                 let index = self.cursor;
                 self.cursor = (self.cursor + 1) % self.sources.len();
-                if let Some(record) = self.poll(index, Duration::ZERO)? {
+                if let Some(record) = self.poll(index, &immediate, caller)? {
                     return Ok(Some(record));
                 }
             }
-            let Some(remaining) = deadline
-                .checked_duration_since(Instant::now())
-                .filter(|remaining| !remaining.is_zero())
-            else {
+            let Some(remaining) = deadline.and_then(crate::deadline::remaining_before) else {
                 return Ok(None);
             };
             let index = self.cursor;
             self.cursor = (self.cursor + 1) % self.sources.len();
             let wait = remaining.min(POLL_SLICE);
+            let slice = Deadline::new(wait).with_cancellation(caller.cancellation().cloned());
             let started = Instant::now();
-            if let Some(record) = self.poll(index, wait)? {
+            if let Some(record) = self.poll(index, &slice, caller)? {
                 return Ok(Some(record));
             }
             // Test/injected providers may return early. Keep an empty source
@@ -400,8 +405,13 @@ impl<C: Session> Group<C> {
             }
         }
     }
-    fn poll(&mut self, index: usize, timeout: Duration) -> Result<Option<Record>, Error> {
-        let captured = match self.sources[index].capture.next_captured_frame(timeout) {
+    fn poll(
+        &mut self,
+        index: usize,
+        wait: &Deadline,
+        caller: &Deadline,
+    ) -> Result<Option<Record>, Error> {
+        let captured = match self.sources[index].capture.next_captured_frame(wait) {
             Ok(Some(captured)) => captured,
             Ok(None) => return Ok(None),
             Err(source) => {
@@ -412,7 +422,7 @@ impl<C: Session> Group<C> {
                 ))));
             }
         };
-        if let Err(cause) = self.check_cancelled() {
+        if let Err(cause) = check_cancelled(caller) {
             return Err(self.fail(cause));
         }
         let source = &mut self.sources[index].source;
@@ -482,14 +492,6 @@ impl<C: Session> Group<C> {
             source,
         }
     }
-    fn check_cancelled(&self) -> Result<(), Cause> {
-        self.cancellation.as_ref().map_or(Ok(()), |signal| {
-            signal
-                .check()
-                .map_err(crate::Error::from)
-                .map_err(Cause::Configuration)
-        })
-    }
     fn fail(&mut self, cause: Cause) -> Error {
         let cleanup = self.shutdown_all();
         Error {
@@ -530,6 +532,23 @@ impl<C: Session> Group<C> {
         failures
     }
 }
+fn check_cancelled(deadline: &Deadline) -> Result<(), Cause> {
+    deadline
+        .check_cancelled()
+        .map_err(crate::Error::from)
+        .map_err(Cause::Configuration)
+}
+
+/// The instant a group wait ends, or `None` once the caller's deadline is
+/// spent or its remainder exceeds the public maximum.
+fn wait_end(deadline: &Deadline) -> Option<Instant> {
+    let remaining = deadline
+        .remaining()
+        .ok()
+        .filter(|remaining| !remaining.is_zero() && *remaining <= super::MAX_TIMEOUT)?;
+    Instant::now().checked_add(remaining)
+}
+
 impl<C: Session> Drop for Group<C> {
     fn drop(&mut self) {
         let _ = self.shutdown_all();

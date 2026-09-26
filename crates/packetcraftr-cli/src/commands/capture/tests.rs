@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::test_support::stream;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{self as net, capture as native, interface::Id};
 use std::{
@@ -25,10 +26,13 @@ impl native::Session for Session {
     fn metadata(&self) -> &native::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
-    fn next_captured_frame(&mut self, _: Duration) -> Result<Option<native::Captured>, net::Error> {
+    fn next_captured_frame(
+        &mut self,
+        _deadline: &Deadline,
+    ) -> Result<Option<native::Captured>, net::Error> {
         if let Some(frame) = self.frames.pop_front() {
             return Ok(Some(frame));
         }
@@ -57,7 +61,11 @@ struct Provider {
 }
 impl native::Provider for Provider {
     type Capture = Session;
-    fn arm_capture(&self, _: &native::Request) -> Result<Session, net::Error> {
+    fn arm_capture(
+        &self,
+        _: &native::Request,
+        _deadline: &Deadline,
+    ) -> Result<Session, net::Error> {
         Ok(self.captures.lock().unwrap().pop_front().unwrap())
     }
 }

@@ -4,6 +4,7 @@ use packetcraftr::{
     capture::{self, Control, Event, Options, StopReason},
     policy::{CaptureBudget, Policy},
 };
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     error::{BoundaryError, Classification, Classified, Kind},
     frame::{Frame, LinkType},
@@ -31,10 +32,13 @@ impl native::Session for Session {
     fn metadata(&self) -> &native::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
-    fn next_captured_frame(&mut self, _: Duration) -> Result<Option<native::Captured>, net::Error> {
+    fn next_captured_frame(
+        &mut self,
+        _deadline: &Deadline,
+    ) -> Result<Option<native::Captured>, net::Error> {
         Ok(self.frames.pop_front())
     }
     fn shutdown(&mut self) -> Result<(), net::Error> {
@@ -76,7 +80,11 @@ impl Provider {
 }
 impl native::Provider for Provider {
     type Capture = Session;
-    fn arm_capture(&self, request: &native::Request) -> Result<Session, net::Error> {
+    fn arm_capture(
+        &self,
+        request: &native::Request,
+        _deadline: &Deadline,
+    ) -> Result<Session, net::Error> {
         let index = self.opened.fetch_add(1, Ordering::SeqCst);
         Ok(Session {
             metadata: native::Metadata {

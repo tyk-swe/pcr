@@ -10,6 +10,8 @@
 
 use std::net::IpAddr;
 
+use packetcraftr_core::budget::Deadline;
+
 use crate::{
     Error, interface,
     interface::Id as InterfaceId,
@@ -57,8 +59,9 @@ pub(crate) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
+    deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
-    route_backend::route(destination, interface_hint, preferred_source)
+    route_backend::route(destination, interface_hint, preferred_source, deadline)
 }
 
 #[cfg(not(native_route))]
@@ -66,6 +69,7 @@ pub(crate) fn route(
     _destination: IpAddr,
     _interface_hint: Option<&InterfaceId>,
     _preferred_source: Option<IpAddr>,
+    _deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
     Err(SystemError::Unsupported {
         message: unsupported_message(
@@ -77,12 +81,18 @@ pub(crate) fn route(
 }
 
 #[cfg(native_route)]
-pub(crate) fn interface_route(interface: &InterfaceId) -> Result<Decision, SystemError> {
-    route_backend::interface_route(interface)
+pub(crate) fn interface_route(
+    interface: &InterfaceId,
+    deadline: &Deadline,
+) -> Result<Decision, SystemError> {
+    route_backend::interface_route(interface, deadline)
 }
 
 #[cfg(not(native_route))]
-pub(crate) fn interface_route(_interface: &InterfaceId) -> Result<Decision, SystemError> {
+pub(crate) fn interface_route(
+    _interface: &InterfaceId,
+    _deadline: &Deadline,
+) -> Result<Decision, SystemError> {
     Err(SystemError::Unsupported {
         message: unsupported_message(
             cfg!(feature = "native-route"),
@@ -93,12 +103,12 @@ pub(crate) fn interface_route(_interface: &InterfaceId) -> Result<Decision, Syst
 }
 
 #[cfg(native_route)]
-pub(crate) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
-    route_backend::interfaces()
+pub(crate) fn interfaces(deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
+    route_backend::interfaces(deadline)
 }
 
 #[cfg(not(native_route))]
-pub(crate) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+pub(crate) fn interfaces(_deadline: &Deadline) -> Result<Vec<interface::Info>, interface::Error> {
     Err(interface::Error::Unsupported {
         message: unsupported_message(
             cfg!(feature = "native-route"),
@@ -165,6 +175,9 @@ pub(crate) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Er
 
 /// Confirms the interface is still current and returns its snapshot.
 #[cfg(native_layer2)]
-pub(crate) fn current_interface(expected: &InterfaceId) -> Result<interface::Info, Error> {
-    super::interface_identity::validate_current_interface_identity(expected)
+pub(crate) fn current_interface(
+    expected: &InterfaceId,
+    deadline: &Deadline,
+) -> Result<interface::Info, Error> {
+    super::interface_identity::validate_current_interface_identity(expected, deadline)
 }

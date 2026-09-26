@@ -9,6 +9,7 @@ use std::sync::{
 };
 use std::time::{Duration, SystemTime};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::interface::Id as InterfaceId;
@@ -50,8 +51,9 @@ impl<L: Send + Sync, C: capture::Provider> capture::Provider for FixtureIo<L, C>
     fn arm_capture(
         &self,
         request: &capture::Request,
+        deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
-        self.capture.arm_capture(request)
+        self.capture.arm_capture(request, deadline)
     }
 }
 
@@ -73,8 +75,13 @@ where
         })
     }
 
+    /// Resolves with no operation deadline: only the options bound it.
     fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
-        self.state.over(&self.io).resolve(request)
+        self.resolve_within(request, &unbounded())
+    }
+
+    fn resolve_within(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
+        self.state.over(&self.io).resolve(request, deadline)
     }
 
     fn exchange<S: Session>(
@@ -86,8 +93,13 @@ where
     ) -> Result<ExchangeOutcome, Error> {
         self.state
             .over(&self.io)
-            .exchange(request, request_bytes, route, capture)
+            .exchange(request, request_bytes, route, capture, &unbounded())
     }
+}
+
+/// An operation with no deadline of its own.
+fn unbounded() -> Deadline {
+    Deadline::new(capture::MAX_TIMEOUT)
 }
 
 /// Compares every field through `Debug`, including the non-comparable
@@ -124,14 +136,15 @@ impl Session for ObservedCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
-        timeout: Duration,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        let timeout = deadline.remaining().unwrap_or_default();
         self.timeouts
             .lock()
             .expect("timeout observations")
@@ -234,6 +247,7 @@ impl capture::Provider for SilentCaptureProvider {
     fn arm_capture(
         &self,
         _request: &capture::Request,
+        _deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         Ok(SilentCapture {
             metadata: capture::Metadata {
@@ -255,14 +269,15 @@ impl Session for SilentCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), packetcraftr_netio::Error> {
         Ok(())
     }
 
     fn next_captured_frame(
         &mut self,
-        timeout: Duration,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        let timeout = deadline.remaining().unwrap_or_default();
         std::thread::sleep(timeout);
         Ok(None)
     }
@@ -328,14 +343,15 @@ impl Session for FixtureCapture {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), packetcraftr_netio::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), packetcraftr_netio::Error> {
         self.readiness.clone()
     }
 
     fn next_captured_frame(
         &mut self,
-        timeout: Duration,
+        deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, packetcraftr_netio::Error> {
+        let timeout = deadline.remaining().unwrap_or_default();
         if timeout.is_zero() {
             self.pre_request.pop_front().unwrap_or(CaptureStep::End)
         } else {
@@ -414,6 +430,7 @@ impl capture::Provider for FixtureCaptureProvider {
     fn arm_capture(
         &self,
         request: &capture::Request,
+        _deadline: &Deadline,
     ) -> Result<Self::Capture, packetcraftr_netio::Error> {
         if let Some(operations) = &self.state.operations {
             operations
@@ -455,7 +472,6 @@ fn request() -> Request {
         vlan_tags: Vec::new(),
         mtu: 1_500,
         link_type: LinkType::ETHERNET,
-        deadline: None,
     }
 }
 
@@ -805,10 +821,8 @@ fn pre_request_and_receive_errors_report_distinct_operations() {
 
 #[test]
 fn request_deadline_stops_attempts_before_the_configured_budget() {
-    let request = Request {
-        deadline: Instant::now().checked_add(Duration::from_millis(40)),
-        ..request()
-    };
+    let request = request();
+    let deadline = Deadline::new(Duration::from_millis(40));
     let layer2 = FixtureLayer2::successful();
     // Three attempts of 100 ms each are configured; the request deadline
     // leaves room for one clipped attempt on a silent link.
@@ -816,7 +830,7 @@ fn request_deadline_stops_attempts_before_the_configured_budget() {
         .expect("resolver options");
 
     let error = resolver
-        .resolve(&request)
+        .resolve_within(&request, &deadline)
         .expect_err("no response within the request deadline");
 
     let Error::NotFound { attempts, .. } = error else {
@@ -830,16 +844,15 @@ fn request_deadline_stops_attempts_before_the_configured_budget() {
 
 #[test]
 fn expired_request_deadline_makes_no_attempt() {
-    let request = Request {
-        deadline: Some(Instant::now()),
-        ..request()
-    };
+    let request = request();
+    let frozen = Instant::now();
+    let expired = Deadline::with_time_source(Duration::ZERO, move || frozen);
     let layer2 = FixtureLayer2::successful();
     let resolver = ActiveResolver::try_new(layer2.clone(), SilentCaptureProvider, test_options(3))
         .expect("resolver options");
 
     let error = resolver
-        .resolve(&request)
+        .resolve_within(&request, &expired)
         .expect_err("an expired deadline cannot resolve");
 
     assert!(

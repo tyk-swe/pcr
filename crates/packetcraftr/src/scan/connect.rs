@@ -341,8 +341,7 @@ where
     let pending = match tcp::start_connect(
         Arc::clone(provider),
         endpoint,
-        timeout,
-        clock.cancellation(),
+        &Deadline::new(timeout).with_cancellation(clock.cancellation()),
     ) {
         Ok(pending) => pending,
         Err(tcp::ConnectError::Capacity { .. }) => return Ok(None),
@@ -638,7 +637,7 @@ mod tests {
     }
     impl Provider for Concurrent {
         type Stream = Socket;
-        fn connect(&self, endpoint: SocketAddr, _: Duration) -> io::Result<Socket> {
+        fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(active, Ordering::SeqCst);
@@ -714,7 +713,7 @@ mod tests {
     }
     impl Provider for Verdicts {
         type Stream = Socket;
-        fn connect(&self, endpoint: SocketAddr, _: Duration) -> io::Result<Socket> {
+        fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
             match endpoint.port() % 3 {
                 0 => Ok(Socket {
                     peer: endpoint,

@@ -8,6 +8,8 @@ use std::sync::Mutex;
 
 use super::*;
 
+use packetcraftr_core::budget::Deadline;
+
 /// Field-by-field equality for an error that retains a system source and
 /// so cannot derive `PartialEq`. `Debug` renders every field, the source
 /// included, so this compares strictly more than a derived `==` did.
@@ -37,7 +39,7 @@ struct ScriptedConnector {
 impl Provider for ScriptedConnector {
     type Stream = ScriptedStream;
 
-    fn connect(&self, _endpoint: SocketAddr, _timeout: Duration) -> io::Result<Self::Stream> {
+    fn connect(&self, _endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Self::Stream> {
         if let Some(kind) = self.connect_error {
             return Err(io::Error::from(kind));
         }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::capture_file::{Reader, Writer};
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -95,6 +96,7 @@ impl Transmitter for RecordingTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
+        _deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError> {
         self.validation_calls += 1;
         let interface = self.resolves_to.as_ref().unwrap_or(interface);

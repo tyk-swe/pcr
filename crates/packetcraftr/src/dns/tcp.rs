@@ -322,7 +322,10 @@ fn exchange_with_clock<P: Provider>(
         })?;
     let connect_timeout = remaining(deadline, now(), Phase::Connect, 0)?;
     let mut stream = connector
-        .connect(request.endpoint, connect_timeout)
+        .connect(
+            request.endpoint,
+            &packetcraftr_core::budget::Deadline::new(connect_timeout),
+        )
         .map_err(|source| map_connect_error(request.endpoint, source))?;
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,

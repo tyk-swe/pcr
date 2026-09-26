@@ -9,13 +9,14 @@ use std::mem::{MaybeUninit, offset_of, size_of};
 use std::net::IpAddr;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use packetcraftr_core::budget::Deadline;
 use socket2::{Domain, Socket, Type};
 
 use super::enumeration::interfaces;
 use super::parser::{parse_route_addresses, roundup};
-use crate::deadline::remaining_before;
+use crate::deadline::{POLL_INTERVAL, expires_at, remaining_before};
 use crate::platform::route::{constrain_by_preferred_source, find_interface, os_error};
 use crate::route::normalize::{NativeRouteSnapshot, finish_route, interface_decision};
 use crate::{
@@ -25,12 +26,14 @@ use crate::{
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 
-const ROUTE_QUERY_TIMEOUT: Duration = Duration::from_secs(2);
+/// Unrelated routing-socket messages a query skips before giving up.
+const MAX_UNMATCHED_MESSAGES: usize = 64;
 
 pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
+    deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
     let available = interfaces()?;
     let requested = interface_hint
@@ -44,6 +47,7 @@ pub(in crate::platform) fn route(
         constrained_interface
             .as_ref()
             .map(|interface| interface.id.index),
+        deadline,
     )?;
     let output_index = u32::from(response.header.rtm_index);
     let local_addresses = available
@@ -89,8 +93,11 @@ pub(in crate::platform) fn route(
     )
 }
 
+/// `getifaddrs(3)` answers from the kernel without waiting, so the caller's
+/// deadline has already been checked by the time this runs.
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
+    _deadline: &Deadline,
 ) -> Result<Decision, SystemError> {
     interface_decision(find_interface(&interfaces()?, requested)?)
 }
@@ -112,17 +119,27 @@ struct RouteRequest {
 fn query_route(
     destination: IpAddr,
     interface_index: Option<u32>,
+    caller: &Deadline,
 ) -> Result<RouteResponse, SystemError> {
-    let deadline = Instant::now()
-        .checked_add(ROUTE_QUERY_TIMEOUT)
-        .ok_or_else(|| SystemError::OperatingSystem {
-            operation: "RTM_GET",
-            message: "macOS routing-socket deadline exceeded the monotonic clock range".to_owned(),
-            source: None,
-        })?;
+    let deadline = expires_at(caller).map_err(|interrupted| {
+        SystemError::interrupted(interrupted, "querying the macOS routing socket")
+    })?;
     let request = build_route_request(destination, interface_index)?;
     let socket = send_route_request(&request, destination, deadline)?;
-    read_route_response(&socket, destination, deadline, &request)
+    read_route_response(&socket, destination, caller, deadline, &request)
+}
+
+/// The caller's deadline expired during `operation`.
+fn route_timeout(operation: &'static str) -> SystemError {
+    SystemError::DeadlineExceeded { operation }
+}
+
+/// Whether a socket call ended because its timeout elapsed.
+fn timed_out(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 fn build_route_request(
@@ -192,11 +209,8 @@ fn send_route_request(
 ) -> Result<Socket, SystemError> {
     let socket = Socket::new(Domain::from(libc::AF_ROUTE), Type::RAW, None)
         .map_err(|error| os_error("open routing socket", error))?;
-    let remaining = remaining_before(deadline).ok_or_else(|| SystemError::OperatingSystem {
-        operation: "write RTM_GET",
-        message: "macOS routing-socket request deadline expired".to_owned(),
-        source: None,
-    })?;
+    let remaining =
+        remaining_before(deadline).ok_or_else(|| route_timeout("writing the RTM_GET request"))?;
     socket
         .set_write_timeout(Some(remaining))
         .map_err(|error| os_error("set routing-socket timeout", error))?;
@@ -222,29 +236,38 @@ fn route_write_error(destination: IpAddr, error: std::io::Error) -> SystemError 
     if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENETUNREACH)) {
         return SystemError::RouteNotFound { destination };
     }
+    if timed_out(&error) {
+        return route_timeout("writing the RTM_GET request");
+    }
     os_error("write RTM_GET", error)
 }
 
 fn read_route_response(
     socket: &Socket,
     destination: IpAddr,
+    caller: &Deadline,
     deadline: Instant,
     request: &RouteRequest,
 ) -> Result<RouteResponse, SystemError> {
-    for _ in 0..64 {
-        let remaining = remaining_before(deadline).ok_or_else(|| SystemError::OperatingSystem {
-            operation: "read RTM_GET",
-            message: "macOS routing-socket response deadline expired".to_owned(),
-            source: None,
-        })?;
+    let mut unmatched = 0;
+    while unmatched < MAX_UNMATCHED_MESSAGES {
+        let remaining = remaining_before(deadline)
+            .ok_or_else(|| route_timeout("reading the RTM_GET response"))?;
+        // Reads wait in slices so a cancelled caller is noticed promptly.
         socket
-            .set_read_timeout(Some(remaining))
+            .set_read_timeout(Some(remaining.min(POLL_INTERVAL)))
             .map_err(|error| os_error("set routing-socket timeout", error))?;
         let mut response = [MaybeUninit::<u8>::uninit(); 4096];
-        let length = socket
-            .recv(&mut response)
-            .map_err(|error| os_error("read RTM_GET", error))?;
+        let length = match socket.recv(&mut response) {
+            Ok(length) => length,
+            Err(error) if timed_out(&error) => {
+                caller.check_cancelled()?;
+                continue;
+            }
+            Err(error) => return Err(os_error("read RTM_GET", error)),
+        };
         if length < size_of::<libc::rt_msghdr>() {
+            unmatched += 1;
             continue;
         }
         // SAFETY: `recv` initialized the returned prefix; the slice is limited
@@ -259,6 +282,7 @@ fn read_route_response(
             || response_header.rtm_pid != request.pid
             || response_header.rtm_seq != request.sequence
         {
+            unmatched += 1;
             continue;
         }
         let declared = usize::from(response_header.rtm_msglen);

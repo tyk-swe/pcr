@@ -38,7 +38,12 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     let request = prepare_route(route, policy.into_policy(), &registry)?;
     let client = client(Arc::clone(&registry), request.policy);
     let route = client
-        .plan(&request.packet, request.destination, &request.options)
+        .plan(
+            &request.packet,
+            request.destination,
+            &request.options,
+            &crate::invocation::passive_lookup(),
+        )
         .map_err(CliError::classified)?;
     let result = output::plan::Report::from(route);
     match format {

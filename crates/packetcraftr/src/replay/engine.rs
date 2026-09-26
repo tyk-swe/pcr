@@ -579,7 +579,7 @@ fn plan_frame_route<T: Transmitter>(
     frame: &Frame,
 ) -> Result<MaterializedRoute, Error> {
     enforce_deadline(deadline, source_index)?;
-    let route = transmitter.plan_frame(interface, mode, frame);
+    let route = transmitter.plan_frame(interface, mode, frame, deadline);
     enforce_deadline(deadline, source_index)?;
     let route = route.map_err(|source| Error::Transmission {
         source_index,

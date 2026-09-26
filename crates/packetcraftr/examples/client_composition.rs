@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use packetcraftr::Client;
 use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::send;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
@@ -46,6 +47,7 @@ impl Provider for DocumentationRoutes {
         destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
         _preferred_source: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<Decision, Self::Error> {
         Ok(Decision {
             interface: InterfaceId {
@@ -87,7 +89,11 @@ impl capture::Provider for RecordingSender {
 
     /// The client arms capture only to resolve a neighbor; this example's
     /// Layer 3 sends never need one, so arming would prove the wiring wrong.
-    fn arm_capture(&self, _request: &capture::Request) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(
+        &self,
+        _request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Self::Capture, LiveIoError> {
         unreachable!("Layer 3 sends never resolve neighbors")
     }
 }

@@ -4,6 +4,7 @@
 use std::net::IpAddr;
 use std::time::Instant;
 
+use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{Error as LiveIoError, transmit::Provider as PacketIo};
@@ -40,16 +41,23 @@ where
     R: packetcraftr_netio::route::Provider,
     I: PacketIo,
 {
-    /// Passive dry planning: route/source/interface lookup only.
+    /// Passive dry planning: route/source/interface lookup only. The route
+    /// lookup receives `deadline`.
     pub fn plan(
         &self,
         packet: &Packet,
         destination: Option<IpAddr>,
         options: &Options,
+        deadline: &Deadline,
     ) -> Result<Plan, Error> {
-        self.plan_with_provider(packet, destination, options, &self.routes, None)
+        self.authorize_and_plan(packet, destination, options, &self.routes, deadline, || {
+            Ok(())
+        })
     }
 
+    /// Plans for an operation bounded by the wall-clock `deadline`, or by
+    /// [`PASSIVE_LOOKUP_TIMEOUT`](crate::deadline::PASSIVE_LOOKUP_TIMEOUT)
+    /// when it has none. The lookup honors `cancellation`.
     pub(crate) fn plan_with_provider<P: packetcraftr_netio::route::Provider>(
         &self,
         packet: &Packet,
@@ -57,6 +65,29 @@ where
         options: &Options,
         provider: &P,
         deadline: Option<Instant>,
+        cancellation: Option<Cancellation>,
+    ) -> Result<Plan, Error> {
+        let lookup = match deadline {
+            Some(deadline) => crate::deadline::until(deadline, cancellation),
+            None => Deadline::new(crate::deadline::PASSIVE_LOOKUP_TIMEOUT)
+                .with_cancellation(cancellation),
+        };
+        self.authorize_and_plan(packet, destination, options, provider, &lookup, || {
+            deadline.map_or(Ok(()), ensure_preparation_deadline)
+        })
+    }
+
+    /// Authorizes, plans through `provider` under `deadline`, and authorizes
+    /// the plan. `before_lookup` runs after the declared destinations are
+    /// authorized and before the provider is asked.
+    fn authorize_and_plan<P: packetcraftr_netio::route::Provider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        options: &Options,
+        provider: &P,
+        deadline: &Deadline,
+        before_lookup: impl FnOnce() -> Result<(), Error>,
     ) -> Result<Plan, Error> {
         self.policy.validate()?;
         if let Some(destination) = destination {
@@ -66,10 +97,8 @@ where
         // provider can observe one. The completed plan is checked again below
         // so provider-derived selections cannot bypass policy either.
         self.policy.authorize_packet_destinations(packet)?;
-        if let Some(deadline) = deadline {
-            ensure_preparation_deadline(deadline)?;
-        }
-        let plan = plan_route(packet, destination, options, provider)?;
+        before_lookup()?;
+        let plan = plan_route(packet, destination, options, provider, deadline)?;
         self.policy.authorize_packet_sources(packet, &plan)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;

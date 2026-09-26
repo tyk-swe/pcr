@@ -47,7 +47,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         .map(|info| {
             let timestamp_types = arguments
                 .timestamp_types
-                .then(|| provider.timestamp_types(&info.id))
+                .then(|| provider.timestamp_types(&info.id, &crate::invocation::passive_lookup()))
                 .transpose()
                 .map_err(CliError::classified)?;
             Ok((info, timestamp_types))
@@ -71,7 +71,10 @@ mod tests {
     struct FixtureProvider;
 
     impl net::interface::Provider for FixtureProvider {
-        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::interface::Error> {
+        fn interfaces(
+            &self,
+            _deadline: &packetcraftr_core::budget::Deadline,
+        ) -> Result<Vec<net::interface::Info>, net::interface::Error> {
             Ok(vec![
                 net::interface::Info {
                     id: net::interface::Id {

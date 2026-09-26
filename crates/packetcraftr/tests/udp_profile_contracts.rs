@@ -12,6 +12,7 @@ use packetcraftr::{
     },
     target::Target,
 };
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{
     build::Builder,
     decode::Dissector,
@@ -139,6 +140,7 @@ impl route::Provider for Routes {
         _: IpAddr,
         _: Option<&Id>,
         _: Option<IpAddr>,
+        _deadline: &Deadline,
     ) -> Result<route::Decision, Infallible> {
         Ok(route::Decision {
             interface: Id {
@@ -233,12 +235,12 @@ impl capture::Session for Capture {
     fn metadata(&self) -> &capture::Metadata {
         &self.metadata
     }
-    fn wait_ready(&mut self, _: Duration) -> Result<(), net::Error> {
+    fn wait_ready(&mut self, _deadline: &Deadline) -> Result<(), net::Error> {
         Ok(())
     }
     fn next_captured_frame(
         &mut self,
-        _: Duration,
+        _deadline: &Deadline,
     ) -> Result<Option<capture::Captured>, net::Error> {
         Ok(self
             .state
@@ -258,7 +260,11 @@ impl capture::Session for Capture {
 }
 impl capture::Provider for Io {
     type Capture = Capture;
-    fn arm_capture(&self, request: &capture::Request) -> Result<Capture, net::Error> {
+    fn arm_capture(
+        &self,
+        request: &capture::Request,
+        _deadline: &Deadline,
+    ) -> Result<Capture, net::Error> {
         self.0.lock().unwrap().arms += 1;
         Ok(Capture {
             state: self.0.clone(),

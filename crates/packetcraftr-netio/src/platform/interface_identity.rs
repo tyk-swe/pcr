@@ -19,8 +19,10 @@ use crate::{Error, interface::Id as InterfaceId};
 #[cfg(any(native_layer2, not(any(target_os = "linux", target_os = "macos"))))]
 pub(in crate::platform) fn validate_current_interface_identity(
     expected: &InterfaceId,
+    deadline: &packetcraftr_core::budget::Deadline,
 ) -> Result<crate::interface::Info, Error> {
-    let mut interfaces = crate::interface::Provider::interfaces(&crate::interface::SystemProvider)?;
+    let mut interfaces =
+        crate::interface::Provider::interfaces(&crate::interface::SystemProvider, deadline)?;
     if let Some(position) = interfaces
         .iter()
         .position(|interface| interface.id == *expected)
@@ -52,7 +54,10 @@ pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> 
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        validate_current_interface_identity(expected).map(|_| ())
+        // A send has no deadline to give, and this target's enumeration is a
+        // synchronous snapshot that takes none.
+        let unbounded = packetcraftr_core::budget::Deadline::new(std::time::Duration::MAX);
+        validate_current_interface_identity(expected, &unbounded).map(|_| ())
     }
 }
 

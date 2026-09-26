@@ -7,7 +7,7 @@
 
 use crate::{Stats, policy::CaptureBudget};
 use packetcraftr_core::{
-    budget::Cancellation,
+    budget::{Cancellation, Deadline},
     diagnostic::Diagnostic,
     error::{BoundaryError, Classification, Classified, Coordinate, Kind},
     frame::Frame,
@@ -186,7 +186,9 @@ where
             report.stop = StopReason::Window;
             break;
         };
-        let record = match group.next_record(remaining.min(Duration::from_millis(50))) {
+        let slice = Deadline::new(remaining.min(Duration::from_millis(50)))
+            .with_cancellation(options.cancellation.clone());
+        let record = match group.next_record(&slice) {
             Ok(Some(record)) => record,
             Ok(None) => continue,
             Err(error) => {
@@ -352,7 +354,16 @@ fn armed<P: native::Provider>(
     {
         return Err(failure(Cause::Cancelled(error), report, None));
     }
-    let mut group = match group::Group::arm(provider, request, options.cancellation.clone()) {
+    let deadline = started + options.window;
+    // The window bounds arming and readiness. A zero window still arms its
+    // sources, bounded only by the longest wait a provider accepts, and then
+    // stops without waiting.
+    let arming = if options.window.is_zero() {
+        Deadline::new(native::MAX_TIMEOUT).with_cancellation(options.cancellation.clone())
+    } else {
+        crate::deadline::until(deadline, options.cancellation.clone())
+    };
+    let mut group = match group::Group::arm(provider, request, &arming) {
         Ok(group) => group,
         Err(error) => {
             replace_sources(&mut report, &error.sources);
@@ -360,19 +371,12 @@ fn armed<P: native::Provider>(
             return Err(failure(Cause::Native(Box::new(error)), report, None));
         }
     };
-    let deadline = started + options.window;
     let mut primary = None;
     if !options.window.is_zero() {
-        match deadline
-            .checked_duration_since(Instant::now())
-            .filter(|remaining| !remaining.is_zero())
-        {
-            Some(remaining) => {
-                if let Err(error) = group.wait_ready(remaining) {
-                    primary = Some(Cause::Native(Box::new(error)));
-                }
-            }
-            None => primary = Some(Cause::Invalid("capture window expired during activation")),
+        if packetcraftr_netio::deadline::remaining_before(deadline).is_none() {
+            primary = Some(Cause::Invalid("capture window expired during activation"));
+        } else if let Err(error) = group.wait_ready(&arming) {
+            primary = Some(Cause::Native(Box::new(error)));
         }
     }
     Ok(Armed {

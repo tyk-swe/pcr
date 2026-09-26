@@ -35,7 +35,7 @@ impl super::Spec for Args {
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
-        .interfaces()
+        .interfaces(&crate::invocation::passive_lookup())
         .map_err(CliError::classified)?;
     let provider = net::route::SystemProvider;
     let mut routes = Vec::new();
@@ -44,7 +44,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
         .filter(|interface| arguments.includes(interface))
     {
         let route = provider
-            .lookup_interface(&interface.id)
+            .lookup_interface(&interface.id, &crate::invocation::passive_lookup())
             .map_err(CliError::classified)?;
         if let Some(route) = route {
             routes.push(route);

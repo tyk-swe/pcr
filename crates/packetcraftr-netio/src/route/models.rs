@@ -5,6 +5,7 @@ use std::net::IpAddr;
 
 use crate::interface::Id as InterfaceId;
 use crate::link::{Capability, MacAddress};
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
 
@@ -50,6 +51,8 @@ pub struct Decision {
 ///
 /// Provider errors classify themselves, so injected providers choose their
 /// own stable codes without exposing native operating-system error types.
+/// Both lookups follow the [deadline convention](crate::deadline): they stop
+/// when the caller's `deadline` is cancelled or spent.
 pub trait Provider: Send + Sync {
     type Error: Classified + Send + Sync + 'static;
 
@@ -60,11 +63,16 @@ pub trait Provider: Send + Sync {
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
+        deadline: &Deadline,
     ) -> Result<Decision, Self::Error>;
 
     /// Passively selects an interface for destination-free packets without default-route IP
     /// lookup or neighbor traffic. Defaults to `None` for IP-only providers.
-    fn lookup_interface(&self, _interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
+    fn lookup_interface(
+        &self,
+        _interface: &InterfaceId,
+        _deadline: &Deadline,
+    ) -> Result<Option<Decision>, Self::Error> {
         Ok(None)
     }
 }

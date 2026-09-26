@@ -1,6 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::{
     resources::tcp_connect_snapshot,
     tcp::{self, Provider, Stream},
@@ -64,7 +65,7 @@ struct Gate {
 }
 impl Provider for Gate {
     type Stream = Socket;
-    fn connect(&self, endpoint: SocketAddr, _timeout: Duration) -> io::Result<Socket> {
+    fn connect(&self, endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Socket> {
         self.entered.send(()).unwrap();
         self.release
             .lock()
@@ -103,8 +104,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
     let mut pending = tcp::start_connect(
         Arc::clone(&provider),
         endpoint,
-        Duration::from_millis(10),
-        None,
+        &Deadline::new(Duration::from_millis(10)),
     )
     .unwrap();
     started.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -120,8 +120,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
             tcp::start_connect(
                 Arc::clone(&provider),
                 endpoint,
-                Duration::from_secs(10),
-                None,
+                &Deadline::new(Duration::from_secs(10)),
             )
             .unwrap(),
         );
@@ -133,8 +132,7 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
         tcp::start_connect(
             Arc::clone(&provider),
             endpoint,
-            Duration::from_secs(1),
-            None
+            &Deadline::new(Duration::from_secs(1))
         ),
         Err(tcp::ConnectError::Capacity { .. })
     ));
@@ -144,7 +142,8 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
     }
     wait_empty();
     assert_eq!(closed.load(Ordering::SeqCst), tcp::MAX_PENDING_CONNECTIONS);
-    let mut pending = tcp::start_connect(provider, endpoint, Duration::from_secs(1), None).unwrap();
+    let mut pending =
+        tcp::start_connect(provider, endpoint, &Deadline::new(Duration::from_secs(1))).unwrap();
     started.recv_timeout(Duration::from_secs(2)).unwrap();
     release.send(()).unwrap();
     let until = Instant::now() + Duration::from_secs(2);
@@ -162,4 +161,34 @@ fn cancelled_workers_and_queued_sockets_keep_finite_admission_until_cleanup() {
     assert_eq!(tcp_connect_snapshot().active, 1);
     drop(socket);
     wait_empty();
+}
+
+#[test]
+fn a_spent_or_cancelled_caller_starts_no_connection() {
+    use packetcraftr_core::{budget::Cancellation, error::Classified as _};
+
+    let (entered, started) = mpsc::channel();
+    let (_release, gate) = mpsc::channel();
+    let provider = Arc::new(Gate {
+        entered,
+        release: Mutex::new(gate),
+        closed: Arc::new(AtomicUsize::new(0)),
+    });
+    let endpoint = "127.0.0.1:9".parse().unwrap();
+    let frozen = Instant::now();
+    let spent = Deadline::with_time_source(Duration::ZERO, move || frozen);
+    let Err(error) = tcp::start_connect(Arc::clone(&provider), endpoint, &spent) else {
+        panic!("a spent deadline must not start a connection");
+    };
+    assert!(matches!(error, tcp::ConnectError::DeadlineExceeded));
+    assert_eq!(error.classification().code, "io.deadline_exceeded");
+
+    let signal = Cancellation::default();
+    signal.cancel();
+    let cancelled = Deadline::new(Duration::from_secs(1)).with_cancellation(Some(signal));
+    assert!(matches!(
+        tcp::start_connect(provider, endpoint, &cancelled),
+        Err(tcp::ConnectError::Cancelled(_))
+    ));
+    assert!(started.try_recv().is_err(), "no provider call was made");
 }

@@ -5,11 +5,15 @@
 //! every request check, the interface identity check, and the BPF netmask
 //! happen here before the selected backend opens its source.
 
+use packetcraftr_core::budget::Deadline;
+
 use super::{Request, Session, TimestampType};
 use crate::{Error, interface::Id as InterfaceId};
 
+/// Opening and activating a native source does not wait on the network, so
+/// the caller's deadline is checked once, before any native work starts.
 #[cfg(native_layer2)]
-pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
+pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request
         .limits
         .validate()
@@ -18,7 +22,9 @@ pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
     if let Some(filter) = request.filter.as_deref() {
         super::filter::validate(&request.interface, filter)?;
     }
-    let interface = crate::platform::current_interface(&request.interface)?;
+    crate::deadline::remaining(deadline)
+        .map_err(|interrupted| Error::interrupted(interrupted, "arming capture"))?;
+    let interface = crate::platform::current_interface(&request.interface, deadline)?;
     let parts = crate::platform::open_capture(
         &interface.id,
         limits,
@@ -33,7 +39,7 @@ pub(super) fn open(request: &Request) -> Result<Box<dyn Session>, Error> {
 }
 
 #[cfg(not(native_layer2))]
-pub(super) fn open(_request: &Request) -> Result<Box<dyn Session>, Error> {
+pub(super) fn open(_request: &Request, _deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     Err(crate::platform::unsupported(
         cfg!(feature = "native-layer2"),
         "native-layer2",
@@ -42,13 +48,19 @@ pub(super) fn open(_request: &Request) -> Result<Box<dyn Session>, Error> {
 }
 
 #[cfg(native_layer2)]
-pub(super) fn timestamp_types(interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-    let interface = crate::platform::current_interface(interface)?;
+pub(super) fn timestamp_types(
+    interface: &InterfaceId,
+    deadline: &Deadline,
+) -> Result<Vec<TimestampType>, Error> {
+    let interface = crate::platform::current_interface(interface, deadline)?;
     crate::platform::timestamp_types(&interface.id)
 }
 
 #[cfg(not(native_layer2))]
-pub(super) fn timestamp_types(_interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
+pub(super) fn timestamp_types(
+    _interface: &InterfaceId,
+    _deadline: &Deadline,
+) -> Result<Vec<TimestampType>, Error> {
     Err(crate::platform::unsupported(
         cfg!(feature = "native-layer2"),
         "native-layer2",

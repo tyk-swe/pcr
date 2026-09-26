@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::deadline::remaining_before;
+use packetcraftr_core::budget::Deadline;
+
+use crate::deadline::{POLL_INTERVAL, remaining_before};
 
 use crate::workers::{JoinAttempt, WorkerPermit, join_with_deadline};
 
@@ -31,7 +33,18 @@ use super::{
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
-fn capture_deadline(timeout: Duration) -> Result<Instant, Error> {
+/// The instant a capture wait ends: `None` once the caller's deadline is
+/// spent, so the wait takes only what is already there. A remainder above
+/// the public maximum is refused rather than clipped.
+fn capture_deadline(deadline: &Deadline) -> Result<Option<Instant>, Error> {
+    deadline.check_cancelled()?;
+    let Some(timeout) = deadline
+        .remaining()
+        .ok()
+        .filter(|remaining| !remaining.is_zero())
+    else {
+        return Ok(None);
+    };
     if timeout > MAX_TIMEOUT {
         return Err(Error::InvalidCaptureTimeout {
             timeout,
@@ -40,6 +53,7 @@ fn capture_deadline(timeout: Duration) -> Result<Instant, Error> {
     }
     Instant::now()
         .checked_add(timeout)
+        .map(Some)
         .ok_or(Error::InvalidCaptureTimeout {
             timeout,
             maximum: MAX_TIMEOUT,
@@ -168,21 +182,23 @@ impl Session for NativeCaptureSession {
         &self.metadata
     }
 
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
-        let deadline = capture_deadline(timeout)?;
+    fn wait_ready(&mut self, caller: &Deadline) -> Result<(), Error> {
+        let deadline = capture_deadline(caller)?;
+        let expired = || Error::CaptureReadiness {
+            message: "capture readiness deadline expired".to_owned(),
+        };
         let mut state = self.shared.lock();
         while !state.ready && !state.closed && state.error.is_none() {
-            let Some(remaining) = remaining_before(deadline) else {
-                return Err(Error::CaptureReadiness {
-                    message: "capture readiness deadline expired".to_owned(),
-                });
+            let Some(remaining) = deadline.and_then(remaining_before) else {
+                return Err(expired());
             };
-            let (next, timed_out) = self.shared.wait_timeout(state, remaining);
+            // Wait in slices: the queue signals readiness, not cancellation.
+            let (next, _) = self
+                .shared
+                .wait_timeout(state, remaining.min(POLL_INTERVAL));
             state = next;
-            if timed_out && !state.ready && !state.closed && state.error.is_none() {
-                return Err(Error::CaptureReadiness {
-                    message: "capture readiness deadline expired".to_owned(),
-                });
+            if !state.ready && !state.closed && state.error.is_none() {
+                caller.check_cancelled()?;
             }
         }
         if let Some(error) = state
@@ -201,8 +217,8 @@ impl Session for NativeCaptureSession {
         }
     }
 
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        let deadline = capture_deadline(timeout)?;
+    fn next_captured_frame(&mut self, caller: &Deadline) -> Result<Option<Captured>, Error> {
+        let deadline = capture_deadline(caller)?;
         let mut state = self.shared.lock();
         loop {
             if let Some(captured) = state.queue.front() {
@@ -219,16 +235,19 @@ impl Session for NativeCaptureSession {
                 state.error_observed = true;
                 return Err(error);
             }
-            if state.closed || timeout.is_zero() {
+            if state.closed {
                 return Ok(None);
             }
-            let Some(remaining) = remaining_before(deadline) else {
+            let Some(remaining) = deadline.and_then(remaining_before) else {
                 return Ok(None);
             };
-            let (next_state, timed_out) = self.shared.wait_timeout(state, remaining);
+            // Wait in slices: the queue signals records, not cancellation.
+            let (next_state, _) = self
+                .shared
+                .wait_timeout(state, remaining.min(POLL_INTERVAL));
             state = next_state;
-            if timed_out {
-                continue;
+            if state.queue.is_empty() && state.error.is_none() {
+                caller.check_cancelled()?;
             }
         }
     }
@@ -570,7 +589,7 @@ mod tests {
             Duration::from_millis(5),
         );
         session
-            .wait_ready(Duration::from_millis(100))
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("fake capture should become ready");
         wait_until_blocked(started_receiver);
 
@@ -657,10 +676,10 @@ mod tests {
         wait_for_scripted_terminal_state(&session, finished, 1);
 
         session
-            .wait_ready(Duration::from_millis(100))
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("queued evidence keeps a ready session readable");
         let captured = session
-            .next_captured_frame(Duration::ZERO)
+            .next_captured_frame(&Deadline::new(Duration::ZERO))
             .expect("queued frame")
             .expect("one queued frame");
         assert_eq!(captured.frame.bytes().as_ref(), &[1, 2, 3]);
@@ -670,7 +689,7 @@ mod tests {
         assert_eq!(captured.received_at, Some(ingress));
         assert_same_failure(
             &session
-                .next_captured_frame(Duration::ZERO)
+                .next_captured_frame(&Deadline::new(Duration::ZERO))
                 .expect_err("terminal error follows queued evidence"),
             &terminal,
         );
@@ -704,7 +723,7 @@ mod tests {
         wait_for_scripted_terminal_state(&session, finished, 0);
 
         let error = session
-            .wait_ready(Duration::from_millis(100))
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect_err("invalid frame must fail closed");
         assert!(matches!(
             error,
@@ -712,7 +731,7 @@ mod tests {
                 if message.contains("native capture returned an invalid frame")
         ));
         assert!(matches!(
-            session.next_captured_frame(Duration::ZERO),
+            session.next_captured_frame(&Deadline::new(Duration::ZERO)),
             Err(Error::Capture { .. })
         ));
         assert_eq!(session.statistics(), Statistics::default());
@@ -723,14 +742,54 @@ mod tests {
 
     #[test]
     fn capture_waits_reject_timeouts_above_the_public_maximum() {
-        assert!(capture_deadline(MAX_TIMEOUT).is_ok());
+        let frozen = Instant::now();
+        let fixed = |limit| Deadline::with_time_source(limit, move || frozen);
+        assert!(capture_deadline(&fixed(MAX_TIMEOUT)).unwrap().is_some());
         assert!(matches!(
-            capture_deadline(MAX_TIMEOUT + Duration::from_nanos(1)),
+            capture_deadline(&fixed(MAX_TIMEOUT + Duration::from_nanos(1))),
             Err(Error::InvalidCaptureTimeout {
                 maximum: MAX_TIMEOUT,
                 ..
             })
         ));
+        assert!(capture_deadline(&fixed(Duration::ZERO)).unwrap().is_none());
+    }
+
+    #[test]
+    fn cancellation_ends_a_capture_wait_and_still_allows_explicit_shutdown() {
+        let (release_sender, release_receiver) = mpsc::channel();
+        let interrupt = Arc::new(FakeInterrupt::default());
+        let (mut session, started_receiver) = blocked_session(
+            release_receiver,
+            None,
+            Arc::clone(&interrupt),
+            Duration::from_secs(1),
+        );
+        session
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
+            .expect("fake capture should become ready");
+        wait_until_blocked(started_receiver);
+
+        let signal = packetcraftr_core::budget::Cancellation::default();
+        let caller = Deadline::new(Duration::from_secs(30)).with_cancellation(Some(signal.clone()));
+        let canceller = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            signal.cancel();
+        });
+        let started = Instant::now();
+        assert!(matches!(
+            session.next_captured_frame(&caller),
+            Err(Error::Cancelled(_))
+        ));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        canceller.join().unwrap();
+
+        release_sender
+            .send(())
+            .expect("release fake capture worker");
+        session
+            .shutdown()
+            .expect("cancellation leaves cleanup available");
     }
 
     #[test]
@@ -745,7 +804,7 @@ mod tests {
             Duration::from_millis(5),
         );
         session
-            .wait_ready(Duration::from_millis(100))
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("fake capture should become ready");
         wait_until_blocked(started_receiver);
         drop(session);
@@ -957,7 +1016,7 @@ mod tests {
             Duration::from_millis(5),
         );
         session
-            .wait_ready(Duration::from_millis(100))
+            .wait_ready(&Deadline::new(Duration::from_millis(100)))
             .expect("fake capture should become ready");
         wait_until_blocked(started_receiver);
         assert!(matches!(

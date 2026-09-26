@@ -265,6 +265,21 @@ impl Classified for Error {
     }
 }
 
+impl Error {
+    /// The failure a provider reports when its caller's deadline stopped it
+    /// while `operation` was in progress.
+    #[cfg(native_layer2)]
+    pub(crate) fn interrupted(
+        interrupted: packetcraftr_core::budget::Interrupted,
+        operation: &'static str,
+    ) -> Self {
+        match interrupted {
+            packetcraftr_core::budget::Interrupted::Cancelled(cancelled) => cancelled.into(),
+            _ => Self::DeadlineExceeded { operation },
+        }
+    }
+}
+
 fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {
     Classification::new(code, kind, Some(remediation))
 }

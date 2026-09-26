@@ -3,6 +3,7 @@
 
 //! Interface validation, route materialization, and exact replay transmission.
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::semantics;
@@ -45,6 +46,7 @@ impl SystemTransmitter {
         requested: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
+        deadline: &Deadline,
     ) -> Result<crate::route::Materialized, LiveIoError> {
         let network = match mode {
             LinkMode::Layer3 => Some(replay_network_envelope(frame)?),
@@ -57,7 +59,7 @@ impl SystemTransmitter {
         let selected = match cached {
             Some(selected) => selected,
             None => {
-                let interfaces = SystemInterfaceProvider.interfaces()?;
+                let interfaces = SystemInterfaceProvider.interfaces(deadline)?;
                 let selected = interfaces
                     .into_iter()
                     .find(|interface| requested_interface_matches(&interface.id, requested))
@@ -96,7 +98,7 @@ impl SystemTransmitter {
                 source: None,
             });
         }
-        materialized_route(&selected, mode, frame, network)
+        materialized_route(&selected, mode, frame, network, deadline)
     }
 }
 
@@ -105,6 +107,7 @@ fn materialized_route(
     mode: LinkMode,
     frame: &Frame,
     network: Option<NetworkEnvelope>,
+    deadline: &Deadline,
 ) -> Result<crate::route::Materialized, LiveIoError> {
     let plan = match mode {
         LinkMode::Layer2 => {
@@ -147,7 +150,12 @@ fn materialized_route(
                 .any(|address| address.address == network.source)
                 .then_some(network.source);
             let route = packetcraftr_netio::route::SystemProvider
-                .lookup_with_preferences(network.destination, Some(&interface.id), preferred_source)
+                .lookup_with_preferences(
+                    network.destination,
+                    Some(&interface.id),
+                    preferred_source,
+                    deadline,
+                )
                 .map_err(map_replay_route_error)?;
             if route.interface != interface.id {
                 return Err(LiveIoError::Device {
@@ -218,8 +226,9 @@ impl Transmitter for SystemTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
+        deadline: &Deadline,
     ) -> Result<crate::route::Materialized, LiveIoError> {
-        self.resolve(interface, mode, frame)
+        self.resolve(interface, mode, frame, deadline)
     }
 
     fn transmit(
@@ -253,6 +262,7 @@ impl Transmitter for SystemTransmitter {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_support::live;
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::UNIX_EPOCH;
 
@@ -379,7 +389,7 @@ mod tests {
 
         let frame = ethernet_frame(LinkType::ETHERNET);
         let route = transmitter
-            .plan_frame(&requested, LinkMode::Layer2, &frame)
+            .plan_frame(&requested, LinkMode::Layer2, &frame, &live())
             .expect("matching cached Layer 2 interface");
         assert_eq!(route.plan.decision.interface, requested);
         assert_eq!(route.plan.mode, LinkMode::Layer2);
@@ -396,6 +406,7 @@ mod tests {
                 &requested,
                 LinkMode::Auto,
                 &ethernet_frame(LinkType::ETHERNET),
+                &live(),
             ),
             Err(LiveIoError::Unsupported { .. })
         ));
@@ -404,7 +415,12 @@ mod tests {
         let requested = selected.id.clone();
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
-            transmitter.plan_frame(&requested, LinkMode::Layer2, &ethernet_frame(LinkType::RAW),),
+            transmitter.plan_frame(
+                &requested,
+                LinkMode::Layer2,
+                &ethernet_frame(LinkType::RAW),
+                &live(),
+            ),
             Err(LiveIoError::Unsupported { .. })
         ));
 
@@ -412,7 +428,7 @@ mod tests {
         let requested = selected.id.clone();
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
-            transmitter.plan_frame(&requested, LinkMode::Layer3, &ipv4_frame()),
+            transmitter.plan_frame(&requested, LinkMode::Layer3, &ipv4_frame(), &live()),
             Err(LiveIoError::Unsupported { .. })
         ));
 
@@ -424,6 +440,7 @@ mod tests {
                 &requested,
                 LinkMode::Layer2,
                 &ethernet_frame(LinkType::ETHERNET),
+                &live(),
             ),
             Err(LiveIoError::Device { message, .. })
                 if message.contains("differs from captured link type")
@@ -433,7 +450,12 @@ mod tests {
         let requested = selected.id.clone();
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
-            transmitter.plan_frame(&requested, LinkMode::Layer3, &ethernet_frame(LinkType::RAW),),
+            transmitter.plan_frame(
+                &requested,
+                LinkMode::Layer3,
+                &ethernet_frame(LinkType::RAW),
+                &live(),
+            ),
             Err(LiveIoError::InvalidTransmissionFrame { .. })
         ));
     }
@@ -443,7 +465,7 @@ mod tests {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
         let frame = ethernet_frame(LinkType::ETHERNET);
 
-        let route = materialized_route(&selected, LinkMode::Layer2, &frame, None)
+        let route = materialized_route(&selected, LinkMode::Layer2, &frame, None, &live())
             .expect("Layer 2 replay route is local and passive");
         assert_eq!(route.plan.decision.interface, selected.id);
         assert_eq!(route.plan.decision.source_mac, Some(INTERFACE_MAC));
@@ -463,7 +485,7 @@ mod tests {
 
         let mut without_mtu = selected;
         without_mtu.mtu = None;
-        let route = materialized_route(&without_mtu, LinkMode::Layer2, &frame, None)
+        let route = materialized_route(&without_mtu, LinkMode::Layer2, &frame, None, &live())
             .expect("missing native MTU uses the unbounded model value");
         assert_eq!(route.plan.decision.mtu, u32::MAX);
     }
@@ -481,6 +503,7 @@ mod tests {
             LinkMode::Layer2,
             &ethernet_ipv4_frame(secondary),
             None,
+            &live(),
         )
         .expect("Layer 2 route is passive");
 
@@ -498,7 +521,7 @@ mod tests {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
 
         assert!(matches!(
-            materialized_route(&selected, LinkMode::Layer3, &ipv4_frame(), None),
+            materialized_route(&selected, LinkMode::Layer3, &ipv4_frame(), None, &live()),
             Err(LiveIoError::UnresolvedLinkMode)
         ));
         assert!(matches!(
@@ -507,6 +530,7 @@ mod tests {
                 LinkMode::Auto,
                 &ethernet_frame(LinkType::ETHERNET),
                 None,
+                &live(),
             ),
             Err(LiveIoError::UnresolvedLinkMode)
         ));
@@ -519,6 +543,7 @@ mod tests {
                 &requested,
                 LinkMode::Layer3,
                 &ethernet_frame(LinkType::ETHERNET),
+                &live(),
             ),
             Err(LiveIoError::InvalidTransmissionFrame { .. })
         ));
@@ -528,7 +553,7 @@ mod tests {
     fn transmission_rejects_missing_or_mismatched_validation_before_packet_io() {
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::ETHERNET);
         let frame = ethernet_frame(LinkType::ETHERNET);
-        let route = materialized_route(&selected, LinkMode::Layer2, &frame, None)
+        let route = materialized_route(&selected, LinkMode::Layer2, &frame, None, &live())
             .expect("Layer 2 replay route is local and passive");
         let mut transmitter = SystemTransmitter::default();
         assert!(matches!(
@@ -544,7 +569,7 @@ mod tests {
             },
             ..selected.clone()
         };
-        let other_route = materialized_route(&other, LinkMode::Layer2, &frame, None)
+        let other_route = materialized_route(&other, LinkMode::Layer2, &frame, None, &live())
             .expect("Layer 2 replay route is local and passive");
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(

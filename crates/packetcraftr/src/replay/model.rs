@@ -3,6 +3,7 @@
 
 use std::time::{Duration, SystemTime};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::capture_file::{
     DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Format, Interface,
 };
@@ -306,12 +307,14 @@ pub trait Selector {
 /// [`transmit`](Transmitter::transmit).
 pub trait Transmitter {
     /// Resolve and validate the concrete interface, then passively select and
-    /// materialize the final route, before any intentional delay.
+    /// materialize the final route, before any intentional delay. Interface
+    /// and route lookups receive the replay's `deadline`.
     fn plan_frame(
         &mut self,
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
+        deadline: &Deadline,
     ) -> Result<MaterializedRoute, LiveIoError>;
 
     /// Transmit the exact frame through the route that was authorized.

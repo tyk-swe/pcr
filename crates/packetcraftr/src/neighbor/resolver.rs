@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_netio::deadline::remaining_before;
 
@@ -52,7 +53,10 @@ struct ExchangeOutcome {
 /// The seam [`crate::route::materialize`] resolves through, so in-crate tests
 /// can script resolution without capture or transmission.
 pub(crate) trait Resolver {
-    fn resolve(&self, request: &Request) -> Result<Resolution, Error>;
+    /// Resolves `request` within the calling operation's `deadline`: no
+    /// attempt starts after it and every wait is clipped to it, on top of the
+    /// resolver's own per-attempt budget.
+    fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error>;
 }
 
 /// Client-owned resolution state: validated options and the cache that every
@@ -96,7 +100,7 @@ impl<I> Resolver for Active<'_, I>
 where
     I: transmit::Provider + capture::Provider,
 {
-    fn resolve(&self, request: &Request) -> Result<Resolution, Error> {
+    fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
         if let Some(mac_address) = self.state.cache.get(&cache_key)? {
@@ -121,7 +125,7 @@ where
         };
         let mut capture = self
             .io
-            .arm_capture(&capture_request)
+            .arm_capture(&capture_request, deadline)
             .map_err(|error| map_io_error(request, "arming capture", error))?;
         let primary = self.exchange(
             request,
@@ -132,6 +136,7 @@ where
                 lookup_destination: None,
             },
             &mut capture,
+            deadline,
         );
         let cleanup = capture.shutdown();
         // A successful shutdown makes these final discovery-session statistics.
@@ -200,8 +205,10 @@ where
         request_bytes: &Bytes,
         route: transmit::Route<'_>,
         capture: &mut S,
+        deadline: &Deadline,
     ) -> Result<ExchangeOutcome, Error> {
-        let Some(ready_timeout) = self.remaining_attempt_budget(request) else {
+        let cancellation = deadline.cancellation().cloned();
+        let Some(ready_timeout) = self.remaining_attempt_budget(deadline) else {
             // The caller's deadline passed before discovery could start; the
             // outcome is an honest zero-attempt miss, not an attempt.
             return Ok(ExchangeOutcome {
@@ -212,18 +219,18 @@ where
             });
         };
         capture
-            .wait_ready(ready_timeout)
+            .wait_ready(&Deadline::new(ready_timeout).with_cancellation(cancellation.clone()))
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         let mut evidence = EvidenceBuffer::new(&self.state.options);
-        self.drain_pre_request(request, capture, &mut evidence)?;
+        self.drain_pre_request(request, capture, &mut evidence, &cancellation)?;
 
         let mut attempts = 0;
         for attempt in 1..=self.state.options.max_attempts {
-            let Some(attempt_budget) = self.remaining_attempt_budget(request) else {
+            let Some(attempt_budget) = self.remaining_attempt_budget(deadline) else {
                 break;
             };
             attempts = attempt;
-            let deadline = Instant::now()
+            let attempt_deadline = Instant::now()
                 .checked_add(attempt_budget)
                 .ok_or_else(|| invalid_options("attempt deadline overflowed".to_owned()))?;
             let frame = Layer2Frame::try_new(request_bytes, route)
@@ -235,11 +242,11 @@ where
             validate_neighbor_send(request, request_bytes, &report)?;
             let freshness_marker = report.timing().freshness_marker().monotonic();
 
-            while let Some(remaining) = remaining_before(deadline) {
-                let Some(captured_frame) =
-                    capture.next_captured_frame(remaining).map_err(|error| {
-                        map_io_error(request, "receiving discovery response", error)
-                    })?
+            let wait = crate::deadline::until(attempt_deadline, cancellation.clone());
+            while remaining_before(attempt_deadline).is_some() {
+                let Some(captured_frame) = capture.next_captured_frame(&wait).map_err(|error| {
+                    map_io_error(request, "receiving discovery response", error)
+                })?
                 else {
                     break;
                 };
@@ -248,7 +255,7 @@ where
                 } = captured_frame;
                 validate_captured_frame(request, &frame, self.state.options.snap_length)?;
                 if received_at.is_none_or(|received_at| {
-                    received_at < freshness_marker || received_at > deadline
+                    received_at < freshness_marker || received_at > attempt_deadline
                 }) {
                     evidence.retain(frame);
                     continue;
@@ -281,14 +288,14 @@ where
     }
 
     /// The budget the next attempt may spend: the configured per-attempt
-    /// timeout, clipped to whatever the request deadline still leaves. `None`
-    /// once that deadline has passed, so no further attempt starts.
-    fn remaining_attempt_budget(&self, request: &Request) -> Option<Duration> {
-        match request.deadline {
-            None => Some(self.state.options.attempt_timeout),
-            Some(deadline) => remaining_before(deadline)
-                .map(|remaining| remaining.min(self.state.options.attempt_timeout)),
-        }
+    /// timeout, clipped to whatever the operation deadline still leaves.
+    /// `None` once that deadline has passed, so no further attempt starts.
+    fn remaining_attempt_budget(&self, deadline: &Deadline) -> Option<Duration> {
+        deadline
+            .remaining()
+            .ok()
+            .filter(|remaining| !remaining.is_zero())
+            .map(|remaining| remaining.min(self.state.options.attempt_timeout))
     }
 
     fn drain_pre_request<S: Session>(
@@ -296,10 +303,12 @@ where
         request: &Request,
         capture: &mut S,
         evidence: &mut EvidenceBuffer,
+        cancellation: &Option<packetcraftr_core::budget::Cancellation>,
     ) -> Result<(), Error> {
+        let queued = crate::deadline::immediate(cancellation.clone());
         for _ in 0..self.state.options.max_capture_queue_frames {
             let Some(captured_frame) = capture
-                .next_captured_frame(Duration::ZERO)
+                .next_captured_frame(&queued)
                 .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
             else {
                 break;

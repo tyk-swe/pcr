@@ -17,8 +17,8 @@ pub(crate) use accumulator::{
 pub(crate) use client::Prepared;
 pub(crate) use model::into_sent_packet;
 pub use model::{
-    Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, MAX_EXCHANGE_TIMEOUT,
-    Options, Report, Response, Summary,
+    Collector, DEFAULT_MAX_RESPONSES, DEFAULT_MAX_UNMATCHED_FRAMES, Event, Options, Report,
+    Response, Summary,
 };
 pub(crate) use shutdown::CaptureGuard;
 pub(crate) use transaction::Transaction;

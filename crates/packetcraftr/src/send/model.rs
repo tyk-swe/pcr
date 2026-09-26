@@ -2,13 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::IpAddr;
-use std::time::Duration;
+
+use packetcraftr_netio::capture::MAX_TIMEOUT;
 
 use crate::Stats;
-
-/// Maximum cumulative pacing delay accepted by one set send, matching the
-/// capture/replay ceiling for intentional operation time.
-pub const MAX_SEND_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Options {
@@ -110,11 +107,11 @@ impl SetOptions {
             }
         })?;
         let scheduled_nanos = u128::from(total - 1) * delay.as_nanos();
-        if scheduled_nanos > MAX_SEND_DURATION.as_nanos() {
+        if scheduled_nanos > MAX_TIMEOUT.as_nanos() {
             return Err(crate::Error::InvalidSendOption {
                 field: "rate",
                 message: format!(
-                    "scheduled pacing {scheduled_nanos} ns exceeds the {MAX_SEND_DURATION:?} ceiling"
+                    "scheduled pacing {scheduled_nanos} ns exceeds the {MAX_TIMEOUT:?} ceiling"
                 ),
             });
         }

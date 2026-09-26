@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES};
+use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
 use crate::probe::evidence::EvidenceLimits;
 use crate::probe::limits::{CaptureEvidenceLimits, check_limits, duration_violation};
@@ -17,7 +17,7 @@ use crate::dns::wire::canonical_query_name;
 use crate::dns::{
     DEFAULT_MAX_NAME_POINTERS, DEFAULT_MAX_RECORDS, DEFAULT_MAX_REJECTED_RECORDS,
     DEFAULT_MAX_TXT_BYTES, DEFAULT_MAX_TXT_STRINGS, DEFAULT_MAX_UNDECODED_FRAMES, MAX_ATTEMPTS,
-    MAX_DURATION, MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
+    MAX_MESSAGE_BYTES, MAX_NAME_POINTERS, MAX_RATE, MAX_RECORDS,
 };
 
 /// A DNS question's exact 16-bit wire code, including unassigned codes.
@@ -205,7 +205,7 @@ impl Default for Limits {
             max_evidence_frames: MAX_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: MAX_CAPTURE_QUEUE_BYTES,
             max_undecoded: DEFAULT_MAX_UNDECODED_FRAMES,
-            max_duration: MAX_DURATION,
+            max_duration: MAX_TIMEOUT,
         }
     }
 }
@@ -233,10 +233,10 @@ impl Limits {
             value,
             reason,
         })?;
-        if duration_violation(self.max_duration, MAX_DURATION) {
+        if duration_violation(self.max_duration, MAX_TIMEOUT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,
-                maximum: MAX_DURATION,
+                maximum: MAX_TIMEOUT,
             });
         }
         Ok(())
@@ -329,10 +329,10 @@ impl Request {
                 reason: format!("must be within 1..={MAX_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > packetcraftr_netio::capture::MAX_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,
-                maximum: packetcraftr_netio::capture::MAX_TIMEOUT,
+                maximum: MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.queries_per_second

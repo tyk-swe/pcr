@@ -322,7 +322,7 @@ fn exchange_options_validate_all_aggregate_bounds() {
 
     let invalid = [
         exchange::Options {
-            timeout: exchange::MAX_EXCHANGE_TIMEOUT + Duration::from_nanos(1),
+            timeout: net::capture::MAX_TIMEOUT + Duration::from_nanos(1),
             ..defaults.clone()
         },
         exchange::Options {

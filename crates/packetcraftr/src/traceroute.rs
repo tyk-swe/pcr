@@ -4,8 +4,6 @@
 //! Policy-gated traceroute to authorized destinations, with finite hop, attempt,
 //! timeout, and evidence limits.
 
-use std::time::Duration;
-
 use crate::probe::Workflow;
 
 pub const DEFAULT_FIRST_HOP: u8 = 1;
@@ -17,7 +15,6 @@ pub const DEFAULT_MAX_UNDECODED_FRAMES: usize = 64;
 pub const MAX_PROBES_PER_HOP: u32 = 32;
 pub const MAX_PROBES: usize = 100_000;
 pub const MAX_RATE: u32 = 1_000_000;
-pub const MAX_DURATION: Duration = packetcraftr_netio::capture::MAX_TIMEOUT;
 
 // A generated probe is no larger than Ethernet + IPv6 + TCP without options.
 // The deliberately conservative value makes complete byte-policy approval

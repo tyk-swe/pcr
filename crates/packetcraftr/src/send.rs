@@ -6,4 +6,4 @@
 mod execution;
 mod model;
 
-pub use model::{MAX_SEND_DURATION, Options, Report, SentFrame, SetOptions, SetReport};
+pub use model::{Options, Report, SentFrame, SetOptions, SetReport};

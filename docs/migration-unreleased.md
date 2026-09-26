@@ -171,18 +171,18 @@ these request settings add no fields to the output/v6 or packet/v2 contracts.
 
 Import DNS `Name`, `Record`, `RecordValue`, `Edns`, and `EdnsOption` from
 `packetcraftr_core::protocol::application::dns`. The workflow crate consumes
-these core types. `Name::from_labels` now returns core `DecodeError`.
-Name failures use `DecodeError::Name(name::Error)`, retaining their original
+these core types. `Name::from_labels` now returns core `dns::Error`.
+Name failures use `dns::Error::Name(name::Error)`, retaining their original
 offsets and typed source, including the distinction between self-pointers and
 pointer loops.
-Structural live-decoder failures are wrapped in `WireError::Decode(DecodeError)`;
+Structural live-decoder failures are wrapped in `WireError::Decode(dns::Error)`;
 match the core error inside that variant. Query correlation, TCP framing, and
 live EDNS policy errors remain workflow-owned.
 
 `Dns::from_wire` decodes all declared records. Malformed or truncated records
 and trailing bytes now fail decoding; offline dissection retains the original
 payload with malformed-packet diagnostics. `Dns::from_wire_with_limits` returns
-typed `DecodeError` and accepts `DecodeLimits`. The retained `wire()` remains
+typed `dns::Error` and accepts `DecodeLimits`. The retained `wire()` remains
 the original message, including compression and unknown bytes.
 
 Default bounds are 65,535 message bytes, 512 records, 32 compression pointers
@@ -647,8 +647,8 @@ canonical path:
 | `packetcraftr_core::{Packet, PacketError}` | `packetcraftr_core::packet::{Packet, PacketError}` |
 | `build::{Context, Mode}` | `codec::{Context, Mode}` |
 | `build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` | `layout::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE}` |
-| `protocol::application::{Dns, Tls}` | `protocol::application::dns::Dns`, `protocol::application::tls::codec::Tls` |
-| `protocol::application::tls` facade re-exports | `tls::fingerprint::`, `tls::model::`, `tls::parse::` |
+| `protocol::application::{Dns, Tls}` | `protocol::application::dns::Dns`, `protocol::application::tls::Tls` |
+| `protocol::application::tls::{codec, fingerprint, model, names, parse}` submodule paths | the same items re-exported flat from `protocol::application::tls` |
 | `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
 | `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_netio::SystemFault` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
@@ -700,3 +700,36 @@ whose frames may end in padding after the network payload (as Ethernet frames
 do) calls `Builder::allow_trailing_padding(protocol)` when it registers its
 codec, so decoding reports those bytes as padding and strict builds accept
 link padding inside it.
+
+## Protocol grouping and wire errors
+
+Built-in protocols live in their layer group, and each protocol's wire API
+returns that protocol's error. Items and wire behavior are unchanged.
+
+| Removed path | Import instead |
+|---|---|
+| `protocol::gre::Gre` | `protocol::tunnel::Gre` |
+| `protocol::icmp::{Icmpv4, Icmpv6}` | `protocol::network::{Icmpv4, Icmpv6}` |
+| `protocol::ipv6::{Fragment, HopByHop, DestinationOptions, SegmentRoutingHeader}` | `protocol::network::{Fragment, HopByHop, DestinationOptions, SegmentRoutingHeader}` |
+| `application::dns::DecodeError` | `application::dns::Error` |
+
+TLS items are imported from `application::tls` itself (for example
+`tls::Tls`, `tls::parse_record`, `tls::ja4`, `tls::version_name`, and the
+`tls::extension` constants); see "Removed equivalent paths".
+
+Error types of the wire APIs:
+
+- `Dns::to_wire` and `Dns::try_from` (from `Bytes`, `Vec<u8>`, and `&[u8]`)
+  return `dns::Error`. Decoding failures are the former `DecodeError`
+  variants; an encoding failure is `dns::Error::Encode`, whose source is the
+  codec error. Code that matched `codec::Error::Truncated` on a DNS
+  conversion matches `dns::Error::MessageTooShort`, `TruncatedField`, or
+  `Name(name::Error::Truncated*)` instead.
+- `Http::try_from(&[u8])` returns `http::Error`; an incomplete or trailing
+  header block is `http::Error::Invalid`.
+- `Tls::try_from` (from `&[u8]` and `Hello`), `Hello::to_wire`,
+  `HelloExtension::server_name`, `HelloExtension::alpn`, and
+  `tls::Outcome::Malformed` carry the new `tls::Error`. Its `Invalid`
+  message displays exactly as the former `codec::Error::Invalid` did, and a
+  hello that exceeds an encoder bound is `tls::Error::Encode` with the codec
+  error as source.

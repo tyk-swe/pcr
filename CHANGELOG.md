@@ -109,6 +109,24 @@ All notable changes to PacketcraftR are documented here. The format follows
   with the same items. `protocol::raw` is removed: the `Raw`, `Padding`, and
   `Malformed` layers and their codecs belong to `layer`, and `parse_hex` moves
   to `layer::parse_hex`. See `docs/migration-unreleased.md`.
+- Built-in protocols are grouped by layer: GRE is `protocol::tunnel::Gre`,
+  ICMP is `protocol::network::{Icmpv4, Icmpv6}`, and the IPv6 extension headers
+  are `protocol::network::{Fragment, HopByHop, DestinationOptions,
+  SegmentRoutingHeader}`; `protocol::{gre, icmp, ipv6}` are removed. See
+  `docs/migration-unreleased.md`.
+- Protocol wire APIs return the protocol's own error. `dns::DecodeError` is
+  renamed `dns::Error`, and `Dns::to_wire` and the `Dns` `TryFrom`
+  conversions return it instead of `codec::Error` (encoding failures are
+  `dns::Error::Encode` with the codec error as source). `Http::try_from`
+  returns `http::Error`. The new `tls::Error` replaces `codec::Error` in
+  `Tls::try_from`, `Hello::to_wire`, `HelloExtension::{server_name, alpn}`,
+  and `tls::Outcome::Malformed`, with the same messages.
+- TLS items are flat re-exports of `protocol::application::tls`: the
+  `codec`, `model`, `parse`, `fingerprint`, and `names` modules are private,
+  so `tls::codec::Tls` is `tls::Tls`, `tls::parse::parse_record` is
+  `tls::parse_record`, `tls::names::version_name` is `tls::version_name`, and
+  `tls::model::extension` is `tls::extension`. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -553,9 +571,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 - Rust: the equivalent public paths `packetcraftr_core::{Packet, PacketError}`
   (use `packet::`), `build::{Context, Mode, DEFAULT_MAX_LAYERS,
   DEFAULT_MAX_PACKET_SIZE}` (use `codec::` and `layout::`),
-  `protocol::application::{Dns, Tls}` (use `dns::Dns` and `tls::codec::Tls`),
-  the `protocol::application::tls` facade re-exports (use `fingerprint::`,
-  `model::`, and `parse::`), `analysis::pcap::DEFAULT_SIZE_LIMIT` (use
+  `protocol::application::{Dns, Tls}` (use `dns::Dns` and `tls::Tls`),
+  the `protocol::application::tls::{codec, fingerprint, model, names, parse}`
+  submodule paths (use the flat `tls::` re-exports),
+  `analysis::pcap::DEFAULT_SIZE_LIMIT` (use
   `frame::DEFAULT_SIZE_LIMIT`), and `packetcraftr::dns::tcp::SocketFault` (use
   `packetcraftr_netio::SystemFault`).
 - The independent downstream compatibility workspace (`compatibility/`); its

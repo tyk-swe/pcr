@@ -1,9 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use crate::output::{self, contract::CaptureFormat};
 use crate::{
-    command_options::{PacketBudgetArgs, RecipeArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_plain_line},
 };
@@ -12,30 +15,6 @@ use packetcraftr_core::{
     frame::{Frame, LinkType},
     protocol::BuiltinProtocol,
 };
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
-
-    #[command(flatten)]
-    pub(crate) recipe: RecipeArgs,
-    /// IP MTU, excluding the link header. Fragmentation is always explicit.
-    #[arg(long)]
-    pub(crate) mtu: usize,
-    /// Fragment identification; required when splitting IPv6.
-    #[arg(long)]
-    pub(crate) identification: Option<u32>,
-    /// Maximum fragments produced from the datagram; at most 8192.
-    #[arg(long, default_value_t = 1024)]
-    pub(crate) max_fragments: usize,
-    /// Maximum bytes across all produced fragment frames.
-    #[arg(long, default_value_t = 256 * 1024 * 1024)]
-    pub(crate) max_output_bytes: usize,
-    #[command(flatten)]
-    pub(crate) budget: PacketBudgetArgs,
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::CaptureFormat;
@@ -125,11 +104,7 @@ pub(crate) fn run(
             CaptureFormat::Json => records.push(record),
             CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
             CaptureFormat::Hex => write_plain_line(format_args!("{}", record.frame.bytes_hex()))?,
-            CaptureFormat::Text => write_plain_line(format_args!(
-                "fragment {index}: {} bytes {}",
-                record.frame.captured_length,
-                record.frame.bytes_hex()
-            ))?,
+            CaptureFormat::Text => rendering::render_fragment(&record)?,
             CaptureFormat::Pcap | CaptureFormat::PcapNg => {
                 return Err(CliError::new(
                     core::error::Kind::Internal,

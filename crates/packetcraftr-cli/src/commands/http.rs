@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use super::application_output::EventOutput;
 use crate::output::{
     self,
@@ -8,7 +12,6 @@ use crate::output::{
     http as wire,
 };
 use crate::{
-    command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
 };
@@ -19,28 +22,6 @@ use packetcraftr_core::{
     },
     error::Kind,
 };
-use std::path::PathBuf;
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.
-    pub(crate) path: PathBuf,
-    /// Select a whole TCP conversation, using tcp:INDEX.
-    #[arg(long)]
-    pub(crate) stream: Option<String>,
-    /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
-    /// 8080 are always inspected.
-    #[arg(long = "http-port")]
-    pub(crate) http_ports: Vec<u16>,
-    /// Maximum counted entity bytes in one message. Bodies are discarded.
-    #[arg(long, default_value_t = 16 * 1024 * 1024)]
-    pub(crate) max_http_body_bytes: u64,
-    #[command(flatten)]
-    pub(crate) application: ApplicationLimitsArgs,
-    #[command(flatten)]
-    pub(crate) decode: DecodeArgs,
-    #[command(flatten)]
-    pub(crate) limits: OfflineLimitsArgs,
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -106,9 +87,11 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             Event::Message(message) => output.emit(
                 wire::Message::try_from(*message).map_err(CliError::classified)?,
                 &mut messages,
-                render_message,
+                rendering::render_message,
             ),
-            Event::Issue(issue) => output.emit(wire::Issue(issue), &mut issues, render_issue),
+            Event::Issue(issue) => {
+                output.emit(wire::Issue(issue), &mut issues, rendering::render_issue)
+            }
         }
     };
     let outcome = session
@@ -153,49 +136,4 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             complete.summary.requests_without_final_response
         )),
     }
-}
-fn render_message(value: &wire::Message) -> Result<(), CliError> {
-    let start = match &value.start {
-        Some(wire::StartLine::Request { method, target, .. }) => {
-            format!("{method} {}", escaped(target))
-        }
-        Some(wire::StartLine::Response { status, reason, .. }) => {
-            format!("{status} {}", escaped(reason))
-        }
-        None => "partial headers".to_owned(),
-    };
-    write_plain_line(format_args!(
-        "HTTP tcp:{} message={} {:?} {} body_bytes={} request={:?} frames={:?}",
-        value.stream,
-        value.index,
-        value.status,
-        start,
-        value.body_bytes,
-        value.request,
-        value
-            .sources
-            .iter()
-            .map(|source| source.number)
-            .collect::<Vec<_>>()
-    ))?;
-    for header in &value.headers {
-        write_plain_line(format_args!(
-            "  {}: {}",
-            header.name,
-            escaped(&header.value)
-        ))?;
-    }
-    if let Some(error) = &value.error {
-        write_plain_line(format_args!("  {error}"))?;
-    }
-    Ok(())
-}
-fn render_issue(value: &wire::Issue) -> Result<(), CliError> {
-    write_plain_line(format_args!(
-        "  TCP stream={} frame={} {:?}",
-        value.0.stream, value.0.number, value.0.status
-    ))
-}
-fn escaped(value: &str) -> String {
-    value.chars().flat_map(char::escape_default).collect()
 }

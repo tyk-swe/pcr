@@ -191,9 +191,9 @@ macro_rules! commands {
 
 commands! {
     /// Merge time-ordered captures into scoped PCAPNG.
-    Merge(merge::Args) = "merge",
+    Merge(merge::arguments::Args) = "merge",
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
-    Fragment(fragment::Args) = "fragment",
+    Fragment(fragment::arguments::Args) = "fragment",
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
     Build(build::arguments::Args) = "build",
@@ -207,8 +207,8 @@ commands! {
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
     Read(read::arguments::Args) = "read",
     /// Enumerate local interfaces.
-    #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args) = "interfaces",
+    #[command(after_long_help = interfaces::arguments::AFTER_LONG_HELP)]
+    Interfaces(interfaces::arguments::Args) = "interfaces",
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
     Plan(plan::arguments::Args) = "plan",
@@ -252,24 +252,24 @@ commands! {
     )]
     Dns(dns::arguments::Args) = "dns",
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
-    DnsRead(dns_read::Args) = "dns-read",
+    DnsRead(dns_read::arguments::Args) = "dns-read",
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
-    Http(http::Args) = "http",
+    Http(http::arguments::Args) = "http",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
-    Export(export::Args) = "export",
+    Export(export::arguments::Args) = "export",
     /// Rewrite capture headers with checked lengths and transport checksums.
-    Rewrite(rewrite::Args) = "rewrite",
+    Rewrite(rewrite::arguments::Args) = "rewrite",
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
     Fuzz(fuzz::arguments::Args) = "fuzz",
     /// Enumerate passive interface-bound route decisions.
-    #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args) = "routes",
+    #[command(after_long_help = routes::arguments::AFTER_LONG_HELP)]
+    Routes(routes::arguments::Args) = "routes",
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
     VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
-    Documentation(documentation::Args),
+    Documentation(documentation::arguments::Args),
 }
 
 /// Runs one contract command: enters its publication deadline, rejects an
@@ -381,11 +381,11 @@ mod tests {
         let cases: &[Case] = &[
             (
                 &["merge", "--write", "m.pcapng", CAPTURE, CAPTURE],
-                undeclared_bounds::<merge::Args>,
+                undeclared_bounds::<merge::arguments::Args>,
             ),
             (
                 &["fragment", "--mtu", "576", "--packet", PACKET],
-                undeclared_bounds::<fragment::Args>,
+                undeclared_bounds::<fragment::arguments::Args>,
             ),
             (
                 &["build", "--packet", PACKET],
@@ -403,7 +403,10 @@ mod tests {
                 &["read", CAPTURE],
                 undeclared_bounds::<read::arguments::Args>,
             ),
-            (&["interfaces"], undeclared_bounds::<interfaces::Args>),
+            (
+                &["interfaces"],
+                undeclared_bounds::<interfaces::arguments::Args>,
+            ),
             (
                 &["plan", "--destination", "192.0.2.1"],
                 undeclared_bounds::<plan::arguments::Args>,
@@ -449,21 +452,27 @@ mod tests {
                 &["dns", "192.0.2.53", "example.com"],
                 undeclared_bounds::<dns::arguments::Args>,
             ),
-            (&["dns-read", CAPTURE], undeclared_bounds::<dns_read::Args>),
-            (&["http", CAPTURE], undeclared_bounds::<http::Args>),
+            (
+                &["dns-read", CAPTURE],
+                undeclared_bounds::<dns_read::arguments::Args>,
+            ),
+            (
+                &["http", CAPTURE],
+                undeclared_bounds::<http::arguments::Args>,
+            ),
             (
                 &["export", "--write", "e.pcapng", CAPTURE],
-                undeclared_bounds::<export::Args>,
+                undeclared_bounds::<export::arguments::Args>,
             ),
             (
                 &["rewrite", "--write", "r.pcapng", CAPTURE],
-                undeclared_bounds::<rewrite::Args>,
+                undeclared_bounds::<rewrite::arguments::Args>,
             ),
             (
                 &["fuzz", "--packet", PACKET],
                 undeclared_bounds::<fuzz::arguments::Args>,
             ),
-            (&["routes"], undeclared_bounds::<routes::Args>),
+            (&["routes"], undeclared_bounds::<routes::arguments::Args>),
             (
                 &[
                     "verify-forwarding",

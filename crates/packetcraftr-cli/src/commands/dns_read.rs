@@ -1,6 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(super) mod arguments;
+mod rendering;
+
+use self::arguments::Args;
 use super::application_output::EventOutput;
 use crate::output::{
     self,
@@ -8,7 +12,6 @@ use crate::output::{
     dns_read as wire,
 };
 use crate::{
-    command_options::{DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
 };
@@ -19,25 +22,6 @@ use packetcraftr_core::{
     },
     error::Kind,
 };
-use std::path::PathBuf;
-
-#[derive(Debug, clap::Args)]
-pub(crate) struct Args {
-    /// PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.
-    pub(crate) path: PathBuf,
-    /// Keep one whole conversation: tcp:INDEX or udp:INDEX.
-    #[arg(long)]
-    pub(crate) stream: Option<String>,
-    /// Additional DNS service ports; repeat to add services. Port 53 is always analyzed.
-    #[arg(long = "dns-port")]
-    pub(crate) dns_ports: Vec<u16>,
-    #[command(flatten)]
-    pub(crate) application: crate::command_options::ApplicationLimitsArgs,
-    #[command(flatten)]
-    pub(crate) decode: DecodeArgs,
-    #[command(flatten)]
-    pub(crate) limits: OfflineLimitsArgs,
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -104,14 +88,16 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             Event::Message(value) => output.emit(
                 wire::Message::try_from(*value).map_err(CliError::classified)?,
                 &mut messages,
-                render_message,
+                rendering::render_message,
             ),
             Event::Transaction(value) => output.emit(
                 wire::Transaction::try_from(value).map_err(CliError::classified)?,
                 &mut transactions,
-                render_transaction,
+                rendering::render_transaction,
             ),
-            Event::Issue(value) => output.emit(wire::Issue(value), &mut issues, render_issue),
+            Event::Issue(value) => {
+                output.emit(wire::Issue(value), &mut issues, rendering::render_issue)
+            }
         }
     };
     let outcome = session
@@ -156,40 +142,4 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
             complete.frames_read
         )),
     }
-}
-fn render_message(value: &wire::Message) -> Result<(), CliError> {
-    write_plain_line(format_args!(
-        "DNS {:?}:{} message={} {:?} {}:{} -> {}:{} frames={:?} {}",
-        value.transport,
-        value.stream,
-        value.index,
-        value.status,
-        value.flow.flow.source,
-        value.flow.flow.source_port,
-        value.flow.flow.destination,
-        value.flow.flow.destination_port,
-        value
-            .sources
-            .iter()
-            .map(|source| source.number)
-            .collect::<Vec<_>>(),
-        value
-            .fields
-            .as_ref()
-            .and_then(|fields| fields.get("questions"))
-            .map(ToString::to_string)
-            .unwrap_or_default()
-    ))
-}
-fn render_transaction(value: &wire::Transaction) -> Result<(), CliError> {
-    write_plain_line(format_args!(
-        "  transaction id={} {:?} queries={:?} response={:?} latest_latency={:?}",
-        value.dns_id, value.status, value.queries, value.response, value.latest_query_latency
-    ))
-}
-fn render_issue(value: &wire::Issue) -> Result<(), CliError> {
-    write_plain_line(format_args!(
-        "  TCP stream={} frame={} {:?}",
-        value.0.stream, value.0.number, value.0.status
-    ))
 }

@@ -6,6 +6,7 @@ use crate::output::contract::DissectFormat;
 use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
+mod rendering;
 
 use std::time::SystemTime;
 
@@ -19,10 +20,7 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
-use crate::rendering::{
-    emit_aggregate, emit_stderr_message, render_diagnostics_text, render_dns_records,
-    write_plain_line, write_raw, write_stdout_line, write_summary_line,
-};
+use crate::rendering::{emit_aggregate, emit_stderr_message, write_plain_line, write_raw};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::DissectFormat;
@@ -136,20 +134,7 @@ pub(super) fn run(
         return emit_stderr_message("frame did not match the filter");
     }
     match format {
-        DissectFormat::Text => {
-            write_summary_line(format_args!(
-                "decoded {} bytes into {} layer(s)",
-                decoded.original.len(),
-                decoded.packet.len()
-            ))?;
-            for (index, layer) in decoded.packet.iter().enumerate() {
-                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
-            }
-            render_dns_records(&packetcraftr_core::document::Packet::from_packet(
-                &decoded.packet,
-            ))?;
-            render_diagnostics_text(&decoded.diagnostics)
-        }
+        DissectFormat::Text => rendering::render_text(&decoded),
         DissectFormat::Hex => write_plain_line(format_args!(
             "{}",
             output::hex::CompactHex(&decoded.original)

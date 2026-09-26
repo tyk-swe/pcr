@@ -53,7 +53,7 @@ impl Launch<'_> {
     /// Generates documentation files. They are not contract output, so no
     /// output stream, diagnostics, or cancellation is set up, and failures
     /// report on stderr.
-    pub(crate) fn generate(self, arguments: commands::documentation::Args) -> ExitCode {
+    pub(crate) fn generate(self, arguments: commands::documentation::arguments::Args) -> ExitCode {
         match commands::documentation::run(&arguments) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {

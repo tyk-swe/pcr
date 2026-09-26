@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 pub(super) mod arguments;
+mod rendering;
 
 use crate::output::contract::SendFormat;
 
@@ -41,17 +42,6 @@ fn output_failure(error: CliError) -> packetcraftr::Error {
     }
 }
 
-fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
-    let route = frame.packet.route();
-    format!(
-        "sent {} bytes via {} (index {}, {})",
-        frame.packet.wire_bytes().len(),
-        route.plan.decision.interface.name,
-        route.plan.decision.interface.index,
-        route.plan.mode
-    )
-}
-
 impl super::Spec for Args {
     type Format = crate::output::contract::SendFormat;
     const CANCELLATION: bool = true;
@@ -81,7 +71,8 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
             let report = prepared
                 .client
                 .send_set_with_events(&prepared.template, prepared.options, |frame| {
-                    write_summary_line(format_args!("{}", sent_line(frame))).map_err(output_failure)
+                    write_summary_line(format_args!("{}", rendering::sent_line(frame)))
+                        .map_err(output_failure)
                 })
                 .map_err(CliError::classified)?;
             let diagnostics = collect_diagnostics(&report);

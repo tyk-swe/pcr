@@ -478,7 +478,7 @@ mod tests {
         let packet = documentation_packet();
         let packets = [&packet];
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
-        
+
         let packet_error = policy
             .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(2, 1),
@@ -512,7 +512,7 @@ mod tests {
         let packets = [&packet];
         // Multicast counts as public under the policy and never names a host.
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
-        
+
         policy
             .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 1),

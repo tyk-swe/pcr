@@ -28,11 +28,11 @@ use super::{
 };
 use crate::Sink;
 use crate::clock::Clock;
+use crate::execution::Admission;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
-use crate::execution::Admission;
 use crate::probe::Batch;
-use crate::probe::{Execution, ProbeStatus, Transport};
+use crate::probe::{Evidence, ProbeStatus, Transport};
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{
@@ -47,7 +47,7 @@ use packetcraftr_core::registry::Registry;
 struct Serial<'e, E>(&'e mut E);
 
 impl<E: Executor<Batch<Probe>>> Executor<Batch<Probe>> for Serial<'_, E> {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         self.0.execute(batch)
     }
 }
@@ -154,7 +154,7 @@ struct TimeoutExecutor {
 }
 
 impl Executor<Batch<Probe>> for TimeoutExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
             batch
@@ -190,7 +190,7 @@ impl Executor<Batch<Probe>> for TimeoutExecutor {
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -267,7 +267,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
 struct LateResponseExecutor(TimeoutExecutor);
 
 impl Executor<Batch<Probe>> for LateResponseExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
             tcp_packet(
@@ -952,7 +952,7 @@ struct EchoReplyExecutor {
 }
 
 impl Executor<Batch<Probe>> for EchoReplyExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -1041,7 +1041,7 @@ struct EveryOtherEchoExecutor {
 }
 
 impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         if batch.probes[0].sequence % 2 == 1 {
             return Ok(execution);
@@ -1141,7 +1141,7 @@ struct StaleEchoExecutor {
 }
 
 impl Executor<Batch<Probe>> for StaleEchoExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)

@@ -6,8 +6,8 @@ use std::time::{Duration, SystemTime};
 use crate::Stats;
 use crate::exchange::Response;
 use crate::execution::ExchangeEvidenceError;
-use crate::execution::evidence::EvidenceLimits;
-use crate::probe::runner::{Execution, Sequenced};
+use crate::execution::limits::EvidenceLimits;
+use crate::probe::runner::{Evidence, Sequenced};
 use crate::test_support::{Failure, TestErrors};
 use bytes::Bytes;
 use packetcraftr_core::frame::{Frame, LinkType};
@@ -114,7 +114,7 @@ fn untimestamped_capture_evidence_is_invalid() {
 
 /// Validates `execution` as the evidence for a one-probe batch at sequence 7,
 /// reporting an invalid-evidence rejection as its sequence and typed cause.
-fn validate(execution: &Execution, sent_matches: bool) -> Result<(), (u64, ExchangeEvidenceError)> {
+fn validate(execution: &Evidence, sent_matches: bool) -> Result<(), (u64, ExchangeEvidenceError)> {
     validate_batch_evidence(
         &TestErrors,
         &[Probe(7)],
@@ -130,8 +130,8 @@ fn validate(execution: &Execution, sent_matches: bool) -> Result<(), (u64, Excha
 }
 
 /// One sent raw packet whose statistics report `bytes` sent.
-fn execution(sent: &'static [u8], bytes: u64) -> Execution {
-    Execution {
+fn execution(sent: &'static [u8], bytes: u64) -> Evidence {
+    Evidence {
         permit: crate::evidence::ExecutionPermit::new(),
         sent: vec![crate::test_support::sent_packet(raw_packet(sent))],
         responses: Vec::new(),

@@ -32,7 +32,7 @@ use crate::{BoundaryError, Stats};
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
-use super::executor::{Exchange, Execution, TcpEvidence, TcpQuerier, TcpQuery};
+use super::executor::{Exchange, ExchangeEvidence, TcpEvidence, TcpQuerier, TcpQuery};
 
 use super::DEFAULT_SERVER_PORT;
 use super::report::Observed;
@@ -233,10 +233,10 @@ impl Authorizer for SlowTcpDenyingAuthorizer {
 struct TrustedReceiptExecutor;
 
 impl Executor<Exchange> for TrustedReceiptExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
-        Ok(Execution {
+        Ok(ExchangeEvidence {
             permit: exchange.permit,
             sent,
             responses: Vec::new(),
@@ -257,7 +257,7 @@ impl Executor<Exchange> for TrustedReceiptExecutor {
 struct InvalidResponseIndexExecutor;
 
 impl Executor<Exchange> for InvalidResponseIndexExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         let frame = Frame::without_timestamp(LinkType::RAW, &[0_u8][..]).expect("evidence frame");
         execution.responses.push(crate::exchange::Response {
@@ -288,7 +288,7 @@ struct SelectionDeadlineExecutor {
 }
 
 impl Executor<Exchange> for SelectionDeadlineExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let execution = ClassifiedResponseExecutor.execute(exchange)?;
         self.completed.store(true, Ordering::SeqCst);
         Ok(execution)
@@ -298,7 +298,7 @@ impl Executor<Exchange> for SelectionDeadlineExecutor {
 struct LoopbackExecutor;
 
 impl Executor<Exchange> for LoopbackExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).map_err(loopback_boundary_error)?;
         socket
             .set_read_timeout(Some(exchange.timeout))
@@ -389,7 +389,7 @@ impl ScriptedExecutor {
 }
 
 impl Executor<Exchange> for ScriptedExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         self.udp_calls += 1;
         self.udp_queries.push(exchange.probe.query.clone());
         let payload = self.udp_payloads.pop_front().unwrap_or(None);
@@ -441,7 +441,7 @@ fn scripted_udp_execution(
     exchange: &Exchange,
     payload: Option<Bytes>,
     elapsed: Duration,
-) -> Execution {
+) -> ExchangeEvidence {
     let sent = crate::test_support::sent_packet(exchange.probe.packet());
     let bytes = u64::try_from(sent.bytes_sent()).unwrap();
     let responses = payload
@@ -482,7 +482,7 @@ fn scripted_udp_execution(
             }
         })
         .collect();
-    Execution {
+    ExchangeEvidence {
         permit: exchange.permit,
         sent,
         responses,
@@ -500,7 +500,7 @@ fn scripted_udp_execution(
 }
 
 impl Executor<Exchange> for ClassifiedResponseExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         let mut packet = Packet::new();
@@ -537,7 +537,7 @@ impl Executor<Exchange> for ClassifiedResponseExecutor {
             Bytes::from_static(&[0xfe]),
         )
         .expect("second undecoded frame");
-        Ok(Execution {
+        Ok(ExchangeEvidence {
             permit: exchange.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -674,7 +674,7 @@ fn push_a_record_tail(output: &mut Vec<u8>, address: [u8; 4]) {
 }
 
 impl Executor<Exchange> for ProgressiveExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
@@ -1226,7 +1226,10 @@ fn direct_tcp_denials_and_scoped_targets_never_execute_a_probe() {
     };
     let error = run(
         &request,
-        &mut crate::execution::Admission::new(&policy, &crate::test_support::ScriptedResolver::new([])),
+        &mut crate::execution::Admission::new(
+            &policy,
+            &crate::test_support::ScriptedResolver::new([]),
+        ),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -2153,7 +2156,7 @@ struct CancellingExecutor {
 }
 
 impl Executor<Exchange> for CancellingExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         self.calls += 1;
         if self.calls == self.cancel_at {
             self.signal.cancel();
@@ -2167,7 +2170,7 @@ impl Executor<Exchange> for CancellingExecutor {
 struct OvertimeExecutor;
 
 impl Executor<Exchange> for OvertimeExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         execution.stats.elapsed = Duration::from_secs(3600);
         Ok(execution)

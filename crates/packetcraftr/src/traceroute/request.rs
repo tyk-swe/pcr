@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::execution::evidence::EvidenceLimits;
-use crate::execution::limits::{CaptureEvidenceLimits, check_limits, duration_violation};
+use crate::execution::limits::EvidenceLimits;
+use crate::execution::limits::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Target;
 
@@ -57,16 +57,12 @@ impl Limits {
                 reason,
             },
         )?;
-        CaptureEvidenceLimits {
-            max_evidence_frames: self.max_evidence_frames,
-            max_evidence_bytes: self.max_evidence_bytes,
-            max_undecoded: Some(self.max_undecoded),
-        }
-        .validate(|field, value, reason| Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        })?;
+        self.evidence()
+            .validate(|field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            })?;
         if duration_violation(self.max_duration, MAX_TIMEOUT) {
             return Err(Error::InvalidDuration {
                 value: self.max_duration,

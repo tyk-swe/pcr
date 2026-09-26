@@ -8,9 +8,7 @@
 //! pick responses only through [`ResponseSelector`]. The pipelined scan
 //! orders its in-flight candidates with the selector's [`candidate_precedes`].
 
-pub(crate) use budget::{
-    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceSink, EvidenceState,
-};
+pub(crate) use budget::{EvidenceDiagnosticDescriptor, EvidenceSink, EvidenceState};
 pub(crate) use candidate_selection::{
     CandidateKey, ResponseCandidate, ResponseSelector, candidate_precedes,
 };

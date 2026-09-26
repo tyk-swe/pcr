@@ -13,7 +13,7 @@ use crate::{
         evidence::{CandidateKey, candidate_precedes},
     },
     preparation::RebuildError,
-    probe::Execution,
+    probe::Evidence,
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -655,7 +655,7 @@ fn complete(
         elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
         capture: Default::default(),
     };
-    let execution = Execution {
+    let execution = Evidence {
         permit: planned[index].permit,
         sent: vec![entry.sent.as_ref().clone()],
         responses: entry

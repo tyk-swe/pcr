@@ -5,6 +5,7 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
+use crate::execution::limits::EvidenceLimits;
 
 #[derive(Clone, Copy)]
 pub(crate) struct EvidenceDiagnosticDescriptor {
@@ -25,13 +26,6 @@ impl EvidenceDiagnosticDescriptor {
             display_name,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EvidenceLimits {
-    pub(crate) max_frames: usize,
-    pub(crate) max_bytes: usize,
-    pub(crate) max_undecoded: usize,
 }
 
 /// Where a workflow publishes what [`EvidenceState`] keeps, as the

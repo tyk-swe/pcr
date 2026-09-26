@@ -30,19 +30,21 @@ pub(crate) fn check_limits<E>(
     Ok(())
 }
 
-/// The evidence-retention bounds every live workflow validates against the
-/// same ceilings. `max_undecoded` is [`Some`] when the workflow bounds
-/// undecoded retention; it must not exceed the frame bound.
+/// The evidence-retention limits of one workflow run: the exact frames and
+/// bytes it may retain, and how many of those frames may be undecodable. A
+/// workflow that does not bound undecodable frames separately sets
+/// `max_undecoded` to `max_frames`.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CaptureEvidenceLimits {
-    pub(crate) max_evidence_frames: usize,
-    pub(crate) max_evidence_bytes: usize,
-    pub(crate) max_undecoded: Option<usize>,
+pub(crate) struct EvidenceLimits {
+    pub(crate) max_frames: usize,
+    pub(crate) max_bytes: usize,
+    pub(crate) max_undecoded: usize,
 }
 
-impl CaptureEvidenceLimits {
-    /// Rejects shared evidence bounds above their ceilings, then an undecoded
-    /// bound above the frame bound.
+impl EvidenceLimits {
+    /// Rejects retention limits above the capture queue ceilings, then an
+    /// undecoded limit above the frame limit. Fields are named as requests
+    /// publish them.
     pub(crate) fn validate<E>(
         &self,
         invalid: impl Fn(&'static str, u64, String) -> E,
@@ -51,31 +53,23 @@ impl CaptureEvidenceLimits {
             &[
                 (
                     "max_evidence_frames",
-                    self.max_evidence_frames,
+                    self.max_frames,
                     packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_FRAMES,
                 ),
                 (
                     "max_evidence_bytes",
-                    self.max_evidence_bytes,
+                    self.max_bytes,
                     packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES,
                 ),
             ],
-            &[],
-            &invalid,
-        )?;
-        if let Some(max_undecoded) = self.max_undecoded {
-            check_limits(
-                &[],
-                &[(
-                    "max_undecoded",
-                    max_undecoded,
-                    self.max_evidence_frames,
-                    "cannot exceed max_evidence_frames",
-                )],
-                invalid,
-            )?;
-        }
-        Ok(())
+            &[(
+                "max_undecoded",
+                self.max_undecoded,
+                self.max_frames,
+                "cannot exceed max_evidence_frames",
+            )],
+            invalid,
+        )
     }
 }
 

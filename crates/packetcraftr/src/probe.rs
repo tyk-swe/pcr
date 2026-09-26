@@ -13,7 +13,7 @@ pub(crate) mod test_support;
 
 pub use crate::correlation::Transport;
 pub use model::{ProbeEndpoint, ProbeStatus};
-pub(crate) use runner::{Batch, Execution};
+pub(crate) use runner::{Batch, Evidence};
 
 pub(crate) use limits::{check_probe_count, check_probe_duration};
 

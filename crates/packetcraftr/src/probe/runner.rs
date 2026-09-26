@@ -44,7 +44,7 @@ impl<P> Batch<P> {
 
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
-pub(crate) struct Execution {
+pub(crate) struct Evidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -54,7 +54,7 @@ pub(crate) struct Execution {
     pub(crate) stats: Stats,
 }
 
-impl Execution {
+impl Evidence {
     pub(crate) fn from_exchange(
         permit: ExecutionPermit,
         result: crate::exchange::Aggregate,
@@ -84,7 +84,7 @@ impl Execution {
     }
 }
 
-impl Receipt for Execution {
+impl Receipt for Evidence {
     fn permit(&self) -> ExecutionPermit {
         self.permit
     }
@@ -93,8 +93,8 @@ impl Receipt for Execution {
     }
 }
 
-impl<P> crate::execution::Request for Batch<P> {
-    type Execution = Execution;
+impl<P> crate::execution::Step for Batch<P> {
+    type Evidence = Evidence;
 }
 
 pub(crate) trait Sequenced {

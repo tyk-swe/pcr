@@ -27,17 +27,17 @@ impl ExecutorFault {
     }
 }
 
-/// One unit of live work a workflow hands to its executor, paired with the
-/// evidence receipt that work produces.
-pub(crate) trait Request {
-    type Execution;
+/// One approved unit of live work a workflow hands to its executor, paired
+/// with the evidence that work produces.
+pub(crate) trait Step {
+    type Evidence;
 }
 
 /// The executor boundary every live workflow shares: it carries out one
-/// approved request and returns the evidence it produced. Implementations are
-/// keyed by request type, so a scan executor and a DNS executor stay distinct.
-pub(crate) trait Executor<Req: Request> {
-    fn execute(&mut self, request: &Req) -> Result<Req::Execution, BoundaryError>;
+/// approved step and returns the evidence it produced. Implementations are
+/// keyed by step type, so a scan executor and a DNS executor stay distinct.
+pub(crate) trait Executor<S: Step> {
+    fn execute(&mut self, step: &S) -> Result<S::Evidence, BoundaryError>;
 }
 
 /// Runs each approved workflow step as one capture-ready exchange on a

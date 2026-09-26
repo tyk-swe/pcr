@@ -8,9 +8,8 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::packet::Packet;
 
-use super::{
-    EvidenceDiagnosticDescriptor, EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector,
-};
+use super::{EvidenceDiagnosticDescriptor, EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::limits::EvidenceLimits;
 
 const LIMITS: EvidenceLimits = EvidenceLimits {
     max_frames: 1,

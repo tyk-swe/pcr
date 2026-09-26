@@ -22,7 +22,7 @@ use crate::{BoundaryError, Client, Sink, Stats};
 
 use super::engine::run;
 use super::error::duration_limit;
-use super::executor::{Execution, ExecutionCase};
+use super::executor::{CaseEvidence, CaseStep};
 use super::{Aggregate, Collector, Error, Event, Outcome, Report, Request, Trial};
 
 /// A live run of `campaign` over the fixture packet.
@@ -40,7 +40,7 @@ fn publish<A, E, C, S>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor<ExecutionCase>,
+    E: Executor<CaseStep>,
     C: Clock,
     S: Sink<Event, Ack = ()>,
 {
@@ -59,7 +59,7 @@ fn publish_cancellable<A, E, C, S>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor<ExecutionCase>,
+    E: Executor<CaseStep>,
     C: Clock,
     S: Sink<Event, Ack = ()>,
 {
@@ -89,7 +89,7 @@ fn collect<A, E, C>(
 ) -> Result<Aggregate, Error>
 where
     A: Authorizer,
-    E: Executor<ExecutionCase>,
+    E: Executor<CaseStep>,
     C: Clock,
 {
     collect_cancellable(request, authorizer, executor, clock, None)
@@ -105,7 +105,7 @@ fn collect_cancellable<A, E, C>(
 ) -> Result<Aggregate, Error>
 where
     A: Authorizer,
-    E: Executor<ExecutionCase>,
+    E: Executor<CaseStep>,
     C: Clock,
 {
     let collector = Collector::default();
@@ -182,10 +182,10 @@ impl Authorizer for AllowAll {
 
 struct RebuildingExecutor;
 
-impl Executor<ExecutionCase> for RebuildingExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl Executor<CaseStep> for RebuildingExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(case.packet.clone());
-        Ok(Execution {
+        Ok(CaseEvidence {
             permit: case.permit,
             stats: Stats {
                 packets_attempted: 1,
@@ -207,8 +207,8 @@ struct CountingExecutor {
     executions: usize,
 }
 
-impl Executor<ExecutionCase> for CountingExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl Executor<CaseStep> for CountingExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         self.executions += 1;
         let mut executor = RebuildingExecutor;
         executor.execute(case)
@@ -356,8 +356,8 @@ struct BudgetSpendingExecutor {
     executions: usize,
 }
 
-impl Executor<ExecutionCase> for BudgetSpendingExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl Executor<CaseStep> for BudgetSpendingExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let first = self.executions == 0;
         self.executions += 1;
         let sent = crate::test_support::sent_packet(case.packet.clone());
@@ -375,7 +375,7 @@ impl Executor<ExecutionCase> for BudgetSpendingExecutor {
                 latency: self.latency,
             }]
         };
-        Ok(Execution {
+        Ok(CaseEvidence {
             permit: case.permit,
             stats: Stats {
                 packets_attempted: 1,
@@ -489,8 +489,8 @@ fn live_case_evidence_beyond_the_remaining_budget_is_rejected_before_publication
 /// frame.
 struct ThreeFrameExecutor;
 
-impl Executor<ExecutionCase> for ThreeFrameExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl Executor<CaseStep> for ThreeFrameExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let mut execution = RebuildingExecutor.execute(case)?;
         let frame = |bytes: &'static [u8]| {
             packetcraftr_core::frame::Frame::new(
@@ -588,10 +588,10 @@ fn live_evidence_is_retained_under_one_campaign_budget_that_warns_once() {
 
 struct SubstitutingFuzzExecutor;
 
-impl Executor<ExecutionCase> for SubstitutingFuzzExecutor {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl Executor<CaseStep> for SubstitutingFuzzExecutor {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(packet());
-        Ok(Execution {
+        Ok(CaseEvidence {
             permit: case.permit,
             stats: Stats {
                 packets_attempted: 1,

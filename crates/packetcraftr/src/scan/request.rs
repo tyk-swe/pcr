@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use packetcraftr_core::template::DEFAULT_MAX_TEMPLATE_PACKETS;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::execution::evidence::EvidenceLimits;
+use crate::execution::limits::EvidenceLimits;
 use crate::execution::limits::{check_limits, duration_violation};
 use crate::target::Family;
 use crate::target::Selection;

@@ -31,7 +31,7 @@ use super::classification::{
 };
 use super::error::{Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
-use super::executor::{Exchange, Execution, TcpQuerier};
+use super::executor::{Exchange, ExchangeEvidence, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
 use super::probe::{Probe, rotated_source_port};
 use super::{
@@ -268,8 +268,8 @@ struct Retries<'a, A, E, C, F> {
     emit: &'a mut F,
 }
 
-struct ProbeExecution {
-    execution: Execution,
+struct ProbeAttempt {
+    execution: ExchangeEvidence,
     timeout: Duration,
     attempt_deadline: Deadline,
 }
@@ -307,7 +307,7 @@ where
             let mut attempt_deadline = self.execution.deadline().for_wait(self.request.timeout)?;
             return self.query_over_tcp(&probe, &mut attempt_deadline);
         }
-        let ProbeExecution {
+        let ProbeAttempt {
             mut execution,
             timeout,
             mut attempt_deadline,
@@ -438,7 +438,7 @@ where
         })
     }
 
-    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
+    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeAttempt, Error> {
         let limits = self.request.limits;
         // The attempt window starts before the exchange and is shared with a
         // TCP fallback, which may use only what the exchange left of it.
@@ -460,7 +460,7 @@ where
             },
         )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
-        Ok(ProbeExecution {
+        Ok(ProbeAttempt {
             execution,
             timeout: grant.timeout,
             attempt_deadline,
@@ -611,7 +611,7 @@ where
 fn select_response<'a>(
     registry: &Registry,
     probe: &Probe,
-    execution: &'a mut Execution,
+    execution: &'a mut ExchangeEvidence,
     limits: Limits,
     timeout: Duration,
     check: impl FnMut() -> Result<(), Error>,

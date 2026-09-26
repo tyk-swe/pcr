@@ -187,6 +187,12 @@ pub(crate) enum Retention {
     Ring,
 }
 
+impl crate::resources::SettingValue for Retention {
+    fn setting_value(&self) -> Option<crate::output::resources::Value> {
+        crate::resources::policy_value(self)
+    }
+}
+
 impl From<Retention> for crate::output::capture::Retention {
     fn from(value: Retention) -> Self {
         match value {

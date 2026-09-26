@@ -14,6 +14,8 @@ use clap::Args;
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_netio as net;
 
+use crate::resources::{Settings, declare};
+
 #[derive(Clone, Debug, Args)]
 pub(crate) struct PublicDestinationArgs {
     /// Authorize destinations classified as public: globally routable and multicast addresses.
@@ -214,6 +216,53 @@ pub(crate) struct ReplayPolicyArgs {
     budgets: TrafficBudgetArgs<Streamed>,
 }
 
+impl HostnameResolutionArgs {
+    fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [max_resolved_addresses: Count @ Operation]);
+    }
+}
+
+impl<B: Budget> TrafficBudgetArgs<B> {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [
+            max_packets: Count @ Operation,
+            max_bytes: Bytes @ Operation,
+        ]);
+    }
+}
+
+impl SendPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+        self.budgets.resources(settings);
+    }
+}
+
+impl HostnamePolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+        self.budgets.resources(settings);
+    }
+}
+
+impl RoutePolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.hostname_resolution.resources(settings);
+    }
+}
+
+impl FuzzPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources(settings);
+    }
+}
+
+impl ReplayPolicyArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        self.budgets.resources(settings);
+    }
+}
+
 impl PublicDestinationArgs {
     pub(crate) fn apply_to(self, policy: &mut packetcraftr::policy::Policy) {
         policy.allow_public_destinations = self.allow_public_destinations;
@@ -336,7 +385,7 @@ mod tests {
             Command::Fuzz(fuzz) => fuzz.policy.into_policy(),
             Command::Replay(replay) => replay.policy.into_policy(),
             Command::Capture(capture) => capture.budgets.into_policy(),
-            other => panic!("unbudgeted command {:?}", other.kind()),
+            other => panic!("unbudgeted command {other:?}"),
         };
         (
             policy.max_packets_per_operation,

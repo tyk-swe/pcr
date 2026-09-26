@@ -24,6 +24,32 @@ use std::{
     time::{Duration, Instant},
 };
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::CaptureFormat;
+    const CANCELLATION: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            rotate_bytes: Bytes @ CaptureStorage,
+            rotate_interval_ms: Milliseconds @ CaptureStorage,
+            rotate_files: Count @ CaptureStorage,
+            retention: Policy @ CaptureStorage,
+            timeout_ms: Milliseconds @ Operation,
+            max_projection_bytes: Bytes @ ResultRetention,
+        ]);
+        self.limits.resources(settings);
+        self.budgets.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     args: Args,
     format: CaptureFormat,

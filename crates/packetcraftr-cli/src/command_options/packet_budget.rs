@@ -18,6 +18,13 @@ pub(crate) struct PacketBudgetArgs {
 }
 
 impl PacketBudgetArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_layers: Count @ Operation,
+            max_packet_size: Count @ Operation,
+        ]);
+    }
+
     pub(crate) fn build_options(self, mode: core::codec::Mode) -> core::build::Options {
         core::build::Options {
             mode,

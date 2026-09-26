@@ -3,274 +3,360 @@
 
 //! Invocation-local assembly of opt-in diagnostics. No protocol mechanics or
 //! admission decisions depend on these observations.
+//!
+//! Each command declares its settings from its typed arguments through
+//! [`Spec::resources`], naming each
+//! setting's unit, stage, and whether the stage runs. The command-line
+//! definition supplies only the flag name, help text, and value source.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use crate::output::{
-    contract::{Command, Format},
+    contract::Format,
     envelope::Envelope,
     resources::{Report, Setting, Value, Worker},
 };
-use clap::{ArgMatches, CommandFactory, parser::ValueSource};
+use clap::{ArgMatches, CommandFactory, ValueEnum, parser::ValueSource};
 use packetcraftr::progress::Runtime;
 
 use crate::cli::Cli;
+use crate::commands::Spec;
+use crate::presets::Preset;
 use crate::rendering::OUTPUT_TIMEOUT_MS;
 
 struct Context {
-    settings: Vec<Setting>,
+    settings: Vec<(Setting, Enabled)>,
+    stream_index: AtomicBool,
     runtimes: Mutex<Vec<(&'static str, Runtime)>>,
 }
 static CONTEXT: OnceLock<Context> = OnceLock::new();
 
-pub(crate) fn configure(matches: &ArgMatches, command: Command, format: Format) {
-    let settings = settings(matches, command, format);
-    let _ = CONTEXT.set(Context {
-        settings,
-        runtimes: Mutex::new(Vec::new()),
-    });
+/// What a setting's value measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unit {
+    Count,
+    Bytes,
+    Milliseconds,
+    /// A named policy choice rather than a quantity.
+    Policy,
 }
 
-fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setting> {
-    let mut definition = Cli::command();
-    definition.build();
-    let mut settings = BTreeMap::new();
-    let selected = matches.subcommand().map(|(_, values)| values);
-    let preset = matches
-        .get_one::<crate::presets::Preset>("resource_preset")
-        .copied();
-    let forwarding = command == Command::VerifyForwarding;
-    let indexed_forwarding = forwarding && selected.is_some_and(forwarding_needs_index);
-    let tcp_enabled = matches!(
-        command,
-        Command::Expert | Command::DnsRead | Command::Http | Command::Tls
-    ) || (command == Command::Follow
-        && selected
-            .and_then(|values| values.get_raw("stream"))
-            .and_then(|mut values| values.next())
-            .is_some_and(|value| !value.to_string_lossy().starts_with("udp:")));
-    let selected_definition = definition.find_subcommand(command.as_str());
-    for (values, definition) in
-        std::iter::once((matches, &definition)).chain(selected.zip(selected_definition))
-    {
-        for arg in definition.get_arguments() {
-            let id = arg.get_id().as_str();
-            let Some(stage) = stage(id, command) else {
-                continue;
-            };
-            let Some(raw) = values.get_raw(id).and_then(|mut values| values.next_back()) else {
-                continue;
-            };
-            let raw = raw.to_string_lossy();
-            let value = raw
-                .parse::<u64>()
-                .map_or_else(|_| Value::Policy(raw.into_owned()), Value::Number);
-            let unit = if id.ends_with("_ms") {
-                "milliseconds"
-            } else if id.contains("bytes") || id == "snap_length" {
-                "bytes"
-            } else if matches!(id, "overflow_policy" | "ip_overlap" | "retention") {
-                "policy"
-            } else {
-                "count"
-            };
-            let name = format!("--{}", arg.get_long().unwrap_or(id));
-            settings.insert(
-                name.clone(),
-                Setting {
-                    enabled: if forwarding && id == "max_provenance_bytes" {
-                        false
-                    } else if forwarding
-                        && (id.starts_with("max_ip_")
-                            || matches!(
-                                id,
-                                "ip_idle_expiry_ms"
-                                    | "ip_overlap"
-                                    | "max_flows"
-                                    | "max_scope_bytes"
-                            ))
-                    {
-                        indexed_forwarding
-                    } else {
-                        !(id.starts_with("max_tcp_") || id == "tcp_idle_expiry_ms") || tcp_enabled
-                    },
-                    name,
-                    value,
-                    unit: unit.to_owned(),
-                    stage: stage.to_owned(),
-                    scope: arg
-                        .get_long_help()
-                        .or_else(|| arg.get_help())
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    source: if values.value_source(id) == Some(ValueSource::CommandLine) {
-                        "override".to_owned()
-                    } else if let Some(preset) = preset.filter(|preset| preset.value(id).is_some())
-                    {
-                        format!("preset:{}", preset.name())
-                    } else {
-                        "default".to_owned()
-                    },
-                },
-            );
+impl Unit {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Bytes => "bytes",
+            Self::Milliseconds => "milliseconds",
+            Self::Policy => "policy",
         }
     }
-    if format == Format::Ndjson {
-        settings
+}
+
+/// The processing stage a setting bounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stage {
+    Output,
+    CaptureStorage,
+    Preparation,
+    Comparison,
+    ObservationCollection,
+    ResultRetention,
+    IndexedMetadata,
+    NativeCapture,
+    /// Capture-file reader bounds. A command that is not
+    /// [`OFFLINE`](crate::commands::Spec::OFFLINE) reads its capture as part
+    /// of a live operation, so there they are [`Stage::Operation`] settings.
+    PhysicalInput,
+    Operation,
+    ActiveState,
+}
+
+impl Stage {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Output => "output",
+            Self::CaptureStorage => "capture_storage",
+            Self::Preparation => "preparation",
+            Self::Comparison => "comparison",
+            Self::ObservationCollection => "observation_collection",
+            Self::ResultRetention => "result_retention",
+            Self::IndexedMetadata => "indexed_metadata",
+            Self::NativeCapture => "native_capture",
+            Self::PhysicalInput => "physical_input",
+            Self::Operation => "operation",
+            Self::ActiveState => "active_state",
+        }
+    }
+}
+
+/// Whether the command runs a setting's stage in this invocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Enabled {
+    /// Known from the arguments alone.
+    Fixed(bool),
+    /// Runs only when the comparison needs the capture stream index. The
+    /// command reports that through [`stream_index_needed`] once its rules and
+    /// filters compile; until then the stage counts as enabled.
+    StreamIndex,
+}
+
+impl From<bool> for Enabled {
+    fn from(enabled: bool) -> Self {
+        Self::Fixed(enabled)
+    }
+}
+
+/// A typed argument value as it is reported; `None` for an unset option.
+pub(crate) trait SettingValue {
+    fn setting_value(&self) -> Option<Value>;
+}
+
+macro_rules! numeric_setting_values {
+    ($($number:ty),*) => {$(
+        impl SettingValue for $number {
+            fn setting_value(&self) -> Option<Value> {
+                Some(Value::Number(u64::try_from(*self).unwrap_or(u64::MAX)))
+            }
+        }
+    )*};
+}
+
+numeric_setting_values!(u8, u64, usize);
+
+impl<T: SettingValue> SettingValue for Option<T> {
+    fn setting_value(&self) -> Option<Value> {
+        self.as_ref().and_then(SettingValue::setting_value)
+    }
+}
+
+/// A policy choice reported under its command-line spelling.
+pub(crate) fn policy_value<T: ValueEnum>(value: &T) -> Option<Value> {
+    value
+        .to_possible_value()
+        .map(|value| Value::Policy(value.get_name().to_owned()))
+}
+
+/// Declares typed argument fields as resource settings:
+/// `declare!(settings, group, [field: Unit @ Stage, field: Unit @ Stage if enabled])`.
+/// Each field's name is its command-line argument id.
+macro_rules! declare {
+    (@enabled) => { $crate::resources::Enabled::Fixed(true) };
+    (@enabled $enabled:expr) => { $crate::resources::Enabled::from($enabled) };
+    (
+        $settings:expr, $group:expr,
+        [$($field:ident: $unit:ident @ $stage:ident $(if $enabled:expr)?),* $(,)?]
+    ) => {{
+        $(
+            $settings.declare(
+                stringify!($field),
+                $crate::resources::SettingValue::setting_value(&$group.$field),
+                $crate::resources::Unit::$unit,
+                $crate::resources::Stage::$stage,
+                $crate::resources::declare!(@enabled $($enabled)?),
+            );
+        )*
+    }};
+}
+pub(crate) use declare;
+
+/// The settings one invocation reports, collected from typed arguments.
+pub(crate) struct Settings<'a> {
+    root: (&'a clap::Command, &'a ArgMatches),
+    selected: Option<(&'a clap::Command, &'a ArgMatches)>,
+    preset: Option<Preset>,
+    offline: bool,
+    format: Format,
+    declared: BTreeMap<String, (Setting, Enabled)>,
+}
+
+impl Settings<'_> {
+    /// Declares one argument's effective value. `id` is the argument id; an
+    /// unset optional argument (`value` is `None`) is not reported.
+    ///
+    /// # Panics
+    ///
+    /// If `id` names no argument of the selected command or the root command.
+    pub(crate) fn declare(
+        &mut self,
+        id: &str,
+        value: Option<Value>,
+        unit: Unit,
+        stage: Stage,
+        enabled: Enabled,
+    ) {
+        let Some(value) = value else {
+            return;
+        };
+        let (arg, matches) = self
+            .selected
+            .into_iter()
+            .chain(std::iter::once(self.root))
+            .find_map(|(definition, matches)| {
+                definition
+                    .get_arguments()
+                    .find(|arg| arg.get_id() == id)
+                    .map(|arg| (arg, matches))
+            })
+            .unwrap_or_else(|| panic!("resource setting {id} names no argument"));
+        let stage = if stage == Stage::PhysicalInput && !self.offline {
+            Stage::Operation
+        } else {
+            stage
+        };
+        let name = format!("--{}", arg.get_long().unwrap_or(id));
+        let source = if matches.value_source(id) == Some(ValueSource::CommandLine) {
+            "override".to_owned()
+        } else if let Some(preset) = self.preset.filter(|preset| preset.value(id).is_some()) {
+            format!("preset:{}", preset.name())
+        } else {
+            "default".to_owned()
+        };
+        let setting = Setting {
+            name: name.clone(),
+            value,
+            unit: unit.as_str().to_owned(),
+            stage: stage.as_str().to_owned(),
+            scope: arg
+                .get_long_help()
+                .or_else(|| arg.get_help())
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+            source,
+            enabled: true,
+        };
+        self.declared.insert(name, (setting, enabled));
+    }
+
+    /// Declares the aggregate JSON retention a command derives from its
+    /// physical frame ceiling.
+    pub(crate) fn retained_result_items(&mut self, max_frames: u64) {
+        let name = "retained_result_items";
+        self.declared.insert(
+            name.to_owned(),
+            (
+                Setting {
+                    name: name.to_owned(),
+                    value: Value::Number(max_frames),
+                    unit: Unit::Count.as_str().to_owned(),
+                    stage: Stage::ResultRetention.as_str().to_owned(),
+                    scope: "Aggregate JSON items; derived from the physical frame ceiling"
+                        .to_owned(),
+                    source: "derived".to_owned(),
+                    enabled: true,
+                },
+                Enabled::Fixed(self.format == Format::Json),
+            ),
+        );
+    }
+
+    /// Adds the output settings every NDJSON stream runs under.
+    fn stream_output(&mut self) {
+        let fixed = |name: &str, value, unit: Unit, scope: &str, source: &str| {
+            (
+                Setting {
+                    name: name.to_owned(),
+                    value: Value::Number(value),
+                    unit: unit.as_str().to_owned(),
+                    stage: Stage::Output.as_str().to_owned(),
+                    scope: scope.to_owned(),
+                    source: source.to_owned(),
+                    enabled: true,
+                },
+                Enabled::Fixed(true),
+            )
+        };
+        self.declared
             .entry("--output-timeout-ms".to_owned())
-            .or_insert(Setting {
-                name: "--output-timeout-ms".to_owned(),
-                value: Value::Number(OUTPUT_TIMEOUT_MS),
-                unit: "milliseconds".to_owned(),
-                stage: "output".to_owned(),
-                scope: "Per-write wait; clipped by the remaining operation deadline".to_owned(),
-                source: "default".to_owned(),
-                enabled: true,
+            .or_insert_with(|| {
+                fixed(
+                    "--output-timeout-ms",
+                    OUTPUT_TIMEOUT_MS,
+                    Unit::Milliseconds,
+                    "Per-write wait; clipped by the remaining operation deadline",
+                    "default",
+                )
             });
         for (name, value, unit, scope) in [
             (
                 "output_record_bytes",
                 crate::output::stream::MAX_RECORD_BYTES as u64,
-                "bytes",
+                Unit::Bytes,
                 "One prepared NDJSON line, including newline",
             ),
             (
                 "terminal_error_timeout_ms",
                 OUTPUT_TIMEOUT_MS,
-                "milliseconds",
+                Unit::Milliseconds,
                 "Separate terminal-error cleanup wait; cannot repair a failed write",
             ),
         ] {
-            settings.insert(
-                name.to_owned(),
-                Setting {
-                    name: name.to_owned(),
-                    value: Value::Number(value),
-                    unit: unit.to_owned(),
-                    stage: "output".to_owned(),
-                    scope: scope.to_owned(),
-                    source: "fixed".to_owned(),
-                    enabled: true,
-                },
-            );
+            self.declared
+                .insert(name.to_owned(), fixed(name, value, unit, scope, "fixed"));
         }
     }
-    if matches!(command, Command::Expert | Command::Follow)
-        && let Some(limit) = settings.get("--max-frames").cloned()
-    {
-        settings.insert(
-            "retained_result_items".to_owned(),
-            Setting {
-                name: "retained_result_items".to_owned(),
-                value: limit.value,
-                unit: "count".to_owned(),
-                stage: "result_retention".to_owned(),
-                scope: "Aggregate JSON items; derived from the physical frame ceiling".to_owned(),
-                source: "derived".to_owned(),
-                enabled: format == Format::Json,
-            },
-        );
-    }
-    settings.into_values().collect()
 }
 
-fn forwarding_needs_index(values: &ArgMatches) -> bool {
-    use packetcraftr_core::analysis::forwarding::{Declarations, Rules};
+/// Collects the selected command's settings for `--resource-diagnostics`.
+pub(crate) fn configure<T: Spec>(
+    matches: &ArgMatches,
+    arguments: &T,
+    preset: Option<Preset>,
+    output_timeout_ms: Option<u64>,
+    format: Format,
+) {
+    let settings = settings(matches, arguments, preset, output_timeout_ms, format);
+    let _ = CONTEXT.set(Context {
+        settings,
+        stream_index: AtomicBool::new(true),
+        runtimes: Mutex::new(Vec::new()),
+    });
+}
 
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let fields = |id| {
-        values
-            .get_many::<String>(id)
-            .map(|fields| fields.cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
+/// The settings `arguments` declare, with their stage enablement.
+pub(crate) fn settings<T: Spec>(
+    matches: &ArgMatches,
+    arguments: &T,
+    preset: Option<Preset>,
+    output_timeout_ms: Option<u64>,
+    format: Format,
+) -> Vec<(Setting, Enabled)> {
+    let mut definition = Cli::command();
+    definition.build();
+    let selected = matches.subcommand().and_then(|(name, values)| {
+        definition
+            .find_subcommand(name)
+            .map(|definition| (definition, values))
+    });
+    let mut settings = Settings {
+        root: (&definition, matches),
+        selected,
+        preset,
+        offline: T::OFFLINE,
+        format,
+        declared: BTreeMap::new(),
     };
-    let rules = Rules::compile_declarations(
-        Declarations {
-            identity: &fields("identity"),
-            preserve: &fields("preserve"),
-            preserve_presence: &fields("preserve_presence"),
-            expect: &fields("expect"),
-            expect_absent: &fields("expect_absent"),
-        },
-        &registry,
-        *values
-            .get_one::<usize>("max_field_bytes")
-            .expect("forwarding field budget has a default"),
+    settings.declare(
+        "output_timeout_ms",
+        output_timeout_ms.setting_value(),
+        Unit::Milliseconds,
+        Stage::Output,
+        Enabled::Fixed(true),
     );
-    // Collection combines the compiled rules' requirements with each side's
-    // filter. Diagnostics are enabled if either capture needs the stage.
-    // Invalid input fails before analysis; conservatively keep stages enabled.
-    rules.map_or(true, |rules| rules.requirements().stream_index)
-        || ["ingress_filter", "egress_filter"].into_iter().any(|id| {
-            values.get_one::<String>(id).is_some_and(|source| {
-                crate::filtering::compile(
-                    source,
-                    &registry,
-                    crate::filtering::Capabilities::stream_capable(),
-                )
-                .map_or(true, |filter| filter.requirements().stream_index)
-            })
-        })
+    arguments.resources(&mut settings);
+    if format == Format::Ndjson {
+        settings.stream_output();
+    }
+    settings.declared.into_values().collect()
 }
 
-fn stage(id: &str, command: Command) -> Option<&'static str> {
-    let offline = matches!(
-        command,
-        Command::VerifyForwarding
-            | Command::Rewrite
-            | Command::Export
-            | Command::Merge
-            | Command::Read
-            | Command::Stats
-            | Command::Expert
-            | Command::Follow
-            | Command::Http
-            | Command::DnsRead
-            | Command::Tls
-    );
-    Some(match id {
-        "output_timeout_ms" => "output",
-        "rotate_bytes" | "rotate_interval_ms" | "rotate_files" | "retention" => "capture_storage",
-        "max_prepared_bytes" => "preparation",
-        "max_scratch_bytes" => "comparison",
-        "max_evidence_bytes" | "max_field_bytes" => "observation_collection",
-        "max_details"
-        | "max_detail_bytes"
-        | "max_application_output_bytes"
-        | "max_projection_bytes"
-        | "max_output_bytes"
-        | "top"
-        | "max_output_sessions"
-        | "max_unmatched_frames"
-        | "max_responses"
-        | "max_undecoded"
-        | "max_ip_outcomes"
-        | "max_rejected_records" => "result_retention",
-        "max_provenance_bytes" | "max_flows" | "max_scope_bytes" | "max_interfaces" => {
-            "indexed_metadata"
-        }
-        "max_queue_frames" | "max_captured_bytes" | "snap_length" | "overflow_policy" => {
-            "native_capture"
-        }
-        "max_frames" | "max_bytes" | "max_frame_bytes" | "max_encoded_bytes"
-        | "max_decoded_bytes"
-            if offline =>
-        {
-            "physical_input"
-        }
-        "max_duration_ms" | "timeout_ms" | "max_targets" | "max_in_flight" => "operation",
-        "tcp_idle_expiry_ms" | "ip_idle_expiry_ms" | "ip_overlap" => "active_state",
-        id if id.starts_with("max_tcp_")
-            || id.starts_with("max_ip_")
-            || id.starts_with("max_application_")
-            || id.starts_with("max_tls_") =>
-        {
-            "active_state"
-        }
-        id if id.starts_with("max_") => "operation",
-        _ => return None,
-    })
+/// Reports whether the comparison needs the capture stream index, which
+/// enables or disables the [`Enabled::StreamIndex`] stages.
+pub(crate) fn stream_index_needed(needed: bool) {
+    if let Some(context) = CONTEXT.get() {
+        context.stream_index.store(needed, Ordering::Relaxed);
+    }
 }
 
 /// Constructors remain isolated. Keeping a runtime clone observes admission;
@@ -307,8 +393,20 @@ pub(crate) fn snapshot() -> Option<Report> {
             .iter()
             .map(|(name, runtime)| Worker::progress(*name, runtime.snapshot())),
     );
+    let stream_index = context.stream_index.load(Ordering::Relaxed);
+    let settings = context
+        .settings
+        .iter()
+        .map(|(setting, enabled)| Setting {
+            enabled: match enabled {
+                Enabled::Fixed(enabled) => *enabled,
+                Enabled::StreamIndex => stream_index,
+            },
+            ..setting.clone()
+        })
+        .collect();
     Some(Report {
-        settings: context.settings.clone(),
+        settings,
         workers,
         cooperative_deadlines: true,
         hard_rss_limit: false,

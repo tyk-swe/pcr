@@ -26,6 +26,46 @@ use crate::rendering::StreamEncoder;
 /// the report's `verdict` field distinguishes them.
 const VERDICT_NOT_PASS: u8 = 1;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(
+            self.limits.max_duration_ms,
+        ))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_field_bytes: Bytes @ ObservationCollection,
+            max_evidence_bytes: Bytes @ ObservationCollection,
+            max_details: Count @ ResultRetention,
+            max_detail_bytes: Bytes @ ResultRetention,
+            max_scratch_bytes: Bytes @ Comparison,
+        ]);
+        // Indexing runs only when the compiled rules or filters need the stream
+        // index, which `run` reports once they compile.
+        self.limits.resources(
+            settings,
+            crate::command_options::AnalysisStages {
+                tcp: false,
+                index: crate::resources::Enabled::StreamIndex,
+                provenance: false,
+            },
+        );
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ToolFormat,
@@ -60,6 +100,13 @@ pub(super) fn run(
     .map_err(CliError::classified)?;
     let ingress_filter = compile_selection(arguments.ingress_filter.as_deref(), &prepared)?;
     let egress_filter = compile_selection(arguments.egress_filter.as_deref(), &prepared)?;
+    crate::resources::stream_index_needed(
+        rules.requirements().stream_index
+            || [&ingress_filter, &egress_filter]
+                .into_iter()
+                .flatten()
+                .any(|filter| filter.requirements().stream_index),
+    );
 
     let (ingress, ingress_source) = collect(
         &prepared,

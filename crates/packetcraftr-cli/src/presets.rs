@@ -61,28 +61,10 @@ impl Preset {
     }
 }
 
-fn supported(command: &str) -> bool {
-    matches!(
-        command,
-        "read"
-            | "stats"
-            | "expert"
-            | "follow"
-            | "tls"
-            | "dns-read"
-            | "http"
-            | "export"
-            | "rewrite"
-            | "merge"
-            | "verify-forwarding"
-    )
-}
-
-fn definition(preset: Preset) -> clap::Command {
-    Cli::command().mut_subcommands(|command| {
-        if !supported(command.get_name()) {
-            return command;
-        }
+/// The command-line definition with `preset`'s values as the defaults of the
+/// named subcommand's resource options.
+fn definition(preset: Preset, subcommand: &str) -> clap::Command {
+    Cli::command().mut_subcommand(subcommand, |command| {
         command.mut_args(|arg| {
             if let Some(value) = preset.value(arg.get_id().as_str()) {
                 arg.default_value(value)
@@ -99,13 +81,16 @@ pub(crate) fn parse_from(arguments: Vec<OsString>) -> Result<(Cli, ArgMatches), 
     let Some(preset) = cli.resource_preset else {
         return Ok((cli, matches));
     };
-    if !matches.subcommand_name().is_some_and(supported) {
-        return Err(Cli::command().error(
-            clap::error::ErrorKind::ArgumentConflict,
-            "--resource-preset applies only to offline capture commands",
-        ));
-    }
-    let matches = definition(preset).try_get_matches_from(arguments)?;
+    let subcommand = match matches.subcommand_name() {
+        Some(subcommand) if cli.command.offline() => subcommand,
+        _ => {
+            return Err(Cli::command().error(
+                clap::error::ErrorKind::ArgumentConflict,
+                "--resource-preset applies only to offline capture commands",
+            ));
+        }
+    };
+    let matches = definition(preset, subcommand).try_get_matches_from(arguments)?;
     let cli = Cli::from_arg_matches(&matches)?;
     Ok((cli, matches))
 }
@@ -116,8 +101,11 @@ mod tests {
 
     #[test]
     fn both_presets_build_valid_command_trees() {
-        definition(Preset::CiV1).debug_assert();
-        definition(Preset::WorkstationV1).debug_assert();
+        for preset in [Preset::CiV1, Preset::WorkstationV1] {
+            for subcommand in Cli::command().get_subcommands() {
+                definition(preset, subcommand.get_name()).debug_assert();
+            }
+        }
     }
 
     #[test]

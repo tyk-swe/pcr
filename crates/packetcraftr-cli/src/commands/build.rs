@@ -19,6 +19,24 @@ use crate::rendering::{
     stream_capture_error, write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::BuildFormat;
+    const CANCELLATION: bool = false;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.template.resources(settings);
+        self.budget.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: BuildFormat,

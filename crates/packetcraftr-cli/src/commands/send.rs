@@ -52,6 +52,24 @@ fn sent_line(frame: &packetcraftr::send::SentFrame) -> String {
     )
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::SendFormat;
+    const CANCELLATION: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.send.resources(settings);
+        self.template.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        _stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
     let compression = arguments.send.compression;
     compression.validate(format.as_format())?;

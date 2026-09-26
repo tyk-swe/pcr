@@ -31,6 +31,17 @@ pub(crate) struct ApplicationLimitsArgs {
     pub(crate) max_application_output_bytes: usize,
 }
 impl ApplicationLimitsArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_application_messages: Count @ ActiveState,
+            max_application_streams: Count @ ActiveState,
+            max_application_buffer_bytes: Bytes @ ActiveState,
+            max_application_retained_bytes: Bytes @ ActiveState,
+            max_application_source_spans: Count @ ActiveState,
+            max_application_output_bytes: Bytes @ ResultRetention,
+        ]);
+    }
+
     pub(crate) fn core(self) -> Limits {
         Limits {
             max_messages: self.max_application_messages,

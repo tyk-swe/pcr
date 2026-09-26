@@ -40,6 +40,29 @@ struct ReplayRun {
     requested_interface: Option<net::interface::Id>,
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ExchangeFormat;
+    const CANCELLATION: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(self.max_duration_ms))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        self.reader.resources(settings);
+        self.policy.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ExchangeFormat,

@@ -8,19 +8,29 @@
 //! into `arguments.rs`, `rendering.rs`, and sometimes `conversion.rs` — most
 //! of the live and capture-reading commands. Clap groups several commands
 //! share live under `command_options` instead (`SendArgs` serves `send` and
-//! `exchange`). [`Command::run`] validates the global `--output`
-//! choice before dispatch; [`execution`] composes the live probe providers, and
+//! `exchange`).
+//!
+//! Every command's `Args` implements [`Spec`], and the `commands!` declaration
+//! below lists each command once. Dispatch, the output contract, presets, and
+//! resource diagnostics read their per-command facts from those two places, so
+//! adding a command is one [`Spec`] implementation plus one declared variant.
+//! [`execution`] composes the live probe providers, and
 //! [`render_aggregate_rows`] renders the Text/Json match the aggregate
 //! commands share.
 
-use crate::output::contract::Format;
-use packetcraftr_core::error::Kind;
+use std::time::Duration;
+
+use crate::output::contract::{Format, FormatSubset};
+use packetcraftr_core::error::Kind as ErrorKind;
+use serde::Serialize;
 
 use crate::output;
 use clap::Subcommand;
 
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
+use crate::resources::Settings;
+use crate::startup::Launch;
 
 mod application_output;
 mod build;
@@ -28,7 +38,6 @@ mod capture;
 mod dissect;
 mod dns;
 mod dns_read;
-// `startup` dispatches documentation generation before contract stream setup.
 pub(crate) mod documentation;
 mod exchange;
 mod execution;
@@ -56,241 +65,226 @@ mod tls;
 mod traceroute;
 mod verify_forwarding;
 
-#[derive(Debug, Subcommand)]
-pub(crate) enum Command {
+/// What one command declares about itself, and how it runs.
+///
+/// Implemented by each command's `Args`. Dispatch, the output contract,
+/// `--resource-preset`, and `--resource-diagnostics` read these facts instead
+/// of keeping per-command tables of their own.
+pub(crate) trait Spec: Sized {
+    /// The narrow format enum `run` matches; its
+    /// [`FORMATS`](FormatSubset::FORMATS) are the formats the command's
+    /// output contract admits.
+    type Format: FormatSubset;
+
+    /// Whether shared cancellation is installed before dispatch. Build
+    /// installs its own handler after loading its blocking recipe input.
+    const CANCELLATION: bool;
+
+    /// Whether the command analyzes capture files offline. Only offline
+    /// commands accept `--resource-preset`, and their capture-reader bounds
+    /// are physical-input settings rather than operation settings.
+    const OFFLINE: bool = false;
+
+    /// The operation deadline the invocation publishes under, if the command
+    /// bounds its run time.
+    fn publication_duration(&self) -> Option<Duration> {
+        None
+    }
+
+    /// Declares the command's resource settings for `--resource-diagnostics`.
+    fn resources(&self, _settings: &mut Settings<'_>) {}
+
+    /// Runs the command with its format already narrowed and checked.
+    fn run(self, format: Self::Format, stream: &StreamEncoder) -> Result<CommandExit, CliError>;
+}
+
+/// Declares every command once, in `--help` order.
+///
+/// A variant with a published name is an output-contract command: it gets a
+/// [`Kind`] variant serialized under that name, which is also its
+/// command-line name, and startup publishes it through the contract. A
+/// variant without one (`documentation`) writes files instead of contract
+/// output, so it has no kind.
+macro_rules! commands {
+    (@offline $arguments:ty) => { false };
+    (@offline $arguments:ty, $name:literal) => { <$arguments as Spec>::OFFLINE };
+    (@start $launch:ident, $arguments:ident, $variant:ident) => {
+        $launch.generate($arguments)
+    };
+    (@start $launch:ident, $arguments:ident, $variant:ident, $name:literal) => {
+        $launch.publish(Kind::$variant, $arguments)
+    };
+    // Expands to `$item`; naming `$name` makes the item repeat once per
+    // published command only.
+    (@published $name:literal, $item:expr) => { $item };
+    (
+        $(
+            $(#[$attribute:meta])*
+            $variant:ident($arguments:ty) $(= $name:literal)?,
+        )*
+    ) => {
+        #[derive(Debug, Subcommand)]
+        pub(crate) enum Command {
+            $(
+                $(#[$attribute])*
+                $(#[command(name = $name)])?
+                $variant($arguments),
+            )*
+        }
+
+        impl Command {
+            /// Whether `--resource-preset` applies to this command.
+            pub(crate) const fn offline(&self) -> bool {
+                match self {
+                    $( Self::$variant(_) => commands!(@offline $arguments $(, $name)?), )*
+                }
+            }
+
+            /// Runs the selected command under the startup options.
+            pub(crate) fn start(self, launch: Launch<'_>) -> std::process::ExitCode {
+                match self {
+                    $(
+                        Self::$variant(arguments) => {
+                            commands!(@start launch, arguments, $variant $(, $name)?)
+                        }
+                    )*
+                }
+            }
+        }
+
+        /// CLI command identifier frozen into the output schema: every command
+        /// that publishes through the output contract.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+        pub enum Kind {
+            $( $( #[serde(rename = $name)] $variant, )? )*
+        }
+
+        impl Kind {
+            /// Complete command vocabulary, in `--help` order.
+            pub const ALL: &'static [Self] = &[
+                $( $( commands!(@published $name, Self::$variant), )? )*
+            ];
+
+            /// The serialized name, byte-identical to the command-line name.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( $( Self::$variant => $name, )? )*
+                }
+            }
+
+            /// Formats deliberately supported by this command contract.
+            pub const fn formats(self) -> &'static [Format] {
+                match self {
+                    $(
+                        $(
+                            Self::$variant => commands!(
+                                @published $name,
+                                <<$arguments as Spec>::Format as FormatSubset>::FORMATS
+                            ),
+                        )?
+                    )*
+                }
+            }
+        }
+    };
+}
+
+commands! {
     /// Merge time-ordered captures into scoped PCAPNG.
-    Merge(merge::Args),
+    Merge(merge::Args) = "merge",
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
-    Fragment(fragment::Args),
+    Fragment(fragment::Args) = "fragment",
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
-    Build(build::arguments::Args),
+    Build(build::arguments::Args) = "build",
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = dissect::arguments::AFTER_LONG_HELP)]
-    Dissect(dissect::arguments::Args),
+    Dissect(dissect::arguments::Args) = "dissect",
     /// List built-in protocols or describe one protocol.
     #[command(after_long_help = protocols::arguments::AFTER_LONG_HELP)]
-    Protocols(protocols::arguments::Args),
+    Protocols(protocols::arguments::Args) = "protocols",
     /// Stream frames from a classic PCAP or PCAPNG file.
     #[command(after_long_help = read::arguments::AFTER_LONG_HELP)]
-    Read(read::arguments::Args),
+    Read(read::arguments::Args) = "read",
     /// Enumerate local interfaces.
     #[command(after_long_help = interfaces::AFTER_LONG_HELP)]
-    Interfaces(interfaces::Args),
+    Interfaces(interfaces::Args) = "interfaces",
     /// Passively select route, source, MTU, and link mode.
     #[command(after_long_help = plan::arguments::AFTER_LONG_HELP)]
-    Plan(plan::arguments::Args),
+    Plan(plan::arguments::Args) = "plan",
     /// Transmit a packet under traffic policy.
     #[command(after_long_help = send::arguments::AFTER_LONG_HELP)]
-    Send(send::arguments::Args),
+    Send(send::arguments::Args) = "send",
     /// Capture-ready request/response exchange.
     #[command(after_long_help = exchange::arguments::AFTER_LONG_HELP)]
-    Exchange(exchange::arguments::Args),
+    Exchange(exchange::arguments::Args) = "exchange",
     /// Stream live captured frames.
     #[command(after_long_help = capture::arguments::AFTER_LONG_HELP)]
-    Capture(capture::arguments::Args),
+    Capture(capture::arguments::Args) = "capture",
     /// Report protocol health findings over a capture file.
     #[command(after_long_help = expert::arguments::AFTER_LONG_HELP)]
-    Expert(expert::arguments::Args),
+    Expert(expert::arguments::Args) = "expert",
     /// Extract one conversation's payload from a capture file.
     #[command(after_long_help = follow::arguments::AFTER_LONG_HELP)]
-    Follow(follow::arguments::Args),
+    Follow(follow::arguments::Args) = "follow",
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = replay::arguments::AFTER_LONG_HELP)]
-    Replay(replay::arguments::Args),
+    Replay(replay::arguments::Args) = "replay",
     /// Run a structured network scan.
     #[command(after_long_help = scan::arguments::AFTER_LONG_HELP)]
-    Scan(scan::arguments::Args),
+    Scan(scan::arguments::Args) = "scan",
     /// Compute aggregate statistics over a capture file.
     #[command(after_long_help = stats::arguments::AFTER_LONG_HELP)]
-    Stats(stats::arguments::Args),
+    Stats(stats::arguments::Args) = "stats",
     /// Assemble TLS handshake sessions from a capture file.
     #[command(after_long_help = tls::arguments::AFTER_LONG_HELP)]
-    Tls(tls::arguments::Args),
+    Tls(tls::arguments::Args) = "tls",
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = traceroute::arguments::LONG_ABOUT,
         after_long_help = traceroute::arguments::AFTER_LONG_HELP
     )]
-    Traceroute(traceroute::arguments::Args),
+    Traceroute(traceroute::arguments::Args) = "traceroute",
     /// Run bounded DNS over UDP, TCP, or UDP with TCP fallback.
     #[command(
         long_about = dns::arguments::LONG_ABOUT,
         after_long_help = dns::arguments::AFTER_LONG_HELP
     )]
-    Dns(dns::arguments::Args),
+    Dns(dns::arguments::Args) = "dns",
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
-    DnsRead(dns_read::Args),
+    DnsRead(dns_read::Args) = "dns-read",
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
-    Http(http::Args),
+    Http(http::Args) = "http",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
-    Export(export::Args),
+    Export(export::Args) = "export",
     /// Rewrite capture headers with checked lengths and transport checksums.
-    Rewrite(rewrite::Args),
+    Rewrite(rewrite::Args) = "rewrite",
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]
-    Fuzz(fuzz::arguments::Args),
+    Fuzz(fuzz::arguments::Args) = "fuzz",
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = routes::AFTER_LONG_HELP)]
-    Routes(routes::Args),
+    Routes(routes::Args) = "routes",
     /// Compare ingress and egress captures under explicit identity rules.
     #[command(after_long_help = verify_forwarding::arguments::AFTER_LONG_HELP)]
-    VerifyForwarding(verify_forwarding::arguments::Args),
+    VerifyForwarding(verify_forwarding::arguments::Args) = "verify-forwarding",
     /// Generate shell completions and man pages under a directory.
     Documentation(documentation::Args),
 }
 
-impl Command {
-    /// The published machine-output kind; `None` for commands that generate
-    /// files instead of producing contract output.
-    pub(crate) const fn kind(&self) -> Option<output::contract::Command> {
-        Some(match self {
-            Self::Merge(_) => output::contract::Command::Merge,
-            Self::Fragment(_) => output::contract::Command::Fragment,
-            Self::Build(_) => output::contract::Command::Build,
-            Self::Dissect(_) => output::contract::Command::Dissect,
-            Self::Protocols(_) => output::contract::Command::Protocols,
-            Self::Read(_) => output::contract::Command::Read,
-            Self::Interfaces(_) => output::contract::Command::Interfaces,
-            Self::Plan(_) => output::contract::Command::Plan,
-            Self::Send(_) => output::contract::Command::Send,
-            Self::Exchange(_) => output::contract::Command::Exchange,
-            Self::Capture(_) => output::contract::Command::Capture,
-            Self::Expert(_) => output::contract::Command::Expert,
-            Self::Follow(_) => output::contract::Command::Follow,
-            Self::Replay(_) => output::contract::Command::Replay,
-            Self::Scan(_) => output::contract::Command::Scan,
-            Self::Stats(_) => output::contract::Command::Stats,
-            Self::Tls(_) => output::contract::Command::Tls,
-            Self::Traceroute(_) => output::contract::Command::Traceroute,
-            Self::Dns(_) => output::contract::Command::Dns,
-            Self::DnsRead(_) => output::contract::Command::DnsRead,
-            Self::Http(_) => output::contract::Command::Http,
-            Self::Export(_) => output::contract::Command::Export,
-            Self::Rewrite(_) => output::contract::Command::Rewrite,
-            Self::Fuzz(_) => output::contract::Command::Fuzz,
-            Self::Routes(_) => output::contract::Command::Routes,
-            Self::VerifyForwarding(_) => output::contract::Command::VerifyForwarding,
-            Self::Documentation(_) => return None,
-        })
-    }
-
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        let millis = match self {
-            Self::Stats(args) => args.limits.max_duration_ms,
-            Self::Expert(args) => args.limits.max_duration_ms,
-            Self::Follow(args) => args.limits.max_duration_ms,
-            Self::Tls(args) => args.limits.max_duration_ms,
-            Self::DnsRead(args) => args.limits.max_duration_ms,
-            Self::Http(args) => args.limits.max_duration_ms,
-            Self::Export(args) => args.limits.max_duration_ms,
-            Self::VerifyForwarding(args) => args.limits.max_duration_ms,
-            Self::Rewrite(args) => args.max_duration_ms,
-            Self::Replay(args) => args.max_duration_ms,
-            Self::Scan(args) => args.max_duration_ms,
-            Self::Traceroute(args) => args.max_duration_ms,
-            Self::Dns(args) => args.max_duration_ms,
-            Self::Fuzz(args) => args.max_duration_ms,
-            _ => return None,
-        };
-        Some(std::time::Duration::from_millis(millis))
-    }
-
-    /// Install shared cancellation before dispatch for these workflows.
-    /// Build installs its handler after loading its blocking recipe input.
-    pub(crate) fn supports_cancellation(&self) -> bool {
-        matches!(
-            self,
-            Self::Merge(_)
-                | Self::Fragment(_)
-                | Self::Read(_)
-                | Self::Send(_)
-                | Self::Capture(_)
-                | Self::Exchange(_)
-                | Self::Expert(_)
-                | Self::Follow(_)
-                | Self::Replay(_)
-                | Self::Scan(_)
-                | Self::Stats(_)
-                | Self::Tls(_)
-                | Self::Traceroute(_)
-                | Self::Rewrite(_)
-                | Self::Export(_)
-                | Self::Http(_)
-                | Self::DnsRead(_)
-                | Self::Dns(_)
-                | Self::Fuzz(_)
-                | Self::VerifyForwarding(_)
-        )
-    }
-
-    /// Dispatches to the selected command.
-    ///
-    /// Rejects unsupported output formats before any command performs work.
-    /// Each arm narrows the shared [`Format`] into the command's own format
-    /// enum, so command code matches exhaustively instead of trusting a
-    /// catch-all `unreachable!`.
-    pub(crate) fn run(
-        self,
-        format: Format,
-        stream: &StreamEncoder,
-    ) -> Result<CommandExit, CliError> {
-        // Documentation generates files outside the output contract, so
-        // startup dispatches it before stream setup and never reaches here.
-        let kind = self
-            .kind()
-            .expect("non-documentation commands have an output contract kind");
-        let _invocation = crate::invocation::enter(self.publication_duration());
-        let publisher =
-            crate::invocation::deadline().map(|deadline| stream.clone().with_deadline(deadline));
-        let stream = publisher.as_ref().unwrap_or(stream);
-        let result = match self {
-            Self::Merge(arguments) => merge::run(arguments, kind.require_format(format)?, stream),
-            Self::Fragment(arguments) => {
-                fragment::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Build(arguments) => build::run(arguments, kind.require_format(format)?, stream),
-            Self::Dissect(arguments) => {
-                dissect::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Protocols(arguments) => protocols::run(arguments, kind.require_format(format)?),
-            Self::Read(arguments) => read::run(arguments, kind.require_format(format)?, stream),
-            Self::Interfaces(arguments) => interfaces::run(arguments, kind.require_format(format)?),
-            Self::Plan(arguments) => plan::run(arguments, kind.require_format(format)?),
-            Self::Send(arguments) => send::run(arguments, kind.require_format(format)?),
-            Self::Capture(arguments) => {
-                capture::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Expert(arguments) => expert::run(arguments, kind.require_format(format)?, stream),
-            Self::Follow(arguments) => follow::run(arguments, kind.require_format(format)?, stream),
-            Self::Exchange(arguments) => {
-                exchange::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Replay(arguments) => replay::run(arguments, kind.require_format(format)?, stream),
-            Self::Scan(arguments) => scan::run(arguments, kind.require_format(format)?, stream),
-            Self::Stats(arguments) => stats::run(arguments, kind.require_format(format)?),
-            Self::Tls(arguments) => tls::run(arguments, kind.require_format(format)?, stream),
-            Self::DnsRead(arguments) => {
-                dns_read::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Http(arguments) => http::run(arguments, kind.require_format(format)?, stream),
-            Self::Export(arguments) => export::run(arguments, kind.require_format(format)?, stream),
-            Self::Rewrite(arguments) => {
-                rewrite::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Traceroute(arguments) => {
-                traceroute::run(arguments, kind.require_format(format)?, stream)
-            }
-            Self::Dns(arguments) => dns::run(arguments, kind.require_format(format)?, stream),
-            Self::Fuzz(arguments) => fuzz::run(arguments, kind.require_format(format)?, stream),
-            Self::Routes(arguments) => routes::run(arguments, kind.require_format(format)?),
-            Self::VerifyForwarding(arguments) => {
-                return verify_forwarding::run(arguments, kind.require_format(format)?, stream);
-            }
-            Self::Documentation(_) => unreachable!("documentation returned before dispatch"),
-        };
-        result.map(|()| CommandExit::SUCCESS)
-    }
+/// Runs one contract command: enters its publication deadline, rejects an
+/// unsupported output format before any work, and dispatches.
+pub(crate) fn execute<T: Spec>(
+    kind: Kind,
+    arguments: T,
+    format: Format,
+    stream: &StreamEncoder,
+) -> Result<CommandExit, CliError> {
+    let _invocation = crate::invocation::enter(arguments.publication_duration());
+    let publisher =
+        crate::invocation::deadline().map(|deadline| stream.clone().with_deadline(deadline));
+    let stream = publisher.as_ref().unwrap_or(stream);
+    arguments.run(kind.require_format(format)?, stream)
 }
 
 /// The process status of a command that published its output.
@@ -339,5 +333,158 @@ fn render_aggregate_rows<T, R: serde::Serialize>(
 fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {
     value
         .checked_add(1)
-        .ok_or_else(|| CliError::new(Kind::Internal, format!("{counter} overflowed")))
+        .ok_or_else(|| CliError::new(ErrorKind::Internal, format!("{counter} overflowed")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use clap::{CommandFactory, FromArgMatches};
+
+    use super::*;
+    use crate::cli::Cli;
+
+    /// A command line, and the check of its command's bound declarations.
+    type Case = (&'static [&'static str], fn(&[&str]) -> Vec<String>);
+
+    /// The `--max-*` bounds `arguments` accept but do not declare as resource
+    /// settings.
+    fn undeclared_bounds<T: Spec + FromArgMatches>(argv: &[&str]) -> Vec<String> {
+        let matches = Cli::command()
+            .try_get_matches_from(std::iter::once("packetcraftr").chain(argv.iter().copied()))
+            .unwrap_or_else(|error| panic!("{argv:?}: {error}"));
+        let (name, selected) = matches.subcommand().expect("a selected command");
+        let arguments = T::from_arg_matches(selected).expect("typed arguments");
+        let declared = crate::resources::settings(&matches, &arguments, None, None, Format::Json)
+            .into_iter()
+            .map(|(setting, _)| setting.name)
+            .collect::<BTreeSet<_>>();
+        Cli::command()
+            .find_subcommand(name)
+            .expect("selected command definition")
+            .get_arguments()
+            .filter(|arg| arg.get_id().as_str().starts_with("max_"))
+            .filter_map(|arg| arg.get_long().map(|long| format!("--{long}")))
+            .filter(|name| !declared.contains(name))
+            .collect()
+    }
+
+    /// Resource diagnostics come from each command's typed declarations, so a
+    /// new `--max-*` bound that its command forgets to declare would silently
+    /// vanish from the report.
+    #[test]
+    fn every_command_declares_each_of_its_bounds() {
+        const CAPTURE: &str = "capture.pcap";
+        const PACKET: &str = "ipv4(destination=192.0.2.1)/raw(text=hello)";
+        let cases: &[Case] = &[
+            (
+                &["merge", "--write", "m.pcapng", CAPTURE, CAPTURE],
+                undeclared_bounds::<merge::Args>,
+            ),
+            (
+                &["fragment", "--mtu", "576", "--packet", PACKET],
+                undeclared_bounds::<fragment::Args>,
+            ),
+            (
+                &["build", "--packet", PACKET],
+                undeclared_bounds::<build::arguments::Args>,
+            ),
+            (
+                &["dissect", "--hex", "00"],
+                undeclared_bounds::<dissect::arguments::Args>,
+            ),
+            (
+                &["protocols"],
+                undeclared_bounds::<protocols::arguments::Args>,
+            ),
+            (
+                &["read", CAPTURE],
+                undeclared_bounds::<read::arguments::Args>,
+            ),
+            (&["interfaces"], undeclared_bounds::<interfaces::Args>),
+            (
+                &["plan", "--destination", "192.0.2.1"],
+                undeclared_bounds::<plan::arguments::Args>,
+            ),
+            (
+                &["send", "--packet", PACKET],
+                undeclared_bounds::<send::arguments::Args>,
+            ),
+            (
+                &["exchange", "--packet", PACKET],
+                undeclared_bounds::<exchange::arguments::Args>,
+            ),
+            (
+                &["capture", "--interface", "lo"],
+                undeclared_bounds::<capture::arguments::Args>,
+            ),
+            (
+                &["expert", CAPTURE],
+                undeclared_bounds::<expert::arguments::Args>,
+            ),
+            (
+                &["follow", "--stream", "tcp:0", CAPTURE],
+                undeclared_bounds::<follow::arguments::Args>,
+            ),
+            (
+                &["replay", "--interface", "lo", CAPTURE],
+                undeclared_bounds::<replay::arguments::Args>,
+            ),
+            (
+                &["scan", "192.0.2.1"],
+                undeclared_bounds::<scan::arguments::Args>,
+            ),
+            (
+                &["stats", CAPTURE],
+                undeclared_bounds::<stats::arguments::Args>,
+            ),
+            (&["tls", CAPTURE], undeclared_bounds::<tls::arguments::Args>),
+            (
+                &["traceroute", "192.0.2.1"],
+                undeclared_bounds::<traceroute::arguments::Args>,
+            ),
+            (
+                &["dns", "192.0.2.53", "example.com"],
+                undeclared_bounds::<dns::arguments::Args>,
+            ),
+            (&["dns-read", CAPTURE], undeclared_bounds::<dns_read::Args>),
+            (&["http", CAPTURE], undeclared_bounds::<http::Args>),
+            (
+                &["export", "--write", "e.pcapng", CAPTURE],
+                undeclared_bounds::<export::Args>,
+            ),
+            (
+                &["rewrite", "--write", "r.pcapng", CAPTURE],
+                undeclared_bounds::<rewrite::Args>,
+            ),
+            (
+                &["fuzz", "--packet", PACKET],
+                undeclared_bounds::<fuzz::arguments::Args>,
+            ),
+            (&["routes"], undeclared_bounds::<routes::Args>),
+            (
+                &[
+                    "verify-forwarding",
+                    CAPTURE,
+                    CAPTURE,
+                    "--identity",
+                    "ipv4.identification",
+                ],
+                undeclared_bounds::<verify_forwarding::arguments::Args>,
+            ),
+        ];
+        for (argv, undeclared) in cases {
+            assert_eq!(undeclared(argv), Vec::<String>::new(), "{}", argv[0]);
+        }
+        let covered = cases
+            .iter()
+            .map(|(argv, _)| argv[0])
+            .collect::<BTreeSet<_>>();
+        let published = Kind::ALL
+            .iter()
+            .map(|kind| kind.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(covered, published);
+    }
 }

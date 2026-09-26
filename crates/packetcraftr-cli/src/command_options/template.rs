@@ -45,6 +45,10 @@ pub(crate) struct ParsedTemplate {
 }
 
 impl TemplateArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_template_packets: Count @ Operation]);
+    }
+
     /// Check syntax, aggregate input size, and the complete expansion ceiling
     /// before a caller reads its recipe or performs route preparation.
     pub(crate) fn parse(self) -> Result<ParsedTemplate, CliError> {

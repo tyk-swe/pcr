@@ -22,6 +22,35 @@ use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(self.max_duration_ms))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_hops: Count @ Operation,
+            timeout_ms: Milliseconds @ Operation,
+            max_probes: Count @ Operation,
+            max_duration_ms: Milliseconds @ Operation,
+            max_undecoded: Count @ ResultRetention,
+        ]);
+        self.limits.resources(settings);
+        self.policy.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ToolFormat,

@@ -115,6 +115,13 @@ All notable changes to PacketcraftR are documented here. The format follows
   with the same items. `protocol::raw` is removed: the `Raw`, `Padding`, and
   `Malformed` layers and their codecs belong to `layer`, and `parse_hex` moves
   to `layer::parse_hex`. See `docs/migration-unreleased.md`.
+- CLI `output::contract::Command` is declared once with the command line it
+  names: `Command::ALL` lists commands in `--help` order instead of a separate
+  canonical order. The per-command format enums implement the new
+  `output::contract::FormatSubset` trait, which carries `FORMATS` in place of
+  the inherent constant, and `Command::require_format` takes
+  `F: FormatSubset`. Serialized command names and formats are unchanged. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

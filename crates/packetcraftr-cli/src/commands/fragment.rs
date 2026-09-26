@@ -37,6 +37,27 @@ pub(crate) struct Args {
     pub(crate) budget: PacketBudgetArgs,
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::CaptureFormat;
+    const CANCELLATION: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_fragments: Count @ Operation,
+            max_output_bytes: Bytes @ ResultRetention,
+        ]);
+        self.budget.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(crate) fn run(
     args: Args,
     format: CaptureFormat,

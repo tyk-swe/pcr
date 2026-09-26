@@ -18,6 +18,30 @@ use super::{execution, preparation};
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ExchangeFormat;
+    const CANCELLATION: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.send.resources(settings);
+        self.template.resources(settings);
+        crate::resources::declare!(settings, self, [
+            timeout_ms: Milliseconds @ Operation,
+            max_responses: Count @ ResultRetention,
+            max_unmatched_frames: Count @ ResultRetention,
+        ]);
+        self.limits.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ExchangeFormat,

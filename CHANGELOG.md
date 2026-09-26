@@ -511,6 +511,10 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `packetcraftr_netio::route::SystemProvider` rejects a preferred source of
+  the other address family (`io.route_selection`) in builds without
+  `native-route` too, before reporting the missing capability
+  (`capability.route`).
 - `rewrite` and `fragment` validate every IPv6 extension header and IP option
   they step over. A malformed length in a source-route, Home Address,
   routing, fragment, or AH header now reports `packet.transform_input` where

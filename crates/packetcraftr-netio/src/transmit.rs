@@ -297,16 +297,6 @@ impl Provider for SystemProvider {
     }
 }
 
-impl<S, C> Provider for crate::PacketIo<S, C>
-where
-    S: Provider,
-    C: Send + Sync,
-{
-    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
-        self.sender.send(outbound)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Duration;

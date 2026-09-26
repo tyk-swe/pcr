@@ -221,6 +221,16 @@ pub struct DeadlineExceeded {
     pub limit: Duration,
 }
 
+impl crate::error::Classified for DeadlineExceeded {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "policy.duration_limit",
+            crate::error::Kind::Policy,
+            Some("reduce input or raise the finite invocation duration"),
+        )
+    }
+}
+
 /// Why a [`Deadline::enforce`] gate refused to continue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -237,6 +247,15 @@ impl Interrupted {
         match self {
             Self::Cancelled(cancelled) => cancelled.into(),
             Self::Exceeded(exceeded) => exceeded.into(),
+        }
+    }
+}
+
+impl crate::error::Classified for Interrupted {
+    fn classification(&self) -> crate::error::Classification {
+        match self {
+            Self::Cancelled(source) => source.classification(),
+            Self::Exceeded(source) => source.classification(),
         }
     }
 }

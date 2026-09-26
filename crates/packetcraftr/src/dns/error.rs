@@ -10,7 +10,7 @@ use crate::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::protocol::application::dns::name;
 
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
 pub enum WireError {
     #[error("DNS construction failed: {0}")]

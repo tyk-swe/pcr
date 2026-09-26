@@ -19,9 +19,9 @@ use crate::{
 
 use crate::protocol::common::{
     ValueExpectation, checksum, child_is_opaque, expected_discriminator, invalid, make_layer,
-    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, protocol,
-    resolve_u8, resolve_u16, strict_or_diagnostic, truncated, typed_layer,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    network_from_addresses, pad_options_to_four_bytes, payload_without_padding, protocol, rejected,
+    resolve_u8, resolve_u16, strict_or_diagnostic, strict_or_diagnostic_error, truncated,
+    typed_layer, validate_auto_raw_discriminator, validate_raw_child_discriminator,
 };
 
 use super::envelope::is_outer_network_layer;
@@ -232,7 +232,7 @@ impl LayerCodec for Ipv4Codec {
         let source = Ipv4Addr::new(header[12], header[13], header[14], header[15]);
         let destination = Ipv4Addr::new(header[16], header[17], header[18], header[19]);
         let pseudo_header_destination = ipv4_source_route_destination(destination, options)
-            .map_err(|error| invalid(NAME, error.to_string()))?;
+            .map_err(|error| rejected(NAME, error))?;
         let mut diagnostics = Vec::new();
         if checksum(full_header) != 0 {
             diagnostics.push(
@@ -337,11 +337,11 @@ fn prepare_payload(
     // The decoder refuses an option list it cannot walk, because it may hide a
     // source-routed destination, so strict mode must not emit one.
     if let Err(error) = ipv4_source_route_destination(layer.destination, &options) {
-        strict_or_diagnostic(
+        strict_or_diagnostic_error(
             NAME,
             "build.ipv4_options",
             "options",
-            error.to_string(),
+            error,
             context,
             &mut diagnostics,
         )?;

@@ -11,6 +11,8 @@
 
 use bytes::Bytes;
 
+use crate::protocol::application::dns::Error;
+
 /// The largest label a name may carry, in octets (RFC 1035 §2.3.4).
 pub const MAX_LABEL_LEN: usize = 63;
 
@@ -32,42 +34,6 @@ pub struct Decompressed {
     pub resume: usize,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    /// The label-length byte at `offset` is past the end of the message.
-    #[error("DNS name label length at byte {offset} is truncated")]
-    TruncatedLabelLength { offset: usize },
-    /// The second byte of the compression pointer starting at `offset` is
-    /// past the end of the message.
-    #[error("DNS name compression pointer at byte {offset} is truncated")]
-    TruncatedPointer { offset: usize },
-    /// The label body starting at `offset` needs octets through `end`, which
-    /// the message does not have.
-    #[error("DNS name label at byte {offset} is truncated before byte {end}")]
-    TruncatedLabel { offset: usize, end: usize },
-    #[error("DNS name compression pointer {pointer} is outside the {length}-byte message")]
-    PointerOutOfBounds { pointer: usize, length: usize },
-    #[error("DNS name compression pointer at byte {offset} addresses itself")]
-    SelfPointer { offset: usize },
-    /// A compression pointer addresses a later offset, which cannot terminate.
-    #[error("DNS name compression pointer at byte {offset} points forward to byte {pointer}")]
-    ForwardPointer { offset: usize, pointer: usize },
-    #[error("DNS name compression pointer loop was detected at byte {offset}")]
-    PointerLoop { offset: usize },
-    #[error("DNS name uses more than {limit} compression pointers")]
-    PointerLimit { limit: usize },
-    /// A label length byte uses one of the two reserved tag values.
-    #[error("DNS label at byte {offset} uses a reserved length encoding")]
-    ReservedLabelLength { offset: usize },
-    /// A label declares more than [`MAX_LABEL_LEN`] octets.
-    #[error("DNS label at byte {offset} is {actual} bytes; maximum is {MAX_LABEL_LEN}")]
-    LabelTooLong { offset: usize, actual: usize },
-    /// The expanded name exceeds [`MAX_NAME_LEN`] wire octets.
-    #[error("DNS name exceeds the {MAX_NAME_LEN}-byte wire limit")]
-    NameTooLong,
-}
-
 /// Expands the possibly-compressed DNS name that starts at `offset` in
 /// `message`, following at most `max_pointers` compression pointers.
 ///
@@ -84,7 +50,7 @@ pub enum Error {
 /// # Examples
 ///
 /// ```
-/// use packetcraftr_core::protocol::application::dns::name;
+/// use packetcraftr_core::protocol::application::dns::{Error, name};
 ///
 /// // "a" then a pointer back to the root label at offset 0.
 /// let message = [0x00, 0x01, b'a', 0xc0, 0x00];
@@ -94,10 +60,10 @@ pub enum Error {
 /// assert_eq!(expanded.resume, 5);
 ///
 /// // A pointer that does not move backward cannot terminate.
-/// assert_eq!(
+/// assert!(matches!(
 ///     name::decompress(&bytes::Bytes::from_static(&[0xc0, 0x00]), 0, 32),
-///     Err(name::Error::SelfPointer { offset: 0 }),
-/// );
+///     Err(Error::SelfPointer { offset: 0 }),
+/// ));
 /// ```
 pub fn decompress(
     message: &Bytes,
@@ -229,34 +195,34 @@ mod tests {
 
     #[test]
     fn pointers_must_address_a_strictly_earlier_offset() {
-        assert_eq!(
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0xc0, 0x00]), 0, 32),
             Err(Error::SelfPointer { offset: 0 })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0xc0, 0x02, 0x00]), 0, 32),
             Err(Error::ForwardPointer {
                 offset: 0,
                 pointer: 2
             })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0xc0, 0x09]), 0, 32),
             Err(Error::PointerOutOfBounds {
                 pointer: 9,
                 length: 2
             })
-        );
+        ));
     }
 
     #[test]
     fn an_offset_is_never_expanded_twice() {
         // Enter at 5, hop to 1, read "a", then hop to 1 again.
         let message = [0, 1, b'a', 0xc0, 0x01, 0xc0, 0x01];
-        assert_eq!(
+        assert!(matches!(
             decompress(&Bytes::copy_from_slice(&message), 5, 32),
             Err(Error::PointerLoop { offset: 1 })
-        );
+        ));
     }
 
     #[test]
@@ -270,10 +236,10 @@ mod tests {
             message.extend_from_slice(&pointer.to_be_bytes());
             previous = offset;
         }
-        assert_eq!(
+        assert!(matches!(
             decompress(&Bytes::copy_from_slice(&message), previous, 32),
             Err(Error::PointerLimit { limit: 32 })
-        );
+        ));
         assert!(decompress(&Bytes::copy_from_slice(&message), previous, 33).is_ok());
         // Entering one trampoline earlier is exactly 32 hops, which fits, and
         // resumes two bytes past the pointer it started on.
@@ -293,33 +259,33 @@ mod tests {
             message.extend_from_slice(&[3, b'a', b'b', b'c']);
         }
         message.push(0);
-        assert_eq!(
+        assert!(matches!(
             decompress(&Bytes::copy_from_slice(&message), 0, 32),
             Err(Error::NameTooLong)
-        );
+        ));
     }
 
     #[test]
     fn reserved_and_truncated_encodings_are_refused() {
-        assert_eq!(
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0x40, 0]), 0, 32),
             Err(Error::ReservedLabelLength { offset: 0 })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0x80, 0]), 0, 32),
             Err(Error::ReservedLabelLength { offset: 0 })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[]), 0, 32),
             Err(Error::TruncatedLabelLength { offset: 0 })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[0xc0]), 0, 32),
             Err(Error::TruncatedPointer { offset: 0 })
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             decompress(&Bytes::from_static(&[3, b'a']), 0, 32),
             Err(Error::TruncatedLabel { offset: 1, end: 4 })
-        );
+        ));
     }
 }

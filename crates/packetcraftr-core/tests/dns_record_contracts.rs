@@ -9,12 +9,13 @@ use packetcraftr_core::{
     layer::{Layer, Malformed, Raw},
     packet::Packet,
     protocol::{
-        application::dns::{DecodeLimits, Dns, Error as DecodeError, Name, RecordValue, name},
+        application::dns::{DecodeLimits, Dns, Error as DecodeError, Name, RecordValue},
         builtin,
         network::Ipv4,
         transport::Udp,
     },
 };
+use std::collections::BTreeMap;
 use std::time::{Duration, UNIX_EPOCH};
 
 fn question() -> Vec<u8> {
@@ -24,35 +25,54 @@ fn question() -> Vec<u8> {
 }
 
 #[test]
-fn malformed_names_retain_the_original_typed_cause() {
+fn dns_codec_failures_keep_the_dns_error_as_their_source() {
+    use packetcraftr_core::error::{Classified, source_chain};
     use std::error::Error as _;
 
-    for (suffix, expected) in [
-        (
-            &b"\x03a"[..],
-            name::Error::TruncatedLabel {
-                offset: 13,
-                end: 16,
-            },
-        ),
-        (&b"\xc0\x0c"[..], name::Error::SelfPointer { offset: 12 }),
-        (
-            &b"\x01a\xc0\x0c"[..],
-            name::Error::PointerLoop { offset: 12 },
-        ),
-    ] {
+    type Expected = fn(&DecodeError) -> bool;
+    let cases: [(&[u8], Expected); 2] = [
+        (b"\xc0\x0c", |error| {
+            matches!(error, DecodeError::SelfPointer { offset: 12 })
+        }),
+        (b"\x01a\xc0\x0c", |error| {
+            matches!(error, DecodeError::PointerLoop { offset: 12 })
+        }),
+    ];
+    let registry = builtin::registry();
+    let dns = registry.codec("dns").expect("built-in DNS codec");
+    for (suffix, expected) in cases {
         let mut wire = question();
         wire.truncate(12);
         wire.extend_from_slice(suffix);
-        let error = Dns::from_wire_with_limits(wire, DecodeLimits::default()).unwrap_err();
-        assert_eq!(error, DecodeError::Name(expected));
-        assert_eq!(
-            error.source().unwrap().downcast_ref::<name::Error>(),
-            Some(&expected)
-        );
-        assert_eq!(error.to_string(), expected.to_string());
-        assert!(packetcraftr_core::error::source_chain(&error).is_empty());
+        let direct = Dns::from_wire_with_limits(wire.clone(), DecodeLimits::default()).unwrap_err();
+        assert!(expected(&direct), "{direct:?}");
+
+        let fields = BTreeMap::from([("wire".to_owned(), FieldValue::Bytes(Bytes::from(wire)))]);
+        let error = dns.make_layer(&fields).unwrap_err();
+        assert!(matches!(error, codec::Error::Rejected { .. }), "{error:?}");
+        assert_eq!(error.to_string(), "invalid dns layer");
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<DecodeError>())
+            .expect("the DNS error is the codec error's source");
+        assert!(expected(source), "{source:?}");
+        assert_eq!(source_chain(&error), [direct.to_string()]);
+        assert_eq!(error.classification().code, "packet.codec");
     }
+}
+
+#[test]
+fn truncated_names_report_the_bytes_they_need() {
+    let mut wire = question();
+    wire.truncate(12);
+    wire.extend_from_slice(b"\x03a");
+    assert!(matches!(
+        Dns::from_wire_with_limits(wire, DecodeLimits::default()),
+        Err(DecodeError::TruncatedLabel {
+            offset: 13,
+            end: 16
+        })
+    ));
 }
 
 fn record(wire: &mut Vec<u8>, owner: &[u8], kind: u16, class: u16, ttl: u32, data: &[u8]) {
@@ -285,7 +305,7 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
                 max_name_pointers: 0,
                 ..defaults
             },
-            |e| matches!(e, DecodeError::Name(name::Error::PointerLimit { limit: 0 })),
+            |e| matches!(e, DecodeError::PointerLimit { limit: 0 }),
         ),
         (
             DecodeLimits {
@@ -332,11 +352,11 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
     overlong.extend_from_slice(&[0, 0, 1, 0, 1]);
     assert!(matches!(
         Dns::from_wire_with_limits(overlong, defaults),
-        Err(DecodeError::Name(name::Error::NameTooLong))
+        Err(DecodeError::NameTooLong)
     ));
     assert!(matches!(
         Name::from_labels(std::iter::repeat(Bytes::from_static(b"a"))),
-        Err(DecodeError::Name(name::Error::NameTooLong))
+        Err(DecodeError::NameTooLong)
     ));
     let unbounded = DecodeLimits {
         max_message_bytes: usize::MAX,

@@ -449,7 +449,7 @@ where
                     if diagnostics.insert("decode") {
                         emit(PipelineEvent::Diagnostic(Diagnostic::warning(
                             "scan.decode_error",
-                            error.to_string(),
+                            packetcraftr_core::error::render(&error),
                         )))?;
                     }
                     if undecoded < options.max_undecoded {

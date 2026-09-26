@@ -8,8 +8,8 @@ use super::{
     Hello, HelloExtension, HelloKind, MAX_ALPN, MAX_CIPHER_SUITES, MAX_EXTENSIONS, Tls, hex,
 };
 use crate::{
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, reflective_layer},
+    field::{self, FieldKind, FieldValue},
+    layer::{FieldSchema, reflective_layer},
     protocol::common::{
         out_of_range, protocol, read_only,
         structured::{Object, list, member, object},
@@ -18,7 +18,7 @@ use crate::{
 };
 
 impl Tls {
-    fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::layer::FieldError> {
+    fn set_hello(&mut self, value: FieldValue) -> Result<(), crate::field::Error> {
         let hello = Hello::from_value(value)?;
         let replacement = Self::try_from(hello)
             .map_err(|_| crate::protocol::common::out_of_range(tls_schema(), "hello"))?;
@@ -62,7 +62,7 @@ impl Hello {
             ),
         ])
     }
-    fn from_value(value: FieldValue) -> Result<Self, FieldError> {
+    fn from_value(value: FieldValue) -> Result<Self, field::Error> {
         let mut o = Object::new(value, tls_schema(), "hello")?;
         let mut hello = Self::default();
         hello.kind = match o.value("kind", "client".to_owned())?.as_str() {
@@ -120,7 +120,7 @@ impl Hello {
                             }
                             Ok(bytes)
                         })
-                        .collect::<Result<Vec<_>, FieldError>>()?;
+                        .collect::<Result<Vec<_>, field::Error>>()?;
                     HelloExtension::alpn(&protocols)
                         .map_err(|_| out_of_range(tls_schema(), "alpn"))?
                 } else {

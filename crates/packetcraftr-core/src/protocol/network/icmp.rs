@@ -11,8 +11,8 @@ use bytes::Bytes;
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, ICMPV4_CHECKSUM, ICMPV6_CHECKSUM},
-    field::{FieldValue, WireValue},
-    layer::{FieldError, Layer, reflective_layer},
+    field::{self, FieldValue, WireValue},
+    layer::{Layer, reflective_layer},
     layout::{ByteRange, FieldLayout},
 };
 
@@ -112,7 +112,7 @@ fn body_unsigned_value(
     schema: &'static crate::layer::Schema,
     field: &str,
     value: FieldValue,
-) -> Result<u64, FieldError> {
+) -> Result<u64, field::Error> {
     match value {
         FieldValue::Unsigned(value) => Ok(value),
         _ => Err(wrong_type(schema, field, "unsigned")),
@@ -122,7 +122,7 @@ fn body_unsigned_value(
 macro_rules! icmp_body_view_setters {
     ($schema:ident) => {
         /// Edits the `identifier` view: the echo identifier at body bytes 0-2.
-        fn set_identifier(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+        fn set_identifier(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             let value = body_unsigned_value($schema(), name, value)?;
             let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
             patch_body(&mut self.body, 0, &value.to_be_bytes());
@@ -130,7 +130,7 @@ macro_rules! icmp_body_view_setters {
         }
 
         /// Edits the `sequence` view: the echo sequence at body bytes 2-4.
-        fn set_sequence(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+        fn set_sequence(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             let value = body_unsigned_value($schema(), name, value)?;
             let value = u16::try_from(value).map_err(|_| out_of_range($schema(), name))?;
             patch_body(&mut self.body, 2, &value.to_be_bytes());
@@ -138,7 +138,7 @@ macro_rules! icmp_body_view_setters {
         }
 
         /// Edits the `rest` view: bytes after the type-specific field.
-        fn set_rest(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+        fn set_rest(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
             match value {
                 FieldValue::Bytes(value) => {
                     patch_body_rest(&mut self.body, &value);
@@ -261,7 +261,7 @@ impl Icmpv4 {
     icmp_body_view_setters!(icmpv4_schema);
 
     /// Edits the `gateway` view: the redirect gateway at body bytes 0-4.
-    fn set_gateway(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+    fn set_gateway(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let address = match value {
             FieldValue::Ipv4(address) => address,
             FieldValue::Text(value) => value
@@ -274,7 +274,7 @@ impl Icmpv4 {
     }
 
     /// Edits the `mtu` view: the 16-bit next-hop MTU at body bytes 2-4.
-    fn set_mtu(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+    fn set_mtu(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv4_schema(), name, value)?;
         let value = u16::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
         patch_body(&mut self.body, 2, &value.to_be_bytes());
@@ -282,7 +282,7 @@ impl Icmpv4 {
     }
 
     /// Edits the `pointer` view: the parameter-problem octet at body byte 0.
-    fn set_pointer(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+    fn set_pointer(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv4_schema(), name, value)?;
         let value = u8::try_from(value).map_err(|_| out_of_range(icmpv4_schema(), name))?;
         patch_body(&mut self.body, 0, &[value]);
@@ -367,7 +367,7 @@ impl Icmpv6 {
 
     /// Edits a 32-bit view over the whole type-specific field at body bytes
     /// 0-4: the packet-too-big `mtu` and the parameter-problem `pointer`.
-    fn set_body_word(&mut self, value: FieldValue, name: &str) -> Result<(), FieldError> {
+    fn set_body_word(&mut self, value: FieldValue, name: &str) -> Result<(), field::Error> {
         let value = body_unsigned_value(icmpv6_schema(), name, value)?;
         let value = u32::try_from(value).map_err(|_| out_of_range(icmpv6_schema(), name))?;
         patch_body(&mut self.body, 0, &value.to_be_bytes());
@@ -642,11 +642,11 @@ mod tests {
         let mut layer = Icmpv4::default();
         assert!(matches!(
             layer.set_field("identifier", FieldValue::Unsigned(0x1_0000)),
-            Err(FieldError::OutOfRange { .. })
+            Err(field::Error::OutOfRange { .. })
         ));
         assert!(matches!(
             layer.set_field("rest", FieldValue::Unsigned(1)),
-            Err(FieldError::WrongType { .. })
+            Err(field::Error::WrongType { .. })
         ));
         assert_eq!(
             layer.body.as_ref(),

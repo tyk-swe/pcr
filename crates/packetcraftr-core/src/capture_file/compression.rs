@@ -44,7 +44,7 @@ pub enum Error {
     ByteLimit { limit: u64 },
     #[error("Zstd window log {value} is outside 10..=26")]
     WindowLimit { value: u32 },
-    #[error("{format:?} capture compression I/O failed: {source}")]
+    #[error("{format:?} capture compression I/O failed")]
     Io {
         format: Format,
         #[source]

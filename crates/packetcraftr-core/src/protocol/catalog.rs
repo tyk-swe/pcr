@@ -196,4 +196,14 @@ macro_rules! define_builtin_protocol {
 #[error("unknown protocol {0:?}")]
 pub struct UnknownProtocolName(pub String);
 
+impl crate::error::Classified for UnknownProtocolName {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "cli.protocol",
+            crate::error::Kind::Usage,
+            Some("run `packetcraftr protocols` to list the built-in protocol names"),
+        )
+    }
+}
+
 builtin_protocol_catalog!(define_builtin_protocol);

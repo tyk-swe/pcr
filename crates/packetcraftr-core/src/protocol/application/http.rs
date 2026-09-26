@@ -28,8 +28,33 @@ pub enum Error {
     #[error("HTTP/1 {0}")]
     Invalid(&'static str),
     #[error("HTTP/1 exceeds its {0} limit")]
-    Limit(&'static str),
+    Limit(Limit),
 }
+/// The HTTP/1 bound an [`Error::Limit`] exceeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Limit {
+    StartLine,
+    HeaderBytes,
+    HeaderCount,
+    ChunkLine,
+    BodyBytes,
+    TrailerBytes,
+}
+
+impl std::fmt::Display for Limit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::StartLine => "start line",
+            Self::HeaderBytes => "header bytes",
+            Self::HeaderCount => "header count",
+            Self::ChunkLine => "chunk or trailer line",
+            Self::BodyBytes => "body bytes",
+            Self::TrailerBytes => "trailer bytes",
+        })
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {

@@ -46,7 +46,7 @@ pub const fn response_code_name(code: u16) -> &'static str {
 
 /// Classifies a decoded frame against a DNS probe. Invalid correlated frames
 /// are decode failures, never accepted responses.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResponseClassification {
     Response(ValidatedResponse),
     /// A wire error the caller can match on; `reason` keeps its message for

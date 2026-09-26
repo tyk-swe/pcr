@@ -529,7 +529,7 @@ impl Live {
                     }
                     Outcome::Malformed(error) => {
                         self.side_mut(direction).finish();
-                        return finished(Status::Malformed, error.to_string());
+                        return finished(Status::Malformed, crate::error::render(&error));
                     }
                 }
                 continue;
@@ -571,7 +571,7 @@ impl Live {
                 }
                 Outcome::Malformed(error) => {
                     self.side_mut(direction).finish();
-                    return finished(Status::Malformed, error.to_string());
+                    return finished(Status::Malformed, crate::error::render(&error));
                 }
             }
         }
@@ -674,7 +674,7 @@ impl Live {
                 Outcome::NeedMore { .. } => return Verdict::Open,
                 Outcome::Malformed(error) => {
                     self.side_mut(direction).finish();
-                    return finished(Status::Malformed, error.to_string());
+                    return finished(Status::Malformed, crate::error::render(&error));
                 }
             }
         }

@@ -51,6 +51,13 @@ fn normalized_output_propagates_header_interface_packet_and_flush_failures() {
         )
         .unwrap_err();
         assert_eq!(error.exit_code(), 5);
-        assert!(error.message.contains("fixture output"));
+        assert!(
+            error
+                .causes
+                .iter()
+                .any(|cause| cause.contains("fixture output")),
+            "{:?}",
+            error.causes
+        );
     }
 }

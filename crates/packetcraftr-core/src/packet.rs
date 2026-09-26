@@ -68,9 +68,9 @@ impl Packet {
         self
     }
 
-    pub fn insert<L: Layer>(&mut self, index: usize, layer: L) -> Result<&mut Self, PacketError> {
+    pub fn insert<L: Layer>(&mut self, index: usize, layer: L) -> Result<&mut Self, Error> {
         if index > self.layers.len() {
-            return Err(PacketError::IndexOutOfBounds {
+            return Err(Error::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
@@ -81,15 +81,15 @@ impl Packet {
         Ok(self)
     }
 
-    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, PacketError> {
+    pub fn remove(&mut self, index: usize) -> Result<Box<dyn Layer>, Error> {
         if index >= self.layers.len() {
-            return Err(PacketError::IndexOutOfBounds {
+            return Err(Error::IndexOutOfBounds {
                 index,
                 len: self.layers.len(),
             });
         }
         if removal_would_orphan_padding(&self.layers, index) {
-            return Err(PacketError::PaddingBoundaryRemoval { index });
+            return Err(Error::PaddingBoundaryRemoval { index });
         }
         let removed = self.layers.remove(index);
         shift_padding_for_remove(&mut self.layers, index);
@@ -97,17 +97,13 @@ impl Packet {
         Ok(removed)
     }
 
-    pub fn replace<L: Layer>(
-        &mut self,
-        index: usize,
-        layer: L,
-    ) -> Result<Box<dyn Layer>, PacketError> {
+    pub fn replace<L: Layer>(&mut self, index: usize, layer: L) -> Result<Box<dyn Layer>, Error> {
         let mut layer: Box<dyn Layer> = Box::new(layer);
         let len = self.layers.len();
         let slot = self
             .layers
             .get_mut(index)
-            .ok_or(PacketError::IndexOutOfBounds { index, len })?;
+            .ok_or(Error::IndexOutOfBounds { index, len })?;
         std::mem::swap(slot, &mut layer);
         self.invalidate_encoded_payload_lengths();
         Ok(layer)
@@ -215,13 +211,31 @@ impl<'a> IntoIterator for &'a Packet {
 /// Why a structural [`crate::packet::Packet`] operation was refused.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PacketError {
+pub enum Error {
     #[error("layer index {index} is outside packet length {len}")]
     IndexOutOfBounds { index: usize, len: usize },
     #[error(
         "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
     )]
     PaddingBoundaryRemoval { index: usize },
+}
+
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        use crate::error::{Classification, Kind};
+        match self {
+            Self::IndexOutOfBounds { .. } => Classification::new(
+                "cli.layer_index",
+                Kind::Usage,
+                Some("address a layer index inside the packet"),
+            ),
+            Self::PaddingBoundaryRemoval { .. } => Classification::new(
+                "packet.padding_boundary",
+                Kind::Packet,
+                Some("remove the padding layer before the layer its boundary depends on"),
+            ),
+        }
+    }
 }
 
 /// Whether removing the layer at `index` would leave a padding layer whose

@@ -21,9 +21,7 @@
 use std::io::Read;
 use std::sync::Arc;
 
-use thiserror::Error;
-
-use crate::error::{BoundaryError, Classification, Classified, Coordinate};
+use crate::error::BoundaryError;
 use crate::filter::{Filter, Requirements};
 use crate::registry::Registry;
 
@@ -71,7 +69,7 @@ impl CollectorNeeds {
 ///
 /// `observe` failures cross the run as [`super::Error::Sink`] attributed to
 /// the frame being folded; `finish` and trailing-drain failures surface as
-/// [`SessionError::Collector`] after the run has completed.
+/// [`Error::Collector`](super::Error::Collector) after the run has completed.
 pub trait Collector {
     /// One observation emitted while folding a frame or finishing the pass.
     type Event;
@@ -121,16 +119,19 @@ impl<C: Collector> Pass<C> {
     /// Captures [`Collector::scopes`], consumes the collector through
     /// [`Collector::finish`], and drains its trailing events through
     /// `event_sink` — in that order.
-    pub fn finish<F>(self, event_sink: &mut F) -> Result<Outcome<C>, SessionError>
+    pub fn finish<F>(self, event_sink: &mut F) -> Result<Outcome<C>, super::Error>
     where
         F: FnMut(C::Event) -> Result<(), BoundaryError>,
     {
         let selected_absent = self.selected_absent();
         // Scope capture precedes finish, which consumes the collector.
         let scopes = self.collector.scopes();
-        let (trailing, summary) = self.collector.finish(&self.run)?;
+        let (trailing, summary) = self
+            .collector
+            .finish(&self.run)
+            .map_err(super::Error::Collector)?;
         for event in trailing {
-            event_sink(event)?;
+            event_sink(event).map_err(super::Error::Collector)?;
         }
         Ok(Outcome {
             run: self.run,
@@ -162,45 +163,6 @@ impl<C: Collector> Outcome<C> {
     #[must_use]
     pub fn selected_absent(&self) -> bool {
         self.selected_absent
-    }
-}
-
-/// A session failure: the bounded run itself, or the collector contract
-/// outside it.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum SessionError {
-    /// The run failed — capture, decode, filter, and budget errors, plus
-    /// `observe` and in-run event-sink failures, each attributed to its
-    /// frame as [`Error::Sink`](super::Error::Sink).
-    #[error(transparent)]
-    Run(#[from] super::Error),
-    /// The collector's `finish` or the trailing drain failed after the run
-    /// completed.
-    #[error(transparent)]
-    Collector(#[from] BoundaryError),
-}
-
-impl Classified for SessionError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Run(source) => source.classification(),
-            Self::Collector(source) => source.classification(),
-        }
-    }
-
-    fn context(&self) -> Option<Coordinate> {
-        match self {
-            Self::Run(source) => source.context(),
-            Self::Collector(source) => source.context(),
-        }
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            Self::Run(source) => source.causes(),
-            Self::Collector(source) => source.causes(),
-        }
     }
 }
 
@@ -263,7 +225,7 @@ impl<'a, C: Collector> Session<'a, C> {
         reader: &mut Reader<R>,
         ip_sink: I,
         event_sink: F,
-    ) -> Result<Outcome<C>, SessionError>
+    ) -> Result<Outcome<C>, super::Error>
     where
         R: Read,
         I: FnMut(IpEventRecord) -> Result<(), BoundaryError>,
@@ -284,7 +246,7 @@ impl<'a, C: Collector> Session<'a, C> {
         reader: &mut Reader<R>,
         ip_sink: I,
         event_sink: &mut F,
-    ) -> Result<Pass<C>, SessionError>
+    ) -> Result<Pass<C>, super::Error>
     where
         R: Read,
         I: FnMut(IpEventRecord) -> Result<(), BoundaryError>,
@@ -312,6 +274,7 @@ mod tests {
     use crate::build::{Builder, Options as BuildOptions};
     use crate::capture_file::Writer;
     use crate::codec::Context as BuildContext;
+    use crate::error::Classified;
     use crate::error::{Classification, Kind};
     use crate::field::WireValue;
     use crate::filter::Options as FilterOptions;
@@ -503,7 +466,7 @@ mod tests {
         probe: Probe,
         filter: Option<&Filter>,
         selector: Option<StreamRef>,
-    ) -> Result<Driven, SessionError> {
+    ) -> Result<Driven, RunError> {
         let mut reader = reader_of(frames);
         let options = Options {
             filter,
@@ -527,7 +490,7 @@ mod tests {
     }
 
     /// `Driven` is not `Debug`, so `expect_err` is unavailable.
-    fn expect_failure(result: Result<Driven, SessionError>) -> SessionError {
+    fn expect_failure(result: Result<Driven, RunError>) -> RunError {
         match result {
             Ok(_) => panic!("the session succeeded"),
             Err(error) => error,
@@ -811,7 +774,7 @@ mod tests {
         ));
 
         match error {
-            SessionError::Run(RunError::Sink { number, .. }) => {
+            RunError::Sink { number, .. } => {
                 assert_eq!(number, 2, "the failure is attributed to its frame");
             }
             other => panic!("expected a run sink error, got {other:?}"),
@@ -840,7 +803,7 @@ mod tests {
         ));
 
         match error {
-            SessionError::Collector(source) => {
+            RunError::Collector(source) => {
                 assert_eq!(source.classification().code, "probe.failed");
             }
             other => panic!("expected a collector error, got {other:?}"),
@@ -870,7 +833,7 @@ mod tests {
             Err(error) => error,
         };
         match error {
-            SessionError::Run(RunError::Sink { number: 1, .. }) => {}
+            RunError::Sink { number: 1, .. } => {}
             other => panic!("expected a run sink error at frame 1, got {other:?}"),
         }
 
@@ -891,7 +854,7 @@ mod tests {
             Ok(())
         };
         match pass.finish(&mut failing) {
-            Err(SessionError::Collector(source)) => {
+            Err(RunError::Collector(source)) => {
                 assert_eq!(source.classification().code, "probe.failed");
             }
             Err(other) => panic!("expected a collector error, got {other:?}"),

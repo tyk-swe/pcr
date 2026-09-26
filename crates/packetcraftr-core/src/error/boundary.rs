@@ -16,7 +16,7 @@ pub struct BoundaryError {
     classification: Box<Classification>,
     context: Option<Coordinate>,
     causes: Vec<String>,
-    source: Option<Box<dyn Error + Send + Sync>>,
+    source: Option<super::Source>,
 }
 
 impl BoundaryError {
@@ -49,7 +49,7 @@ impl BoundaryError {
             classification: Box::new(classification),
             context,
             causes,
-            source: Some(Box::new(error)),
+            source: Some(super::Source::new(error)),
         }
     }
 
@@ -69,8 +69,17 @@ impl BoundaryError {
             classification: Box::new(classification),
             context: None,
             causes,
-            source: Some(Box::new(source)),
+            source: Some(super::Source::new(source)),
         }
+    }
+
+    /// Its message followed by its captured causes: the causes of a wrapper
+    /// that reports this error as its source without repeating its text.
+    #[must_use]
+    pub(crate) fn as_causes(&self) -> Vec<String> {
+        std::iter::once(self.message.clone())
+            .chain(self.causes.iter().cloned())
+            .collect()
     }
 
     /// Attaches the stable domain coordinate of a boundary failure.

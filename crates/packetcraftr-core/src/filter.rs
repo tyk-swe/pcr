@@ -65,7 +65,7 @@ mod parser;
 mod path;
 mod plan;
 mod projection;
-pub use projection::{Projection, ProjectionError};
+pub use projection::Projection;
 
 pub use error::Error;
 pub use eval::{Context, DerivedPacket};

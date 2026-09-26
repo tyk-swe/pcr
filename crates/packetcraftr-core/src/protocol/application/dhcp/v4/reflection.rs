@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::{Dhcpv4, Option4, Value4};
 use crate::{
-    field::{FieldKind, FieldValue},
-    layer::{FieldError, FieldSchema, reflect_set, reflective_layer},
+    field::{self, FieldKind, FieldValue},
+    layer::{FieldSchema, reflect_set, reflective_layer},
     protocol::{
         BuiltinProtocol,
         common::{
@@ -71,7 +71,7 @@ fn options_value(options: &[Option4]) -> FieldValue {
             .collect(),
     )
 }
-fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, FieldError> {
+fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, field::Error> {
     list(value, 4096, schema(), field)?
         .into_iter()
         .map(|value| {
@@ -96,7 +96,7 @@ fn parse_options(value: FieldValue, field: &str) -> Result<Vec<Option4>, FieldEr
                                 reflect_set(&mut address, schema(), field, value)?;
                                 Ok(address)
                             })
-                            .collect::<Result<_, FieldError>>()?,
+                            .collect::<Result<_, field::Error>>()?,
                     ),
                     24 | 35 | 38 | 51 | 58 | 59 => {
                         Value4::Seconds(value.required_value("seconds")?)
@@ -130,7 +130,7 @@ fn fixed<const N: usize>(
     target: &mut [u8; N],
     value: FieldValue,
     field: &str,
-) -> Result<(), FieldError> {
+) -> Result<(), field::Error> {
     let FieldValue::Bytes(value) = value else {
         return Err(wrong_type(schema(), field, "bytes"));
     };
@@ -141,7 +141,7 @@ fn fixed<const N: usize>(
     target[..value.len()].copy_from_slice(&value);
     Ok(())
 }
-fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<(), FieldError> {
+fn message_type(layer: &mut Dhcpv4, value: FieldValue, field: &str) -> Result<(), field::Error> {
     let mut number = 0u8;
     reflect_set(&mut number, schema(), field, value)?;
     if let Some(option) = layer.options.iter_mut().find(|option| option.code == 53) {

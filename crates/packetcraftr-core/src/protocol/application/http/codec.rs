@@ -7,7 +7,8 @@ use bytes::Bytes;
 
 use super::reflection::{http_layout, http_schema};
 use super::{
-    Body, Error, Head, Header, Http, MAX_HEADER_BYTES, MAX_HEADERS, MAX_START_LINE, StartLine,
+    Body, Error, Head, Header, Http, Limit, MAX_HEADER_BYTES, MAX_HEADERS, MAX_START_LINE,
+    StartLine,
 };
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
@@ -15,7 +16,7 @@ use crate::{
     layer::{Layer, Raw, raw_layout},
     protocol::{
         BuiltinProtocol,
-        common::{ensure_encode_budget, invalid, typed_layer},
+        common::{ensure_encode_budget, invalid, rejected, typed_layer},
     },
     registry::Discriminator,
 };
@@ -129,16 +130,16 @@ pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
         .map(|n| n + 4);
     let Some(end) = end else {
         if input.len() >= MAX_HEADER_BYTES {
-            return Err(Error::Limit("header bytes"));
+            return Err(Error::Limit(Limit::HeaderBytes));
         }
         if input.iter().position(|b| *b == b'\n').is_none() && input.len() > MAX_START_LINE {
-            return Err(Error::Limit("start line"));
+            return Err(Error::Limit(Limit::StartLine));
         }
         validate_line_endings(input)?;
         return Ok(None);
     };
     if end > MAX_HEADER_BYTES {
-        return Err(Error::Limit("header bytes"));
+        return Err(Error::Limit(Limit::HeaderBytes));
     }
     validate_line_endings(&input[..end])?;
     let first = input[..end]
@@ -146,7 +147,7 @@ pub fn parse_head(input: &Bytes) -> Result<Option<(Head, usize)>, Error> {
         .position(|b| b == b"\r\n")
         .ok_or(Error::Invalid("lacks a start line"))?;
     if first > MAX_START_LINE {
-        return Err(Error::Limit("start line"));
+        return Err(Error::Limit(Limit::StartLine));
     }
     let start = parse_start(&input.slice(..first))?;
     let headers = parse_headers(&input.slice(first + 2..end - 2))?;
@@ -172,7 +173,7 @@ pub(crate) fn parse_headers(input: &Bytes) -> Result<Vec<Header>, Error> {
             return Err(Error::Invalid("has an unexpected empty header line"));
         }
         if headers.len() >= MAX_HEADERS {
-            return Err(Error::Limit("header count"));
+            return Err(Error::Limit(Limit::HeaderCount));
         }
         let line = &input[offset..end];
         let colon = line
@@ -396,8 +397,7 @@ impl LayerCodec for HttpCodec {
                 "HTTP/1 dissection requires retained header wire",
             ));
         };
-        let mut layer =
-            Http::try_from(wire.as_ref()).map_err(|error| invalid(NAME, error.to_string()))?;
+        let mut layer = Http::try_from(wire.as_ref()).map_err(|error| rejected(NAME, error))?;
         for (name, value) in fields {
             if layer.field(name).as_ref() != Some(value) {
                 layer.set_field(name, value.clone())?;

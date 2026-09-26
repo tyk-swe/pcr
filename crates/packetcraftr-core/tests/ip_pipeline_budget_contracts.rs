@@ -9,9 +9,7 @@ use common::ip_fragments::{
     cascading_vxlan_tcp_frames, ipv4_protocol_fragment_frame, reader_with_link_type,
 };
 use common::registry;
-use packetcraftr_core::analysis::reassembly::ip::{
-    IncompleteDatagram, IncompleteReason, ResourceError,
-};
+use packetcraftr_core::analysis::reassembly::ip::{IncompleteDatagram, IncompleteReason, Resource};
 use packetcraftr_core::analysis::{
     IpDatagramOutcome, IpEvent, IpEventRecord, Limits, Options, run_with_ip_events,
 };
@@ -43,7 +41,7 @@ fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
         packetcraftr_core::analysis::Error::IpReassembly {
             number: 2,
             source: packetcraftr_core::analysis::reassembly::ip::Error::Resource(
-                ResourceError::AggregateMemoryLimit { limit: 10_000 }
+                Resource::AggregateMemoryLimit { limit: 10_000 }
             )
         }
     ));

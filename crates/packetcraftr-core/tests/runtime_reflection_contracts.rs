@@ -8,8 +8,8 @@ mod common;
 use bytes::Bytes;
 use common::probe::{Child, Probe, probe_layout, structure};
 use packetcraftr_core::diagnostic::Diagnostic;
-use packetcraftr_core::field::FieldValue;
-use packetcraftr_core::layer::{FieldError, Layer, Malformed, Padding, Raw, raw_layout};
+use packetcraftr_core::field::{self, FieldValue};
+use packetcraftr_core::layer::{Layer, Malformed, Padding, Raw, raw_layout};
 use packetcraftr_core::layout::{ByteRange, FieldLayout};
 use packetcraftr_core::packet::Packet;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -26,7 +26,7 @@ fn assert_failed_packet_mutations(packet: &mut Packet) {
     assert!(packet.get_mut::<Raw>().is_none());
     assert!(matches!(
         packet.replace(99, Child::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 99, len: 4 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 99, len: 4 })
     ));
     assert_eq!(structure(packet), structure(&before_failed_mutations));
     assert_eq!(packet.get::<Child>().map(|child| child.value), Some(10));
@@ -69,7 +69,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     );
     assert!(matches!(
         packet.insert(9, Raw::default()),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 9, len: 4 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 9, len: 4 })
     ));
 
     let removed = packet
@@ -85,13 +85,13 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
 
     assert!(matches!(
         packet.remove(2),
-        Err(packetcraftr_core::packet::PacketError::PaddingBoundaryRemoval { index: 2 })
+        Err(packetcraftr_core::packet::Error::PaddingBoundaryRemoval { index: 2 })
     ));
     packet.remove(3).expect("padding itself can be removed");
     assert_eq!(packet.len(), 3);
     assert!(matches!(
         packet.remove(8),
-        Err(packetcraftr_core::packet::PacketError::IndexOutOfBounds { index: 8, len: 3 })
+        Err(packetcraftr_core::packet::Error::IndexOutOfBounds { index: 8, len: 3 })
     ));
 
     packet
@@ -112,14 +112,14 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
             .get_mut::<Probe>()
             .expect("probe layer")
             .set_field("unknown", 1_u8.into()),
-        Err(FieldError::UnknownField { .. })
+        Err(field::Error::UnknownField { .. })
     ));
     assert!(matches!(
         packet
             .get_mut::<Probe>()
             .expect("probe layer")
             .set_field("value", FieldValue::Unsigned(256)),
-        Err(FieldError::OutOfRange { .. })
+        Err(field::Error::OutOfRange { .. })
     ));
     assert_eq!(structure(&packet), structure(&before_failed_edits));
 
@@ -172,42 +172,42 @@ fn reflected_fields_cover_supported_types_and_fail_closed() {
 
     assert!(matches!(
         layer.set_field("enabled", 1_u8.into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "bool",
             ..
         })
     ));
     assert!(matches!(
         layer.set_field("ipv4", "not-an-address".into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "ipv4",
             ..
         })
     ));
     assert!(matches!(
         layer.set_field("ipv6", false.into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "ipv6",
             ..
         })
     ));
     assert!(matches!(
         layer.set_field("mac", "00:11:22".into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "mac address",
             ..
         })
     ));
     assert!(matches!(
         layer.set_field("token", vec![1, 2].into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "eight bytes",
             ..
         })
     ));
     assert!(matches!(
         layer.set_field("wire", "manual".into()),
-        Err(FieldError::WrongType {
+        Err(field::Error::WrongType {
             expected: "unsigned, bytes, or 'auto'",
             ..
         })
@@ -263,7 +263,7 @@ fn field_values_raw_layers_and_diagnostics_have_stable_views() {
     assert_eq!(padding.outside_layer, Some(4));
     assert!(matches!(
         padding.set_field("outside_layer", false.into()),
-        Err(FieldError::WrongType { .. })
+        Err(field::Error::WrongType { .. })
     ));
     let mut malformed = Malformed::new(None, vec![0xff], "bad header");
     malformed

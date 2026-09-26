@@ -11,7 +11,7 @@ use crate::capture_file::{DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Limits as
 use crate::filter::Filter;
 use crate::frame::DEFAULT_SIZE_LIMIT;
 
-use crate::analysis::Error;
+use crate::analysis::{Constraint, Error};
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
 
@@ -123,7 +123,7 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value,
-                    reason: "must be non-zero",
+                    reason: Constraint::NonZero,
                 });
             }
         }
@@ -131,7 +131,7 @@ impl Limits {
             return Err(Error::InvalidLimit {
                 field: "max_frame_bytes",
                 value: self.max_frame_bytes as u64,
-                reason: "cannot exceed max_bytes",
+                reason: Constraint::AtMostMaxBytes,
             });
         }
         // The per-flow window doubles as the reordering window, so a value
@@ -142,14 +142,14 @@ impl Limits {
             return Err(Error::InvalidLimit {
                 field: "max_tcp_bytes_per_flow",
                 value: self.max_tcp_bytes_per_flow as u64,
-                reason: "reaches the TCP serial-number half-space",
+                reason: Constraint::BelowSerialHalfSpace,
             });
         }
         if self.max_duration.is_zero() {
             return Err(Error::InvalidLimit {
                 field: "max_duration",
                 value: 0,
-                reason: "must be non-zero",
+                reason: Constraint::NonZero,
             });
         }
         for (field, expiry) in [
@@ -160,14 +160,14 @@ impl Limits {
                 return Err(Error::InvalidLimit {
                     field,
                     value: 0,
-                    reason: "must be non-zero",
+                    reason: Constraint::NonZero,
                 });
             }
             if Instant::now().checked_add(expiry).is_none() {
                 return Err(Error::InvalidLimit {
                     field,
                     value: u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
-                    reason: "exceeds the platform monotonic-clock range",
+                    reason: Constraint::WithinClockRange,
                 });
             }
         }

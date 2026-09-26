@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::analysis::Error;
 use packetcraftr_core::analysis::reassembly::tcp;
+use packetcraftr_core::analysis::{Constraint, Error};
 use packetcraftr_core::error::{BoundaryError, Classified, Kind};
 
 #[test]
@@ -10,7 +10,7 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     let invalid = Error::InvalidLimit {
         field: "max_flows",
         value: 0,
-        reason: "must be non-zero",
+        reason: Constraint::NonZero,
     };
     assert_eq!(invalid.classification().kind, Kind::Usage);
     let stream = Error::StreamLimit {
@@ -20,7 +20,7 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     assert_eq!(stream.classification().kind, Kind::Policy);
     let malformed = Error::Reassembly {
         number: 3,
-        source: tcp::MalformedError::ConflictingFinalSequence {
+        source: tcp::Malformed::ConflictingFinalSequence {
             existing_offset: 1,
             new_offset: 2,
         }
@@ -30,7 +30,7 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     assert_eq!(malformed.causes().len(), 1);
     let bounded = Error::Reassembly {
         number: 3,
-        source: tcp::ResourceError::FlowByteLimit { limit: 8 }.into(),
+        source: tcp::Resource::FlowByteLimit { limit: 8 }.into(),
     };
     assert_eq!(bounded.classification().kind, Kind::Policy);
     let tcp_remediation = bounded
@@ -43,7 +43,7 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
     assert!(tcp_remediation.contains("--max-tcp-*"));
     let bounded_ip = Error::IpReassembly {
         number: 3,
-        source: packetcraftr_core::analysis::reassembly::ip::ResourceError::AggregateMemoryLimit {
+        source: packetcraftr_core::analysis::reassembly::ip::Resource::AggregateMemoryLimit {
             limit: 8,
         }
         .into(),
@@ -85,5 +85,6 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         source: BoundaryError::execution_validation("bad sink", "test.sink", "repair it"),
     };
     assert_eq!(sink.classification().code, "test.sink");
-    assert_eq!(sink.causes(), Vec::<String>::new());
+    assert_eq!(sink.to_string(), "analysis consumer failed at frame 4");
+    assert_eq!(sink.causes(), ["bad sink"]);
 }

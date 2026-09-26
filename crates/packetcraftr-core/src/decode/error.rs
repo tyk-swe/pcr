@@ -4,7 +4,7 @@
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::layer::FieldError;
+use crate::field;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -24,13 +24,13 @@ pub enum Error {
         protocol: crate::layer::Id,
         actual: crate::layer::Id,
     },
-    #[error("codec for {protocol} returned a layer that violates its reflective schema: {source}")]
+    #[error("codec for {protocol} returned a layer that violates its reflective schema")]
     InvalidLayer {
         protocol: crate::layer::Id,
         #[source]
-        source: FieldError,
+        source: field::Error,
     },
-    #[error("invalid frame: {0}")]
+    #[error("invalid frame")]
     InvalidFrame(#[from] crate::frame::Error),
 }
 

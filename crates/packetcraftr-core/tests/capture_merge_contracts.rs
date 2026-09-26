@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::{
-    capture_file::{
-        self, MergeError, MergeLimits, MergeSource, MetadataBlockKind, Reader, RecordKind, Writer,
-    },
+    capture_file::{self, MergeLimits, MergeSource, MetadataBlockKind, Reader, RecordKind, Writer},
     frame::{Frame, LinkType},
 };
 use std::{
@@ -84,7 +82,7 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     assert!(matches!(
         capture_file::merge(&mut sources, &mut output, Default::default()),
-        Err(MergeError::ClockRegression { input: 0, frame: 2 })
+        Err(capture_file::Error::MergeClockRegression { input: 0, frame: 2 })
     ));
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     writer.add_interface(LinkType::ETHERNET).unwrap();
@@ -101,10 +99,8 @@ fn unordered_missing_time_and_aggregate_limit_failures_are_explicit() {
     let mut output = Writer::pcapng(Vec::new()).unwrap();
     assert!(matches!(
         capture_file::merge(&mut sources, &mut output, Default::default()),
-        Err(MergeError::Source {
-            source: capture_file::Error::TimestampUnavailable { .. },
-            ..
-        })
+        Err(capture_file::Error::MergeSource { source, .. })
+            if matches!(*source, capture_file::Error::TimestampUnavailable { .. })
     ));
     for limits in [
         MergeLimits {

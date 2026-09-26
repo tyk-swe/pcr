@@ -7,7 +7,7 @@ use std::net::Ipv6Addr;
 use bytes::Bytes;
 
 use super::super::codec::{self as shared, Budget, Message, extend, take, u16_at, u32_at};
-use super::super::{Error, Limits};
+use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv6, Duid, Option6, Value6};
 use crate::{
@@ -53,7 +53,7 @@ impl Dhcpv6 {
     }
     fn decode(wire: Bytes, budget: &mut Budget, depth: usize) -> Result<Self, Error> {
         if depth > budget.limits.max_nesting {
-            return Err(Error::Limit("relay nesting"));
+            return Err(Error::Limit(Limit::RelayNesting));
         }
         take(&wire, 0, 4)?;
         let message_type = wire[0];
@@ -94,7 +94,7 @@ impl Dhcpv6 {
     }
     fn encode(&self, budget: &mut Budget, depth: usize) -> Result<Vec<u8>, Error> {
         if depth > budget.limits.max_nesting {
-            return Err(Error::Limit("relay nesting"));
+            return Err(Error::Limit(Limit::RelayNesting));
         }
         let maximum = budget.limits.max_message_bytes;
         let mut output = Vec::new();
@@ -242,7 +242,8 @@ fn encode_options(
     for option in options {
         budget.option(depth)?;
         let data = encode_value(option, budget, depth)?;
-        let length = u16::try_from(data.len()).map_err(|_| Error::Limit("DHCPv6 option bytes"))?;
+        let length =
+            u16::try_from(data.len()).map_err(|_| Error::Limit(Limit::Dhcpv6OptionBytes))?;
         extend(&mut output, &option.code.to_be_bytes(), maximum)?;
         extend(&mut output, &length.to_be_bytes(), maximum)?;
         extend(&mut output, &data, maximum)?;

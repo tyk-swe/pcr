@@ -28,7 +28,7 @@ pub enum Error {
     Frame(#[from] crate::frame::Error),
     #[error(transparent)]
     Decode(#[from] crate::decode::Error),
-    #[error("packet transform checksum failed: {0}")]
+    #[error("packet transform checksum failed")]
     Checksum(#[source] crate::codec::Error),
 }
 

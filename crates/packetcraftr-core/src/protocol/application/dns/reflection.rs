@@ -3,14 +3,14 @@
 
 use super::codec::NAME;
 use super::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
-use crate::field::{FieldKind, FieldValue};
-use crate::layer::{FieldError, FieldSchema, reflect_set, reflective_layer};
+use crate::field::{self, FieldKind, FieldValue};
+use crate::layer::{FieldSchema, reflect_set, reflective_layer};
 use crate::protocol::common::structured::{Object, list, member, object};
 use crate::protocol::common::{out_of_range, protocol, read_only, wrong_type};
 use bytes::Bytes;
 
 impl Dns {
-    fn assign(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+    fn assign(&mut self, name: &str, value: FieldValue) -> Result<(), field::Error> {
         let mut candidate = self.clone();
         if !candidate.wire.is_empty() {
             candidate.edit(|_| {});
@@ -230,14 +230,14 @@ fn record_value(value: &RecordValue) -> FieldValue {
     }
 }
 
-fn name(object: &mut Object, key: &str) -> Result<Name, FieldError> {
+fn name(object: &mut Object, key: &str) -> Result<Name, field::Error> {
     let FieldValue::Text(text) = object.required(key)? else {
         return Err(wrong_type(dns_schema(), key, "DNS name text"));
     };
     text.parse().map_err(|_| out_of_range(dns_schema(), key))
 }
 
-fn record(value: FieldValue, field: &str) -> Result<Record, FieldError> {
+fn record(value: FieldValue, field: &str) -> Result<Record, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let owner = name(&mut o, "owner")?;
     let value = parse_value(o.required("value")?, field)?;
@@ -262,7 +262,7 @@ fn record(value: FieldValue, field: &str) -> Result<Record, FieldError> {
     })
 }
 
-fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, FieldError> {
+fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, field::Error> {
     let mut o = Object::new(value, dns_schema(), field)?;
     let kind = o.value("kind", String::new())?;
     let value = match kind.as_str() {
@@ -351,7 +351,7 @@ fn parse_value(value: FieldValue, field: &str) -> Result<RecordValue, FieldError
     Ok(value)
 }
 
-fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), FieldError> {
+fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), field::Error> {
     macro_rules! scalar { ($($name:ident),* $(,)?) => { match field {
         $(stringify!($name) => return reflect_set(&mut layer.$name, dns_schema(), field, value),)*
         _ => {}
@@ -399,7 +399,7 @@ fn assign_field(layer: &mut Dns, field: &str, value: FieldValue) -> Result<(), F
             }
         }
         _ => {
-            return Err(FieldError::UnknownField {
+            return Err(field::Error::UnknownField {
                 protocol: dns_schema().protocol,
                 field: field.to_owned(),
             });

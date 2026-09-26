@@ -6,7 +6,7 @@
 //! bytes unchanged.
 
 use super::super::RANGE_METADATA_CHARGE;
-use super::{Error, Incoming, MalformedError, OverlapPolicy, ResourceError, RetainedRange};
+use super::{Error, Incoming, Malformed, OverlapPolicy, Resource, RetainedRange};
 
 pub(super) struct MergePlan {
     pub(super) first_affected: usize,
@@ -50,9 +50,9 @@ pub(super) fn plan_merge(
     let mut overlapping_bytes = 0usize;
     let mut conflicting_bytes = 0usize;
     for (index, retained) in ranges.iter().enumerate() {
-        let end = retained.end().ok_or(MalformedError::OffsetOverflow)?;
+        let end = retained.end().ok_or(Malformed::OffsetOverflow)?;
         if end < incoming.offset {
-            first_affected = index.checked_add(1).ok_or(MalformedError::OffsetOverflow)?;
+            first_affected = index.checked_add(1).ok_or(Malformed::OffsetOverflow)?;
             continue;
         }
         if retained.start > incoming.end {
@@ -66,7 +66,7 @@ pub(super) fn plan_merge(
         }
         affected_count = affected_count
             .checked_add(1)
-            .ok_or(MalformedError::OffsetOverflow)?;
+            .ok_or(Malformed::OffsetOverflow)?;
         union_start = union_start.min(retained.start);
         union_end = union_end.max(end);
         let overlap_start = retained.start.max(incoming.offset);
@@ -75,22 +75,22 @@ pub(super) fn plan_merge(
             let (overlapping, conflicting) = measure_overlap(retained, end, incoming)?;
             overlapping_bytes = overlapping_bytes
                 .checked_add(overlapping)
-                .ok_or(MalformedError::OffsetOverflow)?;
+                .ok_or(Malformed::OffsetOverflow)?;
             conflicting_bytes = conflicting_bytes
                 .checked_add(conflicting)
-                .ok_or(MalformedError::OffsetOverflow)?;
+                .ok_or(Malformed::OffsetOverflow)?;
         }
     }
     let added_bytes = incoming
         .payload
         .len()
         .checked_sub(overlapping_bytes)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let result_range_count = ranges
         .len()
         .checked_add(1)
         .and_then(|count| count.checked_sub(affected_count))
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let kind = if added_bytes == 0 && conflicting_bytes == 0 {
         UpdateKind::Unchanged
     } else if affected_count == 1
@@ -127,27 +127,27 @@ fn measure_overlap(
     let overlap_end = retained_end.min(incoming.end);
     let length = overlap_end
         .checked_sub(overlap_start)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let retained_start = overlap_start
         .checked_sub(retained.start)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let incoming_start = overlap_start
         .checked_sub(incoming.offset)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let retained_stop = retained_start
         .checked_add(length)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let incoming_stop = incoming_start
         .checked_add(length)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let retained_overlap = retained
         .bytes
         .get(retained_start..retained_stop)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let incoming_overlap = incoming
         .payload
         .get(incoming_start..incoming_stop)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     // A retransmitted fragment overlaps byte-for-byte, so settle that
     // case with one slice compare before counting byte by byte.
     let conflicting = if retained_overlap == incoming_overlap {
@@ -173,11 +173,11 @@ pub(super) fn merge_affected(
     let union_length = plan
         .union_end
         .checked_sub(plan.union_start)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     let mut merged = Vec::new();
     merged
         .try_reserve_exact(union_length)
-        .map_err(|_| ResourceError::AllocationFailed {
+        .map_err(|_| Resource::AllocationFailed {
             requested: union_length,
         })?;
     merged.resize(union_length, 0);
@@ -185,7 +185,7 @@ pub(super) fn merge_affected(
     let incoming_start = incoming
         .offset
         .checked_sub(plan.union_start)
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     // Overlapping bytes are resolved by write order: whichever side is
     // written last wins the contested region.
     let incoming_last = policy == OverlapPolicy::Last;
@@ -200,7 +200,7 @@ pub(super) fn merge_affected(
         let relative = retained
             .start
             .checked_sub(plan.union_start)
-            .ok_or(MalformedError::OffsetOverflow)?;
+            .ok_or(Malformed::OffsetOverflow)?;
         copy_into(&mut merged, relative, &retained.bytes)?;
     }
     if incoming_last {
@@ -225,11 +225,11 @@ pub(super) fn apply_range_update(
         RangeUpdate::Append => {
             let range = ranges
                 .get_mut(plan.first_affected)
-                .ok_or(MalformedError::OffsetOverflow)?;
+                .ok_or(Malformed::OffsetOverflow)?;
             range
                 .bytes
                 .try_reserve_exact(incoming.payload.len())
-                .map_err(|_| ResourceError::AllocationFailed {
+                .map_err(|_| Resource::AllocationFailed {
                     requested: incoming.payload.len(),
                 })?;
             range.bytes.extend_from_slice(&incoming.payload);
@@ -239,14 +239,14 @@ pub(super) fn apply_range_update(
             let replaced_end = plan
                 .first_affected
                 .checked_add(plan.affected_count)
-                .ok_or(MalformedError::OffsetOverflow)?;
+                .ok_or(Malformed::OffsetOverflow)?;
             if ranges.get(plan.first_affected..replaced_end).is_none() {
-                return Err(MalformedError::OffsetOverflow.into());
+                return Err(Malformed::OffsetOverflow.into());
             }
             if plan.affected_count == 0 {
                 ranges
                     .try_reserve(1)
-                    .map_err(|_| ResourceError::AllocationFailed {
+                    .map_err(|_| Resource::AllocationFailed {
                         requested: RANGE_METADATA_CHARGE,
                     })?;
             }
@@ -260,10 +260,10 @@ pub(super) fn apply_range_update(
 fn copy_into(target: &mut [u8], start: usize, bytes: &[u8]) -> Result<(), Error> {
     let end = start
         .checked_add(bytes.len())
-        .ok_or(MalformedError::OffsetOverflow)?;
+        .ok_or(Malformed::OffsetOverflow)?;
     target
         .get_mut(start..end)
-        .ok_or(MalformedError::OffsetOverflow)?
+        .ok_or(Malformed::OffsetOverflow)?
         .copy_from_slice(bytes);
     Ok(())
 }

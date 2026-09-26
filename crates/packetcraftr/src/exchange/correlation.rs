@@ -168,7 +168,10 @@ impl Accumulator {
                 }
                 self.diagnostics.push_once(Diagnostic::warning(
                     "exchange.decode_error",
-                    format!("captured frame could not be decoded: {error}"),
+                    format!(
+                        "captured frame could not be decoded: {}",
+                        packetcraftr_core::error::render(&error)
+                    ),
                 ));
                 self.retain_undecoded(identity, raw_frame, context.options);
                 Err(ProcessOutcome::Continue)

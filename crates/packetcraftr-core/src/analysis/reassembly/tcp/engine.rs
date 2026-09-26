@@ -7,7 +7,7 @@ use std::time::Instant;
 use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
 use super::{
-    Error, Event, Limits, MAX_BYTES_PER_FLOW, Reassembler, ResourceError, ScopedFlowKey, Segment,
+    Error, Event, Limits, MAX_BYTES_PER_FLOW, Reassembler, Resource, ScopedFlowKey, Segment,
 };
 
 impl Reassembler {
@@ -49,7 +49,7 @@ impl Reassembler {
                     .saturating_sub(usize::from(existing.is_some()))
                     >= self.limits.max_flows
             {
-                return Err(ResourceError::FlowLimit {
+                return Err(Resource::FlowLimit {
                     limit: self.limits.max_flows,
                 }
                 .into());
@@ -151,7 +151,7 @@ impl Reassembler {
 
     fn validate_limits(&self) -> Result<(), Error> {
         if self.limits.max_bytes_per_flow > MAX_BYTES_PER_FLOW {
-            return Err(ResourceError::InvalidWindowLimit {
+            return Err(Resource::InvalidWindowLimit {
                 limit: self.limits.max_bytes_per_flow,
             }
             .into());
@@ -163,7 +163,7 @@ impl Reassembler {
         &self,
         existing: Option<&TcpFlowState>,
     ) -> Result<(usize, usize), Error> {
-        let accounting_error = || ResourceError::AggregateByteLimit {
+        let accounting_error = || Resource::AggregateByteLimit {
             limit: self.limits.max_aggregate_bytes,
         };
         let old_retained_bytes = existing

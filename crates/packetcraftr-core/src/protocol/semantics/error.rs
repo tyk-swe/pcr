@@ -63,6 +63,16 @@ pub enum Error {
     Ipv4SourceRoutePointer { option: u8, pointer: usize },
 }
 
+impl crate::error::Classified for Error {
+    fn classification(&self) -> crate::error::Classification {
+        crate::error::Classification::new(
+            "packet.semantics",
+            crate::error::Kind::Packet,
+            Some("repair the malformed or ambiguous route-bearing packet fields"),
+        )
+    }
+}
+
 impl Error {
     pub(super) fn field(protocol: &Id, field: &'static str, reason: &'static str) -> Self {
         Self::Field {

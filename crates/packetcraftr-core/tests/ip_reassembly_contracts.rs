@@ -8,8 +8,8 @@ use bytes::Bytes;
 use packetcraftr_core::analysis::reassembly::ip::Limits;
 use packetcraftr_core::analysis::reassembly::ip::{
     DatagramKey, Error, Family, Fragment, FragmentDisposition, IncompleteReason, Ipv4DatagramKey,
-    Ipv4Fragment, Ipv6DatagramKey, Ipv6Fragment, MalformedError, OverlapPolicy, PushOutcome,
-    Reassembler, ResourceError,
+    Ipv4Fragment, Ipv6DatagramKey, Ipv6Fragment, Malformed, OverlapPolicy, PushOutcome,
+    Reassembler, Resource,
 };
 use packetcraftr_core::analysis::scope::{Interner, ScopeId};
 use proptest::prelude::*;
@@ -446,9 +446,7 @@ fn overlap_policies_reject_keep_first_or_keep_last_and_report_changed_bytes() {
         .expect("first copy is retained");
     assert_eq!(
         reject.push(ipv4_fragment(&key, 0, true, &b"ABcdefgh"[..]), now),
-        Err(Error::Malformed(MalformedError::ConflictingOverlap {
-            bytes: 2
-        }))
+        Err(Error::Malformed(Malformed::ConflictingOverlap { bytes: 2 }))
     );
     assert_eq!(reject.datagram_count(), 1, "rejected input is atomic");
 }
@@ -551,7 +549,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     );
     assert_eq!(
         datagrams.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
-        Err(Error::Resource(ResourceError::DatagramLimit { limit: 0 }))
+        Err(Error::Resource(Resource::DatagramLimit { limit: 0 }))
     );
     assert_eq!(datagrams.aggregate_payload_bytes(), 0);
 
@@ -564,9 +562,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     );
     assert_eq!(
         bytes.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
-        Err(Error::Resource(ResourceError::DatagramByteLimit {
-            limit: 7
-        }))
+        Err(Error::Resource(Resource::DatagramByteLimit { limit: 7 }))
     );
     assert_eq!(bytes.datagram_count(), 0);
 
@@ -580,7 +576,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     );
     assert_eq!(
         aggregate.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
-        Err(Error::Resource(ResourceError::AggregateMemoryLimit {
+        Err(Error::Resource(Resource::AggregateMemoryLimit {
             limit: 4_187
         }))
     );
@@ -599,7 +595,7 @@ fn resource_limits_reject_before_retaining_new_payload() {
     let retained = fragments.aggregate_memory_charge();
     assert_eq!(
         fragments.push(ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]), now),
-        Err(Error::Resource(ResourceError::FragmentLimit { limit: 1 }))
+        Err(Error::Resource(Resource::FragmentLimit { limit: 1 }))
     );
     assert_eq!(fragments.datagram_count(), 1);
     assert_eq!(fragments.aggregate_memory_charge(), retained);
@@ -627,9 +623,7 @@ fn aggregate_limit_covers_replacement_and_completion_peak_allocations() {
 
     assert_eq!(
         reassembler.push(ipv4_fragment(&key, 1, false, &b"tail"[..]), now),
-        Err(Error::Resource(ResourceError::AggregateMemoryLimit {
-            limit
-        }))
+        Err(Error::Resource(Resource::AggregateMemoryLimit { limit }))
     );
     assert_eq!(reassembler.datagram_count(), 1);
     assert_eq!(reassembler.aggregate_memory_charge(), retained);
@@ -674,13 +668,11 @@ fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state(
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     assert_eq!(
         reassembler.push(ipv4_fragment(&key, 0, true, Bytes::new()), now),
-        Err(Error::Malformed(MalformedError::EmptyPayload))
+        Err(Error::Malformed(Malformed::EmptyPayload))
     );
     assert_eq!(
         reassembler.push(ipv4_fragment(&key, 0, true, &b"seven!!"[..]), now),
-        Err(Error::Malformed(MalformedError::UnalignedNonFinal {
-            length: 7
-        }))
+        Err(Error::Malformed(Malformed::UnalignedNonFinal { length: 7 }))
     );
 
     reassembler
@@ -688,7 +680,7 @@ fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state(
         .expect("first final length is retained");
     assert_eq!(
         reassembler.push(ipv4_fragment(&key, 1, false, &b"tail"[..]), now),
-        Err(Error::Malformed(MalformedError::ConflictingFinalLength {
+        Err(Error::Malformed(Malformed::ConflictingFinalLength {
             existing: 20,
             new: 12
         }))
@@ -698,7 +690,7 @@ fn malformed_lengths_and_final_offsets_fail_closed_without_destroying_old_state(
     let mut oversized = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     assert_eq!(
         oversized.push(ipv4_fragment(&key, 0x1fff, false, &b"1234567"[..]), now),
-        Err(Error::Malformed(MalformedError::ReconstructedLength {
+        Err(Error::Malformed(Malformed::ReconstructedLength {
             family: packetcraftr_core::analysis::reassembly::ip::Family::Ipv4
         }))
     );
@@ -725,7 +717,7 @@ fn first_ipv4_header_revalidates_the_retained_wire_extent() {
     });
     assert_eq!(
         reassembler.push(first, now),
-        Err(Error::Malformed(MalformedError::ReconstructedLength {
+        Err(Error::Malformed(Malformed::ReconstructedLength {
             family: Family::Ipv4,
         }))
     );
@@ -756,7 +748,7 @@ fn repeated_first_ipv4_headers_must_agree_on_preserved_flags() {
         .expect("the first offset-zero fragment is retained");
     assert_eq!(
         reassembler.push(Fragment::Ipv4(conflicting), now),
-        Err(Error::Malformed(MalformedError::InconsistentIpv4Header))
+        Err(Error::Malformed(Malformed::InconsistentIpv4Header))
     );
 }
 
@@ -771,7 +763,7 @@ fn known_final_length_rejects_beyond_and_nonfinal_data_atomically() {
     let retained = beyond.aggregate_memory_charge();
     assert_eq!(
         beyond.push(ipv4_fragment(&key, 1, true, &b"12345678"[..]), now),
-        Err(Error::Malformed(MalformedError::BeyondFinalLength {
+        Err(Error::Malformed(Malformed::BeyondFinalLength {
             final_length: 12,
         }))
     );
@@ -784,7 +776,7 @@ fn known_final_length_rejects_beyond_and_nonfinal_data_atomically() {
     let retained = at_final.aggregate_memory_charge();
     assert_eq!(
         at_final.push(ipv4_fragment(&key, 1, true, &b"abcdefgh"[..]), now),
-        Err(Error::Malformed(MalformedError::NonFinalAtFinalLength {
+        Err(Error::Malformed(Malformed::NonFinalAtFinalLength {
             final_length: 16,
         }))
     );
@@ -808,7 +800,7 @@ fn final_length_rejects_a_retained_nonfinal_endpoint_regardless_of_arrival_order
             .expect("the first fragment is individually valid");
         assert_eq!(
             reassembler.push(fragments[1].clone(), now),
-            Err(Error::Malformed(MalformedError::NonFinalAtFinalLength {
+            Err(Error::Malformed(Malformed::NonFinalAtFinalLength {
                 final_length: 16,
             }))
         );
@@ -829,7 +821,7 @@ fn wire_offset_guard_rejects_values_before_checked_byte_conversion() {
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     assert_eq!(
         reassembler.push(Fragment::Ipv6(fragment), Instant::now()),
-        Err(Error::Malformed(MalformedError::OffsetOutOfRange {
+        Err(Error::Malformed(Malformed::OffsetOutOfRange {
             offset: 0x2000,
         }))
     );
@@ -843,7 +835,7 @@ fn wire_offset_guard_rejects_values_before_checked_byte_conversion() {
     fragment.fragment_offset = 0x2000;
     assert_eq!(
         reassembler.push(Fragment::Ipv4(fragment), Instant::now()),
-        Err(Error::Malformed(MalformedError::OffsetOutOfRange {
+        Err(Error::Malformed(Malformed::OffsetOutOfRange {
             offset: 0x2000,
         }))
     );
@@ -857,7 +849,7 @@ fn intrinsic_wire_extent_precedes_configurable_byte_limit() {
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     assert_eq!(
         reassembler.push(ipv6_fragment(&key, 0x1fff, false, &b"12345678"[..]), now),
-        Err(Error::Malformed(MalformedError::ReconstructedLength {
+        Err(Error::Malformed(Malformed::ReconstructedLength {
             family: Family::Ipv6,
         }))
     );
@@ -885,7 +877,7 @@ fn ipv6_predecessor_must_be_on_the_structural_extension_chain() {
     let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
     assert!(matches!(
         reassembler.push(fragment, Instant::now()),
-        Err(Error::Malformed(MalformedError::InvalidIpv6Prefix { .. }))
+        Err(Error::Malformed(Malformed::InvalidIpv6Prefix { .. }))
     ));
     assert_eq!(reassembler.datagram_count(), 0);
 }
@@ -916,7 +908,7 @@ fn ipv6_predecessor_rejects_an_undersized_authentication_header() {
 
     assert!(matches!(
         reassembler.push(fragment, Instant::now()),
-        Err(Error::Malformed(MalformedError::InvalidIpv6Prefix { .. }))
+        Err(Error::Malformed(Malformed::InvalidIpv6Prefix { .. }))
     ));
     assert_eq!(reassembler.datagram_count(), 0);
 }
@@ -934,7 +926,7 @@ fn unrepresentable_idle_expiry_fails_before_state_mutation() {
             ipv4_fragment(&key, 0, true, &b"abcdefgh"[..]),
             Instant::now()
         ),
-        Err(Error::Resource(ResourceError::IdleExpiryRange {
+        Err(Error::Resource(Resource::IdleExpiryRange {
             expiry: Duration::MAX,
         }))
     );
@@ -1049,7 +1041,7 @@ fn repeated_offset_zero_fragments_may_differ_only_in_ecn() {
     );
     assert_eq!(
         mismatched.push(changed_dscp, now),
-        Err(Error::Malformed(MalformedError::InconsistentIpv4Header))
+        Err(Error::Malformed(Malformed::InconsistentIpv4Header))
     );
 }
 
@@ -1114,7 +1106,7 @@ fn ipv4_not_ect_with_ce_fails_typed_in_either_order() {
             .expect("the first fragment is admitted");
         assert_eq!(
             reassembler.push(second, now),
-            Err(Error::Malformed(MalformedError::InconsistentEcn))
+            Err(Error::Malformed(Malformed::InconsistentEcn))
         );
         assert_eq!(reassembler.datagram_count(), 1);
     }
@@ -1288,7 +1280,7 @@ proptest! {
                 ipv4_fragment(&key, 0, true, Bytes::copy_from_slice(&last)),
                 now,
             ),
-            Err(Error::Malformed(MalformedError::ConflictingOverlap {
+            Err(Error::Malformed(Malformed::ConflictingOverlap {
                 bytes: conflicts,
             }))
         );

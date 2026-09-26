@@ -177,6 +177,23 @@ pub(crate) fn strict_or_diagnostic(
     Ok(())
 }
 
+/// Like [`strict_or_diagnostic`] for a typed failure: strict mode keeps it as
+/// the codec error's source, and permissive mode publishes its rendered chain.
+pub(crate) fn strict_or_diagnostic_error(
+    name: &'static str,
+    code: &'static str,
+    field: &'static str,
+    error: impl std::error::Error + Send + Sync + 'static,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), crate::codec::Error> {
+    if context.mode == crate::codec::Mode::Strict {
+        return Err(super::rejected(name, error));
+    }
+    diagnostics.push(Diagnostic::warning(code, crate::error::render(&error)).at_field(field));
+    Ok(())
+}
+
 /// Copies option bytes and zero-pads the copy to a four-byte boundary,
 /// emitting the caller's padded-options diagnostic when padding is added.
 pub(crate) fn pad_options_to_four_bytes(

@@ -37,7 +37,7 @@ pub enum Error {
     UnknownProtocol { layer: usize, name: String },
     #[error("duplicate field {field} at layer {layer}")]
     DuplicateField { layer: usize, field: String },
-    #[error("could not construct layer {name} at index {layer}: {source}")]
+    #[error("could not construct layer {name} at index {layer}")]
     Layer {
         layer: usize,
         name: String,

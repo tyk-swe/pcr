@@ -5,8 +5,6 @@
 
 use packetcraftr_cli::output::contract::ToolFormat;
 
-use std::sync::OnceLock;
-
 use packetcraftr_core::error::Kind;
 
 pub(super) mod arguments;
@@ -204,17 +202,10 @@ pub(super) fn run(
 /// The per-direction buffer is a core constant rather than a limit any flag
 /// sets, so the error names the flag that set the ceiling instead.
 fn buffer_floor_error(value: usize) -> CliError {
-    static REASON: OnceLock<String> = OnceLock::new();
-    let reason = REASON.get_or_init(|| {
-        format!(
-            "cannot be below the per-direction handshake buffer of {} bytes",
-            analysis::tls::MAX_DIRECTION_BUFFER
-        )
-    });
     CliError::classified(analysis::Error::InvalidLimit {
         field: "--max-tls-buffer-bytes",
         value: u64::try_from(value).unwrap_or(u64::MAX),
-        reason,
+        reason: analysis::Constraint::AtLeastTlsDirectionBuffer,
     })
 }
 

@@ -3,10 +3,7 @@
 
 use std::io::{Read, Write};
 
-use super::{
-    Error, Limits, MetadataBlockKind, Reader, RecordKind, RewriteReport, SelectionError,
-    SelectionReport,
-};
+use super::{Error, Limits, MetadataBlockKind, Reader, RecordKind, RewriteReport, SelectionReport};
 use crate::{error::BoundaryError, frame::Frame};
 
 /// Rewrites a capture without changing its format or dropping source records.
@@ -45,12 +42,12 @@ pub fn select<R: Read, W: Write, F>(
     output: W,
     limits: Limits,
     mut predicate: F,
-) -> Result<(W, SelectionReport), SelectionError>
+) -> Result<(W, SelectionReport), Error>
 where
     F: FnMut(u64, &Frame) -> Result<bool, BoundaryError>,
 {
     copy_records(reader, output, limits, true, |number, frame| {
-        predicate(number, frame).map_err(|source| SelectionError::Predicate { number, source })
+        predicate(number, frame).map_err(|source| Error::Predicate { number, source })
     })
 }
 

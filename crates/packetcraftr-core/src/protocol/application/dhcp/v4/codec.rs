@@ -7,7 +7,7 @@ use std::net::Ipv4Addr;
 use bytes::Bytes;
 
 use super::super::codec::{self as shared, Budget, Message, extend, take, u16_at, u32_at};
-use super::super::{Error, Limits};
+use super::super::{Error, Limit, Limits};
 use super::reflection::{layout, schema};
 use super::{Dhcpv4, Option4, Value4};
 use crate::{
@@ -116,7 +116,7 @@ impl Dhcpv4 {
             .saturating_add(self.server_name_options.len())
             > budget.limits.max_options
         {
-            return Err(Error::Limit("option count"));
+            return Err(Error::Limit(Limit::OptionCount));
         }
         let mut primary = self.options.clone();
         let existing = overload(&primary)?;
@@ -188,7 +188,7 @@ impl Option4 {
             }
             (Value4::Addresses(values), 3..=11 | 41 | 42 | 44 | 45 | 48 | 49 | 65 | 68..=76) => {
                 if values.is_empty() || values.len() > 63 {
-                    return Err(Error::Limit("IPv4 option addresses"));
+                    return Err(Error::Limit(Limit::Ipv4OptionAddresses));
                 }
                 for value in values {
                     output.extend_from_slice(&value.octets());
@@ -228,7 +228,7 @@ impl Option4 {
             }
         }
         if output.len() > 255 {
-            return Err(Error::Limit("DHCPv4 option bytes"));
+            return Err(Error::Limit(Limit::Dhcpv4OptionBytes));
         }
         Ok(output.into())
     }

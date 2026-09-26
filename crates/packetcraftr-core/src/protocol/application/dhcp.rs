@@ -35,7 +35,7 @@ impl Default for Limits {
 #[non_exhaustive]
 pub enum Error {
     #[error("DHCP exceeds {0} limit")]
-    Limit(&'static str),
+    Limit(Limit),
     #[error("DHCP truncated at byte {offset}: need {needed}, have {available}")]
     Truncated {
         offset: usize,
@@ -45,6 +45,37 @@ pub enum Error {
     #[error("invalid DHCP value: {0}")]
     Invalid(&'static str),
 }
+/// The DHCP bound an [`Error::Limit`] exceeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Limit {
+    MessageBytes,
+    EncodedBytes,
+    OptionCount,
+    OptionNesting,
+    RelayNesting,
+    DuidBytes,
+    Ipv4OptionAddresses,
+    Dhcpv4OptionBytes,
+    Dhcpv6OptionBytes,
+}
+
+impl std::fmt::Display for Limit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MessageBytes => "message bytes",
+            Self::EncodedBytes => "encoded bytes",
+            Self::OptionCount => "option count",
+            Self::OptionNesting => "option nesting",
+            Self::RelayNesting => "relay nesting",
+            Self::DuidBytes => "DUID bytes",
+            Self::Ipv4OptionAddresses => "IPv4 option addresses",
+            Self::Dhcpv4OptionBytes => "DHCPv4 option bytes",
+            Self::Dhcpv6OptionBytes => "DHCPv6 option bytes",
+        })
+    }
+}
+
 impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         use crate::error::{Classification, Kind};

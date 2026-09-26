@@ -10,8 +10,10 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
+mod error;
 mod path;
-pub use path::{Path, PathError};
+pub use error::Error;
+pub use path::Path;
 
 /// Derived, exact, or raw wire value. Fresh layers normally use
 /// [`WireValue::Auto`] for computed fields; decoders use [`WireValue::Exact`]

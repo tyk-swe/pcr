@@ -9,10 +9,7 @@ use super::{
     CaptureHeader, Endianness, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
     Reader, RecordKind, Writer,
 };
-use crate::{
-    error::{Classification, Classified, Kind},
-    frame::Frame,
-};
+use crate::frame::Frame;
 use serde::Serialize;
 use std::{
     cmp::Reverse,
@@ -57,50 +54,6 @@ pub struct MergeReport {
     pub interfaces: Vec<MergedInterface>,
     pub source_metadata_records: u64,
 }
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum MergeError {
-    #[error("capture merge requires 1..={maximum} sources with names of at most 4096 bytes")]
-    Sources { maximum: usize },
-    #[error("merge source {input}, frame {frame}: {source}")]
-    Source {
-        input: usize,
-        frame: u64,
-        #[source]
-        source: Error,
-    },
-    #[error("merge source {input}, frame {frame} has a timestamp before its preceding frame")]
-    ClockRegression { input: usize, frame: u64 },
-    #[error("merge source {input} has unsupported metadata: {field}")]
-    Metadata { input: usize, field: &'static str },
-    #[error(transparent)]
-    Capture(#[from] Error),
-}
-impl Classified for MergeError {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Source { source, .. } | Self::Capture(source) => source.classification(),
-            Self::Sources { .. } => Classification::new(
-                "cli.capture_merge_sources",
-                Kind::Usage,
-                Some("select a bounded set of named capture sources"),
-            ),
-            Self::ClockRegression { .. } => Classification::new(
-                "packet.capture_merge_order",
-                Kind::Packet,
-                Some("each merge input must already be ordered by timestamp"),
-            ),
-            Self::Metadata { .. } => Classification::new(
-                "packet.capture_merge_metadata",
-                Kind::Packet,
-                Some(
-                    "use faithful source-record export for metadata the normalized merge cannot preserve",
-                ),
-            ),
-        }
-    }
-}
-
 struct Pending {
     frame: Frame,
     description: Interface,
@@ -124,14 +77,14 @@ pub fn merge<R: Read, W: Write>(
     sources: &mut [MergeSource<R>],
     output: &mut Writer<W>,
     limits: MergeLimits,
-) -> Result<MergeReport, MergeError> {
+) -> Result<MergeReport, Error> {
     if limits.max_sources == 0
         || limits.max_sources > 64
         || sources.is_empty()
         || sources.len() > limits.max_sources
         || sources.iter().any(|source| source.name.len() > 4096)
     {
-        return Err(MergeError::Sources {
+        return Err(Error::MergeSources {
             maximum: limits.max_sources.min(64),
         });
     }
@@ -139,8 +92,7 @@ pub fn merge<R: Read, W: Write>(
         return Err(Error::WrongWriterFormat {
             expected: Format::PcapNg,
             actual: output.format(),
-        }
-        .into());
+        });
     }
     let mut states = Vec::new();
     let mut interface_count = 0usize;
@@ -148,7 +100,7 @@ pub fn merge<R: Read, W: Write>(
         let endianness = match source.reader.header() {
             CaptureHeader::Pcap(header) => {
                 if header.network & 0xffff0000 != 0 {
-                    return Err(MergeError::Metadata {
+                    return Err(Error::MergeMetadata {
                         input: index,
                         field: "classic PCAP extended link/FCS metadata",
                     });
@@ -171,8 +123,7 @@ pub fn merge<R: Read, W: Write>(
     if interface_count > limits.max_interfaces {
         return Err(Error::TotalInterfaceLimit {
             limit: limits.max_interfaces,
-        }
-        .into());
+        });
     }
     let mut report = MergeReport {
         source_frames: vec![0; sources.len()],
@@ -265,7 +216,7 @@ fn advance<R: Read>(
     interfaces: &mut usize,
     report: &mut MergeReport,
     limits: MergeLimits,
-) -> Result<Option<Pending>, MergeError> {
+) -> Result<Option<Pending>, Error> {
     let next = report.source_frames[index]
         .checked_add(1)
         .ok_or(Error::FrameLimitExceeded {
@@ -276,10 +227,10 @@ fn advance<R: Read>(
         let record = source
             .reader
             .next_record()
-            .map_err(|source| MergeError::Source {
+            .map_err(|source| Error::MergeSource {
                 input: index,
                 frame: next,
-                source,
+                source: Box::new(source),
             })?;
         let Some(record) = record else {
             return Ok(None);
@@ -311,7 +262,7 @@ fn advance<R: Read>(
                             .iter()
                             .any(|option| option.code == PCAPNG_OPTION_IF_FCSLEN) =>
                     {
-                        return Err(MergeError::Metadata {
+                        return Err(Error::MergeMetadata {
                             input: index,
                             field: "interface FCS length",
                         });
@@ -322,7 +273,7 @@ fn advance<R: Read>(
             }
         };
         validate_rewritable_packet_flags(&options, state.endianness, "packet flags").map_err(
-            |field| MergeError::Metadata {
+            |field| Error::MergeMetadata {
                 input: index,
                 field,
             },
@@ -331,15 +282,15 @@ fn advance<R: Read>(
             format: source.reader.format(),
             reason: "packet record has no frame",
         })?;
-        let time = frame.timestamp.ok_or(MergeError::Source {
+        let time = frame.timestamp.ok_or_else(|| Error::MergeSource {
             input: index,
             frame: next,
-            source: Error::TimestampUnavailable {
+            source: Box::new(Error::TimestampUnavailable {
                 format: Format::PcapNg,
-            },
+            }),
         })?;
         if state.previous.is_some_and(|previous| time < previous) {
-            return Err(MergeError::ClockRegression {
+            return Err(Error::MergeClockRegression {
                 input: index,
                 frame: next,
             });

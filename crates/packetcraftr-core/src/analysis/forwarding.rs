@@ -47,7 +47,7 @@ use serde::Serialize;
 use crate::budget::Cancelled;
 use crate::error::{Classification, Classified, Kind};
 use crate::field::FieldValue;
-use crate::filter::{Filter, Projection, ProjectionError};
+use crate::filter::{Filter, Projection};
 use crate::frame::{GlobalInterfaceId, LinkType};
 use crate::registry::Registry;
 
@@ -493,7 +493,7 @@ impl Rules {
                     .collect();
                 Ok((cells, states))
             }
-            Err(ProjectionError::Limit { .. }) => {
+            Err(crate::filter::Error::ProjectionLimit { .. }) => {
                 // Preserve truncation as acquisition evidence when both limits apply.
                 if incomplete.is_none() {
                     *incomplete = Some(Incomplete::FieldBudget);
@@ -615,9 +615,8 @@ impl Expectation {
     fn compile(rule: &str, registry: &Registry) -> Result<Self, Error> {
         let (field, value) = rule
             .split_once('=')
-            .ok_or_else(|| Error::ExpectationSyntax {
+            .ok_or_else(|| Error::ExpectationSeparator {
                 rule: rule.to_owned(),
-                reason: "expected FIELD=VALUE",
             })?;
         let field = field.trim();
         let mut value = value.trim_start();
@@ -625,9 +624,8 @@ impl Expectation {
             value = rest.trim_start();
         }
         if field.is_empty() || value.is_empty() {
-            return Err(Error::ExpectationSyntax {
+            return Err(Error::ExpectationEmptySide {
                 rule: rule.to_owned(),
-                reason: "expected FIELD=VALUE with non-empty sides",
             });
         }
         let actual =
@@ -698,7 +696,7 @@ impl<'a> Collector<'a> {
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
-    Projection(#[from] ProjectionError),
+    Projection(crate::filter::Error),
     #[error(transparent)]
     Filter(#[from] crate::filter::Error),
     #[error(transparent)]
@@ -713,19 +711,21 @@ pub enum Error {
         field: String,
         why: &'static str,
     },
-    #[error("invalid expectation {rule:?}: {reason}")]
-    ExpectationSyntax { rule: String, reason: &'static str },
-    #[error("invalid expectation {rule:?}: {source}")]
+    #[error("invalid expectation {rule:?}: expected FIELD=VALUE")]
+    ExpectationSeparator { rule: String },
+    #[error("invalid expectation {rule:?}: expected FIELD=VALUE with non-empty sides")]
+    ExpectationEmptySide { rule: String },
+    #[error("invalid expectation {rule:?}")]
     Expectation {
         rule: String,
         #[source]
         source: crate::filter::Error,
     },
-    #[error("invalid expectation {rule:?}: {source}")]
+    #[error("invalid expectation {rule:?}")]
     ExpectationField {
         rule: String,
         #[source]
-        source: ProjectionError,
+        source: crate::filter::Error,
     },
     /// The retained-evidence budget was exhausted; nothing was evicted.
     #[error("retained observation evidence exceeds the {limit} byte budget")]
@@ -750,14 +750,7 @@ impl Classified for Error {
             }
             Self::Filter(source) | Self::Expectation { source, .. } => source.classification(),
             Self::Cancelled(source) => source.classification(),
-            Self::Interrupted(source) => match source {
-                crate::budget::Interrupted::Cancelled(source) => source.classification(),
-                crate::budget::Interrupted::Exceeded(_) => Classification::new(
-                    "policy.duration_limit",
-                    Kind::Policy,
-                    Some("reduce input or raise the finite invocation duration"),
-                ),
-            },
+            Self::Interrupted(source) => source.classification(),
             Self::ObservationContract { .. } => Classification::new(
                 "analysis.verify_observation_contract",
                 Kind::Usage,
@@ -768,15 +761,14 @@ impl Classified for Error {
                 Kind::Policy,
                 Some("reduce input or raise the finite comparison scratch budget"),
             ),
-            Self::CaptureLocal { .. } | Self::ExpectationSyntax { .. } | Self::RuleBudget => {
-                Classification::new(
-                    "cli.verify_rule",
-                    Kind::Usage,
-                    Some(
-                        "declare identity, preservation, and expectation rules over packet fields",
-                    ),
-                )
-            }
+            Self::CaptureLocal { .. }
+            | Self::ExpectationSeparator { .. }
+            | Self::ExpectationEmptySide { .. }
+            | Self::RuleBudget => Classification::new(
+                "cli.verify_rule",
+                Kind::Usage,
+                Some("declare identity, preservation, and expectation rules over packet fields"),
+            ),
             Self::EvidenceBudget { .. } => Classification::new(
                 "policy.verify_evidence_limit",
                 Kind::Policy,

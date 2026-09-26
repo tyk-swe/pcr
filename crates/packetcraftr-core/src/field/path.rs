@@ -20,17 +20,11 @@ pub struct Path {
     components: Vec<Component>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("invalid reflective field path {path:?}")]
-pub struct PathError {
-    pub path: String,
-}
-
 impl std::str::FromStr for Path {
-    type Err = PathError;
+    type Err = super::Error;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let invalid = || PathError {
+        let invalid = || super::Error::InvalidPath {
             path: input.chars().take(256).collect(),
         };
         if input.is_empty() || input.len() > 8192 {

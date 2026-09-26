@@ -110,7 +110,7 @@ impl SystemAuthorizer {
                             "repair the capture so its decoded layers rebuild the exact submitted bytes",
                         ),
                     ),
-                    Vec::new(),
+                    packetcraftr_core::error::source_chain(&source),
                     source,
                 )
             })
@@ -157,7 +157,7 @@ fn decode_error(source: decode::Error) -> BoundaryError {
             Kind::Packet,
             Some("repair the frame or link type before authorizing live replay"),
         ),
-        Vec::new(),
+        packetcraftr_core::error::source_chain(&source),
         source,
     )
 }
@@ -212,7 +212,7 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
                 Kind::Packet,
                 Some("repair the raw IP header or capture link type before live replay"),
             ),
-            Vec::new(),
+            packetcraftr_core::error::source_chain(&source),
             source,
         )
     })?;

@@ -5,11 +5,11 @@ use std::net::Ipv6Addr;
 
 use crate::layer::Id;
 
-/// Why a packet's route interpretation is ambiguous or refused.
+/// Why a packet's route interpretation is ambiguous or cannot be determined.
 ///
-/// Every variant is a reason live transmission is denied, so the enum is the
-/// authorization gate's own vocabulary: a new ambiguity gets a variant here,
-/// never a prose string assembled at the throw site.
+/// Each variant describes the packet, not what a caller does about it; a new
+/// ambiguity gets a variant here, never a prose string assembled at the throw
+/// site.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -19,11 +19,15 @@ pub enum Error {
         field: &'static str,
         reason: &'static str,
     },
-    #[error("non-atomic {protocol} fragment may hide a live destination")]
+    #[error(
+        "destination cannot be determined because the {protocol} layer is a non-atomic fragment"
+    )]
     NonAtomicFragment { protocol: Id },
-    #[error("malformed {protocol} layer may hide a live destination: {reason}")]
+    #[error("destination cannot be determined because the {protocol} layer is malformed: {reason}")]
     MalformedMayHideDestination { protocol: String, reason: String },
-    #[error("unknown protocol {protocol} exposes route-bearing field {field}")]
+    #[error(
+        "destination cannot be determined because unknown protocol {protocol} carries route-bearing field {field}"
+    )]
     UnknownProtocolRouteField { protocol: Id, field: &'static str },
     #[error("IP layer index is outside the packet")]
     LayerIndexOutOfRange,

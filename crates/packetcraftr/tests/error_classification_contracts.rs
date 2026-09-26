@@ -361,7 +361,7 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
         matches!(
             &error,
             Error::Policy(policy::Error::InvalidPacketSemantics { reason, .. })
-                if reason.contains("may hide a live destination")
+                if reason.contains("destination cannot be determined")
                     && reason.contains("truncated ipv4 layer")
         ),
         "{error:?}"

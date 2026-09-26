@@ -336,7 +336,7 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
         (
             "NonAtomicFragment",
             SemanticsError::NonAtomicFragment { protocol: ipv4() },
-            "non-atomic ipv4 fragment may hide a live destination",
+            "destination cannot be determined because the ipv4 layer is a non-atomic fragment",
         ),
         (
             "MalformedMayHideDestination",
@@ -344,7 +344,7 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
                 protocol: "ipv4".to_owned(),
                 reason: "truncated ipv4 layer".to_owned(),
             },
-            "malformed ipv4 layer may hide a live destination: truncated ipv4 layer",
+            "destination cannot be determined because the ipv4 layer is malformed: truncated ipv4 layer",
         ),
         (
             "UnknownProtocolRouteField",
@@ -352,7 +352,7 @@ fn every_semantics_error_variant_renders_a_stable_refusal() {
                 protocol: Id::new("route_mimic"),
                 field: "destination",
             },
-            "unknown protocol route_mimic exposes route-bearing field destination",
+            "destination cannot be determined because unknown protocol route_mimic carries route-bearing field destination",
         ),
         (
             "LayerIndexOutOfRange",

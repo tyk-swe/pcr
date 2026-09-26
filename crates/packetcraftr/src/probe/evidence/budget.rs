@@ -4,7 +4,7 @@
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::evidence::{Budget, BudgetError, DiagnosticLog};
+use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
 
 #[derive(Clone, Copy)]
 pub(crate) struct EvidenceDiagnosticDescriptor {
@@ -53,7 +53,7 @@ pub(crate) trait EvidenceSink {
 pub(crate) struct EvidenceState {
     limits: EvidenceLimits,
     descriptor: EvidenceDiagnosticDescriptor,
-    budget: Budget,
+    budget: RetentionBudget,
     retained_undecoded: usize,
     diagnostics: DiagnosticLog,
 }
@@ -63,7 +63,7 @@ impl EvidenceState {
         Self {
             limits,
             descriptor,
-            budget: Budget::default(),
+            budget: RetentionBudget::default(),
             retained_undecoded: 0,
             diagnostics: DiagnosticLog::default(),
         }
@@ -143,13 +143,13 @@ impl EvidenceState {
         };
         let name = self.descriptor.display_name;
         let message = match error {
-            BudgetError::FrameCountOverflow => {
+            RetentionError::FrameCountOverflow => {
                 format!("{name} evidence frame accounting overflowed; later frames were omitted")
             }
-            BudgetError::ByteCountOverflow => {
+            RetentionError::ByteCountOverflow => {
                 format!("{name} evidence byte accounting overflowed; later frames were omitted")
             }
-            BudgetError::FrameLimit | BudgetError::ByteLimit => format!(
+            RetentionError::FrameLimit | RetentionError::ByteLimit => format!(
                 "{name} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"
             ),
         };

@@ -52,7 +52,7 @@ use packetcraftr_netio::{Error as LiveIoError, capture, interface, transmit};
 
 use crate::mtu::validate_mtu;
 use crate::planning::ensure_preparation_deadline;
-use crate::policy::{Operation, Policy, WireBudget};
+use crate::policy::{Operation, Policy, WireLimits};
 use crate::route;
 use crate::{Client, Error, SentPacket, send};
 use materialize::{
@@ -236,7 +236,8 @@ impl Materializer<'_> {
     }
 }
 
-/// The operation's packet count and cumulative exact wire bytes.
+/// The operation's running wire budget: its declared packet count and the
+/// exact wire bytes charged so far, each authorized against policy limits.
 #[derive(Debug)]
 struct Budget {
     packets: u64,
@@ -246,7 +247,7 @@ struct Budget {
 impl Budget {
     /// Authorizes the count-only budget before any provider is consulted.
     fn open(policy: &Policy, packets: u64) -> Result<Self, Error> {
-        policy.authorize(Operation::Budgeted(WireBudget::new(packets, 0)))?;
+        policy.authorize(Operation::Wire(WireLimits::new(packets, 0)))?;
         Ok(Self {
             packets,
             wire_bytes: 0,
@@ -263,10 +264,7 @@ impl Budget {
                 actual: u64::MAX,
                 limit: policy.max_bytes_per_operation,
             })?;
-        policy.authorize(Operation::Budgeted(WireBudget::new(
-            self.packets,
-            wire_bytes,
-        )))?;
+        policy.authorize(Operation::Wire(WireLimits::new(self.packets, wire_bytes)))?;
         self.wire_bytes = wire_bytes;
         Ok(())
     }

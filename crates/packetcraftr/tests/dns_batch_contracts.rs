@@ -16,16 +16,16 @@ use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 #[derive(Default)]
 struct PolicyGate {
     policy: Policy,
-    budgets: Vec<DnsOperation>,
+    operations: Vec<DnsOperation>,
     resolutions: usize,
 }
 
 impl Authorizer for PolicyGate {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        let Operation::Dns(budget) = operation else {
+        let Operation::Dns(dns) = operation else {
             panic!("DNS must declare UDP and TCP costs");
         };
-        self.budgets.push(budget);
+        self.operations.push(dns);
         PolicyAuthorizer::for_packets(&self.policy).authorize_operation(operation)
     }
 
@@ -129,8 +129,11 @@ fn batches_authorize_combined_retry_and_transport_units_before_discovery() {
         )
         .unwrap_err();
         assert_eq!(error.classification().code, "policy.traffic_unit_limit");
-        assert_eq!(gate.budgets.len(), 1);
-        assert_eq!(gate.budgets[0].budget().packets(), 3 * per_question_units);
+        assert_eq!(gate.operations.len(), 1);
+        assert_eq!(
+            gate.operations[0].limits().packets(),
+            3 * per_question_units
+        );
         assert_eq!(gate.resolutions, 0);
         assert_eq!(executor.calls, 0);
     }
@@ -162,8 +165,8 @@ fn batches_authorize_combined_query_bytes_before_discovery() {
     )
     .unwrap_err();
     assert_eq!(error.classification().code, "policy.traffic_byte_limit");
-    assert_eq!(gate.budgets.len(), 1);
-    assert_eq!(gate.budgets[0].tcp().application_bytes(), total);
+    assert_eq!(gate.operations.len(), 1);
+    assert_eq!(gate.operations[0].tcp().application_bytes(), total);
     assert_eq!(gate.resolutions, 0);
     assert_eq!(executor.calls, 0);
 }
@@ -235,7 +238,7 @@ fn batch_totals_include_traffic_from_questions_that_later_fail() {
     ));
     assert_eq!(executor.calls, 3);
     assert_eq!(report.stats.bytes, expected_bytes);
-    assert_eq!(gate.budgets.len(), 1);
+    assert_eq!(gate.operations.len(), 1);
     assert_eq!(
         gate.resolutions, 6,
         "every attempted TCP endpoint is still authorized"
@@ -297,7 +300,7 @@ fn a_pre_cancelled_batch_leaves_every_question_unattempted() {
     .unwrap();
     assert_eq!(report.status_counts(), (0, 0, 2));
     assert_eq!(report.stats, packetcraftr::Stats::default());
-    assert!(gate.budgets.is_empty());
+    assert!(gate.operations.is_empty());
     assert_eq!(gate.resolutions, 0);
 }
 
@@ -321,7 +324,7 @@ fn batch_rejects_mixed_server_identity_before_authorization() {
         )
         .unwrap_err();
         assert_eq!(error.classification().code, "cli.dns_limit");
-        assert!(gate.budgets.is_empty());
+        assert!(gate.operations.is_empty());
         assert_eq!(gate.resolutions, 0);
         assert_eq!(executor.calls, 0);
     }

@@ -231,20 +231,20 @@ fn policy_validates_address_and_operation_bounds() {
     );
 
     defaults
-        .authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        .authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation,
             defaults.max_bytes_per_operation,
         )))
         .expect("limits are inclusive");
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             defaults.max_packets_per_operation + 1,
             0
         ))),
         Err(policy::Error::PacketLimit { .. })
     ));
     assert!(matches!(
-        defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
+        defaults.authorize(policy::Operation::Wire(policy::WireLimits::new(
             0,
             defaults.max_bytes_per_operation + 1
         ))),
@@ -253,11 +253,11 @@ fn policy_validates_address_and_operation_bounds() {
     defaults
         .authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(
+                policy::WireLimits::new(
                     defaults.max_packets_per_operation,
                     defaults.max_bytes_per_operation,
                 ),
-                policy::SocketBudget::none(),
+                policy::SocketLimits::none(),
             )
             .unwrap(),
         ))
@@ -265,8 +265,8 @@ fn policy_validates_address_and_operation_bounds() {
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(defaults.max_packets_per_operation + 1, 0),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(defaults.max_packets_per_operation + 1, 0),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),
@@ -275,8 +275,8 @@ fn policy_validates_address_and_operation_bounds() {
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
             policy::DnsOperation::new(
-                policy::WireBudget::new(0, defaults.max_bytes_per_operation + 1),
-                policy::SocketBudget::none()
+                policy::WireLimits::new(0, defaults.max_bytes_per_operation + 1),
+                policy::SocketLimits::none()
             )
             .unwrap()
         )),

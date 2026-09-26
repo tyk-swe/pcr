@@ -18,7 +18,7 @@ use super::evidence::{Recorder, validate_execution};
 use super::execution::{Execution, ExecutionCase};
 use super::plan::{rate_delay, worst_case_duration};
 use super::{Case, LiveOptions, Report, Stats, Summary};
-use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireBudget};
+use crate::policy::{Authorizer, DeclaredPackets, Operation, PermissiveLive, WireLimits};
 use crate::probe::Executor;
 
 /// Builds and validates all cases offline, then authorizes and executes the campaign.
@@ -288,7 +288,7 @@ where
         PermissiveLive::NotRequired
     };
     authorizer.authorize_operation(Operation::Declared(DeclaredPackets::new(
-        WireBudget::new(prepared.built_case_count, prepared.maximum_wire_bytes),
+        WireLimits::new(prepared.built_case_count, prepared.maximum_wire_bytes),
         &packets,
         live.destination,
         permissive_live,

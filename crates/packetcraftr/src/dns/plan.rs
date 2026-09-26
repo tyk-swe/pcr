@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use crate::policy::{BudgetOverflow, DnsOperation, SocketBudget, WireBudget};
+use crate::policy::{DnsOperation, LimitOverflow, SocketLimits, WireLimits};
 
 use super::MAX_PROBE_OVERHEAD;
 use super::error::Error;
@@ -11,56 +11,56 @@ use super::{Request, TransportMode};
 
 /// The complete finite cost one DNS operation may incur, approved before any
 /// resolver, route, capture, or socket side effect.
-pub(super) struct OperationBudget {
+pub(super) struct OperationLimits {
     pub(super) packet_count: u64,
     pub(super) maximum_wire_bytes: u64,
     /// The socket cost of direct TCP or a possible continuation, or
-    /// [`SocketBudget::none`] for UDP-only queries. DNS always
+    /// [`SocketLimits::none`] for UDP-only queries. DNS always
     /// states the shape, so the same overrun is charged and classified the
     /// same way whether or not fallback is enabled.
-    pub(super) tcp: SocketBudget,
+    pub(super) tcp: SocketLimits,
     /// Intentional delay between attempts at the requested rate.
     pub(super) delay: Duration,
 }
 
 /// Sum every question's worst-case UDP and TCP cost before any batch traffic.
-pub(super) fn batch_budget(
-    mut budgets: impl Iterator<Item = DnsOperation>,
+pub(super) fn batch_limits(
+    mut operations: impl Iterator<Item = DnsOperation>,
 ) -> Result<DnsOperation, Error> {
-    budgets.try_fold(
-        DnsOperation::new(WireBudget::new(0, 0), SocketBudget::none())?,
-        |total, budget| {
+    operations.try_fold(
+        DnsOperation::new(WireLimits::new(0, 0), SocketLimits::none())?,
+        |total, operation| {
             let udp = total.udp();
             let tcp = total.tcp();
             Ok(DnsOperation::new(
-                WireBudget::new(
+                WireLimits::new(
                     udp.packets()
-                        .checked_add(budget.udp().packets())
-                        .ok_or(BudgetOverflow)?,
+                        .checked_add(operation.udp().packets())
+                        .ok_or(LimitOverflow)?,
                     udp.wire_bytes()
-                        .checked_add(budget.udp().wire_bytes())
-                        .ok_or(BudgetOverflow)?,
+                        .checked_add(operation.udp().wire_bytes())
+                        .ok_or(LimitOverflow)?,
                 ),
-                SocketBudget::new(
+                SocketLimits::new(
                     tcp.connections()
-                        .checked_add(budget.tcp().connections())
-                        .ok_or(BudgetOverflow)?,
+                        .checked_add(operation.tcp().connections())
+                        .ok_or(LimitOverflow)?,
                     tcp.messages()
-                        .checked_add(budget.tcp().messages())
-                        .ok_or(BudgetOverflow)?,
+                        .checked_add(operation.tcp().messages())
+                        .ok_or(LimitOverflow)?,
                     tcp.application_bytes()
-                        .checked_add(budget.tcp().application_bytes())
-                        .ok_or(BudgetOverflow)?,
+                        .checked_add(operation.tcp().application_bytes())
+                        .ok_or(LimitOverflow)?,
                 ),
             )?)
         },
     )
 }
 
-pub(super) fn operation_budget(
+pub(super) fn operation_limits(
     request: &Request,
     query_bytes: usize,
-) -> Result<OperationBudget, Error> {
+) -> Result<OperationLimits, Error> {
     let attempts = u64::from(request.attempts);
     let packet_count = if request.transport == TransportMode::Tcp {
         0
@@ -78,9 +78,9 @@ pub(super) fn operation_budget(
                 reason: "wire-byte accounting overflowed".to_owned(),
             })?;
     let tcp = if request.transport != TransportMode::Udp {
-        socket_budget(attempts, query_bytes)?
+        socket_limits(attempts, query_bytes)?
     } else {
-        SocketBudget::none()
+        SocketLimits::none()
     };
     let delay = rate_delay(request.queries_per_second)?;
     let worst_case = worst_case_duration(request, delay)?;
@@ -90,7 +90,7 @@ pub(super) fn operation_budget(
             limit: request.limits.max_duration,
         });
     }
-    Ok(OperationBudget {
+    Ok(OperationLimits {
         packet_count,
         maximum_wire_bytes,
         tcp,
@@ -98,7 +98,7 @@ pub(super) fn operation_budget(
     })
 }
 
-fn socket_budget(packet_count: u64, query_bytes: u64) -> Result<SocketBudget, Error> {
+fn socket_limits(packet_count: u64, query_bytes: u64) -> Result<SocketLimits, Error> {
     let framed_query_bytes = query_bytes.checked_add(2).ok_or(Error::InvalidLimit {
         field: "socket_bytes",
         value: u64::MAX,
@@ -112,7 +112,7 @@ fn socket_budget(packet_count: u64, query_bytes: u64) -> Result<SocketBudget, Er
                 value: u64::MAX,
                 reason: "DNS-over-TCP byte accounting overflowed".to_owned(),
             })?;
-    Ok(SocketBudget::new(
+    Ok(SocketLimits::new(
         packet_count,
         packet_count,
         application_bytes,

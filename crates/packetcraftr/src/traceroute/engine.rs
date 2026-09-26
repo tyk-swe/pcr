@@ -14,7 +14,7 @@ use crate::clock::Clock;
 use crate::policy::Authorizer;
 use crate::probe::limits::{check_probe_count, check_probe_duration};
 use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
-use crate::target::{GateErrors, admit_operation, budgeted};
+use crate::target::{GateErrors, admit_operation, wire_limits};
 
 use super::MAX_PROBE_BYTES;
 use super::WORKFLOW;
@@ -212,7 +212,12 @@ fn approve_traceroute<A: Authorizer>(
                 ))?;
             Ok((total_probes, maximum_wire_bytes))
         },
-        |plan| Ok(budgeted(u64::try_from(plan.0).unwrap_or(u64::MAX), plan.1)),
+        |plan| {
+            Ok(wire_limits(
+                u64::try_from(plan.0).unwrap_or(u64::MAX),
+                plan.1,
+            ))
+        },
     )?;
     // The admission gate guarantees the selected set is non-empty.
     let destination = selected.addresses[0];

@@ -13,7 +13,7 @@ use packetcraftr_core::{
 use packetcraftr_netio::capture::RecordIdentity;
 
 use super::model::Options;
-use crate::evidence::{Budget, BudgetError, DiagnosticLog};
+use crate::evidence::{DiagnosticLog, RetentionBudget, RetentionError};
 use crate::preparation::PreparedPacket;
 
 #[derive(Clone, Copy)]
@@ -35,7 +35,7 @@ pub(crate) struct Accumulator {
     pub(super) unsolicited: Vec<UnsolicitedEvidence>,
     pub(super) pending_events: Vec<super::model::Event>,
     pub(crate) diagnostics: DiagnosticLog,
-    pub(super) evidence_budget: Budget,
+    pub(super) evidence_budget: RetentionBudget,
     pub(crate) response_counts: Vec<usize>,
     pub(super) response_count: usize,
     pub(super) retained_unmatched: usize,
@@ -81,7 +81,7 @@ impl Accumulator {
             unsolicited: Vec::new(),
             pending_events: Vec::new(),
             diagnostics: DiagnosticLog::default(),
-            evidence_budget: Budget::default(),
+            evidence_budget: RetentionBudget::default(),
             response_counts: vec![0; requests],
             response_count: 0,
             retained_unmatched: 0,
@@ -116,22 +116,22 @@ impl Accumulator {
             Err(error) => error,
         };
         let (code, message) = match error {
-            BudgetError::FrameCountOverflow => (
+            RetentionError::FrameCountOverflow => (
                 "exchange.capture_frame_limit",
                 "retained capture frame accounting overflowed; frame was not retained".to_owned(),
             ),
-            BudgetError::FrameLimit => (
+            RetentionError::FrameLimit => (
                 "exchange.capture_frame_limit",
                 format!(
                     "aggregate retained capture frame limit {} reached; later frames were not retained",
                     options.capture.max_frames
                 ),
             ),
-            BudgetError::ByteCountOverflow => (
+            RetentionError::ByteCountOverflow => (
                 "exchange.capture_byte_limit",
                 "retained capture byte accounting overflowed; frame was not retained".to_owned(),
             ),
-            BudgetError::ByteLimit => (
+            RetentionError::ByteLimit => (
                 "exchange.capture_byte_limit",
                 format!(
                     "retained capture byte limit {} reached; later frames were not retained",

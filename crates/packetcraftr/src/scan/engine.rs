@@ -16,7 +16,7 @@ use crate::clock::Clock;
 use crate::policy::Authorizer;
 use crate::probe::limits::{check_probe_count, check_probe_duration};
 use crate::probe::runner::{BatchEvidence, run_batches, sink_observer};
-use crate::target::{DeclaredTargets, GateErrors, admit_selection, budgeted};
+use crate::target::{DeclaredTargets, GateErrors, admit_selection, wire_limits};
 
 use super::WORKFLOW;
 use super::evidence::ProbeClassifier;
@@ -418,7 +418,7 @@ fn approve_scan<A: Authorizer>(
             })
         },
         |plan| {
-            Ok(budgeted(
+            Ok(wire_limits(
                 u64::try_from(plan.total_probes).unwrap_or(u64::MAX),
                 plan.maximum_bytes,
             ))

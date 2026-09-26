@@ -86,8 +86,8 @@ pub(super) fn prepare<O: LiveOptions>(
     policy.validate().map_err(CliError::classified)?;
     let count = options.budget_count(&template)?;
     policy
-        .authorize(packetcraftr::policy::Operation::Budgeted(
-            packetcraftr::policy::WireBudget::new(count, 0),
+        .authorize(packetcraftr::policy::Operation::Wire(
+            packetcraftr::policy::WireLimits::new(count, 0),
         ))
         .map_err(CliError::classified)?;
     let routed = prepare_expanded_route(

@@ -35,7 +35,7 @@ use crate::test_support::RecordingClock;
 struct RecordingAuthorizer {
     calls: usize,
     final_wire_calls: usize,
-    budgets: Vec<(u64, u64)>,
+    limits: Vec<(u64, u64)>,
     deny: bool,
     deny_final_wire: bool,
 }
@@ -43,8 +43,8 @@ struct RecordingAuthorizer {
 impl Authorizer for RecordingAuthorizer {
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
         self.calls += 1;
-        let budget = operation.budget();
-        self.budgets.push((budget.packets(), budget.wire_bytes()));
+        let limits = operation.limits();
+        self.limits.push((limits.packets(), limits.wire_bytes()));
         assert!(
             matches!(operation, Operation::Replay(_)),
             "replay must submit an exact frame, got {operation:?}"
@@ -526,7 +526,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     .unwrap();
 
     assert_eq!(selector.numbers, [1, 2, 3]);
-    assert_eq!(authorizer.budgets, [(1, 2), (2, 6)]);
+    assert_eq!(authorizer.limits, [(1, 2), (2, 6)]);
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(clock.delays, [Duration::ZERO, Duration::from_secs(2)]);
     assert_eq!(summary.frames_read, 3);
@@ -623,7 +623,7 @@ fn byte_rate_uses_selected_bytes_and_cumulative_rounding() {
     );
     assert_eq!(summary.scheduled_duration, Duration::from_nanos(16));
     assert_eq!(summary.bytes_transmitted, 7);
-    assert_eq!(authorizer.budgets, [(1, 2), (2, 6), (3, 7)]);
+    assert_eq!(authorizer.limits, [(1, 2), (2, 6), (3, 7)]);
     assert_eq!(authorizer.final_wire_calls, 3);
 }
 
@@ -855,7 +855,7 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
         [(1, 0, 7), (1, 1, 8), (2, 0, 7), (2, 1, 8)]
     );
     assert_eq!(authorizer.final_wire_calls, 4);
-    assert_eq!(authorizer.budgets, [(1, 2), (2, 4), (3, 6), (4, 8)]);
+    assert_eq!(authorizer.limits, [(1, 2), (2, 4), (3, 6), (4, 8)]);
     options.limits.max_source_frames = 3;
     let mut transmitter = RecordingTransmitter::default();
     assert!(matches!(

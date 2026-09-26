@@ -16,8 +16,8 @@ pub use model::{
 pub use model::{DestinationConstraint, Error, Policy};
 
 pub use operation::{
-    Authorizer, BudgetOverflow, DeclaredPackets, DnsOperation, Operation, PermissiveLive,
-    PolicyAuthorizer, ReplayFrame, SocketBudget, SocketOperation, WireBudget,
+    Authorizer, DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive,
+    PolicyAuthorizer, ReplayFrame, SocketLimits, SocketOperation, WireLimits,
     unsupported_operation,
 };
 pub use wire::requires_live_opt_in;

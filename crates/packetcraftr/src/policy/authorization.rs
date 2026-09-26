@@ -60,10 +60,9 @@ impl Policy {
         Ok(())
     }
 
-    /// Applies the operation-wide packet and exact wire-byte budgets together.
+    /// Applies the operation-wide packet and exact wire-byte limits together.
     /// Callers provide prospective totals before starting live side effects.
-    ///
-    pub(super) fn authorize_wire_budget(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
+    pub(super) fn authorize_wire_limits(&self, packets: u64, wire_bytes: u64) -> Result<(), Error> {
         if packets > self.max_packets_per_operation {
             return Err(Error::PacketLimit {
                 actual: packets,
@@ -81,7 +80,7 @@ impl Policy {
 
     /// Applies the shared policy ceilings to DNS's explicit aggregate of raw
     /// packets and bounded socket connection/message traffic units.
-    pub(super) fn authorize_traffic_budget(
+    pub(super) fn authorize_traffic_limits(
         &self,
         traffic_units: u64,
         wire_and_application_bytes: u64,

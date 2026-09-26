@@ -16,7 +16,7 @@ use crate::target::approve_operation;
 use crate::{BoundaryError, Stats};
 
 use super::engine::{Attempts, Gates, PreparedOperation};
-use super::plan::batch_budget;
+use super::plan::batch_limits;
 use super::report::{Collector, Report};
 use super::{Error, Event, Request};
 
@@ -99,7 +99,7 @@ impl BatchReport {
 /// Runs requests in input order under the minimum `limits.max_duration` in the
 /// batch.
 ///
-/// Prepares and authorizes the combined worst-case traffic budget before
+/// Prepares and authorizes the combined worst-case traffic limits before
 /// discovery. Cancellation or deadline exhaustion leaves remaining questions
 /// [`QuestionStatus::Unattempted`]; other question failures are
 /// [`QuestionStatus::Failed`] and allow the batch to continue. Output failures
@@ -219,10 +219,10 @@ where
         .iter()
         .map(PreparedOperation::new)
         .collect::<Result<Vec<_>, _>>()?;
-    let budget = batch_budget(prepared.iter().map(|prepared| prepared.budget))?;
+    let limits = batch_limits(prepared.iter().map(|prepared| prepared.limits))?;
     let mut stop = deadline.enforce().is_err();
     if !stop {
-        approve_operation(authorizer, Operation::Dns(budget), deadline, &Gates)?;
+        approve_operation(authorizer, Operation::Dns(limits), deadline, &Gates)?;
     }
     let mut questions = Vec::with_capacity(requests.len());
     let mut stats = Stats::default();

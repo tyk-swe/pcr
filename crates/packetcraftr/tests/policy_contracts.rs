@@ -329,8 +329,8 @@ fn both_authorization_seams_refuse_a_malformed_policy_identically() {
         ..policy::Policy::default()
     };
     let workflow_denial = packetcraftr::policy::PolicyAuthorizer::for_packets(&malformed)
-        .authorize_operation(packetcraftr::policy::Operation::Budgeted(
-            packetcraftr::policy::WireBudget::new(1, 1),
+        .authorize_operation(packetcraftr::policy::Operation::Wire(
+            packetcraftr::policy::WireLimits::new(1, 1),
         ))
         .expect_err("the workflow seam rejects a malformed policy");
 

@@ -587,7 +587,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   Advertisement bodies with their source and target link-layer address options
   (`NeighborSolicitation`, `NeighborAdvertisement`, `MessageOption`,
   `solicited_node_multicast`). Decoding keeps reserved bits and unknown
-  options, and a decoded body re-encodes byte for byte. The models are not
+  options, and a decoded body re-encodes byte for byte. `ndp::Error`
+  implements `Classified` (`packet.codec`). The models are not
   registered layers, so dissection output is unchanged.
 - `packet::MacAddress::for_ip_multicast` maps an IPv4 or IPv6 multicast group
   to its Ethernet group address.

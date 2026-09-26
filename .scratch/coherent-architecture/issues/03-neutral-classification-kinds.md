@@ -4,9 +4,20 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No library crate references a CLI-named kind.
-- [ ] The error-classification contract tests pass unchanged: codes, kinds as published, exit codes.
-- [ ] `[Unreleased]` records the Rust rename, and the migration note mentions it.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] No library crate references a CLI-named kind.
+- [x] The error-classification contract tests pass unchanged: codes, kinds as published, exit codes.
+- [x] `[Unreleased]` records the Rust rename, and the migration note mentions it.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- The CLI output envelope serialized core's `Kind` directly, so the rename
+  needed a CLI-owned published kind: `output::envelope::ErrorKind`
+  (`From<Kind>`, `Usage` -> `"cli"`), also used by the root `--help`
+  exit-code table. This changes the type of the CLI crate's public
+  `envelope::Error.kind`; recorded as breaking. Output, schemas, and examples
+  are unchanged.
+- Core `Kind::Usage` serializes and displays as `"usage"`; nothing in the
+  published contract serializes core's `Kind` any more.

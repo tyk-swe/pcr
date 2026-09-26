@@ -6,12 +6,12 @@
 
 use crate::command_options::Compression;
 use crate::output::capture::{File as FileReport, Files as FilesReport, Retention};
+use packetcraftr::capture::Source;
 use packetcraftr_core::{
     capture_file::{self, compression},
     error::{Classification, Classified, Kind},
     frame::Frame,
 };
-use packetcraftr_netio::capture::Source;
 use std::{
     fs::File,
     io::{self, Seek, Write},
@@ -499,6 +499,10 @@ mod tests {
             statistics: Stats::default(),
             delivered_frames: 0,
             delivered_bytes: 0,
+            admitted_frames: 0,
+            matched_frames: 0,
+            emitted_frames: 0,
+            late_frames: 0,
         }]
     }
     fn frame(value: u8) -> Frame {

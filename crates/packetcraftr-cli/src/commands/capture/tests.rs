@@ -7,7 +7,11 @@ use super::*;
 use crate::test_support::stream;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_netio::{self as net, capture as native, interface::Id};
+use packetcraftr_netio::{
+    self as net,
+    capture::{self as native, GroupRequest},
+    interface::Id,
+};
 use std::{
     collections::VecDeque,
     sync::{
@@ -118,25 +122,42 @@ fn fixture(fail: bool) -> (Provider, GroupRequest, Vec<Arc<AtomicUsize>>) {
         stopped,
     )
 }
-fn options(count: u64) -> workflow::Options {
-    workflow::Options {
-        window: Duration::from_secs(1),
-        budget: packetcraftr::policy::CaptureBudget::new(&packetcraftr::policy::Policy {
+/// The fixture capture provider; capture never reaches the others.
+type Fixture = packetcraftr::ProviderSet<
+    net::route::SystemProvider,
+    net::interface::SystemProvider,
+    Provider,
+    net::transmit::SystemProvider,
+    net::tcp::SystemProvider,
+    packetcraftr::target::SystemResolver,
+>;
+
+/// A client capturing from `provider` under a budget of `count` frames.
+fn client(provider: Provider, count: u64) -> packetcraftr::Client<Fixture> {
+    packetcraftr::Client::new(
+        registry(),
+        packetcraftr::policy::Policy {
             max_packets_per_operation: count,
             max_bytes_per_operation: 1024,
             ..Default::default()
-        }),
-        cancellation: None,
-    }
+        },
+        packetcraftr::ProviderSet {
+            route: Default::default(),
+            interface: Default::default(),
+            capture: provider,
+            transmit: Default::default(),
+            tcp: Default::default(),
+            resolver: packetcraftr::target::SystemResolver,
+        },
+    )
 }
 #[test]
 fn mixed_interfaces_share_output_ids_and_completion_statistics() {
     let (provider, request, stopped) = fixture(false);
     let (publisher, buffer) = stream(Command::Capture);
     drive(
-        &provider,
-        &request,
-        options(2),
+        &client(provider, 2),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -186,9 +207,8 @@ fn runtime_failure_finalizes_saved_capture_and_retains_partial_evidence() {
     .unwrap();
     let (publisher, buffer) = stream(Command::Capture);
     let error = drive(
-        &provider,
-        &request,
-        options(10),
+        &client(provider, 10),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -301,9 +321,8 @@ fn dissected_frames_retain_bytes_metadata_and_diagnostics() {
         single_session(LinkType::ETHERNET, vec![ipv4_udp_frame(), truncated, bytes]);
     let (publisher, buffer) = stream(Command::Capture);
     drive(
-        &provider,
-        &request,
-        options(3),
+        &client(provider, 3),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -379,9 +398,8 @@ fn projection_streams_bounded_fields_records() {
     )
     .unwrap();
     drive(
-        &provider,
-        &request,
-        options(1),
+        &client(provider, 1),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -433,9 +451,8 @@ fn projection_exhaustion_stops_capture_and_retains_evidence() {
     )
     .unwrap();
     let error = drive(
-        &provider,
-        &request,
-        options(2),
+        &client(provider, 2),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -472,9 +489,8 @@ fn sink_failure_stops_capture_and_shuts_sources_down() {
     let (provider, request, stopped) = single_session(LinkType::ETHERNET, vec![ipv4_udp_frame()]);
     let publisher = StreamEncoder::new(Command::Capture, Broken);
     let error = drive(
-        &provider,
-        &request,
-        options(1),
+        &client(provider, 1),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,
@@ -510,9 +526,8 @@ fn filtered_decoding_parks_one_dissection_per_emission() {
     )
     .unwrap();
     drive(
-        &provider,
-        &request,
-        options(2),
+        &client(provider, 2),
+        workflow::Request::new(request, Duration::from_secs(1)),
         Output {
             format: CaptureFormat::Ndjson,
             compression: Compression::None,

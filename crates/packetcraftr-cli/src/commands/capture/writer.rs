@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+use packetcraftr::capture::Source;
 use packetcraftr_core::capture_file::{self, Error, Format, Writer};
-use packetcraftr_netio::capture::Source;
 use std::io::Write;
 pub(super) fn initialize<W: Write>(
     destination: W,

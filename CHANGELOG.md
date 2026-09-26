@@ -398,6 +398,20 @@ All notable changes to PacketcraftR are documented here. The format follows
   `policy::Authorizer` keeps `authorize_operation` (and
   `authorize_final_wire`), and DNS, scan, connect scan, and traceroute require
   `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
+- Live capture runs on the client: `client.capture(capture::Request, S)`
+  replaces `capture::run`. `capture::Request { group, window, select }`
+  replaces the provider, `GroupRequest`, and `capture::Options` arguments; the
+  budget comes from the client's policy and cancellation from the client. The
+  selector is `capture::Selector`, and events reach a `Sink<capture::Event>`
+  whose answer converts into `capture::Control` (`()` continues).
+  `capture::Source` holds the source fields itself instead of a public
+  `capture: netio::capture::Source`, and `Event::Started` carries
+  `capture::Source` values.
+- TCP connect scans run on the client: `client.scan_connect(scan::Request, S)`
+  replaces `scan::connect::run` and `run_with_events` and connects through the
+  client's TCP provider. Events are `connect::Event::Probe(Probe)`; the former
+  `connect::Summary` is `connect::Report`, and the former `connect::Report` is
+  `connect::Aggregate { report, endpoints }`, rebuilt by `connect::Collector`.
 
   See `docs/migration-unreleased.md`.
 - Scan and traceroute run on the client: `client.scan(scan::Request, S)` and
@@ -744,6 +758,11 @@ All notable changes to PacketcraftR are documented here. The format follows
   of the system clock; waits for captured frames stay on the capture group.
   A UDP-profile scan builds its operation-local registry once per scan
   instead of once per probe.
+- `capture` publishes its frames on a runtime worker, so
+  `--resource-diagnostics` lists a `capture_progress` worker for it, and a
+  TCP connect `scan` lists its `scan_connect` worker in every output format,
+  not only NDJSON. A capture read interrupted by cancellation reports the
+  cancellation itself; the code stays `io.cancelled`.
 - `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
   the operation's destinations (and for `send` and `exchange` its budget) are
   authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer

@@ -359,6 +359,47 @@ All notable changes to PacketcraftR are documented here. The format follows
   public.
 
   See `docs/migration-unreleased.md`.
+- The `Client` owns its providers: `Client<P, K = SystemClock>` holds a
+  `Providers` bundle (route, interface, capture, transmit, TCP, resolver),
+  composed with `ProviderSet` or `ProviderSet::system()`, and is built with
+  `Client::new(registry, policy, providers)`. `with_clock`, `with_runtime`,
+  `runtime()`, and `providers()` replace `with_progress_runtime` and
+  `progress_runtime()`. `packetcraftr_netio::PacketIo` is removed.
+- Send and exchange run on requests and sinks: `client.send(send::Request, S)`
+  and `client.exchange(exchange::Request, S)` publish their events to a
+  `Sink` and return the terminal `Report`; each workflow's `Collector` sink
+  rebuilds the full `Aggregate`. `send_set`, `send_set_with_events`,
+  `send_set_driven`, `send::SetOptions`, `send::SetReport`, and
+  `exchange_with_events` are removed; `exchange::Options` splits into
+  `exchange::Request` and the reusable `exchange::Collection`; the former
+  `exchange::Summary` is `exchange::Report` and the former `exchange::Report`
+  is `exchange::Aggregate`. `probe::ExchangeExecutor::new` takes the client,
+  `send::Options`, and an `exchange::Collection`.
+- `send::Error` and `exchange::Error` wrap the root preparation error
+  `packetcraftr::Error`, which keeps only preparation failures. The send and
+  exchange variants move to the workflow errors with unchanged codes:
+  `SendOutput` and `InvalidSendOption` become `send::Error::{Output,
+  InvalidRequest}`; `ExchangeOutput`, `ExchangeOutputAndCaptureShutdown`,
+  `OperationAndCaptureShutdown`, `InvalidExchangeEvents`,
+  `HeterogeneousExchangeRoute`, and `InvalidExchangeOption` become
+  `exchange::Error::{Output, OutputAndCaptureShutdown,
+  OperationAndCaptureShutdown, IncoherentEvents, HeterogeneousRoute,
+  InvalidRequest}`.
+- `clock::Clock` is `Clone + Send + Sync + 'static`, `now` takes `&self`, and
+  `sleep(&self, delay, deadline)` returns early once the deadline's
+  cancellation is signaled. The client anchors every deadline and send
+  schedule on its clock.
+- `route::Options.interface` is a `route::Interface` selector (`Id`, `Name`,
+  or `Index`). A client resolves a name or index through its interface
+  provider only after the operation is admitted; `route::plan` accepts only a
+  resolved `Interface::Id` and otherwise fails with
+  `route::Error::UnresolvedInterface`.
+- Target resolution is the separate `target::ResolveTarget` seam:
+  `policy::Authorizer` keeps `authorize_operation` (and
+  `authorize_final_wire`), and DNS, scan, connect scan, and traceroute require
+  `A: Authorizer + ResolveTarget`. `PolicyAuthorizer` implements both.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -658,6 +699,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
+  the operation's destinations (and for `send` and `exchange` its budget) are
+  authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer
+  enumerates interfaces, and one command enumerates them once. Codes and
+  messages are unchanged.
 - `--payload-file` refusals keep `cli.error` and exit code 2, but their text
   changed: the message names the option (`--payload-file requires
   LAYER.FIELD=PATH` or `--payload-file cannot fill its recipe field`) and the

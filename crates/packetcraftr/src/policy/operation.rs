@@ -405,7 +405,7 @@ fn no_resolver() -> BoundaryError {
 }
 
 /// Applies client policy and an optional resolver to workflow operations.
-/// [`Authorizer::resolve_and_authorize`] reports a wiring fault if no resolver
+/// [`ResolveTarget::resolve_and_authorize`] reports a wiring fault if no resolver
 /// exists.
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::policy::Policy,

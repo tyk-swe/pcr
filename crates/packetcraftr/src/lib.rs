@@ -8,13 +8,22 @@
 //!
 //! `packetcraftr-core` owns packets and offline analysis;
 //! `packetcraftr-netio` owns provider contracts and native resources.
-//! [`route`] plans each packet's route over a netio route provider, and
-//! [`neighbor`] resolves an admitted route's next hop over the client's own
-//! transmit and capture providers.
-//! Live entry points such as [`scan`], [`dns`], and [`send`] require a
-//! [`policy::Policy`] and finite resource limits. A workflow that publishes
-//! events while it runs delivers them to a [`Sink`] on a worker admitted by a
-//! [`progress::Runtime`], and returns its terminal report.
+//!
+//! Live workflows run on a [`Client`]. It holds the [`policy::Policy`], the
+//! protocol registry, a [`clock::Clock`], the [`progress::Runtime`] that
+//! admits event workers, and the [`Providers`] every workflow reaches the
+//! network through ([`ProviderSet::system`] selects the native ones). Each
+//! workflow is admitted by the client's policy, with finite resource limits,
+//! before any provider is consulted; an interface selector is resolved only
+//! after that. A workflow method takes the workflow's request and a [`Sink`]
+//! for its events, publishes each event on a worker admitted by the runtime,
+//! and returns its terminal report; the workflow's `Collector` sink rebuilds
+//! the full aggregate. [`Client::send`] and [`Client::exchange`] are two such
+//! methods.
+//!
+//! [`route`] plans each packet's route over the client's route provider, and
+//! [`neighbor`] resolves an admitted route's next hop over its transmit and
+//! capture providers.
 //!
 //! Every workflow duration and timeout is at most
 //! [`packetcraftr_netio::capture::MAX_TIMEOUT`], the longest a capture stays

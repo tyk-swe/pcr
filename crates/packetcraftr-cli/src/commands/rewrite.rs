@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! `rewrite`: rewrites capture headers and fields with checked lengths and
+//! transport checksums into a new PCAPNG file.
+
 pub(super) mod arguments;
 mod rendering;
 mod rules;

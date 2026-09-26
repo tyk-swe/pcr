@@ -5,10 +5,10 @@
 
 use crate::errors::CliError;
 use crate::output;
-use crate::rendering::write_plain_line;
+use crate::rendering::write_summary_line;
 
 pub(super) fn render_text(report: &output::export::Report) -> Result<(), CliError> {
-    write_plain_line(format_args!(
+    write_summary_line(format_args!(
         "exported {} of {} physical frames to {}; {} complete and {} incomplete datagrams, {} unmatched stream selectors, {} unmatched datagram selectors",
         report.capture.frames_selected,
         report.capture.frames_read,

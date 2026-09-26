@@ -5,11 +5,11 @@
 
 use crate::errors::CliError;
 use crate::output;
-use crate::rendering::write_plain_line;
+use crate::rendering::write_stdout_line;
 
 /// One line per produced fragment: its index, size, and exact bytes.
 pub(super) fn render_fragment(fragment: &output::fragment::Fragment) -> Result<(), CliError> {
-    write_plain_line(format_args!(
+    write_stdout_line(format_args!(
         "fragment {}: {} bytes {}",
         fragment.fragment_index,
         fragment.frame.captured_length,

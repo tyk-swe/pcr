@@ -27,7 +27,7 @@ use self::files::Files;
 use crate::command_options::Compression;
 use crate::filtering::FrameDecoder;
 use crate::output;
-use crate::rendering::{render_frame_text, write_plain_line};
+use crate::rendering::{render_frame_text, write_hex_line};
 use packetcraftr::capture::{self as workflow, Control, Event};
 use packetcraftr_core::{
     self as core,
@@ -508,7 +508,7 @@ fn emit_frame(
             }),
         CaptureFormat::Hex => output::frame::Captured::try_from_frame(frame)
             .map_err(CliError::classified)
-            .and_then(|frame| write_plain_line(format_args!("{}", frame.bytes_hex()))),
+            .and_then(|frame| write_hex_line(frame.bytes())),
         CaptureFormat::Ndjson => output::capture::Event::try_from_frame(source_frame, frame)
             .map_err(CliError::classified)
             .and_then(|event| stream.emit_data(event, Vec::new()).map_err(Into::into)),

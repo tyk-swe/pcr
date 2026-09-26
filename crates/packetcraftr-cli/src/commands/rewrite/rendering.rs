@@ -5,11 +5,11 @@
 
 use crate::errors::CliError;
 use crate::output;
-use crate::rendering::write_plain_line;
+use crate::rendering::write_summary_line;
 
 pub(super) fn render_text(report: &output::rewrite::Report) -> Result<(), CliError> {
     if report.dry_run {
-        write_plain_line(format_args!(
+        write_summary_line(format_args!(
             "dry-run: {} of {} frames would change across {} interfaces; \
              {} changes reported, {} omitted",
             report.capture.frames_changed,
@@ -19,7 +19,7 @@ pub(super) fn render_text(report: &output::rewrite::Report) -> Result<(), CliErr
             report.changes_omitted
         ))
     } else {
-        write_plain_line(format_args!(
+        write_summary_line(format_args!(
             "rewrote {} of {} frames across {} interfaces into {}",
             report.capture.frames_changed,
             report.capture.frames_read,

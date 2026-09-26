@@ -11,6 +11,14 @@ use crate::command_options::{
     CompressionArgs, DecodeArgs, MaxDurationArgs, OfflineCaptureLimitsArgs, RunTime, SavedPcapNg,
 };
 
+pub(crate) const AFTER_LONG_HELP: &str = r"Header edits (--source-mac, --destination-ip, --vlan, and the rest) and field assignments (--set) apply to every frame --filter matches, or to every frame; a --rules-file holds ordered rules instead. Header edits recompute lengths and transport checksums; field assignments repair covering checksums unless --checksum-mode preserve keeps checksum bytes exactly. The destination is published only when every frame rewrote cleanly; --dry-run reports the field changes without writing it.
+
+Examples:
+  packetcraftr rewrite capture.pcapng --write rewritten.pcapng --destination-ip 192.0.2.10
+  packetcraftr rewrite capture.pcapng --write out.pcapng --set ipv4.ttl=64 --filter 'udp'
+  packetcraftr rewrite capture.pcapng --write out.pcapng --rules-file rules.json
+  packetcraftr rewrite capture.pcapng --write out.pcapng --set dns.id=7 --dry-run";
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Source capture; - reads redirected stdin. gzip and Zstd are detected.

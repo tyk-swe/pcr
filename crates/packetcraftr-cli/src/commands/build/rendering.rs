@@ -9,7 +9,7 @@ use packetcraftr_core::error::Kind;
 use crate::errors::CliError;
 use crate::output::{self, contract::BuildFormat};
 use crate::rendering::{
-    emit_aggregate, render_diagnostics_text, spaced_hex, write_plain_line, write_raw,
+    emit_aggregate, render_diagnostics_text, spaced_hex, write_hex_line, write_raw,
     write_stdout_line, write_summary_line,
 };
 
@@ -23,9 +23,7 @@ pub(super) fn render_packet(
             write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
             render_diagnostics_text(&built.diagnostics)
         }
-        BuildFormat::Hex => {
-            write_plain_line(format_args!("{}", output::hex::CompactHex(&built.bytes)))
-        }
+        BuildFormat::Hex => write_hex_line(&built.bytes),
         BuildFormat::Raw => write_raw(&built.bytes),
         BuildFormat::Json => {
             let (result, diagnostics) = output::build::Report::from_built(built);

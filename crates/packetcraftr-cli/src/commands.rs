@@ -191,8 +191,10 @@ macro_rules! commands {
 
 commands! {
     /// Merge time-ordered captures into scoped PCAPNG.
+    #[command(after_long_help = merge::arguments::AFTER_LONG_HELP)]
     Merge(merge::arguments::Args) = "merge",
     /// Explicitly split a complete IPv4/IPv6 recipe into bounded fragments.
+    #[command(after_long_help = fragment::arguments::AFTER_LONG_HELP)]
     Fragment(fragment::arguments::Args) = "fragment",
     /// Build exact packet bytes from an expression or document.
     #[command(after_long_help = build::arguments::AFTER_LONG_HELP)]
@@ -252,12 +254,16 @@ commands! {
     )]
     Dns(dns::arguments::Args) = "dns",
     /// Inspect captured UDP/TCP DNS messages and transaction evidence.
+    #[command(after_long_help = dns_read::arguments::AFTER_LONG_HELP)]
     DnsRead(dns_read::arguments::Args) = "dns-read",
     /// Inspect cleartext HTTP/1 messages over captured TCP streams.
+    #[command(after_long_help = http::arguments::AFTER_LONG_HELP)]
     Http(http::arguments::Args) = "http",
     /// Export streams and reassembled IP datagrams with their physical dependencies.
+    #[command(after_long_help = export::arguments::AFTER_LONG_HELP)]
     Export(export::arguments::Args) = "export",
     /// Rewrite capture headers with checked lengths and transport checksums.
+    #[command(after_long_help = rewrite::arguments::AFTER_LONG_HELP)]
     Rewrite(rewrite::arguments::Args) = "rewrite",
     /// Run bounded field-aware packet fuzzing.
     #[command(after_long_help = fuzz::arguments::AFTER_LONG_HELP)]

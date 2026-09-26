@@ -9,6 +9,15 @@ use crate::command_options::{
     ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, stream_selector,
 };
 
+pub(crate) const AFTER_LONG_HELP: &str = r"HTTP/1 messages are read offline from reassembled TCP streams on ports 80 and 8080 and every --http-port; nothing is transmitted. Bodies are counted against --max-http-body-bytes and discarded, and each response names the request it answers when both were captured.
+
+--stream keeps one TCP conversation, as tcp:INDEX. Text prints start lines and header fields escaped; JSON and NDJSON keep their exact bytes as hex.
+
+Examples:
+  packetcraftr http capture.pcapng
+  packetcraftr http capture.pcapng --http-port 8000 --stream tcp:2
+  packetcraftr --output json http capture.pcapng";
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.

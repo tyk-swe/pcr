@@ -49,7 +49,7 @@ pub(crate) fn render_dns_records(packet: &Packet) -> Result<(), CliError> {
 }
 
 /// The questions and records one DNS message's reflected fields carry.
-fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result<(), CliError> {
+pub(crate) fn render_dns_fields(fields: &BTreeMap<String, FieldValue>) -> Result<(), CliError> {
     if let Some(FieldValue::List(questions)) = fields.get("questions") {
         for question in questions {
             let FieldValue::Object(parts) = question else {

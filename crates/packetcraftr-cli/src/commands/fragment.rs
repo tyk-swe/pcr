@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! `fragment`: builds one IPv4 or IPv6 recipe and splits it into bounded
+//! fragments at an explicit MTU.
+
 pub(super) mod arguments;
 mod rendering;
 
@@ -8,7 +11,7 @@ use self::arguments::Args;
 use crate::output::{self, contract::CaptureFormat};
 use crate::{
     errors::CliError,
-    rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_plain_line},
+    rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_hex_line},
 };
 use packetcraftr_core::{
     self as core,
@@ -103,7 +106,7 @@ pub(crate) fn run(
         match format {
             CaptureFormat::Json => records.push(record),
             CaptureFormat::Ndjson => stream.emit_data(record, Vec::new())?,
-            CaptureFormat::Hex => write_plain_line(format_args!("{}", record.frame.bytes_hex()))?,
+            CaptureFormat::Hex => write_hex_line(record.frame.bytes())?,
             CaptureFormat::Text => rendering::render_fragment(&record)?,
             CaptureFormat::Pcap | CaptureFormat::PcapNg => {
                 return Err(CliError::new(

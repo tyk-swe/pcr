@@ -133,10 +133,15 @@ pub(crate) fn write_summary_line(arguments: fmt::Arguments<'_>) -> Result<(), Cl
     write_human_stdout(&rendered, true).map_err(HumanWriteError::into_cli_error)
 }
 
-pub(crate) fn write_plain_line(arguments: fmt::Arguments<'_>) -> Result<(), CliError> {
+/// One `--output hex` line: the bytes as contiguous lowercase hex.
+///
+/// Every other stdout line goes through terminal sanitization; this one
+/// holds only hex digits by construction, so it is written unstyled and
+/// byte-exact.
+pub(crate) fn write_hex_line(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
-        .write_fmt(arguments)
+        .write_fmt(format_args!("{}", crate::output::hex::CompactHex(bytes)))
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(Kind::Io, format!("write stdout failed: {source}")))

@@ -15,7 +15,7 @@ use self::arguments::Args;
 use super::preparation::{self, Prepared};
 use crate::errors::CliError;
 use crate::rendering::{
-    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_plain_line,
+    emit_aggregate_with_stats, render_diagnostics_text, write_capture_file, write_hex_line,
     write_raw, write_summary_line,
 };
 
@@ -95,11 +95,7 @@ pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
         SendFormat::Hex => prepared
             .client
             .send_set_with_events(&prepared.template, prepared.options, |frame| {
-                write_plain_line(format_args!(
-                    "{}",
-                    output::frame::Wire::new(frame.packet.wire_bytes().clone()).bytes_hex()
-                ))
-                .map_err(output_failure)
+                write_hex_line(frame.packet.wire_bytes()).map_err(output_failure)
             })
             .map_err(CliError::classified)
             .map(|_| ()),

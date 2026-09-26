@@ -9,6 +9,13 @@ use crate::command_options::{
     CompressionArgs, DecodeArgs, Destination, OfflineLimitsArgs, stream_selector,
 };
 
+pub(crate) const AFTER_LONG_HELP: &str = r"Export selects whole conversations (--stream), IP datagrams by a physical frame they contain (--datagram-frame), or frames a --filter matches, and writes the selected physical frames together with every frame they depend on, such as the other fragments of a reassembled datagram. The destination keeps the source capture format and metadata and is published only after every frame was written.
+
+Examples:
+  packetcraftr export capture.pcapng --write conversation.pcapng --stream tcp:4
+  packetcraftr export capture.pcap --write datagram.pcap --datagram-frame 12
+  packetcraftr export capture.pcapng --write dns.pcapng --filter 'dns'";
+
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Source PCAP/PCAPNG; - reads redirected stdin. Compression is detected.

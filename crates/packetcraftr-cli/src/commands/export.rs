@@ -1,6 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! `export`: saves selected conversations and datagrams with the physical
+//! frames they depend on.
+
 pub(super) mod arguments;
 mod rendering;
 

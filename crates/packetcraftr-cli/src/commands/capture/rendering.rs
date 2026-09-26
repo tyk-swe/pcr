@@ -10,7 +10,7 @@ use crate::output::{
 };
 use crate::rendering::{
     StreamEncoder, document_spelling, emit_aggregate_with_stats, render_diagnostics_stderr,
-    render_diagnostics_text, write_plain_line, write_summary_line,
+    render_diagnostics_text, write_stdout_line, write_summary_line,
 };
 use packetcraftr::Stats;
 
@@ -39,7 +39,7 @@ pub(super) fn render_complete(
             ))?;
             for source in &summary.sources {
                 if let Some(settings) = &source.capture_settings {
-                    write_plain_line(format_args!(
+                    write_stdout_line(format_args!(
                         "  source {} ({}): buffer_size {} timestamp_source {} timestamp_precision {}",
                         source.capture_id,
                         source.native_interface.name,
@@ -51,12 +51,12 @@ pub(super) fn render_complete(
             }
             if let Some(files) = &summary.files {
                 for file in &files.files {
-                    write_plain_line(format_args!(
+                    write_stdout_line(format_args!(
                         "  {}: {} frames, {} capture bytes, finalized={}",
                         file.path, file.frames, file.capture_bytes, file.finalized
                     ))?;
                 }
-                write_plain_line(format_args!(
+                write_stdout_line(format_args!(
                     "  retention={}, retired files={}, retired frames={}",
                     document_spelling(&files.retention),
                     files.discarded_files,

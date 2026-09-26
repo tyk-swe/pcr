@@ -6,7 +6,7 @@ use crate::output::contract::ReadFormat;
 use crate::output;
 
 use crate::errors::CliError;
-use crate::rendering::{StreamEncoder, render_frame_text, write_plain_line};
+use crate::rendering::{StreamEncoder, render_frame_text, write_hex_line};
 
 pub(super) fn render_record(
     record: output::read::Frame,
@@ -20,7 +20,7 @@ pub(super) fn render_record(
     } = &record;
     match format {
         ReadFormat::Text => render_frame_text(*source_frame, frame, decoded.as_ref()),
-        ReadFormat::Hex => write_plain_line(format_args!("{}", frame.bytes_hex())),
+        ReadFormat::Hex => write_hex_line(frame.bytes()),
         ReadFormat::Ndjson => Ok(stream.emit_data(output::read::Event::Frame(record), Vec::new())?),
         ReadFormat::Json
         | ReadFormat::Csv

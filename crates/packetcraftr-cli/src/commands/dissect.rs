@@ -20,7 +20,7 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::{InputKind, read_bounded_file, read_stdin_bounded};
-use crate::rendering::{emit_aggregate, emit_stderr_message, write_plain_line, write_raw};
+use crate::rendering::{emit_aggregate, emit_stderr_message, write_hex_line, write_raw};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::DissectFormat;
@@ -135,10 +135,7 @@ pub(super) fn run(
     }
     match format {
         DissectFormat::Text => rendering::render_text(&decoded),
-        DissectFormat::Hex => write_plain_line(format_args!(
-            "{}",
-            output::hex::CompactHex(&decoded.original)
-        )),
+        DissectFormat::Hex => write_hex_line(&decoded.original),
         DissectFormat::Raw => write_raw(&decoded.original),
         DissectFormat::Json => {
             let (dissection, diagnostics) = if kept {

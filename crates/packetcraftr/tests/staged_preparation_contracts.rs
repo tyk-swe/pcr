@@ -9,12 +9,10 @@ mod common;
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::Duration;
 
-use packetcraftr::clock::SystemClock;
-use packetcraftr::fuzz::{self, LiveOptions, RunInput};
-use packetcraftr::policy::{Authorizer, DestinationConstraint, Operation, Policy};
-use packetcraftr::probe::ExchangeExecutor;
+use packetcraftr::fuzz;
+use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::{Client, exchange, route, send};
-use packetcraftr_core::error::{BoundaryError, Classified};
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::field::FieldValue;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::Raw;
@@ -249,21 +247,10 @@ fn a_streamed_set_authorizes_each_packet_before_its_own_discovery() {
     }
 }
 
-/// Leaves every decision to the client's own policy.
-struct AllowAll;
-
-impl Authorizer for AllowAll {
-    fn authorize_operation(&mut self, _operation: Operation<'_>) -> Result<(), BoundaryError> {
-        Ok(())
-    }
-}
-
 #[test]
 fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
     let (client, steps) = client(Policy::default());
-    let mut executor =
-        ExchangeExecutor::new(&client, layer2_send(), exchange::Collection::default());
-    let request = packet_fuzz::Request {
+    let campaign = packet_fuzz::Request {
         cases: 2,
         strategies: vec![packet_fuzz::Strategy::BitFlip],
         targets: vec!["2.bytes".parse().expect("raw payload target")],
@@ -284,21 +271,19 @@ fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
         })
         .push(Raw::new(b"probe".to_vec()));
 
-    let report = fuzz::run(
-        RunInput {
-            request: &request,
-            live: LiveOptions {
+    let send = layer2_send();
+    let collector = fuzz::Collector::default();
+    let report = client
+        .fuzz(
+            fuzz::Request {
                 timeout: Duration::from_millis(100),
-                ..LiveOptions::default()
+                route: send.plan,
+                ..fuzz::Request::new(campaign, packet)
             },
-            packet,
-            registry: builtin::registry(),
-        },
-        &mut AllowAll,
-        &mut executor,
-        &mut SystemClock,
-    )
-    .expect("the executor's prepared bytes are the expected exact bytes");
+            collector.clone(),
+        )
+        .expect("the executor's prepared bytes are the expected exact bytes");
+    let aggregate = collector.finish(report);
 
     let transmitted = steps
         .take()
@@ -308,13 +293,15 @@ fn fuzz_accepts_exactly_the_bytes_its_executor_prepared_and_transmitted() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    let recorded = report
-        .cases
+    let recorded = aggregate
+        .trials
         .iter()
-        .map(|case| {
-            case.sent
+        .map(|trial| {
+            trial
+                .evidence
                 .as_ref()
                 .expect("every case is sent")
+                .sent
                 .bytes()
                 .to_vec()
         })

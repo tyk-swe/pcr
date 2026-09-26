@@ -1,223 +1,122 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::time::Duration;
-
 use packetcraftr_core::{frame::Frame, fuzz as packet_fuzz};
-use packetcraftr_netio::capture::Stats as CaptureStats;
-use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CaseOutcome {
-    Built,
-    Rejected,
+use crate::execution::Shared;
+use crate::{BoundaryError, Sink, Stats};
+
+/// What became of one transmitted case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// At least one correlated response arrived within the case's window.
     Response,
+    /// The window closed with no correlated response.
     Timeout,
 }
 
-impl CaseOutcome {
-    /// The serialized name, for text output that must agree with JSON.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Built => "built",
-            Self::Rejected => "rejected",
-            Self::Response => "response",
-            Self::Timeout => "timeout",
-        }
-    }
-}
-
-impl std::fmt::Display for CaseOutcome {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
+/// What one transmitted case produced: the exact frame sent and the frames
+/// retained under the campaign-wide evidence budget.
+///
+/// The outcome is decided before retention, so a case that was answered
+/// after the budget ran out is still a [`Outcome::Response`] with no
+/// retained response.
 #[derive(Clone, Debug)]
-pub struct Case {
-    pub prepared: packet_fuzz::Case,
-    pub outcome: CaseOutcome,
-    pub sent: Option<Frame>,
+pub struct Evidence {
+    pub sent: Frame,
+    pub outcome: Outcome,
     pub responses: Vec<Frame>,
     pub unmatched: Vec<Frame>,
     pub undecoded: Vec<Frame>,
 }
 
-impl From<packet_fuzz::CaseOutcome> for CaseOutcome {
-    /// An offline case has been generated and either built or rejected; the
-    /// live outcomes are reached only after transmission.
-    fn from(value: packet_fuzz::CaseOutcome) -> Self {
-        match value {
-            packet_fuzz::CaseOutcome::Built => Self::Built,
-            packet_fuzz::CaseOutcome::Rejected => Self::Rejected,
-        }
-    }
+/// One campaign case as the live run finished it.
+///
+/// `case` is the case core prepared. Once it was transmitted, its `built`
+/// and `decoded` packets are the ones actually sent on the case's route, and
+/// its diagnostics include those raised while sending and collecting. A
+/// rejected case is never sent and has no evidence.
+#[derive(Clone, Debug)]
+pub struct Trial {
+    pub case: packet_fuzz::Case,
+    pub evidence: Option<Evidence>,
 }
 
-impl From<packet_fuzz::Case> for Case {
-    fn from(prepared: packet_fuzz::Case) -> Self {
-        let outcome = prepared.outcome.into();
-        Self {
-            prepared,
-            outcome,
-            sent: None,
-            responses: Vec::new(),
-            unmatched: Vec::new(),
-            undecoded: Vec::new(),
-        }
-    }
+/// What a live campaign publishes while it runs, in case order. Each event
+/// is answered before the next case is sent.
+#[derive(Clone, Debug)]
+pub enum Event {
+    /// A case whose live outcome is final.
+    Case(Trial),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Stats {
-    pub cases_generated: u64,
-    pub cases_built: u64,
-    pub packets_attempted: u64,
-    pub packets_completed: u64,
-    pub bytes: u64,
-    pub elapsed: Duration,
-    pub capture: CaptureStats,
-}
-
-/// One completed live campaign. Diagnostics are carried by the case they were
-/// raised during, in [`Case::prepared`]'s `diagnostics`, so the campaign does
-/// not repeat them.
+/// The terminal result of one live campaign.
+///
+/// Diagnostics are carried by the case they were raised during, in its
+/// [`Trial::case`], so the campaign does not repeat them.
 #[derive(Clone, Debug)]
 pub struct Report {
     pub seed: u64,
     pub first_case: u64,
-    pub cases: Vec<Case>,
+    /// What the campaign generated and built before any case was sent, and
+    /// how long preparing it took.
+    pub campaign: packet_fuzz::Stats,
+    /// The live traffic, including every pacing delay.
     pub stats: Stats,
 }
 
-/// Final live campaign metadata after every case event was published.
+/// Every case of one live campaign, in case order, with its terminal report.
+///
+/// [`Totals::try_from`](packet_fuzz::Totals) checks that the cases agree with
+/// the report.
 #[derive(Clone, Debug)]
-pub struct Summary {
+pub struct Aggregate {
     pub seed: u64,
     pub first_case: u64,
+    pub trials: Vec<Trial>,
+    pub campaign: packet_fuzz::Stats,
     pub stats: Stats,
 }
 
-/// Why a campaign's cases disagree with its own summary.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{reason}")]
-pub struct IncoherentReport {
-    reason: &'static str,
-}
+impl TryFrom<&Aggregate> for packet_fuzz::Totals {
+    type Error = packet_fuzz::IncoherentReport;
 
-impl IncoherentReport {
-    const fn new(reason: &'static str) -> Self {
-        Self { reason }
-    }
-}
-
-/// A campaign's case counts, established as coherent: built cases never
-/// exceed generated cases, and every case was either built or rejected.
-///
-/// Converting a report also checks its cases against the counts: one case
-/// per generated case, one non-rejected case per built case, and each case
-/// carrying the campaign seed and its index in publication order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Totals {
-    pub generated: u64,
-    pub built: u64,
-    pub rejected: u64,
-}
-
-impl Totals {
-    /// Counts checked against each other.
-    pub fn new(generated: u64, built: u64) -> Result<Self, IncoherentReport> {
-        let rejected = generated.checked_sub(built).ok_or(IncoherentReport::new(
-            "built case count exceeds generated case count",
-        ))?;
-        Ok(Self {
-            generated,
-            built,
-            rejected,
-        })
-    }
-
-    /// Checks the published cases, in order, against these counts.
-    fn check_cases<'a>(
-        self,
-        seed: u64,
-        first_case: u64,
-        cases: impl ExactSizeIterator<Item = (&'a packet_fuzz::Case, bool)>,
-    ) -> Result<Self, IncoherentReport> {
-        if u64::try_from(cases.len()).unwrap_or(u64::MAX) != self.generated {
-            return Err(IncoherentReport::new(
-                "case cardinality does not match the campaign summary",
-            ));
-        }
-        let mut built = 0_u64;
-        let mut identities = Vec::with_capacity(cases.len());
-        for (case, was_built) in cases {
-            built = built.saturating_add(u64::from(was_built));
-            identities.push((case.index, case.operation_seed));
-        }
-        if built != self.built {
-            return Err(IncoherentReport::new(
-                "case outcomes do not match the campaign built count",
-            ));
-        }
-        for (offset, (index, operation_seed)) in identities.into_iter().enumerate() {
-            let expected = first_case
-                .checked_add(u64::try_from(offset).unwrap_or(u64::MAX))
-                .ok_or(IncoherentReport::new("case index order overflowed"))?;
-            if index != expected || operation_seed != seed {
-                return Err(IncoherentReport::new(
-                    "case identity or publication order does not match the campaign",
-                ));
-            }
-        }
-        Ok(self)
-    }
-}
-
-impl TryFrom<&Stats> for Totals {
-    type Error = IncoherentReport;
-
-    fn try_from(stats: &Stats) -> Result<Self, IncoherentReport> {
-        Self::new(stats.cases_generated, stats.cases_built)
-    }
-}
-
-impl TryFrom<&packet_fuzz::Stats> for Totals {
-    type Error = IncoherentReport;
-
-    fn try_from(stats: &packet_fuzz::Stats) -> Result<Self, IncoherentReport> {
-        Self::new(stats.cases_generated, stats.cases_built)
-    }
-}
-
-impl TryFrom<&Report> for Totals {
-    type Error = IncoherentReport;
-
-    fn try_from(report: &Report) -> Result<Self, IncoherentReport> {
-        Self::try_from(&report.stats)?.check_cases(
-            report.seed,
-            report.first_case,
-            report
-                .cases
-                .iter()
-                .map(|case| (&case.prepared, case.outcome != CaseOutcome::Rejected)),
+    fn try_from(aggregate: &Aggregate) -> Result<Self, packet_fuzz::IncoherentReport> {
+        Self::try_from(&aggregate.campaign)?.check_cases(
+            aggregate.seed,
+            aggregate.first_case,
+            aggregate.trials.iter().map(|trial| &trial.case),
         )
     }
 }
 
-impl TryFrom<&packet_fuzz::Report> for Totals {
-    type Error = IncoherentReport;
+/// A sink that keeps every published case. Pass a clone to
+/// [`Client::fuzz`](crate::Client::fuzz) and [`finish`](Self::finish) the one
+/// kept with the report the campaign returns.
+#[derive(Clone, Default)]
+pub struct Collector(Shared<Vec<Trial>>);
 
-    fn try_from(report: &packet_fuzz::Report) -> Result<Self, IncoherentReport> {
-        Self::try_from(&report.stats)?.check_cases(
-            report.seed,
-            report.first_case,
-            report
-                .cases
-                .iter()
-                .map(|case| (case, case.outcome != packet_fuzz::CaseOutcome::Rejected)),
-        )
+impl Sink<Event> for Collector {
+    type Ack = ();
+
+    fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
+        self.0.update(|trials| match event {
+            Event::Case(trial) => trials.push(trial),
+        });
+        Ok(())
+    }
+}
+
+impl Collector {
+    /// Joins the collected cases with the campaign's terminal `report`.
+    #[must_use]
+    pub fn finish(self, report: Report) -> Aggregate {
+        Aggregate {
+            seed: report.seed,
+            first_case: report.first_case,
+            trials: self.0.take(),
+            campaign: report.campaign,
+            stats: report.stats,
+        }
     }
 }

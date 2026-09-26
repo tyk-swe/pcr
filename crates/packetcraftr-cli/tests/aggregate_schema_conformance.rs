@@ -1278,34 +1278,32 @@ fn fuzz_rejected_case() -> Value {
 
 fn fuzz_live_case() -> Value {
     let offline = offline_fuzz_report();
-    let stats = packetcraftr::fuzz::Stats {
-        cases_generated: offline.stats.cases_generated,
-        cases_built: offline.stats.cases_built,
+    let stats = packetcraftr::Stats {
         packets_attempted: offline.stats.cases_built,
         packets_completed: offline.stats.cases_built,
         bytes: offline.stats.bytes,
         elapsed: Duration::from_millis(9),
         capture: capture_statistics(),
     };
-    let cases = offline
+    let trials = offline
         .cases
         .into_iter()
         .map(|case| {
-            let mut live = packetcraftr::fuzz::Case::from(case);
-            if live.outcome == packetcraftr::fuzz::CaseOutcome::Built {
-                live.outcome = packetcraftr::fuzz::CaseOutcome::Response;
-                live.sent = Some(evidence_frame());
-                live.responses = vec![evidence_frame()];
-                live.unmatched = vec![evidence_frame()];
-                live.undecoded = vec![evidence_frame()];
-            }
-            live
+            let evidence = case.built.is_some().then(|| packetcraftr::fuzz::Evidence {
+                sent: evidence_frame(),
+                outcome: packetcraftr::fuzz::Outcome::Response,
+                responses: vec![evidence_frame()],
+                unmatched: vec![evidence_frame()],
+                undecoded: vec![evidence_frame()],
+            });
+            packetcraftr::fuzz::Trial { case, evidence }
         })
         .collect();
-    let report = Published::<fuzz_output::Report>::try_from(packetcraftr::fuzz::Report {
+    let report = Published::<fuzz_output::Report>::try_from(packetcraftr::fuzz::Aggregate {
         seed: offline.seed,
         first_case: offline.first_case,
-        cases,
+        trials,
+        campaign: offline.stats,
         stats,
     })
     .expect("live fuzz campaign converts");

@@ -1,19 +1,58 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! The live fuzz executor boundary: one permit-bound case in, one bounded
+//! evidence receipt out, served by a capture-ready exchange on the client.
+
+use std::time::Duration;
+
+use packetcraftr_core::diagnostic::Diagnostic;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::packet::Packet;
+
 use crate::BoundaryError;
 use crate::clock::Clock;
-use crate::execution::ExchangeExecutor;
-use crate::execution::Executor;
-use crate::execution::ExecutorFault;
+use crate::evidence::ExecutionPermit;
+use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, Receipt};
 use crate::providers::Providers;
-
-use super::execution::{Execution, ExecutionCase};
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "internal.fuzz_executor",
     "execute exactly one bounded fuzz case per capture-ready exchange",
 );
+
+/// One built case, bound to the permit and clipped timeout it may run under.
+#[derive(Clone, Debug)]
+pub(crate) struct ExecutionCase {
+    pub(crate) permit: ExecutionPermit,
+    pub(crate) packet: Packet,
+    pub(crate) timeout: Duration,
+}
+
+impl crate::execution::Request for ExecutionCase {
+    type Execution = Execution;
+}
+
+/// What the executor reports for one case, before the engine validates it.
+#[derive(Clone, Debug)]
+pub(crate) struct Execution {
+    pub(crate) permit: ExecutionPermit,
+    pub(crate) sent: crate::SentPacket,
+    pub(crate) responses: Vec<crate::exchange::Response>,
+    pub(crate) unmatched: Vec<Frame>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: crate::Stats,
+}
+
+impl Receipt for Execution {
+    fn permit(&self) -> ExecutionPermit {
+        self.permit
+    }
+    fn stats(&self) -> &crate::Stats {
+        &self.stats
+    }
+}
 
 impl<P: Providers, K: Clock> Executor<ExecutionCase> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {

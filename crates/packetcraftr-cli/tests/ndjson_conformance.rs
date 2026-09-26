@@ -276,7 +276,7 @@ fn dns_attempt() -> packetcraftr::dns::AttemptEvidence {
     }
 }
 
-fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
+fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Event) {
     let mut packet = core::packet::Packet::new();
     packet.push(core::layer::Raw::new(vec![0_u8]));
     let request = core::fuzz::Request {
@@ -292,7 +292,11 @@ fn fuzz_cases() -> (core::fuzz::Case, packetcraftr::fuzz::Case) {
         .into_iter()
         .next()
         .expect("one fuzz case");
-    (case.clone(), packetcraftr::fuzz::Case::from(case))
+    let live = packetcraftr::fuzz::Event::Case(packetcraftr::fuzz::Trial {
+        case: case.clone(),
+        evidence: None,
+    });
+    (case, live)
 }
 
 fn sent_packet() -> packetcraftr::SentPacket {

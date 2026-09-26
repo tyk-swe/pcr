@@ -108,14 +108,14 @@ pub struct Summary {
     pub planned_duration: Duration,
     pub socket_stats: Stats,
 }
-impl From<connect::Summary> for Summary {
-    fn from(summary: connect::Summary) -> Self {
+impl From<connect::Report> for Summary {
+    fn from(report: connect::Report) -> Self {
         Self {
             method: "tcp_connect",
-            target: summary.target,
-            resolved_addresses: summary.resolved_addresses,
-            planned_duration: summary.planned_duration,
-            socket_stats: summary.stats.into(),
+            target: report.target,
+            resolved_addresses: report.resolved_addresses,
+            planned_duration: report.planned_duration,
+            socket_stats: report.stats.into(),
         }
     }
 }
@@ -125,12 +125,12 @@ pub struct Report {
     pub summary: Summary,
     pub endpoints: Vec<Endpoint>,
 }
-impl TryFrom<connect::Report> for Report {
+impl TryFrom<connect::Aggregate> for Report {
     type Error = Error;
-    fn try_from(report: connect::Report) -> Result<Self, Error> {
+    fn try_from(aggregate: connect::Aggregate) -> Result<Self, Error> {
         Ok(Self {
-            summary: report.summary.into(),
-            endpoints: report
+            summary: aggregate.report.into(),
+            endpoints: aggregate
                 .endpoints
                 .into_iter()
                 .map(|endpoint| {

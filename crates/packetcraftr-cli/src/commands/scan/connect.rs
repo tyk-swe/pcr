@@ -1,17 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::output::{self, contract::ToolFormat};
-use crate::{errors::CliError, rendering::StreamEncoder};
-use std::sync::Arc;
+use packetcraftr::scan::connect;
 
-/// The pieces both connect entry points drive: the policy authorizer, the
-/// cancellation-sharing clock, and the TCP provider.
-struct Session<'a> {
-    authorizer: packetcraftr::policy::PolicyAuthorizer<'a>,
-    clock: packetcraftr::clock::CancellableClock,
-    provider: Arc<packetcraftr_netio::tcp::SystemProvider>,
-}
+use crate::output::{self, contract::ToolFormat};
+use crate::system::{Client, client};
+use crate::{errors::CliError, rendering::StreamEncoder};
 
 pub(super) fn run(
     request: &packetcraftr::scan::Request,
@@ -21,68 +15,53 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    let resolver = packetcraftr::target::SystemResolver;
-    let mut session = Session {
-        authorizer: packetcraftr::policy::PolicyAuthorizer::new(&policy, &resolver),
-        clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
-        provider: Arc::new(packetcraftr_netio::tcp::SystemProvider),
-    };
+    let mut client: Client = client(
+        packetcraftr_core::protocol::builtin::registry(),
+        policy,
+        "scan_connect",
+    );
     crate::commands::execution::run_workflow(
-        &mut session,
+        &mut client,
         format,
         stream,
         crate::cancellation::signal(),
         crate::commands::execution::Hooks {
             command: output::contract::Command::Scan,
-            run: Box::new(|session| {
-                packetcraftr::scan::connect::run(
-                    request,
-                    &mut session.authorizer,
-                    session.provider.clone(),
-                    &mut session.clock,
-                )
-                .map_err(CliError::classified)
+            run: Box::new(|client| {
+                let collector = connect::Collector::default();
+                let report = client
+                    .scan_connect(request.clone(), collector.clone())
+                    .map_err(CliError::classified)?;
+                collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|session, emit| {
-                let runtime = crate::resources::runtime(
-                    "scan_connect",
-                    packetcraftr::progress::MAX_WORKER_CAPACITY,
-                );
-                packetcraftr::scan::connect::run_with_events(
-                    request,
-                    &mut session.authorizer,
-                    session.provider.clone(),
-                    &mut session.clock,
-                    &runtime,
-                    emit,
-                )
-                .map_err(CliError::classified)
+            run_with_events: Box::new(|client, emit| {
+                client
+                    .scan_connect(request.clone(), emit)
+                    .map_err(CliError::classified)
             }),
             on_event: emit_event,
-            into_result: Box::new(|report| {
-                output::scan::connect::Report::try_from(report)
+            into_result: Box::new(|aggregate| {
+                output::scan::connect::Report::try_from(aggregate)
                     .map(|report| output::envelope::Published::new(report, Vec::new()))
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|report, _| {
+            render_text: Box::new(|aggregate, _| {
                 super::rendering::render_connect_text(
-                    &output::scan::connect::Report::try_from(report)
+                    &output::scan::connect::Report::try_from(aggregate)
                         .map_err(CliError::classified)?,
                 )
             }),
-            complete: |summary, stream| {
+            complete: |report, stream| {
                 stream
-                    .complete(output::scan::connect::Summary::from(summary), Vec::new())
+                    .complete(output::scan::connect::Summary::from(report), Vec::new())
                     .map_err(CliError::from)
             },
         },
     )
 }
 
-fn emit_event(
-    probe: packetcraftr::scan::connect::Probe,
-    stream: &StreamEncoder,
-) -> Result<(), CliError> {
+fn emit_event(event: connect::Event, stream: &StreamEncoder) -> Result<(), CliError> {
+    let connect::Event::Probe(probe) = event;
     let event = output::scan::connect::ProbeEvent::try_from(probe).map_err(CliError::classified)?;
     Ok(stream.emit_data(event, Vec::new())?)
 }

@@ -14,7 +14,6 @@
 mod common;
 
 use common::registry;
-use std::any::Any;
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -232,12 +231,6 @@ impl Layer for CountedLayer {
             inner: self.inner.clone_box(),
             reads: Arc::clone(&self.reads),
         })
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
     fn field(&self, name: &str) -> Option<FieldValue> {
         self.reads.lock().expect("reads lock").push(name.to_owned());

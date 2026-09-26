@@ -37,7 +37,6 @@ fn tcp_response_correlation_uses_decoded_payload_after_every_mutation_api() {
             packet
                 .layer_mut(2)
                 .expect("Raw layer")
-                .as_any_mut()
                 .downcast_mut::<Raw>()
                 .expect("Raw type")
                 .bytes = Bytes::from_static(&[2, 3, 4]);

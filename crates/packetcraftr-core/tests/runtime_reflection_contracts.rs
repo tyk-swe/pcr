@@ -19,7 +19,7 @@ fn assert_failed_packet_mutations(packet: &mut Packet) {
     assert!(
         packet
             .layer_mut(0)
-            .and_then(|layer| layer.as_any_mut().downcast_mut::<Probe>())
+            .and_then(|layer| layer.downcast_mut::<Probe>())
             .is_none()
     );
     assert!(packet.layer_mut(99).is_none());
@@ -41,13 +41,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
         ..Probe::default()
     });
     assert_eq!(packet.len(), 2);
-    assert_eq!(
-        packet
-            .iter()
-            .filter(|layer| layer.as_any().is::<Probe>())
-            .count(),
-        2
-    );
+    assert_eq!(packet.iter().filter(|layer| layer.is::<Probe>()).count(), 2);
     assert_eq!(
         packet
             .iter()
@@ -84,7 +78,7 @@ fn packet_mutation_reflection_and_boundaries_are_consistent() {
     assert_eq!(removed.protocol_id().as_str(), "child");
     packet
         .layer_mut(0)
-        .and_then(|layer| layer.as_any_mut().downcast_mut::<Child>())
+        .and_then(|layer| layer.downcast_mut::<Child>())
         .expect("child layer at index 0")
         .value = 10;
     assert_failed_packet_mutations(&mut packet);

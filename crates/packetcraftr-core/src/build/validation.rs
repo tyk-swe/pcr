@@ -22,7 +22,7 @@ pub(super) fn validate_bindings(
     debug_assert_eq!(protocols.len(), packet.len());
     let mut previous_padding: Option<&Padding> = None;
     for (index, layer) in packet.iter().enumerate() {
-        let Some(padding) = layer.as_any().downcast_ref::<Padding>() else {
+        let Some(padding) = layer.downcast_ref::<Padding>() else {
             previous_padding = None;
             continue;
         };
@@ -109,7 +109,7 @@ fn validate_padding(
             outside_layer,
         });
     };
-    if outside.as_any().is::<Padding>() || outside.as_any().is::<Malformed>() {
+    if outside.is::<Padding>() || outside.is::<Malformed>() {
         return Err(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
@@ -136,7 +136,7 @@ fn validate_padding(
     };
     let child_protocol = packet
         .layer(child_layer)
-        .and_then(|child| child.as_any().downcast_ref::<Malformed>())
+        .and_then(|child| child.downcast_ref::<Malformed>())
         .and_then(|child| child.intended_protocol.as_deref())
         .unwrap_or(declared_child.as_str());
     let link_declares_length = || match outside.field("ether_type") {
@@ -237,7 +237,6 @@ fn is_network_boundary(protocol: Option<BuiltinProtocol>) -> bool {
 
 pub(super) fn pass_through_byte_length(packet: &Packet) -> Result<usize, Error> {
     packet.iter().try_fold(0_usize, |total, layer| {
-        let layer = layer.as_any();
         let length = if let Some(layer) = layer.downcast_ref::<Raw>() {
             layer.bytes.len()
         } else if let Some(layer) = layer.downcast_ref::<Padding>() {

@@ -75,6 +75,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   `traceroute::Batch` already was. Executor implementations read the scan
   batch's single probe from the one-element `batch.probes` instead of
   `batch.probe`. See `docs/migration-unreleased.md`.
+- `Layer` no longer has `as_any`/`as_any_mut`; `dyn Layer` upcasts to
+  `dyn Any` and provides `is`, `downcast_ref`, and `downcast_mut` directly.
+  Hand-written `Layer` implementations delete both methods. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

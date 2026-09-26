@@ -146,7 +146,7 @@ impl Policy {
                 }
             });
         let source_mac = semantics::outer_layers(packet)
-            .find_map(|layer| layer.as_any().downcast_ref::<Ethernet>())
+            .find_map(|layer| layer.downcast_ref::<Ethernet>())
             .map(|ethernet| MacAddress(ethernet.source))
             .map_or(plan.source_mac, |source| {
                 if source.0 == [0; 6] {

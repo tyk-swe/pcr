@@ -198,7 +198,7 @@ impl Collector {
                     .decoded
                     .packet
                     .layer(view.layer)
-                    .and_then(|layer| layer.as_any().downcast_ref::<Udp>())
+                    .and_then(|layer| layer.downcast_ref::<Udp>())
                     .ok_or(Error::Sources {
                         number: record.number,
                     })?;

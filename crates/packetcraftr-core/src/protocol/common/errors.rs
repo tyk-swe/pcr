@@ -12,7 +12,6 @@ pub(crate) fn protocol(name: &'static str) -> crate::layer::Id {
 /// of a malformed layer, otherwise the layer's own identifier.
 pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
     layer
-        .as_any()
         .downcast_ref::<Malformed>()
         .and_then(|layer| layer.intended_protocol.as_deref())
         .unwrap_or_else(|| layer.protocol_id().as_str())
@@ -36,7 +35,6 @@ pub(crate) fn typed_layer<'a, L: Layer + 'static>(
     layer: &'a dyn Layer,
 ) -> Result<&'a L, crate::codec::Error> {
     layer
-        .as_any()
         .downcast_ref::<L>()
         .ok_or_else(|| wrong_layer(name, layer))
 }

@@ -476,7 +476,7 @@ fn ipv4_wire_with_truncated_options_may_hide_a_destination() {
     let malformed = decoded
         .packet
         .iter()
-        .find_map(|layer| layer.as_any().downcast_ref::<Malformed>())
+        .find_map(|layer| layer.downcast_ref::<Malformed>())
         .expect("the truncated IPv4 header must decode as a malformed layer");
     assert_eq!(malformed.intended_protocol.as_deref(), Some("ipv4"));
 

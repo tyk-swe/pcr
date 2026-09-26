@@ -17,8 +17,8 @@ pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), Error> {
             .packet
             .iter()
             .rev()
-            .take_while(|layer| layer.as_any().is::<Padding>())
-            .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
+            .take_while(|layer| layer.is::<Padding>())
+            .filter_map(|layer| layer.downcast_ref::<Padding>())
             .filter(|padding| padding.excluded_from(index))
             .try_fold(0_usize, |total, padding| {
                 total.checked_add(padding.bytes.len())

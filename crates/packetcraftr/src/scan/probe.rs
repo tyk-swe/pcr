@@ -227,7 +227,7 @@ fn push_geneve_payload(packet: &mut Packet, registry: &Arc<Registry>, payload: &
     let Some(header) = decode_tunnel_header(registry, "geneve", payload) else {
         return false;
     };
-    let Some(geneve) = header.layer.as_any().downcast_ref::<Geneve>() else {
+    let Some(geneve) = header.layer.downcast_ref::<Geneve>() else {
         return false;
     };
     let inner_bytes = &payload[header.consumed..];

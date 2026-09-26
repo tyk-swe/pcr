@@ -103,11 +103,15 @@ pub enum FieldError {
 }
 
 /// Object-safe packet layer interface used by built-in and external protocols.
+///
+/// `dyn Layer` upcasts to `dyn Any`; its inherent `is`, `downcast_ref`, and
+/// `downcast_mut` recover the concrete layer.
 pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn schema(&self) -> &'static Schema;
+    /// Clones the layer behind a trait object. `Clone` requires `Sized` and
+    /// cannot be a supertrait of an object-safe trait, so `Box<dyn Layer>`
+    /// needs this method to implement `Clone`.
     fn clone_box(&self) -> Box<dyn Layer>;
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn field(&self, name: &str) -> Option<FieldValue>;
     fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
 
@@ -155,6 +159,23 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
 
     fn protocol_id(&self) -> &Id {
         &self.schema().protocol
+    }
+}
+
+impl dyn Layer {
+    /// Returns whether the concrete layer is `T`.
+    pub fn is<T: Layer>(&self) -> bool {
+        (self as &dyn Any).is::<T>()
+    }
+
+    /// Returns the concrete layer when it is `T`.
+    pub fn downcast_ref<T: Layer>(&self) -> Option<&T> {
+        (self as &dyn Any).downcast_ref()
+    }
+
+    /// Returns the concrete layer mutably when it is `T`.
+    pub fn downcast_mut<T: Layer>(&mut self) -> Option<&mut T> {
+        (self as &mut dyn Any).downcast_mut()
     }
 }
 

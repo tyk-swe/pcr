@@ -86,7 +86,7 @@ impl<R: RunTime> MaxDurationArgs<R> {
     }
 
     pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
-        declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        declare!(settings, self, [max_duration_ms: Milliseconds @ Operation preset(30000, 300000)]);
     }
 }
 

@@ -35,8 +35,8 @@ impl super::Spec for Args {
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            max_tls_buffer_bytes: Bytes @ ActiveState,
-            max_tls_sessions: Count @ ActiveState,
+            max_tls_buffer_bytes: Bytes @ ActiveState preset(4194304, 33554432),
+            max_tls_sessions: Count @ ActiveState preset(128, 2048),
             max_output_sessions: Count @ ResultRetention,
         ]);
         self.limits.resources(

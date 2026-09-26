@@ -124,6 +124,15 @@ macro_rules! commands {
     (@start $launch:ident, $arguments:ident, $variant:ident, $name:literal) => {
         $launch.publish(Command::$variant, $arguments)
     };
+    // A command without a published name writes files, not capture analysis,
+    // so no preset applies to it.
+    (@presets $arguments:ident, $preset:ident) => {{
+        let _ = ($arguments, $preset);
+        std::collections::BTreeMap::new()
+    }};
+    (@presets $arguments:ident, $preset:ident, $name:literal) => {
+        Settings::preset_defaults($arguments, $preset)
+    };
     // Expands to `$item`; naming `$name` makes the item repeat once per
     // published command only.
     (@published $name:literal, $item:expr) => { $item };
@@ -148,6 +157,21 @@ macro_rules! commands {
             pub(crate) const fn offline(&self) -> bool {
                 match self {
                     $( Self::$variant(_) => commands!(@offline $arguments $(, $name)?), )*
+                }
+            }
+
+            /// The `--resource-preset` defaults the command's typed arguments
+            /// declare, by argument id.
+            pub(crate) fn preset_defaults(
+                &self,
+                preset: crate::presets::Preset,
+            ) -> std::collections::BTreeMap<&'static str, &'static str> {
+                match self {
+                    $(
+                        Self::$variant(arguments) => {
+                            commands!(@presets arguments, preset $(, $name)?)
+                        }
+                    )*
                 }
             }
 

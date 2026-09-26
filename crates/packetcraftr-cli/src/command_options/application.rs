@@ -33,12 +33,12 @@ pub(crate) struct ApplicationLimitsArgs {
 impl ApplicationLimitsArgs {
     pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            max_application_messages: Count @ ActiveState,
-            max_application_streams: Count @ ActiveState,
-            max_application_buffer_bytes: Bytes @ ActiveState,
-            max_application_retained_bytes: Bytes @ ActiveState,
-            max_application_source_spans: Count @ ActiveState,
-            max_application_output_bytes: Bytes @ ResultRetention,
+            max_application_messages: Count @ ActiveState preset(256, 4096),
+            max_application_streams: Count @ ActiveState preset(64, 1024),
+            max_application_buffer_bytes: Bytes @ ActiveState preset(2097152, 16777216),
+            max_application_retained_bytes: Bytes @ ActiveState preset(8388608, 67108864),
+            max_application_source_spans: Count @ ActiveState preset(2048, 16384),
+            max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864),
         ]);
     }
 

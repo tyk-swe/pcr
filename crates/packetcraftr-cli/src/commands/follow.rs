@@ -30,7 +30,7 @@ impl super::Spec for Args {
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention]);
+        crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention preset(8388608, 67108864)]);
         // A UDP conversation never runs TCP reassembly.
         let tcp = !self.stream.text().starts_with("udp:");
         self.limits.resources(

@@ -40,7 +40,11 @@ impl Command {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Command);
+impl fmt::Display for Command {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// User-selectable output formats across supported commands. Never a document
 /// field: a format is chosen on the command line, so it has no default here.
@@ -73,7 +77,11 @@ impl Format {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Format);
+impl fmt::Display for Format {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// Whether one structured value is an aggregate JSON result or an NDJSON record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]

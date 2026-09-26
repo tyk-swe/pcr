@@ -49,7 +49,11 @@ impl QuestionStatus {
     }
 }
 
-packetcraftr_core::display_via_as_str!(QuestionStatus);
+impl std::fmt::Display for QuestionStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// The deterministic outcome of one batch question, in input order.
 #[derive(Debug)]

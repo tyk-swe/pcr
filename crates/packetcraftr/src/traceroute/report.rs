@@ -40,7 +40,11 @@ impl ResponseKind {
     }
 }
 
-packetcraftr_core::display_via_as_str!(ResponseKind);
+impl std::fmt::Display for ResponseKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,7 +67,11 @@ impl Completion {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Completion);
+impl std::fmt::Display for Completion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {

@@ -55,7 +55,11 @@ impl Classification {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Classification);
+impl std::fmt::Display for Classification {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct ProbeEvidence {

@@ -31,8 +31,7 @@
 //! protocol may carry trailing padding, are recorded when the protocol is
 //! registered, so custom protocols behave like built-in ones.
 
-#[macro_export]
-#[doc(hidden)]
+/// Implements `Display` for a type through its `as_str` method.
 macro_rules! display_via_as_str {
     ($type:ty) => {
         impl ::std::fmt::Display for $type {

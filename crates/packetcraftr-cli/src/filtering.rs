@@ -105,9 +105,9 @@ impl FrameDecoder {
             .decode(
                 frame.clone(),
                 core::decode::Options {
-                    limits: packetcraftr_core::packet::Limits {
+                    limits: core::packet::Limits {
                         max_packet_size: self.max_frame_bytes,
-                        ..packetcraftr_core::packet::Limits::default()
+                        ..core::packet::Limits::default()
                     },
                 },
             )

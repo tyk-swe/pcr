@@ -56,7 +56,7 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
             limits.ip.max_aggregate_bytes = 0;
         }),
         ("max_ip_outcomes", |limits| {
-            limits.ip.max_retained_outcomes = 0
+            limits.ip.max_retained_outcomes = 0;
         }),
     ];
     for (field, zero) in zeroed {

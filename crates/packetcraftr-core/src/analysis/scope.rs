@@ -162,25 +162,13 @@ impl Limits {
 }
 
 /// Exact interner for semantic encapsulation paths and capture scopes.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Interner {
     scopes: HashMap<(Option<GlobalInterfaceId>, Vec<EncapsulationIdentifier>), ScopeId>,
     definitions: Vec<Definition>,
     retained_bytes: usize,
     limits: Limits,
     next: u32,
-}
-
-impl Default for Interner {
-    fn default() -> Self {
-        Self {
-            scopes: HashMap::new(),
-            definitions: Vec::new(),
-            retained_bytes: 0,
-            limits: Limits::default(),
-            next: 0,
-        }
-    }
 }
 
 impl Interner {

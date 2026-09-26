@@ -98,11 +98,10 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
         targets,
         build: core::build::Options {
             mode: arguments.mode.into(),
-            limits: packetcraftr_core::packet::Limits {
+            limits: core::packet::Limits {
                 max_packet_size: arguments.max_packet_bytes,
-                ..packetcraftr_core::packet::Limits::default()
+                ..core::packet::Limits::default()
             },
-            ..core::build::Options::default()
         },
         limits: core::fuzz::Limits {
             max_cases: arguments.max_cases,

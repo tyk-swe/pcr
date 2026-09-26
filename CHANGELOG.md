@@ -783,6 +783,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   their cause in the message: it reads `DNS query construction failed` or
   `DNS-over-TCP execution is unavailable on attempt N`, and the cause appears
   once in `causes`. Codes are unchanged.
+- `dns` publishes its events on the client's runtime, so its `resources`
+  report lists the `client_progress` runtime row instead of
+  `workflow_progress`.
 - `send`, `exchange`, and `plan` resolve `--interface` inside the client, after
   the operation's destinations (and for `send` and `exchange` its budget) are
   authorized, as DNS, scan, traceroute, and live fuzz already did. A refused operation no longer

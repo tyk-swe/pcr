@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Live workflow orchestration shared by the probe-driven commands:
-//! provider composition ([`prepare`]/[`Providers`]), the per-invocation
-//! [`WorkflowSession`], and [`run_workflow`], the one driver deciding between
-//! the streaming and collecting engine entry points under the negotiated
-//! output format. [`Executor`] delegates to the library exchange, whose client
+//! provider composition ([`prepare`]/[`Providers`]) and [`run_workflow`], the
+//! one driver deciding between the streaming and collecting engine entry
+//! points under the negotiated output format. [`Executor`] delegates to the library exchange, whose client
 //! resolves the interface selector after it admits each exchange.
 
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
@@ -50,45 +49,9 @@ where
 }
 
 pub(super) struct Providers {
-    pub(super) policy: Arc<packetcraftr::policy::Policy>,
-    /// The resolver the session authorizer resolves declared targets with.
-    pub(super) resolver: packetcraftr::target::SystemResolver,
-    pub(super) registry: Arc<core::registry::Registry>,
     pub(super) executor: Executor,
     /// Admits the one callback worker NDJSON streaming publishes through.
     pub(super) runtime: packetcraftr::progress::Runtime,
-}
-
-impl Providers {
-    /// Vends the live-run session the workflow commands drive: the authorizer
-    /// over the composed policy and the system resolver, the clock sharing
-    /// the installed cancellation signal, and the registry, executor, and
-    /// callback worker the engines drive.
-    pub(super) fn session(&mut self) -> WorkflowSession<'_> {
-        WorkflowSession {
-            authorizer: packetcraftr::policy::PolicyAuthorizer::new(&self.policy, &self.resolver),
-            clock: packetcraftr::clock::CancellableClock(crate::cancellation::signal().clone()),
-            registry: &self.registry,
-            executor: &mut self.executor,
-            runtime: &self.runtime,
-        }
-    }
-}
-
-/// The per-invocation run context [`Providers::session`] vends to a workflow
-/// command. Commands lend it to [`run_workflow`], which borrows the pieces
-/// each engine entry point needs.
-pub(super) struct WorkflowSession<'a> {
-    /// Authorizes declared targets and the operation budget.
-    pub(super) authorizer: packetcraftr::policy::PolicyAuthorizer<'a>,
-    /// Pacing clock sharing the installed interrupt signal.
-    pub(super) clock: packetcraftr::clock::CancellableClock,
-    /// The protocol registry the engines decode evidence with.
-    pub(super) registry: &'a core::registry::Registry,
-    /// The exchange executor probe requests run through.
-    pub(super) executor: &'a mut Executor,
-    /// The bounded callback worker NDJSON streaming publishes through.
-    pub(super) runtime: &'a packetcraftr::progress::Runtime,
 }
 
 /// Validates the policy and interface selector, then binds an executor to the
@@ -114,7 +77,7 @@ pub(super) fn prepare(
         .map(Into::into);
     let registry = packetcraftr_core::protocol::builtin::registry();
     let executor = Executor {
-        client: client(Arc::clone(&registry), policy.clone(), "client_progress"),
+        client: client(registry, policy, "client_progress"),
         send: packetcraftr::send::Options {
             destination: None,
             plan: packetcraftr::route::Options {
@@ -128,9 +91,6 @@ pub(super) fn prepare(
         collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
     };
     Ok(Providers {
-        policy,
-        resolver: packetcraftr::target::SystemResolver,
-        registry,
         executor,
         runtime: crate::resources::runtime(
             "workflow_progress",

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::Error;
+use super::{Error, InvalidInput, Limit, Unsupported};
 use crate::{
     frame::{Frame, LinkType},
-    packet::link::{VlanKind, VlanTag},
+    packet::{VlanKind, VlanTag},
     protocol::{
         BuiltinProtocol, checksum,
         headers::MAX_VLAN_DEPTH,
@@ -30,7 +30,7 @@ impl VlanRewrite {
     fn tci(self) -> Result<u16, Error> {
         let kind = VlanKind::from_ether_type(self.ether_type)
             .filter(|_| self.identifier <= 4095 && self.priority <= 7)
-            .ok_or(Error::Invalid("invalid VLAN rewrite tag"))?;
+            .ok_or(Error::Invalid(InvalidInput::VlanTag))?;
         Ok(VlanTag {
             kind,
             priority: self.priority,
@@ -76,7 +76,7 @@ impl HeaderRewrite {
         if let Some(tags) = &self.vlans {
             if tags.len() > MAX_VLAN_DEPTH {
                 return Err(Error::Limit {
-                    field: "VLAN depth",
+                    field: Limit::VlanDepth,
                     limit: MAX_VLAN_DEPTH,
                 });
             }
@@ -87,9 +87,7 @@ impl HeaderRewrite {
         if let (Some(source), Some(destination)) = (self.source_ip, self.destination_ip)
             && source.is_ipv4() != destination.is_ipv4()
         {
-            return Err(Error::Invalid(
-                "rewrite addresses use different IP families",
-            ));
+            return Err(Error::Invalid(InvalidInput::MixedAddressFamilies));
         }
         Ok(())
     }
@@ -128,7 +126,7 @@ pub fn rewrite(
     patch.validate()?;
     if frame.bytes().len() > limits.max_output_bytes {
         return Err(Error::Limit {
-            field: "max_output_bytes",
+            field: Limit::MaxOutputBytes,
             limit: limits.max_output_bytes,
         });
     }
@@ -136,15 +134,15 @@ pub fn rewrite(
         return Ok(frame.clone());
     }
     if frame.captured_length() != frame.original_length() {
-        return Err(Error::Invalid("cannot rewrite a truncated capture"));
+        return Err(Error::Invalid(InvalidInput::RewriteTruncatedCapture));
     }
     let link_edits =
         patch.source_mac.is_some() || patch.destination_mac.is_some() || patch.vlans.is_some();
     if link_edits && frame.link_type != LinkType::ETHERNET {
-        return Err(Error::Unsupported("MAC/VLAN edits require Ethernet"));
+        return Err(Error::Unsupported(Unsupported::LinkEditWithoutEthernet));
     }
     let link = LinkHeader::walk(frame.link_type, frame.bytes())?
-        .ok_or(Error::Unsupported("rewrite requires Ethernet or raw IP"))?;
+        .ok_or(Error::Unsupported(Unsupported::RewriteLinkType))?;
     let old_offset = link.network_offset();
     let new_offset = patch.vlans.as_ref().map_or(old_offset, |tags| {
         EthernetHeader::LENGTH + EthernetHeader::VLAN_TAG_LENGTH * tags.len()
@@ -156,7 +154,7 @@ pub fn rewrite(
         .and_then(|n| n.checked_add(new_offset))
         .filter(|length| *length <= limits.max_output_bytes)
         .ok_or(Error::Limit {
-            field: "max_output_bytes",
+            field: Limit::MaxOutputBytes,
             limit: limits.max_output_bytes,
         })?;
     let mut bytes = Vec::with_capacity(length);
@@ -189,15 +187,13 @@ pub fn rewrite(
     {
         // The IP bytes moved with the link header only, so offsets walked in
         // the captured frame hold in the output.
-        let header = link.walk_ip(frame.bytes())?.ok_or(Error::Unsupported(
-            "network edits require an outer IPv4/IPv6 datagram",
-        ))?;
+        let header = link
+            .walk_ip(frame.bytes())?
+            .ok_or(Error::Unsupported(Unsupported::NetworkEditWithoutIp))?;
         let ip = &mut bytes[new_offset..];
         network(ip, &header, patch)?;
         if matches!(link, LinkHeader::RawIp { .. }) && header.datagram_length() != ip.len() {
-            return Err(Error::Unsupported(
-                "raw IP has uninterpreted trailing bytes",
-            ));
+            return Err(Error::Unsupported(Unsupported::RawIpTrailer));
         }
     }
     let mut output = Frame::without_timestamp(frame.link_type, bytes)?;
@@ -206,8 +202,6 @@ pub fn rewrite(
     output.direction = frame.direction;
     Ok(output)
 }
-
-const AUTHENTICATED_OR_UNKNOWN: &str = "unknown or authenticated upper-layer checksum semantics";
 
 /// Writes the patched addresses and ports into `ip` in place and regenerates
 /// the checksums that cover them. IPv4 options, IPv6 extension headers, and
@@ -231,7 +225,7 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
             (IpHeader::V6(_), Some(IpAddr::V6(value))) => {
                 ip[range].copy_from_slice(&value.octets());
             }
-            _ => return Err(Error::Invalid("cannot change IP address family")),
+            _ => return Err(Error::Invalid(InvalidInput::AddressFamilyChange)),
         }
     }
     // AH authenticates the rewritten bytes. The walk steps over it, so it is
@@ -242,7 +236,7 @@ fn network(ip: &mut [u8], header: &IpHeader, patch: &HeaderRewrite) -> Result<()
             .iter()
             .any(|extension| extension.protocol() == ip_protocol::AH)
     {
-        return Err(Error::Unsupported(AUTHENTICATED_OR_UNKNOWN));
+        return Err(Error::Unsupported(Unsupported::UpperLayerChecksum));
     }
     let address = |ip: &[u8], range: Range<usize>| {
         match header {
@@ -275,13 +269,13 @@ fn transport(
     let ipv6 = source.is_ipv6();
     let ports = patch.source_port.is_some() || patch.destination_port.is_some();
     if ports && !matches!(protocol, ip_protocol::TCP | ip_protocol::UDP) {
-        return Err(Error::Unsupported("port edits require TCP or UDP"));
+        return Err(Error::Unsupported(Unsupported::PortEditTransport));
     }
     let (name, length, checksum_offset) = match protocol {
         ip_protocol::TCP => {
             let header = segment.get(12).map(|byte| usize::from(byte >> 4) * 4);
             if !header.is_some_and(|header| (20..=segment.len()).contains(&header)) {
-                return Err(Error::Invalid("invalid TCP header length"));
+                return Err(Error::Invalid(InvalidInput::TcpHeaderLength));
             }
             (BuiltinProtocol::Tcp, segment.len(), 16)
         }
@@ -289,20 +283,20 @@ fn transport(
             let length = segment
                 .get(4..6)
                 .map(|length| usize::from(u16::from_be_bytes([length[0], length[1]])))
-                .ok_or(Error::Invalid("invalid UDP length"))?;
+                .ok_or(Error::Invalid(InvalidInput::UdpLength))?;
             if length < 8 || length > segment.len() {
-                return Err(Error::Invalid("invalid UDP length"));
+                return Err(Error::Invalid(InvalidInput::UdpLength));
             }
             (BuiltinProtocol::Udp, length, 6)
         }
         ip_protocol::ICMPV6 if ipv6 => {
             if segment.len() < 4 {
-                return Err(Error::Invalid("truncated ICMPv6"));
+                return Err(Error::Invalid(InvalidInput::TruncatedIcmpv6));
             }
             (BuiltinProtocol::Icmpv6, segment.len(), 2)
         }
         1 | 2 | 4 | 41 | 47 | ip_protocol::NO_NEXT_HEADER | 132 => return Ok(()),
-        _ => return Err(Error::Unsupported(AUTHENTICATED_OR_UNKNOWN)),
+        _ => return Err(Error::Unsupported(Unsupported::UpperLayerChecksum)),
     };
     let checksum = checksum_offset..checksum_offset + 2;
     let disabled_udp = protocol == ip_protocol::UDP && !ipv6 && segment[checksum.clone()] == [0, 0];

@@ -23,6 +23,12 @@
 //! [`headers`] walks raw link, VLAN, and IP header bytes for code that must
 //! edit or inspect bytes a codec round trip would not reproduce.
 //!
+//! The built-in registry carries a
+//! [`ResponseMatcher`](crate::matcher::ResponseMatcher) for each protocol whose
+//! [`BuiltinProtocol::has_matcher`] is true. Live workflows that
+//! classify responses themselves use the same correlation through
+//! [`quoted_icmp_error`] and [`transport_tuple_reversed`].
+//!
 //! Codecs preserve unknown and malformed bytes. SCTP chunks remain validated
 //! opaque bytes; unrecognized application payloads use [`crate::layer::Raw`].
 
@@ -43,6 +49,4 @@ pub use catalog::{BuiltinProtocol, UnknownProtocolName};
 pub use common::{ChecksumAccumulator, checksum, checksum_parts};
 pub(crate) use common::{network_from_addresses, transport_checksum};
 
-pub use matcher::{
-    QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport_tuple_reversed,
-};
+pub use matcher::{IcmpErrorKind, QuotedTransport, quoted_icmp_error, transport_tuple_reversed};

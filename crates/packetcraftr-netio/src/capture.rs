@@ -230,7 +230,11 @@ impl TimestampPrecision {
     }
 }
 
-packetcraftr_core::display_via_as_str!(TimestampPrecision);
+impl std::fmt::Display for TimestampPrecision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// Timestamp sources synchronized with the host system clock. Unsynchronized
 /// sources cannot be converted to host monotonic or Unix time; discovery
@@ -270,7 +274,11 @@ impl TimestampSource {
     }
 }
 
-packetcraftr_core::display_via_as_str!(TimestampSource);
+impl std::fmt::Display for TimestampSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// One packet timestamp type a native backend advertises for an interface.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -495,7 +503,11 @@ impl OverflowPolicy {
     }
 }
 
-packetcraftr_core::display_via_as_str!(OverflowPolicy);
+impl std::fmt::Display for OverflowPolicy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {

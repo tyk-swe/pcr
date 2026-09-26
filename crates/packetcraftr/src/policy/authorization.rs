@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    packet::Packet, packet::link::MacAddress, protocol::link::Ethernet, protocol::semantics,
+    packet::MacAddress, packet::Packet, protocol::link::Ethernet, protocol::semantics,
 };
 use packetcraftr_netio::route::Plan;
 

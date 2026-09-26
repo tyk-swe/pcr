@@ -13,8 +13,7 @@ use packetcraftr_core::protocol::network::{Fragment, HopByHop, Icmpv4, Icmpv6, I
 use packetcraftr_core::protocol::transport::{Sctp, Tcp, Udp};
 use packetcraftr_core::protocol::tunnel::{Ah, Gre};
 use packetcraftr_core::protocol::{
-    BuiltinProtocol, QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind,
-    transport_tuple_reversed,
+    BuiltinProtocol, IcmpErrorKind, QuotedTransport, quoted_icmp_error, transport_tuple_reversed,
 };
 use packetcraftr_core::{build, codec, packet::Packet};
 
@@ -43,12 +42,12 @@ enum ProbeTransport {
 }
 
 impl ProbeTransport {
-    const fn quoted(self) -> QuotedProbeTransport {
+    const fn quoted(self) -> QuotedTransport {
         match self {
-            Self::Tcp => QuotedProbeTransport::Tcp,
-            Self::Udp => QuotedProbeTransport::Udp,
-            Self::Sctp => QuotedProbeTransport::Sctp,
-            Self::Icmp => QuotedProbeTransport::Icmp,
+            Self::Tcp => QuotedTransport::Tcp,
+            Self::Udp => QuotedTransport::Udp,
+            Self::Sctp => QuotedTransport::Sctp,
+            Self::Icmp => QuotedTransport::Icmp,
         }
     }
 
@@ -231,11 +230,11 @@ fn reverse_udp_and_echo_matchers_require_reversed_identity() {
 
 #[test]
 fn quoted_icmp_errors_classify_every_transport_in_both_address_families() {
-    use NetworkVersion::{V4, V6};
-    use ProbeTransport::{Icmp, Sctp, Tcp, Udp};
-    use QuotedIcmpError::{
+    use IcmpErrorKind::{
         AdministrativelyProhibited, DestinationUnreachable, PortUnreachable, TimeExceeded,
     };
+    use NetworkVersion::{V4, V6};
+    use ProbeTransport::{Icmp, Sctp, Tcp, Udp};
 
     let cases = [
         (V4, Udp, 3, 3, PortUnreachable),
@@ -253,7 +252,7 @@ fn quoted_icmp_errors_classify_every_transport_in_both_address_families() {
         let request = build_probe(network, transport);
         let response = quoted_response(network, &request.bytes, icmp_type, code);
         assert_eq!(
-            quoted_icmp_error_kind(&request.packet, &response, transport.quoted()),
+            quoted_icmp_error(&request.packet, &response, transport.quoted()),
             Some(expected),
             "{network:?} {transport:?}"
         );
@@ -311,7 +310,7 @@ fn quoted_icmp_rejects_malformed_or_inexact_ipv4_probes() {
     for (name, quote) in variants {
         let response = quoted_response(NetworkVersion::V4, &quote, 3, 13);
         assert_eq!(
-            quoted_icmp_error_kind(&request.packet, &response, QuotedProbeTransport::Tcp,),
+            quoted_icmp_error(&request.packet, &response, QuotedTransport::Tcp,),
             None,
             "{name}"
         );
@@ -319,13 +318,13 @@ fn quoted_icmp_rejects_malformed_or_inexact_ipv4_probes() {
 
     let response = quoted_response(NetworkVersion::V4, &request.bytes, 3, 13);
     assert_eq!(
-        quoted_icmp_error_kind(&request.packet, &response, QuotedProbeTransport::Udp),
+        quoted_icmp_error(&request.packet, &response, QuotedTransport::Udp),
         None,
         "declared transport must match the request"
     );
     let non_error = quoted_response(NetworkVersion::V4, &request.bytes, 8, 0);
     assert_eq!(
-        quoted_icmp_error_kind(&request.packet, &non_error, QuotedProbeTransport::Tcp,),
+        quoted_icmp_error(&request.packet, &non_error, QuotedTransport::Tcp,),
         None,
         "echo request is not an ICMP error"
     );
@@ -346,8 +345,8 @@ fn quoted_ipv6_walks_extensions_and_rejects_non_initial_fragments() {
 
     let response = quoted_response(NetworkVersion::V6, &request.bytes, 1, 4);
     assert_eq!(
-        quoted_icmp_error_kind(&request.packet, &response, QuotedProbeTransport::Udp),
-        Some(QuotedIcmpError::PortUnreachable)
+        quoted_icmp_error(&request.packet, &response, QuotedTransport::Udp),
+        Some(IcmpErrorKind::PortUnreachable)
     );
 
     let malformed_quotes = [
@@ -370,7 +369,7 @@ fn quoted_ipv6_walks_extensions_and_rejects_non_initial_fragments() {
     for (name, quote) in malformed_quotes {
         let response = quoted_response(NetworkVersion::V6, &quote, 1, 4);
         assert_eq!(
-            quoted_icmp_error_kind(&request.packet, &response, QuotedProbeTransport::Udp),
+            quoted_icmp_error(&request.packet, &response, QuotedTransport::Udp),
             None,
             "{name}"
         );

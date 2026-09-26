@@ -30,9 +30,18 @@
 //! Properties an engine needs from a protocol, such as whether a link
 //! protocol may carry trailing padding, are recorded when the protocol is
 //! registered, so custom protocols behave like built-in ones.
+//!
+//! # Public paths
+//!
+//! Each item has one public path: its module re-exports it flat from private
+//! submodules (`dns::Dns`, `tls::Tls`, `packet::MacAddress`). A module nests
+//! a public module only for a sub-domain with its own vocabulary, such as the
+//! analyses under [`analysis`], the reassembly engines, the protocol groups,
+//! and [`capture_file::compression`], or for a namespace of wire constants
+//! such as [`protocol::network::ip_protocol`]. Custom layers use the same
+//! [`reflective_layer!`] declaration as the built-in ones.
 
-#[macro_export]
-#[doc(hidden)]
+/// Implements `Display` for a type through its `as_str` method.
 macro_rules! display_via_as_str {
     ($type:ty) => {
         impl ::std::fmt::Display for $type {

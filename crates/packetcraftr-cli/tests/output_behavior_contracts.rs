@@ -30,7 +30,7 @@ use packetcraftr_core::frame::Direction as CaptureDirection;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::{Lengths, LinkType};
 use packetcraftr_core::layer::FieldSchema;
-use packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag};
+use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_netio::interface::Address;
 use packetcraftr_netio::interface::Flags;

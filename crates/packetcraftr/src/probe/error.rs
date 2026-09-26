@@ -88,7 +88,11 @@ impl Workflow {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Workflow);
+impl fmt::Display for Workflow {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 struct Codes {
     limit: &'static str,

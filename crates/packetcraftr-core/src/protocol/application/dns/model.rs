@@ -6,10 +6,7 @@ use serde::Serialize;
 use std::fmt::{self, Write as _};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use super::{
-    Error,
-    name::{MAX_LABEL_LEN, MAX_NAME_LEN},
-};
+use super::{Error, MAX_LABEL_LEN, MAX_NAME_LEN};
 use crate::field::WireValue;
 
 /// The bounded, exact DNS-over-UDP layer.

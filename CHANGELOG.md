@@ -66,8 +66,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   and `fuzz` aliases are removed without compatibility aliases. See
   `docs/migration-unreleased.md`.
 - `LayerCodec::decode` takes a refcounted `Bytes` view of the layer input
-  instead of `&[u8]`; `dns::decode_name`, `dns::name::decompress`, and
-  `http::parse_head` take `&Bytes` for the same reason. Byte-retaining codecs
+  instead of `&[u8]`; `dns::decode_name` and `http::parse_head` take `&Bytes`
+  for the same reason. Byte-retaining codecs
   now slice the shared frame buffer instead of copying each retained range,
   eliminating a per-packet memcpy in the DHCP, ICMP, IGMP, raw, DNS, NTP, HTTP,
   and TLS decode paths. Callers holding borrowed bytes wrap them once with
@@ -208,6 +208,23 @@ All notable changes to PacketcraftR are documented here. The format follows
   `envelope::Published<T>`. `http::Issue` and `dns_read::Issue` are structs
   instead of newtypes, and `tls::SelectionCounts` is removed. output/v6 JSON is
   unchanged. See `docs/migration-unreleased.md`.
+- Core's public API is a flat facade: every item has one documented path and
+  nothing hidden is used from another crate. `packet::link` is private and its
+  `MacAddress`, `VlanKind`, and `VlanTag` are at `packet::`. `dns::name` is
+  private: `dns::decode_name` is the one name decoder (`name::decompress` and
+  `name::Decompressed` are removed) and `MAX_LABEL_LEN`/`MAX_NAME_LEN` are at
+  `dns::`. `layer::raw_layout` is `layer::Raw::layout`. The ICMP correlation
+  helpers are documented: `protocol::QuotedIcmpError` is `IcmpErrorKind`,
+  `QuotedProbeTransport` is `QuotedTransport`, and `quoted_icmp_error_kind` is
+  `quoted_icmp_error`. `reflective_layer!`, `layer::ReflectiveField`, and the
+  `reflect_*` helpers are documented API for custom layers. The
+  `display_via_as_str!` macro is no longer exported, and the
+  `frame::GlobalInterfaceId` alias is removed in favor of `u32`.
+  `transform::Error::{Invalid, Unsupported, Limit}` carry the typed
+  `transform::{InvalidInput, Unsupported, Limit}` reasons, and
+  `fuzz::Error::{InvalidLimit, InvalidTarget, InvalidBasePacket}` carry
+  `fuzz::{Constraint, TargetFault, BaseFault}`; messages and codes are
+  unchanged. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -334,8 +351,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   socket authorization, bounded framing, response validation, and retries.
 - `packetcraftr_netio::deadline::remaining_before` is the one helper every
   live crate uses to turn a deadline into a remaining wait; the previous netio-private copy
-  is gone. Core exposes `protocol::application::dns::read_u16` and the CLI
-  library exposes `output::hex` for the compact hex rendering shared by
+  is gone. The CLI library exposes `output::hex` for the compact hex rendering shared by
   rendering and machine output, with borrowed formatting for `--output hex`.
   `scan::DEFAULT_ATTEMPTS` names the scan attempts default.
 - Published `output-expert-complete.json` and `output-replay-complete.json`

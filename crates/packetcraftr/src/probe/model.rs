@@ -25,7 +25,11 @@ impl Transport {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Transport);
+impl std::fmt::Display for Transport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 /// Transport-specific addressing: TCP and UDP require ports; ICMP has none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,4 +78,8 @@ impl ProbeStatus {
     }
 }
 
-packetcraftr_core::display_via_as_str!(ProbeStatus);
+impl std::fmt::Display for ProbeStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}

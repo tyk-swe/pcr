@@ -277,9 +277,9 @@ mod tests {
     use packetcraftr_core::error::Classified;
     use packetcraftr_core::field::FieldValue;
     use packetcraftr_core::frame::LinkType;
-    use packetcraftr_core::layer::{Layer, Raw, raw_layout};
+    use packetcraftr_core::layer::{Layer, Raw};
+    use packetcraftr_core::packet::MacAddress;
     use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::packet::link::MacAddress;
     use packetcraftr_core::protocol::{
         link::Ethernet,
         network::{Icmpv4, Ipv4},
@@ -320,7 +320,7 @@ mod tests {
                 }
             })?;
             let mut encoded = EncodedLayer::header(raw.bytes.to_vec(), Box::new(raw.clone()));
-            encoded.fields = raw_layout(raw.bytes.len());
+            encoded.fields = Raw::layout(raw.bytes.len());
             Ok(encoded)
         }
 
@@ -331,7 +331,7 @@ mod tests {
         ) -> Result<DecodedLayer, packetcraftr_core::codec::Error> {
             let mut decoded =
                 DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-            decoded.fields = raw_layout(input.len());
+            decoded.fields = Raw::layout(input.len());
             Ok(decoded)
         }
 

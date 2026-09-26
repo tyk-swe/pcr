@@ -10,7 +10,7 @@ use crate::{
 };
 
 use super::{
-    QuotedProbeTransport, ReversedProtocolLayers, quoted_icmp_error_kind, response_source,
+    QuotedTransport, ReversedProtocolLayers, quoted_icmp_error, response_source,
     reversed_protocol_layers, sctp::sctp_initiate_tag,
 };
 
@@ -32,12 +32,12 @@ impl ReverseFlowMatcher {
 impl ResponseMatcher for ReverseFlowMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> Option<Match> {
         let transport = match self.protocol {
-            BuiltinProtocol::Tcp => QuotedProbeTransport::Tcp,
-            BuiltinProtocol::Udp => QuotedProbeTransport::Udp,
-            BuiltinProtocol::Sctp => QuotedProbeTransport::Sctp,
+            BuiltinProtocol::Tcp => QuotedTransport::Tcp,
+            BuiltinProtocol::Udp => QuotedTransport::Udp,
+            BuiltinProtocol::Sctp => QuotedTransport::Sctp,
             _ => return None,
         };
-        if quoted_icmp_error_kind(request, response, transport).is_some() {
+        if quoted_icmp_error(request, response, transport).is_some() {
             return Some(Match::new(150));
         }
         let layers = reversed_protocol_layers(self.protocol, request, response)?;

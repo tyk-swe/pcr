@@ -48,7 +48,7 @@ use crate::budget::Cancelled;
 use crate::error::{Classification, Classified, Kind};
 use crate::field::FieldValue;
 use crate::filter::{Filter, Projection};
-use crate::frame::{GlobalInterfaceId, LinkType};
+use crate::frame::LinkType;
 use crate::registry::Registry;
 
 /// Which capture an observation belongs to. Capture identity is part of every
@@ -117,7 +117,7 @@ pub struct Declarations<'a> {
 pub struct Observation {
     frame: u64,
     timestamp: std::time::SystemTime,
-    interface: Option<GlobalInterfaceId>,
+    interface: Option<u32>,
     link_type: LinkType,
     incomplete: Option<Incomplete>,
     diagnostics: Vec<&'static str>,

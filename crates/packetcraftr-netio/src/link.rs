@@ -3,7 +3,7 @@
 
 //! Link-layer transmission capabilities, modes, and VLAN header limits.
 
-pub(crate) use packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag};
+pub(crate) use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
 
 /// Maximum explicit VLAN headers carried by one planned link-layer route.
 pub const MAX_VLAN_TAGS: usize = 8;
@@ -41,7 +41,11 @@ impl Capability {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Capability);
+impl std::fmt::Display for Capability {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -64,4 +68,8 @@ impl Mode {
     }
 }
 
-packetcraftr_core::display_via_as_str!(Mode);
+impl std::fmt::Display for Mode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}

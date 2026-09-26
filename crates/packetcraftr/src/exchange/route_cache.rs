@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     use packetcraftr_core::error::{Classification, Kind};
     use packetcraftr_core::frame::LinkType;
-    use packetcraftr_core::packet::link::MacAddress;
+    use packetcraftr_core::packet::MacAddress;
     use packetcraftr_netio::link::Capability;
     use packetcraftr_netio::route::{Provider, Scope, SelectionReason};
 

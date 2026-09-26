@@ -17,7 +17,7 @@ use packetcraftr::policy::{DestinationConstraint, Policy};
 use packetcraftr::send;
 use packetcraftr_core::expression;
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Capability;

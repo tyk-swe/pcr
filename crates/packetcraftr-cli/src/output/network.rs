@@ -7,7 +7,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_core::packet::link as library_link;
+use packetcraftr_core::packet as library_packet;
 use packetcraftr_netio::{interface, link, route};
 
 use super::capture::TimestampSource;
@@ -108,15 +108,15 @@ impl std::fmt::Display for MacAddress {
     }
 }
 
-impl From<library_link::MacAddress> for MacAddress {
-    fn from(value: library_link::MacAddress) -> Self {
+impl From<library_packet::MacAddress> for MacAddress {
+    fn from(value: library_packet::MacAddress) -> Self {
         Self(value.0)
     }
 }
 
 published_enum! {
     /// The 802.1Q tag family a VLAN tag belongs to.
-    pub enum VlanKind from library_link::VlanKind {
+    pub enum VlanKind from library_packet::VlanKind {
         Ieee8021Q => "ieee8021_q",
         Ieee8021Ad => "ieee8021_ad",
     }
@@ -131,8 +131,8 @@ pub struct VlanTag {
     pub vlan_id: u16,
 }
 
-impl From<library_link::VlanTag> for VlanTag {
-    fn from(value: library_link::VlanTag) -> Self {
+impl From<library_packet::VlanTag> for VlanTag {
+    fn from(value: library_packet::VlanTag) -> Self {
         Self {
             kind: value.kind.into(),
             priority: value.priority,

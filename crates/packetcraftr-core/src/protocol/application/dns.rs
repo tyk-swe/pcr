@@ -12,7 +12,7 @@ mod model;
 mod reflection;
 
 pub(crate) use codec::DnsCodec;
-pub use codec::{decode_name, name, read_u16};
+pub use codec::decode_name;
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
 /// Largest accepted [`DecodeLimits::max_message_bytes`] and
@@ -23,6 +23,11 @@ pub const MAX_MESSAGE_BYTES: usize = 65_535;
 pub const MAX_RECORDS: usize = 4_096;
 /// Largest accepted [`DecodeLimits::max_name_pointers`].
 pub const MAX_NAME_POINTERS: usize = 128;
+/// The largest label a name may carry, in octets (RFC 1035 §2.3.4).
+pub const MAX_LABEL_LEN: usize = 63;
+/// The largest expanded name, in wire octets including each length byte
+/// (RFC 1035 §2.3.4).
+pub const MAX_NAME_LEN: usize = 255;
 
 /// Per-message resource bounds. Each is at most its `MAX_*` constant, and a
 /// message may carry at most 64 questions. [`DecodeLimits::validate`] refuses
@@ -121,14 +126,14 @@ pub enum Error {
     /// A label length byte uses one of the two reserved tag values.
     #[error("DNS label at byte {offset} uses a reserved length encoding")]
     ReservedLabelLength { offset: usize },
-    /// A label declares more than [`name::MAX_LABEL_LEN`] octets.
+    /// A label declares more than [`MAX_LABEL_LEN`] octets.
     #[error(
         "DNS label at byte {offset} is {actual} bytes; maximum is {}",
-        name::MAX_LABEL_LEN
+        MAX_LABEL_LEN
     )]
     LabelTooLong { offset: usize, actual: usize },
-    /// The expanded name exceeds [`name::MAX_NAME_LEN`] wire octets.
-    #[error("DNS name exceeds the {}-byte wire limit", name::MAX_NAME_LEN)]
+    /// The expanded name exceeds [`MAX_NAME_LEN`] wire octets.
+    #[error("DNS name exceeds the {}-byte wire limit", MAX_NAME_LEN)]
     NameTooLong,
     #[error("DNS EDNS metadata is invalid: {message}")]
     InvalidEdns { message: String },

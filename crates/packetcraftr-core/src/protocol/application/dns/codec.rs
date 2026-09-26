@@ -22,9 +22,9 @@ use crate::{
 
 mod decode;
 mod encode;
-pub mod name;
+mod name;
 
-pub use decode::{decode_name, read_u16};
+pub use decode::decode_name;
 
 pub(super) const NAME: &str = BuiltinProtocol::Dns.as_str();
 pub(super) const HEADER_LEN: usize = 12;
@@ -223,7 +223,7 @@ impl LayerCodec for DnsCodec {
                 consumed: input.len(),
                 payload_len: 0,
                 next: Vec::new(),
-                fields: crate::layer::raw_layout(input.len()),
+                fields: crate::layer::Raw::layout(input.len()),
                 diagnostics: Vec::new(),
                 stop: true,
                 network: None,

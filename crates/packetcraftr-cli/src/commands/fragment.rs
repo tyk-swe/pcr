@@ -56,7 +56,7 @@ pub(crate) fn run(
         Some(BuiltinProtocol::Ipv6) => LinkType::IPV6,
         _ => {
             return Err(CliError::classified(core::transform::Error::Unsupported(
-                "recipe must begin with Ethernet or IP",
+                core::transform::Unsupported::PacketRoot,
             )));
         }
     };

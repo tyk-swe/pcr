@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
 use packetcraftr_core::{layer::Raw, packet::Packet};
 use packetcraftr_netio::interface::Id as InterfaceId;

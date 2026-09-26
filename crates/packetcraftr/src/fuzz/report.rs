@@ -29,7 +29,11 @@ impl CaseOutcome {
     }
 }
 
-packetcraftr_core::display_via_as_str!(CaseOutcome);
+impl std::fmt::Display for CaseOutcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Case {

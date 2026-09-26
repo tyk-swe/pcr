@@ -196,7 +196,7 @@ macro_rules! define_builtin_protocol {
             }
         }
 
-        crate::display_via_as_str!(BuiltinProtocol);
+        display_via_as_str!(BuiltinProtocol);
 
         /// Parses a canonical name or one of [`Self::aliases`].
         impl ::std::str::FromStr for BuiltinProtocol {

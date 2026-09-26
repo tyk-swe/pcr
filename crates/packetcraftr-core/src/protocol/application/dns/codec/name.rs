@@ -1,37 +1,26 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Bounded DNS name decompression shared by offline and live DNS codecs.
+//! Bounded DNS name decompression behind [`decode_name`](super::decode_name).
 //! Returns exact label bytes and the resume offset; callers own presentation
 //! and errors.
-//!
-//! RFC 1035 bounds labels by [`MAX_LABEL_LEN`] and expanded names by
-//! [`MAX_NAME_LEN`]. Callers also cap compression-pointer hops; pointers must
-//! address earlier offsets.
 
 use bytes::Bytes;
 
-use crate::protocol::application::dns::Error;
-
-/// The largest label a name may carry, in octets (RFC 1035 §2.3.4).
-pub const MAX_LABEL_LEN: usize = 63;
-
-/// The largest expanded name, in wire octets including each length byte
-/// (RFC 1035 §2.3.4).
-pub const MAX_NAME_LEN: usize = 255;
+use crate::protocol::application::dns::{Error, MAX_LABEL_LEN, MAX_NAME_LEN};
 
 /// A decompressed DNS name.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Decompressed {
+pub(super) struct Decompressed {
     /// The label octets in wire order, exactly as they appear in the message.
     /// A root name has no labels. Escaping and case folding are the caller's,
     /// because DNS presentation syntax and DNS equality disagree about which
     /// octets are significant.
-    pub labels: Vec<Bytes>,
+    pub(super) labels: Vec<Bytes>,
     /// The offset just past the name's own encoding, which is where the reader
     /// continues. For a compressed name this is two bytes past the *first*
     /// pointer, not past the bytes the pointer reached.
-    pub resume: usize,
+    pub(super) resume: usize,
 }
 
 /// Expands the possibly-compressed DNS name that starts at `offset` in
@@ -46,26 +35,7 @@ pub struct Decompressed {
 /// `max_pointers` is what bounds the hop count, and the loop-detection scan is
 /// quadratic in it, so pass a small constant: the built-in dissector passes 32
 /// and the DNS workflow's validated ceiling is 128.
-///
-/// # Examples
-///
-/// ```
-/// use packetcraftr_core::protocol::application::dns::{Error, name};
-///
-/// // "a" then a pointer back to the root label at offset 0.
-/// let message = [0x00, 0x01, b'a', 0xc0, 0x00];
-/// let expanded = name::decompress(&bytes::Bytes::copy_from_slice(&message), 1, 32)
-///     .expect("bounded name");
-/// assert_eq!(expanded.labels, vec![bytes::Bytes::from_static(b"a")]);
-/// assert_eq!(expanded.resume, 5);
-///
-/// // A pointer that does not move backward cannot terminate.
-/// assert!(matches!(
-///     name::decompress(&bytes::Bytes::from_static(&[0xc0, 0x00]), 0, 32),
-///     Err(Error::SelfPointer { offset: 0 }),
-/// ));
-/// ```
-pub fn decompress(
+pub(super) fn decompress(
     message: &Bytes,
     offset: usize,
     max_pointers: usize,

@@ -538,7 +538,7 @@ are `#[non_exhaustive]` — add a wildcard arm to exhaustive matches.
 ## Layer codec input
 
 `LayerCodec::decode` takes the layer input as a refcounted `Bytes` view instead
-of `&[u8]`, and `dns::name::decompress` takes `&Bytes`. Custom codecs can
+of `&[u8]`, and `dns::decode_name` takes `&Bytes`. Custom codecs can
 retain ranges with `input.slice(..)` instead of copying them; callers holding
 borrowed bytes wrap them once with `Bytes::copy_from_slice` or `Bytes::from`.
 
@@ -652,11 +652,11 @@ canonical path:
 | `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_netio::SystemFault` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
 | `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireBudget}` |
-| `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag}` |
+| `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag}` |
 | `dns::ResponseMetadata::response_code_name`, `dns::ValidatedResponse::response_code_name` | `packetcraftr::dns::response_code_name(code)` |
 
 The undocumented `packetcraftr_core::layer::{malformed_layout, padding_layout}`
-exports are removed; `raw_layout` remains for codecs that emit `Raw` layers.
+exports are removed; codecs that emit `Raw` layers use `layer::Raw::layout`.
 
 ## Layer downcasting
 
@@ -954,3 +954,39 @@ wraps its `fuzz::IncoherentReport` source. A library value the published
 contract has no spelling for (a future variant of a `non_exhaustive` enum)
 fails with `contract::Error::Unpublished` (`internal.error`), except an error
 coordinate, which is omitted like other optional error metadata.
+
+## Flat core facade
+
+Every core item has one documented public path, and no other crate uses a
+hidden core item. Nested public modules remain only for sub-domains with
+their own vocabulary (`analysis::{dns, http, tls, stats, ...}`,
+`analysis::reassembly::{ip, tcp}`, `capture_file::compression`, the
+`protocol` groups and `protocol::{builtin, headers, semantics}`) and for the
+constant namespaces `network::ip_protocol` and `tls::extension`.
+
+| Removed | Use instead |
+|---|---|
+| `packet::link::{MacAddress, VlanKind, VlanTag}` | `packet::{MacAddress, VlanKind, VlanTag}` |
+| `dns::name::decompress(message, offset, max_pointers)` | `dns::decode_name(message, offset, DecodeLimits { max_name_pointers, .. })`, which returns `(Name, resume)`; `Name::labels()` gives the label octets |
+| `dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN}` | `dns::{MAX_LABEL_LEN, MAX_NAME_LEN}` |
+| `dns::read_u16` | read the two bytes yourself; `dns::Error::TruncatedField` stays public |
+| `layer::raw_layout(len)` | `layer::Raw::layout(len)` |
+| `protocol::QuotedIcmpError` | `protocol::IcmpErrorKind` (same variants) |
+| `protocol::QuotedProbeTransport` | `protocol::QuotedTransport` (same variants) |
+| `protocol::quoted_icmp_error_kind` | `protocol::quoted_icmp_error` |
+| `packetcraftr_core::display_via_as_str!(T)` | `impl Display for T` writing `self.as_str()` |
+| `frame::GlobalInterfaceId` | `u32` |
+| `transform::Error::Invalid(&str)` | `transform::Error::Invalid(transform::InvalidInput)` |
+| `transform::Error::Unsupported(&str)` | `transform::Error::Unsupported(transform::Unsupported)` |
+| `transform::Error::Limit { field: &str, limit }` | `transform::Error::Limit { field: transform::Limit, limit }` |
+| `fuzz::Error::InvalidLimit { reason: String, .. }` | `fuzz::Error::InvalidLimit { reason: fuzz::Constraint, .. }` |
+| `fuzz::Error::InvalidTarget { message: String, .. }` | `fuzz::Error::InvalidTarget { reason: fuzz::TargetFault, .. }` |
+| `fuzz::Error::InvalidBasePacket { message: String }` | `fuzz::Error::InvalidBasePacket { reason: fuzz::BaseFault }` |
+
+`reflective_layer!` (exported at the crate root), `layer::ReflectiveField`,
+`layer::Refusal`, and `layer::{reflect_get, reflect_set, reflect_set_bounded}`
+are now documented API for declaring custom layers; their signatures are
+unchanged. `protocol::transport_tuple_reversed` is documented as well.
+
+Every typed reason renders the text the message carried before, so error
+messages, classification codes, and published output are unchanged.

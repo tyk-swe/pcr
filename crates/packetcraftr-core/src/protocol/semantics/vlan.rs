@@ -5,7 +5,7 @@ use super::error::{Constraint, Error};
 use super::path::outer_scope_len;
 use crate::layer::Layer;
 use crate::packet::Packet;
-use crate::packet::link::{VlanKind, VlanTag};
+use crate::packet::{VlanKind, VlanTag};
 use crate::protocol::link::{Vlan, Vlan8021ad};
 
 /// Outermost-first VLAN tags on the directly transmitted packet.

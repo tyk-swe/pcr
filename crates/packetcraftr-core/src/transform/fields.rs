@@ -39,7 +39,7 @@ use crate::layout::{ByteRange, PacketLayout};
 use crate::protocol::{BuiltinProtocol, checksum, headers::IpHeader};
 use crate::registry::Registry;
 
-use super::{Error, RewriteLimits};
+use super::{Error, InvalidInput, Limit, RewriteLimits, Unsupported};
 
 pub const MAX_FIELD_ASSIGNMENTS: usize = 64;
 
@@ -71,19 +71,19 @@ impl std::str::FromStr for FieldAssignment {
     fn from_str(text: &str) -> Result<Self, Error> {
         let (field, value) = text
             .split_once('=')
-            .ok_or(Error::Invalid("field assignments use <field>=<value>"))?;
+            .ok_or(Error::Invalid(InvalidInput::AssignmentSyntax))?;
         if field.is_empty() {
-            return Err(Error::Invalid("field assignment has an empty field path"));
+            return Err(Error::Invalid(InvalidInput::AssignmentEmptyPath));
         }
         if field.contains(' ') {
-            return Err(Error::Invalid("field assignment path contains a space"));
+            return Err(Error::Invalid(InvalidInput::AssignmentPathSpace));
         }
         let value = if let Some(hex) = value.strip_prefix("0x") {
             u64::from_str_radix(hex, 16)
         } else {
             value.parse()
         }
-        .map_err(|_| Error::Invalid("field assignment value is not unsigned"))?;
+        .map_err(|_| Error::Invalid(InvalidInput::AssignmentValueNotUnsigned))?;
         Ok(Self {
             field: field.to_owned(),
             value: FieldValue::Unsigned(value),
@@ -185,58 +185,53 @@ impl FieldEdit {
     /// fixed editable field set, nested paths, non-unsigned values, or values
     /// wider than the field's wire width.
     pub fn compile(assignment: &FieldAssignment, registry: &Registry) -> Result<Self, Error> {
-        let (head, tail) = assignment.field.split_once('.').ok_or(Error::Invalid(
-            "field edits use <protocol>[#occurrence].<field>",
-        ))?;
+        let (head, tail) = assignment
+            .field
+            .split_once('.')
+            .ok_or(Error::Invalid(InvalidInput::EditSyntax))?;
         let (name, occurrence) = match head.split_once('#') {
             None => (head, 1),
             Some((name, digits)) => {
                 if name.is_empty() || digits.contains('#') {
-                    return Err(Error::Invalid("invalid layer occurrence in field edit"));
+                    return Err(Error::Invalid(InvalidInput::EditOccurrence));
                 }
                 let occurrence: usize = digits
                     .parse()
-                    .map_err(|_| Error::Invalid("layer occurrence is not a number"))?;
+                    .map_err(|_| Error::Invalid(InvalidInput::EditOccurrenceNotNumber))?;
                 if occurrence == 0 {
-                    return Err(Error::Invalid("layer occurrences start at 1"));
+                    return Err(Error::Invalid(InvalidInput::EditOccurrenceZero));
                 }
                 (name, occurrence)
             }
         };
         let protocol = registry
             .protocol_named(name)
-            .ok_or(Error::Invalid("field edit names an unknown protocol"))?;
+            .ok_or(Error::Invalid(InvalidInput::EditUnknownProtocol))?;
         let path = tail
             .parse::<crate::field::Path>()
-            .map_err(|_| Error::Invalid("invalid field edit path"))?;
+            .map_err(|_| Error::Invalid(InvalidInput::EditPath))?;
         if path.is_nested() {
-            return Err(Error::Unsupported(
-                "field edits are limited to flat fixed-width fields",
-            ));
+            return Err(Error::Unsupported(Unsupported::NestedEditPath));
         }
         let schema = registry
             .schema(protocol.as_str())
-            .ok_or(Error::Unsupported(
-                "field edit protocol publishes no schema",
-            ))?;
+            .ok_or(Error::Unsupported(Unsupported::EditProtocolSchema))?;
         let declared = path
             .schema(schema)
-            .ok_or(Error::Invalid("field edit names an unknown field"))?;
+            .ok_or(Error::Invalid(InvalidInput::EditUnknownField))?;
         let FieldValue::Unsigned(value) = assignment.value else {
-            return Err(Error::Invalid("field edits require an unsigned value"));
+            return Err(Error::Invalid(InvalidInput::EditValueNotUnsigned));
         };
         if declared.kind != crate::field::FieldKind::Unsigned {
-            return Err(Error::Invalid("field edit value is not unsigned"));
+            return Err(Error::Invalid(InvalidInput::EditFieldNotUnsigned));
         }
         let Some(&(_, _, width)) = EDITABLE.iter().find(|(protocol_name, field, _)| {
             protocol.as_str() == *protocol_name && declared.name == *field
         }) else {
-            return Err(Error::Unsupported(
-                "field is outside the supported edit set",
-            ));
+            return Err(Error::Unsupported(Unsupported::EditField));
         };
         if width < 8 && value >= 1_u64 << (width * 8) {
-            return Err(Error::Invalid("field edit value exceeds the field width"));
+            return Err(Error::Invalid(InvalidInput::EditValueWidth));
         }
         Ok(Self {
             canonical: format!("{}#{occurrence}.{}", protocol.as_str(), declared.name),
@@ -262,32 +257,28 @@ impl FieldEdit {
                 }
             }
         }
-        let index = layer_index.ok_or(Error::Unsupported(
-            "field edit selects a layer the frame does not contain",
-        ))?;
+        let index = layer_index.ok_or(Error::Unsupported(Unsupported::EditLayerMissing))?;
         // Every layer on the path to the target must be a typed decoded
         // layer. Opaque preservation layers never carry children, so one
         // appearing at or before the target means the layout is inconsistent.
         if (0..=index).any(|layer| {
             builtin(decoded, layer).is_some_and(BuiltinProtocol::preserves_opaque_bytes)
         }) {
-            return Err(Error::Unsupported("field edit crosses an opaque layer"));
+            return Err(Error::Unsupported(Unsupported::EditOpaqueLayer));
         }
         let layer = &layout.layers[index];
         let field = layer
             .fields
             .iter()
             .find(|field| field.name == self.field)
-            .ok_or(Error::Unsupported("field has no byte layout to edit"))?;
+            .ok_or(Error::Unsupported(Unsupported::EditFieldLayout))?;
         let range = field.range;
         if range.end > frame_len
             || range.start < layer.range.start
             || range.end > layer.range.end
             || range.end - range.start != self.width
         {
-            return Err(Error::Unsupported(
-                "field layout does not match its fixed edit width",
-            ));
+            return Err(Error::Unsupported(Unsupported::EditFieldWidth));
         }
         Ok(Resolved {
             layer: index,
@@ -308,14 +299,14 @@ impl FieldEdits {
     pub fn new(edits: Vec<FieldEdit>, checksums: ChecksumMode) -> Result<Self, Error> {
         if edits.len() > MAX_FIELD_ASSIGNMENTS {
             return Err(Error::Limit {
-                field: "field assignments",
+                field: Limit::FieldAssignments,
                 limit: MAX_FIELD_ASSIGNMENTS,
             });
         }
         let mut seen = BTreeSet::new();
         for edit in &edits {
             if !seen.insert(edit.canonical.clone()) {
-                return Err(Error::Invalid("duplicate field edit"));
+                return Err(Error::Invalid(InvalidInput::DuplicateEdit));
             }
         }
         Ok(Self { edits, checksums })
@@ -358,12 +349,12 @@ impl FieldEdits {
         }
         if frame.bytes().len() > limits.max_output_bytes {
             return Err(Error::Limit {
-                field: "max_output_bytes",
+                field: Limit::MaxOutputBytes,
                 limit: limits.max_output_bytes,
             });
         }
         if frame.captured_length() != frame.original_length() {
-            return Err(Error::Invalid("cannot edit a truncated capture"));
+            return Err(Error::Invalid(InvalidInput::EditTruncatedCapture));
         }
         let decoded = dissector.decode(
             frame.clone(),
@@ -382,7 +373,7 @@ impl FieldEdits {
         let mut ordered: Vec<ByteRange> = resolved.iter().map(|edit| edit.range).collect();
         ordered.sort_unstable_by_key(|range| (range.start, range.end));
         if ordered.windows(2).any(|pair| pair[0].end > pair[1].start) {
-            return Err(Error::Invalid("field edits overlap"));
+            return Err(Error::Invalid(InvalidInput::OverlappingEdits));
         }
 
         let mut bytes = frame.bytes().to_vec();
@@ -444,9 +435,7 @@ fn screen_stack(decoded: &DecodedPacket) -> Result<(), Error> {
             BuiltinProtocol::of(layer),
             Some(BuiltinProtocol::Ah | BuiltinProtocol::Esp)
         ) {
-            return Err(Error::Unsupported(
-                "field edits reject AH/ESP protected traffic",
-            ));
+            return Err(Error::Unsupported(Unsupported::EditProtectedTraffic));
         }
     }
     Ok(())
@@ -488,9 +477,7 @@ fn collect_repairs(
                 let index = ancestor.index;
                 let span = transport_span(decoded, index, bytes)?;
                 if range.start < span.start || range.end > span.end {
-                    return Err(Error::Invalid(
-                        "field edit lies outside an enclosing transport span",
-                    ));
+                    return Err(Error::Invalid(InvalidInput::EditOutsideTransport));
                 }
                 repairs.insert(index, Repair::Transport(index));
             }
@@ -504,9 +491,7 @@ fn collect_repairs(
 /// including a custom layer that only borrows a built-in protocol name.
 fn refuse_unrepairable(layer: &crate::layout::LayerLayout) -> Result<(), Error> {
     if layer.fields.iter().any(|field| field.name == "checksum") {
-        return Err(Error::Unsupported(
-            "field edit is covered by a checksum it cannot repair",
-        ));
+        return Err(Error::Unsupported(Unsupported::EditChecksumCoverage));
     }
     Ok(())
 }
@@ -517,9 +502,7 @@ fn enclosing_network(decoded: &DecodedPacket, layer: usize) -> Result<usize, Err
     (0..layer)
         .rev()
         .find(|index| builtin(decoded, *index).is_some_and(BuiltinProtocol::is_ip))
-        .ok_or(Error::Unsupported(
-            "transport checksum needs an IPv4 or IPv6 envelope",
-        ))
+        .ok_or(Error::Unsupported(Unsupported::TransportChecksumEnvelope))
 }
 
 /// The end of the datagram a network header declares, walked from its own
@@ -539,7 +522,7 @@ fn walk_network(
     let start = layout.layers[network].range.start;
     let ip = bytes
         .get(start..)
-        .ok_or(Error::Invalid("transport coverage exceeds captured bytes"))?;
+        .ok_or(Error::Invalid(InvalidInput::TransportCoverage))?;
     Ok((start, IpHeader::walk(ip)?))
 }
 
@@ -556,24 +539,24 @@ fn transport_span(
     let end_of_payload = network_end(layout, network, bytes)?;
     let start = layer.range.start;
     if start < layout.layers[network].range.end || end_of_payload > bytes.len() {
-        return Err(Error::Invalid("transport coverage exceeds captured bytes"));
+        return Err(Error::Invalid(InvalidInput::TransportCoverage));
     }
     let end = match builtin(decoded, transport) {
         Some(BuiltinProtocol::Udp) => {
             let length = read_uint(bytes, ByteRange::new(start + 4, start + 6))?;
             if length < 8 {
-                return Err(Error::Invalid("invalid UDP length"));
+                return Err(Error::Invalid(InvalidInput::UdpLength));
             }
             let end = start
                 .checked_add(usize::try_from(length).unwrap_or(usize::MAX))
-                .ok_or(Error::Invalid("UDP length overflows"))?;
+                .ok_or(Error::Invalid(InvalidInput::UdpLengthOverflow))?;
             if end > end_of_payload {
-                return Err(Error::Invalid("UDP length exceeds its IP payload"));
+                return Err(Error::Invalid(InvalidInput::UdpLengthExceedsPayload));
             }
             end
         }
         Some(BuiltinProtocol::Tcp) => end_of_payload,
-        _ => return Err(Error::Unsupported("unsupported transport checksum")),
+        _ => return Err(Error::Unsupported(Unsupported::TransportChecksum)),
     };
     Ok(ByteRange::new(start, end))
 }
@@ -616,7 +599,7 @@ fn checksum_field_range(layout: &PacketLayout, layer: usize) -> Result<ByteRange
         .find(|field| field.name == "checksum")
         .map(|field| field.range)
         .filter(|range| range.end - range.start == 2)
-        .ok_or(Error::Unsupported("layer has no checksum byte layout"))
+        .ok_or(Error::Unsupported(Unsupported::ChecksumLayout))
 }
 
 fn repair_ipv4(
@@ -627,7 +610,7 @@ fn repair_ipv4(
     let header = layout.layers[layer].range;
     let checksum_range = checksum_field_range(layout, layer)?;
     if checksum_range.end > header.end || checksum_range.start < header.start {
-        return Err(Error::Invalid("IPv4 checksum field is outside its header"));
+        return Err(Error::Invalid(InvalidInput::Ipv4ChecksumPlacement));
     }
     let old = read_uint(bytes, checksum_range)?;
     bytes[checksum_range.start..checksum_range.end].fill(0);
@@ -655,9 +638,7 @@ fn repair_transport(
     let span = transport_span(decoded, transport, bytes)?;
     let checksum_range = checksum_field_range(layout, transport)?;
     if checksum_range.end > span.end || checksum_range.start < span.start {
-        return Err(Error::Invalid(
-            "transport checksum field is outside its segment",
-        ));
+        return Err(Error::Invalid(InvalidInput::TransportChecksumPlacement));
     }
     let ipv6 = builtin(decoded, network) == Some(BuiltinProtocol::Ipv6);
     let udp = builtin(decoded, transport) == Some(BuiltinProtocol::Udp);
@@ -673,12 +654,12 @@ fn repair_transport(
         source.copy_from_slice(
             bytes
                 .get(net.start + 8..net.start + 24)
-                .ok_or(Error::Invalid("truncated IPv6 source"))?,
+                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv6Source))?,
         );
         destination.copy_from_slice(
             bytes
                 .get(net.start + 24..net.start + 40)
-                .ok_or(Error::Invalid("truncated IPv6 destination"))?,
+                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv6Destination))?,
         );
         (
             std::net::IpAddr::from(source),
@@ -690,12 +671,12 @@ fn repair_transport(
         source.copy_from_slice(
             bytes
                 .get(net.start + 12..net.start + 16)
-                .ok_or(Error::Invalid("truncated IPv4 source"))?,
+                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv4Source))?,
         );
         destination.copy_from_slice(
             bytes
                 .get(net.start + 16..net.start + 20)
-                .ok_or(Error::Invalid("truncated IPv4 destination"))?,
+                .ok_or(Error::Invalid(InvalidInput::TruncatedIpv4Destination))?,
         );
         (
             std::net::IpAddr::from(source),
@@ -750,9 +731,9 @@ fn occurrence_of(layout: &PacketLayout, target: usize) -> usize {
 fn read_uint(bytes: &[u8], range: ByteRange) -> Result<u64, Error> {
     let slice = bytes
         .get(range.start..range.end)
-        .ok_or(Error::Invalid("field range exceeds captured bytes"))?;
+        .ok_or(Error::Invalid(InvalidInput::FieldRangeCaptured))?;
     if slice.len() > 8 {
-        return Err(Error::Invalid("field range exceeds eight bytes"));
+        return Err(Error::Invalid(InvalidInput::FieldRangeWidth));
     }
     let mut padded = [0_u8; 8];
     padded[8 - slice.len()..].copy_from_slice(slice);

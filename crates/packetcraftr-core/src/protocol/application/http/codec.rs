@@ -13,7 +13,7 @@ use super::{
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::FieldValue,
-    layer::{Layer, Raw, raw_layout},
+    layer::{Layer, Raw},
     protocol::{
         BuiltinProtocol,
         common::{ensure_encode_budget, invalid, rejected, typed_layer},
@@ -369,7 +369,7 @@ impl LayerCodec for HttpCodec {
     ) -> Result<DecodedLayer, crate::codec::Error> {
         let Ok(Some((head, consumed))) = parse_head(&input) else {
             let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-            raw.fields = raw_layout(input.len());
+            raw.fields = Raw::layout(input.len());
             return Ok(raw);
         };
         Ok(DecodedLayer {

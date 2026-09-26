@@ -30,6 +30,14 @@ impl Raw {
             bytes: bytes.into(),
         }
     }
+
+    /// The field layout of a `Raw` layer holding `length` bytes: one `bytes`
+    /// field spanning all of them. A codec that decodes or encodes opaque
+    /// bytes as `Raw` attaches this to its [`DecodedLayer`] or
+    /// [`EncodedLayer`].
+    pub fn layout(length: usize) -> Vec<crate::layout::FieldLayout> {
+        raw_layout(length)
+    }
 }
 
 reflective_layer! {
@@ -42,7 +50,7 @@ reflective_layer! {
             layout: (0, length)
         }
     }
-    layout pub fn raw_layout(length: usize);
+    layout fn raw_layout(length: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

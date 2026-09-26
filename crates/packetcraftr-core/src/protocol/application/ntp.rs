@@ -17,7 +17,7 @@ use bytes::Bytes;
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     field::{self, FieldValue},
-    layer::{Layer, Raw, raw_layout, reflective_layer},
+    layer::{Layer, Raw, reflective_layer},
 };
 
 use crate::protocol::common::{
@@ -267,7 +267,7 @@ impl LayerCodec for NtpCodec {
             .is_some_and(|header| is_supported(header[0] >> 3 & 0x07, header[0] & 0x07));
         if !supported {
             let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
-            raw.fields = raw_layout(input.len());
+            raw.fields = Raw::layout(input.len());
             return Ok(raw);
         }
         let header: &[u8; NTP_HEADER_LEN] = input

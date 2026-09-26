@@ -10,9 +10,28 @@ Phase 1.
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Every protocol follows the shape, and every protocol module sits in its layer group.
-- [ ] The protocol codec matrix and dissection contract tests pass with only import changes.
-- [ ] `[Unreleased]` and the migration note list moved paths and error types.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Every protocol follows the shape, and every protocol module sits in its layer group.
+- [x] The protocol codec matrix and dissection contract tests pass with only import changes.
+- [x] `[Unreleased]` and the migration note list moved paths and error types.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Built-in modules renamed to `builtin/{assembly, bindings, filter_fields}.rs`.
+- Large-protocol shape: `<proto>.rs` holds docs, the protocol `Error`/limits and
+  re-exports; `model`/`codec`/`reflection` submodules may have children
+  (`dns/codec/{decode, encode, name}`, `tls/codec/{parse, hello}`,
+  `tls/model/{fingerprint, names}`, `http/codec/body`). TCP (`tcp/options.rs`)
+  was also brought into the shape. DHCPv4/v6 share `dhcp/codec.rs` steps
+  through a private `Message` trait instead of the macro.
+- TLS also gains `tls::Error` (its wire APIs returned `codec::Error`), with
+  unchanged Display text. Since the whole TLS tree moved, its submodules became
+  private with flat re-exports now (ticket 13's TLS item); `dns::name` stays a
+  public module for ticket 13.
+- `Dns` wire errors: encoding failures are `dns::Error::Encode(codec::Error)`.
+  `DecodeError` and `name::Error` are not merged (ticket 10).
+- Test assertions changed only where the wire API error type changed
+  (`dns_construction_contracts`, `protocol_end_to_end_contracts`); codec matrix
+  and dissection tests have import changes only.

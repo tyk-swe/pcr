@@ -751,6 +751,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- `neighbor::Options::validate` keeps the capture-limit refusal as the
+  `source` of `neighbor::Error::InvalidOptions` (a new field) instead of
+  flattening it into the message, so it is reported once, as a cause. The
+  message now reads "capture bounds are invalid"; the code stays
+  `cli.neighbor_limit`.
 - DHCP limits above 65535 message bytes, 4096 options, or nesting depth 8 are
   refused with `dhcp::Error::InvalidLimit` (`policy.dhcp_limit`) instead of
   being silently lowered to those ceilings, which are now public as

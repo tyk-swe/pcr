@@ -72,6 +72,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
         (
             NeighborError::InvalidOptions {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "cli.neighbor_limit",
             Kind::Usage,
@@ -208,4 +209,36 @@ fn neighbor_options_reject_every_unbounded_value() {
             Err(neighbor::Error::InvalidOptions { .. })
         ));
     }
+}
+
+/// Options whose capture bounds fail keep the capture-limit refusal as their
+/// source, so it is published once, as a cause.
+#[test]
+fn neighbor_options_retain_the_capture_limit_refusal_as_a_source() {
+    let error = neighbor::Options {
+        max_capture_queue_frames: 0,
+        ..neighbor::Options::default()
+    }
+    .validate()
+    .expect_err("an empty capture queue is refused");
+
+    assert!(
+        matches!(
+            &error,
+            NeighborError::InvalidOptions {
+                source: Some(Error::InvalidCaptureQueueLimit {
+                    field: "max_frames",
+                    ..
+                }),
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.classification().code, "cli.neighbor_limit");
+    assert_eq!(
+        error.to_string(),
+        "neighbor resolver options are invalid: capture bounds are invalid"
+    );
+    assert_eq!(error.causes().len(), 1, "{:?}", error.causes());
 }

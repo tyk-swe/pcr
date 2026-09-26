@@ -35,8 +35,14 @@ pub enum Error {
     },
     #[error("neighbor request is invalid: {message}")]
     InvalidRequest { message: String },
+    /// `source` is the capture-limit refusal when the options' capture
+    /// bounds are what failed.
     #[error("neighbor resolver options are invalid: {message}")]
-    InvalidOptions { message: String },
+    InvalidOptions {
+        message: String,
+        #[source]
+        source: Option<packetcraftr_netio::Error>,
+    },
     #[error("neighbor resolver state failed: {message}")]
     State { message: String },
     #[error("neighbor resolution for {target} on {interface} failed while {operation}: {source}")]
@@ -138,7 +144,10 @@ pub(super) fn map_io_error(
 }
 
 pub(super) fn invalid_options(message: String) -> Error {
-    Error::InvalidOptions { message }
+    Error::InvalidOptions {
+        message,
+        source: None,
+    }
 }
 
 pub(super) fn invalid_request(message: impl Into<String>) -> Error {

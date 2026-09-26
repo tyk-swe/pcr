@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use super::Error;
 use super::error::invalid_options;
 use packetcraftr_netio::capture;
 
@@ -39,7 +40,7 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn validate(&self) -> Result<(), crate::neighbor::Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if !(1..=MAX_CONFIGURED_ATTEMPTS).contains(&self.max_attempts) {
             return Err(invalid_options(format!(
                 "max_attempts must be within 1..={MAX_CONFIGURED_ATTEMPTS}"
@@ -67,7 +68,10 @@ impl Options {
         }
         self.capture_limits()
             .validate()
-            .map_err(|error| invalid_options(error.to_string()))?;
+            .map_err(|source| Error::InvalidOptions {
+                message: "capture bounds are invalid".to_owned(),
+                source: Some(source),
+            })?;
         Ok(())
     }
 

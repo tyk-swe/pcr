@@ -93,7 +93,7 @@ pub(super) fn prepare(
         CliError::classified(analysis::Error::InvalidLimit {
             field: "max_duration",
             value,
-            reason: "exceeds the one-hour ceiling",
+            reason: analysis::Constraint::AtMostOneHour,
         })
     })?;
 

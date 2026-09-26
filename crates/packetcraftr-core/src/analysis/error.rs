@@ -104,6 +104,8 @@ pub enum Constraint {
     WithinClockRange,
     /// A TLS buffer must hold one direction's largest handshake.
     AtLeastTlsDirectionBuffer,
+    /// A duration cannot exceed the one-hour invocation ceiling.
+    AtMostOneHour,
 }
 
 impl std::fmt::Display for Constraint {
@@ -122,6 +124,7 @@ impl std::fmt::Display for Constraint {
                 "cannot be below the per-direction handshake buffer of {} bytes",
                 super::tls::MAX_DIRECTION_BUFFER
             ),
+            Self::AtMostOneHour => formatter.write_str("exceeds the one-hour ceiling"),
         }
     }
 }

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;

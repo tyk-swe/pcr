@@ -176,8 +176,8 @@ mod tests {
 
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::layer::Raw;
+    use packetcraftr_core::packet::MacAddress;
     use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::packet::link::MacAddress;
     use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4, network::Ipv6};
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::{Capability, Mode};

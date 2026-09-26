@@ -4,7 +4,7 @@
 use super::Error;
 use crate::{
     frame::{Frame, LinkType},
-    packet::link::{VlanKind, VlanTag},
+    packet::{VlanKind, VlanTag},
     protocol::{
         BuiltinProtocol, checksum,
         headers::MAX_VLAN_DEPTH,

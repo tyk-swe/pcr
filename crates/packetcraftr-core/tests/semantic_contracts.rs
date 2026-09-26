@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 use packetcraftr_core::field::WireValue;
 use packetcraftr_core::layer::{Layer, Malformed, Raw};
-use packetcraftr_core::packet::link::{VlanKind, VlanTag};
+use packetcraftr_core::packet::{VlanKind, VlanTag};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::link::{Arp, Vlan, Vlan8021ad};
 use packetcraftr_core::protocol::network::{Fragment, Ipv4, Ipv6, SegmentRoutingHeader};

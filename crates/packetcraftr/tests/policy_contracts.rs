@@ -167,8 +167,8 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
 
 struct FixedRoutes;
 
-const INTERFACE_MAC: packetcraftr_core::packet::link::MacAddress =
-    packetcraftr_core::packet::link::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
+const INTERFACE_MAC: packetcraftr_core::packet::MacAddress =
+    packetcraftr_core::packet::MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0x01]);
 const SELECTED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 5);
 const PREFERRED_SOURCE: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 6);
 

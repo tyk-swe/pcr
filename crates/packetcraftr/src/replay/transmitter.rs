@@ -262,8 +262,8 @@ mod tests {
     use packetcraftr_core::build::{Builder, Options};
     use packetcraftr_core::codec::Context;
     use packetcraftr_core::frame::LinkType;
+    use packetcraftr_core::packet::MacAddress;
     use packetcraftr_core::packet::Packet;
-    use packetcraftr_core::packet::link::MacAddress;
     use packetcraftr_core::protocol::{
         link::Ethernet,
         network::{Icmpv4, Ipv4},

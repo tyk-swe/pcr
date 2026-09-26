@@ -49,7 +49,7 @@ use std::ops::Range;
 
 use crate::error::{Classification, Classified, Kind};
 use crate::frame::LinkType;
-use crate::packet::link::{MacAddress, VlanKind, VlanTag};
+use crate::packet::{MacAddress, VlanKind, VlanTag};
 
 use super::BuiltinProtocol;
 use super::network::{ip_protocol, ipv6_extension_header_length, is_walkable_ipv6_extension};

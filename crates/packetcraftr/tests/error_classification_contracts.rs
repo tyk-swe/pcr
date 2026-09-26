@@ -25,7 +25,7 @@ use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_core::layer::Raw;
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 use packetcraftr_core::{packet::Packet, protocol};
 use packetcraftr_netio::{
     Error as LiveIoError,

@@ -40,7 +40,7 @@ use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::packet::Packet;
-use packetcraftr_core::packet::link::{MacAddress, VlanKind, VlanTag};
+use packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag};
 use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_core::protocol::builtin;
 use packetcraftr_core::protocol::network::Ipv4;

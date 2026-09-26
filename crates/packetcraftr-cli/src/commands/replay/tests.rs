@@ -12,7 +12,7 @@ use std::time::UNIX_EPOCH;
 use packetcraftr_core::budget::{Cancellation, Deadline};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 
 use super::*;
 use crate::test_support::{assert_contiguous, stream};

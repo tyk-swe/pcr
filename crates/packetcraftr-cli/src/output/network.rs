@@ -3,9 +3,9 @@
 
 //! Shared serialized interface, endpoint, and route representations.
 
-use packetcraftr_core::packet::link::VlanTag;
+use packetcraftr_core::packet::VlanTag;
 
-use packetcraftr_core::packet::link::MacAddress;
+use packetcraftr_core::packet::MacAddress;
 
 use packetcraftr_netio::route::SelectionReason;
 

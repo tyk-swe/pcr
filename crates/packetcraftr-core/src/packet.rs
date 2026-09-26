@@ -1,15 +1,18 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Ordered layer stacks.
+//! Ordered layer stacks, their size limits, and the link-layer values
+//! ([`MacAddress`], [`VlanTag`]) that packet inspection, routing, and neighbor
+//! discovery share.
 
 use std::fmt;
 
 use crate::layer::{Layer, Padding};
 
 mod limits;
-pub mod link;
+mod link;
 pub use limits::Limits;
+pub use link::{MacAddress, VlanKind, VlanTag};
 
 /// Exactly one ordered, arbitrary wire stack.
 ///

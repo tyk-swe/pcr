@@ -155,16 +155,22 @@ impl FrameSelector {
         Self(FrameDecoder::new(registry, Some(filter), max_frame_bytes))
     }
 
+    pub(crate) fn compile(
+        source: &str,
+        registry: &Arc<Registry>,
+        max_frame_bytes: usize,
+    ) -> Result<Self, CliError> {
+        let filter = compile(source, registry, Capabilities::frames_only())?;
+        Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
+    }
+
     pub(crate) fn compile_optional(
         source: Option<&str>,
         registry: &Arc<Registry>,
         max_frame_bytes: usize,
     ) -> Result<Option<Self>, CliError> {
         source
-            .map(|source| {
-                let filter = compile(source, registry, Capabilities::frames_only())?;
-                Ok(Self::new(Arc::clone(registry), filter, max_frame_bytes))
-            })
+            .map(|source| Self::compile(source, registry, max_frame_bytes))
             .transpose()
     }
 

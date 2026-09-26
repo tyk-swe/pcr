@@ -6,7 +6,6 @@
 
 pub(super) mod arguments;
 mod rendering;
-mod rules;
 
 use self::arguments::Args;
 use crate::output::{
@@ -25,7 +24,7 @@ use packetcraftr_core::{
     capture_file,
     decode::Dissector,
     error::{BoundaryError, Kind},
-    transform::{self, ChecksumMode, FieldEdits, HeaderRewrite},
+    transform::{self, ChecksumMode, HeaderRewrite, Rules},
 };
 
 impl super::Spec for Args {
@@ -80,7 +79,9 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
                 "--rules-file conflicts with direct edits, --set, and --filter",
             ));
         }
-        rules::load(path, &registry, checksum_mode)?
+        let document =
+            crate::input::read_bounded_json_document(path, transform::MAX_REWRITE_DOCUMENT_BYTES)?;
+        Rules::parse(&document, checksum_mode, &registry).map_err(CliError::classified)?
     } else {
         if patch.is_empty() && args.sets.is_empty() {
             return Err(CliError::new(
@@ -88,52 +89,31 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
                 "rewrite requires a header edit, --set, or --rules-file",
             ));
         }
-        patch.validate().map_err(CliError::classified)?;
-        let edits = if args.sets.is_empty() {
-            None
-        } else {
-            Some(
-                FieldEdits::compile(&args.sets, checksum_mode, &registry)
-                    .map_err(|error| CliError::caused(Kind::Usage, &error))?,
-            )
-        };
-        vec![rules::Rule {
-            filter: args.filter.clone(),
+        Rules::single(
+            args.filter.clone(),
             patch,
-            edits,
-        }]
+            &args.sets,
+            checksum_mode,
+            &registry,
+        )
+        .map_err(CliError::classified)?
     };
-    if args.checksum_mode.is_some() && rules.iter().all(|rule| !rule.has_edits()) {
+    if args.checksum_mode.is_some() && !rules.has_field_edits() {
         return Err(CliError::new(
             Kind::Usage,
             "--checksum-mode requires field assignments via --set or a v2 rules file",
         ));
     }
-    if args.dry_run && rules.iter().any(|rule| !rule.patch.is_empty()) {
+    if args.dry_run && rules.has_header_edits() {
         return Err(CliError::new(
             Kind::Usage,
             "--dry-run reports field-assignment changes only; it cannot preview header rewrites",
         ));
     }
-    let rules = rules
-        .into_iter()
-        .map(|rule| {
-            Ok((
-                FrameSelector::compile_optional(
-                    rule.filter.as_deref(),
-                    &registry,
-                    args.limits.reader.max_frame_bytes,
-                )?,
-                rule.patch,
-                rule.edits,
-            ))
-        })
-        .collect::<Result<Vec<_>, CliError>>()?;
-    let growth = rules
-        .iter()
-        .filter_map(|(_, patch, _)| patch.vlans.as_ref().map(|tags| tags.len() * 4))
-        .max()
-        .unwrap_or(0);
+    let rules = rules.try_map_filters(|filter| {
+        FrameSelector::compile(&filter, &registry, args.limits.reader.max_frame_bytes)
+    })?;
+    let growth = rules.maximum_growth();
     let mut staged = if args.dry_run {
         None
     } else {
@@ -170,45 +150,25 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let report =
         capture_file::map_frames(&mut reader, &mut writer, limits, growth, |number, frame| {
             check_deadline(&deadline)?;
-            let mut changed = frame.clone();
-            for (index, (filter, patch, edits)) in rules.iter().enumerate() {
-                if filter
-                    .as_ref()
-                    .map(|filter| filter.keep(number, frame))
-                    .transpose()
-                    .map_err(CliError::into_boundary_error)?
-                    .unwrap_or(true)
-                {
-                    if !patch.is_empty() {
-                        changed = transform::rewrite(
-                            &changed,
-                            patch,
-                            transform::RewriteLimits {
-                                max_output_bytes: args.limits.reader.max_frame_bytes,
-                            },
-                        )
-                        .map_err(BoundaryError::from_error)?;
-                    }
-                    if let Some(edits) = edits {
-                        let outcome = edits
-                            .apply(
-                                &changed,
-                                &dissector,
-                                transform::RewriteLimits {
-                                    max_output_bytes: args.limits.reader.max_frame_bytes,
-                                },
-                            )
-                            .map_err(BoundaryError::from_error)?;
-                        for change in outcome.changes {
-                            changes.push(|| {
-                                output::rewrite::Change::from((number, index as u64, change))
-                            });
-                        }
-                        changed = outcome.frame;
+            let changed = rules.apply(
+                frame,
+                &dissector,
+                transform::RewriteLimits {
+                    max_output_bytes: args.limits.reader.max_frame_bytes,
+                },
+                |filter| {
+                    filter
+                        .keep(number, frame)
+                        .map_err(CliError::into_boundary_error)
+                },
+                |index, applied| {
+                    for change in applied {
+                        changes
+                            .push(|| output::rewrite::Change::from((number, index as u64, change)));
                     }
                     counts[index] += 1;
-                }
-            }
+                },
+            )?;
             check_deadline(&deadline)?;
             Ok(changed)
         })

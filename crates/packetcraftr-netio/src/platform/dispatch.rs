@@ -15,19 +15,19 @@ use crate::{
 };
 
 #[cfg(all(native_route, target_os = "linux"))]
-use super::netlink as route_backend;
+use super::route::netlink as route_backend;
 
 #[cfg(all(native_route, target_os = "macos"))]
-use super::af_route as route_backend;
+use super::route::af_route as route_backend;
 
 #[cfg(all(native_route, windows))]
-use super::iphelper as route_backend;
+use super::route::iphelper as route_backend;
 
 #[cfg(pcap_backend)]
-use super::pcap_backend as layer2_backend;
+use super::layer2::pcap_backend as layer2_backend;
 
 #[cfg(npcap_backend)]
-use super::npcap as layer2_backend;
+use super::layer2::npcap as layer2_backend;
 
 /// Distinguishes a target that has no native implementation from a build that
 /// simply left the feature off.
@@ -56,7 +56,7 @@ pub(crate) fn system_route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
-    super::route_normalize::validate_preferred_source_family(destination, preferred_source)?;
+    crate::route::normalize::validate_preferred_source_family(destination, preferred_source)?;
     route_backend::route(destination, interface_hint, preferred_source)
 }
 
@@ -110,7 +110,7 @@ pub(crate) fn system_interfaces() -> Result<Vec<interface::Info>, Error> {
 fn validate_interface_snapshot(
     interfaces: Vec<interface::Info>,
 ) -> Result<Vec<interface::Info>, Error> {
-    super::interface_validation::validate_native_interfaces(interfaces).map_err(|error| {
+    crate::interface::validation::validate_native_interfaces(interfaces).map_err(|error| {
         Error::InterfaceDiscovery {
             message: "the native route adapter returned an invalid interface snapshot".to_owned(),
             source: Some(std::sync::Arc::new(error)),
@@ -137,7 +137,7 @@ pub(crate) fn system_capture(
         .and_then(|()| request.native.validate(&request.limits))?;
     let validated_limits = request.limits;
     if let Some(filter) = request.filter.as_deref() {
-        super::capture_filter::validate(&request.interface, filter)?;
+        crate::capture::filter::validate(&request.interface, filter)?;
     }
     let interface =
         super::interface_identity::validate_current_interface_identity(&request.interface)?;
@@ -150,7 +150,7 @@ pub(crate) fn system_capture(
         request.promiscuous,
         &request.native,
     )?;
-    Ok(Box::new(super::live_capture::NativeCaptureSession::spawn(
+    Ok(Box::new(crate::capture::live::NativeCaptureSession::spawn(
         parts,
         validated_limits,
     )?))
@@ -204,7 +204,7 @@ pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Re
 #[cfg(native_layer3)]
 pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
     super::interface_identity::verify_interface_identity(&frame.route().decision.interface)?;
-    super::raw_ip::send_layer3(frame)
+    super::layer3::raw_ip::send_layer3(frame)
 }
 
 #[cfg(not(native_layer3))]
@@ -226,24 +226,6 @@ fn capture_netmask(interface: &interface::Info) -> Option<u32> {
     // pcap_compile compares the mask with host-order BPF word loads, so a /24
     // is 0xffffff00 on every target, not its network-order bytes.
     Some(u32::MAX.checked_shl(shift).unwrap_or(0))
-}
-
-/// A diagnostic read never creates native workers or starts the reaper.
-pub(crate) fn native_resource_snapshot() -> crate::resources::NativeSnapshot {
-    #[cfg(native_workers)]
-    {
-        super::workers::shared_budget().snapshot()
-    }
-    #[cfg(not(native_workers))]
-    {
-        crate::resources::NativeSnapshot {
-            supported: false,
-            capacity: 0,
-            active: 0,
-            rejected_admissions: 0,
-            cleanup_retaining_capacity: 0,
-        }
-    }
 }
 
 // `native_layer2` implies `native_route`: the Layer 2 feature enables the route
@@ -345,21 +327,4 @@ mod tests {
             assert!(source.source().is_none());
         }
     }
-}
-
-pub(crate) fn start_tcp_connect<P>(
-    provider: std::sync::Arc<P>,
-    endpoint: std::net::SocketAddr,
-    timeout: std::time::Duration,
-    cancellation: Option<packetcraftr_core::budget::Cancellation>,
-) -> Result<super::TcpConnectPending<P::Stream>, crate::tcp::ConnectError>
-where
-    P: crate::tcp::Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
-{
-    super::tcp_connect::start(provider, endpoint, timeout, cancellation)
-}
-
-pub(crate) fn tcp_connect_snapshot() -> crate::resources::NativeSnapshot {
-    super::tcp_connect::snapshot()
 }

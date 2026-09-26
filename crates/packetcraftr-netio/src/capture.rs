@@ -3,7 +3,11 @@
 
 //! Owned live-capture sessions and bounded queue configuration.
 
+#[cfg(native_layer2)]
+pub(crate) mod filter;
 pub mod group;
+#[cfg(native_layer2)]
+pub(crate) mod live;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};

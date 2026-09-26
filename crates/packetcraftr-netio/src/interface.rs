@@ -3,6 +3,9 @@
 
 //! Interface discovery and portable interface descriptions.
 
+#[cfg(native_route)]
+pub(crate) mod validation;
+
 use std::net::IpAddr;
 
 use super::Error;

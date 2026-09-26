@@ -17,7 +17,7 @@ use crate::{Error, interface::Id as InterfaceId};
 /// with no cheap name lookup. Every other native boundary uses
 /// [`verify_interface_identity`].
 #[cfg(any(native_layer2, not(any(target_os = "linux", target_os = "macos"))))]
-pub(super) fn validate_current_interface_identity(
+pub(in crate::platform) fn validate_current_interface_identity(
     expected: &InterfaceId,
 ) -> Result<crate::interface::Info, Error> {
     let mut interfaces = super::system_interfaces()?;
@@ -37,7 +37,7 @@ pub(super) fn validate_current_interface_identity(
 /// Checks the current name/index pair. Linux and macOS avoid a full native
 /// enumeration on each send; other targets fall back to the enumeration in
 /// `validate_current_interface_identity`, which is not built on every profile.
-pub(super) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
+pub(in crate::platform) fn verify_interface_identity(expected: &InterfaceId) -> Result<(), Error> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         // `if_nametoindex` verifies the pair; `if_indextoname` supplies the

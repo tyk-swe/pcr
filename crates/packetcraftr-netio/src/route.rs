@@ -8,6 +8,8 @@
 //! `packetcraftr::route`.
 
 mod models;
+#[cfg(native_route)]
+pub(crate) mod normalize;
 mod provider;
 
 pub use models::{Decision, Provider, Scope, SelectionReason};

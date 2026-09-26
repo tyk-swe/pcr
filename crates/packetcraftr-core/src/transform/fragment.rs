@@ -3,8 +3,9 @@
 
 use super::{Error, InvalidInput, Limit, Unsupported};
 use crate::frame::{Frame, LinkType};
+use crate::packet::Packet;
 use crate::protocol::{
-    checksum,
+    BuiltinProtocol, checksum,
     headers::{IpHeader, Ipv4Header, Ipv6Header, LinkHeader},
     network::ip_protocol,
 };
@@ -27,6 +28,23 @@ impl Default for FragmentOptions {
             max_output_bytes: 256 * 1024 * 1024,
         }
     }
+}
+
+/// The link type to frame a built `packet` with before [`fragment`]: its
+/// outermost layer must be Ethernet, IPv4, or IPv6, and the link type is the
+/// one [`LinkType::for_root_protocol`] records for that root.
+pub fn fragment_link_type(packet: &Packet) -> Result<LinkType, Error> {
+    packet
+        .layer(0)
+        .and_then(BuiltinProtocol::of)
+        .filter(|root| {
+            matches!(
+                root,
+                BuiltinProtocol::Ethernet | BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6
+            )
+        })
+        .and_then(LinkType::for_root_protocol)
+        .ok_or(Error::Unsupported(Unsupported::PacketRoot))
 }
 
 /// Fragments raw-IP or Ethernet/VLAN datagrams. Existing fragments, IPv4 DF,

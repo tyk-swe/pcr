@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Explicit UDP fixture payloads and bounded application response checks.
+//! Explicit UDP fixture payloads and bounded application response checks,
+//! and the `packetcraftr.udp-profiles/v1` document that assigns them to ports.
 //! Confirmation means the configured checks matched, not authenticated identity.
 use bytes::Bytes;
 use packetcraftr_core::{
@@ -16,6 +17,11 @@ use packetcraftr_core::{
     },
 };
 use serde::{Deserialize, Serialize};
+
+mod document;
+pub use document::{
+    DocumentError, MAX_PROFILE_ASSIGNMENTS, UDP_PROFILES_SCHEMA_V1, parse_document,
+};
 
 pub const MAX_PROFILE_PORTS: usize = 4096;
 pub const MAX_PROFILE_BYTES: usize = 1024 * 1024;

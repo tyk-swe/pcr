@@ -109,7 +109,7 @@ fn resolve_recipe(
     registry: &core::registry::Registry,
     max_layers: usize,
 ) -> Result<Packet, CliError> {
-    let (input, path) = match (packet, packet_file) {
+    let (input, declared) = match (packet, packet_file) {
         (Some(expression), None) => return parse_expression(&expression, registry, max_layers),
         (None, Some(path)) => {
             let bytes = read_bounded_file(
@@ -123,7 +123,7 @@ fn resolve_recipe(
                     format!("packet document is not UTF-8: {source}"),
                 )
             })?;
-            (input, Some(path))
+            (input, core::document::Format::from_path(&path))
         }
         (None, None) => {
             let bytes = read_stdin_bounded(
@@ -137,115 +137,54 @@ fn resolve_recipe(
         }
         (Some(_), Some(_)) => unreachable!("clap enforces recipe source conflicts"),
     };
-    let trimmed = input.trim_start();
-    let format = path
-        .as_deref()
-        .and_then(document_format_from_path)
-        .or_else(|| {
-            trimmed
-                .starts_with('{')
-                .then_some(core::document::Format::Json)
-        })
-        .or_else(|| {
-            (trimmed.starts_with("schema:") || trimmed.starts_with("---"))
-                .then_some(core::document::Format::Yaml)
-        });
-    let parse_document = |format| {
-        core::document::Packet::parse_with_limits(
-            &input,
-            format,
-            &core::document::DocumentLimits {
-                max_layers,
-                ..core::document::DocumentLimits::DEFAULT
-            },
-        )
-    };
-    if let Some(format) = format {
-        return parse_document(format)
-            .and_then(|document| document.to_packet(registry, max_layers))
-            .map_err(CliError::classified);
-    }
-    let mut expression_error = match parse_expression(&input, registry, max_layers) {
-        Ok(packet) => return Ok(packet),
-        Err(error) => error,
-    };
-    match parse_document(core::document::Format::Yaml) {
-        Ok(document) => document
-            .to_packet(registry, max_layers)
-            .map_err(CliError::classified),
-        Err(error) => {
-            expression_error.causes.push(error.to_string());
-            expression_error
-                .causes
-                .extend(core::error::source_chain(&error));
-            Err(expression_error)
-        }
-    }
+    core::document::parse_recipe(&input, declared, registry, max_layers)
+        .map_err(CliError::classified)
 }
 
 /// Loads a file into an existing, empty bytes-typed recipe field under the
 /// packet input ceiling. Saved documents retain the bytes, independent of the
 /// file.
 fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
-    let syntax = || {
-        CliError::new(
-            Kind::Usage,
-            "--payload-file requires LAYER.FIELD=PATH with a zero-based layer index",
+    let (target, path) = spec
+        .split_once('=')
+        .ok_or_else(|| CliError::new(Kind::Usage, PAYLOAD_FILE_SYNTAX))?;
+    let target = target.parse::<core::document::PayloadTarget>()?;
+    target.inject(packet, || {
+        read_bounded_file_allow_empty(
+            Path::new(path),
+            core::document::DEFAULT_MAX_DOCUMENT_BYTES,
+            InputKind::Recipe,
         )
-    };
-    let (selector, path) = spec.split_once('=').ok_or_else(syntax)?;
-    let (layer, field) = selector.trim().split_once('.').ok_or_else(syntax)?;
-    let layer_index = layer.parse::<usize>().map_err(|_| syntax())?;
-    let field = field.trim().to_ascii_lowercase();
-    if field.is_empty() {
-        return Err(syntax());
+        .map(Into::into)
+    })
+}
+
+const PAYLOAD_FILE_SYNTAX: &str = "--payload-file requires LAYER.FIELD=PATH";
+
+/// A refused `--payload-file`: the option is the outer context, and the
+/// library's refusal stays the typed source with its own text.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct PayloadFile {
+    message: &'static str,
+    #[source]
+    source: core::document::PayloadError,
+}
+
+impl From<core::document::PayloadError> for CliError {
+    fn from(source: core::document::PayloadError) -> Self {
+        let classification = core::error::Classified::classification(&source);
+        let message = match source {
+            core::document::PayloadError::Syntax => PAYLOAD_FILE_SYNTAX,
+            _ => "--payload-file cannot fill its recipe field",
+        };
+        let error = PayloadFile { message, source };
+        Self::from_classification(
+            classification,
+            error.to_string(),
+            core::error::source_chain(&error),
+        )
     }
-    let packet_len = packet.len();
-    let layer = packet.layer_mut(layer_index).ok_or_else(|| {
-        CliError::new(
-            Kind::Usage,
-            format!(
-                "--payload-file layer index {layer_index} is outside the recipe's {packet_len} layers"
-            ),
-        )
-    })?;
-    let unknown = || {
-        CliError::new(
-            Kind::Usage,
-            format!("--payload-file field {field} is unknown on layer {layer_index}"),
-        )
-    };
-    let field_path = field.parse::<core::field::Path>().map_err(|_| unknown())?;
-    let current = layer.field_path(&field_path).ok_or_else(unknown)?;
-    let core::field::FieldValue::Bytes(current) = current else {
-        return Err(CliError::new(
-            Kind::Usage,
-            format!("--payload-file field {field} on layer {layer_index} is not bytes-typed"),
-        ));
-    };
-    if !current.is_empty() {
-        return Err(CliError::new(
-            Kind::Usage,
-            format!(
-                "--payload-file field {field} on layer {layer_index} already holds recipe bytes"
-            ),
-        ));
-    }
-    let bytes = read_bounded_file_allow_empty(
-        Path::new(path),
-        core::document::DEFAULT_MAX_DOCUMENT_BYTES,
-        InputKind::Recipe,
-    )?;
-    layer
-        .set_field_path(&field_path, core::field::FieldValue::Bytes(bytes.into()))
-        .map_err(|source| {
-            CliError::new(
-                Kind::Usage,
-                format!(
-                    "could not set --payload-file field {field} on layer {layer_index}: {source}"
-                ),
-            )
-        })
 }
 
 fn parse_expression(
@@ -262,14 +201,6 @@ fn parse_expression(
         },
     )
     .map_err(CliError::classified)
-}
-
-fn document_format_from_path(path: &Path) -> Option<core::document::Format> {
-    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "json" => Some(core::document::Format::Json),
-        "yaml" | "yml" => Some(core::document::Format::Yaml),
-        _ => None,
-    }
 }
 
 pub(crate) fn read_bounded_file(
@@ -715,25 +646,5 @@ mod tests {
             .expect_err("one frame cannot exceed the aggregate byte budget");
         assert_eq!(error.message, "max-frame-bytes 8 exceeds max-bytes 7");
         validate_capture_stream_limits(bounds(1, 8, 8, 1)).expect("equal byte bounds are valid");
-    }
-
-    #[test]
-    fn document_extensions_are_case_insensitive_and_explicit() {
-        use packetcraftr_core::document::Format;
-
-        for (path, expected) in [
-            ("packet.json", Some(Format::Json)),
-            ("packet.JSON", Some(Format::Json)),
-            ("packet.yaml", Some(Format::Yaml)),
-            ("packet.yml", Some(Format::Yaml)),
-            ("packet.txt", None),
-            ("packet", None),
-        ] {
-            assert_eq!(
-                document_format_from_path(Path::new(path)),
-                expected,
-                "{path}"
-            );
-        }
     }
 }

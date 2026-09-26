@@ -243,6 +243,23 @@ All notable changes to PacketcraftR are documented here. The format follows
   offline counterparts), failing with `fuzz::IncoherentReport`. The CLI's
   `internal.fuzz_event_coherence` check now uses it.
 
+- The versioned input documents and their rules are library API, so other
+  consumers read them exactly as the CLI does. Core `transform::Rules` reads
+  `packetcraftr.rewrite/v1` and `/v2` documents (`Rules::parse`, failing with
+  `transform::RulesError`), builds one rule from direct edits
+  (`Rules::single`), reports the VLAN growth a map needs
+  (`maximum_growth`), and applies the rules in order to a frame with a
+  caller-compiled filter (`try_map_filters`, `apply`).
+  `packetcraftr::scan::profile::parse_document` reads
+  `packetcraftr.udp-profiles/v1` into per-port profiles
+  (`scan::profile::DocumentError`). Core `document::parse_recipe` reads recipe
+  text as a JSON or YAML packet document or a layer expression
+  (`document::Format::{from_path, sniff}`, `document::RecipeError`), and
+  `document::PayloadTarget` fills an empty bytes field from outside the recipe
+  (`document::PayloadError`). `transform::fragment_link_type` frames an
+  Ethernet, IPv4, or IPv6 recipe for `transform::fragment`. Document formats,
+  CLI flags, and error codes are unchanged.
+
 - `protocol::headers` is a public, bounded walker over raw link, VLAN, and IP
   header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,
   `Ipv6Header` with its extension chain, and option iterators). Code that
@@ -492,6 +509,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `--payload-file` refusals keep `cli.error` and exit code 2, but their text
+  changed: the message names the option (`--payload-file requires
+  LAYER.FIELD=PATH` or `--payload-file cannot fill its recipe field`) and the
+  first cause gives the reason without the option name, for example
+  `payload field nope is unknown on layer 2`.
 - `rewrite` and `fragment` validate every IPv6 extension header and IP option
   they step over. A malformed length in a source-route, Home Address,
   routing, fragment, or AH header now reports `packet.transform_input` where

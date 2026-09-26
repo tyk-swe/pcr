@@ -13,11 +13,7 @@ use crate::{
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_hex_line},
 };
-use packetcraftr_core::{
-    self as core,
-    frame::{Frame, LinkType},
-    protocol::BuiltinProtocol,
-};
+use packetcraftr_core::{self as core, frame::Frame};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::CaptureFormat;
@@ -49,17 +45,7 @@ pub(crate) fn run(
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
     crate::cancellation::check()?;
-    let root = packet.layer(0).and_then(BuiltinProtocol::of);
-    let link_type = match root {
-        Some(BuiltinProtocol::Ethernet) => LinkType::ETHERNET,
-        Some(BuiltinProtocol::Ipv4) => LinkType::IPV4,
-        Some(BuiltinProtocol::Ipv6) => LinkType::IPV6,
-        _ => {
-            return Err(CliError::classified(core::transform::Error::Unsupported(
-                core::transform::Unsupported::PacketRoot,
-            )));
-        }
-    };
+    let link_type = core::transform::fragment_link_type(&packet).map_err(CliError::classified)?;
     let built = core::build::Builder::new(registry)
         .build(
             packet,

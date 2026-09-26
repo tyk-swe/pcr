@@ -174,3 +174,37 @@ fn fragment_limits_df_and_incomplete_headers_fail_before_returning_output() {
     .unwrap();
     assert!(fragment(&once[0], Default::default()).is_err());
 }
+
+#[test]
+fn only_ethernet_and_ip_roots_frame_a_packet_for_fragmenting() {
+    use packetcraftr_core::{
+        error::Classified,
+        protocol::{link::Ethernet, transport::Tcp},
+        transform::fragment_link_type,
+    };
+    fn rooted(layer: impl packetcraftr_core::layer::Layer) -> Packet {
+        let mut packet = Packet::new();
+        packet.push(layer);
+        packet
+    }
+    for (packet, expected) in [
+        (rooted(Ethernet::default()), LinkType::ETHERNET),
+        (rooted(Ipv4::default()), LinkType::IPV4),
+        (rooted(Ipv6::default()), LinkType::IPV6),
+    ] {
+        assert_eq!(fragment_link_type(&packet).unwrap(), expected);
+    }
+    for packet in [
+        Packet::new(),
+        rooted(Udp::default()),
+        rooted(Tcp::default()),
+        rooted(Raw::new(vec![0x45])),
+    ] {
+        let error = fragment_link_type(&packet).expect_err("unsupported root");
+        assert_eq!(
+            error.to_string(),
+            "unsupported packet transform: recipe must begin with Ethernet or IP"
+        );
+        assert_eq!(error.classification().code, "packet.transform_unsupported");
+    }
+}

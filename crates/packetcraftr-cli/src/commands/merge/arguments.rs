@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{Compression, OfflineCaptureLimitsArgs};
+use crate::command_options::{CompressionArgs, OfflineCaptureLimitsArgs, SavedPcapNg};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -13,9 +13,8 @@ pub(crate) struct Args {
     /// New PCAPNG destination. Existing files are never overwritten.
     #[arg(long)]
     pub(crate) write: PathBuf,
-    /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<SavedPcapNg>,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }

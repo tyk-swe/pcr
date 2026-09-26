@@ -24,7 +24,6 @@ use packetcraftr_core::{
     error::{BoundaryError, Kind},
     transform::{self, ChecksumMode, FieldEdits, HeaderRewrite},
 };
-use std::time::Duration;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -32,11 +31,11 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        self.duration.resources(settings);
         self.limits.resources(settings);
     }
 
@@ -137,7 +136,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     } else {
         Some(crate::staged_output::StagedFile::stage(&args.write)?)
     };
-    let deadline = Deadline::new(Duration::from_millis(args.max_duration_ms))
+    let deadline = Deadline::new(args.duration.max_duration())
         .with_cancellation(Some(crate::cancellation::signal().clone()));
     let mut reader = crate::input::open_capture(&args.path, args.limits.reader)?;
     let limits = capture_file::Limits {
@@ -152,7 +151,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         None => Box::new(std::io::sink()),
     };
     let mut writer = capture_file::Writer::pcapng_with_options(
-        args.compression.writer(inner)?,
+        args.compression.for_file().writer(inner)?,
         capture_file::PcapNgOptions {
             max_size: args.limits.reader.max_frame_bytes,
             // --max-interfaces bounds each input section, not the one output section.

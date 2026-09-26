@@ -14,7 +14,7 @@ use crate::output;
 use packetcraftr_netio::capture::Provider as _;
 
 use crate::errors::CliError;
-use crate::system::{InterfaceSelector, select_interfaces};
+use crate::system::select_interfaces;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::AggregateFormat;
@@ -30,7 +30,7 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
-    let selector = InterfaceSelector::parse_optional(arguments.interface.as_deref())?;
+    let selector = arguments.interface;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;
     let mut result = output::interfaces::Report::new(interfaces);
     if arguments.timestamp_types {
@@ -59,6 +59,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system::InterfaceSelector;
 
     struct FixtureProvider;
 
@@ -100,7 +101,8 @@ mod tests {
     }
 
     fn selected(selector: Option<&str>) -> Vec<String> {
-        let selector = InterfaceSelector::parse_optional(selector).expect("fixture selector");
+        let selector =
+            selector.map(|selector| InterfaceSelector::parse(selector).expect("fixture selector"));
         select_interfaces(&FixtureProvider, selector.as_ref())
             .expect("fixture enumeration succeeds")
             .into_iter()
@@ -121,9 +123,8 @@ mod tests {
 
     #[test]
     fn an_unknown_selector_fails_before_rendering() {
-        let selector =
-            InterfaceSelector::parse_optional(Some("fixture9")).expect("fixture selector");
-        let error = select_interfaces(&FixtureProvider, selector.as_ref())
+        let selector = InterfaceSelector::parse("fixture9").expect("fixture selector");
+        let error = select_interfaces(&FixtureProvider, Some(&selector))
             .expect_err("unknown names must fail");
         assert_eq!(error.exit_code(), 5);
         assert!(error.message.contains("no interface matches"));

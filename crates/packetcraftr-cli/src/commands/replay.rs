@@ -51,11 +51,11 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
-        crate::resources::declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        self.duration.resources(settings);
         self.reader.resources(settings);
         self.policy.resources(settings);
     }
@@ -74,7 +74,7 @@ pub(super) fn run(
     format: ExchangeFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    arguments.compression.validate(format.as_format())?;
+    let compression = arguments.compression.for_output(format.as_format())?;
     let mut prepared = prepare(&arguments)?;
     let filtered = prepared.selector.filter.is_some();
     let requested_interface = prepared.requested_interface.clone();
@@ -94,14 +94,14 @@ pub(super) fn run(
             run,
             CaptureSettings {
                 format: capture::Format::Pcap,
-                compression: arguments.compression,
+                compression,
             },
         ),
         ExchangeFormat::PcapNg => replay_capture(
             run,
             CaptureSettings {
                 format: capture::Format::PcapNg,
-                compression: arguments.compression,
+                compression,
             },
         ),
     }
@@ -131,8 +131,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
             "replay permits at most 256 interface rules",
         ));
     }
-    let requested_interface = InterfaceSelector::parse_optional(arguments.interface.as_deref())?
-        .map(InterfaceSelector::into_id);
+    let requested_interface = arguments.interface.clone().map(InterfaceSelector::into_id);
     let mut rules = Vec::new();
     for mapping in &arguments.interface_maps {
         let (source, destination) = mapping.split_once('=').ok_or_else(|| {
@@ -174,7 +173,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,
         arguments.reader.max_frame_bytes,
-        Duration::from_millis(arguments.max_duration_ms),
+        arguments.duration.max_duration(),
     );
     limits.validate().map_err(CliError::classified)?;
     let options = packetcraftr::replay::Options {

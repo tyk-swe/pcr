@@ -17,7 +17,7 @@ use packetcraftr_core::analysis;
 use crate::output;
 
 use self::arguments::Args;
-use super::offline_analysis::{parse_stream_selector, prepare};
+use super::offline_analysis::prepare;
 use crate::errors::CliError;
 use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
@@ -114,9 +114,7 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(
-            self.limits.max_duration_ms,
-        ))
+        Some(self.limits.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -145,11 +143,7 @@ pub(super) fn run(
     format: ToolFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let selected_stream = arguments
-        .stream
-        .as_deref()
-        .map(parse_tcp_stream_selector)
-        .transpose()?;
+    let selected_stream = arguments.stream.map(tcp_stream_index).transpose()?;
     let selector = Selector {
         sni: arguments
             .sni
@@ -250,16 +244,17 @@ fn buffer_floor_error(value: usize) -> CliError {
     })
 }
 
-/// Parses `--stream`, rejecting the transports this command cannot assemble.
-fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
-    let selected = parse_stream_selector(spec)?;
+/// The TCP index `--stream` selects, rejecting the transports this command
+/// cannot assemble.
+fn tcp_stream_index(selected: analysis::StreamRef) -> Result<u64, CliError> {
     match selected.transport {
         StreamTransport::Tcp => Ok(selected.index),
         StreamTransport::Udp => Err(CliError::new(
             Kind::Usage,
             format!(
-                "invalid --stream '{spec}': TLS sessions are assembled from TCP streams only; \
-                 UDP port 443 is QUIC, which this command does not read"
+                "invalid --stream '{}:{}': TLS sessions are assembled from TCP streams only; \
+                 UDP port 443 is QUIC, which this command does not read",
+                selected.transport, selected.index
             ),
         )),
     }

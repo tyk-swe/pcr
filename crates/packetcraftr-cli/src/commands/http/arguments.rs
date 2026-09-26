@@ -3,15 +3,19 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs};
+use packetcraftr_core::analysis::StreamRef;
+
+use crate::command_options::{
+    ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs, stream_selector,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// PCAP/PCAPNG input; - reads redirected stdin. gzip and Zstd are detected.
     pub(crate) path: PathBuf,
     /// Select a whole TCP conversation, using tcp:INDEX.
-    #[arg(long)]
-    pub(crate) stream: Option<String>,
+    #[arg(long, value_name = "TRANSPORT:INDEX", value_parser = stream_selector)]
+    pub(crate) stream: Option<StreamRef>,
     /// Additional cleartext HTTP/1 ports; repeat to add services. Ports 80 and
     /// 8080 are always inspected.
     #[arg(long = "http-port")]

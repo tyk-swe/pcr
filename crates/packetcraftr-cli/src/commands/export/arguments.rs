@@ -3,7 +3,11 @@
 
 use std::path::PathBuf;
 
-use crate::command_options::{Compression, DecodeArgs, OfflineLimitsArgs};
+use packetcraftr_core::analysis::StreamRef;
+
+use crate::command_options::{
+    CompressionArgs, DecodeArgs, Destination, OfflineLimitsArgs, stream_selector,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -13,8 +17,8 @@ pub(crate) struct Args {
     #[arg(long)]
     pub(crate) write: PathBuf,
     /// Whole conversations, as tcp:INDEX or udp:INDEX. Repeat to select several.
-    #[arg(long = "stream")]
-    pub(crate) streams: Vec<String>,
+    #[arg(long = "stream", value_name = "TRANSPORT:INDEX", value_parser = stream_selector)]
+    pub(crate) streams: Vec<StreamRef>,
     /// Include complete or incomplete IP datagrams containing this physical frame.
     #[arg(long = "datagram-frame")]
     pub(crate) datagram_frames: Vec<u64>,
@@ -24,11 +28,18 @@ pub(crate) struct Args {
     /// Maximum physical frames selected for export; at most 1,000,000.
     #[arg(long, default_value_t = 100_000)]
     pub(crate) max_selected_frames: usize,
-    /// Compression of the saved capture file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<SavedCapture>,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
+}
+
+/// The saved export, in its source capture format.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SavedCapture;
+
+impl Destination for SavedCapture {
+    const HELP: &'static str = "Compression of the saved capture file";
 }

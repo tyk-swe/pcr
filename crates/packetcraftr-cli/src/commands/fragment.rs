@@ -42,7 +42,7 @@ pub(crate) fn run(
     format: CaptureFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    args.compression.validate(format.as_format())?;
+    let compression = args.compression.for_output(format.as_format())?;
     let registry = core::protocol::builtin::registry();
     let packet = crate::input::read_recipe(args.recipe, &registry, args.budget.max_layers)?;
     crate::cancellation::check()?;
@@ -85,7 +85,7 @@ pub(crate) fn run(
                 core::capture_file::Format::PcapNg
             },
             frames,
-            args.compression,
+            compression,
         );
     }
     let summary = output::fragment::Complete {

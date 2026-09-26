@@ -61,8 +61,7 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: SendFormat) -> Result<(), CliError> {
-    let compression = arguments.send.compression;
-    compression.validate(format.as_format())?;
+    let compression = arguments.send.compression.for_output(format.as_format())?;
     let prepared = prepare(arguments)?;
     match format {
         SendFormat::Text => {

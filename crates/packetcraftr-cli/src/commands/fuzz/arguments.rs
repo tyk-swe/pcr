@@ -7,9 +7,9 @@ use clap::ValueEnum;
 use packetcraftr_core as core;
 
 use crate::command_options::{
-    BuildMode, CaptureLimitsArgs, DestinationAllowlistArgs, PermissivePacketArgs,
-    PublicDestinationArgs, RecipeArgs, RouteSelectionArgs, SourceSpoofingArgs, TrafficBudgetArgs,
-    Transmitted,
+    BuildMode, CaptureLimitsArgs, DestinationAllowlistArgs, MaxDurationArgs, PermissivePacketArgs,
+    Probing, PublicDestinationArgs, RecipeArgs, RouteSelectionArgs, SourceSpoofingArgs,
+    TimeoutArgs, TrafficBudgetArgs, Transmitted, Window,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"NDJSON publishes each case as soon as its offline or live outcome is final, then one complete event with campaign statistics. Earlier case records remain valid if a later case fails.
@@ -92,9 +92,8 @@ pub(crate) struct Args {
     /// Optional route destination when the packet has no fixed destination.
     #[arg(long)]
     pub(crate) destination: Option<IpAddr>,
-    /// Response window for each capture-ready live case.
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<CaseWindow>,
     /// Optional average live-case rate ceiling.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
@@ -116,9 +115,8 @@ pub(crate) struct Args {
     /// Maximum deterministic shrink candidates returned per case.
     #[arg(long, default_value_t = core::fuzz::DEFAULT_MAX_SHRINK_STEPS)]
     pub(crate) max_shrink_steps: usize,
-    /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Probing>,
     #[command(flatten)]
     pub(crate) route: RouteSelectionArgs,
     #[command(flatten)]
@@ -156,4 +154,13 @@ impl PolicyArgs {
         self.budgets.apply_to(&mut policy);
         policy
     }
+}
+
+/// One window per live case.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CaseWindow;
+
+impl Window for CaseWindow {
+    const DEFAULT_MILLISECONDS: &'static str = "1000";
+    const HELP: &'static str = "Response window for each capture-ready live case";
 }

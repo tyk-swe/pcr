@@ -34,7 +34,15 @@ mod send;
 mod template;
 
 mod compression;
-pub(crate) use compression::Compression;
+pub(crate) use compression::{
+    CaptureStdout, Compression, CompressionArgs, Destination, SavedPcapNg,
+};
+
+mod duration;
+pub(crate) use duration::{MaxDurationArgs, ProbeWindow, Probing, RunTime, TimeoutArgs, Window};
+
+mod stream;
+pub(crate) use stream::stream_selector;
 
 mod timestamp;
 pub(crate) use timestamp::parse_timestamp;

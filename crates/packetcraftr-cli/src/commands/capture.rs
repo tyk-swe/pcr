@@ -17,17 +17,11 @@ use crate::output::{
     contract::{CaptureFormat, Command},
 };
 use crate::{
-    errors::CliError,
-    filtering::FrameSelector,
-    rendering::StreamEncoder,
-    system::{InterfaceSelector, resolve},
+    errors::CliError, filtering::FrameSelector, rendering::StreamEncoder, system::resolve,
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
+use std::{collections::HashSet, time::Duration};
 
 use self::files::Files;
 use crate::command_options::Compression;
@@ -58,9 +52,9 @@ impl super::Spec for Args {
             rotate_interval_ms: Milliseconds @ CaptureStorage,
             rotate_files: Count @ CaptureStorage,
             retention: Policy @ CaptureStorage,
-            timeout_ms: Milliseconds @ Operation,
             max_projection_bytes: Bytes @ ResultRetention,
         ]);
+        self.timeout.resources(settings);
         self.limits.resources(settings);
         self.budgets.resources(settings);
     }
@@ -79,20 +73,15 @@ pub(super) fn run(
     format: CaptureFormat,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
-    let timeout = Duration::from_millis(args.timeout_ms);
-    if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
-        return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: net::capture::MAX_TIMEOUT,
-        }));
-    }
+    // Parsing bounded the window to the capture ceiling.
+    let timeout = args.timeout.timeout();
     if args.interface.len() > 256 {
         return Err(CliError::new(
             Kind::Usage,
             "capture accepts at most 256 interface selectors before deduplication",
         ));
     }
-    if args.write.is_some() {
+    let compression = if args.write.is_some() {
         if !matches!(
             format,
             CaptureFormat::Text | CaptureFormat::Json | CaptureFormat::Ndjson
@@ -102,8 +91,9 @@ pub(super) fn run(
                 "--write requires text, JSON, or NDJSON reporting",
             ));
         }
+        args.compression.for_file()
     } else {
-        args.compression.validate(format.as_format())?;
+        let compression = args.compression.for_output(format.as_format())?;
         if args.rotate_bytes.is_some()
             || args.rotate_interval_ms.is_some()
             || args.rotate_files != 1
@@ -120,7 +110,8 @@ pub(super) fn run(
                 "JSON capture summaries require --write to retain packet data",
             ));
         }
-    }
+        compression
+    };
     if (args.dissect || !args.fields.is_empty())
         && !matches!(format, CaptureFormat::Text | CaptureFormat::Ndjson)
     {
@@ -177,7 +168,7 @@ pub(super) fn run(
             files::Files::new(
                 files::Options {
                     path,
-                    compression: args.compression,
+                    compression,
                     rotate_bytes: args.rotate_bytes,
                     rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
                     max_files: args.rotate_files,
@@ -194,10 +185,7 @@ pub(super) fn run(
     let mut seen = HashSet::new();
     let mut interfaces = Vec::new();
     for source in args.interface {
-        let interface = resolve(
-            InterfaceSelector::parse(&source)?,
-            &net::interface::SystemProvider,
-        )?;
+        let interface = resolve(source, &net::interface::SystemProvider)?;
         if seen.insert(interface.index) {
             interfaces.push(interface);
         }
@@ -225,7 +213,7 @@ pub(super) fn run(
         },
         Output {
             format,
-            compression: args.compression,
+            compression,
             selector,
             decoding,
             projector,

@@ -3,8 +3,6 @@
 
 //! Shared, bounded setup for offline analysis commands.
 
-use packetcraftr_core::error::Kind;
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,8 +10,6 @@ use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 use packetcraftr_core::filter::Filter;
 use packetcraftr_core::registry::Registry;
-
-use analysis::{StreamRef, StreamTransport};
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 use crate::errors::CliError;
@@ -82,7 +78,7 @@ pub(super) fn prepare(
         max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
         max_ip_outcomes: limits.max_ip_outcomes,
         ip_idle_expiry: Duration::from_millis(limits.ip_idle_expiry_ms),
-        max_duration: Duration::from_millis(limits.max_duration_ms),
+        max_duration: limits.duration.max_duration(),
     };
     limits.validate().map_err(CliError::classified)?;
 
@@ -145,28 +141,6 @@ pub(super) fn omitted_diagnostic(
         code,
         format!("{omitted} {subject} omitted from this document by the {ceiling} ceiling"),
     )]
-}
-
-/// Parses a `tcp:INDEX` or `udp:INDEX` conversation spec.
-///
-/// Parsing admits both transports so each command states its own
-/// restriction: `follow` follows either, while a TCP-only command rejects a
-/// `udp:` selector with a message that says so.
-pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
-    let invalid = || {
-        CliError::new(
-            Kind::Usage,
-            format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
-        )
-    };
-    let (transport, index) = spec.split_once(':').ok_or_else(invalid)?;
-    let transport = match transport {
-        "tcp" => StreamTransport::Tcp,
-        "udp" => StreamTransport::Udp,
-        _ => return Err(invalid()),
-    };
-    let index = index.parse::<u64>().map_err(|_| invalid())?;
-    Ok(StreamRef { transport, index })
 }
 
 /// Sink for IP reassembly lifecycle events, which only the NDJSON stream

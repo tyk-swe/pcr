@@ -1,13 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::command_options::{PacketBudgetArgs, RecipeArgs};
+use crate::command_options::{CaptureStdout, CompressionArgs, PacketBudgetArgs, RecipeArgs};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<CaptureStdout>,
 
     #[command(flatten)]
     pub(crate) recipe: RecipeArgs,

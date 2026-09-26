@@ -666,7 +666,7 @@ fn unsupported_output_formats_fail_before_command_work() {
             ],
         ),
         ("pcap", &["expert", missing]),
-        ("pcap", &["follow", missing, "--stream", "invalid"]),
+        ("pcap", &["follow", missing, "--stream", "tcp:0"]),
         (
             "raw",
             &["replay", missing, "--interface", "missing-interface"],
@@ -1183,5 +1183,56 @@ fn invalid_dns_query_types_fail_argument_parsing_before_execution() {
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains("invalid value"), "{stderr}");
         assert!(stderr.contains("--type"), "{stderr}");
+    }
+}
+
+/// Selectors and durations are typed arguments: a malformed value fails as a
+/// usage error while arguments are parsed, before any input is opened, any
+/// policy is checked, or any provider is reached.
+#[test]
+fn malformed_selectors_and_durations_fail_while_parsing() {
+    let directory = tempfile::tempdir().expect("temporary directory must open");
+    let missing = directory.path().join("missing.pcapng");
+    let missing = missing.to_str().expect("temporary path is UTF-8");
+    let cases: &[&[&str]] = &[
+        &["capture", "--interface", "0"],
+        &["interfaces", "--interface", ""],
+        &["replay", missing, "--interface", "4294967296"],
+        &["send", "--packet", "raw(hex=\"00\")", "--interface", "0"],
+        &["http", missing, "--stream", "sctp:0"],
+        &["export", missing, "--write", missing, "--stream", "tcp"],
+        &["stats", missing, "--max-duration-ms", "3600001"],
+        &["scan", "192.0.2.1", "--max-duration-ms", "0"],
+        &[
+            "rewrite",
+            missing,
+            "--write",
+            missing,
+            "--max-duration-ms",
+            "0",
+        ],
+        &[
+            "exchange",
+            "--packet",
+            "raw(hex=\"00\")",
+            "--timeout-ms",
+            "3600001",
+        ],
+        &[
+            "capture",
+            "--interface",
+            "lo",
+            "--timeout-ms",
+            "18446744073709551615",
+        ],
+    ];
+    for &command in cases {
+        let mut arguments = vec!["--output", "json"];
+        arguments.extend_from_slice(command);
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}: {output:?}");
+        let error = parse_json(&output);
+        assert_eq!(error["error"]["code"], "cli.error", "{arguments:?}");
+        assert_eq!(error["error"]["kind"], "cli", "{arguments:?}");
     }
 }

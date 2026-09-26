@@ -8,8 +8,6 @@ mod rendering;
 
 use crate::output::contract::ToolFormat;
 
-use std::time::Duration;
-
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
@@ -30,13 +28,11 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(self.max_duration_ms))
+        Some(self.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
         crate::resources::declare!(settings, self, [
-            timeout_ms: Milliseconds @ Operation,
-            max_duration_ms: Milliseconds @ Operation,
             max_message_bytes: Bytes @ Operation,
             max_records: Count @ Operation,
             max_name_pointers: Count @ Operation,
@@ -45,6 +41,8 @@ impl super::Spec for Args {
             max_rejected_records: Count @ ResultRetention,
             max_undecoded: Count @ ResultRetention,
         ]);
+        self.timeout.resources(settings);
+        self.duration.resources(settings);
         self.limits.resources(settings);
         self.policy.resources(settings);
     }
@@ -226,7 +224,7 @@ fn prepare_requests(
         max_evidence_frames: queue_limits.max_frames,
         max_evidence_bytes: queue_limits.max_bytes,
         max_undecoded: arguments.max_undecoded,
-        max_duration: Duration::from_millis(arguments.max_duration_ms),
+        max_duration: arguments.duration.max_duration(),
     };
     questions
         .into_iter()
@@ -259,7 +257,7 @@ fn prepare_requests(
                 }),
                 transport,
                 attempts: arguments.attempts,
-                timeout: Duration::from_millis(arguments.timeout_ms),
+                timeout: arguments.timeout.timeout(),
                 queries_per_second: arguments.rate,
                 limits,
             })

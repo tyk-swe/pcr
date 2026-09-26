@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use packetcraftr_core::transform::{FieldAssignment, VlanRewrite};
 
 use super::rules;
-use crate::command_options::{Compression, DecodeArgs, OfflineCaptureLimitsArgs};
+use crate::command_options::{
+    CompressionArgs, DecodeArgs, MaxDurationArgs, OfflineCaptureLimitsArgs, RunTime, SavedPcapNg,
+};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
@@ -66,14 +68,20 @@ pub(crate) struct Args {
     /// Remove the outer VLAN stack.
     #[arg(long)]
     pub(crate) strip_vlans: bool,
-    /// Compression of the saved PCAPNG file.
-    #[arg(long, value_enum, default_value_t = Compression::None)]
-    pub(crate) compression: Compression,
-    /// Maximum rewrite run time in milliseconds.
-    #[arg(long, default_value_t = 3_600_000, value_parser = clap::value_parser!(u64).range(1..=3_600_000))]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<SavedPcapNg>,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<RewriteRunTime>,
     #[command(flatten)]
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
+}
+
+/// The whole rewrite.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct RewriteRunTime;
+
+impl RunTime for RewriteRunTime {
+    const HELP: &'static str = "Maximum rewrite run time in milliseconds";
 }

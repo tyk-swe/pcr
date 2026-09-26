@@ -5,6 +5,7 @@ use clap::{Args, ValueEnum};
 use packetcraftr_core::analysis;
 use packetcraftr_core::capture_file as capture;
 
+use super::{MaxDurationArgs, RunTime};
 use crate::output::resources::Value;
 use crate::resources::{Enabled, SettingValue, Settings, declare, policy_value};
 
@@ -195,9 +196,16 @@ pub(crate) struct OfflineLimitsArgs {
     /// IP datagram inactivity interval in capture-time milliseconds.
     #[arg(long, default_value_t = default_ip_idle_expiry_ms())]
     pub(crate) ip_idle_expiry_ms: u64,
-    /// Maximum analysis run time in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Analysis>,
+}
+
+/// One pass over a capture file.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Analysis;
+
+impl RunTime for Analysis {
+    const HELP: &'static str = "Maximum analysis run time in milliseconds";
 }
 
 impl OfflineLimitsArgs {
@@ -223,7 +231,7 @@ impl OfflineLimitsArgs {
             max_ip_reassembly_bytes: Bytes @ ActiveState if index,
             max_ip_outcomes: Count @ ResultRetention if index,
             ip_idle_expiry_ms: Milliseconds @ ActiveState if index,
-            max_duration_ms: Milliseconds @ Operation,
         ]);
+        self.duration.resources(settings);
     }
 }

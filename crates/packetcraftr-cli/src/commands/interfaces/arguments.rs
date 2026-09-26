@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::system::InterfaceSelector;
+
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
   packetcraftr interfaces
   packetcraftr interfaces --interface lo
@@ -9,8 +11,8 @@ pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
     /// Only list the interface with this name or numeric index.
-    #[arg(long, value_name = "NAME_OR_INDEX")]
-    pub(crate) interface: Option<String>,
+    #[arg(long, value_name = "NAME_OR_INDEX", value_parser = InterfaceSelector::from_argument)]
+    pub(crate) interface: Option<InterfaceSelector>,
     /// List the packet timestamp types the capture backend advertises for each
     /// interface; types without a source are not selectable for capture.
     #[arg(long)]

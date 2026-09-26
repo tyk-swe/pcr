@@ -12,7 +12,7 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_core::registry::Registry;
 use packetcraftr_core::{capture_file, protocol::builtin};
 
-use crate::command_options::parse_timestamp;
+use crate::command_options::{CompressionArgs, Destination, parse_timestamp};
 use crate::errors::CliError;
 
 /// Capture-file options shared by commands that emit generated frames.
@@ -30,9 +30,8 @@ pub(crate) struct CaptureOutputArgs {
     /// generated captures stay byte-deterministic.
     #[arg(long, value_name = "SECONDS")]
     pub(crate) timestamp: Option<String>,
-    /// Compress binary capture output.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<GeneratedCapture>,
 }
 
 /// The validated capture-stream destination for generated frames.
@@ -50,7 +49,7 @@ impl CaptureOutputArgs {
         self,
         format: crate::output::contract::Format,
     ) -> Result<Option<CaptureOutput>, CliError> {
-        self.compression.validate(format)?;
+        let compression = self.compression.for_output(format)?;
         let captures = match format {
             crate::output::contract::Format::Pcap => Some(capture_file::Format::Pcap),
             crate::output::contract::Format::PcapNg => Some(capture_file::Format::PcapNg),
@@ -86,7 +85,7 @@ impl CaptureOutputArgs {
             link_type: parse_link_type(&link_type)?,
             timestamp,
             format: capture_format,
-            compression: self.compression,
+            compression,
         }))
     }
 }
@@ -212,6 +211,14 @@ fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
             format!("unknown link type {input:?}; use a capture-root name or a decimal number"),
         )
     })
+}
+
+/// Generated frames written to stdout as a capture stream.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct GeneratedCapture;
+
+impl Destination for GeneratedCapture {
+    const HELP: &'static str = "Compress binary capture output";
 }
 
 #[cfg(test)]

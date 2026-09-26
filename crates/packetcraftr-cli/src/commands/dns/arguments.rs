@@ -4,7 +4,8 @@
 use packetcraftr::dns::QueryType;
 
 use crate::command_options::{
-    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, RouteSelectionArgs,
+    AddressFamily, CaptureLimitsArgs, HostnamePolicyArgs, MaxDurationArgs, RouteSelectionArgs,
+    RunTime, TimeoutArgs, Window,
 };
 
 pub(crate) const AFTER_LONG_HELP: &str = r"Examples:
@@ -66,15 +67,13 @@ pub(crate) struct Args {
     /// Number of independently re-resolved and re-authorized attempts.
     #[arg(long, default_value_t = packetcraftr::dns::DEFAULT_ATTEMPTS)]
     pub(crate) attempts: u32,
-    /// Response window for each attempt, shared with any TCP continuation.
-    #[arg(long, default_value_t = 1_000)]
-    pub(crate) timeout_ms: u64,
+    #[command(flatten)]
+    pub(crate) timeout: TimeoutArgs<AttemptWindow>,
     /// Optional retry-rate ceiling; a UDP-to-TCP continuation is immediate.
     #[arg(long)]
     pub(crate) rate: Option<u32>,
-    /// Maximum worst-case timeout plus intentional retry delay in milliseconds.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<Resolution>,
     /// Maximum complete DNS message bytes decoded.
     #[arg(long, default_value_t = packetcraftr::dns::MAX_MESSAGE_BYTES)]
     pub(crate) max_message_bytes: usize,
@@ -176,4 +175,22 @@ mod tests {
             assert!(Cli::try_parse_from(command).is_err());
         }
     }
+}
+
+/// One window per attempt.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AttemptWindow;
+
+impl Window for AttemptWindow {
+    const DEFAULT_MILLISECONDS: &'static str = "1000";
+    const HELP: &'static str = "Response window for each attempt, shared with any TCP continuation";
+}
+
+/// Every attempt window plus retry delay.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Resolution;
+
+impl RunTime for Resolution {
+    const HELP: &'static str =
+        "Maximum worst-case timeout plus intentional retry delay in milliseconds";
 }

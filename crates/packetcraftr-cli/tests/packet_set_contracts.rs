@@ -278,7 +278,8 @@ fn payload_files_flow_into_built_bytes_and_saved_documents() {
 
 #[test]
 fn exchange_authorizes_expanded_destinations_before_route_preparation() {
-    // The invalid interface prevents provider access in every feature profile.
+    // A denied destination fails before any provider is reached; an admitted
+    // one reaches route preparation, which cannot find the missing interface.
     let run_set = |packet, axis| {
         run(&[
             "--output",
@@ -289,15 +290,12 @@ fn exchange_authorizes_expanded_destinations_before_route_preparation() {
             "--axis",
             axis,
             "--interface",
-            "0",
+            "missing-fixture-interface",
         ])
     };
     let allowed = run_set("ipv4(dst=224.0.0.1)/udp(dport=9000)", "0.dst=[127.0.0.1]");
-    assert_eq!(allowed.status.code(), Some(2));
-    assert_eq!(
-        parse_json(&allowed)["error"]["message"],
-        "--interface index must be non-zero"
-    );
+    assert!(!allowed.status.success());
+    assert_ne!(parse_json(&allowed)["error"]["kind"], "policy");
 
     let denied = run_set(
         "ipv4(dst=127.0.0.1)/udp(dport=9000)",
@@ -312,8 +310,8 @@ fn exchange_authorizes_expanded_destinations_before_route_preparation() {
 
 #[test]
 fn destination_allowlist_denies_before_route_preparation_on_every_send_command() {
-    // The invalid interface keeps every provider out of reach in every
-    // feature profile, so the policy failure must precede it.
+    // Policy denies before route preparation, so no provider is reached and
+    // the missing interface is never looked up.
     for command in ["send", "exchange"] {
         let denied = run(&[
             "--output",
@@ -324,7 +322,7 @@ fn destination_allowlist_denies_before_route_preparation_on_every_send_command()
             "--allow-destination",
             "192.0.2.0/24",
             "--interface",
-            "0",
+            "missing-fixture-interface",
         ]);
         assert_eq!(denied.status.code(), Some(6), "{command}");
         let error = parse_json(&denied);
@@ -338,7 +336,7 @@ fn destination_allowlist_denies_before_route_preparation_on_every_send_command()
         assert!(message.contains("192.0.2.0/24"), "{command}: {message}");
 
         // Admitting the destination moves the failure past policy onto the
-        // interface check.
+        // interface lookup.
         let allowed = run(&[
             "--output",
             "json",
@@ -348,14 +346,10 @@ fn destination_allowlist_denies_before_route_preparation_on_every_send_command()
             "--allow-destination",
             "10.0.0.0/8",
             "--interface",
-            "0",
+            "missing-fixture-interface",
         ]);
-        assert_eq!(allowed.status.code(), Some(2), "{command}");
-        assert_eq!(
-            parse_json(&allowed)["error"]["message"],
-            "--interface index must be non-zero",
-            "{command}"
-        );
+        assert!(!allowed.status.success(), "{command}");
+        assert_ne!(parse_json(&allowed)["error"]["kind"], "policy", "{command}");
     }
 }
 

@@ -29,9 +29,7 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(
-            self.limits.max_duration_ms,
-        ))
+        Some(self.limits.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -58,11 +56,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     ports.extend([80, 8080]);
     let collector = Collector::new(args.application.core(), ports, args.max_http_body_bytes)
         .map_err(CliError::classified)?;
-    let selector = args
-        .stream
-        .as_deref()
-        .map(super::offline_analysis::parse_stream_selector)
-        .transpose()?;
+    let selector = args.stream;
     if selector.is_some_and(|selected| selected.transport != analysis::StreamTransport::Tcp) {
         return Err(CliError::new(
             Kind::Usage,

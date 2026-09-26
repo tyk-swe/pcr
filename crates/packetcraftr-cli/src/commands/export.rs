@@ -21,9 +21,7 @@ impl super::Spec for Args {
     const OFFLINE: bool = true;
 
     fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(std::time::Duration::from_millis(
-            self.limits.max_duration_ms,
-        ))
+        Some(self.limits.duration.max_duration())
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
@@ -44,15 +42,10 @@ impl super::Spec for Args {
 }
 
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
-    let streams = args
-        .streams
-        .iter()
-        .map(|value| super::offline_analysis::parse_stream_selector(value))
-        .collect::<Result<Vec<_>, _>>()?;
     let setup =
         super::offline_analysis::prepare(args.limits, args.filter.as_deref(), &args.decode)?;
     let selection = analysis::export::Selection {
-        streams,
+        streams: args.streams,
         datagram_frames: args.datagram_frames,
         filter: setup.filter.as_ref(),
         max_selected_frames: args.max_selected_frames,
@@ -76,10 +69,12 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     reader.rewind().map_err(CliError::classified)?;
     let (writer, report) = capture_file::select(
         &mut reader,
-        args.compression.writer(std::io::BufWriter::with_capacity(
-            64 * 1024,
-            staged.as_file_mut(),
-        ))?,
+        args.compression
+            .for_file()
+            .writer(std::io::BufWriter::with_capacity(
+                64 * 1024,
+                staged.as_file_mut(),
+            ))?,
         limits,
         |number, _| Ok(plan.source_frames.contains(&number)),
     )

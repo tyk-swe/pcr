@@ -3,9 +3,12 @@
 
 use std::path::PathBuf;
 
+use crate::system::InterfaceSelector;
+
 use crate::command_options::{
-    Budget, CaptureReaderBoundsArgs, DestinationAllowlistArgs, LinkMode, PermissivePacketArgs,
-    PublicDestinationArgs, SourceSpoofingArgs, TrafficBudgetArgs,
+    Budget, CaptureReaderBoundsArgs, CaptureStdout, CompressionArgs, DestinationAllowlistArgs,
+    LinkMode, MaxDurationArgs, PermissivePacketArgs, PublicDestinationArgs, RunTime,
+    SourceSpoofingArgs, TrafficBudgetArgs,
 };
 use clap::ValueEnum;
 
@@ -39,15 +42,19 @@ impl From<Timing> for packetcraftr::replay::Timing {
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Args {
-    /// Compress binary capture output; independent of the input's detected format.
-    #[arg(long, value_enum, default_value_t = crate::command_options::Compression::None)]
-    pub(crate) compression: crate::command_options::Compression,
+    #[command(flatten)]
+    pub(crate) compression: CompressionArgs<CaptureStdout>,
 
     /// Classic PCAP or PCAPNG input path.
     pub(crate) path: PathBuf,
     /// Fallback output interface; mapping-only runs may omit it.
-    #[arg(long, value_name = "NAME_OR_INDEX", required_unless_present_any = ["interface_maps", "filter_maps"])]
-    pub(crate) interface: Option<String>,
+    #[arg(
+        long,
+        value_name = "NAME_OR_INDEX",
+        value_parser = InterfaceSelector::from_argument,
+        required_unless_present_any = ["interface_maps", "filter_maps"]
+    )]
+    pub(crate) interface: Option<InterfaceSelector>,
     /// Map a capture-global input interface ID (classic PCAP uses 0).
     #[arg(long = "map-interface", value_name = "SOURCE_ID=OUTPUT_INTERFACE")]
     pub(crate) interface_maps: Vec<String>,
@@ -78,10 +85,8 @@ pub(crate) struct Args {
     /// synthetic media overhead. Scheduling is best effort; first frame is immediate.
     #[arg(long, conflicts_with_all = ["rate", "speed"], value_parser = clap::value_parser!(u64).range(1..))]
     pub(crate) bps: Option<u64>,
-    /// Maximum replay run time in milliseconds, which also bounds the cumulative
-    /// scheduled delay.
-    #[arg(long, default_value_t = 3_600_000)]
-    pub(crate) max_duration_ms: u64,
+    #[command(flatten)]
+    pub(crate) duration: MaxDurationArgs<ReplayRunTime>,
     #[command(flatten)]
     pub(crate) reader: CaptureReaderBoundsArgs,
     /// Per-operation opt-in required for a permissively built or malformed live frame.
@@ -142,4 +147,13 @@ impl PolicyArgs {
         self.budgets.apply_to(&mut policy);
         policy
     }
+}
+
+/// The whole replay, scheduled delay included.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ReplayRunTime;
+
+impl RunTime for ReplayRunTime {
+    const HELP: &'static str =
+        "Maximum replay run time in milliseconds, which also bounds the cumulative scheduled delay";
 }

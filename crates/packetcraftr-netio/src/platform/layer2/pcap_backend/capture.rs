@@ -17,7 +17,7 @@ use pcap::{Active, Capture, Error as PcapError};
 
 use super::bpf::install_capture_filter;
 use crate::{
-    Error,
+    Error, NativeCapability, Unsupported,
     capture::live::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
         NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
@@ -27,11 +27,12 @@ use crate::{
     },
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{
-        canonical_link_type, check_setting_status, is_missing_device, is_permission_denied,
-        realize_settings, timestamp_precision_value, timestamp_source_of_value,
-        timestamp_source_value, validate_effective_snapshot_length,
+        Diagnostic, canonical_link_type, check_setting_status, is_missing_device,
+        is_permission_denied, realize_settings, timestamp_precision_value,
+        timestamp_source_of_value, timestamp_source_value, validate_effective_snapshot_length,
     },
 };
+use packetcraftr_core::error::Source;
 pub(super) const READ_TIMEOUT_MILLIS: i32 = 50;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
@@ -87,12 +88,14 @@ pub(in crate::platform) fn open_capture(
     let datalink = capture.get_datalink().0;
     let link_type = u32::try_from(datalink)
         .map(canonical_link_type)
-        .map_err(|_| Error::Unsupported {
-            message: format!(
-                "libpcap returned negative data-link type {datalink} for {}",
-                interface.name
-            ),
-            source: None,
+        .map_err(|_| {
+            Unsupported::new(
+                NativeCapability::Capture,
+                format!(
+                    "libpcap returned negative data-link type {datalink} for {}",
+                    interface.name
+                ),
+            )
         })?;
     // SAFETY: capture is activated and remains live and immutably borrowed for
     // this query; pcap_snapshot only reads its configured snapshot length.
@@ -204,11 +207,10 @@ pub(in crate::platform) fn timestamp_types(
     if count < 0 {
         return Err(Error::Capture {
             message: format!(
-                "libpcap could not enumerate timestamp types for {}: {}",
-                interface.name,
-                inactive_error_message(handle)
+                "libpcap could not enumerate timestamp types for {}",
+                interface.name
             ),
-            source: None,
+            source: Diagnostic::new(Some(count), inactive_error_message(handle)).into_source(),
         });
     }
     // A zero count means only the default timestamp type is supported;
@@ -337,7 +339,7 @@ impl NativeCaptureSource for PcapCaptureSource {
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),
             Err(error) => Err(Error::Capture {
                 message: "libpcap receive failed".to_owned(),
-                source: Some(Arc::new(error)),
+                source: Some(Source::new(error)),
             }),
         }
     }
@@ -352,7 +354,7 @@ impl NativeCaptureSource for PcapCaptureSource {
             })
             .map_err(|error| Error::Capture {
                 message: "libpcap statistics failed".to_owned(),
-                source: Some(Arc::new(error)),
+                source: Some(Source::new(error)),
             })
     }
 }
@@ -367,7 +369,7 @@ impl CaptureInterrupt for PcapInterrupt {
 
 pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
-    let source: Option<crate::SystemFault> = Some(Arc::new(error));
+    let source = Some(Source::new(error));
     if is_permission_denied(&message) {
         return Error::Privilege {
             message: format!(

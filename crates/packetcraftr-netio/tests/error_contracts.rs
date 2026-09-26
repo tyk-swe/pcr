@@ -1,12 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
+use std::{fmt, io, net::IpAddr, time::Duration};
 
 use packetcraftr_core::budget::Cancelled;
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
-    Error, SendEvidenceFault, capture, interface, link::Mode, route::SystemError,
+    Error, NativeCapability, SendEvidenceFault, Unsupported, capture, interface, link::Mode,
+    route::SystemError, tcp,
 };
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
@@ -15,7 +16,7 @@ use packetcraftr_netio::{
 fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     let error = Error::Capture {
         message: "libpcap receive failed".to_owned(),
-        source: Some(Arc::new(io::Error::other("device is not up"))),
+        source: Some(Source::new(io::Error::other("device is not up"))),
     };
     assert_eq!(error.to_string(), "capture failed: libpcap receive failed");
     assert_eq!(error.causes(), ["device is not up"]);
@@ -26,17 +27,26 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
         fault: SendEvidenceFault::AcceptedBytesDiffer,
     };
     assert_eq!(
+        invariant.to_string(),
+        "packet transmission wire evidence is inconsistent"
+    );
+    assert_eq!(
         invariant.causes(),
         ["provider-accepted bytes differ from the exact submitted frame"]
+    );
+    assert_row(
+        &SendEvidenceFault::InconsistentTiming,
+        "internal.live_io_invariant",
+        Kind::Internal,
     );
 
     // A route adapter refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Some(Arc::new(SystemError::OperatingSystem {
+        source: Some(Source::new(SystemError::OperatingSystem {
             operation: "RTM_GETLINK",
             message: "the operating system refused the request".to_owned(),
-            source: Some(Arc::new(io::Error::other("operation not permitted"))),
+            source: Some(Source::new(io::Error::other("operation not permitted"))),
         })),
     };
     assert_eq!(
@@ -52,13 +62,14 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
 /// the matching live-I/O failure with the same message and source chain.
 #[test]
 fn interface_errors_keep_live_io_classes_and_their_source() {
-    let unsupported = interface::Error::Unsupported {
-        message: "enable the native-route feature for native interface enumeration".to_owned(),
-    };
+    let unsupported = interface::Error::Unsupported(Unsupported::new(
+        NativeCapability::InterfaceEnumeration,
+        "enable the native-route feature for native interface enumeration",
+    ));
     assert_row(&unsupported, "capability.unsupported", Kind::Capability);
     let discovery = interface::Error::Discovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Arc::new(io::Error::other("operation not permitted")),
+        source: Source::new(io::Error::other("operation not permitted")),
     };
     assert_row(&discovery, "io.interface_discovery", Kind::Io);
     assert_eq!(discovery.causes(), ["operation not permitted"]);
@@ -74,6 +85,124 @@ fn interface_errors_keep_live_io_classes_and_their_source() {
         assert_eq!(live.to_string(), error.to_string());
         assert_eq!(live.causes(), error.causes());
         assert_eq!(live.classification(), error.classification());
+    }
+}
+
+/// Every "unsupported" failure is one [`Unsupported`] whose capability
+/// decides its class: route lookups publish `capability.route`, everything
+/// else `capability.unsupported`. The three error types that carry it publish
+/// the same message, class, and causes.
+#[test]
+fn unsupported_capabilities_classify_by_capability_in_every_error_type() {
+    for (capability, code, subject) in [
+        (
+            NativeCapability::Route,
+            "capability.route",
+            "native route selection",
+        ),
+        (
+            NativeCapability::InterfaceEnumeration,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Capture,
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer2),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+        (
+            NativeCapability::Transmission(Mode::Layer3),
+            "capability.unsupported",
+            "live packet I/O",
+        ),
+    ] {
+        let unsupported = Unsupported {
+            capability,
+            message: "fixture".to_owned(),
+            source: Some(Source::new(io::Error::other("refused by the driver"))),
+        };
+        assert_row(&unsupported, code, Kind::Capability);
+        assert_eq!(
+            unsupported.to_string(),
+            format!("{subject} is unavailable: fixture")
+        );
+        assert_eq!(unsupported.causes(), ["refused by the driver"]);
+
+        let carriers: [Box<dyn Classified>; 3] = [
+            Box::new(Error::from(unsupported.clone())),
+            Box::new(SystemError::from(unsupported.clone())),
+            Box::new(interface::Error::from(unsupported.clone())),
+        ];
+        for carrier in carriers {
+            assert_eq!(carrier.classification(), unsupported.classification());
+            assert_eq!(carrier.causes(), unsupported.causes());
+        }
+        assert_eq!(
+            Error::from(unsupported.clone()).to_string(),
+            unsupported.to_string()
+        );
+    }
+}
+
+/// `tcp::Error` is `#[non_exhaustive]`; the table lists all 9 variants
+/// exactly once. A socket failure is the provider's own error: its message
+/// and kind pass through, and every other socket error stays a source.
+#[test]
+fn tcp_errors_keep_stable_classes_and_their_socket_source() {
+    let socket = tcp::Error::from(io::Error::new(
+        io::ErrorKind::ConnectionRefused,
+        "connection refused by the peer",
+    ));
+    assert_eq!(socket.to_string(), "connection refused by the peer");
+    assert!(matches!(
+        &socket,
+        tcp::Error::Socket(source) if source.kind() == io::ErrorKind::ConnectionRefused
+    ));
+
+    let evidence = tcp::Error::Evidence {
+        operation: "peer",
+        source: io::Error::other("socket is not connected"),
+    };
+    assert_eq!(
+        evidence.to_string(),
+        "could not inspect the connected peer endpoint"
+    );
+    assert_eq!(evidence.causes(), ["socket is not connected"]);
+
+    let cases = [
+        (socket, "io.tcp_connect", Kind::Io),
+        (evidence, "io.tcp_connect_evidence", Kind::Io),
+        (tcp::Error::Timeout, "cli.tcp_connect_timeout", Kind::Usage),
+        (
+            tcp::Error::DeadlineExceeded,
+            "io.deadline_exceeded",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Capacity { limit: 16 },
+            "io.tcp_connect_capacity",
+            Kind::Io,
+        ),
+        (
+            tcp::Error::Spawn(io::Error::other("thread limit reached")),
+            "io.tcp_connect_worker",
+            Kind::Io,
+        ),
+        (tcp::Error::Worker, "io.tcp_connect_worker", Kind::Io),
+        (
+            tcp::Error::Completed,
+            "internal.tcp_connect_state",
+            Kind::Internal,
+        ),
+        (tcp::Error::Cancelled(Cancelled), "io.cancelled", Kind::Io),
+    ];
+    for (error, code, kind) in cases {
+        assert_row(&error, code, kind);
     }
 }
 
@@ -105,9 +234,7 @@ fn assert_row(
 fn system_route_errors_keep_stable_provider_classes() {
     let cases = [
         (
-            SystemError::Unsupported {
-                message: "fixture".to_owned(),
-            },
+            SystemError::Unsupported(Unsupported::new(NativeCapability::Route, "fixture")),
             "capability.route",
             Kind::Capability,
         ),
@@ -163,7 +290,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             SystemError::OperatingSystem {
                 operation: "fixture operation",
                 message: "fixture".to_owned(),
-                source: Some(Arc::new(io::Error::other("kernel refused the request"))),
+                source: Some(Source::new(io::Error::other("kernel refused the request"))),
             },
             "io.route",
             Kind::Io,
@@ -189,10 +316,7 @@ fn system_route_errors_keep_stable_provider_classes() {
 fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
     let cases = [
         (
-            Error::Unsupported {
-                message: "fixture".to_owned(),
-                source: None,
-            },
+            Error::Unsupported(Unsupported::new(NativeCapability::Capture, "fixture")),
             "capability.unsupported",
             Kind::Capability,
         ),

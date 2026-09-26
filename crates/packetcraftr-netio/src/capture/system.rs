@@ -39,10 +39,12 @@ pub(super) fn open(request: &Request, deadline: &Deadline) -> Result<Box<dyn Ses
 pub(super) fn open(request: &Request, _deadline: &Deadline) -> Result<Box<dyn Session>, Error> {
     request.validate()?;
     Err(crate::platform::unsupported(
+        crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),
         "native-layer2",
         "packet capture",
-    ))
+    )
+    .into())
 }
 
 #[cfg(native_layer2)]
@@ -60,10 +62,12 @@ pub(super) fn timestamp_types(
     _deadline: &Deadline,
 ) -> Result<Vec<TimestampType>, Error> {
     Err(crate::platform::unsupported(
+        crate::NativeCapability::Capture,
         cfg!(feature = "native-layer2"),
         "native-layer2",
         "timestamp type discovery",
-    ))
+    )
+    .into())
 }
 
 #[cfg(native_layer2)]

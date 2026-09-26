@@ -294,6 +294,31 @@ All notable changes to PacketcraftR are documented here. The format follows
   `DeadlineExceeded` variants, and `tcp::ConnectError` gains
   `DeadlineExceeded` (`io.deadline_exceeded`). See
   `docs/migration-unreleased.md`.
+- netio errors follow the workspace error convention:
+  - One unsupported representation: `packetcraftr_netio::Error::Unsupported`,
+    `route::SystemError::Unsupported`, and `interface::Error::Unsupported`
+    each carry the new `packetcraftr_netio::Unsupported { capability,
+    message, source }`. Its `NativeCapability` (`Route`,
+    `InterfaceEnumeration`, `Capture`, `Transmission(Mode)`) decides the
+    class, so `capability.route` and `capability.unsupported` and the
+    messages are unchanged.
+  - The `packetcraftr_netio::SystemFault` alias is removed. Type-erased sources
+    in netio errors and in `packetcraftr::dns::tcp::Error` are
+    `packetcraftr_core::error::Source`, which exposes the wrapped error to
+    `downcast_ref` directly.
+  - `tcp::ConnectError` and the `io::Result` of `tcp::Provider::connect`,
+    `ConnectOutcome::result`, `PendingConnect::poll`, and `tcp::start_connect`
+    fold into `tcp::Error`. A provider's socket failure is
+    `tcp::Error::Socket(io::Error)` (`From<io::Error>`, classified as the new
+    `io.tcp_connect`), and a connection that never reached its provider reports
+    `DeadlineExceeded` or `Cancelled` instead of a synthetic `io::Error`.
+    Every other code is unchanged.
+  - `SendEvidenceFault` implements `Classified`.
+  - `tcp::Error::{Evidence, Spawn}`, `Error::InvalidSendEvidence`, and
+    `SendEvidenceFault::UnrepresentableFrame` no longer repeat their source in
+    their message; it appears in `causes`.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -840,6 +865,14 @@ All notable changes to PacketcraftR are documented here. The format follows
   keeps the preparation error as its source, instead of `InvalidEvidence`
   with that error's text. The code (`internal.fuzz_evidence`) and message are
   unchanged; the error's `causes` now list the preparation error.
+- Native libpcap and Npcap failures keep the status and error-buffer text the
+  API reported as their source, instead of formatting them into the message
+  with no source. Codes are unchanged; the text moves from the message to
+  `causes`. A failed Windows system-directory lookup keeps its OS error, and
+  IP Helper adapter enumeration that never stabilizes keeps its
+  buffer-overflow status. A `connect` scan attempt stopped before its provider
+  ran publishes the same socket error kind (`TimedOut` or `Interrupted`), and
+  its message now names the spent deadline or the cancellation.
 
 ### Removed
 
@@ -851,7 +884,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   submodule paths (use the flat `tls::` re-exports),
   `analysis::pcap::DEFAULT_SIZE_LIMIT` (use
   `frame::DEFAULT_SIZE_LIMIT`), and `packetcraftr::dns::tcp::SocketFault` (use
-  `packetcraftr_netio::SystemFault`).
+  `packetcraftr_core::error::Source`).
 - The independent downstream compatibility workspace (`compatibility/`); its
   codec, offline collector, provider composition and output-consumer checks
   are covered by the workspace integration tests.
@@ -865,7 +898,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}`
   re-exports; import them from `packetcraftr::policy`.
 - **Breaking:** the `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}`
-  re-exports; import them from `packetcraftr_core::packet::link`.
+  re-exports; import them from `packetcraftr_core::packet`.
 - The `#[doc(hidden)]` `packetcraftr_core::layer::{malformed_layout,
   padding_layout}` exports. `raw_layout` remains available to codecs outside
   core that emit `Raw` layers.

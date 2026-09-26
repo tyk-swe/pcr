@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::ffi::{c_char, c_int};
-use std::sync::Arc;
 
 use super::abi::{
     PCAP_ERROR_BUFFER_SIZE, PCAP_ERROR_CAPTURE_NOTSUP, PCAP_ERROR_IFACE_NOT_UP,
@@ -10,73 +9,80 @@ use super::abi::{
     PCAP_ERROR_RFMON_NOTSUP, PCAP_WARNING_PROMISC_NOTSUP,
 };
 use crate::{
-    Error,
+    Error, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
-    platform::layer2::pcap_common::{is_missing_device, is_permission_denied},
+    platform::layer2::pcap_common::{Diagnostic, is_missing_device, is_permission_denied},
 };
+use packetcraftr_core::error::Source;
 
+/// Classifies a rejected activation by its status; the status and Npcap's
+/// diagnostic stay the failure's source.
 pub(super) fn map_activation_error(
     interface: &InterfaceId,
     status: c_int,
-    message: String,
+    diagnostic: String,
 ) -> Error {
+    let source = Diagnostic::new(Some(status), diagnostic).into_source();
     match status {
-        PCAP_WARNING_PROMISC_NOTSUP => Error::Unsupported {
+        PCAP_WARNING_PROMISC_NOTSUP => Unsupported {
+            capability: NativeCapability::Capture,
             message: format!(
-                "Npcap does not support requested promiscuous capture on {}: {message}",
+                "Npcap does not support requested promiscuous capture on {}",
                 interface.name
             ),
-            source: None,
-        },
+            source,
+        }
+        .into(),
         PCAP_ERROR_PERM_DENIED | PCAP_ERROR_PROMISC_PERM_DENIED => Error::Privilege {
             message: format!(
-                "cannot open {} through Npcap: {message}; grant capture privileges or run elevated",
+                "cannot open {} through Npcap; grant capture privileges or run elevated",
                 interface.name
             ),
-            source: None,
+            source,
         },
         PCAP_ERROR_NO_SUCH_DEVICE | PCAP_ERROR_IFACE_NOT_UP => Error::Device {
             interface: interface.name.clone(),
-            message: format!("Npcap activation failed with status {status}: {message}"),
-            source: None,
+            message: "Npcap activation failed".to_owned(),
+            source,
         },
-        PCAP_ERROR_RFMON_NOTSUP | PCAP_ERROR_CAPTURE_NOTSUP => Error::Unsupported {
-            message: format!(
-                "Npcap does not support capture on {} (status {status}): {message}",
-                interface.name
-            ),
-            source: None,
-        },
+        PCAP_ERROR_RFMON_NOTSUP | PCAP_ERROR_CAPTURE_NOTSUP => Unsupported {
+            capability: NativeCapability::Capture,
+            message: format!("Npcap does not support capture on {}", interface.name),
+            source,
+        }
+        .into(),
         _ => Error::Capture {
-            message: format!(
-                "Npcap activation failed for {} with status {status}: {message}",
-                interface.name
-            ),
-            source: None,
+            message: format!("Npcap activation failed for {}", interface.name),
+            source,
         },
     }
 }
 
-pub(super) fn map_open_message(interface: &InterfaceId, message: String) -> Error {
-    if is_permission_denied(&message) {
+/// Classifies a failed `pcap_create` by its diagnostic, the only thing it
+/// reports; the diagnostic stays the failure's source.
+pub(super) fn map_open_message(interface: &InterfaceId, diagnostic: String) -> Error {
+    let privilege = is_permission_denied(&diagnostic);
+    let missing = is_missing_device(&diagnostic);
+    let source = Diagnostic::new(None, diagnostic).into_source();
+    if privilege {
         return Error::Privilege {
             message: format!(
-                "cannot open {} through Npcap: {message}; grant capture privileges or run elevated",
+                "cannot open {} through Npcap; grant capture privileges or run elevated",
                 interface.name
             ),
-            source: None,
+            source,
         };
     }
-    if is_missing_device(&message) {
+    if missing {
         return Error::Device {
             interface: interface.name.clone(),
-            message: format!("Npcap could not open this interface: {message}"),
-            source: None,
+            message: "Npcap could not open this interface".to_owned(),
+            source,
         };
     }
     Error::Capture {
-        message: format!("could not open {} through Npcap: {message}", interface.name),
-        source: None,
+        message: format!("could not open {} through Npcap", interface.name),
+        source,
     }
 }
 
@@ -91,7 +97,7 @@ pub(super) fn interface_conversion_error(
             "{operation} rejected interface index {} (Win32 error {code})",
             interface.index
         ),
-        source: Some(Arc::new(std::io::Error::from_raw_os_error(
+        source: Some(Source::new(std::io::Error::from_raw_os_error(
             code.cast_signed(),
         ))),
     }

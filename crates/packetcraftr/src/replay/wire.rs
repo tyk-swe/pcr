@@ -7,7 +7,8 @@ use packetcraftr_core::codec::NetworkEnvelope;
 use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{
-    Error as LiveIoError, link::Mode as LinkMode, transmit::Report as IoSendReport,
+    Error as LiveIoError, NativeCapability, Unsupported, link::Mode as LinkMode,
+    transmit::Report as IoSendReport,
 };
 
 use super::error::Error;
@@ -29,12 +30,16 @@ pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {
     let classification = source.classification();
-    let source: packetcraftr_netio::SystemFault = std::sync::Arc::new(source);
+    let source = packetcraftr_core::error::Source::new(source);
     match classification.kind {
-        Kind::Capability => LiveIoError::Unsupported {
+        // Replay reports the missing route adapter as its own raw Layer 3
+        // transmission capability, not as a route lookup's.
+        Kind::Capability => Unsupported {
+            capability: NativeCapability::Transmission(LinkMode::Layer3),
             message: "the native route adapter cannot select a replay route".to_owned(),
             source: Some(source),
-        },
+        }
+        .into(),
         _ => LiveIoError::Send {
             message: "replay route selection failed".to_owned(),
             source: Some(source),

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::error::Error as StdError;
-use std::sync::Arc;
 use std::time::Duration;
 
 use thiserror::Error as ThisError;
@@ -10,12 +8,8 @@ use thiserror::Error as ThisError;
 use super::capture::Phase as CapturePhase;
 use super::interface::Id as InterfaceId;
 use super::link::Mode;
-use packetcraftr_core::error::{Classification, Classified, Kind, source_chain};
-
-/// Shared native error source. Sharing keeps [`Error`] cloneable so capture
-/// sessions can return terminal failures repeatedly. An absent source on an
-/// error means a PacketcraftR invariant failed rather than a platform call.
-pub type SystemFault = Arc<dyn StdError + Send + Sync>;
+use super::unsupported::Unsupported;
+use packetcraftr_core::error::{Classification, Classified, Kind, Source, source_chain};
 
 /// Which exact-transmission invariant a provider's wire evidence violated.
 ///
@@ -28,54 +22,54 @@ pub enum SendEvidenceFault {
     AcceptedBytesDiffer,
     #[error("provider timing has inconsistent monotonic endpoints")]
     InconsistentTiming,
-    #[error("provider-accepted bytes cannot form a capture record: {0}")]
+    #[error("provider-accepted bytes cannot form a capture record")]
     UnrepresentableFrame(#[from] packetcraftr_core::frame::Error),
 }
 
-/// Live interface, transmission, and capture failures. Native errors retain
-/// their typed [`SystemFault`] through rendering.
+/// Live interface, transmission, and capture failures.
+///
+/// A native failure keeps the platform's own error as its `source`, a shared
+/// [`Source`] handle so capture sessions can return a terminal failure
+/// repeatedly. An absent source means one of PacketcraftR's own checks failed
+/// (an invariant, a limit, or a provider's answer) rather than a platform call.
 #[derive(Debug, ThisError, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    #[error("live packet I/O is unavailable: {message}")]
-    Unsupported {
-        message: String,
-        #[source]
-        source: Option<SystemFault>,
-    },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     #[error("interface discovery failed: {message}")]
     InterfaceDiscovery {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("native dependency {dependency} is unavailable: {message}")]
     MissingDependency {
         dependency: &'static str,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("network device {interface} is unavailable: {message}")]
     Device {
         interface: String,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("live packet I/O requires additional privileges: {message}")]
     Privilege {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("packet transmission failed: {message}")]
     Send {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "packet transmission mode mismatch: expected {expected:?}, materialized route uses {actual:?}"
@@ -94,7 +88,7 @@ pub enum Error {
         bytes_sent: usize,
         wire_bytes: usize,
     },
-    #[error("packet transmission wire evidence is inconsistent: {fault}")]
+    #[error("packet transmission wire evidence is inconsistent")]
     InvalidSendEvidence {
         #[source]
         fault: SendEvidenceFault,
@@ -105,7 +99,7 @@ pub enum Error {
     Capture {
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error("native capture filter was rejected for {interface}: {message}")]
     InvalidCaptureFilter { interface: String, message: String },
@@ -185,15 +179,17 @@ pub enum Error {
     },
 }
 
+impl Classified for SendEvidenceFault {
+    fn classification(&self) -> Classification {
+        live_io_invariant()
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::Unsupported { .. } => classified(
-                "capability.unsupported",
-                Kind::Capability,
-                "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
-            ),
+            Self::Unsupported(unsupported) => unsupported.classification(),
             Self::MissingDependency { .. } => classified(
                 "capability.missing_dependency",
                 Kind::Capability,
@@ -295,15 +291,11 @@ impl Classified for Error {
             ),
             Self::CaptureSource { source, .. } => source.classification(),
             Self::CaptureCleanup { first, .. } => first.classification(),
+            Self::InvalidSendEvidence { fault } => fault.classification(),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
             | Self::InvalidSendReport { .. }
-            | Self::InvalidSendEvidence { .. }
-            | Self::InvalidCaptureStatistics { .. } => classified(
-                "internal.live_io_invariant",
-                Kind::Internal,
-                "report the inconsistent provider result; do not reinterpret it as a successful operation",
-            ),
+            | Self::InvalidCaptureStatistics { .. } => live_io_invariant(),
         }
     }
 
@@ -334,6 +326,14 @@ impl Error {
             _ => Self::DeadlineExceeded { operation },
         }
     }
+}
+
+fn live_io_invariant() -> Classification {
+    classified(
+        "internal.live_io_invariant",
+        Kind::Internal,
+        "report the inconsistent provider result; do not reinterpret it as a successful operation",
+    )
 }
 
 fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Classification {

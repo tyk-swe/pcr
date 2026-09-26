@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::budget::{Cancelled, Interrupted};
-use packetcraftr_core::error::{Classification, Classified};
-use thiserror::Error as ThisError;
+use packetcraftr_core::error::{Classification, Classified, Source};
 
-use crate::SystemFault;
+use crate::Unsupported;
+use thiserror::Error as ThisError;
 
 /// Why interface enumeration failed.
 #[derive(Debug, ThisError, Clone)]
@@ -17,15 +17,15 @@ pub enum Error {
     #[error("live operation deadline expired while {operation}")]
     DeadlineExceeded { operation: &'static str },
     /// This build or target has no native interface enumeration.
-    #[error("live packet I/O is unavailable: {message}")]
-    Unsupported { message: String },
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
     /// The provider refused the query or answered with an invalid snapshot;
     /// `source` holds that failure.
     #[error("interface discovery failed: {message}")]
     Discovery {
         message: String,
         #[source]
-        source: SystemFault,
+        source: Source,
     },
 }
 
@@ -44,14 +44,14 @@ impl Error {
     #[cfg(native_route)]
     pub(crate) fn native(error: crate::route::SystemError) -> Self {
         match error {
-            crate::route::SystemError::Unsupported { message } => Self::Unsupported { message },
+            crate::route::SystemError::Unsupported(unsupported) => unsupported.into(),
             crate::route::SystemError::Cancelled(cancelled) => cancelled.into(),
             crate::route::SystemError::DeadlineExceeded { operation } => {
                 Self::DeadlineExceeded { operation }
             }
             error => Self::Discovery {
                 message: "the native route adapter refused the interface query".to_owned(),
-                source: std::sync::Arc::new(error),
+                source: Source::new(error),
             },
         }
     }
@@ -64,10 +64,7 @@ impl From<Error> for crate::Error {
         match error {
             Error::Cancelled(cancelled) => cancelled.into(),
             Error::DeadlineExceeded { operation } => Self::DeadlineExceeded { operation },
-            Error::Unsupported { message } => Self::Unsupported {
-                message,
-                source: None,
-            },
+            Error::Unsupported(unsupported) => unsupported.into(),
             Error::Discovery { message, source } => Self::InterfaceDiscovery {
                 message,
                 source: Some(source),

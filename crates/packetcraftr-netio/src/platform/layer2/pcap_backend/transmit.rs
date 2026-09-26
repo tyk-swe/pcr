@@ -3,8 +3,6 @@
 
 //! libpcap Layer 2 frame transmission.
 
-use std::sync::Arc;
-
 use pcap::{Capture, Error as PcapError};
 
 use super::capture::{READ_TIMEOUT_MILLIS, map_open_error};
@@ -14,6 +12,7 @@ use crate::{
     platform::layer2::pcap_common::is_permission_denied,
     transmit::{self, Layer2Frame, Submission},
 };
+use packetcraftr_core::error::Source;
 
 pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
     let interface = &frame.route().decision.interface;
@@ -39,7 +38,7 @@ pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmi
 
 fn map_send_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
-    let source: Option<crate::SystemFault> = Some(Arc::new(error));
+    let source = Some(Source::new(error));
     if is_permission_denied(&message) {
         return Error::Privilege {
             message: format!(

@@ -22,10 +22,11 @@ use crate::platform::route::os_error;
 use crate::route::normalize::{NativeRouteSnapshot, finish_route};
 use crate::{
     interface::{self, Id as InterfaceId},
-    link::{Capability, MacAddress},
+    link::Capability,
     route::{Decision, SelectionReason, SystemError},
 };
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::MacAddress;
 
 pub(super) async fn query_route(
     handle: Handle,

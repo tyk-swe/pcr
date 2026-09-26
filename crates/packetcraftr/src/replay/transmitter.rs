@@ -9,7 +9,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::protocol::semantics;
 use packetcraftr_netio::route::Provider;
 use packetcraftr_netio::{
-    Error as LiveIoError,
+    Error as LiveIoError, NativeCapability, Unsupported,
     interface::Id as InterfaceId,
     interface::{
         Info as InterfaceInfo, Provider as InterfaceProvider,
@@ -80,13 +80,14 @@ impl SystemTransmitter {
         };
         self.validated_interface = Some(selected.clone());
         if !selected.capability.supports(mode) {
-            return Err(LiveIoError::Unsupported {
-                message: format!(
+            return Err(Unsupported::new(
+                NativeCapability::Transmission(mode),
+                format!(
                     "interface {} does not support requested {mode:?} replay",
                     selected.id.name
                 ),
-                source: None,
-            });
+            )
+            .into());
         }
         if mode == LinkMode::Layer2 && selected.link_type != frame.link_type {
             return Err(LiveIoError::Device {
@@ -168,13 +169,14 @@ fn materialized_route(
                 });
             }
             if !route.capability.supports(LinkMode::Layer3) {
-                return Err(LiveIoError::Unsupported {
-                    message: format!(
+                return Err(Unsupported::new(
+                    NativeCapability::Transmission(LinkMode::Layer3),
+                    format!(
                         "route through {} does not support raw Layer 3 transmission",
                         route.interface.name
                     ),
-                    source: None,
-                });
+                )
+                .into());
             }
             let source_mac = route.source_mac;
             crate::route::Plan {
@@ -408,7 +410,7 @@ mod tests {
                 &ethernet_frame(LinkType::ETHERNET),
                 &live(),
             ),
-            Err(LiveIoError::Unsupported { .. })
+            Err(LiveIoError::Unsupported(_))
         ));
 
         let selected = interface(LinkCapability::Layer3, LinkType::RAW);
@@ -421,7 +423,7 @@ mod tests {
                 &ethernet_frame(LinkType::RAW),
                 &live(),
             ),
-            Err(LiveIoError::Unsupported { .. })
+            Err(LiveIoError::Unsupported(_))
         ));
 
         let selected = interface(LinkCapability::Layer2, LinkType::ETHERNET);
@@ -429,7 +431,7 @@ mod tests {
         let mut transmitter = transmitter_with_cached_interface(selected);
         assert!(matches!(
             transmitter.plan_frame(&requested, LinkMode::Layer3, &ipv4_frame(), &live()),
-            Err(LiveIoError::Unsupported { .. })
+            Err(LiveIoError::Unsupported(_))
         ));
 
         let selected = interface(LinkCapability::Layer2AndLayer3, LinkType::RAW);

@@ -5,7 +5,6 @@
 //! it finished, such as a capture worker that missed shutdown.
 
 use std::{
-    fmt,
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex, OnceLock,
@@ -17,6 +16,7 @@ use std::{
 };
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Source;
 
 use super::{Class, Exhausted, Permit, Pool, Task, Waited, shared};
 
@@ -38,30 +38,14 @@ struct ReaperService {
     _workers: Vec<JoinHandle<()>>,
 }
 
-/// Shared rather than boxed so [`shared_reaper`] can clone the startup
-/// failure out of its `OnceLock` — a live-I/O failure then retains this as
-/// its typed source instead of formatting it into a message.
-#[derive(Clone, Debug)]
+/// The reaper's thread could not start. Cloneable so [`shared_reaper`] can
+/// hand the startup failure out of its `OnceLock` repeatedly; `source` is the
+/// original `std::io::Error` itself, so `raw_os_error()` stays reachable.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("start shared native worker reaper failed")]
 pub(crate) struct ReaperStartError {
-    source: Arc<std::io::Error>,
-}
-
-impl fmt::Display for ReaperStartError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "start shared native worker reaper failed: {}",
-            self.source
-        )
-    }
-}
-
-impl std::error::Error for ReaperStartError {
-    /// The original `std::io::Error` itself, so `raw_os_error()` and the
-    /// error's own chain stay reachable through `source()`.
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&*self.source)
-    }
+    #[source]
+    source: Source,
 }
 
 pub(crate) type ReapTask = Box<dyn FnOnce() + Send + 'static>;
@@ -141,7 +125,7 @@ fn start_reaper(
                     let _ = worker.join();
                 }
                 return Err(ReaperStartError {
-                    source: Arc::new(error),
+                    source: Source::new(error),
                 });
             }
         }
@@ -222,7 +206,14 @@ mod tests {
             Ok(_) => panic!("injected reaper spawn must fail"),
             Err(error) => error,
         };
-        assert!(error.to_string().contains("injected spawn failure"));
+        assert_eq!(
+            error.to_string(),
+            "start shared native worker reaper failed"
+        );
+        assert_eq!(
+            packetcraftr_core::error::render(&error),
+            "start shared native worker reaper failed: injected spawn failure"
+        );
     }
 
     #[test]

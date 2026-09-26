@@ -19,6 +19,8 @@ pub(in crate::platform) mod netlink;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use std::net::IpAddr;
 
+use packetcraftr_core::error::Source;
+
 use crate::{
     interface::{self, Id as InterfaceId},
     route::SystemError,
@@ -35,7 +37,7 @@ fn os_error(
     SystemError::OperatingSystem {
         operation,
         message: "the operating system refused the request".to_owned(),
-        source: Some(std::sync::Arc::new(error)),
+        source: Some(Source::new(error)),
     }
 }
 
@@ -44,7 +46,7 @@ fn refused(exhausted: crate::workers::Exhausted) -> SystemError {
     SystemError::OperatingSystem {
         operation: "reserve native worker",
         message: format!("native worker capacity {} is exhausted", exhausted.capacity),
-        source: Some(std::sync::Arc::new(exhausted)),
+        source: Some(Source::new(exhausted)),
     }
 }
 
@@ -71,7 +73,7 @@ fn on_worker<T: Send + 'static>(
             .map_err(|error| SystemError::OperatingSystem {
                 operation: "start native route worker",
                 message: "the operating system refused the request".to_owned(),
-                source: Some(std::sync::Arc::new(error)),
+                source: Some(Source::new(error)),
             })?;
     drop(permit);
     match task.wait(deadline) {
@@ -179,7 +181,8 @@ mod tests {
     use packetcraftr_core::frame::LinkType;
 
     use super::*;
-    use crate::link::{Capability, MacAddress};
+    use crate::link::Capability;
+    use packetcraftr_core::packet::MacAddress;
 
     fn interface() -> interface::Info {
         interface::Info {

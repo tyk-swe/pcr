@@ -7,6 +7,8 @@ use bytes::Bytes;
 
 use crate::interface::Id as InterfaceId;
 use crate::{Error, transmit::Layer3Frame};
+#[cfg(windows)]
+use crate::{NativeCapability, Unsupported, link::Mode};
 use packetcraftr_core::protocol::checksum;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
@@ -185,10 +187,11 @@ fn validate_windows_restrictions(
 ) -> Result<(), Error> {
     let protocol = upper_protocol(bytes)?;
     if protocol == 17 && packet_source != interface_source {
-        return Err(Error::Unsupported {
-            message: "Windows client editions drop raw UDP with a source not assigned to a local interface"
-                .to_owned(),
-         source: None });
+        return Err(Unsupported::new(
+            NativeCapability::Transmission(Mode::Layer3),
+            "Windows client editions drop raw UDP with a source not assigned to a local interface",
+        )
+        .into());
     }
     Ok(())
 }

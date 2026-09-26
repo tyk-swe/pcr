@@ -3,7 +3,6 @@
 
 use std::io::Cursor;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -706,7 +705,9 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     let refused = map_replay_route_error(RouteSystemError::OperatingSystem {
         operation: "RTM_GETROUTE",
         message: "the operating system refused the request".to_owned(),
-        source: Some(Arc::new(std::io::Error::other("operation not permitted"))),
+        source: Some(packetcraftr_core::error::Source::new(
+            std::io::Error::other("operation not permitted"),
+        )),
     });
     assert_eq!(
         refused.causes(),
@@ -718,9 +719,12 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
 
     // The capability arm keeps naming the replay boundary and publishes the
     // adapter's text once, in `causes`.
-    let unsupported = map_replay_route_error(RouteSystemError::Unsupported {
-        message: "native route selection is off".to_owned(),
-    });
+    let unsupported = map_replay_route_error(RouteSystemError::Unsupported(
+        packetcraftr_netio::Unsupported::new(
+            packetcraftr_netio::NativeCapability::Route,
+            "native route selection is off",
+        ),
+    ));
     assert_eq!(
         unsupported.to_string(),
         "live packet I/O is unavailable: the native route adapter cannot select a replay route"

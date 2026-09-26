@@ -3,8 +3,6 @@
 
 //! Link-layer transmission capabilities and modes.
 
-pub(crate) use packetcraftr_core::packet::MacAddress;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {

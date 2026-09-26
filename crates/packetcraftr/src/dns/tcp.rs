@@ -6,17 +6,15 @@
 //! Callers authorize destinations and validate DNS responses. Each exchange
 //! reads one declared response frame, then drops the connection.
 
-use packetcraftr_netio::SystemFault;
 use packetcraftr_netio::tcp::{Provider, Stream};
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Instant;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 use thiserror::Error as ThisError;
 
 /// Bytes in the DNS-over-TCP message-length prefix.
@@ -106,7 +104,7 @@ pub enum Error {
         endpoint: SocketAddr,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "DNS-over-TCP could not configure the {phase} timeout after {transferred} phase byte(s)"
@@ -115,7 +113,7 @@ pub enum Error {
         phase: Phase,
         transferred: usize,
         #[source]
-        source: SystemFault,
+        source: Source,
     },
     /// The prefixed query could not be written completely.
     ///
@@ -127,7 +125,7 @@ pub enum Error {
         expected: usize,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     /// A response read failed before an orderly end of stream.
     ///
@@ -138,7 +136,7 @@ pub enum Error {
         phase: Phase,
         message: String,
         #[source]
-        source: Option<SystemFault>,
+        source: Option<Source>,
     },
     #[error(
         "DNS-over-TCP response prefix ended after {actual} of {} bytes",
@@ -330,7 +328,7 @@ fn exchange_with_clock<P: Provider>(
     let peer_address = stream.peer_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "peer socket inspection failed".to_owned(),
-        source: Some(Arc::new(source)),
+        source: Some(Source::new(source)),
     })?;
     if peer_address != request.endpoint {
         return Err(Error::Connect {
@@ -342,7 +340,7 @@ fn exchange_with_clock<P: Provider>(
     let local_address = stream.local_addr().map_err(|source| Error::Connect {
         endpoint: request.endpoint,
         message: "local socket inspection failed".to_owned(),
-        source: Some(Arc::new(source)),
+        source: Some(Source::new(source)),
     })?;
 
     let expected_write =
@@ -446,18 +444,26 @@ fn remaining(
         .ok_or(Error::Timeout { phase, transferred })
 }
 
-fn map_connect_error(endpoint: SocketAddr, source: io::Error) -> Error {
-    if is_timeout(&source) {
-        Error::Timeout {
-            phase: Phase::Connect,
-            transferred: 0,
-        }
-    } else {
-        Error::Connect {
-            endpoint,
-            message: "the socket could not be opened".to_owned(),
-            source: Some(Arc::new(source)),
-        }
+/// A connect that timed out, at the socket or before it could start, is the
+/// connect phase's timeout; any other failure keeps its socket error, or the
+/// provider's own failure, as its source.
+fn map_connect_error(endpoint: SocketAddr, error: packetcraftr_netio::tcp::Error) -> Error {
+    use packetcraftr_netio::tcp::Error as TcpError;
+
+    let timeout = Error::Timeout {
+        phase: Phase::Connect,
+        transferred: 0,
+    };
+    let source = match error {
+        TcpError::Socket(source) if is_timeout(&source) => return timeout,
+        TcpError::DeadlineExceeded => return timeout,
+        TcpError::Socket(source) => Source::new(source),
+        error => Source::new(error),
+    };
+    Error::Connect {
+        endpoint,
+        message: "the socket could not be opened".to_owned(),
+        source: Some(source),
     }
 }
 
@@ -476,7 +482,7 @@ fn write_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase: Phase::Write,
                 transferred: *written,
-                source: Arc::new(source),
+                source: Source::new(source),
             })?;
         match stream.write(bytes) {
             Ok(0) => {
@@ -513,7 +519,7 @@ fn write_exact<S: Stream>(
                     written: *written,
                     expected,
                     message: "the socket write failed".to_owned(),
-                    source: Some(Arc::new(source)),
+                    source: Some(Source::new(source)),
                 });
             }
         }
@@ -536,7 +542,7 @@ fn read_exact<S: Stream>(
             .map_err(|source| Error::ConfigureTimeout {
                 phase,
                 transferred: read,
-                source: Arc::new(source),
+                source: Source::new(source),
             })?;
         let tail = bytes.get_mut(read..).ok_or(Error::Read {
             phase,
@@ -563,7 +569,7 @@ fn read_exact<S: Stream>(
                 return Err(Error::Read {
                     phase,
                     message: "the socket read failed".to_owned(),
-                    source: Some(Arc::new(source)),
+                    source: Some(Source::new(source)),
                 });
             }
         }

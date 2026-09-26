@@ -15,6 +15,7 @@ use std::{
 use packetcraftr_core::budget::Deadline;
 
 use crate::deadline::{POLL_INTERVAL, remaining_before};
+use packetcraftr_core::error::Source;
 
 use crate::workers::{Permit, Task, Waited};
 
@@ -109,14 +110,14 @@ impl NativeCaptureSession {
         // is created, so failure cannot leave an unmanaged native worker.
         let reaper = reaper.map_err(|error| Error::Capture {
             message: "native capture cleanup is unavailable".to_owned(),
-            source: Some(Arc::new(error)),
+            source: Some(Source::new(error)),
         })?;
         let permit = reaper.reserve().map_err(|error| Error::Capture {
             message: format!(
                 "native capture cleanup capacity {} is exhausted",
                 error.capacity
             ),
-            source: Some(Arc::new(error)),
+            source: Some(Source::new(error)),
         })?;
         let NativeCaptureParts {
             source,
@@ -156,7 +157,7 @@ impl NativeCaptureSession {
             })
             .map_err(|error| Error::Capture {
                 message: "could not start the owned capture worker".to_owned(),
-                source: Some(Arc::new(error)),
+                source: Some(Source::new(error)),
             })?;
         Ok(Self {
             metadata,

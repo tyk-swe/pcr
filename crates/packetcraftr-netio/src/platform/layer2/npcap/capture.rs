@@ -27,7 +27,7 @@ use crate::{
     },
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{
-        canonical_link_type, realize_settings, timestamp_source_of_value,
+        Diagnostic, canonical_link_type, realize_settings, timestamp_source_of_value,
         validate_effective_snapshot_length,
     },
 };
@@ -68,11 +68,10 @@ pub(in crate::platform) fn open_capture(
         .map(canonical_link_type)
         .map_err(|_| Error::Capture {
             message: format!(
-                "Npcap could not report the data-link type for {}: {}",
-                interface.name,
-                handle.error_message()
+                "Npcap could not report the data-link type for {}",
+                interface.name
             ),
-            source: None,
+            source: Diagnostic::new(Some(datalink), handle.error_message()).into_source(),
         })?;
     // SAFETY: handle is activated and live; pcap_snapshot only reads its
     // effective snapshot length.
@@ -131,11 +130,10 @@ pub(in crate::platform) fn timestamp_types(
     if count < 0 {
         return Err(Error::Capture {
             message: format!(
-                "Npcap could not enumerate timestamp types for {}: {}",
-                interface.name,
-                handle.error_message()
+                "Npcap could not enumerate timestamp types for {}",
+                interface.name
             ),
-            source: None,
+            source: Diagnostic::new(Some(count), handle.error_message()).into_source(),
         });
     }
     // A zero count means only the default timestamp type is supported;
@@ -331,15 +329,13 @@ impl NativeCaptureSource for NpcapCaptureSource {
             0 => Ok(NativeCaptureEvent::Timeout),
             PCAP_ERROR_BREAK => Ok(NativeCaptureEvent::Closed),
             PCAP_ERROR => Err(Error::Capture {
-                message: format!("Npcap receive failed: {}", self.handle.error_message()),
-                source: None,
+                message: "Npcap receive failed".to_owned(),
+                source: Diagnostic::new(Some(PCAP_ERROR), self.handle.error_message())
+                    .into_source(),
             }),
             status => Err(Error::Capture {
-                message: format!(
-                    "Npcap receive returned unexpected status {status}: {}",
-                    self.handle.error_message()
-                ),
-                source: None,
+                message: "Npcap receive returned an unexpected status".to_owned(),
+                source: Diagnostic::new(Some(status), self.handle.error_message()).into_source(),
             }),
         }
     }
@@ -352,11 +348,8 @@ impl NativeCaptureSource for NpcapCaptureSource {
             unsafe { (self.handle.api.pcap_stats)(self.handle.raw.as_ptr(), &mut statistics) };
         if result != 0 {
             return Err(Error::Capture {
-                message: format!(
-                    "Npcap statistics failed with status {result}: {}",
-                    self.handle.error_message()
-                ),
-                source: None,
+                message: "Npcap statistics failed".to_owned(),
+                source: Diagnostic::new(Some(result), self.handle.error_message()).into_source(),
             });
         }
         Ok(NativeCaptureStatistics {

@@ -6,7 +6,9 @@
 //! mapping, and error phrasing.
 
 use std::ffi::c_int;
+use std::fmt;
 
+use packetcraftr_core::error::Source;
 use packetcraftr_core::frame::LinkType;
 
 use crate::{
@@ -107,6 +109,41 @@ pub(in crate::platform) const fn timestamp_precision_of_value(
     }
 }
 
+/// What a pcap-API call reported about its own failure: the status it
+/// returned, when the call returns one, and the text it wrote into its error
+/// buffer. libpcap and Npcap report nothing more structured, so this is the
+/// typed source their failures keep.
+#[derive(Debug)]
+pub(in crate::platform) struct Diagnostic {
+    status: Option<c_int>,
+    text: String,
+}
+
+impl Diagnostic {
+    pub(in crate::platform) fn new(status: Option<c_int>, text: impl Into<String>) -> Self {
+        Self {
+            status,
+            text: text.into(),
+        }
+    }
+
+    /// The source handle a live-I/O failure keeps.
+    pub(in crate::platform) fn into_source(self) -> Option<Source> {
+        Some(Source::new(self))
+    }
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.status {
+            Some(status) => write!(formatter, "{} (status {status})", self.text),
+            None => formatter.write_str(&self.text),
+        }
+    }
+}
+
+impl std::error::Error for Diagnostic {}
+
 /// Maps known unsupported `pcap_set_*` statuses to
 /// [`Error::UnsupportedCaptureSetting`]. Every other nonzero status, including
 /// unexpected warnings, is a backend failure.
@@ -138,11 +175,8 @@ pub(in crate::platform) fn check_setting_status(
         });
     }
     Err(Error::Capture {
-        message: format!(
-            "{backend} {operation} failed for {} with status {status}: {diagnostic}",
-            interface.name
-        ),
-        source: None,
+        message: format!("{backend} {operation} failed for {}", interface.name),
+        source: Diagnostic::new(Some(status), diagnostic).into_source(),
     })
 }
 
@@ -238,6 +272,12 @@ pub(in crate::platform) fn validate_effective_snapshot_length(
     }
     Ok(effective)
 }
+
+// libpcap and Npcap report why opening or injecting failed only as error-buffer
+// text: their open calls return no status at all, and a failed send returns a
+// bare -1. Matching that text is therefore the only way to tell a privilege or
+// missing-device refusal apart, and it is used only on those paths; wherever
+// the API returns a distinguishing status (activation), the status decides.
 
 /// Recognizes the missing-interface refusals libpcap and Npcap phrase
 /// differently, so both backends classify them as device failures.
@@ -375,6 +415,28 @@ mod tests {
             .unwrap_err();
             assert!(matches!(error, Error::Capture { .. }), "status {status}");
         }
+    }
+
+    #[test]
+    fn a_failed_setting_keeps_the_backend_diagnostic_as_its_source() {
+        use packetcraftr_core::error::Classified;
+
+        let error = check_setting_status(
+            "libpcap",
+            &interface(),
+            "pcap_set_buffer_size",
+            "buffer_size",
+            "4096",
+            -1,
+            "fixture0: buffer is locked",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "capture failed: libpcap pcap_set_buffer_size failed for fixture0"
+        );
+        assert_eq!(error.causes(), ["fixture0: buffer is locked (status -1)"]);
+        assert_eq!(error.classification().code, "io.capture");
     }
 
     #[test]

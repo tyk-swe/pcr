@@ -185,7 +185,7 @@ mod tests {
             &self,
             endpoint: std::net::SocketAddr,
             deadline: &Deadline,
-        ) -> std::io::Result<Self::Stream> {
+        ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
             let timeout = deadline.remaining().unwrap_or_default();
             assert_eq!(endpoint, "127.0.0.1:53".parse().unwrap());
             assert!(!timeout.is_zero());
@@ -194,7 +194,8 @@ mod tests {
             Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "injected TCP refusal",
-            ))
+            )
+            .into())
         }
     }
 

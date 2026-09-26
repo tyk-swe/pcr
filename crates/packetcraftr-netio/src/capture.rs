@@ -6,6 +6,19 @@
 //! A [`Session`] reads one or more sources. A provider arms a single-interface
 //! session; a [`Group`] composes up to [`MAX_SOURCES`] of them into one
 //! session, and each [`Captured`] record names the source that delivered it.
+//!
+//! # Native settings
+//!
+//! [`NativeSettings`], [`TimestampSource`], [`TimestampPrecision`],
+//! [`TimestampType`], [`Realized`], and [`RealizedSettings`] name pcap-API
+//! concepts (`pcap_set_buffer_size`, `pcap_set_tstamp_type`,
+//! `pcap_set_tstamp_precision`). They are public capture API by decision:
+//! both native backends are pcap-API backends, callers select these settings
+//! per request, and a report publishes the advertised timestamp types and
+//! what the backend realized. Every setting is optional, and `None` keeps the
+//! backend default, so a provider without such controls serves every default
+//! request; an explicit request it cannot apply is refused as
+//! [`Error::UnsupportedCaptureSetting`].
 
 #[cfg(native_layer2)]
 mod filter;
@@ -583,10 +596,11 @@ pub trait Provider: Send + Sync {
         _interface: &InterfaceId,
         _deadline: &Deadline,
     ) -> Result<Vec<TimestampType>, Error> {
-        Err(Error::Unsupported {
-            message: "this capture provider cannot enumerate timestamp types".to_owned(),
-            source: None,
-        })
+        Err(crate::Unsupported::new(
+            crate::NativeCapability::Capture,
+            "this capture provider cannot enumerate timestamp types",
+        )
+        .into())
     }
 }
 

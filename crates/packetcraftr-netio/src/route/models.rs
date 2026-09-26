@@ -4,10 +4,11 @@
 use std::net::IpAddr;
 
 use crate::interface::Id as InterfaceId;
-use crate::link::{Capability, MacAddress};
+use crate::link::Capability;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::frame::LinkType;
+use packetcraftr_core::packet::MacAddress;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

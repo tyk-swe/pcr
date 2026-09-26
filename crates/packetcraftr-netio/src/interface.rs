@@ -7,11 +7,12 @@ mod error;
 pub(crate) mod validation;
 
 use std::net::IpAddr;
-use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::Source;
+use packetcraftr_core::packet::MacAddress;
 
-use super::link::{Capability, MacAddress};
+use super::link::Capability;
 
 pub use error::Error;
 
@@ -73,7 +74,7 @@ impl Provider for SystemProvider {
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
     validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
         message: "the native route adapter returned an invalid interface snapshot".to_owned(),
-        source: Arc::new(error),
+        source: Source::new(error),
     })
 }
 
@@ -118,13 +119,10 @@ mod tests {
             vec![valid.clone(), valid],
         ] {
             let error = validate_snapshot(snapshot).unwrap_err();
-            // SystemFault already uses Arc storage; thiserror exposes that Arc as the source.
+            // A `Source` field exposes the wrapped error itself.
             let source = error
                 .source()
                 .unwrap()
-                .downcast_ref::<crate::SystemFault>()
-                .unwrap()
-                .as_ref()
                 .downcast_ref::<SystemError>()
                 .unwrap();
             assert!(matches!(source, SystemError::InvalidResponse { .. }));

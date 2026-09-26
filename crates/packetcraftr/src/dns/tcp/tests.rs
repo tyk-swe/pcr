@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::io::{Cursor, Read, Write};
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::*;
 
@@ -39,9 +39,13 @@ struct ScriptedConnector {
 impl Provider for ScriptedConnector {
     type Stream = ScriptedStream;
 
-    fn connect(&self, _endpoint: SocketAddr, _deadline: &Deadline) -> io::Result<Self::Stream> {
+    fn connect(
+        &self,
+        _endpoint: SocketAddr,
+        _deadline: &Deadline,
+    ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
         if let Some(kind) = self.connect_error {
-            return Err(io::Error::from(kind));
+            return Err(io::Error::from(kind).into());
         }
         Ok(self.stream.clone())
     }

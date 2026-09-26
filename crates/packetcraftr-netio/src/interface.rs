@@ -3,14 +3,15 @@
 
 //! Interface discovery and portable interface descriptions.
 
+mod error;
 pub(crate) mod validation;
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use super::Error;
 use super::link::{Capability, MacAddress};
-use super::route::SystemError;
+
+pub use error::Error;
 
 /// Stable operating-system interface identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize)]
@@ -59,26 +60,16 @@ pub struct SystemProvider;
 
 impl Provider for SystemProvider {
     fn interfaces(&self) -> Result<Vec<Info>, Error> {
-        let interfaces = super::platform::interfaces().map_err(|error| match error {
-            SystemError::Unsupported { message } => Error::Unsupported {
-                message,
-                source: None,
-            },
-            error => Error::InterfaceDiscovery {
-                message: "the native route adapter refused the interface query".to_owned(),
-                source: Some(Arc::new(error)),
-            },
-        })?;
-        validate_snapshot(interfaces)
+        validate_snapshot(super::platform::interfaces()?)
     }
 }
 
 /// Refuses a native snapshot with an incomplete identity, an impossible
 /// prefix, or a duplicate interface.
 fn validate_snapshot(interfaces: Vec<Info>) -> Result<Vec<Info>, Error> {
-    validation::validate_native_interfaces(interfaces).map_err(|error| Error::InterfaceDiscovery {
+    validation::validate_native_interfaces(interfaces).map_err(|error| Error::Discovery {
         message: "the native route adapter returned an invalid interface snapshot".to_owned(),
-        source: Some(Arc::new(error)),
+        source: Arc::new(error),
     })
 }
 
@@ -89,6 +80,7 @@ mod tests {
     use packetcraftr_core::{error::Classified, frame::LinkType};
 
     use super::*;
+    use crate::route::SystemError;
 
     #[test]
     fn discovery_retains_actual_snapshot_validation_failures() {

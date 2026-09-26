@@ -1043,3 +1043,20 @@ capture session armed for it.
 `with_neighbor_options` validates the options (`cli.neighbor_limit` on
 failure) and starts a fresh cache. Every operation of one client shares that
 cache. Variant names, messages, and classification codes are unchanged.
+
+## Interface enumeration errors
+
+`interface::Provider::interfaces` returns `packetcraftr_netio::interface::Error`
+instead of `packetcraftr_netio::Error`, so enumeration no longer shares an
+error type with other live I/O.
+
+| Before | After |
+|---|---|
+| `Err(Error::Unsupported { message, source: None })` | `Err(interface::Error::Unsupported { message })` |
+| `Err(Error::InterfaceDiscovery { message, source })` | `Err(interface::Error::Discovery { message, source })`; `source` is a required `SystemFault` |
+
+Messages and classification codes are unchanged. `packetcraftr_netio::Error`
+implements `From<interface::Error>`, so `?` still converts an enumeration
+failure into a live I/O failure. A test fake that returned
+`InterfaceDiscovery { source: None }` supplies a source, for example
+`Arc::new(std::io::Error::other("fixture"))`.

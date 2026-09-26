@@ -93,13 +93,13 @@ pub(crate) fn interface_route(_interface: &InterfaceId) -> Result<Decision, Syst
 }
 
 #[cfg(native_route)]
-pub(crate) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+pub(crate) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
     route_backend::interfaces()
 }
 
 #[cfg(not(native_route))]
-pub(crate) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
-    Err(SystemError::Unsupported {
+pub(crate) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+    Err(interface::Error::Unsupported {
         message: unsupported_message(
             cfg!(feature = "native-route"),
             "native-route",

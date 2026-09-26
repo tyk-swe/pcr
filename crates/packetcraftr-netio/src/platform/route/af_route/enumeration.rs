@@ -20,7 +20,7 @@ use crate::{
 };
 use packetcraftr_core::frame::LinkType;
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
     // linked list that remains valid until the matching `freeifaddrs` below.

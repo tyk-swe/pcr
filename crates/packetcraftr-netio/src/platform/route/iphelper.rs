@@ -9,5 +9,10 @@ mod adapter;
 mod enumeration;
 mod query;
 
-pub(in crate::platform) use enumeration::interfaces;
+use crate::interface;
+
 pub(in crate::platform) use query::{interface_route, route};
+
+pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+    enumeration::interfaces().map_err(interface::Error::native)
+}

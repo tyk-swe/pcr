@@ -18,7 +18,11 @@ use crate::{
 mod query;
 mod worker;
 
-pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+    snapshot().map_err(interface::Error::native)
+}
+
+fn snapshot() -> Result<Vec<interface::Info>, SystemError> {
     with_netlink(|handle| async move { query_interfaces(&handle).await })
 }
 
@@ -34,5 +38,5 @@ pub(in crate::platform) fn route(
 pub(in crate::platform) fn interface_route(
     requested: &InterfaceId,
 ) -> Result<Decision, SystemError> {
-    interface_decision(find_interface(&interfaces()?, requested)?)
+    interface_decision(find_interface(&snapshot()?, requested)?)
 }

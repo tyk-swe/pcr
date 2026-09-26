@@ -16,10 +16,10 @@ use packetcraftr_core::error::BoundaryError;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("scan: {0}")]
-    TargetSelection(#[source] SelectionError),
-    #[error("scan: {0}")]
-    Cancelled(#[source] Cancelled),
+    #[error(transparent)]
+    TargetSelection(SelectionError),
+    #[error(transparent)]
+    Cancelled(Cancelled),
     #[error("invalid scan limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -32,18 +32,18 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("scan duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
-    #[error("scan authorization failed: {0}")]
+    #[error("scan authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved target has no {family} address selected for this scan")]
     Family { family: &'static str },
     #[error("scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("scan pipeline execution failed: {source}")]
+    #[error("scan pipeline execution failed")]
     PipelineExecution {
         #[source]
         source: BoundaryError,
     },
-    #[error("scan execution failed at probe {sequence}: {source}")]
+    #[error("scan execution failed at probe {sequence}")]
     Execution {
         sequence: u64,
         #[source]
@@ -59,7 +59,7 @@ pub enum Error {
     InvalidEvidence { sequence: u64, message: String },
     #[error("scan statistic accounting overflowed at probe {sequence}")]
     StatisticsOverflow { sequence: u64 },
-    #[error("scan progressive output failed: {source}")]
+    #[error("scan progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -139,14 +139,15 @@ impl Classified for Error {
         }
     }
 
-    /// Boundary-sourced variants delegate because a [`BoundaryError`] carries
-    /// a captured `causes` snapshot its own source chain no longer holds.
+    /// Boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot, which its own source chain no longer
+    /// holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(source)
             | Self::PipelineExecution { source }
             | Self::Execution { source, .. }
-            | Self::Output { source } => source.causes(),
+            | Self::Output { source } => source.as_causes(),
             _ => packetcraftr_core::error::source_chain(self),
         }
     }

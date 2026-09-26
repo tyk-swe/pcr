@@ -23,20 +23,18 @@ pub enum Error {
     HeterogeneousRoute,
     /// Boxed because this variant is the only one that carries two complete
     /// live-I/O failures, and no other failure should make room for them.
-    #[error("{operation}; capture shutdown also failed: {shutdown}")]
+    #[error("exchange failed and its capture shutdown also failed")]
     OperationAndCaptureShutdown {
         operation: Box<LiveIoError>,
         shutdown: Box<LiveIoError>,
     },
     /// The sink refused an event, or publishing it failed.
-    #[error("exchange progressive output failed: {source}")]
+    #[error("exchange progressive output failed")]
     Output {
         #[source]
         source: Box<BoundaryError>,
     },
-    #[error(
-        "exchange progressive output failed: {output}; capture shutdown also failed: {shutdown}"
-    )]
+    #[error("exchange progressive output failed and capture shutdown also failed")]
     OutputAndCaptureShutdown {
         output: Box<BoundaryError>,
         shutdown: Box<LiveIoError>,
@@ -99,17 +97,21 @@ impl Classified for Error {
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Preparation(error) => error.causes(),
-            Self::Output { source } => source.causes(),
+            Self::Output { source } => source.as_causes(),
             Self::OperationAndCaptureShutdown {
                 operation,
                 shutdown,
-            } => vec![operation.to_string(), shutdown.to_string()],
-            Self::OutputAndCaptureShutdown { output, shutdown } => {
-                let mut causes = output.causes();
-                if causes.is_empty() {
-                    causes.push(output.to_string());
-                }
+            } => {
+                let mut causes = vec![operation.to_string()];
+                causes.extend(operation.causes());
                 causes.push(shutdown.to_string());
+                causes.extend(shutdown.causes());
+                causes
+            }
+            Self::OutputAndCaptureShutdown { output, shutdown } => {
+                let mut causes = output.as_causes();
+                causes.push(shutdown.to_string());
+                causes.extend(shutdown.causes());
                 causes
             }
             error => packetcraftr_core::error::source_chain(error),

@@ -18,13 +18,13 @@ pub enum Cause {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
     /// The selector or the sink failed, or the sink did not answer in time.
-    #[error("capture consumer failed: {0}")]
+    #[error("capture consumer failed")]
     Consumer(#[source] BoundaryError),
     #[error("invalid capture operation: {0}")]
     Invalid(&'static str),
     #[error("capture statistics cannot be combined without overflow")]
     Statistics,
-    #[error("capture evidence was lost at source {source_index}: {error}")]
+    #[error("capture evidence was lost at source {source_index}")]
     Loss {
         source_index: usize,
         #[source]
@@ -70,7 +70,7 @@ impl Classified for Error {
         let mut causes = match self.cause.as_ref() {
             // A boundary error carries a captured causes snapshot that its own
             // source chain no longer holds.
-            Cause::Consumer(error) => error.causes(),
+            Cause::Consumer(error) => error.as_causes(),
             Cause::Native(error) => error.causes(),
             _ => packetcraftr_core::error::source_chain(self),
         };

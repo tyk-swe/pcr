@@ -76,7 +76,7 @@ impl BoundaryError {
     /// Its message followed by its captured causes: the causes of a wrapper
     /// that reports this error as its source without repeating its text.
     #[must_use]
-    pub(crate) fn as_causes(&self) -> Vec<String> {
+    pub fn as_causes(&self) -> Vec<String> {
         std::iter::once(self.message.clone())
             .chain(self.causes.iter().cloned())
             .collect()

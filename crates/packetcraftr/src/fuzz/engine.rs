@@ -229,13 +229,14 @@ where
     } else {
         PermissiveLive::NotRequired
     };
-    authorizer.authorize_operation(Operation::Declared(DeclaredPackets::new(
-        WireLimits::new(prepared.stats.cases_built, prepared.maximum_wire_bytes),
-        &packets,
-        request.destination,
-        permissive_live,
-    )))?;
-    Ok(())
+    authorizer
+        .authorize_operation(Operation::Declared(DeclaredPackets::new(
+            WireLimits::new(prepared.stats.cases_built, prepared.maximum_wire_bytes),
+            &packets,
+            request.destination,
+            permissive_live,
+        )))
+        .map_err(Error::Authorization)
 }
 
 /// Judges one case's evidence before any of it is recorded: the executor must

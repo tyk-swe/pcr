@@ -12,7 +12,7 @@ use packetcraftr_core::error::{Classification, Classified, Kind};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("route lookup for {destination} failed: {source}")]
+    #[error("route lookup for {destination} failed")]
     RouteLookup {
         destination: IpAddr,
         #[source]
@@ -25,7 +25,7 @@ pub enum Error {
     MissingLayer2Interface,
     #[error("route provider cannot select interface {interface} without an IP destination")]
     InterfaceLookupUnsupported { interface: String },
-    #[error("interface lookup for {interface} failed: {source}")]
+    #[error("interface lookup for {interface} failed")]
     InterfaceLookup {
         interface: String,
         #[source]

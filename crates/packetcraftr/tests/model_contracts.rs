@@ -545,11 +545,20 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
         )
     };
     let send = packetcraftr::send::Error::Output { source: snapshot() };
-    assert_eq!(send.causes(), ["fixture disk is full"], "{send}");
+    assert_eq!(send.to_string(), "send progressive output failed");
+    assert_eq!(
+        send.causes(),
+        ["progressive output failed", "fixture disk is full"],
+        "{send}"
+    );
     let exchange = exchange::Error::Output {
         source: Box::new(snapshot()),
     };
-    assert_eq!(exchange.causes(), ["fixture disk is full"], "{exchange}");
+    assert_eq!(
+        exchange.causes(),
+        ["progressive output failed", "fixture disk is full"],
+        "{exchange}"
+    );
 
     // A hostname lookup keeps the system refusal instead of pasting it into
     // the message, so the message and the cause each say it once.

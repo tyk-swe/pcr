@@ -1245,7 +1245,7 @@ mod client {
             std::error::Error::source(&error).map(ToString::to_string),
             Some("fixture sink closed".to_owned())
         );
-        assert_eq!(error.causes(), ["fixture cause"]);
+        assert_eq!(error.causes(), ["fixture sink closed", "fixture cause"]);
         assert_eq!(fake.calls().len(), 2, "one frame was sent before the sink");
     }
 

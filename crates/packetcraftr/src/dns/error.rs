@@ -94,7 +94,7 @@ pub enum Error {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("DNS query construction failed")]
     Query(#[source] WireError),
-    #[error("DNS authorization failed: {0}")]
+    #[error("DNS authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
     Family { family: &'static str },
@@ -102,7 +102,7 @@ pub enum Error {
     TcpLinkLocal { address: Ipv6Addr },
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("DNS execution failed on attempt {attempt}: {source}")]
+    #[error("DNS execution failed on attempt {attempt}")]
     Execution {
         attempt: u32,
         #[source]
@@ -134,7 +134,7 @@ pub enum Error {
     },
     #[error("DNS statistic accounting overflowed on attempt {attempt}")]
     StatisticsOverflow { attempt: u32 },
-    #[error("DNS progressive output failed: {source}")]
+    #[error("DNS progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -218,14 +218,14 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain. The boundary-sourced
-    /// variants delegate instead: a [`BoundaryError`] carries a captured
-    /// `causes` snapshot its own source chain does not hold.
+    /// variants list the boundary's message and its captured `causes`
+    /// snapshot instead, which its own source chain does not hold.
     ///
     /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
+            Self::Authorization(error) => error.as_causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

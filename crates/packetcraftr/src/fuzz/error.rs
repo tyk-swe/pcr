@@ -26,9 +26,9 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("fuzz authorization failed: {0}")]
-    Authorization(#[from] packetcraftr_core::error::BoundaryError),
-    #[error("fuzz execution failed at case {case_index}: {source}")]
+    #[error("fuzz authorization failed")]
+    Authorization(#[source] packetcraftr_core::error::BoundaryError),
+    #[error("fuzz execution failed at case {case_index}")]
     Execution {
         case_index: u64,
         #[source]
@@ -44,7 +44,7 @@ pub enum Error {
     InvalidEvidence { case_index: u64, message: String },
     /// The case's exact bytes could not be prepared on the route the executor
     /// reported, so its transmission cannot be verified.
-    #[error("fuzz executor returned invalid evidence at case {case_index}: {source}")]
+    #[error("fuzz executor returned invalid evidence at case {case_index}")]
     UnverifiableRoute {
         case_index: u64,
         #[source]
@@ -52,7 +52,7 @@ pub enum Error {
     },
     #[error("fuzz statistic accounting overflowed at case {case_index}")]
     StatisticsOverflow { case_index: u64 },
-    #[error("fuzz progressive output failed: {source}")]
+    #[error("fuzz progressive output failed")]
     Output {
         #[source]
         source: packetcraftr_core::error::BoundaryError,
@@ -107,16 +107,16 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
-    /// carries a captured `causes` snapshot its own source chain no longer
-    /// holds.
+    /// The boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot instead, which its own source chain no
+    /// longer holds.
     ///
     /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Campaign(error) => error.causes(),
-            Self::Authorization(error) => error.causes(),
-            Self::Execution { source, .. } | Self::Output { source } => source.causes(),
+            Self::Authorization(error) => error.as_causes(),
+            Self::Execution { source, .. } | Self::Output { source } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

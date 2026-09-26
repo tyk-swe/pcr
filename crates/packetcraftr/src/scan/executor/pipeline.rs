@@ -46,7 +46,7 @@ pub struct PendingEvidence {
 /// caller as the source of
 /// [`scan::Error::PipelineExecution`](crate::scan::Error::PipelineExecution).
 #[derive(Debug, thiserror::Error)]
-#[error("packet scan pipeline failed: {source}")]
+#[error("packet scan pipeline failed")]
 pub struct PipelineFailure {
     #[source]
     pub source: BoundaryError,
@@ -62,7 +62,7 @@ impl Classified for PipelineFailure {
         self.source.classification()
     }
     fn causes(&self) -> Vec<String> {
-        let mut causes = self.source.causes();
+        let mut causes = self.source.as_causes();
         if let Some(cleanup) = &self.cleanup {
             causes.push(cleanup.to_string());
             causes.extend(cleanup.causes());

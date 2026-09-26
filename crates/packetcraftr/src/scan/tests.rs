@@ -422,7 +422,11 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
         packetcraftr_core::error::Classified::classification(&error).code,
         "policy.public_destination"
     );
-    assert!(error.to_string().contains("8.8.8.8"));
+    assert_eq!(error.to_string(), "scan authorization failed");
+    assert!(
+        packetcraftr_core::error::Classified::causes(&error)[0].contains("8.8.8.8"),
+        "the denied address is the first cause"
+    );
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor_calls.load(Ordering::SeqCst), 0);
 }

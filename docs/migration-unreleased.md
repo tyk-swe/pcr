@@ -1462,3 +1462,52 @@ impl ResolveTarget for Gate {
     fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
 }
 ```
+
+## Capture and connect scan on the client
+
+**Capture.** `capture::run(&provider, &group_request, options, select, emit)`
+becomes a client method. The client's capture provider arms the group, its
+policy sets the frame and byte budget, and its cancellation stops the capture.
+
+```rust
+// Before
+let report = capture::run(
+    &provider,
+    &group_request,
+    capture::Options { window, budget: CaptureBudget::new(&policy), cancellation },
+    |number, frame| Ok(keep(number, frame)),
+    |event| Ok(Control::Continue),
+)?;
+// After
+let client = Client::new(registry, policy, providers).with_cancellation(cancellation);
+let report = client.capture(
+    capture::Request::new(group_request, window)
+        .with_selector(|number, frame| Ok(keep(number, frame))),
+    |event| Ok(Control::Continue),
+)?;
+```
+
+The sink runs on a runtime worker, so it is `Send + 'static`. It keeps its
+state behind an `Arc<Mutex<_>>` when the caller needs that state afterwards.
+It answers `Control`, or `()` to continue. The selector runs on the capture's
+own thread, before the sink. `Control` stays because a stop is a success
+whose evidence is kept, and `StopBefore`/`StopAfter` say whether the sink
+published the frame.
+
+| Before | After |
+|---|---|
+| `capture::Options { window, budget, cancellation }` | `Request.window`; the budget from `client.policy()`; `client.with_cancellation` |
+| `source.capture.index`, `source.capture.metadata`, … | `source.index`, `source.metadata`, … on `capture::Source` |
+| `Event::Started { sources: Vec<netio::capture::Source> }` | `Event::Started { sources: Vec<capture::Source> }` |
+
+**Connect scan.** `scan::connect::run` and `run_with_events` become
+`client.scan_connect(scan::Request, S)`. The scan connects through the
+client's TCP provider and is admitted through the client's policy and
+resolver.
+
+| Before | After |
+|---|---|
+| `connect::run(&request, &mut authorizer, Arc::new(tcp), &mut clock)` | `let collector = connect::Collector::default(); let report = client.scan_connect(request, collector.clone())?; collector.finish(report)?` |
+| `connect::run_with_events(.., &runtime, sink)` with `Sink<connect::Probe>` | `client.scan_connect(request, sink)` with `Sink<connect::Event>` |
+| `connect::Summary` | `connect::Report` |
+| `connect::Report { summary, endpoints }` | `connect::Aggregate { report, endpoints }` |

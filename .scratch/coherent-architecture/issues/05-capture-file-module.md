@@ -4,10 +4,17 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `analysis` no longer contains capture-format code, and `capture_file` imports nothing from `analysis`.
-- [ ] Link-type knowledge exists once. A matrix test covers every mapped link type in both directions.
-- [ ] Capture merge, rewrite and reader contract tests pass with only import changes.
-- [ ] `[Unreleased]` and the migration note list the path change.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] `analysis` no longer contains capture-format code, and `capture_file` imports nothing from `analysis`.
+- [x] Link-type knowledge exists once. A matrix test covers every mapped link type in both directions.
+- [x] Capture merge, rewrite and reader contract tests pass with only import changes.
+- [x] `[Unreleased]` and the migration note list the path change.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- `frame::LinkType` stays the model type in `frame` (per orchestrator decision): `Frame` and the registry use it and `examples/` must not change. `capture_file/link_type.rs` defines its constants and the one mapping (`LinkType::BUILTIN_ROOTS`, `root_protocol`, `for_root_protocol`, `is_raw_ip`), so the path stays `frame::LinkType`.
+- `protocol::capture::{CaptureRoot, BUILTIN_CAPTURE_ROOTS}` are removed. `fuzz::packet_link_type` keeps its signature and uses the mapping. `transform::fragment`, `packetcraftr::replay` link-mode selection and the fuzz overhead estimate also use `is_raw_ip`.
+- Left for ticket 37: the CLI `fragment.rs` root → link-type choice. The CLI `--link-type` name parser also stays, because its names are frozen CLI vocabulary.
+- The mapping depends on `protocol::BuiltinProtocol`, so `capture_file` sits at the protocols layer or above (for ticket 07's layer map).

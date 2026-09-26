@@ -37,6 +37,7 @@ use super::{
     error::{error_buffer_message, interface_conversion_error},
 };
 use crate::{Error, interface::Id as InterfaceId};
+use packetcraftr_core::error::Source;
 
 pub(super) struct NpcapApi {
     // Keeps the DLL loaded while function pointers are used.
@@ -88,7 +89,7 @@ impl NpcapApi {
                 "could not load {}; install Npcap 1.88 for all users and restart PacketcraftR",
                 path.display()
             ),
-            source: Some(Arc::new(error)),
+            source: Some(Source::new(error)),
         })?;
 
         load_symbols!(&library, {
@@ -280,7 +281,7 @@ unsafe fn load_symbol<T: Copy>(library: &Library, name: &'static [u8]) -> Result
                 "required SDK 1.16 symbol {} is unavailable",
                 String::from_utf8_lossy(name.split_last().map_or(name, |(_, head)| head))
             ),
-            source: Some(Arc::new(error)),
+            source: Some(Source::new(error)),
         })
 }
 

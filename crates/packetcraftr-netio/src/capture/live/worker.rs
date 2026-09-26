@@ -11,6 +11,7 @@ use std::{
 };
 
 use crate::workers::{Permit, Task};
+use packetcraftr_core::error::Source;
 
 use crate::{Error, capture::Captured};
 use packetcraftr_core::frame::{Frame, Lengths, LinkType};
@@ -67,7 +68,7 @@ pub(super) fn capture_worker(
                 )
                 .map_err(|error| Error::Capture {
                     message: "native capture returned an invalid frame".to_owned(),
-                    source: Some(Arc::new(error)),
+                    source: Some(Source::new(error)),
                 })?;
                 frame.interface = Some(interface_index);
                 shared.enqueue(Captured::with_ingress_time(frame, packet.received_at))?;

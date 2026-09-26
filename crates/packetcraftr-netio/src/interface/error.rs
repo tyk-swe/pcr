@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr_core::budget::{Cancelled, Interrupted};
-use packetcraftr_core::error::{Classification, Classified};
+use packetcraftr_core::error::{Classification, Classified, Source};
 use thiserror::Error as ThisError;
-
-use crate::SystemFault;
 
 /// Why interface enumeration failed.
 #[derive(Debug, ThisError, Clone)]
@@ -25,7 +23,7 @@ pub enum Error {
     Discovery {
         message: String,
         #[source]
-        source: SystemFault,
+        source: Source,
     },
 }
 
@@ -51,7 +49,7 @@ impl Error {
             }
             error => Self::Discovery {
                 message: "the native route adapter refused the interface query".to_owned(),
-                source: std::sync::Arc::new(error),
+                source: Source::new(error),
             },
         }
     }

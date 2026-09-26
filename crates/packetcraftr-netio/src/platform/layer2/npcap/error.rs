@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::ffi::{c_char, c_int};
-use std::sync::Arc;
 
 use super::abi::{
     PCAP_ERROR_BUFFER_SIZE, PCAP_ERROR_CAPTURE_NOTSUP, PCAP_ERROR_IFACE_NOT_UP,
@@ -14,6 +13,7 @@ use crate::{
     interface::Id as InterfaceId,
     platform::layer2::pcap_common::{is_missing_device, is_permission_denied},
 };
+use packetcraftr_core::error::Source;
 
 pub(super) fn map_activation_error(
     interface: &InterfaceId,
@@ -91,7 +91,7 @@ pub(super) fn interface_conversion_error(
             "{operation} rejected interface index {} (Win32 error {code})",
             interface.index
         ),
-        source: Some(Arc::new(std::io::Error::from_raw_os_error(
+        source: Some(Source::new(std::io::Error::from_raw_os_error(
             code.cast_signed(),
         ))),
     }

@@ -17,6 +17,7 @@ use windows::Win32::Networking::WinSock::AF_UNSPEC;
 
 use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
 use crate::{interface, route::SystemError};
+use packetcraftr_core::error::Source;
 
 pub(super) fn interfaces() -> Result<Vec<interface::Info>, SystemError> {
     Ok(adapter_snapshots()?
@@ -105,7 +106,7 @@ pub(super) fn win32_error(operation: &'static str, error: WIN32_ERROR) -> System
     SystemError::OperatingSystem {
         operation,
         message: format!("Win32 error {}", error.0),
-        source: Some(std::sync::Arc::new(std::io::Error::from_raw_os_error(
+        source: Some(Source::new(std::io::Error::from_raw_os_error(
             error.0.cast_signed(),
         ))),
     }

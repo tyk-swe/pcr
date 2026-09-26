@@ -6,14 +6,14 @@ use std::net::IpAddr;
 use thiserror::Error;
 
 use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
-use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind, Source};
 
 use crate::interface::Id as InterfaceId;
 
 use super::models::{Decision, Provider};
 
-/// Native route/interface errors, retaining typed
-/// [`SystemFault`](crate::SystemFault) sources through rendering.
+/// Native route/interface errors. An operating-system refusal keeps the
+/// platform's own error as its `source`.
 #[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum SystemError {
@@ -56,7 +56,7 @@ pub enum SystemError {
         operation: &'static str,
         message: String,
         #[source]
-        source: Option<crate::SystemFault>,
+        source: Option<Source>,
     },
 }
 

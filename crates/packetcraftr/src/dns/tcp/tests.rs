@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::io::{Cursor, Read, Write};
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::*;
 

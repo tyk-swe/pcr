@@ -29,7 +29,7 @@ pub(super) fn map_replay_route_error(
     source: packetcraftr_netio::route::SystemError,
 ) -> LiveIoError {
     let classification = source.classification();
-    let source: packetcraftr_netio::SystemFault = std::sync::Arc::new(source);
+    let source = packetcraftr_core::error::Source::new(source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
             message: "the native route adapter cannot select a replay route".to_owned(),

@@ -332,7 +332,9 @@ mod tests {
             if call == 0 {
                 return Err(net::interface::Error::Discovery {
                     message: "fixture enumeration failure".to_owned(),
-                    source: std::sync::Arc::new(std::io::Error::other("fixture refusal")),
+                    source: packetcraftr_core::error::Source::new(std::io::Error::other(
+                        "fixture refusal",
+                    )),
                 });
             }
             Ok(vec![net::interface::Info {

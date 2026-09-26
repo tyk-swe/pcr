@@ -32,6 +32,7 @@ use crate::{
         timestamp_source_value, validate_effective_snapshot_length,
     },
 };
+use packetcraftr_core::error::Source;
 pub(super) const READ_TIMEOUT_MILLIS: i32 = 50;
 const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
 
@@ -337,7 +338,7 @@ impl NativeCaptureSource for PcapCaptureSource {
             Err(PcapError::NoMorePackets) => Ok(NativeCaptureEvent::Closed),
             Err(error) => Err(Error::Capture {
                 message: "libpcap receive failed".to_owned(),
-                source: Some(Arc::new(error)),
+                source: Some(Source::new(error)),
             }),
         }
     }
@@ -352,7 +353,7 @@ impl NativeCaptureSource for PcapCaptureSource {
             })
             .map_err(|error| Error::Capture {
                 message: "libpcap statistics failed".to_owned(),
-                source: Some(Arc::new(error)),
+                source: Some(Source::new(error)),
             })
     }
 }
@@ -367,7 +368,7 @@ impl CaptureInterrupt for PcapInterrupt {
 
 pub(super) fn map_open_error(interface: &InterfaceId, error: PcapError) -> Error {
     let message = error.to_string();
-    let source: Option<crate::SystemFault> = Some(Arc::new(error));
+    let source = Some(Source::new(error));
     if is_permission_denied(&message) {
         return Error::Privilege {
             message: format!(

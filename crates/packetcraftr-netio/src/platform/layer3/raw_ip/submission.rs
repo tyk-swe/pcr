@@ -9,7 +9,6 @@
 use std::num::NonZeroU32;
 #[cfg(windows)]
 use std::os::windows::io::AsRawSocket;
-use std::sync::Arc;
 use std::{
     io,
     net::{IpAddr, SocketAddr, SocketAddrV6},
@@ -25,6 +24,7 @@ use windows::Win32::Networking::WinSock::{
 use super::preparation::PreparedRawIp;
 use crate::Error;
 use crate::interface::Id as InterfaceId;
+use packetcraftr_core::error::Source;
 
 const IPPROTO_RAW: i32 = 255;
 
@@ -188,7 +188,7 @@ pub(super) fn raw_error(operation: &'static str, source: io::Error) -> RawSocket
 pub(super) fn map_raw_error(interface: &InterfaceId, error: RawSocketError) -> Error {
     let message = error.operation.to_owned();
     let kind = error.source.kind();
-    let source: Option<crate::SystemFault> = Some(Arc::new(error.source));
+    let source = Some(Source::new(error.source));
     match kind {
         io::ErrorKind::PermissionDenied => Error::Privilege { message, source },
         io::ErrorKind::Unsupported => Error::Unsupported { message, source },

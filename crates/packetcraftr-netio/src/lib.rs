@@ -33,7 +33,7 @@ pub mod transmit;
 #[forbid(unsafe_code)]
 mod workers;
 
-pub use error::{Error, SendEvidenceFault, SystemFault};
+pub use error::{Error, SendEvidenceFault};
 
 /// Independently owned transmit and capture providers composed into the single
 /// packet I/O value that capture-before-send exchanges require.

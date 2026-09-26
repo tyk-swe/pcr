@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
+use std::{fmt, io, net::IpAddr, time::Duration};
 
 use packetcraftr_core::budget::Cancelled;
-use packetcraftr_core::error::{Classified, Kind};
+use packetcraftr_core::error::{Classified, Kind, Source};
 use packetcraftr_netio::{
     Error, SendEvidenceFault, capture, interface, link::Mode, route::SystemError,
 };
@@ -15,7 +15,7 @@ use packetcraftr_netio::{
 fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     let error = Error::Capture {
         message: "libpcap receive failed".to_owned(),
-        source: Some(Arc::new(io::Error::other("device is not up"))),
+        source: Some(Source::new(io::Error::other("device is not up"))),
     };
     assert_eq!(error.to_string(), "capture failed: libpcap receive failed");
     assert_eq!(error.causes(), ["device is not up"]);
@@ -33,10 +33,10 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
     // A route adapter refusal survives the interface-discovery boundary.
     let discovery = Error::InterfaceDiscovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Some(Arc::new(SystemError::OperatingSystem {
+        source: Some(Source::new(SystemError::OperatingSystem {
             operation: "RTM_GETLINK",
             message: "the operating system refused the request".to_owned(),
-            source: Some(Arc::new(io::Error::other("operation not permitted"))),
+            source: Some(Source::new(io::Error::other("operation not permitted"))),
         })),
     };
     assert_eq!(
@@ -58,7 +58,7 @@ fn interface_errors_keep_live_io_classes_and_their_source() {
     assert_row(&unsupported, "capability.unsupported", Kind::Capability);
     let discovery = interface::Error::Discovery {
         message: "the native route adapter refused the interface query".to_owned(),
-        source: Arc::new(io::Error::other("operation not permitted")),
+        source: Source::new(io::Error::other("operation not permitted")),
     };
     assert_row(&discovery, "io.interface_discovery", Kind::Io);
     assert_eq!(discovery.causes(), ["operation not permitted"]);
@@ -163,7 +163,7 @@ fn system_route_errors_keep_stable_provider_classes() {
             SystemError::OperatingSystem {
                 operation: "fixture operation",
                 message: "fixture".to_owned(),
-                source: Some(Arc::new(io::Error::other("kernel refused the request"))),
+                source: Some(Source::new(io::Error::other("kernel refused the request"))),
             },
             "io.route",
             Kind::Io,

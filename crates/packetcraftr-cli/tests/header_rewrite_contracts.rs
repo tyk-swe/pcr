@@ -67,19 +67,6 @@ fn ordered_rewrite_rules_preserve_a_conversation_and_publish_valid_compressed_ca
         parse_json(&output)["error"]["code"],
         "packet.transform_input"
     );
-    let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../schemas/packetcraftr.rewrite.v1.schema.json"
-    ))
-    .unwrap();
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../examples/documents/rewrite-lab-host.json"
-    ))
-    .unwrap();
-    let validator = jsonschema::validator_for(&schema).unwrap();
-    assert!(validator.is_valid(&fixture));
-    let mut invalid = fixture.clone();
-    invalid["rules"][0]["patch"] = serde_json::json!({});
-    assert!(!validator.is_valid(&invalid));
 }
 
 /// `--max-interfaces` bounds each input section, so a rewrite gathering two

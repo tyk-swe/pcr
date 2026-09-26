@@ -683,3 +683,20 @@ root-protocol mapping now exists once: use `LinkType::root_protocol`,
 `LinkType::for_root_protocol` (raw IP is written as `LinkType::RAW`), and
 `LinkType::is_raw_ip` instead of matching link-type constants by hand.
 `fuzz::packet_link_type` returns the same link types through that mapping.
+
+## Acyclic core layers
+
+Core modules now depend only on their own layer or a lower one (see the
+`packetcraftr_core` crate docs). Only paths change; items and behavior do not.
+
+| Removed path | Import instead |
+|---|---|
+| `packetcraftr_core::packet::semantics` | `packetcraftr_core::protocol::semantics` |
+| `packetcraftr_core::protocol::raw::parse_hex` | `packetcraftr_core::layer::parse_hex` |
+
+`protocol::raw` exported only `parse_hex`; the `Raw`, `Padding`, and
+`Malformed` layers stay at `packetcraftr_core::layer`. A custom link protocol
+whose frames may end in padding after the network payload (as Ethernet frames
+do) calls `Builder::allow_trailing_padding(protocol)` when it registers its
+codec, so decoding reports those bytes as padding and strict builds accept
+link padding inside it.

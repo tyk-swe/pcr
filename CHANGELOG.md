@@ -104,8 +104,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   and the exported `deadline_error_conversions!` macro are removed. Core
   `Deadline` gains `limit()` and `cancellation()` getters. See
   `docs/migration-unreleased.md`.
+- Core modules form acyclic layers (model, protocols, engines, workflows;
+  see the crate docs). `packet::semantics` moves to `protocol::semantics`
+  with the same items. `protocol::raw` is removed: the `Raw`, `Padding`, and
+  `Malformed` layers and their codecs belong to `layer`, and `parse_hex` moves
+  to `layer::parse_hex`. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- `registry::Builder::allow_trailing_padding` records that a link protocol's
+  frames may carry trailing padding after the network payload, and
+  `Registry::allows_trailing_padding` reports it. Decoding and building read
+  this property instead of a fixed list of built-in link protocols, so a
+  custom link protocol registered with it behaves like Ethernet.
 
 - Independent forwarding detail-byte and comparison-scratch budgets, input
   fingerprints, decode/filter context, correspondence-only and identity-overlap
@@ -570,6 +581,9 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- A strict build accepts link padding inside a packet rooted at `vlan` or
+  `vlan8021ad`, as decoding already produces it, instead of failing with
+  `PaddingWithoutLinkLayer`.
 - Replay text output reports a stdout write failure even if the invocation
   deadline expires while the write is blocked.
 - `exchange --output ndjson` no longer fails with

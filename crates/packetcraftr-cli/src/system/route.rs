@@ -5,6 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core as core;
 use packetcraftr_core::packet::Packet;
+use packetcraftr_core::protocol::BuiltinProtocol;
 use packetcraftr_netio as net;
 
 use super::interface;
@@ -128,9 +129,9 @@ fn resolve_destination(
         .map_err(CliError::classified)?;
     let ip_version = packet
         .iter()
-        .find_map(|layer| match layer.protocol_id().as_str() {
-            "ipv4" => Some(packetcraftr::target::Family::Ipv4),
-            "ipv6" => Some(packetcraftr::target::Family::Ipv6),
+        .find_map(|layer| match BuiltinProtocol::of(layer) {
+            Some(BuiltinProtocol::Ipv4) => Some(packetcraftr::target::Family::Ipv4),
+            Some(BuiltinProtocol::Ipv6) => Some(packetcraftr::target::Family::Ipv6),
             _ => None,
         });
     match ip_version {

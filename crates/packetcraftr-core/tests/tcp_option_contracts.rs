@@ -175,7 +175,7 @@ fn tcp_option_fields_filter_project_and_expand() {
     // Nested paths project typed option members.
     let tcp = decoded.packet.get::<Tcp>().unwrap();
     assert_eq!(
-        tcp.field_path("options[0].mss"),
+        tcp.field_path(&"options[0].mss".parse().unwrap()),
         Some(FieldValue::Unsigned(1460))
     );
     // Template axes reach into typed option members.
@@ -198,7 +198,7 @@ fn tcp_option_fields_filter_project_and_expand() {
                 .unwrap()
                 .get::<Tcp>()
                 .unwrap()
-                .field_path("options[0].mss")
+                .field_path(&"options[0].mss".parse().unwrap())
                 .unwrap()
                 .as_u64()
                 .unwrap()

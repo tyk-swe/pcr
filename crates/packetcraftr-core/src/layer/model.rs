@@ -8,7 +8,7 @@ use std::fmt;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::field::{FieldKind, FieldValue};
+use crate::field::{FieldKind, FieldValue, Path};
 
 /// Static protocol/codec name, cheaply copied. Runtime names from documents,
 /// filters, and command lines resolve through
@@ -113,23 +113,23 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn field(&self, name: &str) -> Option<FieldValue>;
     fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
 
-    /// Reads a registered nested object member or zero-based list element.
-    fn field_path(&self, name: &str) -> Option<FieldValue> {
-        if let Some(value) = self.field(name) {
-            return Some(value);
+    /// Reads a field, or a registered nested object member or zero-based
+    /// list element, through a path parsed once by the caller.
+    fn field_path(&self, path: &Path) -> Option<FieldValue> {
+        if !path.is_nested() {
+            return self.field(path.root());
         }
-        let path = name.parse::<crate::field::Path>().ok()?;
         path.schema(self.schema())?;
         path.get(&self.field(path.root())?).cloned()
     }
 
-    /// Edits a nested value through its owning field's validated setter.
-    fn set_field_path(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+    /// Edits a field, or a nested value through its owning field's validated
+    /// setter.
+    fn set_field_path(&mut self, path: &Path, value: FieldValue) -> Result<(), FieldError> {
         let unknown = || FieldError::UnknownField {
             protocol: *self.protocol_id(),
-            field: name.to_owned(),
+            field: path.to_string(),
         };
-        let path = name.parse::<crate::field::Path>().map_err(|_| unknown())?;
         path.schema(self.schema()).ok_or_else(unknown)?;
         if !path.is_nested() {
             return self.set_field(path.root(), value);

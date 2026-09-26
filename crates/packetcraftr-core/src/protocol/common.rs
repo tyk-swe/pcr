@@ -21,7 +21,7 @@ pub(crate) use errors::{
 };
 pub(crate) use fields::{
     ValueExpectation, expected_discriminator, make_layer, resolve_fixed, resolve_u8, resolve_u16,
-    text_list, unsigned_list,
+    set_document_field, text_list, unsigned_list,
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{

@@ -127,6 +127,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   `tls::parse_record`, `tls::names::version_name` is `tls::version_name`, and
   `tls::model::extension` is `tls::extension`. See
   `docs/migration-unreleased.md`.
+- `Layer::field_path` and `Layer::set_field_path` take a parsed
+  `&field::Path` instead of a string, so a path is parsed once at the
+  document or command-line edge rather than on every call. `field::Path`
+  implements `Display` in its own syntax. See `docs/migration-unreleased.md`.
 
 ### Added
 

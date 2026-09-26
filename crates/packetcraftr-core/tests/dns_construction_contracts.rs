@@ -90,7 +90,10 @@ fn wire_images_survive_documents_and_explicit_edits_rebuild_counts() {
     assert_eq!(recreated.get::<Dns>().unwrap().to_wire().unwrap(), original);
     let mut edited = recreated.get::<Dns>().unwrap().clone();
     edited
-        .set_field_path("answers[0].owner", "different.example.test.".into())
+        .set_field_path(
+            &"answers[0].owner".parse().unwrap(),
+            "different.example.test.".into(),
+        )
         .unwrap();
     edited.edit(|message| message.answers.clear());
     let decoded = Dns::try_from(edited.to_wire().unwrap()).unwrap();

@@ -75,7 +75,10 @@ fn oversized_fields_invalid_extensions_and_failed_edits_are_rejected_atomically(
     let original = layer.clone();
     assert!(
         layer
-            .set_field_path("hello.random", Bytes::from_static(b"short").into())
+            .set_field_path(
+                &"hello.random".parse().unwrap(),
+                Bytes::from_static(b"short").into()
+            )
             .is_err()
     );
     assert_eq!(layer, original);

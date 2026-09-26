@@ -392,7 +392,7 @@ impl LayerCodec for TlsCodec {
             if name == "wire" || layer.field(name).as_ref() == Some(value) {
                 continue;
             }
-            layer.set_field_path(name, value.clone())?;
+            crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
         }
         Ok(Box::new(layer))
     }

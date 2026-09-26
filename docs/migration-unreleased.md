@@ -733,3 +733,20 @@ Error types of the wire APIs:
   message displays exactly as the former `codec::Error::Invalid` did, and a
   hello that exceeds an encoder bound is `tls::Error::Encode` with the codec
   error as source.
+
+## Parsed field paths
+
+`Layer::field_path` and `Layer::set_field_path` take a `&field::Path`. Parse
+the caller's spelling once and reuse it:
+
+```rust
+let path: packetcraftr_core::field::Path = "questions[0].name".parse()?;
+let name = layer.field_path(&path);
+layer.set_field_path(&path, value)?;
+```
+
+A string that is not a path fails with `field::PathError` at the parse,
+where it used to read as an absent field or fail with
+`FieldError::UnknownField`. `Display` writes a path back in the same syntax.
+Hand-written `Layer` implementations are unaffected unless they overrode
+either method.

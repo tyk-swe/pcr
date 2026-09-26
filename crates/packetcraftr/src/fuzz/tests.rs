@@ -864,3 +864,95 @@ fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmissio
     assert_eq!(executor.executions, 4);
     assert_eq!(report.cases.len(), 4);
 }
+
+fn offline_report(cases: usize) -> packet_fuzz::Report {
+    let request = packet_fuzz::Request {
+        cases,
+        ..packet_fuzz::Request::default()
+    };
+    packet_fuzz::run(
+        &request,
+        packet(),
+        packetcraftr_core::protocol::builtin::registry(),
+    )
+    .expect("offline fixture campaign runs")
+}
+
+#[test]
+fn a_coherent_campaign_reports_its_totals() {
+    let report = offline_report(2);
+    let totals = super::Totals::try_from(&report).expect("a generated campaign is coherent");
+    assert_eq!(totals.generated, 2);
+    assert_eq!(totals.built + totals.rejected, 2);
+    let live = super::Report {
+        seed: report.seed,
+        first_case: report.first_case,
+        stats: Stats {
+            cases_generated: report.stats.cases_generated,
+            cases_built: report.stats.cases_built,
+            ..Stats::default()
+        },
+        cases: report.cases.into_iter().map(super::Case::from).collect(),
+    };
+    assert_eq!(super::Totals::try_from(&live), Ok(totals));
+}
+
+#[test]
+fn campaign_totals_reject_more_built_than_generated_cases() {
+    let offline = packet_fuzz::Stats {
+        cases_generated: 0,
+        cases_built: 1,
+        ..packet_fuzz::Stats::default()
+    };
+    let live = Stats {
+        cases_generated: 0,
+        cases_built: 1,
+        ..Stats::default()
+    };
+    for error in [
+        super::Totals::try_from(&offline).expect_err("offline totals are incoherent"),
+        super::Totals::try_from(&live).expect_err("live totals are incoherent"),
+    ] {
+        assert_eq!(
+            error.to_string(),
+            "built case count exceeds generated case count"
+        );
+    }
+}
+
+#[test]
+fn campaign_cases_must_match_the_summary_and_publication_order() {
+    let mut missing = offline_report(1);
+    missing.cases.clear();
+    let mut reordered = offline_report(2);
+    reordered.cases.swap(0, 1);
+    let mut foreign = offline_report(1);
+    foreign.cases[0].operation_seed = foreign.seed.wrapping_add(1);
+    let mut miscounted = offline_report(1);
+    miscounted.stats.cases_built = 1 - miscounted.stats.cases_built;
+    for (report, reason) in [
+        (
+            missing,
+            "case cardinality does not match the campaign summary",
+        ),
+        (
+            reordered,
+            "case identity or publication order does not match the campaign",
+        ),
+        (
+            foreign,
+            "case identity or publication order does not match the campaign",
+        ),
+        (
+            miscounted,
+            "case outcomes do not match the campaign built count",
+        ),
+    ] {
+        assert_eq!(
+            super::Totals::try_from(&report)
+                .expect_err("an incoherent campaign is refused")
+                .to_string(),
+            reason
+        );
+    }
+}

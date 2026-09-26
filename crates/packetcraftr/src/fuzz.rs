@@ -23,7 +23,7 @@ mod tests;
 
 pub use error::Error;
 pub use execution::{Execution, ExecutionCase};
-pub use report::{Case, CaseOutcome, Report, Stats, Summary};
+pub use report::{Case, CaseOutcome, IncoherentReport, Report, Stats, Summary, Totals};
 pub use request::{LiveLimits, LiveOptions};
 
 pub use run::{RunInput, run, run_offline_with_events, run_with_events};

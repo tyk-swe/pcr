@@ -4,8 +4,8 @@
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
+use crate::output::contract::Format;
 use clap::{Parser, ValueEnum};
-use packetcraftr_cli::output::contract::Format;
 
 use crate::commands::Command;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};

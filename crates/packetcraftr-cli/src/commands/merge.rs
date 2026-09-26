@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::{self, contract::ToolFormat};
 use crate::{
     command_options::{Compression, OfflineCaptureLimitsArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
 };
-use packetcraftr_cli::output::{self, contract::ToolFormat};
 use packetcraftr_core::{analysis::pcap, error::Kind};
 use std::path::{Path, PathBuf};
 

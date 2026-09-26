@@ -4,7 +4,7 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use packetcraftr_core::analysis;
 

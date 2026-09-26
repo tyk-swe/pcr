@@ -3,10 +3,10 @@
 
 use std::ffi::OsString;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::cli::ColorChoice;
-use packetcraftr_cli::output::contract::Format;
+use crate::output::contract::Format;
 
 /// The formats that can carry a structured error document. A clap failure is
 /// reported in one of these or, for everything else, as prose on stderr.

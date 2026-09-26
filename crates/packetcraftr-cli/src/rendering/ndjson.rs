@@ -11,9 +11,9 @@ use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;
 
-use packetcraftr_cli::output;
+use crate::output;
 
-pub(crate) use packetcraftr_cli::output::stream::StreamEncoder;
+pub(crate) use crate::output::stream::StreamEncoder;
 
 /// Per-write ceiling when `--output-timeout-ms` is absent; max-duration
 /// publishers clip it to their remaining budget. A terminal error may use this

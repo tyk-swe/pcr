@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::ToolFormat;
-use packetcraftr_cli::output::{self, forwarding::Report};
+use crate::output::contract::ToolFormat;
+use crate::output::{self, forwarding::Report};
 use packetcraftr_core::analysis::forwarding as analysis;
 use packetcraftr_core::field::FieldValue;
 

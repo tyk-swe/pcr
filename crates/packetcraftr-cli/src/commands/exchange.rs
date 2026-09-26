@@ -4,14 +4,14 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::ExchangeFormat;
+use crate::output::contract::ExchangeFormat;
 
 use std::time::Duration;
 
 use packetcraftr_core::analysis::pcap as capture;
 use packetcraftr_core::error::Kind;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::{execution, preparation};

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output;
+use crate::output;
 use packetcraftr_core as core;
 use packetcraftr_core::error::Kind;
 

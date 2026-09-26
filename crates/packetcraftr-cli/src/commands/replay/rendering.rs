@@ -14,8 +14,8 @@ use packetcraftr_core::analysis::pcap::Writer;
 use packetcraftr_core::budget::{Cancelled, Interrupted};
 use packetcraftr_netio as net;
 
-use packetcraftr_cli::output;
-use packetcraftr_cli::output::stream::EncodeError;
+use crate::output;
+use crate::output::stream::EncodeError;
 
 use crate::errors::CliError;
 use crate::rendering::{

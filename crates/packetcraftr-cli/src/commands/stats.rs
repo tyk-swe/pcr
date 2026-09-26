@@ -4,21 +4,21 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+use crate::output::contract::AggregateFormat;
 
 use std::time::Duration;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::offline_analysis::{omitted_diagnostic, prepare};
 use crate::errors::CliError;
 use crate::input::open_capture;
+use crate::output::stats::Table;
 use crate::rendering::emit_aggregate;
-use packetcraftr_cli::output::stats::Table;
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     // Stats assigns conversation indices, so stream-aware filters like

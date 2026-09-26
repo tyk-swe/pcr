@@ -1,8 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::forwarding::CaptureSource;
-use packetcraftr_cli::output::hex::compact_hex;
+use crate::output::forwarding::CaptureSource;
+use crate::output::hex::compact_hex;
 use sha2::{Digest as _, Sha256};
 use std::cell::RefCell;
 use std::io::{self, Read};

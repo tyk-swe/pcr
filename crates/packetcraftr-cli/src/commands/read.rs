@@ -8,7 +8,7 @@ pub(crate) mod rendering;
 #[cfg(test)]
 mod tests;
 
-use packetcraftr_cli::output::contract::ReadFormat;
+use crate::output::contract::ReadFormat;
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -21,7 +21,7 @@ use packetcraftr_core::analysis::pcap::rewrite;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use crate::command_options::OfflineCaptureLimitsArgs;

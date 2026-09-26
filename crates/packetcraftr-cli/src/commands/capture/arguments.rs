@@ -86,8 +86,8 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1)]
     pub(crate) rotate_files: usize,
     /// Stop at the file limit, or reuse only files created by this operation.
-    #[arg(long, value_enum, default_value_t = packetcraftr_cli::output::capture::Retention::Stop)]
-    pub(crate) retention: packetcraftr_cli::output::capture::Retention,
+    #[arg(long, value_enum, default_value_t = crate::output::capture::Retention::Stop)]
+    pub(crate) retention: crate::output::capture::Retention,
     /// Enable promiscuous capture mode.
     #[arg(long)]
     pub(crate) promiscuous: bool,

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::DissectFormat;
+use crate::output::contract::DissectFormat;
 
 use packetcraftr_core::error::Kind;
 
@@ -13,7 +13,7 @@ use packetcraftr_core as core;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::frame::LinkType;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;

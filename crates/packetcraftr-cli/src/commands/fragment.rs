@@ -1,12 +1,12 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::{self, contract::CaptureFormat};
 use crate::{
     command_options::{PacketBudgetArgs, RecipeArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_capture_file, write_plain_line},
 };
-use packetcraftr_cli::output::{self, contract::CaptureFormat};
 use packetcraftr_core::{
     self as core,
     frame::{Frame, LinkType},

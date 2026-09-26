@@ -149,5 +149,7 @@ _Avoid_: `tests/support/` as a directory name.
 **Test support**:
 In-crate test helpers that must compile with the crate (shared buffers,
 fixture constructors), in `test_support` modules: the crate's
-`src/test_support.rs`, or one local to the module whose tests share it.
+`src/test_support.rs`, or one local to the module whose tests share it. The
+CLI's integration tests reach its `test_support` through the lib's
+`test-support` feature, never through `#[path]`.
 _Avoid_: `test_fixtures` as a module name.

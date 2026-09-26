@@ -5,7 +5,7 @@
 //! reuse never opens or truncates an unrelated pre-existing pathname.
 
 use crate::command_options::Compression;
-use packetcraftr_cli::output::capture::{File as FileReport, Files as FilesReport, Retention};
+use crate::output::capture::{File as FileReport, Files as FilesReport, Retention};
 use packetcraftr_core::{
     analysis::pcap::{self, compression},
     error::{Classification, Classified, Kind},
@@ -22,12 +22,12 @@ use std::{
 pub(super) const MAX_FILES: usize = 64;
 #[derive(Clone, Debug)]
 pub(super) struct Options {
-    pub path: PathBuf,
-    pub compression: Compression,
-    pub rotate_bytes: Option<u64>,
-    pub rotate_after: Option<Duration>,
-    pub max_files: usize,
-    pub retention: Retention,
+    pub(super) path: PathBuf,
+    pub(super) compression: Compression,
+    pub(super) rotate_bytes: Option<u64>,
+    pub(super) rotate_after: Option<Duration>,
+    pub(super) max_files: usize,
+    pub(super) retention: Retention,
 }
 impl Options {
     pub(super) fn validate(&self) -> Result<(), Error> {
@@ -231,8 +231,8 @@ impl Files {
         source_frame: u64,
         elapsed: Duration,
     ) -> Result<packetcraftr::capture::Control, Error> {
-        let source_frame = packetcraftr_cli::output::frame::SourceFrame::try_from(source_frame)
-            .map_err(|_| Error::State)?;
+        let source_frame =
+            crate::output::frame::SourceFrame::try_from(source_frame).map_err(|_| Error::State)?;
         if self.stopped {
             return Ok(packetcraftr::capture::Control::StopBefore);
         }

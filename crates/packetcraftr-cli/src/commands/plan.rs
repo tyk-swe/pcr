@@ -3,11 +3,11 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+use crate::output::contract::AggregateFormat;
 
 use std::sync::Arc;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;

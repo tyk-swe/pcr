@@ -7,13 +7,13 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use clap::{ArgMatches, CommandFactory, parser::ValueSource};
-use packetcraftr::progress::Runtime;
-use packetcraftr_cli::output::{
+use crate::output::{
     contract::{Command, Format},
     envelope::Envelope,
     resources::{Report, Setting, Value, Worker},
 };
+use clap::{ArgMatches, CommandFactory, parser::ValueSource};
+use packetcraftr::progress::Runtime;
 
 use crate::cli::Cli;
 use crate::rendering::OUTPUT_TIMEOUT_MS;
@@ -131,7 +131,7 @@ fn settings(matches: &ArgMatches, command: Command, format: Format) -> Vec<Setti
         for (name, value, unit, scope) in [
             (
                 "output_record_bytes",
-                packetcraftr_cli::output::stream::MAX_RECORD_BYTES as u64,
+                crate::output::stream::MAX_RECORD_BYTES as u64,
                 "bytes",
                 "One prepared NDJSON line, including newline",
             ),

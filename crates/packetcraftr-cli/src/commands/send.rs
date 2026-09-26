@@ -3,12 +3,12 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::SendFormat;
+use crate::output::contract::SendFormat;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis::pcap as capture;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::preparation::{self, Prepared};

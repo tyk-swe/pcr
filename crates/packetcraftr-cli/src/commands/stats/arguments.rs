@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use packetcraftr_cli::output::stats::Table;
+use crate::output::stats::Table;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 

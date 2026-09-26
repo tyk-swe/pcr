@@ -1,17 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod rules;
+use crate::output::{
+    self,
+    contract::{Command, ToolFormat},
+    rewrite::MAX_REPORTED_CHANGES,
+};
 use crate::{
     command_options::{Compression, DecodeArgs, OfflineCaptureLimitsArgs},
     commands::offline_analysis::Retained,
     errors::CliError,
     filtering::FrameSelector,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
-};
-use packetcraftr_cli::output::{
-    self,
-    contract::{Command, ToolFormat},
-    rewrite::MAX_REPORTED_CHANGES,
 };
 use packetcraftr_core::{
     analysis::pcap,
@@ -41,6 +41,8 @@ pub(crate) struct Args {
     /// tcp.acknowledgment, tcp/udp ports, and dns.id. Header edits apply first
     /// when combined with them; conflicts with --rules-file.
     #[arg(long = "set", value_name = "FIELD=VALUE", value_parser = rules::assignment)]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::invalid_html_tags)]
     pub(crate) sets: Vec<FieldAssignment>,
     /// Checksum behavior for field assignments: repair recomputes covering
     /// checksums; preserve keeps checksum bytes exactly.
@@ -70,6 +72,8 @@ pub(crate) struct Args {
     pub(crate) destination_port: Option<u16>,
     /// Replace the outer VLAN stack; repeat VID or TPID:VID[:PRIORITY[:DEI]].
     #[arg(long = "vlan", value_parser = rules::vlan, conflicts_with = "strip_vlans")]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::broken_intra_doc_links)]
     pub(crate) vlans: Vec<VlanRewrite>,
     /// Remove the outer VLAN stack.
     #[arg(long)]

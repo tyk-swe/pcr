@@ -33,6 +33,7 @@ mod_module_files = "deny"
 packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.3", default-features = false }
 packetcraftr-core = { path = "crates/packetcraftr-core", version = "0.5.0-beta.3" }
 packetcraftr-netio = { path = "crates/packetcraftr-netio", version = "0.5.0-beta.3" }
+packetcraftr-cli = { path = "crates/packetcraftr-cli", version = "0.5.0-beta.3", default-features = false }
 
 anstream = "1.0.0"
 getrandom = { version = "0.4.3", features = ["std"] }

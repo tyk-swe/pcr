@@ -12,15 +12,11 @@ pub(crate) enum Compression {
     Zstd,
 }
 impl Compression {
-    pub(crate) fn validate(
-        self,
-        format: packetcraftr_cli::output::contract::Format,
-    ) -> Result<(), CliError> {
+    pub(crate) fn validate(self, format: crate::output::contract::Format) -> Result<(), CliError> {
         if !matches!(self, Self::None)
             && !matches!(
                 format,
-                packetcraftr_cli::output::contract::Format::Pcap
-                    | packetcraftr_cli::output::contract::Format::PcapNg
+                crate::output::contract::Format::Pcap | crate::output::contract::Format::PcapNg
             )
         {
             return Err(CliError::new(

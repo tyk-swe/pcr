@@ -10,17 +10,8 @@ use std::time::Instant;
 use packetcraftr_core::error::Coordinate;
 use proptest::{prop_assert, prop_assert_eq, proptest};
 
-use super::test_support::{Buffer, Data};
 use super::*;
-
-#[derive(Serialize)]
-#[serde(transparent)]
-struct TestRecord<T>(T);
-impl<T: Serialize> StreamRecord for TestRecord<T> {
-    fn event_name(&self) -> &'static str {
-        "frame"
-    }
-}
+use crate::test_support::{SharedBuffer, TestRecord};
 
 struct BlockedWriter {
     entered: mpsc::Sender<()>,
@@ -106,7 +97,7 @@ fn bounded_terminal_writes_fail_incomplete_without_retrying_or_releasing_the_wor
 
 #[test]
 fn bounded_output_keeps_sequences_contiguous_and_writes_one_terminal() {
-    let output = Buffer::default();
+    let output = SharedBuffer::default();
     let stream = StreamEncoder::new_bounded(
         Command::Read,
         output.clone(),
@@ -128,7 +119,7 @@ fn bounded_output_keeps_sequences_contiguous_and_writes_one_terminal() {
         .unwrap();
     assert!(stream.is_terminal());
     assert!(stream.complete((), Vec::new()).is_err());
-    let bytes = output.0.lock().unwrap();
+    let bytes = output.bytes();
     assert_eq!(bytes.last(), Some(&b'\n'));
     let records: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
         .unwrap()
@@ -228,7 +219,7 @@ fn every_partial_data_or_terminal_write_and_flush_failure_is_final() {
             let result = if terminal {
                 stream.complete((), Vec::new())
             } else {
-                stream.emit_data(Data, Vec::new())
+                stream.emit_data(TestRecord(()), Vec::new())
             };
             assert!(matches!(
                 result,
@@ -242,7 +233,7 @@ fn every_partial_data_or_terminal_write_and_flush_failure_is_final() {
                 Err(EncodeError::Failed)
             ));
             assert!(matches!(
-                stream.emit_data(Data, Vec::new()),
+                stream.emit_data(TestRecord(()), Vec::new()),
                 Err(EncodeError::Failed)
             ));
         }
@@ -274,7 +265,7 @@ proptest! {
         command in 0..Command::ALL.len(),
     ) {
         let command = Command::ALL[command];
-        let buffer = Buffer::default();
+        let buffer = SharedBuffer::default();
         let stream = StreamEncoder::new(command, buffer.clone());
         let mut terminal = false;
         let mut count = 0;
@@ -296,7 +287,7 @@ proptest! {
             stream.complete((), Vec::new()).unwrap();
             count += 1;
         }
-        let bytes = buffer.0.lock().unwrap();
+        let bytes = buffer.bytes();
         prop_assert_eq!(bytes.last(), Some(&b'\n'));
         // Physical NDJSON framing: one complete JSON value per line. A
         // streaming deserializer would also accept concatenated values or a
@@ -342,7 +333,7 @@ fn serialization_that_spends_the_budget_is_not_published_and_can_report_an_error
             now
         }
     });
-    let buffer = Buffer::default();
+    let buffer = SharedBuffer::default();
     let owner = StreamEncoder::new(Command::Read, buffer.clone());
     let publisher = owner.clone().with_deadline(Arc::new(deadline));
     let error = publisher
@@ -355,7 +346,7 @@ fn serialization_that_spends_the_budget_is_not_published_and_can_report_an_error
             ..
         }
     ));
-    assert!(buffer.0.lock().unwrap().is_empty());
+    assert!(buffer.bytes().is_empty());
     owner
         .emit_error(Error::new(
             error.classification(),
@@ -363,7 +354,7 @@ fn serialization_that_spends_the_budget_is_not_published_and_can_report_an_error
             Vec::new(),
         ))
         .unwrap();
-    let record: serde_json::Value = serde_json::from_slice(&buffer.0.lock().unwrap()).unwrap();
+    let record: serde_json::Value = serde_json::from_slice(&buffer.bytes()).unwrap();
     assert_eq!(record["sequence"], 0);
     assert_eq!(record["event"], "error");
     assert!(!owner.is_complete());
@@ -377,8 +368,10 @@ fn an_operation_deadline_bounds_waiting_for_the_encoder_lock() {
         .with_deadline(Arc::new(Deadline::new(Duration::from_millis(25))));
     let guard = owner.output.lock().unwrap();
     let (send, receive) = mpsc::channel();
-    let worker =
-        std::thread::spawn(move || send.send(publisher.emit_data(Data, Vec::new())).unwrap());
+    let worker = std::thread::spawn(move || {
+        send.send(publisher.emit_data(TestRecord(()), Vec::new()))
+            .unwrap();
+    });
     let result = receive.recv_timeout(Duration::from_secs(2));
     drop(guard);
     worker.join().unwrap();
@@ -440,8 +433,10 @@ fn writer_wait_uses_remaining_operation_budget_and_retains_cleanup_capacity() {
             move || now,
         )));
     let (send, receive) = mpsc::channel();
-    let worker =
-        std::thread::spawn(move || send.send(publisher.emit_data(Data, Vec::new())).unwrap());
+    let worker = std::thread::spawn(move || {
+        send.send(publisher.emit_data(TestRecord(()), Vec::new()))
+            .unwrap();
+    });
     let entered = waiting.recv_timeout(Duration::from_secs(2));
     let result = receive.recv_timeout(Duration::from_secs(2));
     let retained = runtime.snapshot().active;
@@ -488,7 +483,7 @@ fn extended_wait_accepts_a_slow_writer_and_cleanup_uses_its_own_ceiling() {
     .unwrap()
     .with_terminal_error_timeout(Duration::from_millis(10));
     let publisher = stream.clone();
-    let worker = std::thread::spawn(move || publisher.emit_data(Data, Vec::new()));
+    let worker = std::thread::spawn(move || publisher.emit_data(TestRecord(()), Vec::new()));
     waiting.recv_timeout(Duration::from_secs(2)).unwrap();
     // Coordinate release rather than asserting wall-time performance.
     release.send(()).unwrap();

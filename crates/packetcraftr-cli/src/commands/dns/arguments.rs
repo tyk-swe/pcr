@@ -31,6 +31,8 @@ pub(crate) struct Args {
     pub(crate) reverse: Vec<std::net::IpAddr>,
     /// DNS type alias, decimal code, or TYPE<n> (0..=65535; at most five digits).
     #[arg(long = "type", default_value_t = QueryType::A)]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::invalid_html_tags)]
     pub(crate) query_type: QueryType,
     /// Select the first authorized server address or one IP family.
     #[arg(long, value_enum, default_value_t = AddressFamily::Any)]

@@ -7,8 +7,8 @@ use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
 use crate::errors::CliError;
+use crate::output::stats::Table;
 use crate::rendering::{render_diagnostics_text, write_stdout_line, write_summary_line};
-use packetcraftr_cli::output::stats::Table;
 
 pub(super) fn render_text(
     table: Table,

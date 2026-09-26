@@ -1,11 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use crate::output::{self, contract::ToolFormat};
 use crate::{
     errors::CliError,
     rendering::{StreamEncoder, write_stdout_line},
 };
-use packetcraftr_cli::output::{self, contract::ToolFormat};
 use std::sync::Arc;
 
 /// The pieces both connect entry points drive: the policy authorizer, the

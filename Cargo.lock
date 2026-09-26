@@ -1066,6 +1066,7 @@ dependencies = [
  "ctrlc",
  "jsonschema",
  "packetcraftr",
+ "packetcraftr-cli",
  "packetcraftr-core",
  "packetcraftr-netio",
  "proptest",

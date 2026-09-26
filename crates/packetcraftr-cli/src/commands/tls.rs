@@ -3,7 +3,7 @@
 
 //! TLS session assembly CLI command.
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use std::sync::OnceLock;
 
@@ -14,7 +14,7 @@ mod rendering;
 
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::offline_analysis::{parse_stream_selector, prepare};

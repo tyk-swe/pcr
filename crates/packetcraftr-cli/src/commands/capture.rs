@@ -7,15 +7,15 @@ mod rendering;
 mod writer;
 
 use self::arguments::Args;
+use crate::output::{
+    capture::Retention,
+    contract::{CaptureFormat, Command},
+};
 use crate::{
     errors::CliError,
     filtering::FrameSelector,
     rendering::StreamEncoder,
     system::{InterfaceSelector, resolve},
-};
-use packetcraftr_cli::output::{
-    capture::Retention,
-    contract::{CaptureFormat, Command},
 };
 use packetcraftr_core::{analysis::pcap, error::Kind};
 use packetcraftr_netio as net;

@@ -1350,7 +1350,7 @@ fn ipv6_link_local_fallback_is_rejected_before_udp_io() {
 #[test]
 fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
     let limits = super::MessageLimits::default();
-    let complete = super::classification::ResponseClassification::Response(
+    let complete = super::evidence::ResponseClassification::Response(
         super::wire::decode_response(
             &dns_response(),
             "example.com",
@@ -1360,7 +1360,7 @@ fn complete_udp_response_ranks_above_truncation_when_both_are_retained() {
         )
         .unwrap(),
     );
-    let truncated = super::classification::ResponseClassification::Response(
+    let truncated = super::evidence::ResponseClassification::Response(
         super::wire::decode_response(
             &truncated_dns_response(),
             "example.com",

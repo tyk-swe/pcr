@@ -27,14 +27,14 @@ use crate::{Client, Sink, Stats, StatsOverflow};
 use packetcraftr_core::error::BoundaryError;
 
 use super::EVIDENCE_DIAGNOSTICS;
-use super::classification::{
-    ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
-};
 use super::error::{Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
+use super::evidence::{
+    ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
+};
 use super::executor::{Exchange, ExchangeEvidence, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
-use super::probe::{Probe, rotated_source_port};
+use super::plan::{Probe, rotated_source_port};
 use super::{
     AttemptEvidence, Event, EventContext, Limits, Outcome, Record, Report, Request, Section,
     Transport, TransportMode, UndecodedEvidence, ValidatedResponse, batch,

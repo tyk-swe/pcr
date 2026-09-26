@@ -6,6 +6,24 @@
 //! All platform-specific and potentially unsafe I/O is contained here. Higher
 //! level transmission and diagnostic workflows remain policy-gated in
 //! `packetcraftr`.
+//!
+//! # Public paths
+//!
+//! Each capability is a module ([`route`], [`interface`], [`capture`],
+//! [`transmit`], [`tcp`]) holding its provider contract and its system
+//! provider; shared vocabulary is at the root. Public fields name core types
+//! by their core path, such as `packetcraftr_core::packet::MacAddress`.
+//!
+//! # Errors
+//!
+//! Every public error implements `packetcraftr_core::error::Classified`.
+//! A native failure keeps the platform's own error as its source, stored as
+//! `packetcraftr_core::error::Source` when it is type-erased, and its message
+//! never repeats that source. [`Error`] is the live-I/O failure capture and
+//! transmission share; [`route::SystemError`], [`interface::Error`], and
+//! [`tcp::Error`] are their capabilities' own. A capability this build, target,
+//! or device lacks is one [`Unsupported`], which all three live-I/O errors
+//! carry and whose [`NativeCapability`] decides its class.
 
 // This crate is the only one permitted to contain `unsafe`. Non-platform
 // modules forbid it locally; files under `platform/` that wrap a native API

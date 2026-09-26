@@ -3,7 +3,8 @@
 
 //! Built-in packet models, registration, and capabilities. [`BuiltinProtocol`]
 //! reports construction, round-trip, and matcher support;
-//! [`capture::BUILTIN_CAPTURE_ROOTS`] lists capture bindings.
+//! [`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS) lists
+//! capture bindings.
 //! [`builtin::registry`] provides the immutable default registry.
 //!
 //! Codecs preserve unknown and malformed bytes. SCTP chunks remain validated

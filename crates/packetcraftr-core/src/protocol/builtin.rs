@@ -5,7 +5,7 @@
 //! immutable default; [`registry_with`] adds bindings, with
 //! [`registry_with_tls_ports`] as the TLS convenience form. Discover codecs and
 //! capture roots through [`super::BuiltinProtocol::ALL`] and
-//! [`super::capture::BUILTIN_CAPTURE_ROOTS`].
+//! [`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS).
 
 mod filter;
 mod registry;

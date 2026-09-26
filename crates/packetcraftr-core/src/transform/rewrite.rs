@@ -130,10 +130,7 @@ pub fn rewrite(
     }
     let (old_offset, kind) = if ethernet {
         super::ethernet_payload(frame.bytes(), u16_at)?
-    } else if matches!(
-        frame.link_type,
-        LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6
-    ) {
+    } else if frame.link_type.is_raw_ip() {
         (0, 0)
     } else {
         return Err(Error::Unsupported("rewrite requires Ethernet or raw IP"));

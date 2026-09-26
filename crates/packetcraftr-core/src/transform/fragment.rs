@@ -61,7 +61,7 @@ pub fn fragment(frame: &Frame, options: FragmentOptions) -> Result<Vec<Frame>, E
 
 fn ip_offset(frame: &Frame) -> Result<usize, Error> {
     match frame.link_type {
-        LinkType::RAW | LinkType::BSD_RAW | LinkType::IPV4 | LinkType::IPV6 => Ok(0),
+        link_type if link_type.is_raw_ip() => Ok(0),
         LinkType::ETHERNET => {
             let bytes = frame.bytes();
             let (offset, kind) = super::ethernet_payload(bytes, u16_at)?;

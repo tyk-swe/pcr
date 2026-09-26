@@ -4,9 +4,7 @@
 use std::sync::Arc;
 
 use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::{
-    build::Builder, frame::LinkType, fuzz as packet_fuzz, packet::Packet, registry::Registry,
-};
+use packetcraftr_core::{build::Builder, fuzz as packet_fuzz, packet::Packet, registry::Registry};
 
 use crate::clock::Clock;
 use crate::execution::{Context, Grant};
@@ -250,13 +248,7 @@ fn maximum_wire_bytes(request: &packet_fuzz::Request, cases: &[Case]) -> Result<
             return Ok(total);
         };
         let overhead = match packet_fuzz::packet_link_type(&built.packet) {
-            Some(
-                LinkType::ETHERNET
-                | LinkType::NULL
-                | LinkType::LOOP
-                | LinkType::LINUX_SLL
-                | LinkType::LINUX_SLL2,
-            ) => 0,
+            Some(link_type) if !link_type.is_raw_ip() => 0,
             _ => SYNTHESIZED_ETHERNET_BYTES,
         };
         total

@@ -5,10 +5,18 @@
 //! support; no native libpcap/Npcap dependency. [`rewrite`](fn@rewrite)
 //! preserves validated source records and format; [`Writer`] creates new
 //! captures from frames.
+//!
+//! This module also owns link-type knowledge: the known
+//! [`LinkType`](crate::frame::LinkType) numbers and the single mapping
+//! between a link type and its built-in root protocol
+//! ([`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS),
+//! [`root_protocol`](crate::frame::LinkType::root_protocol),
+//! [`for_root_protocol`](crate::frame::LinkType::for_root_protocol)).
 
 mod classic;
 pub mod compression;
 mod error;
+mod link_type;
 mod map;
 mod merge;
 pub use map::{MapError, MapReport, map_frames};

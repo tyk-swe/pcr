@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::{
+    frame::LinkType,
     protocol::BuiltinProtocol,
     protocol::{
-        capture::BUILTIN_CAPTURE_ROOTS,
         link::LLC_FRAME_DISCRIMINATOR,
         tunnel::{
             MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, PPPOE_DISCOVERY,
@@ -96,8 +96,8 @@ pub(crate) fn bind_tls_ports(
 }
 
 fn register_link(builder: &mut crate::registry::Builder) -> Result<(), crate::registry::Error> {
-    for root in BUILTIN_CAPTURE_ROOTS {
-        builder.bind_link_type(root.link_type, root.protocol.as_str())?;
+    for &(link_type, protocol) in LinkType::BUILTIN_ROOTS {
+        builder.bind_link_type(link_type, protocol.as_str())?;
     }
     for parent in [
         BuiltinProtocol::Ethernet,

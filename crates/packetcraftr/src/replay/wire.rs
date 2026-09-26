@@ -112,7 +112,7 @@ pub(super) fn replay_link_mode(
 ) -> Result<LinkMode, Error> {
     let supported = match link_type {
         LinkType::ETHERNET => LinkMode::Layer2,
-        LinkType::BSD_RAW | LinkType::RAW | LinkType::IPV4 | LinkType::IPV6 => LinkMode::Layer3,
+        link_type if link_type.is_raw_ip() => LinkMode::Layer3,
         _ => {
             return Err(Error::UnsupportedLinkType {
                 source_index,

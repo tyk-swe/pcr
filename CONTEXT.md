@@ -15,6 +15,11 @@ A pcap or pcapng file: its capture scope (interfaces, link types, timestamp
 resolution) and the frames recorded under it.
 _Avoid_: pcap (for both formats), savefile
 
+**Recipe**:
+The description of a packet to build: a versioned packet document (JSON or
+YAML) or a layer expression. Core tells them apart and reads either one.
+_Avoid_: packet spec
+
 **Permissive packet**:
 A packet built in permissive mode that may break protocol rules on purpose.
 Transmitting one needs both policy permission and a request opt-in.

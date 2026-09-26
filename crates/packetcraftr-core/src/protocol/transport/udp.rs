@@ -12,7 +12,7 @@ use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
     diagnostic::{Diagnostic, UDP_CHECKSUM},
     field::{FieldValue, WireValue},
-    layer::{Layer, reflective_layer},
+    layer::{Layer, Malformed, Padding, reflective_layer},
     protocol::BuiltinProtocol,
     registry::Discriminator,
 };
@@ -253,10 +253,7 @@ fn validate_child_selection(
     let Some(child) = context.child else {
         return Ok(diagnostics);
     };
-    if matches!(
-        BuiltinProtocol::from_id(*child.protocol_id()),
-        Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-    ) {
+    if child.is::<Padding>() || child.is::<Malformed>() {
         return Ok(diagnostics);
     }
     let Some((selecting_port, selected)) = child_discriminators(preferred_ports(

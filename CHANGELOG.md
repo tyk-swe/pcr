@@ -131,6 +131,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `&field::Path` instead of a string, so a path is parsed once at the
   document or command-line edge rather than on every call. `field::Path`
   implements `Display` in its own syntax. See `docs/migration-unreleased.md`.
+- Built-in identity comes from the layer's type. `BuiltinProtocol::of` and
+  `BuiltinProtocol::identifies` recognize only the built-in layer types, so a
+  custom layer whose schema reuses a built-in protocol name (such as `ipv4`)
+  is no longer read as that protocol by route semantics, matchers, or
+  validation. `BuiltinProtocol::from_id` still maps a registry identifier by
+  name. See `docs/migration-unreleased.md`.
 
 ### Added
 

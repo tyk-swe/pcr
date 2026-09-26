@@ -750,3 +750,14 @@ where it used to read as an absent field or fail with
 `FieldError::UnknownField`. `Display` writes a path back in the same syntax.
 Hand-written `Layer` implementations are unaffected unless they overrode
 either method.
+
+## Built-in identity
+
+`BuiltinProtocol::of(layer)` and `BuiltinProtocol::identifies(layer)` decide
+by the layer's concrete type, not by the protocol name in its schema. A custom
+`Layer` whose schema says `ipv4` is not IPv4 to core: `of` returns `None`,
+route semantics refuse it as an unknown protocol carrying a route field, and
+it gets no built-in matcher or validation behavior. Give a custom layer its
+own protocol name and register it through `registry::Builder`.
+`BuiltinProtocol::from_id` and `from_name` still map registry identifiers and
+names.

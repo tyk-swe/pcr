@@ -352,9 +352,9 @@ fn validate_parent(
         )?;
     }
     if layer.version == 1
-        && parent.is_some_and(|parent| {
-            BuiltinProtocol::Gre.identifies(parent) && parent.field("sequence").is_none()
-        })
+        && parent
+            .and_then(|parent| parent.downcast_ref::<super::Gre>())
+            .is_some_and(|gre| gre.sequence.is_none())
     {
         strict_or_diagnostic(
             NAME,

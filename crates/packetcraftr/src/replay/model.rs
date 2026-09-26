@@ -9,11 +9,12 @@ use packetcraftr_core::capture_file::{
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
-    route::Materialized as MaterializedRoute, transmit::Report as IoSendReport,
+    transmit::Report as IoSendReport,
 };
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
+use crate::route::Materialized as MaterializedRoute;
 
 /// Ceiling for [`Limits::max_duration`], which bounds one replay operation as
 /// a deadline on elapsed time from its start. The intentional delays it

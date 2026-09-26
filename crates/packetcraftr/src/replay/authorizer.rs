@@ -247,7 +247,7 @@ impl Authorizer for SystemAuthorizer {
     fn authorize_final_wire(
         &mut self,
         frame: &Frame,
-        route: &packetcraftr_netio::route::Plan,
+        route: &crate::route::Plan,
     ) -> Result<(), BoundaryError> {
         match self.wire_decode.take() {
             Some(decoded)
@@ -286,7 +286,9 @@ mod tests {
     };
     use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::Capability as LinkCapability;
-    use packetcraftr_netio::route::{Decision, Plan, Scope, SelectionReason};
+    use packetcraftr_netio::route::{Decision, Scope, SelectionReason};
+
+    use crate::route::Plan;
 
     use super::*;
     use crate::policy::{DeclaredPackets, PermissiveLive, ReplayFrame, WireBudget};

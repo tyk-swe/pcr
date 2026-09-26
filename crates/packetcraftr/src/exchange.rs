@@ -8,7 +8,6 @@ mod capture;
 mod client;
 mod correlation;
 mod model;
-mod route_cache;
 mod shutdown;
 mod transaction;
 

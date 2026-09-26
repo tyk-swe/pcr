@@ -22,25 +22,25 @@ pub(super) struct PreparedRawIp {
 
 pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     let bytes = frame.bytes().clone();
-    let plan = &frame.route().plan;
-    if bytes.len() > plan.decision.mtu as usize {
+    let route = frame.route();
+    let decision = route.decision;
+    if bytes.len() > decision.mtu as usize {
         return Err(invalid_frame(format!(
             "{} bytes exceed route MTU {}",
             bytes.len(),
-            plan.decision.mtu
+            decision.mtu
         )));
     }
-    if plan.decision.interface.name.is_empty() || plan.decision.interface.index == 0 {
+    if decision.interface.name.is_empty() || decision.interface.index == 0 {
         return Err(invalid_frame(
             "route-selected interface identity is incomplete".to_owned(),
         ));
     }
-    let interface_source = plan
-        .decision
+    let interface_source = decision
         .selected_source
-        .or(plan.decision.preferred_source)
+        .or(decision.preferred_source)
         .ok_or_else(|| invalid_frame("route has no interface-owned source address".to_owned()))?;
-    let route_destination = plan
+    let route_destination = route
         .lookup_destination
         .ok_or_else(|| invalid_frame("route has no Layer 3 lookup destination".to_owned()))?;
     let Some(version) = bytes.first().map(|byte| byte >> 4) else {
@@ -82,7 +82,7 @@ pub(super) fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, Error> {
     validate_windows_restrictions(&bytes, packet_source, interface_source)?;
 
     Ok(PreparedRawIp {
-        interface: plan.decision.interface.clone(),
+        interface: decision.interface.clone(),
         destination,
         submission,
         wire_bytes: bytes,

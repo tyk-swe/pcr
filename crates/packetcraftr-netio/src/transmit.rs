@@ -4,22 +4,38 @@
 //! Typed Layer 2 and Layer 3 transmission contracts; callers own policy authorization.
 
 use bytes::Bytes;
+use std::net::IpAddr;
 use std::time::{Instant, SystemTime};
 
 use super::Error;
 use super::error::SendEvidenceFault;
 use super::link::Mode;
-use super::route::Materialized;
+use super::route::Decision;
+
+/// The route facts a transmission backend checks before sending: the
+/// selected interface decision, the resolved link mode, and the destination
+/// the route was looked up for.
+///
+/// This is a borrowed view of a finished route; planning and neighbor
+/// resolution happen before a frame is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Route<'a> {
+    pub decision: &'a Decision,
+    pub mode: Mode,
+    /// Destination the route was looked up for; absent for destination-free
+    /// Layer 2 frames.
+    pub lookup_destination: Option<IpAddr>,
+}
 
 /// Complete Layer 2 frame with a verified Layer 2 route.
 #[derive(Clone, Copy, Debug)]
 pub struct Layer2Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a Materialized,
+    route: Route<'a>,
 }
 
 impl<'a> Layer2Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer2)?;
         Ok(Self { bytes, route })
     }
@@ -28,7 +44,7 @@ impl<'a> Layer2Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         self.route
     }
 }
@@ -37,11 +53,11 @@ impl<'a> Layer2Frame<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Layer3Frame<'a> {
     bytes: &'a Bytes,
-    route: &'a Materialized,
+    route: Route<'a>,
 }
 
 impl<'a> Layer3Frame<'a> {
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         require_link_mode(route, Mode::Layer3)?;
         Ok(Self { bytes, route })
     }
@@ -50,7 +66,7 @@ impl<'a> Layer3Frame<'a> {
         self.bytes
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         self.route
     }
 }
@@ -63,9 +79,9 @@ pub enum Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
-    /// Selects the typed provider boundary from the already-materialized route.
-    pub fn try_new(bytes: &'a Bytes, route: &'a Materialized) -> Result<Self, Error> {
-        match route.plan.mode {
+    /// Selects the typed provider boundary from the route's resolved mode.
+    pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
+        match route.mode {
             Mode::Layer2 => Layer2Frame::try_new(bytes, route).map(Self::Layer2),
             Mode::Layer3 => Layer3Frame::try_new(bytes, route).map(Self::Layer3),
             Mode::Auto => Err(Error::UnresolvedLinkMode),
@@ -79,7 +95,7 @@ impl<'a> Frame<'a> {
         }
     }
 
-    pub fn route(self) -> &'a Materialized {
+    pub fn route(self) -> Route<'a> {
         match self {
             Self::Layer2(frame) => frame.route(),
             Self::Layer3(frame) => frame.route(),
@@ -87,8 +103,8 @@ impl<'a> Frame<'a> {
     }
 }
 
-fn require_link_mode(route: &Materialized, expected: Mode) -> Result<(), Error> {
-    let actual = route.plan.mode;
+fn require_link_mode(route: Route<'_>, expected: Mode) -> Result<(), Error> {
+    let actual = route.mode;
     if actual == expected {
         Ok(())
     } else {

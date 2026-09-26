@@ -373,7 +373,7 @@ pub trait Authorizer {
     fn authorize_final_wire(
         &mut self,
         _frame: &Frame,
-        _route: &packetcraftr_netio::route::Plan,
+        _route: &crate::route::Plan,
     ) -> Result<(), BoundaryError> {
         Err(BoundaryError::new(
             "this authorizer does not authorize final wire routes",

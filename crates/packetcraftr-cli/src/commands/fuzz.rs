@@ -11,7 +11,6 @@ mod rendering;
 use std::sync::Arc;
 
 use packetcraftr_core as core;
-use packetcraftr_netio as net;
 
 use crate::output;
 
@@ -146,7 +145,7 @@ fn prepare_live(
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: arguments.destination,
-            plan: net::route::Options {
+            plan: packetcraftr::route::Options {
                 link_mode: arguments.route.link_mode.into(),
                 interface: None,
                 preferred_source: arguments.route.source,

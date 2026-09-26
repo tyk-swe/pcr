@@ -18,14 +18,14 @@ struct PreferenceKey {
 
 /// Caches passive route decisions for one exchange. Interface lookups may
 /// return no decision, unlike preference lookups.
-pub(super) struct CachedProvider<'a, R> {
+pub(crate) struct CachedProvider<'a, R> {
     inner: &'a R,
     by_preference: Mutex<HashMap<PreferenceKey, Decision>>,
     by_interface: Mutex<HashMap<InterfaceId, Option<Decision>>>,
 }
 
 impl<'a, R: packetcraftr_netio::route::Provider> CachedProvider<'a, R> {
-    pub(super) fn new(inner: &'a R) -> Self {
+    pub(crate) fn new(inner: &'a R) -> Self {
         Self {
             inner,
             by_preference: Mutex::new(HashMap::new()),

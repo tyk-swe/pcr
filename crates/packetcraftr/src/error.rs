@@ -25,7 +25,7 @@ pub enum Error {
     /// Route planning or materialization failed, including active neighbor
     /// resolution performed while materializing the route.
     #[error(transparent)]
-    Plan(#[from] packetcraftr_netio::route::Error),
+    Plan(#[from] crate::route::Error),
     #[error(transparent)]
     Build(#[from] packetcraftr_core::build::Error),
     #[error(transparent)]

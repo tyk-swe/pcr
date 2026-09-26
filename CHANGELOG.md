@@ -225,6 +225,16 @@ All notable changes to PacketcraftR are documented here. The format follows
   `fuzz::Error::{InvalidLimit, InvalidTarget, InvalidBasePacket}` carry
   `fuzz::{Constraint, TargetFault, BaseFault}`; messages and codes are
   unchanged. See `docs/migration-unreleased.md`.
+- Route planning moved from `packetcraftr_netio::route` to
+  `packetcraftr::route` (ADR 0001): `plan`, `Plan`, `Options`, `Error`,
+  `materialize`, and `Materialized`. netio keeps the route contract
+  (`Provider`, `Decision`, `Scope`, `SelectionReason`, `SystemProvider`,
+  `SystemError`). `Client::plan` returns `packetcraftr::route::Plan`.
+  Transmission frames take a borrowed `transmit::Route` view (decision, link
+  mode, lookup destination) instead of `&route::Materialized`, and
+  `Frame::route()` returns it; build one with `Materialized::transmit_route`.
+  `Materialized::for_prepared_layer2_frame` is removed. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{
     Arc,
@@ -13,8 +12,6 @@ use bytes::Bytes;
 use packetcraftr_core::budget::Cancellation;
 use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::MacAddress;
-use packetcraftr_core::protocol::{link::Ethernet, network::Ipv4};
-use packetcraftr_core::{layer::Raw, packet::Packet};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
     Error,
@@ -22,28 +19,12 @@ use packetcraftr_netio::{
     deadline,
     link::{Capability, Mode},
     neighbor,
-    route::{
-        Decision, Materialized, Options, Plan, Provider, Scope, SelectionReason, plan as plan_route,
-    },
+    route::{Decision, Scope, SelectionReason},
     transmit::{
-        Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, ModeSender, Report, Sender,
+        Frame, Layer2Frame, Layer2Sender, Layer3Frame, Layer3Sender, ModeSender, Report, Route,
+        Sender,
     },
 };
-
-struct Routes(Decision);
-
-impl Provider for Routes {
-    type Error = Infallible;
-
-    fn lookup_with_preferences(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-    ) -> Result<Decision, Self::Error> {
-        Ok(self.0.clone())
-    }
-}
 
 fn interface() -> InterfaceId {
     InterfaceId {
@@ -67,27 +48,11 @@ fn decision(capability: Capability) -> Decision {
     }
 }
 
-fn planned(mode: Mode) -> Plan {
-    Plan {
-        decision: decision(Capability::Layer2AndLayer3),
+fn route(decision: &Decision, mode: Mode) -> Route<'_> {
+    Route {
+        decision,
         mode,
         lookup_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
-        final_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))),
-        visited_destinations: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))],
-        packet_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-        neighbor_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-        neighbor_target: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
-        destination_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 9])),
-        source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 1])),
-        neighbor_vlan_tags: Vec::new(),
-        synthesized_ethernet: false,
-    }
-}
-
-fn materialized(mode: Mode) -> Materialized {
-    Materialized {
-        plan: planned(mode),
-        neighbor_resolution: None,
     }
 }
 
@@ -346,26 +311,27 @@ impl Layer3Sender for CountingLayer3 {
 #[test]
 fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
     let bytes = Bytes::from_static(&[1, 2, 3]);
-    let layer2_route = materialized(Mode::Layer2);
-    let layer3_route = materialized(Mode::Layer3);
-    let auto_route = materialized(Mode::Auto);
+    let decision = decision(Capability::Layer2AndLayer3);
+    let layer2_route = route(&decision, Mode::Layer2);
+    let layer3_route = route(&decision, Mode::Layer3);
+    let auto_route = route(&decision, Mode::Auto);
 
     assert!(matches!(
-        Layer2Frame::try_new(&bytes, &layer3_route),
+        Layer2Frame::try_new(&bytes, layer3_route),
         Err(Error::TransmissionModeMismatch {
             expected: Mode::Layer2,
             actual: Mode::Layer3
         })
     ));
     assert!(matches!(
-        Layer3Frame::try_new(&bytes, &layer2_route),
+        Layer3Frame::try_new(&bytes, layer2_route),
         Err(Error::TransmissionModeMismatch {
             expected: Mode::Layer3,
             actual: Mode::Layer2
         })
     ));
     assert!(matches!(
-        Frame::try_new(&bytes, &auto_route),
+        Frame::try_new(&bytes, auto_route),
         Err(Error::UnresolvedLinkMode)
     ));
 
@@ -375,16 +341,16 @@ fn typed_transmission_frames_enforce_mode_and_dispatch_exact_bytes() {
         CountingLayer2(Arc::clone(&layer2_calls)),
         CountingLayer3(Arc::clone(&layer3_calls)),
     );
-    let frame = Frame::try_new(&bytes, &layer2_route).expect("Layer 2 frame");
+    let frame = Frame::try_new(&bytes, layer2_route).expect("Layer 2 frame");
     assert_eq!(frame.bytes(), &bytes);
-    assert_eq!(frame.route(), &layer2_route);
+    assert_eq!(frame.route(), layer2_route);
     let report = dispatch.send(frame).expect("fixture send");
     assert_eq!(report.wire_bytes(), &bytes);
     assert_eq!(layer2_calls.load(Ordering::SeqCst), 1);
     assert_eq!(layer3_calls.load(Ordering::SeqCst), 0);
 
     dispatch
-        .send(Frame::try_new(&bytes, &layer3_route).expect("Layer 3 frame"))
+        .send(Frame::try_new(&bytes, layer3_route).expect("Layer 3 frame"))
         .expect("fixture send");
     assert_eq!(layer3_calls.load(Ordering::SeqCst), 1);
 }
@@ -424,52 +390,6 @@ fn send_reports_validate_counts_bytes_and_provider_timing() {
         Report::committed(expected.len(), Bytes::from_static(&[3, 2, 1])).validate_exact(&expected),
         Err(Error::InvalidSendEvidence { .. })
     ));
-}
-
-#[test]
-fn route_model_helpers_cover_neighbor_and_vlan_contracts() {
-    let mut plan = planned(Mode::Layer2);
-    plan.destination_mac = None;
-    assert!(plan.needs_neighbor_resolution());
-    plan.lookup_destination = Some(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)));
-    assert!(!plan.needs_neighbor_resolution());
-    plan.mode = Mode::Layer3;
-    plan.lookup_destination = Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9)));
-    assert!(!plan.needs_neighbor_resolution());
-}
-
-#[test]
-fn planner_preserves_explicit_ethernet_destination_for_broadcast() {
-    let source = Ipv4Addr::new(10, 23, 0, 2);
-    let directed_broadcast = Ipv4Addr::new(10, 23, 0, 255);
-    let explicit_mac = MacAddress([0x02, 0, 0, 0, 0, 99]);
-    let mut explicit_packet = Packet::new();
-    explicit_packet.push(Ethernet {
-        destination: explicit_mac.0,
-        ..Ethernet::default()
-    });
-    explicit_packet.push(Ipv4 {
-        source,
-        destination: directed_broadcast,
-        ..Ipv4::default()
-    });
-    explicit_packet.push(Raw::new(vec![1_u8]));
-    let mut explicit_route = decision(Capability::Layer2AndLayer3);
-    explicit_route.selected_source = Some(IpAddr::V4(source));
-    explicit_route.next_hop = None;
-    explicit_route.selection_reason = SelectionReason::Broadcast;
-    let explicit = plan_route(
-        &explicit_packet,
-        None,
-        &Options {
-            link_mode: Mode::Layer2,
-            ..Options::default()
-        },
-        &Routes(explicit_route),
-    )
-    .expect("explicit broadcast envelope plans");
-    assert_eq!(explicit.destination_mac, Some(explicit_mac));
-    assert_eq!(explicit.neighbor_target, None);
 }
 
 #[test]

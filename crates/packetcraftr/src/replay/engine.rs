@@ -9,12 +9,11 @@ use std::time::{Duration, Instant, SystemTime};
 use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::capture_file::{Format, Interface, Reader};
 use packetcraftr_core::frame::Frame;
-use packetcraftr_netio::{
-    link::Mode as LinkMode, route::Materialized as MaterializedRoute, route::Plan as RoutePlan,
-};
+use packetcraftr_netio::link::Mode as LinkMode;
 
 use crate::clock::Clock;
 use crate::execution;
+use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 
 use super::error::Error;
 use super::model::{

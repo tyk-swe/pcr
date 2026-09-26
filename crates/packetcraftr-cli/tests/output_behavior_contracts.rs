@@ -5,6 +5,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
+use packetcraftr::route::Plan;
 use packetcraftr_cli::output::contract::Command;
 use packetcraftr_cli::output::contract::Error as ContractError;
 use packetcraftr_cli::output::contract::Format;
@@ -39,7 +40,6 @@ use packetcraftr_netio::interface::Info;
 use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::link::Mode as LinkMode;
 use packetcraftr_netio::route::Decision;
-use packetcraftr_netio::route::Plan;
 use packetcraftr_netio::route::Scope;
 use packetcraftr_netio::route::SelectionReason;
 use serde_json::json;

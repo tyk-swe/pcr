@@ -172,3 +172,29 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, native_route))]
+mod native_tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::*;
+
+    #[test]
+    fn a_preferred_source_of_the_other_family_is_rejected_before_the_kernel_is_asked() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9));
+        let preferred_source = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
+
+        let error = SystemProvider
+            .lookup_with_preferences(destination, None, Some(preferred_source))
+            .expect_err("mixed address families");
+
+        assert!(matches!(
+            error,
+            SystemError::SourceFamilyMismatch {
+                preferred_source: rejected,
+                destination: requested,
+            } if rejected == preferred_source && requested == destination
+        ));
+        assert_eq!(error.classification().code, "io.route_selection");
+    }
+}

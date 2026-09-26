@@ -46,7 +46,7 @@ impl packetcraftr::policy::Authorizer for FakeAuthorizer {
     fn authorize_final_wire(
         &mut self,
         _frame: &Frame,
-        _route: &net::route::Plan,
+        _route: &packetcraftr::route::Plan,
     ) -> Result<(), packetcraftr_core::error::BoundaryError> {
         Ok(())
     }
@@ -61,10 +61,10 @@ impl packetcraftr::replay::Transmitter for FakeTransmitter {
         interface: &net::interface::Id,
         mode: net::link::Mode,
         frame: &Frame,
-    ) -> Result<net::route::Materialized, net::Error> {
+    ) -> Result<packetcraftr::route::Materialized, net::Error> {
         let selected_source = "192.0.2.1".parse().expect("fixture source");
         let source_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
-        let plan = net::route::Plan {
+        let plan = packetcraftr::route::Plan {
             decision: net::route::Decision {
                 interface: interface.clone(),
                 source_mac: Some(source_mac),
@@ -89,7 +89,7 @@ impl packetcraftr::replay::Transmitter for FakeTransmitter {
             neighbor_vlan_tags: Vec::new(),
             synthesized_ethernet: false,
         };
-        Ok(net::route::Materialized {
+        Ok(packetcraftr::route::Materialized {
             plan,
             neighbor_resolution: None,
         })
@@ -97,7 +97,7 @@ impl packetcraftr::replay::Transmitter for FakeTransmitter {
 
     fn transmit(
         &mut self,
-        route: &net::route::Materialized,
+        route: &packetcraftr::route::Materialized,
         frame: &Frame,
     ) -> Result<packetcraftr::replay::Transmission, net::Error> {
         Ok(packetcraftr::replay::Transmission {

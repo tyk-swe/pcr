@@ -158,7 +158,7 @@ fn denied_resolved_address_never_reaches_route_neighbor_or_transmit_providers() 
         .plan(
             &packet,
             Some(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
         )
         .expect_err("public destination must be denied");
     assert!(error.to_string().contains("denies public destination"));
@@ -249,7 +249,7 @@ fn only_non_interface_owned_sources_require_the_spoofing_opt_in() {
         let result = source_client(allow_source_spoofing).plan(
             &sourced_packet(source_mac, source),
             Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
         );
         match result {
             Ok(_) => assert!(expect_ok, "{source_mac:?}/{source} must be denied"),
@@ -272,7 +272,7 @@ fn unspecified_final_wire_ip_source_requires_the_spoofing_opt_in() {
         .plan(
             &packet,
             Some(destination),
-            &packetcraftr_netio::route::Options::default(),
+            &packetcraftr::route::Options::default(),
         )
         .expect("unspecified authored source must use the planned source");
     plan.packet_source = None;

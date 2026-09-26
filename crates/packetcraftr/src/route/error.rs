@@ -7,6 +7,7 @@ use std::net::IpAddr;
 use thiserror::Error;
 
 use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_netio::neighbor;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -63,7 +64,7 @@ pub enum Error {
     /// Boxed because a neighbor failure carries the captured discovery
     /// evidence, which no other route failure should have to make room for.
     #[error(transparent)]
-    Neighbor(Box<crate::neighbor::Error>),
+    Neighbor(Box<neighbor::Error>),
     #[error("route source address family does not match destination {destination}")]
     SourceFamilyMismatch { destination: IpAddr },
     #[error(
@@ -102,8 +103,8 @@ pub enum Error {
     },
 }
 
-impl From<crate::neighbor::Error> for Error {
-    fn from(error: crate::neighbor::Error) -> Self {
+impl From<neighbor::Error> for Error {
+    fn from(error: neighbor::Error) -> Self {
         Self::Neighbor(Box::new(error))
     }
 }

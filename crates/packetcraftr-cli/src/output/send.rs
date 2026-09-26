@@ -29,10 +29,10 @@ pub struct NeighborEvidence {
     pub capture_statistics: CaptureStats,
 }
 
-impl TryFrom<packetcraftr_netio::route::Materialized> for MaterializedRoute {
+impl TryFrom<packetcraftr::route::Materialized> for MaterializedRoute {
     type Error = Error;
 
-    fn try_from(route: packetcraftr_netio::route::Materialized) -> Result<Self, Error> {
+    fn try_from(route: packetcraftr::route::Materialized) -> Result<Self, Error> {
         let neighbor = route
             .neighbor_resolution
             .map(|resolution| {

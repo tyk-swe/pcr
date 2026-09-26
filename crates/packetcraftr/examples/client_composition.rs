@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Layer 3 planning skips link materialization entirely, so the composed
     // client is fully exercised without capture or neighbor providers.
     let options = send::Options {
-        plan: packetcraftr_netio::route::Options {
+        plan: packetcraftr::route::Options {
             link_mode: packetcraftr_netio::link::Mode::Layer3,
             ..Default::default()
         },

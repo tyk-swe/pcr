@@ -4,14 +4,14 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    packet::Packet,
+    packet::{MacAddress, Packet, VlanTag},
     protocol::BuiltinProtocol,
     protocol::link::{Arp, Ethernet},
     protocol::semantics,
 };
+use packetcraftr_netio::link::MAX_VLAN_TAGS;
 
 use super::error::Error;
-use crate::link::{MAX_VLAN_TAGS, MacAddress, VlanTag};
 
 pub(super) fn packet_has_link_layer_intent(packet: &Packet) -> bool {
     semantics::outer_layers(packet).any(|layer| {

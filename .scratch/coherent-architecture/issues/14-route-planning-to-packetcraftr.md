@@ -9,10 +9,26 @@ Phase 2. See `CONTEXT.md` **Route plan**.
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] netio contains no packet interpretation for routing.
-- [ ] `Client::plan` returns `packetcraftr::route::Plan`.
-- [ ] Planner unit tests move with the code. Route contract tests pass with only import changes.
-- [ ] `AGENTS.md`'s netio description still holds, and `[Unreleased]` and the migration note list the moved paths.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] netio contains no packet interpretation for routing.
+- [x] `Client::plan` returns `packetcraftr::route::Plan`.
+- [x] Planner unit tests move with the code. Route contract tests pass with only import changes.
+- [x] `AGENTS.md`'s netio description still holds, and `[Unreleased]` and the migration note list the moved paths.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Materialization moved with `Plan` (decision C1): `materialize` needs `Plan`
+  and netio cannot depend on packetcraftr. Transmit frames now take a borrowed
+  netio `transmit::Route` view (decision, mode, lookup destination), built
+  with `Materialized::transmit_route()`. `for_prepared_layer2_frame` is gone;
+  neighbor discovery builds its interface-only `Decision` itself.
+- The preferred-source family check runs in the planner and once at
+  `platform::dispatch::system_route` (pre-FFI, because `SystemProvider` is a
+  public boundary also called directly by replay). It no longer runs at each
+  backend entry or in `finish_route`. Interface-hint checks stay only where
+  they verify the kernel's answer (`finish_route`, `find_interface`, netlink
+  hint mapping) plus the planner's contract check.
+- Moved netio route tests live in `packetcraftr/tests/route_contracts.rs`.
+- Consumer examples changed only the `route::Options` path (decision C9).

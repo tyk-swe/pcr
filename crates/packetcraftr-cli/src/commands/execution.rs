@@ -174,7 +174,7 @@ pub(super) fn prepare(
     let exchange = exchange::options(
         packetcraftr::send::Options {
             destination: None,
-            plan: net::route::Options {
+            plan: packetcraftr::route::Options {
                 link_mode: route.link_mode.into(),
                 interface: None,
                 preferred_source: route.source,

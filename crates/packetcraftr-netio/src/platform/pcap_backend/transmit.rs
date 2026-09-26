@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub(in crate::platform) fn send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    let interface = &frame.route().plan.decision.interface;
+    let interface = &frame.route().decision.interface;
     i32::try_from(frame.bytes().len()).map_err(|_| Error::InvalidTransmissionFrame {
         message: format!(
             "Layer 2 frame length {} exceeds the libpcap signed-length limit",

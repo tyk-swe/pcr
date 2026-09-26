@@ -9,9 +9,7 @@ use self::{
     query::{query_interfaces, query_route},
     worker::with_netlink,
 };
-use crate::platform::route_normalize::{
-    find_interface, interface_decision, validate_preferred_source_family,
-};
+use crate::platform::route_normalize::{find_interface, interface_decision};
 use crate::{
     interface::{self, Id as InterfaceId},
     route::{Decision, SystemError},
@@ -29,7 +27,6 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
-    validate_preferred_source_family(destination, preferred_source)?;
     let interface_hint = interface_hint.cloned();
     with_netlink(move |handle| query_route(handle, destination, interface_hint, preferred_source))
 }

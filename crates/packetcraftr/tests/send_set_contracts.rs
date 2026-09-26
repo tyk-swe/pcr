@@ -72,9 +72,9 @@ fn packet(ttl: u8) -> Packet {
 
 fn layer3_send() -> send::Options {
     send::Options {
-        plan: packetcraftr_netio::route::Options {
+        plan: packetcraftr::route::Options {
             link_mode: LinkMode::Layer3,
-            ..packetcraftr_netio::route::Options::default()
+            ..packetcraftr::route::Options::default()
         },
         ..send::Options::default()
     }

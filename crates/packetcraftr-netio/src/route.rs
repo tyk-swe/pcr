@@ -1,15 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-mod error;
-mod intent;
-mod materialize;
+//! The route contract: passive route and interface lookups answered by a
+//! [`Provider`], and the native [`SystemProvider`].
+//!
+//! Planning a packet's route from these answers belongs to
+//! `packetcraftr::route`.
+
 mod models;
-mod planner;
 mod provider;
 
-pub use error::Error;
-pub use materialize::{Materialized, materialize};
-pub use models::{Decision, Options, Plan, Provider, Scope, SelectionReason};
-pub use planner::plan;
+pub use models::{Decision, Provider, Scope, SelectionReason};
 pub use provider::{SystemError, SystemProvider};

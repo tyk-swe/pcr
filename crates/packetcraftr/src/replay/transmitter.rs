@@ -48,7 +48,7 @@ impl SystemTransmitter {
         requested: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<packetcraftr_netio::route::Materialized, LiveIoError> {
+    ) -> Result<crate::route::Materialized, LiveIoError> {
         let network = match mode {
             LinkMode::Layer3 => Some(replay_network_envelope(frame)?),
             LinkMode::Layer2 | LinkMode::Auto => None,
@@ -108,11 +108,11 @@ fn materialized_route(
     mode: LinkMode,
     frame: &Frame,
     network: Option<NetworkEnvelope>,
-) -> Result<packetcraftr_netio::route::Materialized, LiveIoError> {
+) -> Result<crate::route::Materialized, LiveIoError> {
     let plan = match mode {
         LinkMode::Layer2 => {
             let selected_source = interface.addresses.first().map(|value| value.address);
-            packetcraftr_netio::route::Plan {
+            crate::route::Plan {
                 decision: packetcraftr_netio::route::Decision {
                     interface: interface.id.clone(),
                     source_mac: interface.mac_address,
@@ -172,7 +172,7 @@ fn materialized_route(
                 });
             }
             let source_mac = route.source_mac;
-            packetcraftr_netio::route::Plan {
+            crate::route::Plan {
                 decision: route,
                 mode,
                 lookup_destination: Some(network.destination),
@@ -189,7 +189,7 @@ fn materialized_route(
         }
         LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
     };
-    Ok(packetcraftr_netio::route::Materialized {
+    Ok(crate::route::Materialized {
         plan,
         neighbor_resolution: None,
     })
@@ -221,13 +221,13 @@ impl Transmitter for SystemTransmitter {
         interface: &InterfaceId,
         mode: LinkMode,
         frame: &Frame,
-    ) -> Result<packetcraftr_netio::route::Materialized, LiveIoError> {
+    ) -> Result<crate::route::Materialized, LiveIoError> {
         self.resolve(interface, mode, frame)
     }
 
     fn transmit(
         &mut self,
-        route: &packetcraftr_netio::route::Materialized,
+        route: &crate::route::Materialized,
         frame: &Frame,
     ) -> Result<Transmission, LiveIoError> {
         if route.plan.mode == LinkMode::Auto {
@@ -244,9 +244,10 @@ impl Transmitter for SystemTransmitter {
                 message: "interface was not validated before replay transmission".to_owned(),
                 source: None,
             })?;
-        let report = self
-            .packet_io
-            .send(TransmissionFrame::try_new(frame.bytes(), route)?)?;
+        let report = self.packet_io.send(TransmissionFrame::try_new(
+            frame.bytes(),
+            route.transmit_route(),
+        )?)?;
         Ok(Transmission {
             interface: selected.id,
             report,

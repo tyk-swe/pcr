@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::interface::Id as InterfaceId;
 use crate::link::{MacAddress, Mode};
-use crate::route::Plan;
+use crate::route::Decision;
 use packetcraftr_core::frame::LinkType;
 
 use super::*;
@@ -71,9 +71,17 @@ struct FixtureLayer2 {
     state: Arc<FixtureLayer2State>,
 }
 
+/// An owned copy of the route view a discovery frame was sent with.
+#[derive(Clone, Debug)]
+struct SentRoute {
+    decision: Decision,
+    mode: Mode,
+    lookup_destination: Option<IpAddr>,
+}
+
 #[derive(Default)]
 struct FixtureLayer2State {
-    sent: Mutex<Vec<(Bytes, Plan)>>,
+    sent: Mutex<Vec<(Bytes, SentRoute)>>,
     failure: Mutex<Option<crate::Error>>,
     operations: Option<Arc<Mutex<Vec<&'static str>>>>,
 }
@@ -94,7 +102,7 @@ impl FixtureLayer2 {
         }
     }
 
-    fn sent(&self) -> Vec<(Bytes, Plan)> {
+    fn sent(&self) -> Vec<(Bytes, SentRoute)> {
         self.state.sent.lock().expect("fixture sends").clone()
     }
 }
@@ -116,11 +124,14 @@ impl transmit::Layer2Sender for FixtureLayer2 {
         {
             return Err(error);
         }
-        self.state
-            .sent
-            .lock()
-            .expect("fixture sends")
-            .push((frame.bytes().clone(), frame.route().plan.clone()));
+        self.state.sent.lock().expect("fixture sends").push((
+            frame.bytes().clone(),
+            SentRoute {
+                decision: frame.route().decision.clone(),
+                mode: frame.route().mode,
+                lookup_destination: frame.route().lookup_destination,
+            },
+        ));
         Ok(transmit::Report::committed(
             frame.bytes().len(),
             frame.bytes().clone(),
@@ -424,14 +435,13 @@ fn successful_resolution_arms_before_send_and_reuses_the_cached_result() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1.mode, Mode::Layer2);
     assert_eq!(sent[0].1.decision.interface, request.interface);
-    assert_eq!(sent[0].1.source_mac, Some(request.interface_mac));
-    assert_eq!(sent[0].1.destination_mac, Some(MacAddress([0xff; 6])));
+    assert_eq!(sent[0].1.decision.source_mac, Some(request.interface_mac));
+    assert_eq!(sent[0].0[..6], [0xff; 6]);
     // The discovery frame is already complete, so the route invents no
-    // lookup destination, packet source, or neighbor target.
+    // lookup destination, source address, or next hop.
     assert_eq!(sent[0].1.lookup_destination, None);
-    assert_eq!(sent[0].1.packet_source, None);
-    assert_eq!(sent[0].1.neighbor_target, None);
-    assert!(sent[0].1.visited_destinations.is_empty());
+    assert_eq!(sent[0].1.decision.selected_source, None);
+    assert_eq!(sent[0].1.decision.next_hop, None);
 
     let capture_requests = captures
         .state
@@ -770,14 +780,13 @@ fn slow_send_consumes_attempt_timeout_before_capture_wait() {
     )
     .expect("resolver options");
     let request = request();
-    let (request_bytes, destination_mac) = build_request_frame(&request).expect("discovery frame");
-    let route = Materialized::for_prepared_layer2_frame(
-        request.interface.clone(),
-        request.interface_mac,
-        destination_mac,
-        request.mtu,
-        request.link_type,
-    );
+    let (request_bytes, _) = build_request_frame(&request).expect("discovery frame");
+    let decision = discovery_decision(&request);
+    let route = transmit::Route {
+        decision: &decision,
+        mode: Mode::Layer2,
+        lookup_destination: None,
+    };
     let mut capture = ObservedCapture {
         metadata: capture::Metadata {
             interface: request.interface.clone(),
@@ -789,7 +798,7 @@ fn slow_send_consumes_attempt_timeout_before_capture_wait() {
     };
 
     let outcome = resolver
-        .exchange(&request, &request_bytes, &route, &mut capture)
+        .exchange(&request, &request_bytes, route, &mut capture)
         .expect("exchange completes without a response");
 
     assert_eq!(outcome.attempts, 1);

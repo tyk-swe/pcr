@@ -48,12 +48,15 @@ fn unsupported(feature_enabled: bool, feature: &str, capability: &str) -> Error 
     }
 }
 
+/// Rejects a preferred source of the wrong address family before any backend
+/// sees it; the backends verify only what the operating system answers.
 #[cfg(native_route)]
 pub(crate) fn system_route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
+    super::route_normalize::validate_preferred_source_family(destination, preferred_source)?;
     route_backend::route(destination, interface_hint, preferred_source)
 }
 
@@ -185,7 +188,7 @@ pub(crate) fn capture_timestamp_types(
 
 #[cfg(native_layer2)]
 pub(crate) fn system_send_layer2(frame: Layer2Frame<'_>) -> Result<transmit::Report, Error> {
-    super::interface_identity::verify_interface_identity(&frame.route().plan.decision.interface)?;
+    super::interface_identity::verify_interface_identity(&frame.route().decision.interface)?;
     layer2_backend::send_layer2(frame)
 }
 
@@ -200,7 +203,7 @@ pub(crate) fn system_send_layer2(_frame: Layer2Frame<'_>) -> Result<transmit::Re
 
 #[cfg(native_layer3)]
 pub(crate) fn system_send_layer3(frame: Layer3Frame<'_>) -> Result<transmit::Report, Error> {
-    super::interface_identity::verify_interface_identity(&frame.route().plan.decision.interface)?;
+    super::interface_identity::verify_interface_identity(&frame.route().decision.interface)?;
     super::raw_ip::send_layer3(frame)
 }
 

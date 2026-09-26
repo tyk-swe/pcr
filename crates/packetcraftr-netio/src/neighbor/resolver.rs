@@ -10,8 +10,8 @@ use packetcraftr_core::frame::Frame;
 
 use crate::{
     capture::{self, Session},
-    link::MacAddress,
-    route::Materialized,
+    link::{Capability, MacAddress, Mode},
+    route::{Decision, Scope, SelectionReason},
     transmit::{self, Layer2Frame},
 };
 
@@ -23,6 +23,23 @@ use super::evidence::{
 use super::options::Options;
 use super::wire::{build_request_frame, match_neighbor_response};
 use super::{Error, Request, Resolution};
+
+/// The interface-only route a discovery frame leaves on. The frame is
+/// already complete, so no route lookup field is filled in.
+fn discovery_decision(request: &Request) -> Decision {
+    Decision {
+        interface: request.interface.clone(),
+        source_mac: Some(request.interface_mac),
+        selected_source: None,
+        preferred_source: None,
+        next_hop: None,
+        selection_reason: SelectionReason::InterfaceOnly,
+        destination_scope: Scope::Unspecified,
+        mtu: request.mtu,
+        capability: Capability::Layer2,
+        link_type: request.link_type,
+    }
+}
 
 struct ExchangeOutcome {
     mac_address: Option<MacAddress>,
@@ -88,16 +105,8 @@ where
             });
         }
 
-        let (request_bytes, destination_mac) = build_request_frame(request)?;
-        // The discovery frame is already complete, so this route only names the
-        // interface the prepared Layer 2 bytes must leave on.
-        let materialized_route = Materialized::for_prepared_layer2_frame(
-            request.interface.clone(),
-            request.interface_mac,
-            destination_mac,
-            request.mtu,
-            request.link_type,
-        );
+        let (request_bytes, _) = build_request_frame(request)?;
+        let decision = discovery_decision(request);
         let capture_request = capture::Request {
             interface: request.interface.clone(),
             limits: self.options.capture_limits(),
@@ -109,7 +118,16 @@ where
             .capture
             .arm_capture(&capture_request)
             .map_err(|error| map_io_error(request, "arming capture", error))?;
-        let primary = self.exchange(request, &request_bytes, &materialized_route, &mut capture);
+        let primary = self.exchange(
+            request,
+            &request_bytes,
+            transmit::Route {
+                decision: &decision,
+                mode: Mode::Layer2,
+                lookup_destination: None,
+            },
+            &mut capture,
+        );
         let cleanup = capture.shutdown();
         // A successful shutdown makes these final discovery-session statistics.
         let statistics = capture.statistics();
@@ -174,7 +192,7 @@ where
         &self,
         request: &Request,
         request_bytes: &Bytes,
-        route: &Materialized,
+        route: transmit::Route<'_>,
         capture: &mut S,
     ) -> Result<ExchangeOutcome, Error> {
         let Some(ready_timeout) = self.remaining_attempt_budget(request) else {

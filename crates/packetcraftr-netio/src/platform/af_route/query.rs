@@ -18,7 +18,7 @@ use super::parser::{parse_route_addresses, roundup};
 use crate::deadline::remaining_before;
 use crate::platform::route_normalize::{
     NativeRouteSnapshot, constrain_by_preferred_source, find_interface, finish_route,
-    interface_decision, validate_preferred_source_family,
+    interface_decision,
 };
 use crate::{
     interface::Id as InterfaceId,
@@ -35,8 +35,6 @@ pub(in crate::platform) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<Decision, SystemError> {
-    validate_preferred_source_family(destination, preferred_source)?;
-
     let available = interfaces()?;
     let requested = interface_hint
         .map(|requested| find_interface(&available, requested))

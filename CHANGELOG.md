@@ -81,6 +81,19 @@ All notable changes to PacketcraftR are documented here. The format follows
   `output::envelope::Error.kind` is the new CLI-owned `envelope::ErrorKind`,
   which still publishes a usage failure as `"cli"` with exit code 2. See
   `docs/migration-unreleased.md`.
+- Live-policy vocabulary leaves core (ADR 0002).
+  `build::BuiltPacket::requires_live_opt_in` is replaced by the neutral
+  `BuiltPacket::mode` field and the `contains_malformed()` and
+  `contains_network_trailer()` methods; the predicate is now
+  `packetcraftr::policy::requires_live_opt_in(&built)`, and the published
+  `requires_live_opt_in` output field is unchanged.
+  `budget::remaining_before` and `Cancellation::POLL_INTERVAL` move to
+  `packetcraftr_netio::deadline::{remaining_before, POLL_INTERVAL}`.
+  `Deadline::bounded_timeout` and `Deadline::for_wait` move to the
+  `packetcraftr::deadline::DeadlineExt` trait. `Cancelled::into_boundary_error`
+  and the exported `deadline_error_conversions!` macro are removed. Core
+  `Deadline` gains `limit()` and `cancellation()` getters. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -181,8 +194,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   decode as their registered protocol still require strict construction.
 - Direct DNS `--tcp`, available without native packet-I/O features, retaining
   socket authorization, bounded framing, response validation, and retries.
-- `packetcraftr_core::budget::remaining_before` is the one helper every crate
-  uses to turn a deadline into a remaining wait; the previous netio-private copy
+- `packetcraftr_netio::deadline::remaining_before` is the one helper every
+  live crate uses to turn a deadline into a remaining wait; the previous netio-private copy
   is gone. Core exposes `protocol::application::dns::read_u16` and the CLI
   library exposes `output::hex` for the compact hex rendering shared by
   rendering and machine output, with borrowed formatting for `--output hex`.
@@ -315,6 +328,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `packet::semantics::Error` messages describe the packet instead of a
+  transmission denial (for example "destination cannot be determined because
+  the ipv4 layer is malformed: …" instead of "malformed ipv4 layer may hide a
+  live destination: …"). Live commands still refuse such packets with
+  `policy.invalid_packet_semantics`; only the reason text changes.
 - `dns-read --dns-port` adds ports to 53 instead of replacing it, as README
   documents and `http --http-port` already behaves.
 - Display filters read eight two-digit hex groups (`47:45:54:20:2f:69:6e:64`)
@@ -376,9 +394,9 @@ All notable changes to PacketcraftR are documented here. The format follows
   with `#[source]` fields, `source()` chains reach the underlying `io::Error`
   on worker-reaper and capture-output failures, route materialization,
   authorization, send-execution, and DNS-classification failures keep their
-  typed causes, and `fuzz::CaseFailure` implements `Error`. The exported
-  `packetcraftr_core::deadline_error_conversions!` and `display_via_as_str!`
-  macros keep the repeated conversion and `Display` impls in one place.
+  typed causes, and `fuzz::CaseFailure` implements `Error`. Crate-private
+  `deadline_error_conversions!` macros and the exported `display_via_as_str!`
+  macro keep the repeated conversion and `Display` impls in one place.
 - Default CLI builds align workflow dependency features with workspace builds,
   avoiding redundant workflow and CLI recompilation when switching between
   them. Native capabilities, portable builds, debug information, and release

@@ -17,5 +17,6 @@ pub(crate) use context::{Context, Grant, Paused, Receipt, pause, rate_delay};
 pub(crate) use errors::Errors;
 pub use executor::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions, Request};
 pub(crate) use executor::{ExecutorFault, WorkflowOverrides};
-pub(crate) use sink::sink_observer;
+pub use sink::Sink;
+pub(crate) use sink::publisher;
 pub use validation::ExchangeEvidenceError;

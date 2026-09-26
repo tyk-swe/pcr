@@ -70,5 +70,5 @@ mod test_support;
 pub use client::Client;
 pub use error::Error;
 pub use evidence::SentPacket;
-pub use execution::ExchangeEvidenceError;
+pub use execution::{ExchangeEvidenceError, Sink};
 pub use stats::{Stats, StatsOverflow};

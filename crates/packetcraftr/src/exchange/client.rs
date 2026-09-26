@@ -62,11 +62,13 @@ where
         // finite allowance instead of the window they cannot fall inside.
         let finalization_limit = options.timeout;
         let mut finalization = None;
-        let sink = crate::progress::Sink::new_in(&self.runtime, emit).map_err(|source| {
-            Error::ExchangeOutput {
+        let mut publish =
+            crate::execution::publisher(&self.runtime, emit, exchange_deadline_error, |source| {
+                source
+            })
+            .map_err(|source| Error::ExchangeOutput {
                 source: Box::new(source),
-            }
-        })?;
+            })?;
         self.exchange_streamed(template, options, None, None, &mut |event| {
             let deadline = if collection.check().is_ok() {
                 &collection
@@ -75,7 +77,7 @@ where
                     Deadline::new(finalization_limit).with_cancellation(self.cancellation.clone())
                 })
             };
-            sink.emit(event, deadline).map_err(exchange_sink_error)
+            publish(event, deadline)
         })
     }
 
@@ -150,22 +152,19 @@ where
     }
 }
 
-fn exchange_sink_error(error: crate::progress::EmitError) -> BoundaryError {
-    match error {
-        crate::progress::EmitError::Output(source) => source,
-        crate::progress::EmitError::Deadline(error) => BoundaryError::new(
-            format!(
-                "exchange progressive output exceeded the operation deadline of {:?}",
-                error.limit
-            ),
-            Classification::new(
-                "policy.exchange_duration_limit",
-                Kind::Policy,
-                Some("reduce exchange output backpressure or raise the finite timeout"),
-            ),
-            Vec::new(),
+fn exchange_deadline_error(error: packetcraftr_core::budget::DeadlineExceeded) -> BoundaryError {
+    BoundaryError::new(
+        format!(
+            "exchange progressive output exceeded the operation deadline of {:?}",
+            error.limit
         ),
-    }
+        Classification::new(
+            "policy.exchange_duration_limit",
+            Kind::Policy,
+            Some("reduce exchange output backpressure or raise the finite timeout"),
+        ),
+        Vec::new(),
+    )
 }
 
 pub(crate) struct Prepared {

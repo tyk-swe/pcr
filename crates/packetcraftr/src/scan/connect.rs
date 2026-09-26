@@ -9,6 +9,7 @@ use crate::deadline::DeadlineExt as _;
 use crate::{
     BoundaryError,
     clock::Clock,
+    execution::Sink,
     policy::{Authorizer, Operation, SocketLimits, SocketOperation},
     probe::{Transport, enforce_deadline},
     target::{DeclaredTargets, FamilyGate, admit_selection, approve_operation},
@@ -133,24 +134,24 @@ where
     Ok(Report { summary, endpoints })
 }
 
-pub fn run_with_events<P, A, C, F>(
+pub fn run_with_events<P, A, C, S>(
     request: &Request,
     authorizer: &mut A,
     provider: Arc<P>,
     clock: &mut C,
     runtime: &crate::progress::Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     P: Provider + 'static,
     P::Stream: 'static,
     A: Authorizer,
     C: Clock,
-    F: FnMut(Probe) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Probe, Ack = ()>,
 {
-    let observe = crate::execution::sink_observer(
+    let observe = crate::execution::publisher(
         runtime,
-        emit,
+        sink,
         |error| Error::DurationLimit {
             actual: error.actual,
             limit: error.limit,

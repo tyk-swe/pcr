@@ -9,10 +9,9 @@ use crate::progress::Runtime;
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::{diagnostic::Diagnostic, registry::Registry};
 
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::execution::Errors as _;
-use crate::execution::sink_observer;
+use crate::execution::{Sink, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
@@ -64,24 +63,24 @@ where
 /// I/O, not arbitrary callback execution. Confirmed sends in the current hop
 /// are not undone, callback failure prevents later hops, and a callback may
 /// finish after this function returns while holding its permit.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor<Batch>,
     C: Clock,
-    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Event, Ack = ()>,
 {
-    let observe = sink_observer(
+    let observe = publisher(
         runtime,
-        emit,
+        sink,
         |error| Probes.duration_limit(0, error),
         |source| Error::Output { source },
     )?;

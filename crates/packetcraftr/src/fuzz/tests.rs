@@ -576,7 +576,7 @@ fn live_fuzz_sink_failure_prevents_later_case_execution() {
         &mut executor,
         &mut NoopClock,
         &Runtime::default(),
-        move |case| {
+        move |case: super::Case| {
             observed.lock().unwrap().push(case.prepared.index);
             Err(BoundaryError::new(
                 "induced live fuzz sink failure",

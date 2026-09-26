@@ -6,14 +6,14 @@
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::registry::Registry;
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::execution::Context;
 use crate::execution::Executor;
-use crate::execution::sink_observer;
+use crate::execution::{Sink, publisher};
 use crate::policy::{Authorizer, Operation};
 use crate::progress::Runtime;
 use crate::target::approve_operation;
-use crate::{BoundaryError, Stats};
 
 use super::engine::{Attempts, PreparedOperation};
 use super::plan::batch_limits;
@@ -133,22 +133,22 @@ where
 
 /// [`run_batch`] with progressive per-question events on a runtime-budgeted
 /// publisher, matching [`run_with_events`](super::run_with_events) semantics.
-pub fn run_batch_with_events<A, E, C, F>(
+pub fn run_batch_with_events<A, E, C, S>(
     requests: &[Request],
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<BatchReport, Error>
 where
     A: Authorizer,
     E: Executor<super::Exchange> + super::TcpExecutor,
     C: Clock,
-    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Event, Ack = ()>,
 {
-    let observe = sink_observer(runtime, emit, Error::from, |source| Error::Output {
+    let observe = publisher(runtime, sink, Error::from, |source| Error::Output {
         source,
     })?;
     let mut deadline = batch_deadline(requests)?.with_cancellation(clock.cancellation());

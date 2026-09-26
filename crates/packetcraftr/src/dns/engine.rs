@@ -18,8 +18,8 @@ use crate::execution::Context;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
 };
-use crate::execution::sink_observer;
 use crate::execution::{ExchangeEvidenceError, Executor};
+use crate::execution::{Sink, publisher};
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
@@ -79,22 +79,22 @@ where
 /// publisher waiting and live I/O, not arbitrary callback execution. Callback
 /// failure prevents later retries; a callback may finish after this function
 /// returns and holds one runtime worker permit until then.
-pub fn run_with_events<A, E, C, F>(
+pub fn run_with_events<A, E, C, S>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
     executor: &mut E,
     clock: &mut C,
     runtime: &Runtime,
-    emit: F,
+    sink: S,
 ) -> Result<Summary, Error>
 where
     A: Authorizer,
     E: Executor<Exchange> + TcpExecutor,
     C: Clock,
-    F: FnMut(Event) -> Result<(), BoundaryError> + Send + 'static,
+    S: Sink<Event, Ack = ()>,
 {
-    let observe = sink_observer(runtime, emit, Error::from, |source| Error::Output {
+    let observe = publisher(runtime, sink, Error::from, |source| Error::Output {
         source,
     })?;
     run_observed(request, authorizer, registry, executor, clock, observe)

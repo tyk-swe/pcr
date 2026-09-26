@@ -241,16 +241,14 @@ fn policy_validates_address_and_operation_bounds() {
             defaults.max_packets_per_operation + 1,
             0
         ))),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::PacketLimit { .. }
-        ))
+        Err(policy::Error::PacketLimit { .. })
     ));
     assert!(matches!(
         defaults.authorize(policy::Operation::Budgeted(policy::WireBudget::new(
             0,
             defaults.max_bytes_per_operation + 1
         ))),
-        Err(packetcraftr::Error::Policy(policy::Error::ByteLimit { .. }))
+        Err(policy::Error::ByteLimit { .. })
     ));
     defaults
         .authorize(policy::Operation::Dns(
@@ -272,9 +270,7 @@ fn policy_validates_address_and_operation_bounds() {
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficUnitLimit { .. }
-        ))
+        Err(policy::Error::TrafficUnitLimit { .. })
     ));
     assert!(matches!(
         defaults.authorize(policy::Operation::Dns(
@@ -284,9 +280,7 @@ fn policy_validates_address_and_operation_bounds() {
             )
             .unwrap()
         )),
-        Err(packetcraftr::Error::Policy(
-            policy::Error::TrafficByteLimit { .. }
-        ))
+        Err(policy::Error::TrafficByteLimit { .. })
     ));
 }
 
@@ -439,6 +433,26 @@ fn public_errors_retain_stable_policy_and_target_classification() {
             }),
             "policy.invalid_packet_semantics",
             Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UndecodableWire {
+                source: packetcraftr_core::decode::Error::LayerLimit { limit: 1 },
+            }),
+            "policy.invalid_packet_semantics",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::PermissiveLiveOptIn),
+            "policy.permissive_live_opt_in",
+            Kind::Policy,
+        ),
+        (
+            Box::new(policy::Error::UnsupportedOperation {
+                authorizer: "a fixture authorizer",
+                operation: "replay",
+            }),
+            "internal.unsupported_operation",
+            Kind::Internal,
         ),
         (
             Box::new(TargetError::AddressFamilyUnavailable { family: "IPv6" }),

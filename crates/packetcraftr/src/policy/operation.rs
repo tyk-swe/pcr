@@ -13,8 +13,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::link::Mode as LinkMode;
 
-use super::{Policy, authorize_permissive_live};
-use crate::Error;
+use super::{Error, Policy, authorize_permissive_live};
 use crate::target::{Authorized, Resolver, Target};
 
 /// Mandatory packet-count and conservative wire-byte budgets for a live
@@ -657,7 +656,7 @@ mod tests {
             .expect_err("permissive bytes need the per-operation opt-in");
         assert_eq!(
             opt_in_error.classification().code,
-            Error::PermissiveLiveOptInRequired.classification().code
+            Error::PermissiveLiveOptIn.classification().code
         );
 
         let policy_error = authorizer

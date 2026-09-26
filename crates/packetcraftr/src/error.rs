@@ -13,13 +13,6 @@ use crate::{policy, target};
 pub enum Error {
     #[error(transparent)]
     Cancelled(#[from] packetcraftr_core::budget::Cancelled),
-    #[error("{authorizer} does not authorize {operation} operations")]
-    UnsupportedOperation {
-        authorizer: &'static str,
-        operation: &'static str,
-    },
-    #[error("traffic policy cannot authorize packet routing semantics: {0}")]
-    Wire(#[source] packetcraftr_core::decode::Error),
     #[error(transparent)]
     Target(#[from] target::Error),
     /// Route planning or materialization failed, including active neighbor
@@ -30,8 +23,6 @@ pub enum Error {
     Build(#[from] packetcraftr_core::build::Error),
     #[error(transparent)]
     Policy(#[from] policy::Error),
-    #[error("permissively built packets require allow_permissive_live")]
-    PermissiveLiveOptInRequired,
     #[error(transparent)]
     Io(#[from] LiveIoError),
     /// Boxed because this variant is the only one that carries two complete
@@ -104,23 +95,10 @@ impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
             Self::Cancelled(source) => source.classification(),
-            Self::UnsupportedOperation { .. } => Classification::new(
-                "internal.unsupported_operation",
-                Kind::Internal,
-                Some("route this operation through the authorizer built for its workflow"),
-            ),
-            Self::Wire(_) => policy::INVALID_PACKET_SEMANTICS,
             Self::Target(error) => error.classification(),
             Self::Plan(error) => error.classification(),
             Self::Build(error) => error.classification(),
             Self::Policy(error) => error.classification(),
-            Self::PermissiveLiveOptInRequired => Classification::new(
-                "policy.permissive_live_opt_in",
-                Kind::Policy,
-                Some(
-                    "set the explicit per-operation malformed-live opt-in in addition to policy approval",
-                ),
-            ),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
             Self::ExchangeOutput { source } | Self::SendOutput { source } => {
@@ -178,10 +156,7 @@ impl Classified for Error {
             Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
             Self::ExchangeOutput { source } | Self::SendOutput { source } => source.context(),
             Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
-            Self::Wire(error) => error.context(),
-            Self::UnsupportedOperation { .. }
-            | Self::Build(_)
-            | Self::PermissiveLiveOptInRequired
+            Self::Build(_)
             | Self::InvalidExchangeEvents { .. }
             | Self::HeterogeneousExchangeRoute
             | Self::Template { .. }

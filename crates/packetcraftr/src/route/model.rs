@@ -3,6 +3,7 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
+use packetcraftr_core::frame::LinkType;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode;
@@ -52,6 +53,16 @@ impl Plan {
             && self
                 .lookup_destination
                 .is_none_or(|destination| !destination.is_multicast())
+    }
+
+    /// The link type of the bytes this route puts on the wire: the planned
+    /// interface's link type at Layer 2, raw IP at Layer 3.
+    pub(crate) fn wire_link_type(&self) -> Result<LinkType, packetcraftr_netio::Error> {
+        match self.mode {
+            Mode::Layer2 => Ok(self.decision.link_type),
+            Mode::Layer3 => Ok(LinkType::RAW),
+            Mode::Auto => Err(packetcraftr_netio::Error::UnresolvedLinkMode),
+        }
     }
 }
 

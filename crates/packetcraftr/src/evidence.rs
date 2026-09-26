@@ -1,14 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::{
-    build::BuiltPacket,
-    diagnostic::Diagnostic,
-    frame::{Frame, LinkType},
-};
+use packetcraftr_core::{build::BuiltPacket, diagnostic::Diagnostic, frame::Frame};
 use packetcraftr_netio::{
     Error as LiveIoError, SendEvidenceFault,
-    link::Mode as LinkMode,
     transmit::{Report as TransmissionReport, Timing as TransmissionTiming},
 };
 
@@ -137,11 +132,7 @@ impl SentPacket {
         report: TransmissionReport,
     ) -> Result<Self, LiveIoError> {
         report.validate_exact(&built.bytes)?;
-        let link_type = match route.plan.mode {
-            LinkMode::Layer2 => route.plan.decision.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
-        };
+        let link_type = route.plan.wire_link_type()?;
         let frame = Frame::new(
             report.timing().freshness_marker().wall_clock(),
             link_type,

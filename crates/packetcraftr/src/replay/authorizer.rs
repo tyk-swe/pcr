@@ -13,9 +13,8 @@ use packetcraftr_netio::link::Mode;
 use crate::BoundaryError;
 
 use crate::policy::{
-    Authorizer, Operation, PermissiveLiveDenial, WireAuthorizationError, authorize_wire,
-    authorize_wire_destinations, authorize_wire_sources, check_permissive_live,
-    unsupported_operation,
+    Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
+    authorize_wire_sources, unsupported_operation,
 };
 
 use crate::replay::wire::replay_network_envelope;
@@ -135,17 +134,19 @@ impl SystemAuthorizer {
             ));
         }
         if crate::policy::requires_live_opt_in(rebuilt) {
-            check_permissive_live(&self.policy, self.allow_malformed_live)
+            authorize_permissive_live(&self.policy, self.allow_malformed_live)
                 .map_err(permissive_live_error)?;
         }
         Ok(())
     }
 }
 
-fn wire_error(error: WireAuthorizationError) -> BoundaryError {
+/// Replay reports undecodable captured bytes as a packet failure rather than
+/// a policy refusal.
+fn wire_error(error: crate::policy::Error) -> BoundaryError {
     match error {
-        WireAuthorizationError::Decode(source) => decode_error(source),
-        WireAuthorizationError::Policy(error) => BoundaryError::from_error(error),
+        crate::policy::Error::UndecodableWire { source } => decode_error(source),
+        error => BoundaryError::from_error(error),
     }
 }
 
@@ -164,9 +165,9 @@ fn decode_error(source: decode::Error) -> BoundaryError {
 
 /// Replay's denial names captured bytes rather than a built packet, and the
 /// flag that unblocks them.
-fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
-    match denial {
-        PermissiveLiveDenial::OperationOptIn => BoundaryError::new(
+fn permissive_live_error(error: crate::policy::Error) -> BoundaryError {
+    match error {
+        crate::policy::Error::PermissiveLiveOptIn => BoundaryError::new(
             "permissive or malformed captured bytes require --allow-malformed-live",
             Classification::new(
                 "policy.permissive_live_opt_in",
@@ -175,9 +176,7 @@ fn permissive_live_error(denial: PermissiveLiveDenial) -> BoundaryError {
             ),
             Vec::new(),
         ),
-        PermissiveLiveDenial::PolicyApproval => {
-            BoundaryError::from_error(crate::policy::Error::PermissivePacket)
-        }
+        error => BoundaryError::from_error(error),
     }
 }
 

@@ -30,7 +30,6 @@ mod evidence;
 mod execution;
 mod executor;
 mod plan;
-mod probe;
 mod report;
 mod request;
 #[cfg(test)]

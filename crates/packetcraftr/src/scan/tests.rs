@@ -19,7 +19,7 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::P
 
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::probe::probe_packet;
+use super::plan::packet::probe_packet;
 use super::{Batch, Classification, Event, Limits, PortSpec, Request, select_ports};
 use crate::execution::Executor;
 use crate::policy::PolicyAuthorizer;

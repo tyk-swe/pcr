@@ -11,7 +11,7 @@ use packetcraftr_core::{
 };
 
 use super::classification::classify_response;
-use super::probe::sent_probe_matches;
+use super::plan::packet::sent_probe_matches;
 use super::{
     Completion, Event, Probe, ProbeEvidence, ResponseClassification, ResponseKind,
     UndecodedEvidence,

@@ -12,7 +12,7 @@ use packetcraftr_core::{
 };
 
 use super::classification::classify_response;
-use super::probe::sent_probe_matches;
+use super::plan::packet::sent_probe_matches;
 use super::profile;
 use super::report::RttAccumulator;
 use super::{Classification, Event, Probe, ProbeEvidence, ResponseClassification};

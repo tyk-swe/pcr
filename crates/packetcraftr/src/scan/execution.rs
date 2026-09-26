@@ -24,7 +24,7 @@ impl Probe {
     /// for the high-level client to materialize.
     #[must_use]
     pub fn packet(&self) -> Packet {
-        crate::scan::probe::probe_packet(self)
+        crate::scan::plan::packet::probe_packet(self)
     }
 }
 

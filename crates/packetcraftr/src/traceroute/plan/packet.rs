@@ -17,7 +17,7 @@ use crate::probe::ProbeEndpoint;
 // the operation-local sequence is reduced to the 32-bit wire field the probe carries;
 // sent_probe_matches applies the same reduction when comparing, so even a wrapped counter still
 // matches
-pub(super) fn probe_packet(probe: &Probe) -> Packet {
+pub(in crate::traceroute) fn probe_packet(probe: &Probe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -71,7 +71,7 @@ const ICMP_IDENTITY_TAG: u8 = 0x54;
 
 // the observed packet is compared against the same reduction probe_packet applied, so the narrowing
 // is symmetric on both sides of the comparison
-pub(super) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
+pub(in crate::traceroute) fn sent_probe_matches(probe: &Probe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4
     } else {

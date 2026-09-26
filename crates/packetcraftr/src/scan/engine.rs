@@ -25,8 +25,8 @@ use super::Error;
 use super::WORKFLOW;
 use super::error::Probes;
 use super::evidence::ProbeClassifier;
+use super::plan::packet::sent_probe_matches;
 use super::plan::{build_batches, worst_case_duration};
-use super::probe::sent_probe_matches;
 use super::report::RttAccumulator;
 use super::{
     Batch, Classification, ClassificationCounts, Endpoint, Event, ProbeEvidence, Report, Request,
@@ -202,7 +202,7 @@ where
         .saturating_mul(request.attempts as usize);
     if count.saturating_mul(std::mem::size_of::<Batch>()) > request.limits.max_prepared_bytes {
         return Err(Error::PipelineExecution {
-            source: super::pipeline::limit(
+            source: super::executor::pipeline::limit(
                 "prepared descriptions",
                 request.limits.max_prepared_bytes,
             ),

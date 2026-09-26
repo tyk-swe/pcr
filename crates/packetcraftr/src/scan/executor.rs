@@ -11,6 +11,9 @@ use crate::providers::Providers;
 use super::Batch;
 use super::classification::classify_response;
 
+pub(super) mod pipeline;
+pub(super) mod registry;
+
 pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.scan_executor",
     "use one correlated probe per scan batch and retain at least one response",
@@ -26,9 +29,9 @@ impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
         options: PipelineOptions,
         emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
     ) -> Result<crate::Stats, BoundaryError> {
-        let registry = super::registry::configured(self.client.registry(), requests)?;
+        let registry = super::executor::registry::configured(self.client.registry(), requests)?;
         let client = self.client.view_with_registry(registry);
-        super::pipeline::run(
+        super::executor::pipeline::run(
             &mut ExchangeExecutor::new(&client, self.send.clone(), self.collection.clone()),
             requests,
             options,
@@ -36,13 +39,15 @@ impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
         )
     }
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
-        let registry =
-            super::registry::configured(self.client.registry(), std::slice::from_ref(batch))?;
+        let registry = super::executor::registry::configured(
+            self.client.registry(),
+            std::slice::from_ref(batch),
+        )?;
         let client = self.client.view_with_registry(registry);
         let executor = ExchangeExecutor::new(&client, self.send.clone(), self.collection.clone());
         let first = batch.probe()?;
         let packet = first.packet();
-        if !super::probe::sent_probe_matches(first, &packet) {
+        if !super::plan::packet::sent_probe_matches(first, &packet) {
             return Err(EXECUTOR_FAULT.invalid("scan packet does not match its correlated probe"));
         }
         let template = packetcraftr_core::template::Template::new(packet);

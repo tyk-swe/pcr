@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 mod prepare;
-use super::{Batch, Classification, SentProbe, evidence::Observation, profile};
+use crate::scan::{Batch, Classification, SentProbe, evidence::Observation, profile};
 use crate::{
     Client, Providers, SentPacket, Stats,
     clock::Clock,
@@ -44,7 +44,7 @@ pub struct Error {
     pub source: BoundaryError,
     pub stats: Stats,
     pub pending: Vec<PendingEvidence>,
-    pub failed_probe: Option<super::Probe>,
+    pub failed_probe: Option<crate::scan::Probe>,
     pub capture_sources: Vec<capture::Source>,
     /// Capture shutdown failure that followed the primary failure.
     pub cleanup: Option<Box<LiveIoError>>,
@@ -102,7 +102,7 @@ impl Best {
 /// anything is planned.
 #[derive(Clone, Copy)]
 struct Planned<'b> {
-    probe: &'b super::Probe,
+    probe: &'b crate::scan::Probe,
     permit: ExecutionPermit,
 }
 
@@ -123,8 +123,8 @@ fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), 
     let bounds = [
         (
             "probes",
-            super::MAX_PROBES,
-            within(batches.len(), super::MAX_PROBES),
+            crate::scan::MAX_PROBES,
+            within(batches.len(), crate::scan::MAX_PROBES),
         ),
         ("max_in_flight", 1024, within(options.max_in_flight, 1024)),
         (
@@ -147,10 +147,10 @@ fn validate_options(batches: &[Batch], options: &PipelineOptions) -> Result<(), 
         ),
         (
             "probes_per_second",
-            super::MAX_RATE as usize,
+            crate::scan::MAX_RATE as usize,
             options
                 .probes_per_second
-                .is_none_or(|rate| (1..=super::MAX_RATE).contains(&rate)),
+                .is_none_or(|rate| (1..=crate::scan::MAX_RATE).contains(&rate)),
         ),
         (
             "max_undecoded",
@@ -211,7 +211,7 @@ fn definitive(observation: &Observation) -> bool {
         })
 }
 
-pub(super) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
+pub(in crate::scan) fn limit(field: &'static str, maximum: usize) -> BoundaryError {
     BoundaryError::new(
         format!("scan pipeline exceeds {field}={maximum}"),
         ErrorClassification::new("policy.scan_pipeline_limit", Kind::Policy, None),
@@ -234,7 +234,7 @@ fn check<P: Providers, K: Clock>(
     }
     Ok(())
 }
-pub(super) fn run<P: Providers, K: Clock>(
+pub(in crate::scan) fn run<P: Providers, K: Clock>(
     executor: &mut ExchangeExecutor<'_, P, K>,
     batches: &[Batch],
     options: PipelineOptions,
@@ -281,7 +281,7 @@ pub(super) fn run<P: Providers, K: Clock>(
             .map_err(BoundaryError::from_error)?;
         let decoder = Dissector::new(executor.client.registry.clone());
         let spacing = crate::clock::rate_delay(1, options.probes_per_second)
-            .ok_or_else(|| limit("probe rate", super::MAX_RATE as usize))?;
+            .ok_or_else(|| limit("probe rate", crate::scan::MAX_RATE as usize))?;
         let mut next = 0usize;
         let mut next_send = Instant::now();
         let mut retained = plan.base_bytes;
@@ -353,7 +353,7 @@ pub(super) fn run<P: Providers, K: Clock>(
                         }
                         RebuildError::Preparation(source) => BoundaryError::from_error(source),
                     })?;
-                if !super::probe::sent_probe_matches(probe, &prepared.built().packet) {
+                if !crate::scan::plan::packet::sent_probe_matches(probe, &prepared.built().packet) {
                     return Err(BoundaryError::internal_execution(
                         "materialized scan packet differs from its probe",
                         "internal.scan_probe_mismatch",
@@ -613,7 +613,7 @@ fn complete(
     pending: &mut BTreeMap<usize, Pending>,
     retained: &mut usize,
     emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
-    failed: &mut Option<super::Probe>,
+    failed: &mut Option<crate::scan::Probe>,
     usage: &mut EvidenceUsage,
 ) -> Result<(), BoundaryError> {
     let entry = pending.get_mut(&index).expect("completed pending probe");

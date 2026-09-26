@@ -61,8 +61,8 @@ pub(super) fn plan<'c, P: Providers, K: Clock>(
     for &Planned { probe, .. } in planned {
         super::check(client, deadline)?;
         let packet = probe.packet();
-        if !super::super::probe::sent_probe_matches(probe, &packet) {
-            return Err(BoundaryError::from_error(super::super::profile::Error(
+        if !crate::scan::plan::packet::sent_probe_matches(probe, &packet) {
+            return Err(BoundaryError::from_error(crate::scan::profile::Error(
                 "probe fields differ from its selected profile",
             )));
         }

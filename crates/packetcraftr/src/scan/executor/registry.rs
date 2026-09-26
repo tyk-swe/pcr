@@ -3,7 +3,7 @@
 //! Operation-local protocol bindings make each explicit profile's wire intent
 //! agree with strict building. The original client and registry remain intact:
 //! the executor runs on a view of the client with the configured registry.
-use super::Batch;
+use crate::scan::Batch;
 use packetcraftr_core::{
     error::BoundaryError,
     layer::Id,
@@ -25,7 +25,7 @@ pub(super) fn configured(
                 .insert(port, child)
                 .is_some_and(|previous| previous != child)
             {
-                return Err(BoundaryError::from_error(super::profile::Error(
+                return Err(BoundaryError::from_error(crate::scan::profile::Error(
                     "conflicting wire profiles for one UDP port",
                 )));
             }

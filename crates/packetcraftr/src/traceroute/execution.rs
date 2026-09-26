@@ -21,7 +21,7 @@ impl Probe {
     /// this already-authorized hop plan.
     #[must_use]
     pub fn packet(&self) -> Packet {
-        crate::traceroute::probe::probe_packet(self)
+        crate::traceroute::plan::packet::probe_packet(self)
     }
 }
 

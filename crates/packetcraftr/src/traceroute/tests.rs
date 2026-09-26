@@ -21,7 +21,7 @@ use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic, packet::P
 use super::DEFAULT_UDP_PORT;
 use super::classification::classify_response;
 use super::engine::{run, run_with_events};
-use super::probe::probe_packet;
+use super::plan::packet::probe_packet;
 use super::{Batch, Completion, Event, Limits, Probe, Request, ResponseKind};
 use crate::execution::Executor;
 use crate::policy::Authorizer;
@@ -426,7 +426,7 @@ fn traceroute_configured_source_port_threads_into_planned_probes() {
         assert_eq!(probe.source_port, 53_333);
         let packet = probe.packet();
         assert_eq!(packet.get::<Udp>().expect("UDP probe").source_port, 53_333);
-        assert!(super::probe::sent_probe_matches(probe, &packet));
+        assert!(super::plan::packet::sent_probe_matches(probe, &packet));
     }
 
     request.source_port = None;

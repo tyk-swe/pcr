@@ -105,27 +105,19 @@ fn a_refused_payload_target_never_loads_its_bytes() {
         (
             RECIPE,
             "9.bytes",
-            "--payload-file layer index 9 is outside the recipe's 3 layers",
+            "payload layer index 9 is outside the recipe's 3 layers",
         ),
-        (
-            RECIPE,
-            "2.nope",
-            "--payload-file field nope is unknown on layer 2",
-        ),
-        (
-            RECIPE,
-            "2.a..b",
-            "--payload-file field a..b is unknown on layer 2",
-        ),
+        (RECIPE, "2.nope", "payload field nope is unknown on layer 2"),
+        (RECIPE, "2.a..b", "payload field a..b is unknown on layer 2"),
         (
             RECIPE,
             "1.source_port",
-            "--payload-file field source_port on layer 1 is not bytes-typed",
+            "payload field source_port on layer 1 is not bytes-typed",
         ),
         (
             occupied,
             "2.bytes",
-            "--payload-file field bytes on layer 2 already holds recipe bytes",
+            "payload field bytes on layer 2 already holds recipe bytes",
         ),
     ] {
         let mut packet = recipe(recipe_text, None).unwrap();

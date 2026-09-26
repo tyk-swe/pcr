@@ -239,24 +239,23 @@ impl PayloadTarget {
     }
 }
 
-/// Why a payload target cannot receive bytes. The messages name the
-/// `--payload-file` option they are published under.
+/// Why a payload target cannot receive bytes.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PayloadError {
-    /// The target is not `LAYER.FIELD=PATH` with a zero-based layer index.
-    #[error("--payload-file requires LAYER.FIELD=PATH with a zero-based layer index")]
+    /// The target is not `LAYER.FIELD` with a zero-based layer index.
+    #[error("payload target requires LAYER.FIELD with a zero-based layer index")]
     Syntax,
-    #[error("--payload-file layer index {layer} is outside the recipe's {layers} layers")]
+    #[error("payload layer index {layer} is outside the recipe's {layers} layers")]
     LayerOutOfRange { layer: usize, layers: usize },
-    #[error("--payload-file field {field} is unknown on layer {layer}")]
+    #[error("payload field {field} is unknown on layer {layer}")]
     UnknownField { layer: usize, field: String },
-    #[error("--payload-file field {field} on layer {layer} is not bytes-typed")]
+    #[error("payload field {field} on layer {layer} is not bytes-typed")]
     NotBytes { layer: usize, field: String },
-    #[error("--payload-file field {field} on layer {layer} already holds recipe bytes")]
+    #[error("payload field {field} on layer {layer} already holds recipe bytes")]
     Occupied { layer: usize, field: String },
-    /// The layer refused the bytes. The message already names its reason.
-    #[error("could not set --payload-file field {field} on layer {layer}: {source}")]
+    /// The layer refused the bytes.
+    #[error("could not set payload field {field} on layer {layer}")]
     Set {
         layer: usize,
         field: String,
@@ -268,14 +267,6 @@ pub enum PayloadError {
 impl Classified for PayloadError {
     fn classification(&self) -> Classification {
         Classification::new("cli.error", Kind::Usage, None)
-    }
-
-    fn causes(&self) -> Vec<String> {
-        match self {
-            // The message already carries the layer's reason.
-            Self::Set { .. } => Vec::new(),
-            _ => source_chain(self),
-        }
     }
 }
 

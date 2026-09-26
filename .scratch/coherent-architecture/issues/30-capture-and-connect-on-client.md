@@ -10,8 +10,17 @@ Phase 3.
 
 **Blocked by:** 25
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Capture and connect scan contract tests pass.
-- [ ] A fake-provider test shows capture honoring the deadline and cancellation.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Capture and connect scan contract tests pass.
+- [x] A fake-provider test shows capture honoring the deadline and cancellation.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- `Control` stays (see its doc): a rotation stop is a success whose before/after accounting no sink error or request limit expresses. Sinks answering `()` continue.
+- The selector is part of `capture::Request` (`capture::Selector`) and runs on the capture's thread; the sink runs on the runtime worker.
+- A capture read that fails while the client is cancelled reports `Cause::Cancelled` (same `io.cancelled` code).
+- Capture now registers a `capture_progress` runtime (a new `--resource-diagnostics` row); connect keeps `scan_connect`, now in every format. Recorded under Changed.
+- `connect::Collector::finish` reports a count mismatch as `scan::Error::InvalidEvidence` (`internal.scan_evidence`), to avoid adding a `scan::Error` variant that ticket 27 may also touch.
+- `--interface` resolution for capture stays in the CLI (ticket 38).

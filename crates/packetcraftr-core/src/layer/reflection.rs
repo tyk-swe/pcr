@@ -73,14 +73,6 @@ macro_rules! reflective_layer {
                 Box::new(self.clone())
             }
 
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-
-            fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-                self
-            }
-
             fn field(&self, name: &str) -> Option<$crate::field::FieldValue> {
                 match name {
                     $(

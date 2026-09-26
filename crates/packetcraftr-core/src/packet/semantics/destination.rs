@@ -19,7 +19,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
     for (index, layer) in packet.iter().enumerate() {
         // Registries resolve protocol names trimmed and case-insensitively, so
         // a hand-built "IPv4" must not slip past the check "ipv4" meets.
-        if let Some(malformed) = layer.as_any().downcast_ref::<Malformed>()
+        if let Some(malformed) = layer.downcast_ref::<Malformed>()
             && let Some(intended) = malformed.intended_protocol.as_deref()
             && BuiltinProtocol::from_name_or_alias(&intended.trim().to_ascii_lowercase())
                 .is_some_and(malformed_protocol_may_hide_destination)

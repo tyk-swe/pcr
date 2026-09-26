@@ -208,10 +208,9 @@ impl Builder {
         let materialized = Packet::from_encoded_layers(encoding.layers, encoding.payload_lengths);
         let contains_malformed = materialized
             .iter()
-            .any(|layer| layer.as_any().is::<Malformed>());
+            .any(<dyn crate::layer::Layer>::is::<Malformed>);
         let contains_network_trailer = materialized.iter().any(|layer| {
             layer
-                .as_any()
                 .downcast_ref::<Padding>()
                 .and_then(|padding| padding.outside_layer)
                 .and_then(|outside_layer| materialized.layer(outside_layer))

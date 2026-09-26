@@ -224,9 +224,7 @@ fn resolve_addresses(
         .skip(context.index.saturating_add(1))
         .take_while(|candidate| is_ipv6_extension_layer(*candidate))
         .find_map(|candidate| {
-            candidate
-                .as_any()
-                .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()
+            candidate.downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()
         });
     let active_segment = routing.and_then(|routing| {
         let last = routing.segments.len().checked_sub(1)?;

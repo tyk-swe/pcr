@@ -62,7 +62,7 @@ pub(crate) fn resolve_envelope(
         let Some(layer) = context.packet.layer(index) else {
             continue;
         };
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
+        if let Some(ipv4) = layer.downcast_ref::<Ipv4>() {
             let inherit_context = is_outer_network_layer(context.packet, index);
             let inherit_source = inherit_context && ipv4.source.is_unspecified();
             let inherit_destination = inherit_context && ipv4.destination.is_unspecified();
@@ -82,7 +82,7 @@ pub(crate) fn resolve_envelope(
                 pseudo_header_destination.into(),
             ));
         }
-        if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
+        if let Some(ipv6) = layer.downcast_ref::<Ipv6>() {
             let inherit_context = is_outer_network_layer(context.packet, index);
             let inherit_source = inherit_context && ipv6.source.is_unspecified();
             let inherit_destination = inherit_context && ipv6.destination.is_unspecified();
@@ -94,7 +94,6 @@ pub(crate) fn resolve_envelope(
                 .take_while(|candidate| is_ipv6_extension_layer(*candidate))
                 .filter_map(|candidate| {
                     candidate
-                        .as_any()
                         .downcast_ref::<crate::protocol::ipv6::SegmentRoutingHeader>()?
                         .segments
                         .last()

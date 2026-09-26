@@ -367,13 +367,13 @@ fn udp_payload(request: &Packet, response: &DecodedPacket) -> Option<Bytes> {
         return None;
     }
     let sent_udp =
-        semantics::outer_layers(request).find_map(|layer| layer.as_any().downcast_ref::<Udp>())?;
+        semantics::outer_layers(request).find_map(|layer| layer.downcast_ref::<Udp>())?;
     let (index, udp) = response
         .packet
         .iter()
         .take(semantics::outer_scope_len(&response.packet))
         .enumerate()
-        .find_map(|(index, layer)| layer.as_any().downcast_ref::<Udp>().map(|udp| (index, udp)))?;
+        .find_map(|(index, layer)| layer.downcast_ref::<Udp>().map(|udp| (index, udp)))?;
     if sent_udp.source_port != udp.destination_port || sent_udp.destination_port != udp.source_port
     {
         return None;

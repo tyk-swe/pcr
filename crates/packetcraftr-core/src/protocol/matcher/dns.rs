@@ -32,8 +32,8 @@ impl ResponseMatcher for DnsMatcher {
 /// identifier, opcode, and complete ordered question section all echo.
 fn answers(pair: &ReversedProtocolLayers<'_, '_>) -> bool {
     let (Some(query), Some(reply)) = (
-        pair.request.as_any().downcast_ref::<Dns>(),
-        pair.response.as_any().downcast_ref::<Dns>(),
+        pair.request.downcast_ref::<Dns>(),
+        pair.response.downcast_ref::<Dns>(),
     ) else {
         return false;
     };

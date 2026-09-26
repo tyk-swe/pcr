@@ -477,10 +477,7 @@ mod tests {
         assert!(decoded.stop);
         assert!(decoded.diagnostics.is_empty());
         assert_eq!(decoded.next, [Discriminator(0)]);
-        assert_eq!(
-            decoded.layer.as_any().downcast_ref::<Erspan>(),
-            Some(&layer)
-        );
+        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
     }
 
     #[test]
@@ -527,10 +524,7 @@ mod tests {
 
         let decoded = decode(&encoded.prefix, Some(TYPE_III_PROTOCOL)).unwrap();
         assert_eq!(decoded.consumed, 20);
-        assert_eq!(
-            decoded.layer.as_any().downcast_ref::<Erspan>(),
-            Some(&layer)
-        );
+        assert_eq!(decoded.layer.downcast_ref::<Erspan>(), Some(&layer));
     }
 
     #[test]

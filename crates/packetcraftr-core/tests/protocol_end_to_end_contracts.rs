@@ -658,7 +658,7 @@ fn coverage_paddings_build_only_in_innermost_first_order() {
     let paddings = decoded
         .packet
         .iter()
-        .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
+        .filter_map(|layer| layer.downcast_ref::<Padding>())
         .map(|padding| (padding.outside_layer, padding.bytes.len()))
         .collect::<Vec<_>>();
     assert_eq!(paddings, [(Some(2), 3), (Some(1), 2)]);
@@ -902,7 +902,7 @@ fn overlay_and_security_tunnel_stacks_round_trip() {
         decoded
             .packet
             .iter()
-            .filter(|layer| layer.as_any().is::<Mpls>())
+            .filter(|layer| layer.is::<Mpls>())
             .count(),
         2
     );

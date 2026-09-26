@@ -460,10 +460,7 @@ mod tests {
         assert!(decoded.stop);
         assert_eq!(decoded.next, [Discriminator(0x1234)]);
         assert!(decoded.diagnostics.is_empty());
-        assert_eq!(
-            decoded.layer.as_any().downcast_ref::<Geneve>(),
-            Some(&layer)
-        );
+        assert_eq!(decoded.layer.downcast_ref::<Geneve>(), Some(&layer));
     }
 
     #[test]
@@ -511,7 +508,6 @@ mod tests {
         assert_eq!(
             decoded
                 .layer
-                .as_any()
                 .downcast_ref::<Geneve>()
                 .expect("typed GENEVE")
                 .options,

@@ -155,19 +155,14 @@ pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
     let port_53 = source_port == 53 || destination_port == 53;
     let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
-        Some(BuiltinProtocol::Dns) if port_53 => payload
-            .as_any()
-            .downcast_ref::<Dns>()
-            .map(|dns| dns.wire().clone()),
+        Some(BuiltinProtocol::Dns) if port_53 => {
+            payload.downcast_ref::<Dns>().map(|dns| dns.wire().clone())
+        }
         Some(BuiltinProtocol::Malformed) if port_53 => payload
-            .as_any()
             .downcast_ref::<packetcraftr_core::layer::Malformed>()
             .filter(|layer| layer.intended_protocol.as_deref() == Some("dns"))
             .map(|layer| layer.bytes.clone()),
-        Some(BuiltinProtocol::Raw) => payload
-            .as_any()
-            .downcast_ref::<Raw>()
-            .map(|raw| raw.bytes.clone()),
+        Some(BuiltinProtocol::Raw) => payload.downcast_ref::<Raw>().map(|raw| raw.bytes.clone()),
         _ => None,
     }
 }

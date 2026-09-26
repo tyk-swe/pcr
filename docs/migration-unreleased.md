@@ -628,3 +628,11 @@ canonical path:
 
 The undocumented `packetcraftr_core::layer::{malformed_layout, padding_layout}`
 exports are removed; `raw_layout` remains for codecs that emit `Raw` layers.
+
+## Layer downcasting
+
+`Layer::as_any` and `Layer::as_any_mut` are removed. `dyn Layer` upcasts to
+`dyn Any`, and its inherent `is`, `downcast_ref`, and `downcast_mut` replace
+the two-step call: `layer.as_any().downcast_ref::<Udp>()` becomes
+`layer.downcast_ref::<Udp>()`. Hand-written `Layer` implementations delete
+both methods; `clone_box` stays because `Clone` is not object safe.

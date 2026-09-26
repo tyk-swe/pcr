@@ -310,7 +310,7 @@ mod tests {
             _payload: &[u8],
             _context: &LayerEncodeContext<'_>,
         ) -> Result<EncodedLayer, packetcraftr_core::codec::Error> {
-            let raw = layer.as_any().downcast_ref::<Raw>().ok_or_else(|| {
+            let raw = layer.downcast_ref::<Raw>().ok_or_else(|| {
                 packetcraftr_core::codec::Error::WrongLayer {
                     expected: "raw".into(),
                     actual: *layer.protocol_id(),
@@ -650,7 +650,7 @@ mod tests {
             caller_decoded
                 .packet
                 .layer(0)
-                .is_some_and(|layer| layer.as_any().is::<Raw>())
+                .is_some_and(<dyn Layer>::is::<Raw>)
         );
         let caller_rebuilt = authorizer
             .rebuild_frame(&caller_decoded)

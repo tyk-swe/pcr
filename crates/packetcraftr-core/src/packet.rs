@@ -117,7 +117,7 @@ impl Packet {
     pub fn get<T: Layer>(&self) -> Option<&T> {
         self.layers
             .iter()
-            .find_map(|layer| layer.as_any().downcast_ref::<T>())
+            .find_map(|layer| layer.downcast_ref::<T>())
     }
 
     /// Returns the first layer of type `T` for mutation.
@@ -126,12 +126,9 @@ impl Packet {
     /// lengths before the reference is returned. A failed type lookup does
     /// not change the packet.
     pub fn get_mut<T: Layer>(&mut self) -> Option<&mut T> {
-        let index = self
-            .layers
-            .iter()
-            .position(|layer| layer.as_any().is::<T>())?;
+        let index = self.layers.iter().position(|layer| layer.is::<T>())?;
         self.invalidate_encoded_payload_lengths();
-        self.layers.get_mut(index)?.as_any_mut().downcast_mut::<T>()
+        self.layers.get_mut(index)?.downcast_mut::<T>()
     }
 
     pub fn layer(&self, index: usize) -> Option<&dyn Layer> {
@@ -232,18 +229,15 @@ pub enum PacketError {
 /// declared boundary no longer has a layer to sit outside of.
 fn removal_would_orphan_padding(layers: &[Box<dyn Layer>], index: usize) -> bool {
     layers.iter().enumerate().any(|(padding_index, layer)| {
-        layer
-            .as_any()
-            .downcast_ref::<Padding>()
-            .is_some_and(|padding| {
-                padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
-            })
+        layer.downcast_ref::<Padding>().is_some_and(|padding| {
+            padding.outside_layer == Some(index) && index.saturating_add(1) >= padding_index
+        })
     })
 }
 
 fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
     for layer in layers {
-        let Some(padding) = layer.as_any_mut().downcast_mut::<Padding>() else {
+        let Some(padding) = layer.downcast_mut::<Padding>() else {
             continue;
         };
         if let Some(outside_layer) = &mut padding.outside_layer
@@ -256,7 +250,7 @@ fn shift_padding_for_insert(layers: &mut [Box<dyn Layer>], index: usize) {
 
 fn shift_padding_for_remove(layers: &mut [Box<dyn Layer>], index: usize) {
     for layer in layers {
-        let Some(padding) = layer.as_any_mut().downcast_mut::<Padding>() else {
+        let Some(padding) = layer.downcast_mut::<Padding>() else {
             continue;
         };
         padding.outside_layer = match padding.outside_layer {

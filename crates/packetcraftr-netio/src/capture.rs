@@ -32,6 +32,10 @@ pub const MAX_SNAP_LENGTH: usize = 16 * 1024 * 1024;
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
+/// Longest native capture filter, in bytes, that a single session or a group
+/// accepts.
+pub const MAX_FILTER_BYTES: usize = 64 * 1024;
+
 /// Capture counters for accepted frames and pre-delivery loss. Native receiver
 /// drops are a subset; overflow events are bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -424,6 +428,27 @@ pub struct Request {
     pub promiscuous: bool,
     /// Optional native-driver settings; defaults preserve backend behavior.
     pub native: NativeSettings,
+}
+
+impl Request {
+    /// Checks everything that needs no interface: queue limits, native
+    /// settings, and the [`MAX_FILTER_BYTES`] filter limit.
+    pub fn validate(&self) -> Result<(), Error> {
+        validate_filter_length(self.filter.as_deref())?;
+        self.limits.validate()?;
+        self.native.validate(&self.limits)
+    }
+}
+
+/// The filter-size limit single sessions and groups share.
+fn validate_filter_length(filter: Option<&str>) -> Result<(), Error> {
+    match filter {
+        Some(filter) if filter.len() > MAX_FILTER_BYTES => Err(Error::CaptureFilterTooLong {
+            length: filter.len(),
+            maximum: MAX_FILTER_BYTES,
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// Backend-confirmed properties of an activated capture session.

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use packetcraftr_core::{
     budget::Cancellation,
+    error::{Classified, Kind},
     frame::{Frame, LinkType},
 };
 use packetcraftr_netio::{
     self as net,
     capture::{
-        self,
+        self, Provider as _,
         group::{Cause, Group, Phase, Request},
     },
     interface::Id,
@@ -354,4 +355,47 @@ fn an_empty_source_does_not_pretend_the_wait_or_capture_has_ended() {
     assert!(started.elapsed() >= Duration::from_millis(3));
     assert!(group.sources().all(|source| !source.shutdown_confirmed));
     group.shutdown().unwrap();
+}
+#[test]
+fn single_sessions_and_groups_share_the_filter_limit() {
+    let at_limit = "a".repeat(capture::MAX_FILTER_BYTES);
+    let over_limit = "a".repeat(capture::MAX_FILTER_BYTES + 1);
+    let single = |filter: &str| capture::Request {
+        interface: Id {
+            index: 7,
+            name: "fixture0".to_owned(),
+        },
+        limits: capture::Limits::default(),
+        filter: Some(filter.to_owned()),
+        promiscuous: false,
+        native: Default::default(),
+    };
+    single(&at_limit).validate().unwrap();
+    // The system provider refuses before it touches an interface, in every
+    // build profile.
+    let error = match capture::SystemProvider.arm_capture(&single(&over_limit)) {
+        Err(error) => error,
+        Ok(_) => panic!("an oversized filter must not arm"),
+    };
+    assert!(matches!(
+        error,
+        net::Error::CaptureFilterTooLong {
+            length,
+            maximum: capture::MAX_FILTER_BYTES,
+        } if length == capture::MAX_FILTER_BYTES + 1
+    ));
+    let classification = error.classification();
+    assert_eq!(classification.code, "cli.capture_filter");
+    assert_eq!(classification.kind, Kind::Usage);
+
+    let mut grouped = request(1);
+    grouped.filter = Some(at_limit);
+    grouped.validate().unwrap();
+    grouped.filter = Some(over_limit);
+    let error = grouped.validate().expect_err("groups apply the same limit");
+    assert!(matches!(
+        *error.cause,
+        Cause::Configuration(net::Error::CaptureFilterTooLong { .. })
+    ));
+    assert_eq!(error.classification().code, "cli.capture_filter");
 }

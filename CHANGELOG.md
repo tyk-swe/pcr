@@ -527,6 +527,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Single capture sessions apply the 64 KiB capture-filter limit that capture
+  groups applied: `capture::Request::validate` checks it and
+  `capture::SystemProvider` refuses a longer filter before opening an
+  interface, with `cli.capture_filter`. A group's oversized filter now reports
+  `cli.capture_filter` too, instead of `cli.capture_group`.
 - `packetcraftr_netio::route::SystemProvider` rejects a preferred source of
   the other address family (`io.route_selection`) in builds without
   `native-route` too, before reporting the missing capability

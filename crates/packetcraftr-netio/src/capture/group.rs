@@ -33,13 +33,8 @@ impl Request {
     /// Validate the complete set before arming anything, then split both queue
     /// ceilings exactly, retaining a full snapshot's capacity in every source.
     pub fn validate(&self) -> Result<(), Error> {
-        if self
-            .filter
-            .as_ref()
-            .is_some_and(|filter| filter.len() > 64 * 1024)
-        {
-            return Err(Error::new(Cause::Invalid("capture filter exceeds 64 KiB")));
-        }
+        super::validate_filter_length(self.filter.as_deref())
+            .map_err(|source| Error::new(Cause::Configuration(source)))?;
         let count = self.interfaces.len();
         if count == 0 || count > MAX_SOURCES {
             return Err(Error::new(Cause::Invalid(

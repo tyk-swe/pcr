@@ -346,6 +346,14 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
             "internal.live_io_invariant",
             Kind::Internal,
         ),
+        (
+            Error::CaptureFilterTooLong {
+                length: capture::MAX_FILTER_BYTES + 1,
+                maximum: capture::MAX_FILTER_BYTES,
+            },
+            "cli.capture_filter",
+            Kind::Usage,
+        ),
     ];
 
     for (error, code, kind) in cases {

@@ -107,6 +107,8 @@ pub enum Error {
     },
     #[error("native capture filter was rejected for {interface}: {message}")]
     InvalidCaptureFilter { interface: String, message: String },
+    #[error("capture filter is {length} bytes; the maximum is {maximum}")]
+    CaptureFilterTooLong { length: usize, maximum: usize },
     #[error("native capture filter installation failed for {interface}: {message}")]
     CaptureFilterInstallation { interface: String, message: String },
     #[error("capture did not become ready: {message}")]
@@ -204,6 +206,10 @@ impl Classified for Error {
             Self::InvalidCaptureFilter { .. } => classified_cli(
                 "cli.capture_filter",
                 "use a valid libpcap/Npcap BPF capture-filter expression",
+            ),
+            Self::CaptureFilterTooLong { .. } => classified_cli(
+                "cli.capture_filter",
+                "shorten the capture filter to the documented 64 KiB maximum",
             ),
             Self::CaptureFilterInstallation { .. } => classified(
                 "io.capture_filter",

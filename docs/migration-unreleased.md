@@ -228,8 +228,8 @@ recovers the typed cause.
 
 Wrapped errors display route context; inspect `std::error::Error::source()` or
 `Classified::causes()` for the validation detail. Native interface-snapshot
-validation similarly retains its original `SystemError` in the existing
-`SystemFault` shared-source representation. Classification codes are unchanged.
+validation similarly retains its original `SystemError` as a shared
+`packetcraftr_core::error::Source`. Classification codes are unchanged.
 
 ## Explicit DNS TCP providers
 
@@ -655,7 +655,7 @@ canonical path:
 | `protocol::application::{Dns, Tls}` | `protocol::application::dns::Dns`, `protocol::application::tls::Tls` |
 | `protocol::application::tls::{codec, fingerprint, model, names, parse}` submodule paths | the same items re-exported flat from `protocol::application::tls` |
 | `analysis::pcap::DEFAULT_SIZE_LIMIT` | `frame::DEFAULT_SIZE_LIMIT` |
-| `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_netio::SystemFault` |
+| `packetcraftr::dns::tcp::SocketFault` | `packetcraftr_core::error::Source` |
 | `packetcraftr::fuzz::PolicyAuthorizer` | `packetcraftr::policy::PolicyAuthorizer` |
 | `packetcraftr::replay::{Authorizer, Operation, ReplayFrame, WireBudget}` | `packetcraftr::policy::{Authorizer, Operation, ReplayFrame, WireBudget}` |
 | `packetcraftr_netio::link::{MacAddress, VlanKind, VlanTag}` | `packetcraftr_core::packet::{MacAddress, VlanKind, VlanTag}` |
@@ -1058,14 +1058,14 @@ error type with other live I/O.
 
 | Before | After |
 |---|---|
-| `Err(Error::Unsupported { message, source: None })` | `Err(interface::Error::Unsupported { message })` |
-| `Err(Error::InterfaceDiscovery { message, source })` | `Err(interface::Error::Discovery { message, source })`; `source` is a required `SystemFault` |
+| `Err(Error::Unsupported { message, source: None })` | `Err(interface::Error::Unsupported(Unsupported::new(NativeCapability::InterfaceEnumeration, message)))`; see [netio error convention](#netio-error-convention) |
+| `Err(Error::InterfaceDiscovery { message, source })` | `Err(interface::Error::Discovery { message, source })`; `source` is a required `packetcraftr_core::error::Source` |
 
 Messages and classification codes are unchanged. `packetcraftr_netio::Error`
 implements `From<interface::Error>`, so `?` still converts an enumeration
 failure into a live I/O failure. A test fake that returned
 `InterfaceDiscovery { source: None }` supplies a source, for example
-`Arc::new(std::io::Error::other("fixture"))`.
+`Source::new(std::io::Error::other("fixture"))`.
 
 ## One provider contract shape
 
@@ -1178,5 +1178,59 @@ by the deadline reports `route::SystemError::DeadlineExceeded`,
 `interface::Error::DeadlineExceeded`, or `Error::DeadlineExceeded`, all
 classified `io.deadline_exceeded`; a cancelled one reports the `Cancelled`
 variant (`io.cancelled`). `tcp::start_connect` refuses a spent deadline with
-`ConnectError::DeadlineExceeded` rather than `ConnectError::Timeout`, which
+`tcp::Error::DeadlineExceeded` (then `ConnectError`) rather than `Timeout`, which
 now means only a remainder above one hour.
+
+## netio error convention
+
+Every public netio error implements `Classified` and keeps its source.
+
+**One unsupported representation.** `packetcraftr_netio::Error`,
+`route::SystemError`, and `interface::Error` carry the same
+`packetcraftr_netio::Unsupported`, and its capability decides the class.
+
+| Before | After |
+|---|---|
+| `Error::Unsupported { message, source }` | `Error::Unsupported(Unsupported { capability, message, source })` |
+| `route::SystemError::Unsupported { message }` | `SystemError::Unsupported(Unsupported::new(NativeCapability::Route, message))` |
+| `interface::Error::Unsupported { message }` | `interface::Error::Unsupported(Unsupported::new(NativeCapability::InterfaceEnumeration, message))` |
+| `matches!(error, Error::Unsupported { .. })` | `matches!(error, Error::Unsupported(_))` |
+
+`NativeCapability::Route` classifies as `capability.route`, and
+`InterfaceEnumeration`, `Capture`, and `Transmission(mode)` classify as
+`capability.unsupported`. Messages are unchanged: a route capability reads
+"native route selection is unavailable: ...", and every other capability
+reads "live packet I/O is unavailable: ...". All three error types implement
+`From<Unsupported>`, so `Unsupported::new(capability, message).into()` builds
+any of them.
+
+**Type-erased sources.** `packetcraftr_netio::SystemFault` is removed. Use
+`packetcraftr_core::error::Source`: `Some(Source::new(error))` in place of
+`Some(Arc::new(error))`. A `Source` field exposes the wrapped error itself, so
+`error.source().and_then(|source| source.downcast_ref::<std::io::Error>())`
+reaches it without first unwrapping an `Arc`. `packetcraftr::dns::tcp::Error`
+source fields use the same type.
+
+**`tcp::Error`.** `tcp::ConnectError` is renamed `tcp::Error`, and it also
+replaces the `io::Result` the TCP contract returned.
+
+| Before | After |
+|---|---|
+| `fn connect(&self, endpoint, &deadline) -> io::Result<Self::Stream>` | `-> Result<Self::Stream, tcp::Error>`; `?` converts an `io::Error` into `tcp::Error::Socket` |
+| `ConnectOutcome::result: io::Result<Connection<S>>` | `Result<Connection<S>, tcp::Error>` |
+| `tcp::ConnectError::Capacity { .. }` and the other variants | `tcp::Error::Capacity { .. }`, same variants and codes |
+| a socket failure's `io::Error` | `tcp::Error::Socket(io_error)`, classified `io.tcp_connect` |
+| a connect the worker stopped before its provider ran: `io::ErrorKind::TimedOut` or `Interrupted` | `tcp::Error::DeadlineExceeded` or `tcp::Error::Cancelled` |
+
+A fake provider that returned `Err(io::Error::from(kind))` returns
+`Err(io::Error::from(kind).into())`. The connect scan still publishes the
+socket error's kind and OS code: it reads them from `tcp::Error::Socket`, and
+it reports a deadline that stopped the connection as `TimedOut` and a
+cancellation as `Interrupted`.
+
+**Messages.** Native libpcap and Npcap failures keep the status and
+diagnostic text as their source, so that text appears in `causes` rather than
+in the message. `tcp::Error::{Evidence, Spawn}`, `Error::InvalidSendEvidence`,
+and `SendEvidenceFault::UnrepresentableFrame` also no longer repeat their
+source in their message. `SendEvidenceFault` implements `Classified`
+(`internal.live_io_invariant`).

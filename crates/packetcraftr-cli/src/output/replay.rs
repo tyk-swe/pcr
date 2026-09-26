@@ -57,8 +57,8 @@ impl TryFrom<library::Timing> for Timing {
 
 /// A replay publishes its source frames as packet operations: every frame
 /// read was attempted, every frame transmitted completed.
-impl From<(&library::Summary, Duration)> for Stats {
-    fn from((summary, elapsed): (&library::Summary, Duration)) -> Self {
+impl From<(&library::Report, Duration)> for Stats {
+    fn from((summary, elapsed): (&library::Report, Duration)) -> Self {
         Self {
             packets_attempted: summary.frames_read,
             packets_completed: summary.frames_transmitted,
@@ -92,7 +92,7 @@ pub struct Report {
 /// and the per-frame evidence retained for the aggregate.
 impl
     TryFrom<(
-        library::Summary,
+        library::Report,
         Option<NetworkInterfaceId>,
         NetworkLinkMode,
         Vec<Frame>,
@@ -102,7 +102,7 @@ impl
 
     fn try_from(
         (summary, requested_interface, requested_link_mode, frames): (
-            library::Summary,
+            library::Report,
             Option<NetworkInterfaceId>,
             NetworkLinkMode,
             Vec<Frame>,

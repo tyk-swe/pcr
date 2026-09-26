@@ -156,9 +156,18 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
 
 #[test]
 fn domain_failures_preserve_typed_error_context() {
-    let replay = OutputError::classified(&packetcraftr::replay::Error::output_at_source_index(
-        7, "failed",
-    ));
+    let replay = OutputError::classified(&packetcraftr::replay::Error::Output {
+        source_index: 7,
+        source: packetcraftr_core::error::BoundaryError::new(
+            "failed",
+            packetcraftr_core::error::Classification::new(
+                "io.fixture",
+                packetcraftr_core::error::Kind::Io,
+                None,
+            ),
+            Vec::new(),
+        ),
+    });
     assert_eq!(replay.context, Some(ErrorContext::SourceFrame(8)));
 
     let scan = OutputError::classified(&packetcraftr::scan::Error::Clock {

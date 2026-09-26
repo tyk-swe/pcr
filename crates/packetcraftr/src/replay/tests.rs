@@ -19,14 +19,16 @@ use packetcraftr_netio::{
     transmit::Submission,
 };
 
-use super::engine::run_with_selector;
+use super::admission::FinalWire;
+use super::engine::run;
 use super::error::Error;
-use super::evidence::{
-    map_replay_route_error, replay_link_mode, replay_network_envelope,
-    validate_transmission_evidence,
-};
-use super::request::{Limits, Options, Selector, Timing, Transmission, Transmitter};
+use super::evidence::{FrameEvidence, Transmission, network_envelope, validate_transmission};
+use super::executor::{Executor, map_route_error};
+use super::plan::link_mode;
+use super::report::Report;
+use super::request::{AllFrames, Limits, Options, Request, Selector, Source, Timing};
 use crate::BoundaryError;
+use crate::clock::Clock;
 use crate::policy::{Authorizer, Operation};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
@@ -59,7 +61,9 @@ impl Authorizer for RecordingAuthorizer {
             Ok(())
         }
     }
+}
 
+impl FinalWire for RecordingAuthorizer {
     fn authorize_final_wire(
         &mut self,
         _frame: &Frame,
@@ -89,7 +93,7 @@ struct RecordingTransmitter {
     resolves_to: Option<InterfaceId>,
 }
 
-impl Transmitter for RecordingTransmitter {
+impl Executor for RecordingTransmitter {
     fn plan_frame(
         &mut self,
         interface: &InterfaceId,
@@ -205,7 +209,74 @@ fn replay_options(timing: Timing) -> Options {
         link_mode: LinkMode::Auto,
         timing,
         limits: Limits::default(),
+        allow_permissive_live: false,
     }
+}
+
+/// Replays `source` under `options` through the engine's seams.
+fn replay_source<R: std::io::Read, S: Selector, C: Clock>(
+    source: Source<R>,
+    options: &Options,
+    selector: S,
+    authorizer: &mut RecordingAuthorizer,
+    transmitter: &mut RecordingTransmitter,
+    clock: &mut C,
+    emit: impl FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
+) -> Result<Report, Error> {
+    run(
+        Request {
+            source,
+            selector,
+            options: options.clone(),
+        },
+        authorizer,
+        transmitter,
+        clock,
+        Deadline::new(options.limits.max_duration),
+        emit,
+    )
+}
+
+/// Replays one seekable capture, rewound before every pass.
+fn replay_seekable<S: Selector, C: Clock>(
+    reader: Reader<Cursor<Vec<u8>>>,
+    options: &Options,
+    selector: S,
+    authorizer: &mut RecordingAuthorizer,
+    transmitter: &mut RecordingTransmitter,
+    clock: &mut C,
+    emit: impl FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
+) -> Result<Report, Error> {
+    replay_source(
+        Source::seekable(reader),
+        options,
+        selector,
+        authorizer,
+        transmitter,
+        clock,
+        emit,
+    )
+}
+
+/// Replays one streaming capture.
+fn replay<S: Selector, C: Clock>(
+    reader: Reader<Cursor<Vec<u8>>>,
+    options: &Options,
+    selector: S,
+    authorizer: &mut RecordingAuthorizer,
+    transmitter: &mut RecordingTransmitter,
+    clock: &mut C,
+    emit: impl FnMut(FrameEvidence, &Deadline) -> Result<(), Error>,
+) -> Result<Report, Error> {
+    replay_source(
+        Source::stream(reader),
+        options,
+        selector,
+        authorizer,
+        transmitter,
+        clock,
+        emit,
+    )
 }
 
 #[test]
@@ -242,7 +313,7 @@ fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
             false,
         ),
     ] {
-        let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[0; 60])]);
+        let reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[0; 60])]);
         let mut authorizer = RecordingAuthorizer::default();
         let mut transmitter = RecordingTransmitter {
             resolves_to: Some(resolved.clone()),
@@ -251,14 +322,14 @@ fn a_partial_interface_selector_accepts_the_interface_it_resolves_to() {
         let mut clock = RecordingClock::default();
         let mut options = replay_options(Timing::Immediate);
         options.interface = Some(requested.clone());
-        let result = run_with_selector(
-            &mut reader,
+        let result = replay(
+            reader,
             &options,
-            None,
+            AllFrames,
             &mut authorizer,
             &mut transmitter,
             &mut clock,
-            |_| Ok(()),
+            |_, _| Ok(()),
         );
         if accepted {
             let summary = result.unwrap_or_else(|error| panic!("{requested:?}: {error:?}"));
@@ -335,7 +406,7 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
         (vec![0x70], "unsupported IP version 7"),
     ] {
         let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).expect("capture frame");
-        let error = replay_network_envelope(&frame).expect_err("malformed envelope accepted");
+        let error = network_envelope(&frame).expect_err("malformed envelope accepted");
         assert!(error.to_string().contains(expected), "{error}");
     }
 
@@ -344,7 +415,7 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
     ipv4[12..16].copy_from_slice(&[10, 0, 0, 1]);
     ipv4[16..20].copy_from_slice(&[10, 0, 0, 2]);
     let envelope =
-        replay_network_envelope(&Frame::new(UNIX_EPOCH, LinkType::RAW, ipv4).expect("IPv4 frame"))
+        network_envelope(&Frame::new(UNIX_EPOCH, LinkType::RAW, ipv4).expect("IPv4 frame"))
             .expect("valid IPv4 envelope rejected");
     assert_eq!(envelope.source, "10.0.0.1".parse::<IpAddr>().unwrap());
     assert_eq!(envelope.destination, "10.0.0.2".parse::<IpAddr>().unwrap());
@@ -356,7 +427,7 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
     ipv6[8..24].copy_from_slice(&source.octets());
     ipv6[24..40].copy_from_slice(&destination.octets());
     let envelope =
-        replay_network_envelope(&Frame::new(UNIX_EPOCH, LinkType::RAW, ipv6).expect("IPv6 frame"))
+        network_envelope(&Frame::new(UNIX_EPOCH, LinkType::RAW, ipv6).expect("IPv6 frame"))
             .expect("valid IPv6 envelope rejected");
     assert_eq!(envelope.source, IpAddr::V6(source));
     assert_eq!(envelope.destination, IpAddr::V6(destination));
@@ -364,7 +435,7 @@ fn replay_network_envelope_rejects_malformed_ip_envelopes() {
 
 #[test]
 fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
-    let error = replay_link_mode(7, LinkType(999), LinkMode::Auto).unwrap_err();
+    let error = link_mode(7, LinkType(999), LinkMode::Auto).unwrap_err();
     assert!(matches!(
         error,
         Error::UnsupportedLinkType {
@@ -373,7 +444,7 @@ fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
         }
     ));
 
-    let error = replay_link_mode(8, LinkType::ETHERNET, LinkMode::Layer3).unwrap_err();
+    let error = link_mode(8, LinkType::ETHERNET, LinkMode::Layer3).unwrap_err();
     assert!(matches!(
         error,
         Error::LinkModeMismatch {
@@ -387,14 +458,14 @@ fn replay_link_mode_errors_preserve_source_index_and_requested_mode() {
 #[test]
 fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
     let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0x45, 1, 2]).unwrap();
-    validate_transmission_evidence(
+    validate_transmission(
         1,
         &frame,
         &Submission::start().complete(3, frame.bytes().clone()),
     )
     .unwrap();
 
-    let partial = validate_transmission_evidence(
+    let partial = validate_transmission(
         2,
         &frame,
         &Submission::start().complete(2, frame.bytes().clone()),
@@ -408,7 +479,7 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
         }
     ));
 
-    let mismatch = validate_transmission_evidence(
+    let mismatch = validate_transmission(
         3,
         &frame,
         &Submission::start().complete(3, Bytes::from_static(&[0x45, 1, 3])),
@@ -425,21 +496,21 @@ fn replay_transmission_evidence_requires_exact_wire_length_and_bytes() {
 
 #[test]
 fn replay_authorization_denial_has_no_later_io_side_effects() {
-    let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
+    let reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
     let mut authorizer = RecordingAuthorizer {
         deny: true,
         ..RecordingAuthorizer::default()
     };
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
-    let error = run_with_selector(
-        &mut reader,
+    let error = replay(
+        reader,
         &replay_options(Timing::Immediate),
-        None,
+        AllFrames,
         &mut authorizer,
         &mut transmitter,
         &mut clock,
-        |_| Ok(()),
+        |_, _| Ok(()),
     )
     .unwrap_err();
 
@@ -459,7 +530,7 @@ fn replay_authorization_denial_has_no_later_io_side_effects() {
 
 #[test]
 fn replay_final_wire_denial_happens_after_passive_route_selection_and_before_send() {
-    let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
+    let reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1])]);
     let mut authorizer = RecordingAuthorizer {
         deny_final_wire: true,
         ..RecordingAuthorizer::default()
@@ -467,14 +538,14 @@ fn replay_final_wire_denial_happens_after_passive_route_selection_and_before_sen
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
 
-    let error = run_with_selector(
-        &mut reader,
+    let error = replay(
+        reader,
         &replay_options(Timing::Immediate),
-        None,
+        AllFrames,
         &mut authorizer,
         &mut transmitter,
         &mut clock,
-        |_| Ok(()),
+        |_, _| Ok(()),
     )
     .expect_err("final wire authorization must reject the selected route");
 
@@ -494,7 +565,7 @@ fn replay_final_wire_denial_happens_after_passive_route_selection_and_before_sen
 
 #[test]
 fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
-    let mut reader = capture_reader(
+    let reader = capture_reader(
         LinkType::ETHERNET,
         &[
             (Duration::from_secs(1), &[1, 2]),
@@ -511,14 +582,14 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
     let mut emitted = Vec::new();
-    let summary = run_with_selector(
-        &mut reader,
+    let summary = replay(
+        reader,
         &replay_options(Timing::Original),
-        Some(&mut selector),
+        &mut selector,
         &mut authorizer,
         &mut transmitter,
         &mut clock,
-        |evidence| {
+        |evidence, _| {
             emitted.push(evidence);
             Ok(())
         },
@@ -543,7 +614,7 @@ fn replay_selector_skips_authorization_and_preserves_transmitted_spacing() {
 
 #[test]
 fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
-    let mut reader = capture_reader(
+    let reader = capture_reader(
         LinkType::ETHERNET,
         &[
             (Duration::ZERO, &[1]),
@@ -560,14 +631,14 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
     options.limits.max_source_frames = 2;
     let mut authorizer = RecordingAuthorizer::default();
     let mut transmitter = RecordingTransmitter::default();
-    let error = run_with_selector(
-        &mut reader,
+    let error = replay(
+        reader,
         &options,
-        Some(&mut selector),
+        &mut selector,
         &mut authorizer,
         &mut transmitter,
         &mut RecordingClock::default(),
-        |_| Ok(()),
+        |_, _| Ok(()),
     )
     .unwrap_err();
 
@@ -586,7 +657,7 @@ fn replay_selector_skipped_frames_still_consume_the_frame_budget() {
 
 #[test]
 fn byte_rate_uses_selected_bytes_and_cumulative_rounding() {
-    let mut reader = capture_reader(
+    let reader = capture_reader(
         LinkType::ETHERNET,
         &[
             (Duration::ZERO, &[1, 2]),
@@ -603,14 +674,14 @@ fn byte_rate_uses_selected_bytes_and_cumulative_rounding() {
     let mut clock = RecordingClock::default();
     let mut authorizer = RecordingAuthorizer::default();
     let mut transmitter = RecordingTransmitter::default();
-    let summary = run_with_selector(
-        &mut reader,
+    let summary = replay(
+        reader,
         &replay_options(Timing::BitRate(3_000_000_000)),
-        Some(&mut selector),
+        &mut selector,
         &mut authorizer,
         &mut transmitter,
         &mut clock,
-        |_| Ok(()),
+        |_, _| Ok(()),
     )
     .unwrap();
     assert_eq!(
@@ -633,14 +704,14 @@ fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
     let mut options = replay_options(Timing::BitRate(1));
     options.limits.max_duration = Duration::from_secs(1);
     let mut transmitter = RecordingTransmitter::default();
-    let error = run_with_selector(
-        &mut capture_reader(LinkType::ETHERNET, &frames),
+    let error = replay(
+        capture_reader(LinkType::ETHERNET, &frames),
         &options,
-        None,
+        AllFrames,
         &mut RecordingAuthorizer::default(),
         &mut transmitter,
         &mut RecordingClock::default(),
-        |_| Ok(()),
+        |_, _| Ok(()),
     )
     .unwrap_err();
     assert!(matches!(
@@ -658,14 +729,14 @@ fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
         ..RecordingAuthorizer::default()
     };
     assert!(
-        run_with_selector(
-            &mut capture_reader(LinkType::ETHERNET, &frames),
+        replay(
+            capture_reader(LinkType::ETHERNET, &frames),
             &options,
-            None,
+            AllFrames,
             &mut authorizer,
             &mut transmitter,
             &mut RecordingClock::default(),
-            |_| Ok(()),
+            |_, _| Ok(()),
         )
         .is_err()
     );
@@ -678,7 +749,7 @@ fn byte_rate_duration_and_policy_failures_stop_before_later_transmission() {
 #[test]
 fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     let destination = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
-    let unreachable = map_replay_route_error(RouteSystemError::RouteNotFound { destination });
+    let unreachable = map_route_error(RouteSystemError::RouteNotFound { destination });
 
     assert_eq!(
         unreachable.to_string(),
@@ -702,7 +773,7 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
     );
 
     // An operating-system refusal keeps its own nested diagnostic too.
-    let refused = map_replay_route_error(RouteSystemError::OperatingSystem {
+    let refused = map_route_error(RouteSystemError::OperatingSystem {
         operation: "RTM_GETROUTE",
         message: "the operating system refused the request".to_owned(),
         source: Some(packetcraftr_core::error::Source::new(
@@ -719,7 +790,7 @@ fn replay_route_selection_failures_retain_the_route_adapter_refusal() {
 
     // The capability arm keeps naming the replay boundary and publishes the
     // adapter's text once, in `causes`.
-    let unsupported = map_replay_route_error(RouteSystemError::Unsupported(
+    let unsupported = map_route_error(RouteSystemError::Unsupported(
         packetcraftr_netio::Unsupported::new(
             packetcraftr_netio::NativeCapability::Route,
             "native route selection is off",
@@ -766,7 +837,7 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
         now: Arc::clone(&now),
         waits: Arc::default(),
     };
-    let mut reader = capture_reader(
+    let reader = capture_reader(
         LinkType::ETHERNET,
         &[
             (Duration::from_secs(1), &[1]),
@@ -776,14 +847,14 @@ fn replay_processing_cost_reduces_waits_and_overruns_keep_the_anchor() {
         ],
     );
     let mut overhead = [700, 2500, 0, 0].into_iter();
-    let summary = run_with_selector(
-        &mut reader,
+    let summary = replay(
+        reader,
         &replay_options(Timing::Original),
-        None,
+        AllFrames,
         &mut RecordingAuthorizer::default(),
         &mut RecordingTransmitter::default(),
         &mut clock,
-        |_| {
+        |_, _| {
             *now.lock().unwrap() += Duration::from_millis(overhead.next().unwrap());
             Ok(())
         },
@@ -817,10 +888,12 @@ impl Selector for MappedInterfaces {
 
 #[test]
 fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_schedule() {
-    let mut reader = capture_reader(
-        LinkType::ETHERNET,
-        &[(Duration::ZERO, b"ab"), (Duration::from_millis(10), b"cd")],
-    );
+    let capture = || {
+        capture_reader(
+            LinkType::ETHERNET,
+            &[(Duration::ZERO, b"ab"), (Duration::from_millis(10), b"cd")],
+        )
+    };
     let mut options = replay_options(Timing::Original);
     options.interface = None;
     options.repeat = 2;
@@ -829,14 +902,14 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
     let mut transmitter = RecordingTransmitter::default();
     let mut clock = RecordingClock::default();
     let mut evidence = Vec::new();
-    let summary = super::run_repeated_with_selector(
-        &mut reader,
+    let summary = replay_seekable(
+        capture(),
         &options,
-        Some(&mut MappedInterfaces),
+        MappedInterfaces,
         &mut authorizer,
         &mut transmitter,
         &mut clock,
-        |frame| {
+        |frame, _| {
             evidence.push(frame);
             Ok(())
         },
@@ -863,14 +936,14 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
     options.limits.max_source_frames = 3;
     let mut transmitter = RecordingTransmitter::default();
     assert!(matches!(
-        super::run_repeated_with_selector(
-            &mut reader,
+        replay_seekable(
+            capture(),
             &options,
-            Some(&mut MappedInterfaces),
+            MappedInterfaces,
             &mut authorizer,
             &mut transmitter,
             &mut RecordingClock::default(),
-            |_| Ok(())
+            |_, _| Ok(())
         ),
         Err(Error::SourceFrameLimit {
             actual: 4,
@@ -879,6 +952,30 @@ fn repeated_replay_keeps_source_positions_and_uses_one_budget_and_interface_sche
         })
     ));
     assert_eq!(transmitter.transmission_calls, 3);
+
+    let mut transmitter = RecordingTransmitter::default();
+    let error = replay(
+        capture(),
+        &options,
+        MappedInterfaces,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_, _| Ok(()),
+    )
+    .expect_err("a streaming capture cannot be read twice");
+    assert!(
+        matches!(
+            error,
+            Error::InvalidLimit {
+                field: "repeat",
+                value: 2,
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(transmitter.validation_calls, 0);
 }
 
 #[test]
@@ -909,20 +1006,19 @@ fn generated_capture_replays_verbatim_through_fake_providers() {
             .write_frame(&Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).expect("frame"))
             .expect("capture frame writes");
     }
-    let mut reader =
-        Reader::new(Cursor::new(writer.into_inner())).expect("generated capture opens");
+    let reader = Reader::new(Cursor::new(writer.into_inner())).expect("generated capture opens");
 
     let mut transmitter = RecordingTransmitter::default();
     let mut authorizer = RecordingAuthorizer::default();
     let mut evidence = Vec::new();
-    let summary = run_with_selector(
-        &mut reader,
+    let summary = replay(
+        reader,
         &replay_options(Timing::Immediate),
-        None,
+        AllFrames,
         &mut authorizer,
         &mut transmitter,
         &mut RecordingClock::default(),
-        |frame| {
+        |frame, _| {
             evidence.push(frame);
             Ok(())
         },
@@ -940,4 +1036,229 @@ fn generated_capture_replays_verbatim_through_fake_providers() {
     );
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(authorizer.final_wire_calls, 2);
+}
+
+/// `Client::replay` over fake providers: the client's policy admits each
+/// frame, its interface and transmit providers carry it, and its sink
+/// receives the evidence.
+mod client {
+    use std::sync::{Arc, Mutex};
+
+    use packetcraftr_core::budget::Cancelled;
+    use packetcraftr_core::build::Builder;
+    use packetcraftr_core::packet::Packet;
+    use packetcraftr_core::protocol::{
+        link::Ethernet,
+        network::{Icmpv4, Ipv4},
+    };
+    use packetcraftr_netio::interface::{self, Address, Flags};
+
+    use super::*;
+    use crate::policy::Policy;
+    use crate::replay::Collector;
+    use crate::test_support::{Call, FakeProviders};
+    use crate::{Client, ProviderSet};
+
+    const INTERFACE_MAC: MacAddress = MacAddress([0x02, 0, 0, 0, 0, 1]);
+
+    type Providers = ProviderSet<
+        FakeProviders,
+        Interfaces,
+        FakeProviders,
+        FakeProviders,
+        FakeProviders,
+        FakeProviders,
+    >;
+
+    /// One up Ethernet interface that owns 192.0.2.1, enumerated into the
+    /// same call log as the other fake providers.
+    #[derive(Clone)]
+    struct Interfaces(Arc<Mutex<Vec<Call>>>);
+
+    impl interface::Provider for Interfaces {
+        fn interfaces(
+            &self,
+            _deadline: &Deadline,
+        ) -> Result<Vec<interface::Info>, interface::Error> {
+            self.0
+                .lock()
+                .expect("fake provider calls")
+                .push(Call::Interfaces);
+            Ok(vec![interface::Info {
+                id: test_interface(),
+                description: None,
+                mac_address: Some(INTERFACE_MAC),
+                addresses: vec![Address {
+                    address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                    prefix_length: 24,
+                }],
+                flags: Flags {
+                    up: true,
+                    ..Flags::default()
+                },
+                mtu: Some(1_500),
+                capability: LinkCapability::Layer2AndLayer3,
+                link_type: LinkType::ETHERNET,
+            }])
+        }
+    }
+
+    /// A client whose policy permits the permissive rebuild every replayed
+    /// frame needs, over fake providers sharing one call log.
+    fn client(policy: Policy) -> (Client<Providers>, FakeProviders) {
+        let fake = FakeProviders::default();
+        let providers = ProviderSet {
+            route: fake.clone(),
+            interface: Interfaces(Arc::clone(&fake.calls)),
+            capture: fake.clone(),
+            transmit: fake.clone(),
+            tcp: fake.clone(),
+            resolver: fake.clone(),
+        };
+        let client = Client::new(
+            packetcraftr_core::protocol::builtin::registry(),
+            policy,
+            providers,
+        );
+        (client, fake)
+    }
+
+    fn permissive() -> Policy {
+        Policy {
+            allow_permissive_packets: true,
+            ..Policy::default()
+        }
+    }
+
+    /// An ICMP echo from the interface's own addresses to a documentation
+    /// neighbor, identified by `ttl`.
+    fn owned_frame(ttl: u8) -> Vec<u8> {
+        let mut packet = Packet::new();
+        packet
+            .push(Ethernet {
+                source: INTERFACE_MAC.0,
+                destination: [0x02, 0, 0, 0, 0, 2],
+                ..Ethernet::default()
+            })
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ttl,
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        Builder::new(packetcraftr_core::protocol::builtin::registry())
+            .build(
+                packet,
+                packetcraftr_core::codec::Context::default(),
+                packetcraftr_core::build::Options::default(),
+            )
+            .expect("replay fixture builds")
+            .bytes
+            .to_vec()
+    }
+
+    fn request(frames: &[Vec<u8>]) -> Request<Cursor<Vec<u8>>> {
+        let frames = frames
+            .iter()
+            .map(|bytes| (Duration::ZERO, bytes.as_slice()))
+            .collect::<Vec<_>>();
+        let mut options = replay_options(Timing::Immediate);
+        options.allow_permissive_live = true;
+        Request::new(
+            Source::stream(capture_reader(LinkType::ETHERNET, &frames)),
+            options,
+        )
+    }
+
+    #[test]
+    fn replay_admits_routes_and_transmits_each_captured_frame_exactly() {
+        let frames = [owned_frame(1), owned_frame(64)];
+        let (client, fake) = client(permissive());
+        let collector = Collector::default();
+
+        let report = client
+            .replay(request(&frames), collector.clone())
+            .expect("owned documentation frames replay");
+        let aggregate = collector.finish(report).expect("collected frames agree");
+
+        assert_eq!(aggregate.report.frames_transmitted, 2);
+        assert_eq!(aggregate.report.interfaces_used, [test_interface()]);
+        assert_eq!(
+            aggregate
+                .frames
+                .iter()
+                .map(|evidence| evidence.frame.bytes().to_vec())
+                .collect::<Vec<_>>(),
+            frames
+        );
+        // The validated interface is enumerated once and reused.
+        assert_eq!(
+            fake.calls(),
+            [
+                Call::Interfaces,
+                Call::Transmit(frames[0].clone()),
+                Call::Transmit(frames[1].clone()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_frame_the_policy_denies_consults_no_provider() {
+        let (client, fake) = client(Policy::default());
+
+        let error = client
+            .replay(request(&[owned_frame(64)]), Collector::default())
+            .expect_err("the default policy refuses permissive rebuilds");
+
+        assert_eq!(error.classification().code, "policy.permissive_packet");
+        assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+    }
+
+    #[test]
+    fn a_failing_sink_stops_the_replay_with_its_failure_as_the_source() {
+        let frames = [owned_frame(1), owned_frame(64)];
+        let (client, fake) = client(permissive());
+
+        let error = client
+            .replay(request(&frames), |_: crate::replay::Event| {
+                Err(BoundaryError::new(
+                    "fixture sink closed",
+                    Classification::new("io.fixture", Kind::Io, None),
+                    vec!["fixture cause".to_owned()],
+                ))
+            })
+            .expect_err("the sink refuses the first frame");
+
+        assert!(
+            matches!(
+                error,
+                Error::Output {
+                    source_index: 0,
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.classification().code, "io.replay");
+        assert_eq!(
+            std::error::Error::source(&error).map(ToString::to_string),
+            Some("fixture sink closed".to_owned())
+        );
+        assert_eq!(error.causes(), ["fixture cause"]);
+        assert_eq!(fake.calls().len(), 2, "one frame was sent before the sink");
+    }
+
+    #[test]
+    fn a_sink_interrupted_by_cancellation_stops_the_replay_as_cancelled() {
+        let (client, _) = client(permissive());
+
+        let error = client
+            .replay(request(&[owned_frame(64)]), |_: crate::replay::Event| {
+                Err(BoundaryError::from_error(Cancelled))
+            })
+            .expect_err("the sink was interrupted");
+
+        assert!(matches!(error, Error::Cancelled(_)), "{error:?}");
+    }
 }

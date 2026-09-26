@@ -23,21 +23,21 @@ pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
 
 /// The closing line; a filtered replay also names how many frames it read.
 pub(super) fn render_summary(
-    summary: &packetcraftr::replay::Summary,
+    report: &packetcraftr::replay::Report,
     filtered: bool,
 ) -> Result<(), CliError> {
     if filtered {
         write_summary_line(format_args!(
             "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
-            summary.frames_transmitted,
-            summary.frames_read,
-            summary.bytes_transmitted,
-            summary.scheduled_duration
+            report.frames_transmitted,
+            report.frames_read,
+            report.bytes_transmitted,
+            report.scheduled_duration
         ))
     } else {
         write_summary_line(format_args!(
             "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
-            summary.frames_transmitted, summary.bytes_transmitted, summary.scheduled_duration
+            report.frames_transmitted, report.bytes_transmitted, report.scheduled_duration
         ))
     }
 }

@@ -116,18 +116,19 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("replay output failed at source index {source_index}: {message}")]
-    Output { source_index: u64, message: String },
+    /// The sink refused a frame event, or publishing it failed.
+    #[error("replay output failed at source index {source_index}: {source}")]
+    Output {
+        source_index: u64,
+        #[source]
+        source: crate::BoundaryError,
+    },
+    /// A collector saw events that disagree with the report.
+    #[error("replay events are incoherent: {message}")]
+    IncoherentEvents { message: String },
 }
 
 impl Error {
-    pub fn output_at_source_index(source_index: u64, message: impl Into<String>) -> Self {
-        Self::Output {
-            source_index,
-            message: message.into(),
-        }
-    }
-
     fn context(&self) -> Option<Coordinate> {
         let source_index = match self {
             Self::Timing { source_index, .. }
@@ -148,7 +149,8 @@ impl Error {
             Self::Cancelled(_)
             | Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
-            | Self::InvalidTiming { .. } => {
+            | Self::InvalidTiming { .. }
+            | Self::IncoherentEvents { .. } => {
                 return None;
             }
         };
@@ -212,6 +214,13 @@ impl Classified for Error {
                     "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
                 ),
             ),
+            Self::IncoherentEvents { .. } => Classification::new(
+                "internal.replay_event_coherence",
+                Kind::Internal,
+                Some("collect every replay event once, from one replay, in publication order"),
+            ),
+            // Output keeps the sink's failure as its source but publishes
+            // replay's own I/O code: the sink is replay's output.
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
                 "io.replay",
                 Kind::Io,
@@ -227,14 +236,16 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The two boundary-sourced variants delegate instead: a [`BoundaryError`]
+    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
     /// carries a captured `causes` snapshot its own source chain no longer
     /// holds.
     ///
     /// [`BoundaryError`]: crate::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Selection { source, .. } | Self::Authorization { source, .. } => source.causes(),
+            Self::Selection { source, .. }
+            | Self::Authorization { source, .. }
+            | Self::Output { source, .. } => source.causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

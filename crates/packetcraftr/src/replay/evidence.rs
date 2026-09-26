@@ -1,53 +1,51 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+//! What a replay observed: the captured frame's own envelope, and the exact
+//! bytes a provider confirmed it sent.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::Duration;
+
+use packetcraftr_core::capture_file::Interface;
 use packetcraftr_core::codec::NetworkEnvelope;
-use packetcraftr_core::error::{Classified, Kind};
 use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_netio::{
-    Error as LiveIoError, NativeCapability, Unsupported, link::Mode as LinkMode,
+    Error as LiveIoError, interface::Id as InterfaceId, link::Mode as LinkMode,
     transmit::Report as IoSendReport,
 };
 
 use super::error::Error;
 
-/// Whether a resolved interface is the one a possibly partial selector named:
-/// a selector fills in its name, its index, or both.
-pub(super) fn requested_interface_matches(
-    actual: &packetcraftr_netio::interface::Id,
-    requested: &packetcraftr_netio::interface::Id,
-) -> bool {
-    !(requested.index == 0 && requested.name.is_empty())
-        && (requested.index == 0 || actual.index == requested.index)
-        && (requested.name.is_empty() || actual.name == requested.name)
+/// Per-frame evidence published only after exact transmission is confirmed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameEvidence {
+    /// One-based pass identity; source_index remains relative to the input capture.
+    pub pass: u32,
+    pub source_index: u64,
+    pub source_interface_id: Option<u32>,
+    pub capture_interface: Interface,
+    pub link_mode: LinkMode,
+    pub scheduled_delay: Duration,
+    pub frame: Frame,
+    pub(super) transmission: Transmission,
 }
 
-/// Maps route failures to live-I/O errors, retaining the adapter error as the
-/// source.
-pub(super) fn map_replay_route_error(
-    source: packetcraftr_netio::route::SystemError,
-) -> LiveIoError {
-    let classification = source.classification();
-    let source = packetcraftr_core::error::Source::new(source);
-    match classification.kind {
-        // Replay reports the missing route adapter as its own raw Layer 3
-        // transmission capability, not as a route lookup's.
-        Kind::Capability => Unsupported {
-            capability: NativeCapability::Transmission(LinkMode::Layer3),
-            message: "the native route adapter cannot select a replay route".to_owned(),
-            source: Some(source),
-        }
-        .into(),
-        _ => LiveIoError::Send {
-            message: "replay route selection failed".to_owned(),
-            source: Some(source),
-        },
+impl FrameEvidence {
+    pub fn transmission(&self) -> &Transmission {
+        &self.transmission
     }
 }
 
-pub(super) fn replay_network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoError> {
+/// Exact provider report plus the concrete interface selected for a send.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transmission {
+    pub interface: InterfaceId,
+    pub report: IoSendReport,
+}
+
+/// The source and destination of a raw IP frame, read from its own header.
+pub(super) fn network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoError> {
     let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
     let bytes = frame.bytes().as_ref();
     let Some(version) = bytes.first().map(|byte| byte >> 4) else {
@@ -109,33 +107,8 @@ pub(super) fn replay_network_envelope(frame: &Frame) -> Result<NetworkEnvelope, 
     }
 }
 
-pub(super) fn replay_link_mode(
-    source_index: u64,
-    link_type: LinkType,
-    requested: LinkMode,
-) -> Result<LinkMode, Error> {
-    let supported = match link_type {
-        LinkType::ETHERNET => LinkMode::Layer2,
-        link_type if link_type.is_raw_ip() => LinkMode::Layer3,
-        _ => {
-            return Err(Error::UnsupportedLinkType {
-                source_index,
-                link_type: link_type.0,
-            });
-        }
-    };
-    match requested {
-        LinkMode::Auto => Ok(supported),
-        requested if requested == supported => Ok(requested),
-        requested => Err(Error::LinkModeMismatch {
-            source_index,
-            link_type: link_type.0,
-            requested,
-        }),
-    }
-}
-
-pub(super) fn validate_transmission_evidence(
+/// Requires the provider to confirm exactly the frame's bytes.
+pub(super) fn validate_transmission(
     source_index: u64,
     frame: &Frame,
     report: &IoSendReport,

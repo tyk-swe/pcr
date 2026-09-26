@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Policy and exact-byte authorization before replay performs live I/O.
+//! Per-frame admission: the client's policy approves each captured frame's
+//! budget, its exact bytes, and finally the route it would leave through,
+//! before replay performs live I/O.
 
 use std::sync::Arc;
 
@@ -11,52 +13,64 @@ use packetcraftr_core::{build, codec, decode, registry::Registry};
 use packetcraftr_netio::link::Mode;
 
 use crate::BoundaryError;
-
+use crate::execution::Admission;
 use crate::policy::{
     Authorizer, Operation, authorize_permissive_live, authorize_wire, authorize_wire_destinations,
     authorize_wire_sources, unsupported_operation,
 };
 
-use crate::replay::evidence::replay_network_envelope;
+use super::evidence::network_envelope;
 
-/// Validates complete capture evidence, applies policy to raw routing destinations
-/// before I/O, and requires an exact decode/build round trip.
-pub struct SystemAuthorizer {
-    policy: crate::policy::Policy,
+/// Applies source policy to the final route after destination and limits
+/// authorization and before replay delay or transmission. Only replay sends
+/// captured bytes it did not build, so only replay needs it.
+pub(crate) trait FinalWire {
+    fn authorize_final_wire(
+        &mut self,
+        frame: &Frame,
+        route: &crate::route::Plan,
+    ) -> Result<(), BoundaryError>;
+}
+
+/// Validates complete capture evidence, applies the client's policy to raw
+/// routing destinations before I/O, and requires an exact decode/build round
+/// trip.
+pub(super) struct FrameAdmission<'c> {
+    admission: Admission<'c>,
     registry: Arc<Registry>,
-    allow_malformed_live: bool,
+    allow_permissive_live: bool,
     /// The trusted decode `authorize_frame` already produced, retained for
     /// `authorize_final_wire` to reuse when it judges the same wire bytes.
     wire_decode: Option<decode::DecodedPacket>,
 }
 
-impl SystemAuthorizer {
+impl<'c> FrameAdmission<'c> {
     /// Uses `registry` for the caller's normal decode/rebuild round trip.
     /// Destination policy is applied through an independent built-in decoder.
-    pub fn new(
+    pub(super) fn new(
+        admission: Admission<'c>,
         registry: Arc<Registry>,
-        policy: crate::policy::Policy,
-        allow_malformed_live: bool,
+        allow_permissive_live: bool,
     ) -> Self {
         Self {
-            policy,
+            admission,
             registry,
-            allow_malformed_live,
+            allow_permissive_live,
             wire_decode: None,
         }
     }
 
+    fn policy(&self) -> &'c crate::policy::Policy {
+        self.admission.policy()
+    }
+
     /// Authorizes the frame before route planning and retains the trusted
     /// decode so the final wire check can reuse it for the same bytes.
-    pub(in crate::replay) fn authorize_frame(
-        &mut self,
-        frame: &Frame,
-        mode: Mode,
-    ) -> Result<(), BoundaryError> {
+    fn authorize_frame(&mut self, frame: &Frame, mode: Mode) -> Result<(), BoundaryError> {
         validate_complete_frame(frame)?;
         self.validate_link_type(frame)?;
         validate_network_frame(frame, mode)?;
-        let trusted = authorize_wire_destinations(&self.policy, frame.link_type, frame.bytes())
+        let trusted = authorize_wire_destinations(self.policy(), frame.link_type, frame.bytes())
             .map_err(wire_error)?;
         let decoded = self.decode_frame(frame)?;
         let rebuilt = self.rebuild_frame(&decoded)?;
@@ -134,7 +148,7 @@ impl SystemAuthorizer {
             ));
         }
         if crate::policy::requires_live_opt_in(rebuilt) {
-            authorize_permissive_live(&self.policy, self.allow_malformed_live)
+            authorize_permissive_live(self.policy(), self.allow_permissive_live)
                 .map_err(permissive_live_error)?;
         }
         Ok(())
@@ -203,7 +217,7 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
     if mode != Mode::Layer3 {
         return Ok(());
     }
-    replay_network_envelope(frame).map_err(|source| {
+    network_envelope(frame).map_err(|source| {
         BoundaryError::with_source(
             source.to_string(),
             Classification::new(
@@ -218,14 +232,14 @@ fn validate_network_frame(frame: &Frame, mode: Mode) -> Result<(), BoundaryError
     Ok(())
 }
 
-impl Authorizer for SystemAuthorizer {
-    /// Limits are checked before the frame is decoded or rebuilt, so a
-    /// request that exceeds policy never reaches the expensive round trip.
-    /// Shapes without an exact frame are rejected: replay cannot be
-    /// authorized from limits alone or a declared packet list.
+impl Authorizer for FrameAdmission<'_> {
+    /// Limits pass the client's admission before the frame is decoded or
+    /// rebuilt, so a request that exceeds policy never reaches the expensive
+    /// round trip. Shapes without an exact frame are rejected: replay cannot
+    /// be authorized from limits alone or a declared packet list.
     fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        self.policy
-            .authorize(crate::policy::Operation::Wire(operation.limits()))
+        self.admission
+            .authorize(Operation::Wire(operation.limits()))
             .map_err(BoundaryError::from_error)?;
         match operation {
             Operation::Replay(replay) => self.authorize_frame(replay.frame(), replay.mode()),
@@ -233,12 +247,14 @@ impl Authorizer for SystemAuthorizer {
             | Operation::Wire(_)
             | Operation::Dns(_)
             | Operation::Declared(_) => Err(unsupported_operation(
-                "the replay system authorizer",
+                "the replay frame admission",
                 &operation,
             )),
         }
     }
+}
 
+impl FinalWire for FrameAdmission<'_> {
     /// Reuses the trusted decode retained by `authorize_frame` when the wire
     /// bytes match, so only the route-aware source check runs again. Frames
     /// without a retained decode are authorized from scratch.
@@ -252,9 +268,9 @@ impl Authorizer for SystemAuthorizer {
                 if decoded.frame.link_type == frame.link_type
                     && decoded.original == *frame.bytes() =>
             {
-                authorize_wire_sources(&self.policy, &decoded, route).map_err(wire_error)
+                authorize_wire_sources(self.policy(), &decoded, route).map_err(wire_error)
             }
-            _ => authorize_wire(&self.policy, frame.link_type, frame.bytes(), Some(route))
+            _ => authorize_wire(self.policy(), frame.link_type, frame.bytes(), Some(route))
                 .map_err(wire_error),
         }
     }
@@ -293,6 +309,20 @@ mod tests {
 
     fn registry() -> Arc<Registry> {
         packetcraftr_core::protocol::builtin::registry()
+    }
+
+    /// Admission under `policy`, which outlives the test.
+    fn frame_admission(
+        registry: Arc<Registry>,
+        policy: crate::policy::Policy,
+        allow_permissive_live: bool,
+    ) -> FrameAdmission<'static> {
+        let policy = Box::leak(Box::new(policy));
+        FrameAdmission::new(
+            Admission::new(policy, &crate::target::SystemResolver),
+            registry,
+            allow_permissive_live,
+        )
     }
 
     /// A caller codec that preserves every root byte while exposing no IP
@@ -448,7 +478,7 @@ mod tests {
         assert!(!crate::policy::requires_live_opt_in(&built));
         let frame = raw_frame(&built);
         let inspecting_authorizer =
-            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
+            frame_admission(registry(), crate::policy::Policy::default(), false);
         let decoded = inspecting_authorizer
             .decode_frame(&frame)
             .expect("fixture decodes");
@@ -463,7 +493,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(registry(), policy, true)
+        frame_admission(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("exact replay with both explicit live approvals");
     }
@@ -473,7 +503,7 @@ mod tests {
         let frame = raw_frame(&built_ipv4(false));
         let route = replay_route(Mode::Layer3, LinkType::RAW, Ipv4Addr::new(192, 0, 2, 99));
 
-        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_final_wire(&frame, &route)
             .expect_err("foreign raw IP source must be rejected by default");
         assert_eq!(error.classification().code, "policy.source_ownership");
@@ -482,7 +512,7 @@ mod tests {
             allow_source_spoofing: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(registry(), policy, false)
+        frame_admission(registry(), policy, false)
             .authorize_final_wire(&frame, &route)
             .expect("explicit source-spoofing approval permits the raw IP source");
     }
@@ -496,7 +526,7 @@ mod tests {
             Ipv4Addr::new(192, 0, 2, 1),
         );
 
-        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_final_wire(&frame, &route)
             .expect_err("foreign Ethernet source must be rejected by default");
         assert_eq!(error.classification().code, "policy.source_ownership");
@@ -505,7 +535,7 @@ mod tests {
             allow_source_spoofing: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(registry(), policy, false)
+        frame_admission(registry(), policy, false)
             .authorize_final_wire(&frame, &route)
             .expect("explicit source-spoofing approval permits the Ethernet source");
     }
@@ -520,7 +550,7 @@ mod tests {
         );
         route.packet_source = None;
 
-        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_final_wire(&frame, &route)
             .expect_err("the exact unspecified source requires spoofing approval");
         assert_eq!(error.classification().code, "policy.source_ownership");
@@ -536,7 +566,7 @@ mod tests {
         );
         route.source_mac = None;
 
-        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_final_wire(&frame, &route)
             .expect_err("the exact zero source MAC requires spoofing approval");
         assert_eq!(error.classification().code, "policy.source_ownership");
@@ -553,7 +583,7 @@ mod tests {
         );
         route.decision.preferred_source = Some(IpAddr::V4(secondary));
 
-        SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_final_wire(&frame, &route)
             .expect("an IP source owned by the selected interface is not spoofing");
     }
@@ -566,7 +596,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        let mut authorizer = frame_admission(registry(), policy, true);
         authorizer
             .authorize_frame(&frame, Mode::Layer3)
             .expect("the frame authorizes before route planning");
@@ -581,7 +611,7 @@ mod tests {
             allow_source_spoofing: true,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        let mut authorizer = frame_admission(registry(), policy, true);
         authorizer
             .authorize_frame(&frame, Mode::Layer3)
             .expect("the frame authorizes before route planning");
@@ -614,7 +644,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(registry(), policy, true);
+        let mut authorizer = frame_admission(registry(), policy, true);
         authorizer
             .authorize_frame(&frame, Mode::Layer3)
             .expect("the first frame authorizes before route planning");
@@ -643,7 +673,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(opaque_raw_registry(), policy, true);
+        let mut authorizer = frame_admission(opaque_raw_registry(), policy, true);
 
         let caller_decoded = authorizer
             .decode_frame(&frame)
@@ -682,7 +712,7 @@ mod tests {
             max_bytes_per_operation: 2,
             ..crate::policy::Policy::default()
         };
-        let mut authorizer = SystemAuthorizer::new(registry(), policy, false);
+        let mut authorizer = frame_admission(registry(), policy, false);
 
         let packet_error = authorizer
             .authorize_operation(Operation::Replay(ReplayFrame::new(
@@ -715,8 +745,7 @@ mod tests {
             vec![0x45_u8],
         )
         .expect("valid truncated capture record");
-        let mut authorizer =
-            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
+        let mut authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
         let error = authorizer
             .authorize_frame(&truncated, Mode::Layer3)
             .expect_err("truncated evidence cannot be replayed");
@@ -756,7 +785,7 @@ mod tests {
         let frame = raw_frame(&built);
 
         let missing_operation_opt_in =
-            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+            frame_admission(registry(), crate::policy::Policy::default(), false)
                 .authorize_frame(&frame, Mode::Layer3)
                 .expect_err("operation opt-in is mandatory");
         assert_eq!(
@@ -765,7 +794,7 @@ mod tests {
         );
 
         let missing_policy_opt_in =
-            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), true)
+            frame_admission(registry(), crate::policy::Policy::default(), true)
                 .authorize_frame(&frame, Mode::Layer3)
                 .expect_err("policy opt-in is independently mandatory");
         assert_eq!(
@@ -777,7 +806,7 @@ mod tests {
             allow_permissive_packets: true,
             ..crate::policy::Policy::default()
         };
-        SystemAuthorizer::new(registry(), policy, true)
+        frame_admission(registry(), policy, true)
             .authorize_frame(&frame, Mode::Layer3)
             .expect("both explicit approvals authorize the exact malformed bytes");
     }
@@ -786,7 +815,7 @@ mod tests {
     fn the_missing_replay_opt_in_keeps_its_published_message_and_remediation() {
         let frame = raw_frame(&built_ipv4(true));
 
-        let error = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false)
+        let error = frame_admission(registry(), crate::policy::Policy::default(), false)
             .authorize_frame(&frame, Mode::Layer3)
             .expect_err("operation opt-in is mandatory");
 
@@ -802,8 +831,7 @@ mod tests {
 
     #[test]
     fn replay_authorization_refuses_an_operation_with_no_frame() {
-        let mut authorizer =
-            SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
+        let mut authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
 
         let error = authorizer
             .authorize_operation(Operation::Wire(WireLimits::new(1, 1)))
@@ -838,7 +866,7 @@ mod tests {
             vec![0_u8; built.bytes.len()],
         )
         .expect("same-width fixture frame");
-        let authorizer = SystemAuthorizer::new(registry(), crate::policy::Policy::default(), false);
+        let authorizer = frame_admission(registry(), crate::policy::Policy::default(), false);
 
         let error = authorizer
             .validate_rebuild(&different_frame, &built)

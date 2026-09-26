@@ -212,3 +212,12 @@ pub trait Classified: std::error::Error {
         source_chain(self)
     }
 }
+
+/// An infallible operation has no failure to classify, so a provider or
+/// adapter whose error type is [`Infallible`](std::convert::Infallible)
+/// still satisfies a `Classified` error bound.
+impl Classified for std::convert::Infallible {
+    fn classification(&self) -> Classification {
+        match *self {}
+    }
+}

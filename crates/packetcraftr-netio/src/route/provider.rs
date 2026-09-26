@@ -68,16 +68,34 @@ impl Provider for SystemProvider {
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
     ) -> Result<Decision, Self::Error> {
-        crate::platform::system_route(destination, interface_hint, preferred_source)
+        validate_preferred_source_family(destination, preferred_source)?;
+        crate::platform::route(destination, interface_hint, preferred_source)
     }
 
     fn lookup_interface(&self, interface: &InterfaceId) -> Result<Option<Decision>, Self::Error> {
-        crate::platform::system_interface_route(interface).map(Some)
+        crate::platform::interface_route(interface).map(Some)
     }
 
     fn classify_error(&self, error: &Self::Error) -> Classification {
         error.classification()
     }
+}
+
+/// Rejects a preferred source of the wrong address family before any backend
+/// sees it; the backends verify only what the operating system answers.
+fn validate_preferred_source_family(
+    destination: IpAddr,
+    preferred_source: Option<IpAddr>,
+) -> Result<(), SystemError> {
+    if let Some(source) = preferred_source
+        && source.is_ipv4() != destination.is_ipv4()
+    {
+        return Err(SystemError::SourceFamilyMismatch {
+            preferred_source: source,
+            destination,
+        });
+    }
+    Ok(())
 }
 
 impl Classified for SystemError {
@@ -173,8 +191,8 @@ mod tests {
     }
 }
 
-#[cfg(all(test, native_route))]
-mod native_tests {
+#[cfg(test)]
+mod family_tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::*;

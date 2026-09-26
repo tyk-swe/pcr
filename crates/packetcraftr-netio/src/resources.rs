@@ -27,11 +27,24 @@ pub struct NativeSnapshot {
 /// namespace while idle because each thread, runtime, and socket stays alive.
 #[must_use]
 pub fn native_snapshot() -> NativeSnapshot {
-    crate::platform::native_resource_snapshot()
+    #[cfg(native_workers)]
+    {
+        crate::workers::shared_budget().snapshot()
+    }
+    #[cfg(not(native_workers))]
+    {
+        NativeSnapshot {
+            supported: false,
+            capacity: 0,
+            active: 0,
+            rejected_admissions: 0,
+            cleanup_retaining_capacity: 0,
+        }
+    }
 }
 
 /// Inspect the separate process-wide ordinary-TCP worker/socket admission pool.
 #[must_use]
 pub fn tcp_connect_snapshot() -> NativeSnapshot {
-    crate::platform::tcp_connect_snapshot()
+    crate::tcp::connect_snapshot()
 }

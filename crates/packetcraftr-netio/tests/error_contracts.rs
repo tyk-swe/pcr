@@ -4,7 +4,9 @@
 use std::{fmt, io, net::IpAddr, sync::Arc, time::Duration};
 
 use packetcraftr_core::error::{Classified, Kind};
-use packetcraftr_netio::{Error, SendEvidenceFault, capture, link::Mode, route::SystemError};
+use packetcraftr_netio::{
+    Error, SendEvidenceFault, capture, interface, link::Mode, route::SystemError,
+};
 
 /// The live-I/O failures a native adapter raises keep the platform refusal as
 /// a source, and the retained failure is published exactly once.
@@ -43,6 +45,29 @@ fn live_io_failures_retain_the_platform_refusal_as_a_source() {
             "operation not permitted",
         ]
     );
+}
+
+/// Interface enumeration failures publish the live-I/O classes, and become
+/// the matching live-I/O failure with the same message and source chain.
+#[test]
+fn interface_errors_keep_live_io_classes_and_their_source() {
+    let unsupported = interface::Error::Unsupported {
+        message: "enable the native-route feature for native interface enumeration".to_owned(),
+    };
+    assert_row(&unsupported, "capability.unsupported", Kind::Capability);
+    let discovery = interface::Error::Discovery {
+        message: "the native route adapter refused the interface query".to_owned(),
+        source: Arc::new(io::Error::other("operation not permitted")),
+    };
+    assert_row(&discovery, "io.interface_discovery", Kind::Io);
+    assert_eq!(discovery.causes(), ["operation not permitted"]);
+
+    for error in [unsupported, discovery] {
+        let live = Error::from(error.clone());
+        assert_eq!(live.to_string(), error.to_string());
+        assert_eq!(live.causes(), error.causes());
+        assert_eq!(live.classification(), error.classification());
+    }
 }
 
 fn ipv4(value: &str) -> IpAddr {

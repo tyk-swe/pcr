@@ -1,0 +1,42 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Linux route and interface adapter backed by route netlink.
+
+use std::net::IpAddr;
+
+use self::{
+    query::{query_interfaces, query_route},
+    worker::with_netlink,
+};
+use super::find_interface;
+use crate::{
+    interface::{self, Id as InterfaceId},
+    route::{Decision, SystemError, normalize::interface_decision},
+};
+
+mod query;
+mod worker;
+
+pub(in crate::platform) fn interfaces() -> Result<Vec<interface::Info>, interface::Error> {
+    snapshot().map_err(interface::Error::native)
+}
+
+fn snapshot() -> Result<Vec<interface::Info>, SystemError> {
+    with_netlink(|handle| async move { query_interfaces(&handle).await })
+}
+
+pub(in crate::platform) fn route(
+    destination: IpAddr,
+    interface_hint: Option<&InterfaceId>,
+    preferred_source: Option<IpAddr>,
+) -> Result<Decision, SystemError> {
+    let interface_hint = interface_hint.cloned();
+    with_netlink(move |handle| query_route(handle, destination, interface_hint, preferred_source))
+}
+
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+) -> Result<Decision, SystemError> {
+    interface_decision(find_interface(&snapshot()?, requested)?)
+}

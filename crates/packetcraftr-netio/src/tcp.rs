@@ -4,6 +4,10 @@
 //! Explicit providers for bounded TCP connections. Protocol framing belongs to
 //! the caller; providers own the connection and its native resources.
 
+mod connect;
+
+pub(crate) use connect::snapshot as connect_snapshot;
+
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
@@ -71,10 +75,10 @@ impl packetcraftr_core::error::Classified for ConnectError {
 /// A socket and its process-wide admission lease. The socket closes before the lease.
 pub struct Connection<S> {
     inner: S,
-    _lease: Arc<crate::platform::TcpConnectLease>,
+    _lease: Arc<connect::Lease>,
 }
 impl<S> Connection<S> {
-    pub(crate) fn new(inner: S, lease: Arc<crate::platform::TcpConnectLease>) -> Self {
+    fn new(inner: S, lease: Arc<connect::Lease>) -> Self {
         Self {
             inner,
             _lease: lease,
@@ -121,7 +125,7 @@ pub struct ConnectOutcome<S> {
 /// Pollable bounded connect. Dropping it cancels unstarted work; running calls
 /// retain admission until their provider and socket cleanup finish.
 pub struct PendingConnect<S> {
-    inner: crate::platform::TcpConnectPending<S>,
+    inner: connect::Pending<S>,
 }
 impl<S> PendingConnect<S> {
     /// Stops unstarted work and reports whether a provider call was admitted.
@@ -143,8 +147,7 @@ where
     P: Provider + Send + Sync + 'static,
     P::Stream: Send + 'static,
 {
-    crate::platform::start_tcp_connect(provider, endpoint, timeout, cancellation)
-        .map(|inner| PendingConnect { inner })
+    connect::start(provider, endpoint, timeout, cancellation).map(|inner| PendingConnect { inner })
 }
 
 /// A connected byte stream with endpoint evidence and per-call time bounds.

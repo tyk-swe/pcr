@@ -322,14 +322,14 @@ mod tests {
     }
 
     impl net::interface::Provider for FlakyProvider {
-        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::Error> {
+        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::interface::Error> {
             let call = self
                 .calls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if call == 0 {
-                return Err(net::Error::InterfaceDiscovery {
+                return Err(net::interface::Error::Discovery {
                     message: "fixture enumeration failure".to_owned(),
-                    source: None,
+                    source: std::sync::Arc::new(std::io::Error::other("fixture refusal")),
                 });
             }
             Ok(vec![net::interface::Info {

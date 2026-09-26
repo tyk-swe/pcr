@@ -248,6 +248,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   client materializes admitted plans. `link::MAX_VLAN_TAGS` moved to
   `packetcraftr::route::MAX_VLAN_TAGS`. Error messages and codes are unchanged.
   See `docs/migration-unreleased.md`.
+- `interface::Provider::interfaces` returns the new
+  `packetcraftr_netio::interface::Error` (`Unsupported`, `Discovery` with a
+  required source) instead of `packetcraftr_netio::Error`. Its messages and
+  codes (`capability.unsupported`, `io.interface_discovery`) match the old
+  variants, and `From<interface::Error> for packetcraftr_netio::Error` keeps
+  `?` working. See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -541,6 +547,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   the codecs type (Hop-by-Hop, Destination Options, Segment Routing, AH) and
   refused behind any other routing header type or a malformed AH header, which
   the hand-written walk used to step over.
+- `packetcraftr_netio::route::SystemProvider` rejects a preferred source of
+  the other address family (`io.route_selection`) in builds without
+  `native-route` too, before reporting the missing capability
+  (`capability.route`).
 - `rewrite` and `fragment` validate every IPv6 extension header and IP option
   they step over. A malformed length in a source-route, Home Address,
   routing, fragment, or AH header now reports `packet.transform_input` where

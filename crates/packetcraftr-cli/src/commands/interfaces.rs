@@ -71,7 +71,7 @@ mod tests {
     struct FixtureProvider;
 
     impl net::interface::Provider for FixtureProvider {
-        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::Error> {
+        fn interfaces(&self) -> Result<Vec<net::interface::Info>, net::interface::Error> {
             Ok(vec![
                 net::interface::Info {
                     id: net::interface::Id {

@@ -279,7 +279,10 @@ pub struct SystemLayer2;
 
 impl Layer2Sender for SystemLayer2 {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
-        super::platform::system_send_layer2(frame)
+        // A renamed, removed, or recreated interface must not receive the frame.
+        #[cfg(native_layer2)]
+        super::platform::verify_interface_identity(&frame.route().decision.interface)?;
+        super::platform::send_layer2(frame)
     }
 }
 
@@ -294,7 +297,10 @@ pub struct SystemLayer3;
 
 impl Layer3Sender for SystemLayer3 {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
-        super::platform::system_send_layer3(frame)
+        // A renamed, removed, or recreated interface must not receive the packet.
+        #[cfg(native_layer3)]
+        super::platform::verify_interface_identity(&frame.route().decision.interface)?;
+        super::platform::send_layer3(frame)
     }
 }
 

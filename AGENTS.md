@@ -42,10 +42,13 @@ Only `packetcraftr-netio/src/platform/` may contain unsafe code. Every unsafe
 block explains its specific invariant in a `SAFETY` comment; other crates
 forbid unsafe at their roots. Prefer typed errors with their original sources.
 
-Put unit tests beside their owner and public behavior regressions in
-`crates/*/tests/`. Test observable behavior and meaningful failure paths;
-avoid source-layout tests and duplicate verification. Keep schemas, examples,
-CLI tests, and release assets synchronized when changing machine contracts.
+Put unit tests beside their owner, in one inline `mod tests` or
+`<module>/tests.rs`, with in-crate helpers in `test_support` modules. Put public
+behavior regressions in `crates/*/tests/`, named by the test vocabulary in
+`CONTEXT.md` (schema checks go in `*_conformance.rs`, not `*_contracts.rs`).
+Test observable behavior and meaningful failure paths; avoid source-layout tests
+and duplicate verification. Keep schemas, examples, CLI tests, and release
+assets synchronized when changing machine contracts.
 
 Use focused Conventional Commits without `packetcraftr-` in scopes. Document
 breaking changes and user-visible changes in `[Unreleased]`. PRs explain the

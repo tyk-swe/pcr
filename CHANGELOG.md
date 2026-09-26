@@ -248,7 +248,7 @@ All notable changes to PacketcraftR are documented here. The format follows
   `document::PayloadTarget` fills an empty bytes field from outside the recipe
   (`document::PayloadError`). `transform::fragment_link_type` frames an
   Ethernet, IPv4, or IPv6 recipe for `transform::fragment`. Document formats,
-  CLI flags, messages, and error codes are unchanged.
+  CLI flags, and error codes are unchanged.
 
 - `protocol::headers` is a public, bounded walker over raw link, VLAN, and IP
   header bytes (`LinkHeader`, `EthernetHeader`, `IpHeader`, `Ipv4Header`,
@@ -499,6 +499,11 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- `--payload-file` refusals keep `cli.error` and exit code 2, but their text
+  changed: the message names the option (`--payload-file requires
+  LAYER.FIELD=PATH` or `--payload-file cannot fill its recipe field`) and the
+  first cause gives the reason without the option name, for example
+  `payload field nope is unknown on layer 2`.
 - `rewrite` and `fragment` validate every IPv6 extension header and IP option
   they step over. A malformed length in a source-route, Home Address,
   routing, fragment, or AH header now reports `packet.transform_input` where

@@ -147,7 +147,7 @@ fn resolve_recipe(
 fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let (target, path) = spec
         .split_once('=')
-        .ok_or(core::document::PayloadError::Syntax)?;
+        .ok_or_else(|| CliError::new(Kind::Usage, PAYLOAD_FILE_SYNTAX))?;
     let target = target.parse::<core::document::PayloadTarget>()?;
     target.inject(packet, || {
         read_bounded_file_allow_empty(
@@ -159,9 +159,31 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     })
 }
 
+const PAYLOAD_FILE_SYNTAX: &str = "--payload-file requires LAYER.FIELD=PATH";
+
+/// A refused `--payload-file`: the option is the outer context, and the
+/// library's refusal stays the typed source with its own text.
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct PayloadFile {
+    message: &'static str,
+    #[source]
+    source: core::document::PayloadError,
+}
+
 impl From<core::document::PayloadError> for CliError {
-    fn from(error: core::document::PayloadError) -> Self {
-        Self::classified(error)
+    fn from(source: core::document::PayloadError) -> Self {
+        let classification = core::error::Classified::classification(&source);
+        let message = match source {
+            core::document::PayloadError::Syntax => PAYLOAD_FILE_SYNTAX,
+            _ => "--payload-file cannot fill its recipe field",
+        };
+        let error = PayloadFile { message, source };
+        Self::from_classification(
+            classification,
+            error.to_string(),
+            core::error::source_chain(&error),
+        )
     }
 }
 

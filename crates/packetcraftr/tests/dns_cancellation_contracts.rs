@@ -1,75 +1,41 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
+mod common;
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use packetcraftr::clock::CancellableClock;
-use packetcraftr::dns::{self, Exchange, Execution, TcpExecutor};
-use packetcraftr::policy::{Authorizer, Operation, Policy};
-use packetcraftr::probe::Executor;
-use packetcraftr::progress::Runtime;
-use packetcraftr::target::{Authorized, Family, Hostname, Resolver, Target};
+use packetcraftr::dns;
+use packetcraftr::policy::Policy;
+use packetcraftr::target::{Family, Hostname, Resolver};
+use packetcraftr::{Client, ProviderSet};
 use packetcraftr_core::budget::Cancellation;
-use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::error::{BoundaryError, Classified};
 
-struct CancellingAuthorizer {
+/// Answers every hostname after cancelling the client's signal, counting
+/// each resolution.
+#[derive(Clone)]
+struct CancellingResolver {
     signal: Cancellation,
-    cancel_during_resolution: bool,
-    resolutions: usize,
+    resolutions: Arc<AtomicUsize>,
 }
 
-impl packetcraftr::target::ResolveTarget for CancellingAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        self.resolutions += 1;
-        Policy {
-            allow_hostname_resolution: true,
-            ..Policy::default()
-        }
-        .resolve_target(target, self)
-        .map_err(BoundaryError::from_error)
-    }
-}
-
-impl Authorizer for CancellingAuthorizer {
-    fn authorize_operation(&mut self, operation: Operation<'_>) -> Result<(), BoundaryError> {
-        assert!(matches!(operation, Operation::Dns(_)));
-        if !self.cancel_during_resolution {
-            self.signal.cancel();
-        }
-        Ok(())
-    }
-}
-
-impl Resolver for CancellingAuthorizer {
+impl Resolver for CancellingResolver {
     fn resolve(
         &self,
         _hostname: &Hostname,
         _limit: usize,
     ) -> Result<Vec<IpAddr>, packetcraftr::target::Error> {
+        self.resolutions.fetch_add(1, Ordering::SeqCst);
         self.signal.cancel();
         Ok(vec![Ipv4Addr::new(192, 0, 2, 53).into()])
     }
 }
 
-#[derive(Default)]
-struct CountingExecutor(usize);
-
-impl Executor<Exchange> for CountingExecutor {
-    fn execute(&mut self, _exchange: &Exchange) -> Result<Execution, BoundaryError> {
-        self.0 += 1;
-        Err(BoundaryError::new(
-            "cancelled DNS operation reached the executor",
-            Classification::new("internal.fixture_execution", Kind::Internal, None),
-            Vec::new(),
-        ))
-    }
-}
-
-impl TcpExecutor for CountingExecutor {}
-
 #[test]
-fn cancellation_during_authorization_or_resolution_prevents_dns_execution() {
+fn cancellation_before_authorization_or_during_resolution_prevents_dns_execution() {
     for (edns, transport) in [
         None,
         Some(dns::EdnsRequest {
@@ -104,41 +70,48 @@ fn cancellation_during_authorization_or_resolution_prevents_dns_execution() {
                     timeout: Duration::from_secs(1),
                     queries_per_second: None,
                     limits: dns::Limits::default(),
+                    route: Default::default(),
+                    collection: Default::default(),
                 };
-                let mut authorizer = CancellingAuthorizer {
-                    signal: signal.clone(),
-                    cancel_during_resolution,
-                    resolutions: 0,
-                };
-                let registry = packetcraftr_core::protocol::builtin::registry();
-                let mut executor = CountingExecutor::default();
-                let mut clock = CancellableClock(signal);
+                let resolutions = Arc::new(AtomicUsize::new(0));
+                let base = common::providers(common::FixedRoutes, common::NeverTransmit);
+                let connects = base.tcp.steps.clone();
+                let client = Client::new(
+                    packetcraftr_core::protocol::builtin::registry(),
+                    Policy {
+                        allow_hostname_resolution: true,
+                        ..Policy::default()
+                    },
+                    ProviderSet {
+                        route: base.route,
+                        interface: base.interface,
+                        capture: base.capture,
+                        transmit: base.transmit,
+                        tcp: base.tcp,
+                        resolver: CancellingResolver {
+                            signal: signal.clone(),
+                            resolutions: Arc::clone(&resolutions),
+                        },
+                    },
+                )
+                .with_cancellation(signal.clone());
+                if !cancel_during_resolution {
+                    signal.cancel();
+                }
                 let error = if progressive {
-                    dns::run_with_events(
-                        &request,
-                        &mut authorizer,
-                        &registry,
-                        &mut executor,
-                        &mut clock,
-                        &Runtime::default(),
-                        |_| panic!("cancelled DNS operation must not publish an event"),
-                    )
-                    .unwrap_err()
+                    client
+                        .dns(request, |_: dns::Event| -> Result<(), BoundaryError> {
+                            panic!("cancelled DNS operation must not publish an event")
+                        })
+                        .unwrap_err()
                 } else {
-                    dns::run(
-                        &request,
-                        &mut authorizer,
-                        &registry,
-                        &mut executor,
-                        &mut clock,
-                    )
-                    .unwrap_err()
+                    client.dns(request, dns::Collector::default()).unwrap_err()
                 };
-                assert_eq!(executor.0, 0);
                 assert_eq!(
-                    authorizer.resolutions,
+                    resolutions.load(Ordering::SeqCst),
                     usize::from(cancel_during_resolution)
                 );
+                assert!(connects.take().is_empty(), "no TCP query started");
                 assert_eq!(error.classification().code, "io.cancelled");
             }
         }

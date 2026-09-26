@@ -44,7 +44,7 @@ published_enum! {
 
 published_enum! {
     /// Whether a batch question ran to completion.
-    pub enum QuestionStatus from library::QuestionStatus {
+    pub enum QuestionStatus from library::batch::QuestionStatus {
         Completed => "completed",
         Failed => "failed",
         Unattempted => "unattempted",
@@ -151,12 +151,12 @@ impl From<Vec<library::RejectedRecord>> for ResponseRecords {
 }
 
 /// One query, with its diagnostics and totals.
-impl TryFrom<library::Report> for Published<Report> {
+impl TryFrom<library::Aggregate> for Published<Report> {
     type Error = Error;
 
-    fn try_from(result: library::Report) -> Result<Self, Error> {
-        let (summary, response, attempts, undecoded, diagnostics) = result.into_parts();
-        let library::Summary {
+    fn try_from(result: library::Aggregate) -> Result<Self, Error> {
+        let (report, response, attempts, undecoded, diagnostics) = result.into_parts();
+        let library::Report {
             server,
             server_port,
             resolved_addresses,
@@ -165,7 +165,7 @@ impl TryFrom<library::Report> for Published<Report> {
             transaction_id,
             completion,
             stats,
-        } = summary;
+        } = report;
         let outcome = completion.outcome().into();
         let fallback_attempted = completion.fallback_attempted();
         let accepted_transport = completion.accepted_transport().map(Into::into);
@@ -311,11 +311,11 @@ pub struct QuestionComplete {
 }
 
 /// A question batch, with each diagnostic code once and the batch totals.
-impl TryFrom<library::BatchReport> for Published<BatchResult> {
+impl TryFrom<library::batch::Aggregate> for Published<BatchResult> {
     type Error = Error;
 
-    fn try_from(batch: library::BatchReport) -> Result<Self, Error> {
-        let library::BatchReport {
+    fn try_from(batch: library::batch::Aggregate) -> Result<Self, Error> {
+        let library::batch::Aggregate {
             server,
             server_port,
             questions,
@@ -324,15 +324,15 @@ impl TryFrom<library::BatchReport> for Published<BatchResult> {
         let mut diagnostics = Vec::new();
         let mut results = Vec::with_capacity(questions.len());
         for question in questions {
-            let library::QuestionOutcome {
+            let library::batch::Question {
                 query_name,
                 query_type,
                 transaction_id,
                 status,
-                report,
+                result,
                 error,
             } = question;
-            let result = report
+            let result = result
                 .map(|report| {
                     // Questions in a batch trip the same codes; the aggregate
                     // envelope carries one entry per code, not per question.
@@ -367,17 +367,17 @@ impl TryFrom<library::BatchReport> for Published<BatchResult> {
     }
 }
 
-impl From<&library::QuestionOutcome> for QuestionComplete {
-    fn from(question: &library::QuestionOutcome) -> Self {
+impl From<&library::batch::Question> for QuestionComplete {
+    fn from(question: &library::batch::Question) -> Self {
         Self {
             query_name: question.query_name.clone(),
             query_type: question.query_type.code(),
             transaction_id: question.transaction_id,
             status: question.status.into(),
             outcome: question
-                .report
+                .result
                 .as_ref()
-                .map(|report| report.summary().completion.outcome().into()),
+                .map(|report| report.completion.outcome().into()),
             error: question.error.as_ref().map(ToString::to_string),
         }
     }
@@ -534,8 +534,8 @@ impl TryFrom<library::Event> for Published<Event> {
 }
 
 /// The terminal record of one query, with its totals.
-impl From<library::Summary> for Published<Event> {
-    fn from(summary: library::Summary) -> Self {
+impl From<library::Report> for Published<Event> {
+    fn from(summary: library::Report) -> Self {
         let rejected_record_count = summary
             .completion
             .response()
@@ -568,8 +568,8 @@ impl From<library::Summary> for Published<Event> {
 
 /// The terminal record of a batch: every question's status in input order,
 /// with the batch totals.
-impl From<library::BatchReport> for Published<Event> {
-    fn from(batch: library::BatchReport) -> Self {
+impl From<library::batch::Report> for Published<Event> {
+    fn from(batch: library::batch::Report) -> Self {
         Self::new(
             Event::BatchComplete {
                 questions: batch.questions.iter().map(Into::into).collect(),

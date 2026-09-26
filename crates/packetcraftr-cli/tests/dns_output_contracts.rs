@@ -231,8 +231,8 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
     } = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> =
             Some(representative_response());
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -428,7 +428,7 @@ fn dns_progressive_outputs_cover_every_event_and_complete_metadata_shape() {
         result: complete,
         diagnostics,
         stats: converted_stats,
-    } = Published::<dns_output::Event>::from(packetcraftr::dns::Summary {
+    } = Published::<dns_output::Event>::from(packetcraftr::dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -462,8 +462,8 @@ fn dns_timeout_output_omits_response_only_fields() {
         ..
     } = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = None;
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53))],
@@ -513,7 +513,7 @@ fn dns_timeout_output_omits_response_only_fields() {
         result: complete,
         diagnostics,
         ..
-    } = Published::<dns_output::Event>::from(packetcraftr::dns::Summary {
+    } = Published::<dns_output::Event>::from(packetcraftr::dns::Report {
         server: "resolver.example.test".to_owned(),
         server_port: 53,
         resolved_addresses: Vec::new(),

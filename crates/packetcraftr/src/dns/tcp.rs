@@ -3,7 +3,7 @@
 
 //! Bounded DNS-over-TCP framing over an explicitly selected TCP provider.
 //!
-//! Callers authorize destinations and validate DNS responses. Each exchange
+//! Callers authorize destinations and validate DNS responses. Each query
 //! reads one declared response frame, then drops the connection.
 
 use packetcraftr_netio::tcp::{Provider, Stream};
@@ -20,7 +20,7 @@ use thiserror::Error as ThisError;
 /// Bytes in the DNS-over-TCP message-length prefix.
 pub const LENGTH_PREFIX_BYTES: usize = 2;
 
-/// One bounded DNS-over-TCP exchange request.
+/// One bounded DNS-over-TCP query request.
 #[derive(Clone, Copy, Debug)]
 pub struct Request<'a> {
     /// Already-authorized numeric DNS server endpoint.
@@ -63,7 +63,7 @@ impl fmt::Display for Phase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Category {
-    /// The caller submitted a request that is not a runnable bounded exchange.
+    /// The caller submitted a request that is not a runnable bounded query.
     Request,
     /// This build or route cannot execute DNS over TCP at all.
     Unsupported,
@@ -280,14 +280,14 @@ pub struct Response {
     pub frame: Bytes,
 }
 
-/// Runs one bounded DNS-over-TCP exchange through the selected provider.
+/// Runs one bounded DNS-over-TCP query through the selected provider.
 /// Writes one framed query and reads the first framed response. Subsequent
 /// messages on the stream are outside this response.
-pub fn exchange<P: Provider>(request: Request<'_>, provider: &P) -> Result<Response, Error> {
-    exchange_with_clock(request, provider, Instant::now)
+pub fn query<P: Provider>(request: Request<'_>, provider: &P) -> Result<Response, Error> {
+    query_with_clock(request, provider, Instant::now)
 }
 
-fn exchange_with_clock<P: Provider>(
+fn query_with_clock<P: Provider>(
     request: Request<'_>,
     connector: &P,
     now: impl Fn() -> Instant,

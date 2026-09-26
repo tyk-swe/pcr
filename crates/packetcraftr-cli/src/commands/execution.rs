@@ -62,20 +62,6 @@ where
     }
 }
 
-impl packetcraftr::dns::TcpExecutor for Executor {
-    fn execute_tcp(
-        &mut self,
-        exchange: &packetcraftr::dns::TcpExchange,
-    ) -> Result<packetcraftr::dns::TcpExecution, packetcraftr::dns::tcp::Error> {
-        // Direct TCP reaches this path without preparing any UDP exchange.
-        // CLI admission rejects packet-oriented overrides before execution;
-        // the socket adapter independently validates materialized options.
-        self.exchange()
-            .with_dns_tcp(net::tcp::SystemProvider)
-            .execute_tcp(exchange)
-    }
-}
-
 pub(super) struct Providers {
     pub(super) policy: Arc<packetcraftr::policy::Policy>,
     /// The resolver the session authorizer resolves declared targets with.

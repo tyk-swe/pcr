@@ -15,9 +15,10 @@ use packetcraftr_core::{
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::execution::evidence::{EvidenceState, ResponseCandidate};
 
-use super::error::{Error, WireError};
+use super::error::{Error, EvidenceFault, WireError};
+use super::probe::Probe;
 use super::wire::{decode_response, decode_tcp_frame};
-use super::{AttemptEvidence, MessageLimits, Outcome, Probe, ValidatedResponse};
+use super::{AttemptEvidence, MessageLimits, Outcome, ValidatedResponse};
 
 pub const fn response_code_name(code: u16) -> &'static str {
     match code {
@@ -335,7 +336,7 @@ pub(super) fn classify_tcp_response(
         .checked_add(2)
         .ok_or(Error::InvalidEvidence {
             attempt: probe.attempt,
-            message: "TCP query length accounting overflowed".to_owned(),
+            fault: EvidenceFault::TcpQueryLengthOverflow,
         })?;
     if response.local_address.port() == 0
         || response.peer_address != SocketAddr::new(probe.server_address, probe.server_port)
@@ -345,8 +346,7 @@ pub(super) fn classify_tcp_response(
     {
         return Err(Error::InvalidEvidence {
             attempt: probe.attempt,
-            message: "TCP executor returned inconsistent endpoint, byte, or deadline evidence"
-                .to_owned(),
+            fault: EvidenceFault::TcpReceipt,
         });
     }
     let (status, response_code, reason, validated) = match decode_tcp_frame(

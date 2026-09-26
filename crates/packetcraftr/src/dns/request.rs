@@ -305,6 +305,16 @@ pub struct Request {
     pub timeout: Duration,
     pub queries_per_second: Option<u32>,
     pub limits: Limits,
+    /// Route selection for every UDP exchange. Direct TCP and fallback run on
+    /// a kernel socket, which accepts only the default route options. A live
+    /// setting, not part of the serialized question.
+    #[serde(skip)]
+    pub route: crate::route::Options,
+    /// The capture and retention bounds every UDP exchange runs under; they
+    /// must fit inside [`Limits`]'s evidence bounds. A live setting, not part
+    /// of the serialized question.
+    #[serde(skip)]
+    pub collection: crate::exchange::Collection,
 }
 
 impl Request {

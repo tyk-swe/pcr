@@ -23,14 +23,16 @@ use crate::target::{Family, Target, resolve_selected};
 use super::super::classification::{
     ClassifiedAttempt, classify_tcp_response, tcp_failure_evidence, tcp_timeout_evidence,
 };
-use super::super::error::Error;
-use super::super::{Event, Exchange, Outcome, Probe, TcpExchange, TcpExecution, TcpExecutor};
-use super::{Attempts, Operation};
+use super::super::error::{Error, EvidenceFault};
+use super::super::executor::{Exchange, TcpEvidence, TcpQuerier, TcpQuery};
+use super::super::probe::Probe;
+use super::super::{Event, Outcome};
+use super::{Attempts, Retries};
 
-impl<A, E, C, F> Operation<'_, A, E, C, F>
+impl<A, E, C, F> Retries<'_, A, E, C, F>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
+    E: Executor<Exchange> + TcpQuerier,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -51,7 +53,7 @@ where
             .remaining()
             .map_err(|_| Error::InvalidEvidence {
                 attempt: probe.attempt,
-                message: "shared DNS attempt deadline regressed after accounting".to_owned(),
+                fault: EvidenceFault::AttemptDeadlineRegressed,
             })?;
         if requested.is_zero() {
             return Ok(expired_before_connection(probe));
@@ -63,7 +65,7 @@ where
                 .checked_add(2)
                 .ok_or(Error::InvalidEvidence {
                     attempt: probe.attempt,
-                    message: "TCP query length accounting overflowed".to_owned(),
+                    fault: EvidenceFault::TcpQueryLengthOverflow,
                 })?;
         let max_message_bytes = self.request.limits.message.max_message_bytes;
         let (attempt, grant) = self.execution.step(
@@ -71,7 +73,7 @@ where
             requested,
             &mut *self.executor,
             |executor, grant| {
-                let exchange = TcpExchange {
+                let query = TcpQuery {
                     attempt: probe.attempt,
                     endpoint: SocketAddr::new(probe.server_address, probe.server_port),
                     query: probe.query.clone(),
@@ -79,14 +81,13 @@ where
                     max_message_bytes,
                     permit: grant.permit,
                 };
-                Ok(TcpAttempt::execute(executor, &exchange, framed_query_bytes))
+                Ok(TcpAttempt::execute(executor, &query, framed_query_bytes))
             },
             |_, attempt, _, _| {
                 if attempt.bytes_written > framed_query_bytes {
                     return Err(Error::InvalidEvidence {
                         attempt: probe.attempt,
-                        message: "TCP executor reported more query bytes than were authorized"
-                            .to_owned(),
+                        fault: EvidenceFault::TcpBytesUnauthorized,
                     });
                 }
                 Ok(())
@@ -103,11 +104,11 @@ where
             ));
         }
         let error = match attempt.result {
-            Ok(execution) => {
+            Ok(evidence) => {
                 return classify_tcp_response(
                     probe,
                     timeout,
-                    execution.response,
+                    evidence.response,
                     self.request.limits.message,
                 );
             }
@@ -136,9 +137,9 @@ where
             // `Request` — and any class added later — fails closed here: a
             // request this workflow built itself cannot be rejected by the
             // executor, so it is never a retryable per-attempt outcome.
-            _ => Err(Error::InvalidEvidence {
+            _ => Err(Error::TcpRequestRejected {
                 attempt: probe.attempt,
-                message: format!("TCP executor rejected the validated local request: {error}"),
+                source: error,
             }),
         }
     }
@@ -167,10 +168,9 @@ where
         if resolved.addresses.as_slice() != [probe.server_address] {
             return Err(Error::InvalidEvidence {
                 attempt: probe.attempt,
-                message: format!(
-                    "TCP destination reauthorization did not preserve selected server {}",
-                    probe.server_address
-                ),
+                fault: EvidenceFault::TcpServerChanged {
+                    server: probe.server_address,
+                },
             });
         }
         Ok(true)
@@ -185,30 +185,30 @@ fn expired_before_connection(probe: &Probe) -> ClassifiedAttempt {
 /// framing failures are the executor's typed data, not a boundary failure, so
 /// they are carried here with the traffic they may already have produced.
 struct TcpAttempt {
-    result: Result<TcpExecution, TcpError>,
+    result: Result<TcpEvidence, TcpError>,
     permit: ExecutionPermit,
     bytes_written: usize,
     stats: Stats,
 }
 
 impl TcpAttempt {
-    fn execute<E: TcpExecutor>(
+    fn execute<E: TcpQuerier>(
         executor: &mut E,
-        exchange: &TcpExchange,
+        query: &TcpQuery,
         framed_query_bytes: usize,
     ) -> Self {
         let started = Instant::now();
-        let result = executor.execute_tcp(exchange);
+        let result = executor.query(query);
         let boundary_elapsed = started.elapsed();
         let (permit, elapsed, bytes_written) = match &result {
-            Ok(execution) => (
-                execution.permit,
-                execution.response.elapsed,
-                execution.response.bytes_written,
+            Ok(evidence) => (
+                evidence.permit,
+                evidence.response.elapsed,
+                evidence.response.bytes_written,
             ),
             // A failure carries no evidence to bind to another permit.
             Err(error) => (
-                exchange.permit,
+                query.permit,
                 boundary_elapsed,
                 error.query_bytes_written(framed_query_bytes),
             ),

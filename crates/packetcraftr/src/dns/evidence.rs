@@ -11,11 +11,11 @@ use crate::execution::validation::{
     validate_sent_byte_accounting,
 };
 
+use super::Limits;
 use super::classification::dns_payload;
-use super::engine::Attempts;
-use super::error::Error;
-use super::{Execution, Limits, Probe};
-use crate::execution::Errors as _;
+use super::error::{Error, EvidenceFault};
+use super::executor::Execution;
+use super::probe::Probe;
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,
@@ -28,13 +28,13 @@ pub(super) fn validate_dns_execution(
     let Some(network) = dns_network_envelope(sent_packet) else {
         return Err(Error::InvalidEvidence {
             attempt,
-            message: "sent packet has no IPv4 or IPv6 tuple".to_owned(),
+            fault: EvidenceFault::SentWithoutNetwork,
         });
     };
     let Some(ports) = dns_udp_ports(sent_packet) else {
         return Err(Error::InvalidEvidence {
             attempt,
-            message: "sent packet has no complete UDP tuple".to_owned(),
+            fault: EvidenceFault::SentWithoutUdp,
         });
     };
     let network_protocol = if probe.server_address.is_ipv4() {
@@ -72,15 +72,13 @@ pub(super) fn validate_dns_execution(
     {
         return Err(Error::InvalidEvidence {
             attempt,
-            message: "sent packet does not preserve the authorized server, UDP ports, and exact DNS query"
-                .to_owned(),
+            fault: EvidenceFault::SentQueryChanged,
         });
     }
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(Error::InvalidEvidence {
             attempt,
-            message: "successful exchange statistics must account for exactly one DNS query"
-                .to_owned(),
+            fault: EvidenceFault::SentCount,
         });
     }
     if execution
@@ -90,8 +88,7 @@ pub(super) fn validate_dns_execution(
     {
         return Err(Error::InvalidEvidence {
             attempt,
-            message: "single-query DNS exchange returned a response for an unknown request index"
-                .to_owned(),
+            fault: EvidenceFault::ResponseOutsideQuery,
         });
     }
     validate_sent_byte_accounting(std::slice::from_ref(&execution.sent), execution.stats.bytes)
@@ -112,7 +109,10 @@ pub(super) fn validate_dns_execution(
 }
 
 fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> Error {
-    Attempts.invalid_evidence(attempt, error)
+    Error::InvalidEvidence {
+        attempt,
+        fault: EvidenceFault::Exchange(error),
+    }
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

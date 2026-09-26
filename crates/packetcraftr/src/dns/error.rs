@@ -1,18 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv6Addr;
+use std::fmt;
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::Duration;
 
 use thiserror::Error;
 
 use crate::BoundaryError;
+use crate::execution::ExchangeEvidenceError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
 pub enum WireError {
-    #[error("DNS construction failed: {0}")]
+    #[error("{0}")]
     Encode(#[from] packetcraftr_core::codec::Error),
 
     #[error("{0}")]
@@ -75,7 +77,7 @@ pub enum Error {
     #[error(transparent)]
     LimitOverflow(#[from] crate::policy::LimitOverflow),
     #[error(transparent)]
-    IncoherentReport(#[from] super::EvidenceError),
+    IncoherentReport(#[from] super::IncoherentReport),
     #[error("invalid DNS limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -90,10 +92,10 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("DNS duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
-    #[error("DNS query construction failed: {0}")]
+    #[error("DNS query construction failed")]
     Query(#[source] WireError),
     #[error("DNS authorization failed: {0}")]
-    Authorization(#[from] BoundaryError),
+    Authorization(#[source] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
     Family { family: &'static str },
     #[error("DNS-over-TCP cannot address scoped IPv6 link-local server {address}")]
@@ -106,7 +108,7 @@ pub enum Error {
         #[source]
         source: BoundaryError,
     },
-    #[error("DNS-over-TCP execution is unavailable on attempt {attempt}: {source}")]
+    #[error("DNS-over-TCP execution is unavailable on attempt {attempt}")]
     TcpExecution {
         attempt: u32,
         #[source]
@@ -118,8 +120,18 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    #[error("DNS executor returned invalid evidence on attempt {attempt}: {message}")]
-    InvalidEvidence { attempt: u32, message: String },
+    #[error("DNS executor returned invalid evidence on attempt {attempt}: {fault}")]
+    InvalidEvidence { attempt: u32, fault: EvidenceFault },
+    /// The TCP executor refused a query this workflow built and validated
+    /// itself, which only a broken executor can do.
+    #[error(
+        "DNS executor returned invalid evidence on attempt {attempt}: TCP executor rejected the validated local request"
+    )]
+    TcpRequestRejected {
+        attempt: u32,
+        #[source]
+        source: crate::dns::tcp::Error,
+    },
     #[error("DNS statistic accounting overflowed on attempt {attempt}")]
     StatisticsOverflow { attempt: u32 },
     #[error("DNS progressive output failed: {source}")]
@@ -181,6 +193,7 @@ impl Classified for Error {
             Self::LimitOverflow(_)
             | Self::IncoherentReport(_)
             | Self::InvalidEvidence { .. }
+            | Self::TcpRequestRejected { .. }
             | Self::StatisticsOverflow { .. } => Classification::new(
                 "internal.dns_evidence",
                 Kind::Internal,
@@ -198,6 +211,7 @@ impl Classified for Error {
             | Self::TcpExecution { attempt, .. }
             | Self::Clock { attempt, .. }
             | Self::InvalidEvidence { attempt, .. }
+            | Self::TcpRequestRejected { attempt, .. }
             | Self::StatisticsOverflow { attempt } => Some(Coordinate::Attempt(*attempt)),
             _ => None,
         }
@@ -214,5 +228,107 @@ impl Classified for Error {
             Self::Execution { source, .. } | Self::Output { source } => source.causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
+    }
+}
+
+/// What made an executor's DNS evidence untrustworthy: the evidence does not
+/// match the query this workflow authorized and sent.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EvidenceFault {
+    /// The exchange evidence failed the checks every workflow applies.
+    Exchange(ExchangeEvidenceError),
+    /// The sent packet has no outer IPv4 or IPv6 header.
+    SentWithoutNetwork,
+    /// The sent packet has no complete UDP header.
+    SentWithoutUdp,
+    /// The sent packet changed the server, the UDP ports, or the query.
+    SentQueryChanged,
+    /// The exchange statistics do not account for exactly one query.
+    SentCount,
+    /// A response answers a request other than the single query.
+    ResponseOutsideQuery,
+    /// The framed TCP query length overflowed.
+    TcpQueryLengthOverflow,
+    /// The shared attempt deadline went backwards after accounting.
+    AttemptDeadlineRegressed,
+    /// The TCP executor reported writing more than the framed query.
+    TcpBytesUnauthorized,
+    /// The TCP receipt disagrees with the endpoint, byte count, or deadline.
+    TcpReceipt,
+    /// A successful TCP query carried no validated response.
+    TcpResponseMissing,
+    /// Reauthorizing the TCP destination selected another server.
+    TcpServerChanged { server: IpAddr },
+}
+
+impl fmt::Display for EvidenceFault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exchange(error) => formatter.write_str(&error.describe("DNS exchange", "DNS")),
+            Self::SentWithoutNetwork => formatter.write_str("sent packet has no IPv4 or IPv6 tuple"),
+            Self::SentWithoutUdp => formatter.write_str("sent packet has no complete UDP tuple"),
+            Self::SentQueryChanged => formatter.write_str(
+                "sent packet does not preserve the authorized server, UDP ports, and exact DNS query",
+            ),
+            Self::SentCount => formatter
+                .write_str("successful exchange statistics must account for exactly one DNS query"),
+            Self::ResponseOutsideQuery => formatter.write_str(
+                "single-query DNS exchange returned a response for an unknown request index",
+            ),
+            Self::TcpQueryLengthOverflow => {
+                formatter.write_str("TCP query length accounting overflowed")
+            }
+            Self::AttemptDeadlineRegressed => {
+                formatter.write_str("shared DNS attempt deadline regressed after accounting")
+            }
+            Self::TcpBytesUnauthorized => formatter
+                .write_str("TCP executor reported more query bytes than were authorized"),
+            Self::TcpReceipt => formatter.write_str(
+                "TCP executor returned inconsistent endpoint, byte, or deadline evidence",
+            ),
+            Self::TcpResponseMissing => {
+                formatter.write_str("successful TCP query omitted its validated response")
+            }
+            Self::TcpServerChanged { server } => write!(
+                formatter,
+                "TCP destination reauthorization did not preserve selected server {server}"
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_core::error::{Classified, Coordinate};
+
+    use super::{Error, EvidenceFault, WireError};
+
+    #[test]
+    fn messages_leave_their_typed_sources_to_the_causes() {
+        let query = Error::Query(WireError::NameTooLong);
+        assert_eq!(query.to_string(), "DNS query construction failed");
+        assert_eq!(query.causes(), [WireError::NameTooLong.to_string()]);
+
+        let tcp = Error::TcpExecution {
+            attempt: 2,
+            source: crate::dns::tcp::Error::EmptyQuery,
+        };
+        assert_eq!(
+            tcp.to_string(),
+            "DNS-over-TCP execution is unavailable on attempt 2"
+        );
+        assert_eq!(tcp.causes(), ["DNS-over-TCP query must not be empty"]);
+        assert_eq!(tcp.context(), Some(Coordinate::Attempt(2)));
+
+        let evidence = Error::InvalidEvidence {
+            attempt: 1,
+            fault: EvidenceFault::SentWithoutUdp,
+        };
+        assert_eq!(
+            evidence.to_string(),
+            "DNS executor returned invalid evidence on attempt 1: sent packet has no complete UDP tuple"
+        );
+        assert_eq!(evidence.classification().code, "internal.dns_evidence");
     }
 }

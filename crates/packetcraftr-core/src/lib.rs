@@ -20,8 +20,9 @@
 //!    layers), [`layout`], [`packet`], [`frame`], [`codec`], [`registry`],
 //!    and the [`matcher`] contract. Model modules may refer to each other.
 //! 3. Protocols: [`protocol`], holding the built-in codecs, the packet
-//!    interpretation in [`protocol::semantics`], and the built-in response
-//!    matchers; and [`capture_file`], which maps link types to built-in roots.
+//!    interpretation in [`protocol::semantics`], the raw header walker in
+//!    [`protocol::headers`], and the built-in response matchers; and
+//!    [`capture_file`], which maps link types to built-in roots.
 //! 4. Engines: [`decode`], [`build`], [`transform`], [`filter`],
 //!    [`expression`], [`document`], [`template`].
 //! 5. Workflows: [`analysis`], [`fuzz`].

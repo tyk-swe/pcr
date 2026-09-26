@@ -19,6 +19,9 @@
 //! HTTP, TLS, and DHCPv4/DHCPv6, which share DHCP's `Error` and limits). Wire
 //! APIs return the protocol's own `Error`.
 //!
+//! [`headers`] walks raw link, VLAN, and IP header bytes for code that must
+//! edit or inspect bytes a codec round trip would not reproduce.
+//!
 //! Codecs preserve unknown and malformed bytes. SCTP chunks remain validated
 //! opaque bytes; unrecognized application payloads use [`crate::layer::Raw`].
 
@@ -27,6 +30,7 @@ pub mod builtin;
 pub mod capture;
 mod catalog;
 mod common;
+pub mod headers;
 pub mod link;
 mod matcher;
 pub mod network;

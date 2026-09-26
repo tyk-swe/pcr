@@ -245,7 +245,12 @@ fn replay_output_failure_retains_source_frame_context_and_remediation() {
     assert_eq!(error.exit_code(), 5);
     assert_eq!(error.classification.code, "io.replay");
     assert!(error.message.contains("source index 42"));
-    assert!(error.message.contains("sequence 0"));
+    assert!(
+        error
+            .causes
+            .iter()
+            .any(|cause| cause.contains("sequence 0"))
+    );
     assert_eq!(
         error.classification.remediation,
         Some("inspect the replay timer or output sink and account for frames already transmitted")
@@ -333,7 +338,12 @@ fn replay_text_write_failure_wins_over_deadline_expiring_during_write() {
 
     assert_eq!(error.classification.code, "io.replay");
     assert!(error.message.contains("source index 0"));
-    assert!(error.message.contains("fixture pipe closed"));
+    assert!(
+        error
+            .causes
+            .iter()
+            .any(|cause| cause.contains("fixture pipe closed"))
+    );
 }
 
 #[test]

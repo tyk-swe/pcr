@@ -193,7 +193,7 @@ where
     };
     let result = executor.execute_pipeline(&batches, settings, &mut |event| {
         let invalid = |index| {
-            crate::BoundaryError::from_error(Error::InvalidEvidence {
+            packetcraftr_core::error::BoundaryError::from_error(Error::InvalidEvidence {
                 sequence: index as u64,
                 message: "pipeline returned an invalid or repeated request index".to_owned(),
             })
@@ -217,7 +217,7 @@ where
                         }),
                         deadline,
                     )
-                    .map_err(crate::BoundaryError::from_error)?;
+                    .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
             }
             PipelineEvent::Completed { index, execution } => {
                 let batch = batches.get(index).ok_or_else(|| invalid(index))?;
@@ -228,15 +228,15 @@ where
                 let _ = evidence
                     .validate(batch, &execution)
                     .and_then(|()| evidence.process(batch, execution, deadline))
-                    .map_err(crate::BoundaryError::from_error)?;
+                    .map_err(packetcraftr_core::error::BoundaryError::from_error)?;
                 completed[index] = true;
             }
             PipelineEvent::Undecoded { frame } => evidence
                 .retain_undecoded(&[], vec![frame], deadline)
-                .map_err(crate::BoundaryError::from_error)?,
+                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
             PipelineEvent::Diagnostic(diagnostic) => evidence
                 .record_diagnostics(vec![diagnostic], deadline)
-                .map_err(crate::BoundaryError::from_error)?,
+                .map_err(packetcraftr_core::error::BoundaryError::from_error)?,
         }
         Ok(())
     });

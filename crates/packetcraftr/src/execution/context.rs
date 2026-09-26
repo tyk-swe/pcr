@@ -17,10 +17,11 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 
 use super::{Errors, ExchangeEvidenceError};
+use crate::Stats;
 use crate::clock::Clock;
 use crate::deadline::DeadlineExt as _;
 use crate::evidence::ExecutionPermit;
-use crate::{BoundaryError, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 /// Why a [`pause`] stopped before its delay was accounted.
 #[derive(Debug)]

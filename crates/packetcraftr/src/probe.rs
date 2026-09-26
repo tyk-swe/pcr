@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! The kernel scan and traceroute share: batches of homogeneous probes run
-//! through the execution context, batch-evidence processing, and the probe
-//! vocabulary their requests and reports use.
+//! The probe vocabulary scan and traceroute requests and reports use, and,
+//! internally, the kernel both share: batches of homogeneous probes run
+//! through the execution context, and batch-evidence processing.
 
 mod limits;
 mod model;
@@ -13,11 +13,7 @@ pub(crate) mod test_support;
 
 pub use crate::correlation::Transport;
 pub use model::{ProbeEndpoint, ProbeStatus};
-pub use runner::{Batch, Execution};
-
-// The executor contract lives in the private `execution` module. It stays
-// reachable here until every workflow runs through the client.
-pub use crate::execution::{ExchangeExecutor, Executor, Request};
+pub(crate) use runner::{Batch, Evidence};
 
 pub(crate) use limits::{check_probe_count, check_probe_duration};
 

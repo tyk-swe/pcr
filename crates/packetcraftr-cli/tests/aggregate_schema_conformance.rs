@@ -965,7 +965,7 @@ fn dns_timeout_case() -> Value {
                 latency: None,
                 response_code: None,
                 reason: "timeout".to_owned(),
-                exchange: packetcraftr::dns::AttemptTransport::Udp {
+                transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
                     source_port: 49_152,
                     sent_at: UNIX_EPOCH,
                     response: None,
@@ -1015,7 +1015,7 @@ fn dns_batch_case() -> Value {
             latency: None,
             response_code: None,
             reason: "timeout".to_owned(),
-            exchange: packetcraftr::dns::AttemptTransport::Udp {
+            transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
                 source_port: 49_152,
                 sent_at: UNIX_EPOCH,
                 response: None,
@@ -1178,13 +1178,13 @@ fn dns_response_case() -> Value {
         latency: Some(Duration::from_millis(3)),
         response_code: Some(18),
         reason: "validated DNS response".to_owned(),
-        exchange: match transport {
-            packetcraftr::dns::Transport::Udp => packetcraftr::dns::AttemptTransport::Udp {
+        transport_evidence: match transport {
+            packetcraftr::dns::Transport::Udp => packetcraftr::dns::TransportEvidence::Udp {
                 source_port: 49_152,
                 sent_at: UNIX_EPOCH,
                 response: None,
             },
-            packetcraftr::dns::Transport::Tcp => packetcraftr::dns::AttemptTransport::Tcp {
+            packetcraftr::dns::Transport::Tcp => packetcraftr::dns::TransportEvidence::Tcp {
                 source_port: Some(49_152),
                 sent_at: Some(UNIX_EPOCH),
             },
@@ -1213,7 +1213,7 @@ fn dns_response_case() -> Value {
             vec![
                 packetcraftr::dns::AttemptEvidence {
                     status: packetcraftr::dns::Outcome::Truncated,
-                    exchange: packetcraftr::dns::AttemptTransport::Udp {
+                    transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
                         source_port: 49_152,
                         sent_at: UNIX_EPOCH,
                         response: Some(evidence_frame()),

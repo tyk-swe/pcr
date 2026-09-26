@@ -139,7 +139,7 @@ pub enum Error {
     },
     /// The exact wire bytes did not decode with the trusted built-in
     /// registry, so their routing semantics cannot be authorized.
-    #[error("traffic policy cannot authorize packet routing semantics: {source}")]
+    #[error("traffic policy cannot authorize undecodable packet routing semantics")]
     UndecodableWire {
         #[source]
         source: packetcraftr_core::decode::Error,

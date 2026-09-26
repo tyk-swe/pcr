@@ -9,13 +9,13 @@ use bytes::Bytes;
 use packetcraftr_core::{layer::Raw, packet::Packet};
 
 use super::*;
-use crate::BoundaryError;
 use crate::evidence::ExecutionPermit;
 use crate::execution::ExchangeEvidenceError;
-use crate::execution::evidence::EvidenceLimits;
+use crate::execution::limits::EvidenceLimits;
 use crate::probe::Workflow;
 use crate::test_support::{Failure, RecordingClock, TestErrors};
 use crate::test_support::{decoded_packet, evidence_frame};
+use packetcraftr_core::error::BoundaryError;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestProbe(u64);
@@ -153,7 +153,7 @@ impl ScriptedExecutor {
 }
 
 impl Executor<Batch<TestProbe>> for ScriptedExecutor {
-    fn execute(&mut self, batch: &Batch<TestProbe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<TestProbe>) -> Result<Evidence, BoundaryError> {
         self.executed.push(batch.clone());
         let script = self.scripts.pop_front().unwrap_or_default();
         let sent: Vec<_> = batch
@@ -177,7 +177,7 @@ impl Executor<Batch<TestProbe>> for ScriptedExecutor {
             )
             .collect();
         let probes = batch.probes.len() as u64;
-        Ok(Execution {
+        Ok(Evidence {
             permit: if script.foreign_permit {
                 ExecutionPermit::new()
             } else {

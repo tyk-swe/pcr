@@ -12,12 +12,13 @@ use bytes::Bytes;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::correlation::{self, Transport as ProbeTransport};
 use crate::evidence::ExecutionPermit;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
 use crate::providers::Providers;
-use crate::{BoundaryError, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::Limits;
 use super::classification::{ResponseClassification, classify_response};
@@ -36,7 +37,7 @@ pub(crate) struct Exchange {
 
 /// The evidence one [`Exchange`] produced, bound to its permit.
 #[derive(Clone, Debug)]
-pub(crate) struct Execution {
+pub(crate) struct ExchangeEvidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -46,7 +47,7 @@ pub(crate) struct Execution {
     pub(crate) stats: Stats,
 }
 
-impl crate::execution::Receipt for Execution {
+impl crate::execution::Receipt for ExchangeEvidence {
     fn permit(&self) -> ExecutionPermit {
         self.permit
     }
@@ -56,8 +57,8 @@ impl crate::execution::Receipt for Execution {
     }
 }
 
-impl crate::execution::Request for Exchange {
-    type Execution = Execution;
+impl crate::execution::Step for Exchange {
+    type Evidence = ExchangeEvidence;
 }
 
 /// One authorized DNS-over-TCP query, direct or following validated UDP
@@ -104,7 +105,7 @@ const RESULT_FAULT: ExecutorFault = ExecutorFault::new(
 );
 
 impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let max_responses = exchange.limits.max_evidence_frames;
         if max_responses == 0 {
             return Err(EXECUTOR_FAULT.invalid("DNS exchange must retain at least one response"));
@@ -177,7 +178,7 @@ impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
                 "single-query DNS exchange returned a response for an unknown request index",
             ));
         }
-        Ok(Execution {
+        Ok(ExchangeEvidence {
             permit: exchange.permit,
             sent: crate::exchange::into_sent_packet(sent.pop().expect("validated one sent packet")),
             responses,

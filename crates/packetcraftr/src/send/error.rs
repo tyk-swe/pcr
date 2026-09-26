@@ -19,7 +19,7 @@ pub enum Error {
         message: String,
     },
     /// The sink refused an event, or publishing it failed.
-    #[error("send progressive output failed: {source}")]
+    #[error("send progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -28,7 +28,7 @@ pub enum Error {
     #[error("send events are incoherent: {message}")]
     IncoherentEvents { message: String },
     /// The pacing clock failed while the send could still continue.
-    #[error("send pacing clock failed: {source}")]
+    #[error("send pacing clock failed")]
     Clock {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
@@ -68,12 +68,12 @@ impl Classified for Error {
         }
     }
 
-    /// Delegates to the wrapped preparation failure and to the sink's
-    /// [`BoundaryError`] snapshot, which keeps its own causes.
+    /// Delegates to the wrapped preparation failure, and lists the sink's
+    /// [`BoundaryError`] message with the causes it keeps.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Preparation(error) => error.causes(),
-            Self::Output { source } => source.causes(),
+            Self::Output { source } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

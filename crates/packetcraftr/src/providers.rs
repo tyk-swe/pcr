@@ -11,7 +11,7 @@ use crate::target;
 ///
 /// A workflow uses only the providers it needs, and only after its request is
 /// admitted. [`ProviderSet`] is the plain composition of six providers;
-/// [`ProviderSet::system`] selects the native ones.
+/// [`SystemProviders`] is the native provider of each.
 pub trait Providers: Send + Sync + 'static {
     type Route: net::route::Provider + 'static;
     type Interface: net::interface::Provider + 'static;
@@ -43,25 +43,6 @@ pub struct ProviderSet<R, N, C, T, P, H> {
     pub transmit: T,
     pub tcp: P,
     pub resolver: H,
-}
-
-/// The native provider of every capability for this build's platform.
-pub type SystemProviders = ProviderSet<
-    net::route::SystemProvider,
-    net::interface::SystemProvider,
-    net::capture::SystemProvider,
-    net::transmit::SystemProvider,
-    net::tcp::SystemProvider,
-    target::SystemResolver,
->;
-
-impl SystemProviders {
-    /// The system provider of every capability. A capability this build
-    /// lacks fails with a classified capability error when it is used.
-    #[must_use]
-    pub fn system() -> Self {
-        Self::default()
-    }
 }
 
 impl<R, N, C, T, P, H> Providers for ProviderSet<R, N, C, T, P, H>
@@ -102,5 +83,39 @@ where
 
     fn resolver(&self) -> &H {
         &self.resolver
+    }
+}
+
+/// The native provider of every capability for this build's platform. A
+/// capability this build lacks fails with a classified capability error when
+/// it is used.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemProviders;
+
+impl Providers for SystemProviders {
+    type Route = net::route::SystemProvider;
+    type Interface = net::interface::SystemProvider;
+    type Capture = net::capture::SystemProvider;
+    type Transmit = net::transmit::SystemProvider;
+    type Tcp = net::tcp::SystemProvider;
+    type Resolver = target::SystemResolver;
+
+    fn route(&self) -> &Self::Route {
+        &net::route::SystemProvider
+    }
+    fn interface(&self) -> &Self::Interface {
+        &net::interface::SystemProvider
+    }
+    fn capture(&self) -> &Self::Capture {
+        &net::capture::SystemProvider
+    }
+    fn transmit(&self) -> &Self::Transmit {
+        &net::transmit::SystemProvider
+    }
+    fn tcp(&self) -> &Self::Tcp {
+        &net::tcp::SystemProvider
+    }
+    fn resolver(&self) -> &Self::Resolver {
+        &target::SystemResolver
     }
 }

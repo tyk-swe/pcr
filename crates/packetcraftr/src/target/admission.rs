@@ -245,10 +245,11 @@ mod tests {
     use packetcraftr_core::error::{Classification, Kind};
 
     use super::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
+    use crate::StatsOverflow;
     use crate::execution::{Errors, ExchangeEvidenceError};
     use crate::policy::{Authorizer, Operation, SocketLimits, SocketOperation};
     use crate::target::{Authorized, Family, Selection, SelectionError, Target, wire_limits};
-    use crate::{BoundaryError, StatsOverflow};
+    use packetcraftr_core::error::BoundaryError;
 
     /// One authorizer boundary call, in order.
     #[derive(Debug, PartialEq, Eq)]

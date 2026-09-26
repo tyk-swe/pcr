@@ -19,7 +19,7 @@ use crate::output::{
     resources::{Report, Setting, Value, Worker},
 };
 use clap::{ArgMatches, CommandFactory, ValueEnum, parser::ValueSource};
-use packetcraftr::progress::Runtime;
+use packetcraftr::runtime::Runtime;
 
 use crate::cli::Cli;
 use crate::commands::Spec;

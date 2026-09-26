@@ -8,8 +8,7 @@ use packetcraftr_core::fuzz as packet_fuzz;
 use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::capture::{MAX_CAPTURE_QUEUE_BYTES, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT};
 
-use crate::execution::evidence::EvidenceLimits;
-use crate::execution::limits::CaptureEvidenceLimits;
+use crate::execution::limits::EvidenceLimits;
 use crate::{exchange, route, send};
 
 use super::MAX_RATE;
@@ -69,16 +68,12 @@ impl Request {
     ///
     /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
-        CaptureEvidenceLimits {
-            max_evidence_frames: self.max_evidence_frames,
-            max_evidence_bytes: self.max_evidence_bytes,
-            max_undecoded: None,
-        }
-        .validate(|field, value, reason| Error::InvalidLimit {
-            field,
-            value,
-            reason,
-        })?;
+        self.evidence()
+            .validate(|field, value, reason| Error::InvalidLimit {
+                field,
+                value,
+                reason,
+            })?;
         if self.timeout.is_zero() || self.timeout > MAX_TIMEOUT {
             return Err(Error::InvalidTimeout {
                 value: self.timeout,

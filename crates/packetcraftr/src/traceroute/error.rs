@@ -7,16 +7,17 @@ use packetcraftr_core::budget::{Cancelled, DeadlineExceeded, Interrupted};
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::WORKFLOW;
+use crate::StatsOverflow;
 use crate::execution::ExchangeEvidenceError;
 use crate::target::Family;
-use crate::{BoundaryError, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 /// Why a traceroute stopped.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("traceroute: {0}")]
-    Cancelled(#[source] Cancelled),
+    #[error(transparent)]
+    Cancelled(Cancelled),
     #[error("invalid traceroute limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -31,13 +32,13 @@ pub enum Error {
     InvalidTimeout { value: Duration, maximum: Duration },
     #[error("traceroute duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
-    #[error("traceroute authorization failed: {0}")]
+    #[error("traceroute authorization failed")]
     Authorization(#[source] BoundaryError),
     #[error("resolved target has no {family} address selected for this traceroute")]
     Family { family: &'static str },
     #[error("traceroute worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
-    #[error("traceroute execution failed at probe {sequence}: {source}")]
+    #[error("traceroute execution failed at probe {sequence}")]
     Execution {
         sequence: u64,
         #[source]
@@ -53,7 +54,7 @@ pub enum Error {
     InvalidEvidence { sequence: u64, message: String },
     #[error("traceroute statistic accounting overflowed at probe {sequence}")]
     StatisticsOverflow { sequence: u64 },
-    #[error("traceroute progressive output failed: {source}")]
+    #[error("traceroute progressive output failed")]
     Output {
         #[source]
         source: BoundaryError,
@@ -134,13 +135,14 @@ impl Classified for Error {
         }
     }
 
-    /// Boundary-sourced variants delegate because a [`BoundaryError`] carries
-    /// a captured `causes` snapshot its own source chain no longer holds.
+    /// Boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot, which its own source chain no longer
+    /// holds.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Authorization(source)
             | Self::Execution { source, .. }
-            | Self::Output { source } => source.causes(),
+            | Self::Output { source } => source.as_causes(),
             _ => packetcraftr_core::error::source_chain(self),
         }
     }

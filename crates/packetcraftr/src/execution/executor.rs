@@ -27,30 +27,30 @@ impl ExecutorFault {
     }
 }
 
-/// One unit of live work a workflow hands to its executor, paired with the
-/// evidence receipt that work produces.
-pub trait Request {
-    type Execution;
+/// One approved unit of live work a workflow hands to its executor, paired
+/// with the evidence that work produces.
+pub(crate) trait Step {
+    type Evidence;
 }
 
 /// The executor boundary every live workflow shares: it carries out one
-/// approved request and returns the evidence it produced. Implementations are
-/// keyed by request type, so a scan executor and a DNS executor stay distinct.
-pub trait Executor<Req: Request> {
-    fn execute(&mut self, request: &Req) -> Result<Req::Execution, BoundaryError>;
+/// approved step and returns the evidence it produced. Implementations are
+/// keyed by step type, so a scan executor and a DNS executor stay distinct.
+pub(crate) trait Executor<S: Step> {
+    fn execute(&mut self, step: &S) -> Result<S::Evidence, BoundaryError>;
 }
 
 /// Runs each approved workflow step as one capture-ready exchange on a
 /// client, preparing every packet with `send` and collecting under
 /// `collection`.
-pub struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
+pub(crate) struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
     pub(crate) client: &'a crate::Client<P, K>,
     pub(crate) send: crate::send::Options,
     pub(crate) collection: crate::exchange::Collection,
 }
 
 impl<'a, P, K> ExchangeExecutor<'a, P, K> {
-    pub fn new(
+    pub(crate) fn new(
         client: &'a crate::Client<P, K>,
         send: crate::send::Options,
         collection: crate::exchange::Collection,
@@ -90,7 +90,7 @@ where
         overrides: WorkflowOverrides,
         matches_request: &mut crate::exchange::WorkflowResponseMatcher<'_>,
         stop_after_response: Option<&mut crate::exchange::WorkflowStopPredicate<'_>>,
-    ) -> Result<crate::exchange::Aggregate, crate::BoundaryError> {
+    ) -> Result<crate::exchange::Aggregate, packetcraftr_core::error::BoundaryError> {
         let mut send = self.send.clone();
         send.destination = Some(overrides.destination);
         let mut collection = self.collection.clone();
@@ -110,6 +110,6 @@ where
                 Some(matches_request),
                 stop_after_response,
             )
-            .map_err(crate::BoundaryError::from_error)
+            .map_err(packetcraftr_core::error::BoundaryError::from_error)
     }
 }

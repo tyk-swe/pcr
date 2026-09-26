@@ -24,7 +24,7 @@ use crate::preparation::PreparedPacket;
 
 pub(super) enum OperationError {
     Io(LiveIoError),
-    Output(crate::BoundaryError),
+    Output(packetcraftr_core::error::BoundaryError),
 }
 
 impl From<LiveIoError> for OperationError {
@@ -34,7 +34,7 @@ impl From<LiveIoError> for OperationError {
 }
 
 impl OperationError {
-    pub(super) fn output(error: crate::BoundaryError) -> Self {
+    pub(super) fn output(error: packetcraftr_core::error::BoundaryError) -> Self {
         Self::Output(error)
     }
 
@@ -93,7 +93,7 @@ impl<C: Session> Transaction<C> {
     ) -> Result<Report, Error>
     where
         T: transmit::Provider + ?Sized,
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         let operation = self.run(transmit, &mut workflow_matcher, &mut stop_predicate, emit);
         if let Err(operation) = operation {
@@ -113,7 +113,7 @@ impl<C: Session> Transaction<C> {
     ) -> Result<(), OperationError>
     where
         T: transmit::Provider + ?Sized,
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         self.await_capture_readiness()?;
         if self.send_requests(transmit, workflow_matcher, stop_predicate, emit)?
@@ -144,7 +144,7 @@ impl<C: Session> Transaction<C> {
     ) -> Result<ProcessOutcome, OperationError>
     where
         T: transmit::Provider + ?Sized,
-        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         for send_index in 0..self.prepared.len() {
             if self.drain(
@@ -184,7 +184,7 @@ impl<C: Session> Transaction<C> {
     ) -> Result<(), OperationError>
     where
         T: transmit::Provider + ?Sized,
-        F: FnMut(Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         // `send_index` is produced by `0..self.prepared.len()` in `send_requests`, the only caller
         let sent = Arc::new(self.prepared[send_index].clone().transmit(transmit, || {
@@ -238,7 +238,7 @@ impl<C: Session> Transaction<C> {
 
     pub(super) fn finalize_exchange<F>(mut self, emit: &mut F) -> Result<Report, Error>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         let capture_statistics = self.capture.inner.stats();
         capture_statistics.validate()?;

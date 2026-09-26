@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use super::Error;
 use crate::probe::test_support::{ProgressiveExecutor, private_policy};
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use crate::test_support::decoded_packet;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Classified, Kind};
@@ -28,18 +28,19 @@ use super::{
 };
 use crate::Sink;
 use crate::clock::Clock;
+use crate::execution::Admission;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
-use crate::policy::PolicyAuthorizer;
 use crate::probe::Batch;
-use crate::probe::{Execution, ProbeEndpoint, ProbeStatus, Transport};
+use crate::probe::{Evidence, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{AddressListAuthorizer, NoopClock, RejectingExecutor, ScriptedResolver};
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 /// Runs the engine as the client does under the request's duration limit,
@@ -158,7 +159,7 @@ struct NoResponseExecutor {
 }
 
 impl Executor<Batch<Probe>> for NoResponseExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut sent = Vec::new();
         let mut bytes = 0_u64;
         for probe in &batch.probes {
@@ -174,7 +175,7 @@ impl Executor<Batch<Probe>> for NoResponseExecutor {
             sent[index] = sent[0].clone();
         }
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -195,7 +196,7 @@ impl Executor<Batch<Probe>> for NoResponseExecutor {
 struct MixedHopExecutor;
 
 impl Executor<Batch<Probe>> for MixedHopExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -230,7 +231,7 @@ impl Executor<Batch<Probe>> for MixedHopExecutor {
             )
         };
         let count = u64::try_from(batch.probes.len()).expect("test batch fits u64");
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -377,7 +378,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
         calls: Arc::clone(&calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -395,7 +396,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     policy.allow_hostname_resolution = true;
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &request,
         &mut authorizer,

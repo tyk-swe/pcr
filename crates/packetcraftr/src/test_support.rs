@@ -22,10 +22,11 @@ use packetcraftr_netio::link::Capability;
 use packetcraftr_netio::transmit::Report as TransmissionReport;
 use packetcraftr_netio::{Error as LiveIoError, capture, interface, route, tcp, transmit};
 
+use crate::StatsOverflow;
 use crate::clock::Clock;
 use crate::evidence::SentPacket;
 use crate::execution::ExchangeEvidenceError;
-use crate::execution::{Executor, Request};
+use crate::execution::{Executor, Step};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
 use crate::target::Authorized;
@@ -34,7 +35,7 @@ use crate::target::Hostname;
 use crate::target::ResolveTarget;
 use crate::target::Resolver;
 use crate::target::Target;
-use crate::{BoundaryError, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 /// One provider call a [`FakeProviders`] recorded, in call order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -342,8 +343,8 @@ pub(crate) struct RejectingExecutor {
     pub(crate) calls: Arc<AtomicUsize>,
 }
 
-impl<Req: Request> Executor<Req> for RejectingExecutor {
-    fn execute(&mut self, _request: &Req) -> Result<Req::Execution, BoundaryError> {
+impl<S: Step> Executor<S> for RejectingExecutor {
+    fn execute(&mut self, _step: &S) -> Result<S::Evidence, BoundaryError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(BoundaryError::new(
             "stop after authorization",

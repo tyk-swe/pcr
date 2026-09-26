@@ -5,7 +5,8 @@ use packetcraftr_netio::capture::{self, MAX_TIMEOUT};
 
 use crate::clock::Clock;
 use crate::providers::Providers;
-use crate::{BoundaryError, Client, Sink, Stats};
+use crate::{Client, Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::{Error, Event, Report, Request, SentFrame};
 

@@ -10,11 +10,11 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::evidence::ExecutionPermit;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, Receipt};
 use crate::providers::Providers;
+use packetcraftr_core::error::BoundaryError;
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "internal.fuzz_executor",
@@ -23,19 +23,19 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 
 /// One built case, bound to the permit and clipped timeout it may run under.
 #[derive(Clone, Debug)]
-pub(crate) struct ExecutionCase {
+pub(crate) struct CaseStep {
     pub(crate) permit: ExecutionPermit,
     pub(crate) packet: Packet,
     pub(crate) timeout: Duration,
 }
 
-impl crate::execution::Request for ExecutionCase {
-    type Execution = Execution;
+impl crate::execution::Step for CaseStep {
+    type Evidence = CaseEvidence;
 }
 
 /// What the executor reports for one case, before the engine validates it.
 #[derive(Clone, Debug)]
-pub(crate) struct Execution {
+pub(crate) struct CaseEvidence {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: crate::SentPacket,
     pub(crate) responses: Vec<crate::exchange::Response>,
@@ -45,7 +45,7 @@ pub(crate) struct Execution {
     pub(crate) stats: crate::Stats,
 }
 
-impl Receipt for Execution {
+impl Receipt for CaseEvidence {
     fn permit(&self) -> ExecutionPermit {
         self.permit
     }
@@ -54,8 +54,8 @@ impl Receipt for Execution {
     }
 }
 
-impl<P: Providers, K: Clock> Executor<ExecutionCase> for ExchangeExecutor<'_, P, K> {
-    fn execute(&mut self, case: &ExecutionCase) -> Result<Execution, BoundaryError> {
+impl<P: Providers, K: Clock> Executor<CaseStep> for ExchangeExecutor<'_, P, K> {
+    fn execute(&mut self, case: &CaseStep) -> Result<CaseEvidence, BoundaryError> {
         let exchange = self
             .client
             .exchange_hooked(
@@ -88,7 +88,7 @@ impl<P: Providers, K: Clock> Executor<ExecutionCase> for ExchangeExecutor<'_, P,
                 )));
             }
         };
-        Ok(Execution {
+        Ok(CaseEvidence {
             permit: case.permit,
             sent,
             responses,

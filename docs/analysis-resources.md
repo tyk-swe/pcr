@@ -166,7 +166,7 @@ allowance; it never retries an already failed output stream. One record remains
 in flight at a time. This option does not make synchronous serialization or an
 arbitrary writer preemptible.
 
-Embedders can clone a `progress::Runtime` and give it to multiple clients with
+Embedders can clone a `runtime::Runtime` and give it to multiple clients with
 `Client::with_runtime`; `Client::runtime` exposes that owner's snapshot. `Client::new` still creates an isolated runtime. Timed-out callbacks
 and their captured-resource destructors keep their permits until cleanup ends.
 `packetcraftr_netio::resources::native_snapshot()` reports the process-wide

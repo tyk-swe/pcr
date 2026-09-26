@@ -1323,7 +1323,7 @@ The same applies to `scan::connect::run_with_events` (`scan::connect::Probe`),
 `dns::run_batch_with_events`, `fuzz::run_with_events` (`fuzz::Case`), and
 `fuzz::run_offline_with_events` (`packetcraftr_core::fuzz::Case`).
 
-`progress::Sink<T>` is renamed `progress::Worker<T, A = ()>`: the worker thread
+`progress::Sink<T>` is renamed `runtime::Worker<T, A = ()>`: the worker thread
 a runtime admits. Its callback returns `Result<A, BoundaryError>`, and
 `emit` returns that `A`. Name the answer type when the callback never returns
 `Ok` (for example `Worker::<()>::new_in(&runtime, |_| Err(error))`).
@@ -1343,8 +1343,7 @@ workflows run as client methods that take a request and a sink.
 
 **Composition.** `Client<P, K = SystemClock>` holds a `Providers` bundle.
 `ProviderSet { route, interface, capture, transmit, tcp, resolver }` composes
-six providers, and `ProviderSet::system()` (the `SystemProviders` alias)
-selects the native ones. `packetcraftr_netio::PacketIo` is removed: transmit
+six providers, and `SystemProviders` selects the native ones. `packetcraftr_netio::PacketIo` is removed: transmit
 and capture are separate fields.
 
 | Before | After |
@@ -1353,7 +1352,7 @@ and capture are separate fields.
 | `Client<R, I>` | `Client<P>` or `Client<P, K>` with `P: Providers`, `K: Clock` |
 | `client.with_progress_runtime(runtime)`, `client.progress_runtime()` | `client.with_runtime(runtime)`, `client.runtime()` |
 | a clock passed per call (`send_set_driven(.., clock, ..)`) | `client.with_clock(clock)` |
-| `probe::ExchangeExecutor::new(&client, exchange_options)` | `probe::ExchangeExecutor::new(&client, send_options, collection)` |
+| `probe::ExchangeExecutor::new(&client, exchange_options)` | internal; run the workflow on the client |
 | `ExchangeExecutor::with_dns_tcp(provider)` | the client's `tcp` provider (see [DNS on the client](#dns-on-the-client)) |
 
 A provider the workflow does not use is never called, so a composition may
@@ -1431,8 +1430,8 @@ fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>
 fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>
 ```
 
-`Clock::cancellation` and `CancellableClock` remain for the free workflow
-entry points.
+`Clock::cancellation` and `CancellableClock` are removed: cancel through
+`Client::with_cancellation`, which every workflow's deadline carries.
 
 **Interface selectors.** `route::Options.interface` is an
 `Option<route::Interface>`: `Interface::Id(id)` for an identity a provider
@@ -1443,25 +1442,14 @@ operation never enumerates interfaces. An unmatched selector fails with
 `route::Error::InterfaceDiscovery`. The free `route::plan` takes only
 `Interface::Id` and reports `route::Error::UnresolvedInterface` otherwise.
 
-**Target resolution.** `Authorizer::resolve_and_authorize` moves to its own
-trait, `target::ResolveTarget`. An authorizer that resolved targets implements
-both; one that relied on the failing default drops it. DNS, scan, connect
-scan, and traceroute entry points require `A: Authorizer + ResolveTarget`.
-
-```rust
-// Before
-impl Authorizer for Gate {
-    fn authorize_operation(&mut self, op: Operation<'_>) -> Result<(), BoundaryError> { /* ... */ }
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
-}
-// After
-impl Authorizer for Gate {
-    fn authorize_operation(&mut self, op: Operation<'_>) -> Result<(), BoundaryError> { /* ... */ }
-}
-impl ResolveTarget for Gate {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> { /* ... */ }
-}
-```
+**Admission.** The client admits every workflow through its policy and
+resolves declared targets through its `resolver` provider, so
+`policy::Authorizer`, `policy::PolicyAuthorizer`, and the target-resolution
+seam are no longer public. An authorizer that gated a free workflow entry
+point becomes the client's `Policy`, and a custom resolver becomes the
+`resolver` field of the client's `ProviderSet`. To apply a policy without a
+client, call `Policy::authorize(operation)` or
+`Policy::resolve_target(target, &resolver)` directly.
 
 ## Scan and traceroute on the client
 
@@ -1513,10 +1501,9 @@ bounds are not.
 
 **Pipelining.** `max_in_flight` alone selects how a scan runs: one runs each
 probe as its own exchange, and up to `scan::MAX_IN_FLIGHT` overlap their
-response windows over one capture group. `probe::Executor` no longer has
-`pipeline_capacity` or `execute_pipeline`, and `probe::{PipelineOptions,
-PipelineEvent}` are gone. An `Executor` implementation that only forwarded
-them deletes those methods.
+response windows over one capture group. `probe::{PipelineOptions,
+PipelineEvent}` and the executor seam are gone; see
+[Public workflow surface](#public-workflow-surface).
 
 **Errors.** `scan::Error` and `traceroute::Error` add `IncoherentEvents`
 (`internal.scan_event_coherence`, `internal.traceroute_event_coherence`) for a
@@ -1597,6 +1584,7 @@ resolver.
 |---|---|
 | `connect::run(&request, &mut authorizer, Arc::new(tcp), &mut clock)` | `let collector = connect::Collector::default(); let report = client.scan_connect(request, collector.clone())?; collector.finish(report)?` |
 | `connect::run_with_events(.., &runtime, sink)` with `Sink<connect::Probe>` | `client.scan_connect(request, sink)` with `Sink<connect::Event>` |
+| `connect::Probe` | `connect::ProbeEvidence`, carried by `connect::Event::Probe` |
 | `connect::Summary` | `connect::Report` |
 | `connect::Report { summary, endpoints }` | `connect::Aggregate { report, endpoints }` |
 
@@ -1675,7 +1663,7 @@ let aggregate = collector.finish(report);
 |---|---|
 | `fuzz::run(input, &mut authorizer, &mut executor, &mut clock)` | `client.fuzz(request, collector.clone())`, then `collector.finish(report)` |
 | `fuzz::run_with_events(input, .., &runtime, sink)` | `client.fuzz(request, sink)` (the client's runtime) |
-| `fuzz::run_offline_with_events(&campaign, packet, registry, &runtime, sink)` | `packetcraftr_core::fuzz::run_observed(&campaign, packet, registry, emit)`, publishing through a `progress::Worker` if needed |
+| `fuzz::run_offline_with_events(&campaign, packet, registry, &runtime, sink)` | `packetcraftr_core::fuzz::run_observed(&campaign, packet, registry, emit)`, publishing through a `runtime::Worker` if needed |
 | `fuzz::RunInput { request, live, packet, registry }` | `fuzz::Request { campaign, packet, .. }`; the registry is the client's |
 | `LiveOptions { timeout, cases_per_second, destination }` | the same `fuzz::Request` fields |
 | `LiveOptions.allow_malformed_live` | `fuzz::Request.allow_permissive_live` |
@@ -1691,7 +1679,7 @@ let aggregate = collector.finish(report);
 | `fuzz::Stats.{packets_attempted, packets_completed, bytes, elapsed, capture}` | `report.stats` (`packetcraftr::Stats`) |
 | `packetcraftr::fuzz::{Totals, IncoherentReport}` | `packetcraftr_core::fuzz::{Totals, IncoherentReport}` |
 | `Totals::try_from(&live_report)` | `Totals::try_from(&aggregate)` |
-| `fuzz::{Execution, ExecutionCase}`, `impl probe::Executor<ExecutionCase>` | internal; fake the client's providers instead |
+| `fuzz::{Execution, ExecutionCase}`, `impl probe::Executor<ExecutionCase>` | removed; fake the client's providers instead |
 
 The events are `fuzz::Event::Case(Trial)`, one per case in case order, each
 answered before the next case is sent. A rejected case has no evidence; a
@@ -1700,3 +1688,43 @@ sent on its route. `campaign` holds core's preparation statistics (cases
 generated and built, built bytes, preparation time); `stats` holds the live
 traffic, including pacing delays. Codes and the published output are
 unchanged; the CLI derives the four published outcomes from the two sources.
+
+## Public workflow surface
+
+Every workflow is a `Client` method, so the seams the client owns are no
+longer public. Tests and embedders inject fake providers into the client
+(`ProviderSet { route, interface, capture, transmit, tcp, resolver }`) instead
+of fake executors or authorizers.
+
+| Before | After |
+|---|---|
+| `probe::{Executor, Request, ExchangeExecutor, Batch, Execution}` | removed; the client runs each step |
+| `policy::{Authorizer, PolicyAuthorizer}`, `policy::unsupported_operation`, `target::ResolveTarget` | removed; the client admits every workflow (`Policy::authorize` and `Policy::resolve_target` stay public) |
+| `clock::CancellableClock`, `Clock::cancellation` | removed; `Client::with_cancellation` |
+| `packetcraftr::progress::{Runtime, RuntimeSnapshot, Worker, EmitError, MAX_WORKER_CAPACITY}` | `packetcraftr::runtime::…` |
+| `SystemProviders` (an alias of `ProviderSet<…>`), `ProviderSet::system()` | `SystemProviders`, a unit struct implementing `Providers` |
+| `capture::Selector` | removed; pass the closure to `capture::Request::with_selector` |
+| `dns::AttemptTransport`, `AttemptEvidence.exchange` | `dns::TransportEvidence`, `AttemptEvidence.transport_evidence` |
+| `scan::connect::Probe` | `scan::connect::ProbeEvidence` |
+| `fuzz::Error::from(boundary_error)` | `fuzz::Error::Authorization(boundary_error)` |
+
+`replay::Selector` stays public: a replay request carries it.
+
+**Error messages.** A workflow failure no longer repeats the text of the error
+it carries. The message names what failed and the carried error is the first
+entry of `causes()`; for a `BoundaryError` source the boundary's message comes
+first, then its captured causes (`BoundaryError::as_causes`). Code that
+searched a workflow error's `to_string()` for the source's text searches
+`causes()` instead:
+
+```rust
+// Before
+assert!(error.to_string().contains("public destination"));
+// After
+assert_eq!(error.to_string(), "scan authorization failed");
+assert!(error.causes()[0].contains("public destination"));
+```
+
+Scan and traceroute cancellation and target-selection failures report the
+carried error's own message, without a `scan:` or `traceroute:` prefix. Codes,
+exit codes, and coordinates are unchanged.

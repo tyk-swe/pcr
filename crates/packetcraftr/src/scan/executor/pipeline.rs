@@ -13,7 +13,7 @@ use crate::{
         evidence::{CandidateKey, candidate_precedes},
     },
     preparation::RebuildError,
-    probe::Execution,
+    probe::Evidence,
 };
 use packetcraftr_core::{
     budget::Deadline,
@@ -46,8 +46,8 @@ pub struct PendingEvidence {
 /// caller as the source of
 /// [`scan::Error::PipelineExecution`](crate::scan::Error::PipelineExecution).
 #[derive(Debug, thiserror::Error)]
-#[error("packet scan pipeline failed: {source}")]
-pub struct Failure {
+#[error("packet scan pipeline failed")]
+pub struct PipelineFailure {
     #[source]
     pub source: BoundaryError,
     pub stats: Stats,
@@ -57,12 +57,12 @@ pub struct Failure {
     /// Capture shutdown failure that followed the primary failure.
     pub cleanup: Option<Box<LiveIoError>>,
 }
-impl Classified for Failure {
+impl Classified for PipelineFailure {
     fn classification(&self) -> ErrorClassification {
         self.source.classification()
     }
     fn causes(&self) -> Vec<String> {
-        let mut causes = self.source.causes();
+        let mut causes = self.source.as_causes();
         if let Some(cleanup) = &self.cleanup {
             causes.push(cleanup.to_string());
             causes.extend(cleanup.causes());
@@ -606,7 +606,7 @@ pub(super) fn run<P: Providers, K: Clock>(
     });
     match result {
         Ok(()) => Ok(stats),
-        Err(source) => Err(BoundaryError::from_error(Failure {
+        Err(source) => Err(BoundaryError::from_error(PipelineFailure {
             source,
             stats,
             pending: pending_evidence(&pending, &planned),
@@ -655,7 +655,7 @@ fn complete(
         elapsed: entry.sent.timing().freshness_marker().monotonic().elapsed(),
         capture: Default::default(),
     };
-    let execution = Execution {
+    let execution = Evidence {
         permit: planned[index].permit,
         sent: vec![entry.sent.as_ref().clone()],
         responses: entry

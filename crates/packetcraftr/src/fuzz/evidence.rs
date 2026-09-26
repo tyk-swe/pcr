@@ -14,10 +14,10 @@ use crate::execution::evidence::{EvidenceDiagnosticDescriptor, EvidenceState};
 use crate::execution::validation::validate_response_frames_and_deadlines;
 
 use super::error::{CaseErrors, Error, duration_limit};
-use super::executor::Execution;
+use super::executor::CaseEvidence;
 use super::{Evidence, Outcome};
 use crate::execution::Errors as _;
-use crate::execution::evidence::EvidenceLimits;
+use crate::execution::limits::EvidenceLimits;
 
 /// Fuzz keeps undecodable frames as case evidence under the frame budget
 /// alone, so its undecoded-limit code is never raised.
@@ -53,7 +53,7 @@ impl Recorder {
     pub(super) fn record(
         &mut self,
         case: &mut packet_fuzz::Case,
-        execution: Execution,
+        execution: CaseEvidence,
         deadline: &Deadline,
     ) -> Result<Evidence, Error> {
         let had_response = !execution.responses.is_empty();
@@ -120,7 +120,7 @@ impl Recorder {
 
 pub(super) fn validate_execution(
     case: &packet_fuzz::Case,
-    execution: &Execution,
+    execution: &CaseEvidence,
     timeout: Duration,
     max_packet_bytes: usize,
     deadline: &Deadline,

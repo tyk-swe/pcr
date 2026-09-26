@@ -120,8 +120,8 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
     };
     assert_eq!(
         selection.causes(),
-        ["frame 3 failed the filter"],
-        "selection reports the boundary's captured causes"
+        ["selector refused frame 3", "frame 3 failed the filter"],
+        "selection reports the boundary's message and captured causes"
     );
 }
 
@@ -323,4 +323,73 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
         "policy.invalid_packet_semantics"
     );
     assert_eq!(error.classification().kind, Kind::Policy);
+}
+
+/// A workflow failure that carries a boundary failure (an authorization
+/// refusal, a failed step, a refusing sink) names what failed and leaves the
+/// boundary's own text to the causes, so each sentence is published once.
+#[test]
+fn boundary_sourced_workflow_failures_state_their_source_once() {
+    let source = || {
+        BoundaryError::new(
+            "fixture boundary refused",
+            Classification::new("io.fixture", Kind::Io, None),
+            vec!["fixture root cause".to_owned()],
+        )
+    };
+    let failures: Vec<(&str, Box<dyn Classified>)> = vec![
+        (
+            "scan authorization",
+            Box::new(packetcraftr::scan::Error::Authorization(source())),
+        ),
+        (
+            "scan execution",
+            Box::new(packetcraftr::scan::Error::Execution {
+                sequence: 1,
+                source: source(),
+            }),
+        ),
+        (
+            "traceroute output",
+            Box::new(packetcraftr::traceroute::Error::Output { source: source() }),
+        ),
+        (
+            "dns authorization",
+            Box::new(packetcraftr::dns::Error::Authorization(source())),
+        ),
+        (
+            "dns execution",
+            Box::new(packetcraftr::dns::Error::Execution {
+                attempt: 1,
+                source: source(),
+            }),
+        ),
+        (
+            "fuzz authorization",
+            Box::new(packetcraftr::fuzz::Error::Authorization(source())),
+        ),
+        (
+            "send output",
+            Box::new(send::Error::Output { source: source() }),
+        ),
+        (
+            "replay authorization",
+            Box::new(ReplayError::Authorization {
+                source_index: 0,
+                source: source(),
+            }),
+        ),
+    ];
+    for (variant, error) in failures {
+        assert!(
+            !error.to_string().contains("fixture boundary refused"),
+            "{variant}: {error}"
+        );
+        assert_eq!(
+            error.causes(),
+            ["fixture boundary refused", "fixture root cause"],
+            "{variant}"
+        );
+        assert_eq!(error.classification().code, "io.fixture", "{variant}");
+    }
 }

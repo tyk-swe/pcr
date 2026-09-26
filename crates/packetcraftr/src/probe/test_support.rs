@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use packetcraftr_core::error::{Classification, Kind};
 
-use crate::BoundaryError;
-use crate::execution::{Executor, Request};
+use crate::execution::{Executor, Step};
+use packetcraftr_core::error::BoundaryError;
 
 pub(crate) fn private_policy() -> crate::policy::Policy {
     crate::policy::Policy {
@@ -32,10 +32,10 @@ pub(crate) struct ProgressiveExecutor<I> {
 
 impl<R, I> Executor<R> for ProgressiveExecutor<I>
 where
-    R: Request,
+    R: Step,
     I: Executor<R>,
 {
-    fn execute(&mut self, request: &R) -> Result<R::Execution, BoundaryError> {
+    fn execute(&mut self, request: &R) -> Result<R::Evidence, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(

@@ -314,7 +314,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
 
 /// The two lookup variants retain the provider failure they wrap instead of
 /// flattening it into a string, so the chain survives to the render boundary
-/// while the published message stays exactly what it was.
+/// and the message and the cause each say it once.
 #[test]
 fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     let error = RouteError::RouteLookup {
@@ -323,10 +323,7 @@ fn route_lookup_failures_retain_the_provider_error_as_a_source() {
         failure: Classification::new("fixture.route_provider", Kind::Policy, Some("replace it")),
     };
 
-    assert_eq!(
-        error.to_string(),
-        "route lookup for 192.0.2.9 failed: provider refused"
-    );
+    assert_eq!(error.to_string(), "route lookup for 192.0.2.9 failed");
     assert_eq!(error.causes(), ["provider refused"]);
     assert!(std::error::Error::source(&error).is_some());
 

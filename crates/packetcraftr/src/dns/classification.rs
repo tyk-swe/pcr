@@ -263,7 +263,7 @@ pub(super) fn candidate_evidence(
             latency: Some(candidate.latency),
             response_code,
             reason,
-            exchange: crate::dns::AttemptTransport::Udp {
+            transport_evidence: crate::dns::TransportEvidence::Udp {
                 source_port: probe.source_port,
                 sent_at,
                 response: response_frame,
@@ -284,7 +284,7 @@ pub(super) fn timeout_evidence(probe: &Probe, sent_at: SystemTime) -> Classified
             response_code: None,
             reason: "no checksum-valid, tuple-correlated DNS response before the deadline"
                 .to_owned(),
-            exchange: crate::dns::AttemptTransport::Udp {
+            transport_evidence: crate::dns::TransportEvidence::Udp {
                 source_port: probe.source_port,
                 sent_at,
                 response: None,
@@ -312,7 +312,7 @@ pub(super) fn tcp_failure_evidence(
             latency: None,
             response_code: None,
             reason,
-            exchange: crate::dns::AttemptTransport::Tcp {
+            transport_evidence: crate::dns::TransportEvidence::Tcp {
                 source_port: None,
                 sent_at: None,
             },
@@ -377,7 +377,7 @@ pub(super) fn classify_tcp_response(
             latency: Some(response.latency),
             response_code,
             reason,
-            exchange: crate::dns::AttemptTransport::Tcp {
+            transport_evidence: crate::dns::TransportEvidence::Tcp {
                 source_port: Some(response.local_address.port()),
                 sent_at: Some(response.sent_at),
             },

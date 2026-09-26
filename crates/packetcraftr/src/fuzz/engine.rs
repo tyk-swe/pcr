@@ -16,7 +16,7 @@ use crate::{Client, Sink};
 use super::SYNTHESIZED_ETHERNET_BYTES;
 use super::error::{CaseErrors, Error, duration_limit};
 use super::evidence::{Recorder, validate_execution};
-use super::executor::{Execution, ExecutionCase};
+use super::executor::{CaseEvidence, CaseStep};
 use super::plan::worst_case_duration;
 use super::{Event, Report, Request, Trial};
 
@@ -74,7 +74,7 @@ pub(super) fn run<A, E, C, F>(
 ) -> Result<Report, Error>
 where
     A: Authorizer,
-    E: Executor<ExecutionCase>,
+    E: Executor<CaseStep>,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -111,7 +111,7 @@ where
                 request.timeout,
                 &mut *executor,
                 |executor, grant| {
-                    executor.execute(&ExecutionCase {
+                    executor.execute(&CaseStep {
                         permit: grant.permit,
                         packet: case.recipe.clone(),
                         timeout: grant.timeout,
@@ -229,13 +229,14 @@ where
     } else {
         PermissiveLive::NotRequired
     };
-    authorizer.authorize_operation(Operation::Declared(DeclaredPackets::new(
-        WireLimits::new(prepared.stats.cases_built, prepared.maximum_wire_bytes),
-        &packets,
-        request.destination,
-        permissive_live,
-    )))?;
-    Ok(())
+    authorizer
+        .authorize_operation(Operation::Declared(DeclaredPackets::new(
+            WireLimits::new(prepared.stats.cases_built, prepared.maximum_wire_bytes),
+            &packets,
+            request.destination,
+            permissive_live,
+        )))
+        .map_err(Error::Authorization)
 }
 
 /// Judges one case's evidence before any of it is recorded: the executor must
@@ -246,7 +247,7 @@ fn validate_case(
     request: &Request,
     builder: &Builder,
     case: &packet_fuzz::Case,
-    execution: &Execution,
+    execution: &CaseEvidence,
     grant: Grant,
     deadline: &Deadline,
 ) -> Result<(), Error> {

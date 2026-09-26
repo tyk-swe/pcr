@@ -23,7 +23,8 @@ use crate::policy::{DnsOperation, Operation, WireLimits};
 use crate::providers::Providers;
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
-use crate::{BoundaryError, Client, Sink, Stats, StatsOverflow};
+use crate::{Client, Sink, Stats, StatsOverflow};
+use packetcraftr_core::error::BoundaryError;
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{
@@ -31,7 +32,7 @@ use super::classification::{
 };
 use super::error::{Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
-use super::executor::{Exchange, Execution, TcpQuerier};
+use super::executor::{Exchange, ExchangeEvidence, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
 use super::probe::{Probe, rotated_source_port};
 use super::{
@@ -52,7 +53,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// configured fallback reauthorize the selected numeric address, use only
     /// the time left in that attempt, and query over the client's TCP
     /// provider. `sink` runs on a one-event worker admitted by the client's
-    /// [`Runtime`](crate::progress::Runtime); `limits.max_duration` bounds
+    /// [`Runtime`](crate::runtime::Runtime); `limits.max_duration` bounds
     /// waiting for it and live I/O, not the sink itself. A sink failure
     /// prevents later retries, and a sink may finish after this method
     /// returns while it holds one of the runtime's worker permits.
@@ -268,8 +269,8 @@ struct Retries<'a, A, E, C, F> {
     emit: &'a mut F,
 }
 
-struct ProbeExecution {
-    execution: Execution,
+struct ProbeAttempt {
+    execution: ExchangeEvidence,
     timeout: Duration,
     attempt_deadline: Deadline,
 }
@@ -307,7 +308,7 @@ where
             let mut attempt_deadline = self.execution.deadline().for_wait(self.request.timeout)?;
             return self.query_over_tcp(&probe, &mut attempt_deadline);
         }
-        let ProbeExecution {
+        let ProbeAttempt {
             mut execution,
             timeout,
             mut attempt_deadline,
@@ -438,7 +439,7 @@ where
         })
     }
 
-    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeExecution, Error> {
+    fn execute_probe(&mut self, probe: &Probe) -> Result<ProbeAttempt, Error> {
         let limits = self.request.limits;
         // The attempt window starts before the exchange and is shared with a
         // TCP fallback, which may use only what the exchange left of it.
@@ -460,7 +461,7 @@ where
             },
         )?;
         let _ = attempt_deadline.account(execution.stats.elapsed);
-        Ok(ProbeExecution {
+        Ok(ProbeAttempt {
             execution,
             timeout: grant.timeout,
             attempt_deadline,
@@ -611,7 +612,7 @@ where
 fn select_response<'a>(
     registry: &Registry,
     probe: &Probe,
-    execution: &'a mut Execution,
+    execution: &'a mut ExchangeEvidence,
     limits: Limits,
     timeout: Duration,
     check: impl FnMut() -> Result<(), Error>,

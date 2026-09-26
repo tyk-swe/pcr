@@ -27,11 +27,11 @@ use super::executor::{Executor, map_route_error};
 use super::plan::link_mode;
 use super::report::Report;
 use super::request::{AllFrames, Limits, Options, Request, Selector, Source, Timing};
-use crate::BoundaryError;
 use crate::clock::Clock;
 use crate::policy::{Authorizer, Operation};
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
 use crate::test_support::RecordingClock;
+use packetcraftr_core::error::BoundaryError;
 
 #[derive(Default)]
 struct RecordingAuthorizer {
@@ -1245,7 +1245,7 @@ mod client {
             std::error::Error::source(&error).map(ToString::to_string),
             Some("fixture sink closed".to_owned())
         );
-        assert_eq!(error.causes(), ["fixture cause"]);
+        assert_eq!(error.causes(), ["fixture sink closed", "fixture cause"]);
         assert_eq!(fake.calls().len(), 2, "one frame was sent before the sink");
     }
 

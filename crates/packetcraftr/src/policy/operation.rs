@@ -14,7 +14,6 @@ use packetcraftr_core::packet::Packet;
 use packetcraftr_netio::link::Mode as LinkMode;
 
 use super::{Error, Policy, authorize_permissive_live};
-use crate::target::{Authorized, ResolveTarget, Resolver, Target};
 
 /// The packet-count and conservative wire-byte ceilings a live operation
 /// declares. Policy authorizes them before any side effect; the operation then
@@ -317,9 +316,8 @@ pub enum Operation<'a> {
     /// Ordinary socket operations; the endpoint list is authorized before connection.
     Socket(SocketOperation<'a>),
     /// Only the wire limits of a packet workflow whose destinations are
-    /// authorized separately: scan and traceroute targets through
-    /// [`ResolveTarget::resolve_and_authorize`], and send packets as they are
-    /// prepared.
+    /// authorized separately: scan and traceroute targets as the client
+    /// resolves them, and send packets as they are prepared.
     Wire(WireLimits),
     /// DNS raw-UDP and socket limits, using [`SocketLimits::none`] without TCP
     /// continuation. Unlike [`Operation::Wire`], destination authorization
@@ -357,87 +355,22 @@ impl Operation<'_> {
 /// Classified internal error for an operation shape the authorizer cannot
 /// approve.
 #[must_use]
-pub fn unsupported_operation(authorizer: &'static str, request: &Operation<'_>) -> BoundaryError {
+pub(crate) fn unsupported_operation(
+    authorizer: &'static str,
+    request: &Operation<'_>,
+) -> BoundaryError {
     BoundaryError::from_error(Error::UnsupportedOperation {
         authorizer,
         operation: request.shape(),
     })
 }
 
-/// Injectable operation authorization for live workflows. Target resolution
-/// is the separate [`ResolveTarget`] seam, which only workflows that take a
-/// declared target require.
-pub trait Authorizer {
+/// Operation authorization inside a workflow engine. Target resolution is the
+/// separate [`ResolveTarget`](crate::target::ResolveTarget) seam, which only
+/// workflows that take a declared target require.
+pub(crate) trait Authorizer {
     /// Approves the complete operation before it can produce live side effects.
     fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError>;
-}
-
-/// Missing resolver is a caller wiring fault, not a policy or I/O failure.
-fn no_resolver() -> BoundaryError {
-    BoundaryError::new(
-        "this authorizer does not resolve declared targets",
-        packetcraftr_core::error::Classification::new(
-            "internal.target_resolution",
-            packetcraftr_core::error::Kind::Internal,
-            Some("resolve targets through an authorizer built with a resolver"),
-        ),
-        Vec::new(),
-    )
-}
-
-/// Applies client policy and an optional resolver to workflow operations.
-/// [`ResolveTarget::resolve_and_authorize`] reports a wiring fault if no resolver
-/// exists.
-pub struct PolicyAuthorizer<'a> {
-    policy: &'a crate::policy::Policy,
-    resolver: Option<&'a dyn Resolver>,
-}
-
-impl<'a> PolicyAuthorizer<'a> {
-    /// Authorizer for a workflow that resolves declared targets.
-    pub fn new(policy: &'a crate::policy::Policy, resolver: &'a dyn Resolver) -> Self {
-        Self {
-            policy,
-            resolver: Some(resolver),
-        }
-    }
-
-    /// Authorizer for a workflow that authorizes packets rather than names, so
-    /// resolution fails closed.
-    #[must_use]
-    pub const fn for_packets(policy: &'a crate::policy::Policy) -> Self {
-        Self {
-            policy,
-            resolver: None,
-        }
-    }
-}
-
-impl Authorizer for PolicyAuthorizer<'_> {
-    fn authorize_operation(&mut self, request: Operation<'_>) -> Result<(), BoundaryError> {
-        self.policy
-            .authorize(request)
-            .map_err(BoundaryError::from_error)
-    }
-}
-
-impl ResolveTarget for PolicyAuthorizer<'_> {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
-        match (self.resolver, target) {
-            (Some(resolver), _) => self
-                .policy
-                .resolve_target(target, resolver)
-                .map_err(BoundaryError::from_error),
-            // A numeric target names its own address; the policy still gates
-            // that destination. A declared hostname without a resolver is a
-            // wiring fault in the caller, not a policy denial.
-            (None, Target::Address(address)) => self
-                .policy
-                .authorize_numeric_target(target, *address)
-                .map_err(BoundaryError::from_error),
-            (None, Target::Hostname(_)) => Err(no_resolver()),
-        }
-    }
 }
 
 impl Policy {
@@ -487,20 +420,6 @@ mod tests {
 
     use super::*;
 
-    fn hostname_target() -> Target {
-        "documentation.invalid".parse().expect("hostname target")
-    }
-
-    #[test]
-    fn an_authorizer_without_a_resolver_refuses_to_resolve_a_declared_target() {
-        let policy = crate::policy::Policy::default();
-        let error = PolicyAuthorizer::for_packets(&policy)
-            .resolve_and_authorize(&hostname_target())
-            .expect_err("an authorizer built for packets cannot resolve names");
-
-        assert_eq!(error.classification().code, "internal.target_resolution");
-    }
-
     fn documentation_packet() -> Packet {
         let mut packet = Packet::new();
         packet
@@ -514,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_authorizer_applies_the_aggregate_dns_socket_limits() {
+    fn policy_applies_the_aggregate_dns_socket_limits() {
         let policy = crate::policy::Policy {
             max_packets_per_operation: 2,
             ..crate::policy::Policy::default()
@@ -522,20 +441,20 @@ mod tests {
         let dns = Operation::Dns(
             DnsOperation::new(WireLimits::new(1, 40), SocketLimits::new(1, 1, 22)).unwrap(),
         );
-        let error = PolicyAuthorizer::for_packets(&policy)
-            .authorize_operation(dns)
+        let error = policy
+            .authorize(dns)
             .expect_err("UDP plus TCP connection/message units exceed the policy");
         assert_eq!(error.classification().code, "policy.traffic_unit_limit");
     }
 
     #[test]
-    fn the_policy_authorizer_rejects_replay_requests_explicitly() {
+    fn the_policy_rejects_replay_requests_explicitly() {
         let policy = crate::policy::Policy::default();
         let frame = Frame::new(std::time::UNIX_EPOCH, LinkType::RAW, vec![0x45_u8; 20])
             .expect("fixture frame");
 
-        let error = PolicyAuthorizer::for_packets(&policy)
-            .authorize_operation(Operation::Replay(ReplayFrame::new(
+        let error = policy
+            .authorize(Operation::Replay(ReplayFrame::new(
                 WireLimits::new(1, 20),
                 &frame,
                 LinkMode::Layer3,
@@ -559,10 +478,9 @@ mod tests {
         let packet = documentation_packet();
         let packets = [&packet];
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
-        let mut authorizer = PolicyAuthorizer::for_packets(&policy);
 
-        let packet_error = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        let packet_error = policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(2, 1),
                 &packets,
                 Some(public),
@@ -571,8 +489,8 @@ mod tests {
             .expect_err("packet limit fails first");
         assert_eq!(packet_error.classification().code, "policy.packet_limit");
 
-        let byte_error = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        let byte_error = policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 11),
                 &packets,
                 Some(public),
@@ -581,8 +499,8 @@ mod tests {
             .expect_err("byte limit fails before the destination gate");
         assert_eq!(byte_error.classification().code, "policy.byte_limit");
 
-        let limits_only = authorizer
-            .authorize_operation(Operation::Wire(WireLimits::new(2, 1)))
+        let limits_only = policy
+            .authorize(Operation::Wire(WireLimits::new(2, 1)))
             .expect_err("limits-only requests are checked too");
         assert_eq!(limits_only.classification().code, "policy.packet_limit");
     }
@@ -594,10 +512,9 @@ mod tests {
         let packets = [&packet];
         // Multicast counts as public under the policy and never names a host.
         let public = std::net::IpAddr::V4(std::net::Ipv4Addr::new(224, 0, 0, 251));
-        let mut authorizer = PolicyAuthorizer::for_packets(&policy);
 
-        authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 1),
                 &packets,
                 None,
@@ -605,8 +522,8 @@ mod tests {
             )))
             .expect("documentation packets with no chosen destination");
 
-        let destination_error = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        let destination_error = policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 1),
                 &packets,
                 Some(public),
@@ -618,8 +535,8 @@ mod tests {
             "policy.public_destination"
         );
 
-        let opt_in_error = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        let opt_in_error = policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 1),
                 &packets,
                 None,
@@ -631,8 +548,8 @@ mod tests {
             Error::PermissiveLiveOptIn.classification().code
         );
 
-        let policy_error = authorizer
-            .authorize_operation(Operation::Declared(DeclaredPackets::new(
+        let policy_error = policy
+            .authorize(Operation::Declared(DeclaredPackets::new(
                 WireLimits::new(1, 1),
                 &packets,
                 None,

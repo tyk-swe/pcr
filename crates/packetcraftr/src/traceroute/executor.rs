@@ -1,10 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::BoundaryError;
 use crate::execution::{ExchangeExecutor, Executor};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
-use crate::probe::{Batch, Execution, Transport};
+use crate::probe::{Batch, Evidence, Transport};
+use packetcraftr_core::error::BoundaryError;
 
 use crate::clock::Clock;
 use crate::providers::Providers;
@@ -18,7 +18,7 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
 );
 
 impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, K> {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = validate_batch(batch)?;
         if self.collection.max_responses < batch.probes.len() {
             return Err(EXECUTOR_FAULT.invalid(format!(
@@ -80,7 +80,7 @@ impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ExchangeExecutor<'_, P, 
             &mut matches_request,
             None,
         )?;
-        let execution = Execution::from_exchange(batch.permit, exchange);
+        let execution = Evidence::from_exchange(batch.permit, exchange);
         Ok(execution)
     }
 }

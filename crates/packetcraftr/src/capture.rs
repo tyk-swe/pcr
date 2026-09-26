@@ -20,4 +20,4 @@ mod request;
 
 pub use error::{Cause, Error};
 pub use report::{Control, Event, Report, Source, StopReason};
-pub use request::{Request, Selector};
+pub use request::Request;

@@ -6,7 +6,7 @@
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::BoundaryError;
 
-use crate::progress::{EmitError, Runtime, Worker};
+use crate::runtime::{EmitError, Runtime, Worker};
 
 /// Receives the events one workflow run publishes while it runs.
 ///

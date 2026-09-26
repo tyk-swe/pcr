@@ -12,13 +12,14 @@ use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::thread;
 use std::time::Instant;
 
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::layer::Raw;
 use packetcraftr_core::protocol::{network::Ipv4, transport::Udp};
 use packetcraftr_core::{decode::DecodedPacket, frame::Frame, frame::LinkType, packet::Packet};
 
+use crate::Stats;
 use crate::clock::Clock;
 use crate::execution::Executor;
 use crate::policy::Authorizer;
@@ -28,11 +29,11 @@ use crate::target::Family;
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::NoopClock;
-use crate::{BoundaryError, Stats};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
-use super::executor::{Exchange, Execution, TcpEvidence, TcpQuerier, TcpQuery};
+use super::executor::{Exchange, ExchangeEvidence, TcpEvidence, TcpQuerier, TcpQuery};
 
 use super::DEFAULT_SERVER_PORT;
 use super::report::Observed;
@@ -233,10 +234,10 @@ impl Authorizer for SlowTcpDenyingAuthorizer {
 struct TrustedReceiptExecutor;
 
 impl Executor<Exchange> for TrustedReceiptExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
-        Ok(Execution {
+        Ok(ExchangeEvidence {
             permit: exchange.permit,
             sent,
             responses: Vec::new(),
@@ -257,7 +258,7 @@ impl Executor<Exchange> for TrustedReceiptExecutor {
 struct InvalidResponseIndexExecutor;
 
 impl Executor<Exchange> for InvalidResponseIndexExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         let frame = Frame::without_timestamp(LinkType::RAW, &[0_u8][..]).expect("evidence frame");
         execution.responses.push(crate::exchange::Response {
@@ -288,7 +289,7 @@ struct SelectionDeadlineExecutor {
 }
 
 impl Executor<Exchange> for SelectionDeadlineExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let execution = ClassifiedResponseExecutor.execute(exchange)?;
         self.completed.store(true, Ordering::SeqCst);
         Ok(execution)
@@ -298,7 +299,7 @@ impl Executor<Exchange> for SelectionDeadlineExecutor {
 struct LoopbackExecutor;
 
 impl Executor<Exchange> for LoopbackExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).map_err(loopback_boundary_error)?;
         socket
             .set_read_timeout(Some(exchange.timeout))
@@ -389,7 +390,7 @@ impl ScriptedExecutor {
 }
 
 impl Executor<Exchange> for ScriptedExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         self.udp_calls += 1;
         self.udp_queries.push(exchange.probe.query.clone());
         let payload = self.udp_payloads.pop_front().unwrap_or(None);
@@ -441,7 +442,7 @@ fn scripted_udp_execution(
     exchange: &Exchange,
     payload: Option<Bytes>,
     elapsed: Duration,
-) -> Execution {
+) -> ExchangeEvidence {
     let sent = crate::test_support::sent_packet(exchange.probe.packet());
     let bytes = u64::try_from(sent.bytes_sent()).unwrap();
     let responses = payload
@@ -482,7 +483,7 @@ fn scripted_udp_execution(
             }
         })
         .collect();
-    Execution {
+    ExchangeEvidence {
         permit: exchange.permit,
         sent,
         responses,
@@ -500,7 +501,7 @@ fn scripted_udp_execution(
 }
 
 impl Executor<Exchange> for ClassifiedResponseExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let sent = crate::test_support::sent_packet(exchange.probe.packet());
         let bytes = u64::try_from(sent.bytes_sent()).unwrap();
         let mut packet = Packet::new();
@@ -537,7 +538,7 @@ impl Executor<Exchange> for ClassifiedResponseExecutor {
             Bytes::from_static(&[0xfe]),
         )
         .expect("second undecoded frame");
-        Ok(Execution {
+        Ok(ExchangeEvidence {
             permit: exchange.permit,
             sent,
             responses: vec![crate::exchange::Response {
@@ -674,7 +675,7 @@ fn push_a_record_tail(output: &mut Vec<u8>, address: [u8; 4]) {
 }
 
 impl Executor<Exchange> for ProgressiveExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.fail_at == Some(call) {
             return Err(BoundaryError::new(
@@ -1226,7 +1227,10 @@ fn direct_tcp_denials_and_scoped_targets_never_execute_a_probe() {
     };
     let error = run(
         &request,
-        &mut crate::policy::PolicyAuthorizer::for_packets(&policy),
+        &mut crate::execution::Admission::new(
+            &policy,
+            &crate::test_support::ScriptedResolver::new([]),
+        ),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -1617,7 +1621,8 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
         max_packets_per_operation: 2,
         ..crate::policy::Policy::default()
     };
-    let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+    let resolver = crate::test_support::ScriptedResolver::new([]);
+    let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
     let mut executor = ScriptedExecutor::new([Some(truncated_dns_response())]);
 
     let error = run(
@@ -1658,7 +1663,8 @@ fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
             super::TransportMode::Udp
         };
         request.timeout = Duration::from_secs(1);
-        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let resolver = crate::test_support::ScriptedResolver::new([]);
+        let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
         let mut executor = ScriptedExecutor::new([Some(dns_response())]);
 
         let error = run(
@@ -1988,7 +1994,8 @@ fn added_edns_bytes_can_exceed_policy_before_any_io() {
             udp_payload_size: 1232,
             dnssec_ok: false,
         });
-        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let resolver = crate::test_support::ScriptedResolver::new([]);
+        let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
         let mut executor = ScriptedExecutor::new([]);
         let error = run(
             &request,
@@ -2028,7 +2035,7 @@ fn udp_attempt_evidence() -> super::AttemptEvidence {
         latency: Some(Duration::from_secs(1)),
         response_code: Some(18),
         reason: "validated DNS response".to_owned(),
-        exchange: super::AttemptTransport::Udp {
+        transport_evidence: super::TransportEvidence::Udp {
             source_port: 49_152,
             sent_at: UNIX_EPOCH + Duration::from_secs(1),
             response: Some(Frame::new(UNIX_EPOCH, LinkType::IPV4, dns_response()).unwrap()),
@@ -2093,7 +2100,7 @@ fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
 #[test]
 fn report_construction_requires_fallback_and_attempts_to_agree() {
     let mut tcp = udp_attempt_evidence();
-    tcp.exchange = super::AttemptTransport::Tcp {
+    tcp.transport_evidence = super::TransportEvidence::Tcp {
         source_port: None,
         sent_at: None,
     };
@@ -2150,7 +2157,7 @@ struct CancellingExecutor {
 }
 
 impl Executor<Exchange> for CancellingExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         self.calls += 1;
         if self.calls == self.cancel_at {
             self.signal.cancel();
@@ -2164,7 +2171,7 @@ impl Executor<Exchange> for CancellingExecutor {
 struct OvertimeExecutor;
 
 impl Executor<Exchange> for OvertimeExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<ExchangeEvidence, BoundaryError> {
         let mut execution = TrustedReceiptExecutor.execute(exchange)?;
         execution.stats.elapsed = Duration::from_secs(3600);
         Ok(execution)

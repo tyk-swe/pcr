@@ -33,7 +33,7 @@ impl<C: Session> Transaction<C> {
         emit: &mut F,
     ) -> Result<(), OperationError>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         if !self.correlation_stopped {
             while !self.window.expired() {
@@ -68,7 +68,7 @@ impl<C: Session> Transaction<C> {
         emit: &mut F,
     ) -> Result<ProcessOutcome, OperationError>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         let queued = crate::deadline::immediate(self.cancellation.clone());
         for _ in 0..self.collection.capture.max_frames {
@@ -110,7 +110,7 @@ impl<C: Session> Transaction<C> {
         emit: &mut F,
     ) -> Result<ProcessOutcome, OperationError>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         let context = ProcessContext {
             registry: &self.registry,
@@ -178,7 +178,7 @@ impl<C: Session> Transaction<C> {
 
     pub(super) fn publish_diagnostics<F>(&mut self, emit: &mut F) -> Result<(), OperationError>
     where
-        F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
+        F: FnMut(super::Event) -> Result<(), packetcraftr_core::error::BoundaryError>,
     {
         self.captured.diagnostics.publish_new(|diagnostic| {
             emit(super::Event::Diagnostic(diagnostic)).map_err(OperationError::output)

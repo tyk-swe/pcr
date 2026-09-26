@@ -8,7 +8,7 @@ mod pipeline;
 mod registry;
 
 pub(super) use pipeline::limit;
-pub use pipeline::{Failure as PipelineFailure, PendingEvidence};
+pub use pipeline::{PendingEvidence, PipelineFailure};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,9 +17,10 @@ use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
 use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
-use crate::probe::{Batch, Execution};
+use crate::probe::{Batch, Evidence};
 use crate::providers::Providers;
-use crate::{BoundaryError, Client, SentPacket, Stats};
+use crate::{Client, SentPacket, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::Probe;
 use super::Request;
@@ -53,7 +54,7 @@ pub(crate) enum PipelineEvent {
     },
     Completed {
         index: usize,
-        execution: Execution,
+        execution: Evidence,
     },
     Undecoded {
         frame: packetcraftr_core::frame::Frame,
@@ -123,7 +124,7 @@ impl<'c, P: Providers, K: Clock> ClientExecutor<'c, P, K> {
 }
 
 impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K> {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let first = batch.probe()?;
         let packet = first.packet();
         if !sent_probe_matches(first, &packet) {
@@ -155,7 +156,7 @@ impl<P: Providers, K: Clock> Executor<Batch<Probe>> for ClientExecutor<'_, P, K>
             &mut matches_request,
             None,
         )?;
-        Ok(Execution::from_exchange(batch.permit, exchange))
+        Ok(Evidence::from_exchange(batch.permit, exchange))
     }
 }
 

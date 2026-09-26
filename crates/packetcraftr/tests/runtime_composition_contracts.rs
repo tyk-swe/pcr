@@ -7,7 +7,7 @@ use common::{FixedRoutes, NeverTransmit};
 use packetcraftr::{
     Client,
     policy::Policy,
-    progress::{Runtime, Worker},
+    runtime::{Runtime, Worker},
 };
 
 fn client() -> Client<common::FakeProviders<FixedRoutes, NeverTransmit>> {

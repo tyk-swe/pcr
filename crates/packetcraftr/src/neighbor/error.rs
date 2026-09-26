@@ -51,7 +51,7 @@ pub enum Error {
     },
     #[error("neighbor resolver state failed: {message}")]
     State { message: String },
-    #[error("neighbor resolution for {target} on {interface} failed while {operation}: {source}")]
+    #[error("neighbor resolution for {target} on {interface} failed while {operation}")]
     Io {
         interface: String,
         target: IpAddr,
@@ -59,9 +59,7 @@ pub enum Error {
         #[source]
         source: packetcraftr_netio::Error,
     },
-    #[error(
-        "neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}"
-    )]
+    #[error("neighbor resolution for {target} on {interface} completed but capture cleanup failed")]
     Cleanup {
         interface: String,
         target: IpAddr,
@@ -69,7 +67,7 @@ pub enum Error {
         source: packetcraftr_netio::Error,
     },
     #[error(
-        "neighbor resolution for {target} on {interface} failed and capture cleanup also failed: operation={operation}; cleanup={cleanup}"
+        "neighbor resolution for {target} on {interface} failed and capture cleanup also failed"
     )]
     OperationAndCleanup {
         interface: String,

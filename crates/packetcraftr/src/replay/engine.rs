@@ -16,7 +16,8 @@ use crate::execution::{self, Paused};
 use crate::policy::{Authorizer, Operation, ReplayFrame, WireLimits};
 use crate::providers::Providers;
 use crate::route::{Materialized as MaterializedRoute, Plan as RoutePlan};
-use crate::{BoundaryError, Client, Sink};
+use crate::{Client, Sink};
+use packetcraftr_core::error::BoundaryError;
 
 use super::admission::{FinalWire, FrameAdmission};
 use super::error::Error;

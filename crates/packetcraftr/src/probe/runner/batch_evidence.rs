@@ -16,10 +16,11 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 use packetcraftr_core::packet::Packet;
 
-use super::{Batch, Execution, Sequenced};
+use super::{Batch, Evidence, Sequenced};
 use crate::SentPacket;
 use crate::execution::Errors;
-use crate::execution::evidence::{EvidenceLimits, EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::evidence::{EvidenceSink, EvidenceState, ResponseSelector};
+use crate::execution::limits::EvidenceLimits;
 use crate::execution::validation::{
     ExchangeEvidenceError, validate_aggregate_evidence_limits,
     validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
@@ -137,7 +138,7 @@ where
     pub(crate) fn validate(
         &self,
         batch: &Batch<K::Probe>,
-        execution: &Execution,
+        execution: &Evidence,
     ) -> Result<(), G::Error> {
         validate_batch_evidence(
             &self.errors,
@@ -163,11 +164,11 @@ where
     pub(crate) fn process(
         &mut self,
         batch: &Batch<K::Probe>,
-        execution: Execution,
+        execution: Evidence,
         deadline: &Deadline,
     ) -> Result<ControlFlow<()>, G::Error> {
         self.enforce(deadline)?;
-        let Execution {
+        let Evidence {
             permit,
             sent,
             mut responses,
@@ -316,7 +317,7 @@ where
 fn validate_batch_exchange_evidence<P, F>(
     probes: &[P],
     timeout: Duration,
-    execution: &Execution,
+    execution: &Evidence,
     max_captured_frames: usize,
     max_captured_bytes: usize,
     mut sent_packet_matches: F,
@@ -369,7 +370,7 @@ pub(crate) fn validate_batch_evidence<P: Sequenced, G: Errors<Step = u64>>(
     errors: &G,
     probes: &[P],
     timeout: Duration,
-    execution: &Execution,
+    execution: &Evidence,
     limits: EvidenceLimits,
     sent_packet_matches: impl FnMut(&P, &Packet) -> bool,
 ) -> Result<(), G::Error> {

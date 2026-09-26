@@ -14,12 +14,12 @@ use crate::execution::validation::{
 use super::Limits;
 use super::classification::dns_payload;
 use super::error::{Error, EvidenceFault};
-use super::executor::Execution;
+use super::executor::ExchangeEvidence;
 use super::probe::Probe;
 
 pub(super) fn validate_dns_execution(
     probe: &Probe,
-    execution: &Execution,
+    execution: &ExchangeEvidence,
     limits: Limits,
     timeout: Duration,
 ) -> Result<(), Error> {

@@ -12,7 +12,8 @@ use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
 use crate::execution::Shared;
-use crate::{BoundaryError, Sink, Stats};
+use crate::{Sink, Stats};
+use packetcraftr_core::error::BoundaryError;
 
 use super::error::Error;
 use super::request::QueryType;
@@ -141,7 +142,7 @@ impl fmt::Display for Outcome {
 /// Transport-specific evidence. Kernel TCP never carries a captured frame;
 /// a transmitted UDP query always has a source port and transmission time.
 #[derive(Clone, Debug)]
-pub enum AttemptTransport {
+pub enum TransportEvidence {
     Udp {
         source_port: u16,
         sent_at: SystemTime,
@@ -156,7 +157,7 @@ pub enum AttemptTransport {
 #[derive(Clone, Debug)]
 pub struct AttemptEvidence {
     pub attempt: u32,
-    pub exchange: AttemptTransport,
+    pub transport_evidence: TransportEvidence,
     pub server_address: IpAddr,
     pub status: Outcome,
     pub received_at: Option<SystemTime>,
@@ -167,27 +168,27 @@ pub struct AttemptEvidence {
 
 impl AttemptEvidence {
     pub const fn transport(&self) -> Transport {
-        match self.exchange {
-            AttemptTransport::Udp { .. } => Transport::Udp,
-            AttemptTransport::Tcp { .. } => Transport::Tcp,
+        match self.transport_evidence {
+            TransportEvidence::Udp { .. } => Transport::Udp,
+            TransportEvidence::Tcp { .. } => Transport::Tcp,
         }
     }
     pub const fn source_port(&self) -> Option<u16> {
-        match self.exchange {
-            AttemptTransport::Udp { source_port, .. } => Some(source_port),
-            AttemptTransport::Tcp { source_port, .. } => source_port,
+        match self.transport_evidence {
+            TransportEvidence::Udp { source_port, .. } => Some(source_port),
+            TransportEvidence::Tcp { source_port, .. } => source_port,
         }
     }
     pub const fn sent_at(&self) -> Option<SystemTime> {
-        match self.exchange {
-            AttemptTransport::Udp { sent_at, .. } => Some(sent_at),
-            AttemptTransport::Tcp { sent_at, .. } => sent_at,
+        match self.transport_evidence {
+            TransportEvidence::Udp { sent_at, .. } => Some(sent_at),
+            TransportEvidence::Tcp { sent_at, .. } => sent_at,
         }
     }
     pub fn response(&self) -> Option<&Frame> {
-        match &self.exchange {
-            AttemptTransport::Udp { response, .. } => response.as_ref(),
-            AttemptTransport::Tcp { .. } => None,
+        match &self.transport_evidence {
+            TransportEvidence::Udp { response, .. } => response.as_ref(),
+            TransportEvidence::Tcp { .. } => None,
         }
     }
 }

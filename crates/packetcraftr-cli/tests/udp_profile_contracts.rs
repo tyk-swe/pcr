@@ -26,7 +26,7 @@ fn profile_files_validate_before_target_resolution() {
     assert!(!output.status.success());
     let result = parse_json(&output);
     assert!(
-        result["error"]["message"]
+        result["error"]["causes"][0]
             .as_str()
             .unwrap()
             .contains("hostname")

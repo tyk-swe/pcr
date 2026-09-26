@@ -15,10 +15,10 @@ pub use model::{
 };
 pub use model::{DestinationConstraint, Error, Policy};
 
+pub(crate) use operation::{Authorizer, unsupported_operation};
 pub use operation::{
-    Authorizer, DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive,
-    PolicyAuthorizer, ReplayFrame, SocketLimits, SocketOperation, WireLimits,
-    unsupported_operation,
+    DeclaredPackets, DnsOperation, LimitOverflow, Operation, PermissiveLive, ReplayFrame,
+    SocketLimits, SocketOperation, WireLimits,
 };
 pub use wire::requires_live_opt_in;
 pub(crate) use wire::{

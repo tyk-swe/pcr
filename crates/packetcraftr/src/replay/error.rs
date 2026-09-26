@@ -38,7 +38,7 @@ pub enum Error {
         source_index: u64,
         mode: &'static str,
     },
-    #[error("capture read failed at source index {source_index}: {source}")]
+    #[error("capture read failed at source index {source_index}")]
     Capture {
         source_index: u64,
         #[source]
@@ -88,19 +88,19 @@ pub enum Error {
         link_type: u32,
         requested: LinkMode,
     },
-    #[error("replay frame selection failed at source index {source_index}: {source}")]
+    #[error("replay frame selection failed at source index {source_index}")]
     Selection {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
-    #[error("replay policy denied source index {source_index}: {source}")]
+    #[error("replay policy denied source index {source_index}")]
     Authorization {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
-    #[error("replay transmission failed at source index {source_index}: {source}")]
+    #[error("replay transmission failed at source index {source_index}")]
     Transmission {
         source_index: u64,
         #[source]
@@ -117,11 +117,11 @@ pub enum Error {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// The sink refused a frame event, or publishing it failed.
-    #[error("replay output failed at source index {source_index}: {source}")]
+    #[error("replay output failed at source index {source_index}")]
     Output {
         source_index: u64,
         #[source]
-        source: crate::BoundaryError,
+        source: packetcraftr_core::error::BoundaryError,
     },
     /// A collector saw events that disagree with the report.
     #[error("replay events are incoherent: {message}")]
@@ -236,16 +236,16 @@ impl Classified for Error {
     }
 
     /// Walked from the retained `#[source]` chain rather than hand-written.
-    /// The boundary-sourced variants delegate instead: a [`BoundaryError`]
-    /// carries a captured `causes` snapshot its own source chain no longer
-    /// holds.
+    /// The boundary-sourced variants list the boundary's message and its
+    /// captured `causes` snapshot instead, which its own source chain no
+    /// longer holds.
     ///
-    /// [`BoundaryError`]: crate::BoundaryError
+    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Selection { source, .. }
             | Self::Authorization { source, .. }
-            | Self::Output { source, .. } => source.causes(),
+            | Self::Output { source, .. } => source.as_causes(),
             error => packetcraftr_core::error::source_chain(error),
         }
     }

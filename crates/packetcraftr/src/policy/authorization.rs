@@ -212,18 +212,6 @@ impl Policy {
         self.authorize_selected(target, addresses)
     }
 
-    /// Authorizes a target that names its address outright, without a
-    /// resolver. The destination stage is exactly the one
-    /// [`Policy::resolve_target`] applies to a resolved answer.
-    pub(crate) fn authorize_numeric_target(
-        &self,
-        target: &Target,
-        address: IpAddr,
-    ) -> Result<Authorized, TargetError> {
-        self.validate()?;
-        self.authorize_selected(target, vec![address])
-    }
-
     fn authorize_selected(
         &self,
         target: &Target,

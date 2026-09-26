@@ -7,8 +7,9 @@ use packetcraftr_core::capture_file::Format;
 use packetcraftr_netio::interface::Id as InterfaceId;
 use serde::Serialize;
 
+use crate::Sink;
 use crate::execution::Shared;
-use crate::{BoundaryError, Sink};
+use packetcraftr_core::error::BoundaryError;
 
 use super::error::Error;
 use super::evidence::FrameEvidence;

@@ -73,8 +73,8 @@ mod wire;
 pub use classification::{ResponseClassification, classify_response, response_code_name};
 pub use error::{Error, EvidenceFault, WireError};
 pub use report::{
-    Aggregate, AttemptEvidence, AttemptTransport, Collector, Completion, Event, EventContext,
-    IncoherentReport, Outcome, RejectedRecord, Report, ResponseMetadata, Section, Transport,
+    Aggregate, AttemptEvidence, Collector, Completion, Event, EventContext, IncoherentReport,
+    Outcome, RejectedRecord, Report, ResponseMetadata, Section, Transport, TransportEvidence,
     UndecodedEvidence, ValidatedResponse,
 };
 pub use request::{

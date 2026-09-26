@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use super::Error;
 use crate::probe::test_support::{ProgressiveExecutor, private_policy};
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use crate::test_support::decoded_packet;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{
@@ -28,18 +28,19 @@ use super::{
 };
 use crate::Sink;
 use crate::clock::Clock;
+use crate::execution::Admission;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
-use crate::policy::PolicyAuthorizer;
 use crate::probe::Batch;
-use crate::probe::{Execution, ProbeStatus, Transport};
+use crate::probe::{Evidence, ProbeStatus, Transport};
 use crate::target::ResolveTarget;
 use crate::target::Target;
 use crate::test_support::{
     AddressListAuthorizer, NoopClock, RecordingClock, RejectingExecutor, ScriptedResolver,
 };
-use crate::{BoundaryError, Stats, target::Family};
+use crate::{Stats, target::Family};
 use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::BoundaryError;
 use packetcraftr_core::registry::Registry;
 
 /// Runs a serial fixture executor where the engine takes a pipeline-capable
@@ -47,7 +48,7 @@ use packetcraftr_core::registry::Registry;
 struct Serial<'e, E>(&'e mut E);
 
 impl<E: Executor<Batch<Probe>>> Executor<Batch<Probe>> for Serial<'_, E> {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         self.0.execute(batch)
     }
 }
@@ -154,7 +155,7 @@ struct TimeoutExecutor {
 }
 
 impl Executor<Batch<Probe>> for TimeoutExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         self.batches.push((
             batch.probes[0].attempt,
             batch
@@ -190,7 +191,7 @@ impl Executor<Batch<Probe>> for TimeoutExecutor {
             bytes += u64::try_from(receipt.bytes_sent()).unwrap();
             sent.push(receipt);
         }
-        Ok(Execution {
+        Ok(Evidence {
             permit: batch.permit,
             sent,
             responses: Vec::new(),
@@ -220,7 +221,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
     let mut executor = TimeoutExecutor::default();
     let error = run(
         &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
+        &mut Admission::new(&policy, &crate::target::SystemResolver),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -267,7 +268,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
 struct LateResponseExecutor(TimeoutExecutor);
 
 impl Executor<Batch<Probe>> for LateResponseExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.0.execute(batch)?;
         execution.unsolicited.push(decoded(
             tcp_packet(
@@ -374,7 +375,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
         calls: Arc::clone(&executor_calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -406,7 +407,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     policy.allow_hostname_resolution = true;
     let mut request = tcp_scan_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
 
     let error = run(
         &request,
@@ -421,7 +422,11 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
         packetcraftr_core::error::Classified::classification(&error).code,
         "policy.public_destination"
     );
-    assert!(error.to_string().contains("8.8.8.8"));
+    assert_eq!(error.to_string(), "scan authorization failed");
+    assert!(
+        packetcraftr_core::error::Classified::causes(&error)[0].contains("8.8.8.8"),
+        "the denied address is the first cause"
+    );
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
     assert_eq!(executor_calls.load(Ordering::SeqCst), 0);
 }
@@ -952,7 +957,7 @@ struct EchoReplyExecutor {
 }
 
 impl Executor<Batch<Probe>> for EchoReplyExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)
@@ -1041,7 +1046,7 @@ struct EveryOtherEchoExecutor {
 }
 
 impl Executor<Batch<Probe>> for EveryOtherEchoExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         if batch.probes[0].sequence % 2 == 1 {
             return Ok(execution);
@@ -1141,7 +1146,7 @@ struct StaleEchoExecutor {
 }
 
 impl Executor<Batch<Probe>> for StaleEchoExecutor {
-    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Execution, BoundaryError> {
+    fn execute(&mut self, batch: &Batch<Probe>) -> Result<Evidence, BoundaryError> {
         let mut execution = self.inner.execute(batch)?;
         let (IpAddr::V4(remote), crate::probe::ProbeEndpoint::Icmp) =
             (batch.probes[0].address, batch.probes[0].endpoint)

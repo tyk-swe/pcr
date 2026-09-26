@@ -2034,7 +2034,7 @@ fn udp_attempt_evidence() -> super::AttemptEvidence {
         latency: Some(Duration::from_secs(1)),
         response_code: Some(18),
         reason: "validated DNS response".to_owned(),
-        exchange: super::AttemptTransport::Udp {
+        transport_evidence: super::TransportEvidence::Udp {
             source_port: 49_152,
             sent_at: UNIX_EPOCH + Duration::from_secs(1),
             response: Some(Frame::new(UNIX_EPOCH, LinkType::IPV4, dns_response()).unwrap()),
@@ -2099,7 +2099,7 @@ fn completion_construction_rejects_incoherent_transport_or_response_metadata() {
 #[test]
 fn report_construction_requires_fallback_and_attempts_to_agree() {
     let mut tcp = udp_attempt_evidence();
-    tcp.exchange = super::AttemptTransport::Tcp {
+    tcp.transport_evidence = super::TransportEvidence::Tcp {
         source_port: None,
         sent_at: None,
     };

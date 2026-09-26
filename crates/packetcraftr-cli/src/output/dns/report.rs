@@ -233,13 +233,13 @@ impl TryFrom<library::AttemptEvidence> for Attempt {
     type Error = Error;
 
     fn try_from(evidence: library::AttemptEvidence) -> Result<Self, Error> {
-        let (transport, source_port, sent_at, response) = match evidence.exchange {
-            library::AttemptTransport::Udp {
+        let (transport, source_port, sent_at, response) = match evidence.transport_evidence {
+            library::TransportEvidence::Udp {
                 source_port,
                 sent_at,
                 response,
             } => (Transport::Udp, Some(source_port), Some(sent_at), response),
-            library::AttemptTransport::Tcp {
+            library::TransportEvidence::Tcp {
                 source_port,
                 sent_at,
             } => (Transport::Tcp, source_port, sent_at, None),

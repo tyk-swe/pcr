@@ -23,7 +23,7 @@ use crate::{
 use super::super::error::Probes;
 use super::super::report::RttAccumulator;
 use super::super::{Error, Request};
-use super::{Event, Outcome, Probe, Report, Stats};
+use super::{Event, Outcome, ProbeEvidence, Report, Stats};
 
 impl<P: Providers, K: Clock> Client<P, K> {
     /// Scans the request's targets and ports with kernel TCP connects
@@ -268,7 +268,7 @@ where
 fn settle_active<S: tcp::Stream>(
     active: &mut Vec<Active<S>>,
     index: usize,
-) -> Result<Option<Probe>, Error> {
+) -> Result<Option<ProbeEvidence>, Error> {
     let result = active[index]
         .pending
         .poll()
@@ -282,7 +282,7 @@ fn settle_active<S: tcp::Stream>(
     }
     let mut entry = active.remove(index);
     let attempted = entry.pending.cancel();
-    Ok(Some(Probe {
+    Ok(Some(ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,
         attempt: entry.attempt,
@@ -313,7 +313,7 @@ where
     Q::Stream: 'static,
     A: Authorizer + ResolveTarget,
     C: Clock,
-    F: FnMut(Probe, &Deadline) -> Result<(), Error>,
+    F: FnMut(ProbeEvidence, &Deadline) -> Result<(), Error>,
 {
     enforce_deadline(&Probes, deadline)?;
     let (resolved_addresses, planned) = planned(request, authorizer, deadline)?;
@@ -352,7 +352,7 @@ where
                 continue;
             };
             evidence_bytes = evidence_bytes
-                .checked_add(std::mem::size_of::<Probe>())
+                .checked_add(std::mem::size_of::<ProbeEvidence>())
                 .and_then(|bytes| {
                     bytes.checked_add(
                         probe
@@ -415,8 +415,8 @@ where
 fn finish_probe<S: tcp::Stream>(
     entry: Active<S>,
     result: tcp::ConnectOutcome<S>,
-) -> Result<Probe, Error> {
-    let mut probe = Probe {
+) -> Result<ProbeEvidence, Error> {
+    let mut probe = ProbeEvidence {
         sequence: entry.sequence,
         endpoint: entry.endpoint,
         attempt: entry.attempt,

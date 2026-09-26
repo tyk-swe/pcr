@@ -190,7 +190,7 @@ fn attempt_evidence() -> dns::AttemptEvidence {
         latency: Some(Duration::from_secs(1)),
         response_code: Some(18),
         reason: "validated DNS response".to_owned(),
-        exchange: packetcraftr::dns::AttemptTransport::Udp {
+        transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
             source_port: 49_152,
             sent_at: UNIX_EPOCH + Duration::from_secs(1),
             response: Some(evidence_frame()),
@@ -330,7 +330,7 @@ fn dns_aggregate_output_preserves_all_record_shapes_metadata_and_evidence() {
 #[test]
 fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
     let mut tcp = attempt_evidence();
-    tcp.exchange = dns::AttemptTransport::Tcp {
+    tcp.transport_evidence = dns::TransportEvidence::Tcp {
         source_port: Some(50_000),
         sent_at: tcp.sent_at(),
     };
@@ -350,7 +350,7 @@ fn dns_tcp_attempt_output_uses_metadata_without_synthetic_capture_bytes() {
     assert!(json["evidence"].get("frame").is_none());
 
     let mut failed_tcp = tcp.clone();
-    failed_tcp.exchange = dns::AttemptTransport::Tcp {
+    failed_tcp.transport_evidence = dns::TransportEvidence::Tcp {
         source_port: Some(50_000),
         sent_at: None,
     };

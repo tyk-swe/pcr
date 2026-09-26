@@ -13,4 +13,4 @@ mod report;
 #[cfg(test)]
 mod tests;
 
-pub use report::{Aggregate, Collector, Endpoint, Event, Outcome, Probe, Report, Stats};
+pub use report::{Aggregate, Collector, Endpoint, Event, Outcome, ProbeEvidence, Report, Stats};

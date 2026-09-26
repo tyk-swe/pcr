@@ -40,7 +40,7 @@ impl Outcome {
 
 /// The socket evidence of one connect attempt.
 #[derive(Clone, Debug)]
-pub struct Probe {
+pub struct ProbeEvidence {
     pub sequence: u64,
     pub endpoint: SocketAddr,
     pub attempt: u32,
@@ -74,7 +74,7 @@ pub struct Stats {
 #[derive(Clone, Debug)]
 pub enum Event {
     /// One connect attempt settled.
-    Probe(Probe),
+    Probe(ProbeEvidence),
 }
 
 /// The terminal result of one connect scan.
@@ -93,7 +93,7 @@ pub struct Endpoint {
     pub address: IpAddr,
     pub port: u16,
     pub classification: Classification,
-    pub probes: Vec<Probe>,
+    pub probes: Vec<ProbeEvidence>,
 }
 
 /// Every attempt of one connect scan, grouped by endpoint in first-scheduled
@@ -108,7 +108,7 @@ pub struct Aggregate {
 /// [`Client::scan_connect`](crate::Client::scan_connect) and
 /// [`finish`](Self::finish) the one kept with the report it returns.
 #[derive(Clone, Default)]
-pub struct Collector(Shared<Vec<Probe>>);
+pub struct Collector(Shared<Vec<ProbeEvidence>>);
 
 impl Sink<Event> for Collector {
     type Ack = ();

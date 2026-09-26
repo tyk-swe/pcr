@@ -69,9 +69,9 @@ pub struct Probe {
     pub local: Option<SocketAddr>,
     pub error: Option<SocketError>,
 }
-impl TryFrom<connect::Probe> for Probe {
+impl TryFrom<connect::ProbeEvidence> for Probe {
     type Error = Error;
-    fn try_from(probe: connect::Probe) -> Result<Self, Error> {
+    fn try_from(probe: connect::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
             sequence: probe.sequence,
             address: probe.endpoint.ip(),
@@ -155,9 +155,9 @@ pub struct ProbeEvent {
     #[serde(flatten)]
     pub probe: Probe,
 }
-impl TryFrom<connect::Probe> for ProbeEvent {
+impl TryFrom<connect::ProbeEvidence> for ProbeEvent {
     type Error = Error;
-    fn try_from(probe: connect::Probe) -> Result<Self, Error> {
+    fn try_from(probe: connect::ProbeEvidence) -> Result<Self, Error> {
         Ok(Self {
             method: "tcp_connect",
             probe: probe.try_into()?,

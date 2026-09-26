@@ -268,7 +268,7 @@ fn dns_attempt() -> packetcraftr::dns::AttemptEvidence {
         latency: None,
         response_code: None,
         reason: "timeout".to_owned(),
-        exchange: packetcraftr::dns::AttemptTransport::Udp {
+        transport_evidence: packetcraftr::dns::TransportEvidence::Udp {
             source_port: 49_152,
             sent_at: UNIX_EPOCH,
             response: None,
@@ -652,7 +652,7 @@ fn validate_dns_event_variants() {
         packetcraftr::dns::Event::Attempt {
             context: Arc::clone(&context),
             evidence: packetcraftr::dns::AttemptEvidence {
-                exchange: packetcraftr::dns::AttemptTransport::Tcp {
+                transport_evidence: packetcraftr::dns::TransportEvidence::Tcp {
                     source_port: None,
                     sent_at: dns_attempt().sent_at(),
                 },
@@ -741,7 +741,9 @@ fn validate_dns_event_variants() {
 #[test]
 fn dns_schema_forbids_capture_frames_on_tcp_attempts() {
     let mut evidence = dns_attempt();
-    if let packetcraftr::dns::AttemptTransport::Udp { response, .. } = &mut evidence.exchange {
+    if let packetcraftr::dns::TransportEvidence::Udp { response, .. } =
+        &mut evidence.transport_evidence
+    {
         *response = Some(frame(&[4]));
     }
     let event = output::envelope::Published::<output::dns::Event>::try_from(

@@ -194,13 +194,13 @@ fn offline_records_edns_and_binary_data_are_typed_and_round_trip_exactly() {
     assert!(edns.dnssec_ok);
     assert_eq!(edns.options[0].data.as_ref(), [0, 0xff, 1]);
     assert_eq!(
-        dns.field_path("additionals[0].value.rdata"),
+        dns.field_path(&"additionals[0].value.rdata".parse().unwrap()),
         Some(FieldValue::Bytes(Bytes::from_static(&[
             0xff, 0, 0xc0, 0xff
         ])))
     );
     assert_eq!(
-        dns.field_path("additionals[0].value.type"),
+        dns.field_path(&"additionals[0].value.type".parse().unwrap()),
         Some(65000u16.into())
     );
     let rebuilt = build::Builder::new(builtin::registry())

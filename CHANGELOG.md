@@ -140,6 +140,21 @@ All notable changes to PacketcraftR are documented here. The format follows
   `tls::parse_record`, `tls::names::version_name` is `tls::version_name`, and
   `tls::model::extension` is `tls::extension`. See
   `docs/migration-unreleased.md`.
+- `Layer::field_path` and `Layer::set_field_path` take a parsed
+  `&field::Path` instead of a string, so a path is parsed once at the
+  document or command-line edge rather than on every call. `field::Path`
+  implements `Display` in its own syntax. See `docs/migration-unreleased.md`.
+- Built-in identity comes from the layer's type. `BuiltinProtocol::of` and
+  `BuiltinProtocol::identifies` recognize only the built-in layer types, so a
+  custom layer whose schema reuses a built-in protocol name (such as `ipv4`)
+  is no longer read as that protocol by route semantics, matchers, or
+  validation. `BuiltinProtocol::from_id` still maps a registry identifier by
+  name. See `docs/migration-unreleased.md`.
+- `protocol::semantics` reads built-in layers through their types and no
+  longer exports the reflective field-name constants `SOURCE`, `DESTINATION`,
+  `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`, `SEGMENTS_LEFT`,
+  `LAST_ENTRY`, `TARGET_PROTOCOL`, and `IPV4_OPTIONS`. Read the typed layer's
+  fields instead.
 
 ### Added
 

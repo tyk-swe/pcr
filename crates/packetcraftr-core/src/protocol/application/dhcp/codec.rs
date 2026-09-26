@@ -76,7 +76,7 @@ pub(super) fn make_layer<M: Message>(
         if name == "wire" || layer.field(name).as_ref() == Some(value) {
             continue;
         }
-        layer.set_field_path(name, value.clone())?;
+        crate::protocol::common::set_document_field(&mut layer, name, value.clone())?;
     }
     if fields.contains_key("options")
         && let Some(message_type) = fields.get("message_type")

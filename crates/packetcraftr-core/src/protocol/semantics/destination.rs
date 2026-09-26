@@ -4,13 +4,16 @@
 use std::net::IpAddr;
 
 use super::error::Error;
-use super::path::{DESTINATION, IpFamily, SEGMENTS, TARGET_PROTOCOL, ip_path_at};
-use crate::field::FieldValue;
+use super::path::{IpHeader, ip_path_at};
 use crate::layer::Malformed;
 use crate::packet::Packet;
 use crate::protocol::BuiltinProtocol;
+use crate::protocol::link::Arp;
+use crate::protocol::network::Ipv6;
 
-pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
+/// Field names that carry a route on a built-in layer. A layer of an unknown
+/// protocol that declares or reflects one is refused rather than trusted.
+const ROUTE_FIELDS: [&str; 3] = ["destination", "segments", "target_protocol"];
 
 /// Enumerates every address that can determine where the packet is routed. Unknown
 /// protocols cannot opt into route semantics by imitating reflective names.
@@ -29,41 +32,22 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
                 reason: malformed.reason.clone(),
             });
         }
-        match BuiltinProtocol::of(layer) {
-            Some(protocol @ (BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6)) => {
-                let family = if protocol == BuiltinProtocol::Ipv4 {
-                    IpFamily::V4
-                } else {
-                    IpFamily::V6
-                };
-                let path = ip_path_at(packet, index, packet.len(), family)?;
-                push_if_specified(&mut destinations, path.header_destination);
-                for destination in path.declared_route_destinations {
-                    push_if_specified(&mut destinations, destination);
-                }
+        if let Some(header) = IpHeader::of(layer) {
+            let path = ip_path_at(packet, index, packet.len(), header)?;
+            push_if_specified(&mut destinations, path.header_destination);
+            for destination in path.declared_route_destinations {
+                push_if_specified(&mut destinations, destination);
             }
+            continue;
+        }
+        if let Some(arp) = layer.downcast_ref::<Arp>() {
+            push_if_specified(&mut destinations, IpAddr::V4(arp.target_protocol));
+            continue;
+        }
+        match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Ipv6Srh) => {
                 validate_attached_srh(packet, index)?;
             }
-            Some(BuiltinProtocol::Arp) => match layer.field(TARGET_PROTOCOL) {
-                Some(FieldValue::Ipv4(value)) => {
-                    push_if_specified(&mut destinations, IpAddr::V4(value));
-                }
-                Some(_) => {
-                    return Err(Error::field(
-                        layer.protocol_id(),
-                        TARGET_PROTOCOL,
-                        "is not IPv4",
-                    ));
-                }
-                None => {
-                    return Err(Error::field(
-                        layer.protocol_id(),
-                        TARGET_PROTOCOL,
-                        "is missing",
-                    ));
-                }
-            },
             Some(_) => {}
             None => {
                 if let Some(field) = ROUTE_FIELDS.iter().find(|field| {
@@ -136,18 +120,17 @@ fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
 
 fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), Error> {
     for (network_index, candidate) in packet.iter().enumerate().take(srh_index).rev() {
-        match BuiltinProtocol::of(candidate) {
-            Some(BuiltinProtocol::Ipv6) => {
-                ip_path_at(
-                    packet,
-                    network_index,
-                    srh_index.saturating_add(1),
-                    IpFamily::V6,
-                )?;
-                return Ok(());
-            }
-            Some(protocol) if protocol.is_ipv6_extension() => {}
-            _ => break,
+        if let Some(ipv6) = candidate.downcast_ref::<Ipv6>() {
+            ip_path_at(
+                packet,
+                network_index,
+                srh_index.saturating_add(1),
+                IpHeader::V6(ipv6),
+            )?;
+            return Ok(());
+        }
+        if !BuiltinProtocol::of(candidate).is_some_and(BuiltinProtocol::is_ipv6_extension) {
+            break;
         }
     }
     Err(Error::DetachedSegmentRoutingHeader)

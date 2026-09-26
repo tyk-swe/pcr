@@ -9,7 +9,7 @@ use crate::error::{Classification, Kind};
 use crate::{
     build::Builder,
     decode::Dissector,
-    field::{FieldKind, FieldValue},
+    field::{FieldKind, FieldValue, Path},
     packet::Packet,
     registry::Registry,
 };
@@ -27,6 +27,8 @@ use super::rng::case_seed;
 #[derive(Clone)]
 pub(super) struct ResolvedField {
     pub(super) target: Target,
+    /// `target.field`, parsed once when the target is resolved.
+    pub(super) path: Path,
     pub(super) protocol: String,
     pub(super) kind: FieldKind,
     pub(super) is_derived: bool,
@@ -152,7 +154,7 @@ fn prepare_case(
     let Some(layer) = recipe.layer_mut(field.target.layer) else {
         return Err(unresolved_target(field, "layer is outside the packet"));
     };
-    let Some(original) = layer.field_path(&field.target.field) else {
+    let Some(original) = layer.field_path(&field.path) else {
         return Err(unresolved_target(
             field,
             "field is not reflectively readable",
@@ -175,7 +177,7 @@ fn prepare_case(
         value: mutated_value.clone(),
     };
     let shrink_values = shrink_values(&mutated_value, request.limits.max_shrink_steps);
-    let mutation_result = layer.set_field_path(&field.target.field, mutated_value);
+    let mutation_result = layer.set_field_path(&field.path, mutated_value);
     let retained_value_bytes =
         retained_case_value_bytes(&mutation, &shrink_values, &recipe, request.limits)?;
     charge_retained_bytes(
@@ -424,6 +426,7 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                         layer: layer_index,
                         field: field.name.to_owned(),
                     },
+                    path: Path::top_level(field.name),
                     protocol: layer.protocol_id().to_string(),
                     kind: field.kind,
                     is_derived: field.derived,
@@ -460,7 +463,7 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
             })?;
         let path = target
             .field
-            .parse::<crate::field::Path>()
+            .parse::<Path>()
             .map_err(|source| Error::InvalidTarget {
                 target: target.clone(),
                 message: source.to_string(),
@@ -472,20 +475,22 @@ fn resolve_fields(packet: &Packet, requested: &[Target]) -> Result<Vec<ResolvedF
                 message: "unregistered reflective path".to_owned(),
             })?;
         let value = layer
-            .field_path(&target.field)
+            .field_path(&path)
             .ok_or_else(|| Error::InvalidTarget {
                 target: target.clone(),
                 message: "field is not reflectively readable".to_owned(),
             })?;
+        let kind = if path.is_nested() {
+            value.kind()
+        } else {
+            schema.kind
+        };
         fields.push(ResolvedField {
             target: target.clone(),
             protocol: layer.protocol_id().to_string(),
-            kind: if path.is_nested() {
-                value.kind()
-            } else {
-                schema.kind
-            },
+            kind,
             is_derived: schema.derived,
+            path,
         });
     }
     Ok(fields)

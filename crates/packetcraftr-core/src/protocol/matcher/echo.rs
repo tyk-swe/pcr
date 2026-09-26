@@ -8,14 +8,15 @@ use crate::{
 };
 
 use super::{
-    QuotedProbeTransport, quoted_icmp_error_kind, response_source, reversed_protocol_layers,
+    IcmpMessage, QuotedProbeTransport, quoted_icmp_error_kind, response_source,
+    reversed_protocol_layers,
 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct EchoMatcher {
     protocol: BuiltinProtocol,
-    request_type: u64,
-    reply_type: u64,
+    request_type: u8,
+    reply_type: u8,
 }
 
 impl EchoMatcher {
@@ -43,32 +44,20 @@ impl ResponseMatcher for EchoMatcher {
         }
         let layers = reversed_protocol_layers(self.protocol, request, response)?;
         for layers in &layers {
-            let request_layer = layers.request;
-            let response_layer = layers.response;
-            if request_layer.field("type").and_then(|value| value.as_u64())
-                != Some(self.request_type)
-                || response_layer
-                    .field("type")
-                    .and_then(|value| value.as_u64())
-                    != Some(self.reply_type)
+            let request = IcmpMessage::of(layers.request)?;
+            let response = IcmpMessage::of(layers.response)?;
+            if request.icmp_type != self.request_type
+                || response.icmp_type != self.reply_type
+                || request.code != 0
+                || response.code != 0
             {
                 return None;
             }
-            if request_layer.field("code").and_then(|value| value.as_u64()) != Some(0)
-                || response_layer
-                    .field("code")
-                    .and_then(|value| value.as_u64())
-                    != Some(0)
-            {
+            // The echo identifier and sequence (body bytes 0-4) are the
+            // correlation identity; the variable rest of the echo body is not
+            // compared.
+            if request.body.get(..4)? != response.body.get(..4)? {
                 return None;
-            }
-            // The typed echo identifier and sequence are the correlation
-            // identity; the variable rest of the echo body is not compared.
-            for field in ["identifier", "sequence"] {
-                let identity = request_layer.field(field).and_then(|v| v.as_u64())?;
-                if Some(identity) != response_layer.field(field).and_then(|v| v.as_u64()) {
-                    return None;
-                }
             }
         }
         Some(Match::new(100))

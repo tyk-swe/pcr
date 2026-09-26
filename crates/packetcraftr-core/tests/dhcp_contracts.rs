@@ -152,18 +152,20 @@ fn dhcpv6_relay_address_associations_and_prefixes_are_typed_and_editable() {
     let mut decoded = Dhcpv6::try_from(wire.clone()).unwrap();
     assert_eq!(decoded.to_wire().unwrap(), wire);
     assert_eq!(decoded.message_type, 12);
-    let path = "options[0].value.message.options[1].value.options[0].value.address";
+    let path = "options[0].value.message.options[1].value.options[0].value.address"
+        .parse()
+        .unwrap();
     assert_eq!(
-        decoded.field_path(path),
+        decoded.field_path(&path),
         Some(FieldValue::Ipv6("2001:db8::10".parse().unwrap()))
     );
     decoded
-        .set_field_path(path, FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
+        .set_field_path(&path, FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
         .unwrap();
     let changed = decoded.to_wire().unwrap();
     let parsed = Dhcpv6::try_from(changed).unwrap();
     assert_eq!(
-        parsed.field_path(path),
+        parsed.field_path(&path),
         Some(FieldValue::Ipv6("2001:db8::11".parse().unwrap()))
     );
     let Value6::Relay(inner) = &parsed.options[0].value else {

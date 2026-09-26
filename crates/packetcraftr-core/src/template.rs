@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
-use crate::field::FieldValue;
+use crate::field::{FieldValue, Path};
 use crate::layer::FieldError;
 use crate::packet::Packet;
 
@@ -63,7 +63,11 @@ impl NumericRange {
 #[derive(Clone, Debug)]
 struct TemplateAxis {
     layer: usize,
+    /// The field as the caller spelled it, for errors.
     field: String,
+    /// The spelling parsed once when the axis is declared; a spelling that is
+    /// not a path is reported as an unknown field when the axes are validated.
+    path: Option<Path>,
     values: Vec<FieldValue>,
 }
 
@@ -85,11 +89,16 @@ impl Template {
     /// stable, with the last axis varying fastest. [`Self::expand`] rejects a
     /// repeated field (including an alias of it), but only for a non-empty
     /// product: an empty axis yields zero packets without validating any axis.
+    ///
+    /// `field` is the caller's spelling of a [`Path`], parsed once here; one
+    /// that is not a path fails validation as an unknown field.
     #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: Vec<FieldValue>) -> Self {
+        let field = field.into();
         self.axes.push(TemplateAxis {
             layer,
-            field: field.into(),
+            path: field.parse().ok(),
+            field,
             values,
         });
         self
@@ -138,8 +147,16 @@ impl Template {
                     index: axis.layer,
                     len: packet_len,
                 })?;
+                // Nonempty expansions validate every axis first, so each
+                // path parsed.
+                let path = axis.path.as_ref().ok_or_else(|| {
+                    axis.error(FieldError::UnknownField {
+                        protocol: *layer.protocol_id(),
+                        field: axis.field.clone(),
+                    })
+                })?;
                 layer
-                    .set_field_path(&axis.field, value.clone())
+                    .set_field_path(path, value.clone())
                     .map_err(|source| axis.error(source))?;
             }
             Ok(packet)
@@ -159,10 +176,7 @@ impl Template {
                     field: axis.field.clone(),
                 })
             };
-            let path = axis
-                .field
-                .parse::<crate::field::Path>()
-                .map_err(|_| unknown())?;
+            let path = axis.path.as_ref().ok_or_else(unknown)?;
             path.schema(layer.schema()).ok_or_else(unknown)?;
             let root = layer
                 .schema()
@@ -182,7 +196,7 @@ impl Template {
             let mut editable = layer.clone_box();
             for value in &axis.values {
                 editable
-                    .set_field_path(&axis.field, value.clone())
+                    .set_field_path(path, value.clone())
                     .map_err(|source| axis.error(source))?;
             }
         }

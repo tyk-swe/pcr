@@ -217,22 +217,13 @@ pub(crate) fn observe(
         let responder = direct_responder.unwrap_or(responder);
         let observation = match transport {
             Transport::Tcp => {
-                let tcp = response
-                    .packet
-                    .iter()
-                    .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Tcp))?;
-                let flags = u16::try_from(tcp.field("flags")?.as_u64()?).ok()?;
+                let tcp = response.packet.get::<Tcp>()?;
+                let flags = tcp.flags;
                 if flags & Tcp::RST != 0 {
                     Observation::new(responder, Correlation::TcpReset, "correlated TCP reset")
                 } else if flags & (Tcp::SYN | Tcp::ACK) == (Tcp::SYN | Tcp::ACK) {
-                    let request_tcp = request
-                        .iter()
-                        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Tcp))?;
-                    let request_sequence =
-                        u32::try_from(request_tcp.field("sequence")?.as_u64()?).ok()?;
-                    let acknowledgment =
-                        u32::try_from(tcp.field("acknowledgment")?.as_u64()?).ok()?;
-                    if acknowledgment != request_sequence.wrapping_add(1) {
+                    let request_tcp = request.get::<Tcp>()?;
+                    if tcp.acknowledgment != request_tcp.sequence.wrapping_add(1) {
                         return None;
                     }
                     Observation::new(responder, Correlation::TcpSynAck, "correlated TCP SYN/ACK")

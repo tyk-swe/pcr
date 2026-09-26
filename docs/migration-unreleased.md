@@ -767,3 +767,38 @@ Error types of the wire APIs:
   message displays exactly as the former `codec::Error::Invalid` did, and a
   hello that exceeds an encoder bound is `tls::Error::Encode` with the codec
   error as source.
+
+## Parsed field paths
+
+`Layer::field_path` and `Layer::set_field_path` take a `&field::Path`. Parse
+the caller's spelling once and reuse it:
+
+```rust
+let path: packetcraftr_core::field::Path = "questions[0].name".parse()?;
+let name = layer.field_path(&path);
+layer.set_field_path(&path, value)?;
+```
+
+A string that is not a path fails with `field::PathError` at the parse,
+where it used to read as an absent field or fail with
+`FieldError::UnknownField`. `Display` writes a path back in the same syntax.
+Hand-written `Layer` implementations are unaffected unless they overrode
+either method.
+
+## Built-in identity
+
+`BuiltinProtocol::of(layer)` and `BuiltinProtocol::identifies(layer)` decide
+by the layer's concrete type, not by the protocol name in its schema. A custom
+`Layer` whose schema says `ipv4` is not IPv4 to core: `of` returns `None`,
+route semantics refuse it as an unknown protocol carrying a route field, and
+it gets no built-in matcher or validation behavior. Give a custom layer its
+own protocol name and register it through `registry::Builder`.
+`BuiltinProtocol::from_id` and `from_name` still map registry identifiers and
+names.
+
+`protocol::semantics` no longer exports its field-name constants (`SOURCE`,
+`DESTINATION`, `SOURCE_PORT`, `DESTINATION_PORT`, `SEGMENTS`,
+`SEGMENTS_LEFT`, `LAST_ENTRY`, `TARGET_PROTOCOL`, `IPV4_OPTIONS`). Downcast
+to the built-in layer and read its field: `layer.field(semantics::DESTINATION)`
+on an Ethernet layer becomes
+`layer.downcast_ref::<Ethernet>().map(|ethernet| ethernet.destination)`.

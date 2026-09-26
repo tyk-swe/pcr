@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr_core::protocol::application::dns::Dns;
+use packetcraftr_core::protocol::transport::Udp;
 use packetcraftr_core::protocol::{BuiltinProtocol, transport_tuple_reversed};
 use packetcraftr_core::{
     decode::DecodedPacket, diagnostic::Diagnostic, layer::Raw, packet::Packet, registry::Registry,
@@ -146,13 +147,11 @@ fn direct_udp_match(request: &Packet, response: &Packet) -> bool {
 }
 
 pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
-    let udp_index = packet
+    let (udp_index, udp) = packet
         .iter()
-        .position(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))?;
-    let udp = packet.layer(udp_index)?;
-    let source_port = udp.field("source_port")?.as_u64()?;
-    let destination_port = udp.field("destination_port")?.as_u64()?;
-    let port_53 = source_port == 53 || destination_port == 53;
+        .enumerate()
+        .find_map(|(index, layer)| Some((index, layer.downcast_ref::<Udp>()?)))?;
+    let port_53 = udp.source_port == 53 || udp.destination_port == 53;
     let payload = packet.layer(udp_index.checked_add(1)?)?;
     match BuiltinProtocol::of(payload) {
         Some(BuiltinProtocol::Dns) if port_53 => {

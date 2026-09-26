@@ -7,7 +7,7 @@ use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::sem
 
 use super::error::Error;
 use super::intent::{
-    arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_mac,
+    arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_macs,
     packet_has_link_layer_intent,
 };
 use crate::link::{MacAddress, Mode, VlanTag};
@@ -325,8 +325,7 @@ fn select_link(
     neighbor_source: Option<IpAddr>,
     ipv4_broadcast: bool,
 ) -> Result<SelectedLink, Error> {
-    let explicit_destination_mac = outer_ethernet_mac(packet, semantics::DESTINATION);
-    let explicit_source_mac = outer_ethernet_mac(packet, semantics::SOURCE);
+    let (explicit_source_mac, explicit_destination_mac) = outer_ethernet_macs(packet);
     let (arp_source_mac, arp_destination_mac) = arp_link_macs(packet);
     let destination_mac = explicit_destination_mac
         .or(arp_destination_mac)

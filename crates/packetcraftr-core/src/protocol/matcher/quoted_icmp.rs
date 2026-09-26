@@ -4,11 +4,16 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::{
-    codec::NetworkEnvelope, field::FieldValue, layer::Layer, packet::Packet,
-    protocol::BuiltinProtocol, protocol::semantics,
+    codec::NetworkEnvelope,
+    field::WireValue,
+    layer::Layer,
+    packet::Packet,
+    protocol::BuiltinProtocol,
+    protocol::semantics,
+    protocol::transport::{Sctp, Tcp},
 };
 
-use super::{sctp::sctp_initiate_tag, unsigned_field};
+use super::{IcmpMessage, sctp::sctp_initiate_tag};
 use crate::protocol::network::ip_protocol;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,8 +55,8 @@ pub fn quoted_icmp_error_kind(
         return None;
     }
     let (icmp_protocol, layer) = directly_received_icmp(response)?;
-    let icmp_type = unsigned_field::<u8>(layer, "type")?;
-    let code = unsigned_field::<u8>(layer, "code")?;
+    let icmp = IcmpMessage::of(layer)?;
+    let (icmp_type, code) = (icmp.icmp_type, icmp.code);
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
             3 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
@@ -67,9 +72,7 @@ pub fn quoted_icmp_error_kind(
         BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpError::TimeExceeded,
         _ => return None,
     };
-    let FieldValue::Bytes(body) = layer.field("body")? else {
-        return None;
-    };
+    let body = icmp.body;
     let request_network = outer_network_envelope(request)?;
     let response_destination = outer_network_envelope(response)?.destination;
     if request_network.source != response_destination {
@@ -184,18 +187,17 @@ fn quoted_probe_matches(
             }
             match transport {
                 QuotedProbeTransport::Tcp => {
-                    let Some(sequence) = unsigned_field::<u32>(layer, "sequence") else {
+                    let Some(tcp) = layer.downcast_ref::<Tcp>() else {
                         return false;
                     };
-                    quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
+                    quoted.payload.get(4..8) == Some(&tcp.sequence.to_be_bytes()[..])
                 }
                 QuotedProbeTransport::Sctp => {
-                    let Some(verification_tag) = unsigned_field::<u32>(layer, "verification_tag")
-                    else {
+                    let Some(sctp) = layer.downcast_ref::<Sctp>() else {
                         return false;
                     };
-                    quoted.payload.get(4..8) == Some(&verification_tag.to_be_bytes()[..])
-                        && quoted_sctp_init_matches(layer, request, layer_index, quoted.payload)
+                    quoted.payload.get(4..8) == Some(&sctp.verification_tag.to_be_bytes()[..])
+                        && quoted_sctp_init_matches(sctp, request, layer_index, quoted.payload)
                 }
                 QuotedProbeTransport::Udp => true,
                 QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
@@ -216,13 +218,12 @@ fn quoted_probe_matches(
             else {
                 return false;
             };
-            let Some(icmp_type) = unsigned_field::<u8>(layer, "type") else {
-                return false;
-            };
-            let Some(code) = unsigned_field::<u8>(layer, "code") else {
-                return false;
-            };
-            let Some(FieldValue::Bytes(body)) = layer.field("body") else {
+            let Some(IcmpMessage {
+                icmp_type,
+                code,
+                body,
+            }) = IcmpMessage::of(layer)
+            else {
                 return false;
             };
             let Some(quoted_echo) = quoted.payload.first_chunk::<8>() else {
@@ -239,7 +240,7 @@ fn quoted_probe_matches(
 }
 
 fn quoted_sctp_init_matches(
-    layer: &dyn crate::layer::Layer,
+    sctp: &Sctp,
     request: &Packet,
     sctp_index: usize,
     payload: &[u8],
@@ -247,23 +248,15 @@ fn quoted_sctp_init_matches(
     let Some((_, chunk)) = sctp_initiate_tag(request, sctp_index, 1) else {
         return false;
     };
-    let Some(checksum) = layer.field("checksum") else {
-        return false;
-    };
-    let checksum_bytes = match checksum {
-        FieldValue::Unsigned(value) => {
-            let Ok(value) = u32::try_from(value) else {
-                return false;
-            };
-            value.to_le_bytes()
-        }
-        FieldValue::Bytes(value) => {
+    let checksum_bytes = match &sctp.checksum {
+        WireValue::Exact(value) => value.to_le_bytes(),
+        WireValue::Raw(value) => {
             let Ok(value) = <[u8; 4]>::try_from(value.as_ref()) else {
                 return false;
             };
             value
         }
-        _ => return false,
+        WireValue::Auto => return false,
     };
     payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
 }

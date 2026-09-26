@@ -147,7 +147,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     if !matches!(value, WireValue::Auto)
         || context
             .child
-            .is_none_or(|child| child.protocol_id().as_str() != "raw")
+            .is_none_or(|child| !child.is::<crate::layer::Raw>())
     {
         return Ok(());
     }

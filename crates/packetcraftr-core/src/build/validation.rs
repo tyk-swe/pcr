@@ -3,10 +3,11 @@
 
 use crate::{
     diagnostic::Diagnostic,
-    field::FieldValue,
+    field::WireValue,
     layer::{Malformed, Padding, Raw},
     packet::Packet,
     protocol::BuiltinProtocol,
+    protocol::link::{Ethernet, Vlan, Vlan8021ad},
     registry::Registry,
 };
 
@@ -130,32 +131,43 @@ fn validate_padding(
             outside_layer,
         });
     };
-    let outside_builtin = BuiltinProtocol::from_id(*outside_protocol);
+    let outside_builtin = BuiltinProtocol::of(outside);
     let child_layer = outside_layer
         .checked_add(1)
         .ok_or(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
         })?;
-    let Some(declared_child) = protocols.get(child_layer) else {
+    let Some(child) = packet.layer(child_layer) else {
         return Err(Error::InvalidPaddingBoundary {
             index,
             outside_layer,
         });
     };
-    let child_protocol = packet
-        .layer(child_layer)
-        .and_then(|child| child.downcast_ref::<Malformed>())
+    // A malformed child counts as the protocol it was meant to be.
+    let child_is = |protocol: BuiltinProtocol| match child
+        .downcast_ref::<Malformed>()
         .and_then(|child| child.intended_protocol.as_deref())
-        .unwrap_or(declared_child.as_str());
-    let link_declares_length = || match outside.field("ether_type") {
-        Some(FieldValue::Unsigned(value)) => value <= 1500,
-        Some(FieldValue::Bytes(value)) if value.len() == 2 => {
-            u16::from_be_bytes([value[0], value[1]]) <= 1500
-        }
-        _ => {
-            child_protocol == Padding::ID.as_str()
-                || BuiltinProtocol::from_name(child_protocol) == Some(BuiltinProtocol::Llc)
+    {
+        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
+        None => protocol.identifies(child),
+    };
+    let link_declares_length = || {
+        let ether_type = outside
+            .downcast_ref::<Ethernet>()
+            .map(|link| &link.ether_type)
+            .or_else(|| outside.downcast_ref::<Vlan>().map(|link| &link.ether_type))
+            .or_else(|| {
+                outside
+                    .downcast_ref::<Vlan8021ad>()
+                    .map(|link| &link.ether_type)
+            });
+        match ether_type {
+            Some(WireValue::Exact(value)) => *value <= 1500,
+            Some(WireValue::Raw(value)) if value.len() == 2 => {
+                u16::from_be_bytes([value[0], value[1]]) <= 1500
+            }
+            _ => child_is(BuiltinProtocol::Padding) || child_is(BuiltinProtocol::Llc),
         }
     };
     let has_declared_boundary = match outside_builtin {

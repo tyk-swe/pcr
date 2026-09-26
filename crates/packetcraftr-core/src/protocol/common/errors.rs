@@ -17,8 +17,16 @@ pub(crate) fn binding_protocol(layer: &dyn Layer) -> &str {
         .unwrap_or_else(|| layer.protocol_id().as_str())
 }
 
+/// Whether a parent binds this child as `protocol`: a malformed layer by the
+/// protocol it was meant to be, any other layer by its type.
 pub(crate) fn binds_as(layer: &dyn Layer, protocol: BuiltinProtocol) -> bool {
-    BuiltinProtocol::from_name(binding_protocol(layer)) == Some(protocol)
+    match layer
+        .downcast_ref::<Malformed>()
+        .and_then(|layer| layer.intended_protocol.as_deref())
+    {
+        Some(intended) => BuiltinProtocol::from_name(intended) == Some(protocol),
+        None => protocol.identifies(layer),
+    }
 }
 
 /// Whether a child layer only preserves opaque bytes, so a parent that would

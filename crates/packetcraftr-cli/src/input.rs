@@ -206,12 +206,14 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
             ),
         )
     })?;
-    let current = layer.field_path(&field).ok_or_else(|| {
+    let unknown = || {
         CliError::new(
             Kind::Usage,
             format!("--payload-file field {field} is unknown on layer {layer_index}"),
         )
-    })?;
+    };
+    let field_path = field.parse::<core::field::Path>().map_err(|_| unknown())?;
+    let current = layer.field_path(&field_path).ok_or_else(unknown)?;
     let core::field::FieldValue::Bytes(current) = current else {
         return Err(CliError::new(
             Kind::Usage,
@@ -232,7 +234,7 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
         InputKind::Recipe,
     )?;
     layer
-        .set_field_path(&field, core::field::FieldValue::Bytes(bytes.into()))
+        .set_field_path(&field_path, core::field::FieldValue::Bytes(bytes.into()))
         .map_err(|source| {
             CliError::new(
                 Kind::Usage,

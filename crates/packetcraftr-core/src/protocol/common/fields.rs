@@ -8,7 +8,7 @@ use crate::{
     codec::LayerEncodeContext,
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::Layer,
+    layer::{FieldError, Layer},
     registry::Discriminator,
 };
 
@@ -210,6 +210,27 @@ where
         layer.set_field(name, value.clone())?;
     }
     Ok(Box::new(layer))
+}
+
+/// Applies one document field, which may name a nested path such as
+/// `questions[0].name`, to a layer under construction. The document key is
+/// parsed here, at the document edge; a key that is not a path is an unknown
+/// field.
+pub(crate) fn set_document_field<L>(
+    layer: &mut L,
+    name: &str,
+    value: FieldValue,
+) -> Result<(), FieldError>
+where
+    L: Layer,
+{
+    let path = name
+        .parse::<crate::field::Path>()
+        .map_err(|_| FieldError::UnknownField {
+            protocol: *layer.protocol_id(),
+            field: name.to_owned(),
+        })?;
+    layer.set_field_path(&path, value)
 }
 
 /// Rejects a field supplied under two spellings at once.

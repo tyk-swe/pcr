@@ -64,6 +64,7 @@ fn register_catalog(builder: &mut crate::registry::Builder) -> Result<(), crate:
                 constructible: $constructible:literal,
                 exact_round_trip: $exact_round_trip:literal,
                 matcher: $matcher:ident,
+                layer: [$($layer:ty)?],
                 codec: $codec:ident
             }
         )*) => {{

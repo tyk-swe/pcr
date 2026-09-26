@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Built-in packet models, registration, and capabilities. [`BuiltinProtocol`]
-//! reports construction, round-trip, and matcher support;
+//! identifies a built-in layer by its concrete type and reports construction,
+//! round-trip, and matcher support;
 //! [`LinkType::BUILTIN_ROOTS`](crate::frame::LinkType::BUILTIN_ROOTS) lists
 //! capture bindings.
 //! [`builtin::registry`] provides the immutable default registry, and

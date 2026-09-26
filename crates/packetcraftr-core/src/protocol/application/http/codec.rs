@@ -1,83 +1,47 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::error::{Classification, Classified, Kind};
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 
-pub const MAX_HEADER_BYTES: usize = 65_536;
-pub const MAX_HEADERS: usize = 256;
-pub const MAX_START_LINE: usize = 8192;
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
-    #[error("HTTP/1 {0}")]
-    Invalid(&'static str),
-    #[error("HTTP/1 exceeds its {0} limit")]
-    Limit(&'static str),
-}
-impl Classified for Error {
-    fn classification(&self) -> Classification {
-        match self {
-            Self::Invalid(_) => Classification::new("packet.http", Kind::Packet, None),
-            Self::Limit(_) => Classification::new("policy.http_limit", Kind::Policy, None),
+use super::reflection::{http_layout, http_schema};
+use super::{
+    Body, Error, Head, Header, Http, MAX_HEADER_BYTES, MAX_HEADERS, MAX_START_LINE, StartLine,
+};
+use crate::{
+    codec::{DecodedLayer, EncodedLayer, LayerCodec, LayerDecodeContext, LayerEncodeContext},
+    field::FieldValue,
+    layer::{Layer, Raw, raw_layout},
+    protocol::{
+        BuiltinProtocol,
+        common::{ensure_encode_budget, invalid, typed_layer},
+    },
+    registry::Discriminator,
+};
+
+mod body;
+
+pub use body::{BodyDecoder, Progress};
+
+pub(super) const NAME: &str = BuiltinProtocol::Http.as_str();
+
+impl TryFrom<&[u8]> for Http {
+    type Error = Error;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        let bounded = &input[..input.len().min(MAX_HEADER_BYTES)];
+        let (head, length) = parse_head(&Bytes::copy_from_slice(bounded))?
+            .ok_or(Error::Invalid("headers are incomplete"))?;
+        if length != input.len() {
+            return Err(Error::Invalid(
+                "header wire includes body or trailing bytes",
+            ));
         }
+        Ok(Self { head })
     }
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Header {
-    pub name: String,
-    pub value: Bytes,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StartLine {
-    Request {
-        method: String,
-        target: Bytes,
-        version: String,
-    },
-    Response {
-        version: String,
-        status: u16,
-        reason: Bytes,
-    },
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Head {
-    pub start: StartLine,
-    pub headers: Vec<Header>,
-    wire: Bytes,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "type", content = "length", rename_all = "snake_case")]
-pub enum Body {
-    None,
-    Length(u64),
-    Chunked,
-    Close,
-    Tunnel,
 }
 impl Head {
-    pub fn wire(&self) -> &Bytes {
-        &self.wire
-    }
-    pub fn method(&self) -> Option<&str> {
-        match &self.start {
-            StartLine::Request { method, .. } => Some(method),
-            StartLine::Response { .. } => None,
-        }
-    }
-    pub fn status(&self) -> Option<u16> {
-        match self.start {
-            StartLine::Response { status, .. } => Some(status),
-            StartLine::Request { .. } => None,
-        }
-    }
-    pub fn values<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a [u8]> {
-        self.headers
-            .iter()
-            .filter(move |h| h.name.eq_ignore_ascii_case(name))
-            .map(|h| h.value.as_ref())
-    }
     /// RFC 9112 message-body precedence. Ambiguous framing is rejected before
     /// payload consumption; transfer/content encodings are never decoded here.
     pub fn body(&self, request_method: Option<&str>) -> Result<Body, Error> {
@@ -370,4 +334,75 @@ fn validate_line_endings(input: &[u8]) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct HttpCodec;
+impl LayerCodec for HttpCodec {
+    fn protocol_id(&self) -> &'static crate::layer::Id {
+        &http_schema().protocol
+    }
+    fn accepts_decoded_protocol(&self, protocol: &crate::layer::Id) -> bool {
+        matches!(protocol.as_str(), NAME | "raw")
+    }
+    fn published_schema(&self) -> Option<&'static crate::layer::Schema> {
+        Some(http_schema())
+    }
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, crate::codec::Error> {
+        let layer = typed_layer::<Http>(NAME, layer)?;
+        ensure_encode_budget(NAME, layer.head.wire().len(), context)?;
+        Ok(
+            EncodedLayer::header(layer.head.wire().to_vec(), Box::new(layer.clone()))
+                .with_fields(http_layout()),
+        )
+    }
+    fn decode(
+        &self,
+        input: Bytes,
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayer, crate::codec::Error> {
+        let Ok(Some((head, consumed))) = parse_head(&input) else {
+            let mut raw = DecodedLayer::terminal(Box::new(Raw::new(input.clone())), input.len());
+            raw.fields = raw_layout(input.len());
+            return Ok(raw);
+        };
+        Ok(DecodedLayer {
+            layer: Box::new(Http { head }),
+            consumed,
+            payload_len: input.len() - consumed,
+            next: if consumed < input.len() {
+                vec![Discriminator(0)]
+            } else {
+                Vec::new()
+            },
+            fields: http_layout(),
+            diagnostics: Vec::new(),
+            stop: false,
+            network: None,
+        })
+    }
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, crate::codec::Error> {
+        let Some(FieldValue::Bytes(wire)) = fields.get("wire") else {
+            return Err(invalid(
+                NAME,
+                "HTTP/1 dissection requires retained header wire",
+            ));
+        };
+        let mut layer =
+            Http::try_from(wire.as_ref()).map_err(|error| invalid(NAME, error.to_string()))?;
+        for (name, value) in fields {
+            if layer.field(name).as_ref() != Some(value) {
+                layer.set_field(name, value.clone())?;
+            }
+        }
+        Ok(Box::new(layer))
+    }
 }

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::head::{self, Body, Error, Header, MAX_HEADER_BYTES, MAX_START_LINE};
+use super::super::{Body, Error, Header, MAX_HEADER_BYTES, MAX_START_LINE};
+use super::parse_headers;
 use bytes::Bytes;
 
 #[derive(Clone, Debug)]
@@ -153,7 +154,7 @@ impl BodyDecoder {
                             }
                         } else if self.line.len() == 2 {
                             self.trailers =
-                                head::parse_headers(&Bytes::copy_from_slice(&self.trailer_lines))?;
+                                parse_headers(&Bytes::copy_from_slice(&self.trailer_lines))?;
                             if self.trailers.iter().any(|h| {
                                 ["content-length", "transfer-encoding", "host"]
                                     .iter()

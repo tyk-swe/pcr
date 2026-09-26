@@ -683,3 +683,15 @@ root-protocol mapping now exists once: use `LinkType::root_protocol`,
 `LinkType::for_root_protocol` (raw IP is written as `LinkType::RAW`), and
 `LinkType::is_raw_ip` instead of matching link-type constants by hand.
 `fuzz::packet_link_type` returns the same link types through that mapping.
+
+## CLI library entry point
+
+The `packetcraftr_cli` library now holds the whole command-line application.
+`packetcraftr_cli::main()` parses the process arguments, runs the command, and
+returns its `ExitCode`; the `packetcraftr` binary only calls it. Command-line
+behavior, flags, exit codes, and output documents are unchanged.
+
+`output::contract::Format`, `output::stats::Table`, and
+`output::capture::Retention` are plain output types and no longer implement
+`clap::ValueEnum`. Code that parsed them with clap declares its own value enum
+and converts it with `From`, as the CLI does.

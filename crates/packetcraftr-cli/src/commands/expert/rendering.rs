@@ -1,13 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use std::collections::BTreeMap;
 
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;

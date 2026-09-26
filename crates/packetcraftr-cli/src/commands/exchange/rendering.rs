@@ -3,7 +3,7 @@
 
 use packetcraftr_core::capture_file::Format;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{

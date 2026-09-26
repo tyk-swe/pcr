@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::FollowFormat;
+use crate::output::contract::FollowFormat;
 
 use packetcraftr_core::error::Kind;
 

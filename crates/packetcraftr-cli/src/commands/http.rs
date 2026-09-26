@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::application_output::EventOutput;
+use crate::output::{
+    self,
+    contract::{Command, ToolFormat},
+    http as wire,
+};
 use crate::{
     command_options::{ApplicationLimitsArgs, DecodeArgs, OfflineLimitsArgs},
     errors::CliError,
     rendering::{StreamEncoder, emit_aggregate, write_plain_line},
-};
-use packetcraftr_cli::output::{
-    self,
-    contract::{Command, ToolFormat},
-    http as wire,
 };
 use packetcraftr_core::{
     analysis::{

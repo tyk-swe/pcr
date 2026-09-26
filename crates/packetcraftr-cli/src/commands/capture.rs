@@ -7,15 +7,15 @@ mod rendering;
 mod writer;
 
 use self::arguments::Args;
+use crate::output::{
+    capture::Retention,
+    contract::{CaptureFormat, Command},
+};
 use crate::{
     errors::CliError,
     filtering::FrameSelector,
     rendering::StreamEncoder,
     system::{InterfaceSelector, resolve},
-};
-use packetcraftr_cli::output::{
-    capture::Retention,
-    contract::{CaptureFormat, Command},
 };
 use packetcraftr_core::{capture_file, error::Kind};
 use packetcraftr_netio as net;
@@ -57,7 +57,7 @@ pub(super) fn run(
         if args.rotate_bytes.is_some()
             || args.rotate_interval_ms.is_some()
             || args.rotate_files != 1
-            || args.retention != Retention::Stop
+            || Retention::from(args.retention) != Retention::Stop
         {
             return Err(CliError::new(
                 Kind::Usage,
@@ -131,7 +131,7 @@ pub(super) fn run(
                     rotate_bytes: args.rotate_bytes,
                     rotate_after: args.rotate_interval_ms.map(Duration::from_millis),
                     max_files: args.rotate_files,
-                    retention: args.retention,
+                    retention: args.retention.into(),
                 },
                 capture_file::Limits {
                     max_frames: budget.max_frames(),

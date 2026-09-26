@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::files::Files;
+use crate::output::{
+    self,
+    contract::{CaptureFormat, Command},
+};
 use crate::{
     command_options::Compression,
     errors::CliError,
@@ -15,10 +19,6 @@ use crate::{
 use packetcraftr::{
     Stats,
     capture::{self, Control, Event},
-};
-use packetcraftr_cli::output::{
-    self,
-    contract::{CaptureFormat, Command},
 };
 use packetcraftr_core::{
     self as core,

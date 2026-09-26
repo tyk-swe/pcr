@@ -9,8 +9,8 @@
 //! then delegates to the library exchange.
 
 use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
+use crate::output;
 use crate::system::{client, exchange};
-use packetcraftr_cli::output;
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 use std::sync::Arc;
@@ -318,7 +318,7 @@ fn emission_check(cancellation: &core::budget::Cancellation) -> Result<(), CliEr
 mod tests {
     use std::cell::RefCell;
 
-    use packetcraftr_cli::output::contract::{ExchangeFormat, ToolFormat};
+    use crate::output::contract::{ExchangeFormat, ToolFormat};
     use packetcraftr_core::budget::Cancellation;
     use packetcraftr_netio as net;
 

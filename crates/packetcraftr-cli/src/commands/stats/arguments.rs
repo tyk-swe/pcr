@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use packetcraftr_cli::output::stats::Table;
+use crate::output;
 
 use crate::command_options::{DecodeArgs, OfflineLimitsArgs};
 
@@ -43,4 +43,28 @@ pub(crate) struct Args {
     pub(crate) decode: DecodeArgs,
     #[command(flatten)]
     pub(crate) limits: OfflineLimitsArgs,
+}
+
+/// The `--table` selector for [`output::stats::Table`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Table {
+    Conversations,
+    Endpoints,
+    Protocols,
+    Ports,
+    Io,
+    Fragments,
+}
+
+impl From<Table> for output::stats::Table {
+    fn from(value: Table) -> Self {
+        match value {
+            Table::Conversations => Self::Conversations,
+            Table::Endpoints => Self::Endpoints,
+            Table::Protocols => Self::Protocols,
+            Table::Ports => Self::Ports,
+            Table::Io => Self::Io,
+            Table::Fragments => Self::Fragments,
+        }
+    }
 }

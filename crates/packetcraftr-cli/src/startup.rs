@@ -8,7 +8,7 @@ mod context;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::context::{Context, MachineFormat, from_env};
 use super::errors::{CANCELLED_EXIT_CODE, CliError, exit_code_for};
@@ -37,7 +37,7 @@ pub(crate) fn run() -> ExitCode {
             }
         };
     }
-    let format = cli.format;
+    let format = output::contract::Format::from(cli.format);
     if matches!(
         format,
         output::contract::Format::Raw

@@ -3,13 +3,13 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+use crate::output::contract::AggregateFormat;
 
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::protocol::BuiltinProtocol;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;

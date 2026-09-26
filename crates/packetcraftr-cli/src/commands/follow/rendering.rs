@@ -3,11 +3,11 @@
 
 use std::net::SocketAddr;
 
-use packetcraftr_cli::output::contract::FollowFormat;
+use crate::output::contract::FollowFormat;
 
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::commands::offline_analysis::{Retained, omitted_diagnostic};
 use crate::errors::CliError;

@@ -3,7 +3,7 @@
 
 //! Fuzz CLI command logic.
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 pub(super) mod arguments;
 mod rendering;
@@ -14,7 +14,7 @@ use std::time::Duration;
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;

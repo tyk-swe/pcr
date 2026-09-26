@@ -47,14 +47,12 @@ impl CaptureOutputArgs {
     /// the destination when the output is a capture stream.
     pub(crate) fn resolve(
         self,
-        format: packetcraftr_cli::output::contract::Format,
+        format: crate::output::contract::Format,
     ) -> Result<Option<CaptureOutput>, CliError> {
         self.compression.validate(format)?;
         let captures = match format {
-            packetcraftr_cli::output::contract::Format::Pcap => Some(capture_file::Format::Pcap),
-            packetcraftr_cli::output::contract::Format::PcapNg => {
-                Some(capture_file::Format::PcapNg)
-            }
+            crate::output::contract::Format::Pcap => Some(capture_file::Format::Pcap),
+            crate::output::contract::Format::PcapNg => Some(capture_file::Format::PcapNg),
             _ => None,
         };
         let Some(capture_format) = captures else {

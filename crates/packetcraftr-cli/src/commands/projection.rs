@@ -3,14 +3,14 @@
 
 //! Bounded selected-field output shared by read, dissect, and capture.
 
-use crate::{
-    errors::CliError,
-    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
-};
-use packetcraftr_cli::output::{
+use crate::output::{
     self,
     contract::{Command, Format},
     projection::{Cell, Row},
+};
+use crate::{
+    errors::CliError,
+    rendering::{StreamEncoder, bounded_json_len, emit_aggregate, write_raw},
 };
 use packetcraftr_core::{self as core, filter::Projection};
 use std::io::{self, Write};

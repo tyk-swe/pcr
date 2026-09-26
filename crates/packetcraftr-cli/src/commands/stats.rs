@@ -4,23 +4,24 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+use crate::output::contract::AggregateFormat;
 
 use std::time::Duration;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::offline_analysis::{omitted_diagnostic, prepare};
 use crate::errors::CliError;
 use crate::input::open_capture;
+use crate::output::stats::Table;
 use crate::rendering::emit_aggregate;
-use packetcraftr_cli::output::stats::Table;
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
+    let table = Table::from(arguments.table);
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
     let prepared = prepare(
@@ -30,7 +31,7 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     )?;
     let mut collector = analysis::stats::Collector::for_table(
         Duration::from_millis(arguments.interval_ms),
-        arguments.table.into(),
+        table.into(),
     )
     .map_err(CliError::classified)?;
 
@@ -44,16 +45,13 @@ pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliErr
     .map_err(CliError::classified)?;
     let mut report = collector.finish(&summary);
     let frames_read = summary.frames_read;
-    let diagnostics = cap_table(&mut report, arguments.table, arguments.top);
+    let diagnostics = cap_table(&mut report, table, arguments.top);
 
     match format {
-        AggregateFormat::Text => {
-            rendering::render_text(arguments.table, &report, frames_read, &diagnostics)
-        }
+        AggregateFormat::Text => rendering::render_text(table, &report, frames_read, &diagnostics),
         AggregateFormat::Json => {
-            let result =
-                output::stats::Report::try_from_report(arguments.table, report, frames_read)
-                    .map_err(CliError::classified)?;
+            let result = output::stats::Report::try_from_report(table, report, frames_read)
+                .map_err(CliError::classified)?;
             emit_aggregate(output::contract::Command::Stats, result, diagnostics)
         }
     }

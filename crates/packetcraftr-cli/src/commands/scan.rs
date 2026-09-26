@@ -9,11 +9,11 @@ mod payload;
 mod profiles;
 mod rendering;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use std::time::Duration;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::execution;

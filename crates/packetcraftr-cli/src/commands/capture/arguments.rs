@@ -86,8 +86,8 @@ pub(crate) struct Args {
     #[arg(long, default_value_t = 1)]
     pub(crate) rotate_files: usize,
     /// Stop at the file limit, or reuse only files created by this operation.
-    #[arg(long, value_enum, default_value_t = packetcraftr_cli::output::capture::Retention::Stop)]
-    pub(crate) retention: packetcraftr_cli::output::capture::Retention,
+    #[arg(long, value_enum, default_value_t = Retention::Stop)]
+    pub(crate) retention: Retention,
     /// Enable promiscuous capture mode.
     #[arg(long)]
     pub(crate) promiscuous: bool,
@@ -176,6 +176,22 @@ impl From<TimestampPrecisionArg> for TimestampPrecision {
         match value {
             TimestampPrecisionArg::Micro => Self::Micro,
             TimestampPrecisionArg::Nano => Self::Nano,
+        }
+    }
+}
+
+/// The `--retention` selector for [`crate::output::capture::Retention`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Retention {
+    Stop,
+    Ring,
+}
+
+impl From<Retention> for crate::output::capture::Retention {
+    fn from(value: Retention) -> Self {
+        match value {
+            Retention::Stop => Self::Stop,
+            Retention::Ring => Self::Ring,
         }
     }
 }

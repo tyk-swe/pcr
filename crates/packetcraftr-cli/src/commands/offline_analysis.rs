@@ -177,17 +177,13 @@ pub(super) fn ip_event_sink<F>(
     stream: &StreamEncoder,
 ) -> impl FnMut(analysis::IpEventRecord) -> Result<(), packetcraftr_core::error::BoundaryError>
 where
-    F: Into<packetcraftr_cli::output::contract::Format>,
+    F: Into<crate::output::contract::Format>,
 {
-    let stream = (format.into() == packetcraftr_cli::output::contract::Format::Ndjson)
-        .then(|| stream.clone());
+    let stream = (format.into() == crate::output::contract::Format::Ndjson).then(|| stream.clone());
     move |event| {
         if let Some(stream) = &stream {
             stream
-                .emit_data(
-                    packetcraftr_cli::output::reassembly::Event::from(event),
-                    Vec::new(),
-                )
+                .emit_data(crate::output::reassembly::Event::from(event), Vec::new())
                 .map_err(|error| CliError::from(error).into_boundary_error())?;
         }
         Ok(())

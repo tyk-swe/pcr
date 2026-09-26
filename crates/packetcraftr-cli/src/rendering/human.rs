@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use packetcraftr_core as core;
 use packetcraftr_core::budget::Interrupted;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use super::style::{
     error_style, style_document, style_human_line, style_summary_line, terminal_document,

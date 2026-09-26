@@ -3,9 +3,9 @@
 
 pub(super) mod arguments;
 
-use packetcraftr_cli::output::contract::BuildFormat;
+use crate::output::contract::BuildFormat;
 
-use packetcraftr_cli::output;
+use crate::output;
 use packetcraftr_core as core;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Classified as _;

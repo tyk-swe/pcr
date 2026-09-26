@@ -7,7 +7,7 @@ use std::io::{self, Write};
 
 use packetcraftr_core as core;
 
-use packetcraftr_cli::output;
+use crate::output;
 use serde::Serialize;
 
 use crate::errors::CliError;

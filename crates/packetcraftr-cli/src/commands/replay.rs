@@ -8,7 +8,7 @@ mod conversion;
 mod rendering;
 mod selection;
 
-use packetcraftr_cli::output::contract::ExchangeFormat;
+use crate::output::contract::ExchangeFormat;
 
 use std::sync::Arc;
 use std::time::Duration;

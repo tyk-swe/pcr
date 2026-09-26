@@ -6,14 +6,14 @@
 pub(super) mod arguments;
 mod rendering;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use std::time::Duration;
 
 use packetcraftr_core as core;
 use packetcraftr_netio as net;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use self::arguments::Args;
 use super::execution;

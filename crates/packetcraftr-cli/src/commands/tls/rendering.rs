@@ -3,12 +3,12 @@
 
 use std::fmt::Write as _;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 
 use packetcraftr_core as core;
 use packetcraftr_core::analysis;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::commands::offline_analysis::Retained;
 use crate::errors::CliError;

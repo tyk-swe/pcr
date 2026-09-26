@@ -8,7 +8,7 @@ use packetcraftr_core::error::Kind;
 #[cfg(test)]
 use packetcraftr_netio as net;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 #[derive(Debug)]
 pub(crate) struct CliError {

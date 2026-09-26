@@ -29,7 +29,7 @@ pub(super) struct Written {
     pub(super) bytes: u64,
 }
 
-impl From<Written> for packetcraftr_cli::output::follow::WrittenFile {
+impl From<Written> for crate::output::follow::WrittenFile {
     fn from(value: Written) -> Self {
         Self {
             direction: value.direction,

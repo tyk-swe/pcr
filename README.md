@@ -315,7 +315,7 @@ Depend on the crate that owns the capability you need:
 | `packetcraftr-core` | `Packet`, protocol codecs/reflection, bounded documents, capture files, filters, and `analysis::run` |
 | `packetcraftr-netio` | Interface/route providers, capture/transmit resources, and platform backends |
 | `packetcraftr` | `Client` preparation/send/exchange, `policy`, and DNS/replay/scan/traceroute/fuzz workflows |
-| `packetcraftr-cli` | Arguments and rendering; its `output` module owns machine representations and the stream encoder |
+| `packetcraftr-cli` | Arguments, composition, and rendering behind `packetcraftr_cli::main()`; its `output` module owns machine representations and the stream encoder |
 
 Core is portable and independent of native I/O. A workflow uses one policy
 implementation for operation admission and final-wire checks; resolver and

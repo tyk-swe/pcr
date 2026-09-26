@@ -6,7 +6,7 @@ mod rendering;
 
 use std::path::Path;
 
-use packetcraftr_cli::output::contract::ToolFormat;
+use crate::output::contract::ToolFormat;
 use packetcraftr_core::analysis::{self, forwarding};
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::filter::Filter;
@@ -18,8 +18,8 @@ use crate::command_options::CaptureReaderBoundsArgs;
 use crate::errors::CliError;
 use crate::filtering::{self, Capabilities};
 use crate::input::open_capture_hashed;
+use crate::output::forwarding::CaptureSource;
 use crate::rendering::StreamEncoder;
-use packetcraftr_cli::output::forwarding::CaptureSource;
 
 /// The process status when the comparison completed and published its report
 /// but the verdict was not `pass`. `fail` and `inconclusive` share this code;

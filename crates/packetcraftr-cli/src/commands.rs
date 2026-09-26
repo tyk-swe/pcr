@@ -13,11 +13,11 @@
 //! [`render_aggregate_rows`] renders the Text/Json match the aggregate
 //! commands share.
 
-use packetcraftr_cli::output::contract::Format;
+use crate::output::contract::Format;
 use packetcraftr_core::error::Kind;
 
+use crate::output;
 use clap::Subcommand;
-use packetcraftr_cli::output;
 
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};

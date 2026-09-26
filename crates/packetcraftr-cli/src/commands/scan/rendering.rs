@@ -5,7 +5,7 @@ use crate::rendering::StreamEncoder;
 
 use packetcraftr_core as core;
 
-use packetcraftr_cli::output;
+use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{

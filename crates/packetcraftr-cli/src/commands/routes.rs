@@ -1,9 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_cli::output::contract::AggregateFormat;
+use crate::output::contract::AggregateFormat;
 
-use packetcraftr_cli::output;
+use crate::output;
 use packetcraftr_netio as net;
 use packetcraftr_netio::interface::Provider as _;
 use packetcraftr_netio::route::Provider as _;

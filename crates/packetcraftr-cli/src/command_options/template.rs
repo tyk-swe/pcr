@@ -20,6 +20,8 @@ pub(crate) struct TemplateArgs {
     /// unsigned range, e.g. 0.ttl=[1,64] or 0.ttl=1..64:8. Repeat for a
     /// Cartesian product; the last axis varies fastest.
     #[arg(long = "axis", value_name = "LAYER.FIELD=[VALUES]|START..END[:STEP]")]
+    // clap prints this doc comment verbatim as --help text, so it is not rustdoc markup.
+    #[allow(rustdoc::broken_intra_doc_links)]
     pub(crate) axes: Vec<String>,
     /// Maximum packets in the complete Cartesian product, checked before preparation.
     #[arg(long, default_value_t = DEFAULT_MAX_TEMPLATE_PACKETS)]

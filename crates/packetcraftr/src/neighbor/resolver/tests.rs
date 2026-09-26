@@ -9,8 +9,13 @@ use std::sync::{
 };
 use std::time::{Duration, SystemTime};
 
+use packetcraftr_core::build::{self, Builder};
+use packetcraftr_core::codec::Context;
+use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::LinkType;
-use packetcraftr_core::packet::MacAddress;
+use packetcraftr_core::packet::{MacAddress, Packet};
+use packetcraftr_core::protocol::builtin;
+use packetcraftr_core::protocol::link::{Arp, Ethernet};
 use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::Decision;
@@ -469,15 +474,24 @@ fn arp_response(request: &Request, sender: MacAddress) -> Frame {
     else {
         panic!("ARP fixture requires IPv4")
     };
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&request.interface_mac.0);
-    bytes.extend_from_slice(&sender.0);
-    bytes.extend_from_slice(&0x0806_u16.to_be_bytes());
-    bytes.extend_from_slice(&[0, 1, 0x08, 0, 6, 4, 0, 2]);
-    bytes.extend_from_slice(&sender.0);
-    bytes.extend_from_slice(&target.octets());
-    bytes.extend_from_slice(&request.interface_mac.0);
-    bytes.extend_from_slice(&interface_source.octets());
+    let mut reply = Packet::new();
+    reply.push(Ethernet {
+        destination: request.interface_mac.0,
+        source: sender.0,
+        ether_type: WireValue::Auto,
+    });
+    reply.push(Arp {
+        operation: 2,
+        sender_hardware: sender.0,
+        sender_protocol: target,
+        target_hardware: request.interface_mac.0,
+        target_protocol: interface_source,
+        ..Arp::default()
+    });
+    let bytes = Builder::new(builtin::registry())
+        .build(reply, Context::default(), build::Options::default())
+        .expect("ARP response fixture builds")
+        .bytes;
     let mut frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes)
         .expect("ARP response fixture");
     frame.interface = Some(request.interface.index);

@@ -10,8 +10,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use bytes::Bytes;
+use packetcraftr_core::build::{self, Builder};
+use packetcraftr_core::codec::Context;
+use packetcraftr_core::decode::{self, Dissector};
+use packetcraftr_core::field::WireValue;
 use packetcraftr_core::frame::{Frame, LinkType};
-use packetcraftr_core::packet::MacAddress;
+use packetcraftr_core::layer::Padding;
+use packetcraftr_core::packet::{MacAddress, Packet};
+use packetcraftr_core::protocol::builtin;
+use packetcraftr_core::protocol::link::{Arp, Ethernet};
 use packetcraftr_netio::Error as LiveIoError;
 use packetcraftr_netio::capture;
 use packetcraftr_netio::interface::Id as InterfaceId;
@@ -183,25 +191,40 @@ impl capture::Provider for RecordingTransmit {
 
 /// The target of an untagged Ethernet ARP request, and the reply that
 /// resolves it to [`NEIGHBOR_MAC`].
-fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Vec<u8>)> {
-    const ARP_REQUEST: [u8; 10] = [0x08, 0x06, 0, 1, 0x08, 0, 6, 4, 0, 1];
-    if request.len() < 42 || request[12..22] != ARP_REQUEST {
+fn arp_reply(request: &[u8]) -> Option<(Ipv4Addr, Bytes)> {
+    let frame = Frame::new(
+        SystemTime::UNIX_EPOCH,
+        LinkType::ETHERNET,
+        Bytes::copy_from_slice(request),
+    )
+    .ok()?;
+    let decoded = Dissector::new(builtin::registry())
+        .decode(frame, decode::Options::default())
+        .ok()?;
+    decoded.packet.layer(0)?.downcast_ref::<Ethernet>()?;
+    let arp = decoded.packet.layer(1)?.downcast_ref::<Arp>()?;
+    if arp.operation != 1 {
         return None;
     }
-    let requester_mac = &request[22..28];
-    let requester_ip = &request[28..32];
-    let target_ip = &request[38..42];
-    let mut reply = Vec::with_capacity(60);
-    reply.extend_from_slice(requester_mac);
-    reply.extend_from_slice(&NEIGHBOR_MAC.0);
-    reply.extend_from_slice(&[0x08, 0x06, 0, 1, 0x08, 0, 6, 4, 0, 2]);
-    reply.extend_from_slice(&NEIGHBOR_MAC.0);
-    reply.extend_from_slice(target_ip);
-    reply.extend_from_slice(requester_mac);
-    reply.extend_from_slice(requester_ip);
-    reply.resize(60, 0);
-    let target = Ipv4Addr::new(target_ip[0], target_ip[1], target_ip[2], target_ip[3]);
-    Some((target, reply))
+    let mut reply = Packet::new();
+    reply.push(Ethernet {
+        destination: arp.sender_hardware,
+        source: NEIGHBOR_MAC.0,
+        ether_type: WireValue::Auto,
+    });
+    reply.push(Arp {
+        operation: 2,
+        sender_hardware: NEIGHBOR_MAC.0,
+        sender_protocol: arp.target_protocol,
+        target_hardware: arp.sender_hardware,
+        target_protocol: arp.sender_protocol,
+        ..Arp::default()
+    });
+    reply.push(Padding::new(vec![0_u8; 18]));
+    let reply = Builder::new(builtin::registry())
+        .build(reply, Context::default(), build::Options::default())
+        .ok()?;
+    Some((arp.target_protocol, reply.bytes))
 }
 
 /// A capture session that is ready at once and yields the replies queued

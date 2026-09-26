@@ -5,7 +5,8 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::{Cancellation, Deadline};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_netio::deadline::POLL_INTERVAL;
 
 /// Injectable delay seam shared by rate-limited and replay workflows.
 pub trait Clock {
@@ -73,7 +74,7 @@ impl Clock for CancellableClock {
             if remaining.is_zero() {
                 return Ok(());
             }
-            std::thread::sleep(remaining.min(Cancellation::POLL_INTERVAL));
+            std::thread::sleep(remaining.min(POLL_INTERVAL));
         }
     }
     fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {

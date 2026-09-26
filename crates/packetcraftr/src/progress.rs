@@ -14,8 +14,9 @@ use std::{
     thread,
 };
 
-use packetcraftr_core::budget::{Cancellation, Cancelled, Deadline, DeadlineExceeded, Interrupted};
-use packetcraftr_core::error::{BoundaryError, Classification, Kind};
+use packetcraftr_core::budget::{Cancelled, Deadline, DeadlineExceeded, Interrupted};
+use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_netio::deadline::POLL_INTERVAL;
 
 /// Maximum concurrent callback workers admitted by one runtime.
 pub const MAX_WORKER_CAPACITY: usize = 8;
@@ -178,7 +179,12 @@ pub enum EmitError {
 
 impl From<Cancelled> for EmitError {
     fn from(cancelled: Cancelled) -> Self {
-        Self::Output(cancelled.into_boundary_error())
+        Self::Output(BoundaryError::with_source(
+            cancelled.to_string(),
+            cancelled.classification(),
+            Vec::new(),
+            cancelled,
+        ))
     }
 }
 
@@ -252,7 +258,7 @@ impl<T: Send + 'static> Sink<T> {
         let result = (|| {
             loop {
                 deadline.enforce()?;
-                let remaining = deadline.remaining()?.min(Cancellation::POLL_INTERVAL);
+                let remaining = deadline.remaining()?.min(POLL_INTERVAL);
                 match self.outcomes.recv_timeout(remaining) {
                     Ok(outcome) => {
                         self.in_flight.set(false);
@@ -315,7 +321,6 @@ const FIXTURE_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(30)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_core::error::Classified;
     use std::time::{Duration, Instant};
 
     fn wait_for_cleanup(runtime: &Runtime) {

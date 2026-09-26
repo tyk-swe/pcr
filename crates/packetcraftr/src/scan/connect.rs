@@ -4,6 +4,7 @@
 //! Explicit kernel TCP scanning with socket evidence and bounded rolling admission.
 
 use super::{Classification, Request, WORKFLOW};
+use crate::deadline::DeadlineExt as _;
 use crate::{
     BoundaryError,
     clock::Clock,

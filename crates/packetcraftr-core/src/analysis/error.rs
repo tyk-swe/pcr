@@ -186,7 +186,7 @@ impl Classified for Error {
     }
 }
 
-crate::deadline_error_conversions!(Error);
+crate::budget::deadline_error_conversions!(Error);
 
 const GENERAL_RESOURCE_REMEDIATION: &str = "trim the capture before analysis or deliberately raise the finite budget; display filters do not reduce physical input, conversation-index, or scope costs";
 const IP_RESOURCE_REMEDIATION: &str = "trim or pre-filter the capture, or deliberately raise the \

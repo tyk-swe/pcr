@@ -19,6 +19,7 @@ use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::{
     Error,
     capture::{self, Session as _},
+    deadline,
     link::{Capability, Mode},
     neighbor,
     route::{
@@ -293,8 +294,8 @@ impl capture::Session for EmptySession {
 fn cancellable_capture_backs_off_after_early_empty_polls() {
     for (timeout, maximum_polls) in [
         (Duration::ZERO, 1),
-        (Cancellation::POLL_INTERVAL / 5, 1),
-        (Cancellation::POLL_INTERVAL * 4, 4),
+        (deadline::POLL_INTERVAL / 5, 1),
+        (deadline::POLL_INTERVAL * 4, 4),
     ] {
         let polls = Arc::new(AtomicUsize::new(0));
         let mut session = capture::Cancellable::new(

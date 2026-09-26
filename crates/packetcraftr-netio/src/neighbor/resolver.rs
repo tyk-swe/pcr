@@ -4,8 +4,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::deadline::remaining_before;
 use bytes::Bytes;
-use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::frame::Frame;
 
 use crate::{

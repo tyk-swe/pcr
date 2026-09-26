@@ -6,8 +6,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::{decode::Dissector, registry::Registry};
+use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{
     Error as LiveIoError,
     capture::{OverflowPolicy, Session, Statistics},

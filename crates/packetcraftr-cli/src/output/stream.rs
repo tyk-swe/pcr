@@ -8,6 +8,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
+use packetcraftr::deadline::DeadlineExt as _;
 use packetcraftr::progress::{Runtime, Sink};
 
 use serde::Serialize;

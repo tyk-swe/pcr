@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use packetcraftr_core::budget::remaining_before;
+use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
 
 use crate::planning::expired;

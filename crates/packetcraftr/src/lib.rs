@@ -34,6 +34,7 @@ mod address;
 pub mod capture;
 mod client;
 pub mod clock;
+pub mod deadline;
 pub mod dns;
 mod error;
 mod evidence;

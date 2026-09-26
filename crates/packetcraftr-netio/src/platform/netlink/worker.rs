@@ -27,8 +27,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::deadline::remaining_before;
 use futures_util::future::{Either, select};
-use packetcraftr_core::budget::remaining_before;
 use rtnetlink::{Handle, new_connection};
 
 use crate::{

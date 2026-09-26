@@ -4,8 +4,8 @@
 //! Admission shared by native capture and route-query workers. A permit belongs
 //! to the resources being cleaned up, never to the caller's waiting deadline.
 
+use crate::deadline::remaining_before;
 use crate::resources::NativeSnapshot;
-use packetcraftr_core::budget::remaining_before;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};

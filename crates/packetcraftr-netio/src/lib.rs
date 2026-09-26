@@ -14,6 +14,8 @@
 #[forbid(unsafe_code)]
 pub mod capture;
 #[forbid(unsafe_code)]
+pub mod deadline;
+#[forbid(unsafe_code)]
 mod error;
 #[forbid(unsafe_code)]
 pub mod interface;

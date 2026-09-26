@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use packetcraftr_core::budget::remaining_before;
+use crate::deadline::remaining_before;
 
 use crate::platform::workers::{JoinAttempt, WorkerPermit, join_with_deadline};
 

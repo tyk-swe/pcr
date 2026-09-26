@@ -64,6 +64,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
         (
             NeighborError::InvalidRequest {
                 message: "fixture".to_owned(),
+                source: None,
             },
             "internal.neighbor_invariant",
             Kind::Internal,

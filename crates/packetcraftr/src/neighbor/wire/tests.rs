@@ -434,6 +434,37 @@ fn request_builder_rejects_family_and_mtu_mismatches() {
     ));
 }
 
+/// A frame core refuses to build keeps that refusal as its source, published
+/// once, as a cause, rather than repeated in the message.
+#[test]
+fn request_builder_keeps_the_core_build_refusal_as_its_source() {
+    use packetcraftr_core::error::Classified;
+
+    let mut request = ipv4_request();
+    request.vlan_tags = vec![tag(VlanKind::Ieee8021Q, 0, false, 4096)];
+    let error = build_request_frame(&request).expect_err("VLAN 4096 is refused");
+
+    let crate::neighbor::Error::InvalidRequest {
+        source: Some(source),
+        ..
+    } = &error
+    else {
+        panic!("expected an invalid request with a source: {error:?}");
+    };
+    assert!(
+        source
+            .downcast_ref::<packetcraftr_core::build::Error>()
+            .is_some(),
+        "{source:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "neighbor request is invalid: discovery frame does not build"
+    );
+    assert_eq!(error.causes().first(), Some(&source.to_string()));
+    assert_eq!(error.classification().code, "internal.neighbor_invariant");
+}
+
 #[test]
 fn arp_response_matcher_accepts_only_exact_correlated_evidence() {
     let request = ipv4_request();

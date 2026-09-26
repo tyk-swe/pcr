@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use bytes::Bytes;
 
 use crate::neighbor::Request as NeighborRequest;
-use crate::neighbor::error::invalid_request;
+use crate::neighbor::error::{invalid_request, unbuildable_request};
 use packetcraftr_core::build::{Builder, BuiltPacket, Options};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::field::WireValue;
@@ -55,7 +55,7 @@ pub(in crate::neighbor) fn build_request_frame(
                 options: vec![ndp::MessageOption::source_link_layer(request.interface_mac)],
             };
             let message = solicitation.to_icmpv6().map_err(|source| {
-                invalid_request(format!("neighbor solicitation does not encode: {source}"))
+                unbuildable_request("neighbor solicitation does not encode", source)
             })?;
             let mut packet = link_header(request, destination);
             let network = packet.len();
@@ -145,5 +145,5 @@ pub(super) fn push_vlan(packet: &mut Packet, tag: VlanTag) {
 fn build_packet(packet: Packet) -> Result<BuiltPacket, crate::neighbor::Error> {
     Builder::new(builtin::registry())
         .build(packet, Context::default(), Options::default())
-        .map_err(|source| invalid_request(format!("discovery frame does not build: {source}")))
+        .map_err(|source| unbuildable_request("discovery frame does not build", source))
 }

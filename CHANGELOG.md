@@ -792,6 +792,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   flattening it into the message, so it is reported once, as a cause. The
   message now reads "capture bounds are invalid"; the code stays
   `cli.neighbor_limit`.
+- A neighbor request frame that core refuses to encode or build keeps that
+  refusal as the `source` of `neighbor::Error::InvalidRequest` (a new
+  `Option<error::Source>` field) instead of flattening it into the message, so
+  it is reported once, as a cause. The message now reads "discovery frame does
+  not build" or "neighbor solicitation does not encode"; the code stays
+  `internal.neighbor_invariant`.
 - DHCP limits above 65535 message bytes, 4096 options, or nesting depth 8 are
   refused with `dhcp::Error::InvalidLimit` (`policy.dhcp_limit`) instead of
   being silently lowered to those ceilings, which are now public as

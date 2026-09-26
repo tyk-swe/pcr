@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_core::{
-    error::{Classification, Classified, Kind},
+    error::{Classification, Classified, Kind, Source},
     frame::Frame,
 };
 
@@ -33,8 +33,14 @@ pub enum Error {
         evidence_truncated: bool,
         capture_statistics: Statistics,
     },
+    /// `source` is the core refusal when encoding or building the request
+    /// frame is what failed.
     #[error("neighbor request is invalid: {message}")]
-    InvalidRequest { message: String },
+    InvalidRequest {
+        message: String,
+        #[source]
+        source: Option<Source>,
+    },
     /// `source` is the capture-limit refusal when the options' capture
     /// bounds are what failed.
     #[error("neighbor resolver options are invalid: {message}")]
@@ -153,5 +159,18 @@ pub(super) fn invalid_options(message: String) -> Error {
 pub(super) fn invalid_request(message: impl Into<String>) -> Error {
     Error::InvalidRequest {
         message: message.into(),
+        source: None,
+    }
+}
+
+/// A request frame that core refused to encode or build, keeping the refusal
+/// as the source.
+pub(super) fn unbuildable_request(
+    message: impl Into<String>,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> Error {
+    Error::InvalidRequest {
+        message: message.into(),
+        source: Some(Source::new(source)),
     }
 }

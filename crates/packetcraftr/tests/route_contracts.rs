@@ -326,6 +326,7 @@ fn route_lookup_failures_retain_the_provider_error_as_a_source() {
     // A transparent variant delegates rather than repeating its own message.
     let neighbor = RouteError::Neighbor(Box::new(NeighborError::InvalidRequest {
         message: "fixture".to_owned(),
+        source: None,
     }));
     assert!(neighbor.causes().is_empty());
     assert_eq!(neighbor.to_string(), "neighbor request is invalid: fixture");

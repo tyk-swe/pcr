@@ -22,9 +22,9 @@ use crate::{
 
 mod decode;
 mod encode;
-pub mod name;
+mod name;
 
-pub use decode::{decode_name, read_u16};
+pub use decode::decode_name;
 
 pub(super) const NAME: &str = BuiltinProtocol::Dns.as_str();
 pub(super) const HEADER_LEN: usize = 12;

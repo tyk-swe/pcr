@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::application::dns::name::{MAX_LABEL_LEN, MAX_NAME_LEN};
+use packetcraftr_core::protocol::application::dns::{MAX_LABEL_LEN, MAX_NAME_LEN};
 
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.

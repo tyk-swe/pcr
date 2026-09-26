@@ -7,7 +7,7 @@ use crate::protocol::application::dns::Error;
 ///
 /// Fails with [`Error::TruncatedField`] naming `field` when the message
 /// ends before the value does.
-pub fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
+pub(super) fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, Error> {
     let bytes: [u8; 2] = message
         .get(offset..offset.saturating_add(2))
         .and_then(|slice| <[u8; 2]>::try_from(slice).ok())

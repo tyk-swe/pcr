@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::protocol::application::dns::{self as core_dns, decode_name, read_u16};
+use packetcraftr_core::protocol::application::dns::{self as core_dns, decode_name};
 
 use super::name::canonical_query_name;
 use super::relevance::{RelevantRecords, filter_relevant_records};
@@ -143,6 +143,20 @@ fn advance(offset: usize, delta: usize, field: &'static str) -> Result<usize, Wi
             field,
             offset,
             needed: offset.saturating_add(delta),
+        }))
+}
+
+/// Reads the big-endian `u16` at `offset`, naming `field` when the message
+/// ends first.
+fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, WireError> {
+    message
+        .get(offset..offset.saturating_add(2))
+        .and_then(|bytes| <[u8; 2]>::try_from(bytes).ok())
+        .map(u16::from_be_bytes)
+        .ok_or(WireError::Decode(core_dns::Error::TruncatedField {
+            field,
+            offset,
+            needed: offset.saturating_add(2),
         }))
 }
 

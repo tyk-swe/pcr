@@ -3,7 +3,7 @@
 
 use super::super::{DecodeLimits, Dns, Error, Name, Question};
 use bytes::Bytes;
-pub use primitives::read_u16;
+use primitives::read_u16;
 mod primitives;
 mod records;
 
@@ -15,7 +15,38 @@ pub(super) fn advance(offset: usize, delta: usize, field: &'static str) -> Resul
     })
 }
 
-/// Decompresses one bounded, lossless name and returns its wire resume offset.
+/// Decodes the possibly-compressed name that starts at `offset` in `message`,
+/// returning it with the offset where the reader continues.
+///
+/// The labels keep their exact octets. The resume offset is just past the
+/// name's own encoding: for a compressed name, two bytes past the *first*
+/// pointer, not past the bytes the pointer reached.
+///
+/// Every offset is bounds-checked, every compression pointer must address a
+/// strictly earlier offset, no offset is expanded twice, at most
+/// [`DecodeLimits::max_name_pointers`] pointers are followed, and the name is
+/// capped at [`MAX_NAME_LEN`](super::super::MAX_NAME_LEN) wire octets, so the
+/// input cannot make decoding loop or allocate without bound. The limits are
+/// validated first.
+///
+/// # Examples
+///
+/// ```
+/// use bytes::Bytes;
+/// use packetcraftr_core::protocol::application::dns::{DecodeLimits, Error, decode_name};
+///
+/// // "a" then a pointer back to the root label at offset 0.
+/// let message = Bytes::from_static(&[0x00, 0x01, b'a', 0xc0, 0x00]);
+/// let (name, resume) = decode_name(&message, 1, DecodeLimits::default()).expect("bounded name");
+/// assert_eq!(name.labels(), [Bytes::from_static(b"a")]);
+/// assert_eq!(resume, 5);
+///
+/// // A pointer that does not move backward cannot terminate.
+/// assert!(matches!(
+///     decode_name(&Bytes::from_static(&[0xc0, 0x00]), 0, DecodeLimits::default()),
+///     Err(Error::SelfPointer { offset: 0 }),
+/// ));
+/// ```
 pub fn decode_name(
     message: &Bytes,
     offset: usize,

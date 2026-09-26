@@ -8,7 +8,6 @@ use thiserror::Error;
 
 use crate::BoundaryError;
 use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
-use packetcraftr_core::protocol::application::dns::name;
 
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
@@ -43,7 +42,10 @@ pub enum WireError {
     UnsupportedEdnsVersion { version: u8 },
     #[error("DNS EDNS metadata is invalid: {message}")]
     InvalidEdns { message: String },
-    #[error("DNS name exceeds the {}-byte wire limit", name::MAX_NAME_LEN)]
+    #[error(
+        "DNS name exceeds the {}-byte wire limit",
+        packetcraftr_core::protocol::application::dns::MAX_NAME_LEN
+    )]
     NameTooLong,
     #[error("DNS-over-TCP frame declares a zero-length DNS message")]
     TcpFrameZeroLength,

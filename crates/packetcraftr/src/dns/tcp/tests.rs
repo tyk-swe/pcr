@@ -21,11 +21,11 @@ fn assert_same_error(actual: &Error, expected: &Error) {
 const ENDPOINT: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 53);
 const LOCAL: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 49_152);
 
-fn exchange_with_connector(
+fn query_with_connector(
     request: Request<'_>,
     connector: &ScriptedConnector,
 ) -> Result<Response, Error> {
-    exchange_with_clock(request, connector, || {
+    query_with_clock(request, connector, || {
         connector.stream.state.lock().unwrap().now
     })
 }
@@ -220,7 +220,7 @@ fn request(query: &[u8]) -> Request<'_> {
 fn explicit_provider_endpoint_mismatch_cannot_write_query_bytes() {
     let mut provider = connector(vec![0, 1, 1]);
     provider.stream.peer = "127.0.0.2:53".parse().unwrap();
-    let error = exchange(request(b"q"), &provider).unwrap_err();
+    let error = query(request(b"q"), &provider).unwrap_err();
     assert!(matches!(error, Error::Connect { source: None, .. }));
     assert!(provider.stream.state.lock().unwrap().output.is_empty());
 }
@@ -237,7 +237,7 @@ fn provider_read_and_write_timeouts_preserve_phase_and_query_progress() {
                 _ => unreachable!(),
             }
         }
-        let error = exchange(request(b"q"), &provider).unwrap_err();
+        let error = query(request(b"q"), &provider).unwrap_err();
         assert_same_error(
             &error,
             &Error::Timeout {
@@ -271,7 +271,7 @@ fn partial_and_interrupted_io_preserves_exact_frames() {
         state.read_interrupts = 1;
     }
 
-    let response = exchange_with_connector(request(b"query"), &connector).unwrap();
+    let response = query_with_connector(request(b"query"), &connector).unwrap();
 
     assert_eq!(response.local_address, LOCAL);
     assert_eq!(response.frame.as_ref(), input);
@@ -317,7 +317,7 @@ fn framing_failures_are_distinct_and_bounded_before_allocation() {
         ),
     ] {
         let connector = connector(input);
-        let error = exchange_with_connector(
+        let error = query_with_connector(
             Request {
                 max_message_bytes: maximum,
                 ..request(b"q")
@@ -331,8 +331,8 @@ fn framing_failures_are_distinct_and_bounded_before_allocation() {
 }
 
 #[test]
-fn one_exchange_returns_only_the_first_declared_response_frame() {
-    let response = exchange_with_connector(request(b"q"), &connector(vec![0, 1, 1, 0, 1, 2]))
+fn one_query_returns_only_the_first_declared_response_frame() {
+    let response = query_with_connector(request(b"q"), &connector(vec![0, 1, 1, 0, 1, 2]))
         .expect("the first complete response frame is sufficient");
 
     assert_eq!(response.frame.as_ref(), [0, 1, 1]);
@@ -349,7 +349,7 @@ fn final_successful_read_cannot_complete_after_the_deadline() {
         .read_pacing
         .extend([Pacing::Prompt, Pacing::PastDeadline]);
 
-    let error = exchange_with_connector(
+    let error = query_with_connector(
         Request {
             timeout: SCRIPTED_TIMEOUT,
             ..request(b"q")
@@ -392,7 +392,7 @@ fn late_end_of_stream_is_a_timeout_not_a_framing_failure() {
             .read_pacing
             .extend(pacing);
 
-        let error = exchange_with_connector(
+        let error = query_with_connector(
             Request {
                 timeout: SCRIPTED_TIMEOUT,
                 ..request(b"q")
@@ -408,7 +408,7 @@ fn late_end_of_stream_is_a_timeout_not_a_framing_failure() {
 #[test]
 fn request_and_connect_failures_have_stable_categories() {
     assert!(matches!(
-        exchange_with_connector(
+        query_with_connector(
             Request {
                 timeout: Duration::ZERO,
                 ..request(b"q")
@@ -418,7 +418,7 @@ fn request_and_connect_failures_have_stable_categories() {
         Err(Error::InvalidTimeout { .. })
     ));
     assert_same_error(
-        &exchange_with_connector(
+        &query_with_connector(
             request(b""),
             &ScriptedConnector {
                 stream: ScriptedStream::new(Vec::new()),
@@ -429,7 +429,7 @@ fn request_and_connect_failures_have_stable_categories() {
         &Error::EmptyQuery,
     );
     assert!(matches!(
-        exchange_with_connector(
+        query_with_connector(
             Request {
                 max_message_bytes: 0,
                 ..request(b"q")
@@ -438,7 +438,7 @@ fn request_and_connect_failures_have_stable_categories() {
         ),
         Err(Error::InvalidMessageLimit { .. })
     ));
-    let error = exchange_with_connector(
+    let error = query_with_connector(
         request(b"q"),
         &ScriptedConnector {
             stream: ScriptedStream::new(Vec::new()),
@@ -455,7 +455,7 @@ fn write_zero_and_socket_timeouts_are_typed() {
     let zero = connector(Vec::new());
     zero.stream.state.lock().unwrap().write_chunks.push_back(0);
     assert!(matches!(
-        exchange_with_connector(request(b"q"), &zero),
+        query_with_connector(request(b"q"), &zero),
         Err(Error::Write {
             written: 0,
             expected: 3,
@@ -463,7 +463,7 @@ fn write_zero_and_socket_timeouts_are_typed() {
         })
     ));
 
-    let error = exchange_with_connector(
+    let error = query_with_connector(
         request(b"q"),
         &ScriptedConnector {
             stream: ScriptedStream::new(Vec::new()),

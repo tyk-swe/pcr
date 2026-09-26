@@ -939,8 +939,8 @@ fn dns_timeout_case() -> Value {
     let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
     let report = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = None;
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![server_address],
@@ -988,7 +988,7 @@ fn dns_timeout_case() -> Value {
 /// the shared deadline never reached.
 fn dns_batch_case() -> Value {
     let server_address = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53));
-    let summary = packetcraftr::dns::Summary {
+    let summary = packetcraftr::dns::Report {
         server: "192.0.2.53".to_owned(),
         server_port: 53,
         resolved_addresses: vec![server_address],
@@ -1004,7 +1004,7 @@ fn dns_batch_case() -> Value {
         )
         .unwrap(),
     };
-    let report = packetcraftr::dns::Report::new(
+    let report = packetcraftr::dns::Aggregate::new(
         summary,
         None,
         vec![packetcraftr::dns::AttemptEvidence {
@@ -1025,33 +1025,33 @@ fn dns_batch_case() -> Value {
         Vec::new(),
     )
     .unwrap();
-    let batch = packetcraftr::dns::BatchReport {
+    let batch = packetcraftr::dns::batch::Aggregate {
         server: "192.0.2.53".to_owned(),
         server_port: 53,
         stats: workflow_stats(),
         questions: vec![
-            packetcraftr::dns::QuestionOutcome {
+            packetcraftr::dns::batch::Question {
                 query_name: "1.2.0.192.in-addr.arpa".to_owned(),
                 query_type: packetcraftr::dns::QueryType::PTR,
                 transaction_id: 0x1234,
-                status: packetcraftr::dns::QuestionStatus::Completed,
-                report: Some(report),
+                status: packetcraftr::dns::batch::QuestionStatus::Completed,
+                result: Some(report),
                 error: None,
             },
-            packetcraftr::dns::QuestionOutcome {
+            packetcraftr::dns::batch::Question {
                 query_name: "unreachable.test".to_owned(),
                 query_type: packetcraftr::dns::QueryType::A,
                 transaction_id: 0x1235,
-                status: packetcraftr::dns::QuestionStatus::Failed,
-                report: None,
+                status: packetcraftr::dns::batch::QuestionStatus::Failed,
+                result: None,
                 error: Some(packetcraftr::dns::Error::InvalidPort),
             },
-            packetcraftr::dns::QuestionOutcome {
+            packetcraftr::dns::batch::Question {
                 query_name: "later.test".to_owned(),
                 query_type: packetcraftr::dns::QueryType::A,
                 transaction_id: 0x1236,
-                status: packetcraftr::dns::QuestionStatus::Unattempted,
-                report: None,
+                status: packetcraftr::dns::batch::QuestionStatus::Unattempted,
+                result: None,
                 error: None,
             },
         ],
@@ -1192,8 +1192,8 @@ fn dns_response_case() -> Value {
     };
     let report = Published::<dns_output::Report>::try_from({
         let response: Option<packetcraftr::dns::ValidatedResponse> = Some(response);
-        packetcraftr::dns::Report::new(
-            packetcraftr::dns::Summary {
+        packetcraftr::dns::Aggregate::new(
+            packetcraftr::dns::Report {
                 server: "resolver.example.test".to_owned(),
                 server_port: 53,
                 resolved_addresses: vec![server_address],

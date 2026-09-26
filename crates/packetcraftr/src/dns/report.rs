@@ -11,7 +11,8 @@ use serde::Serialize;
 use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
 
-use crate::Stats;
+use crate::execution::Shared;
+use crate::{BoundaryError, Sink, Stats};
 
 use super::error::Error;
 use super::request::QueryType;
@@ -194,7 +195,7 @@ impl AttemptEvidence {
 /// Incoherent independently supplied DNS result parts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("incoherent DNS evidence: {0}")]
-pub struct EvidenceError(pub(in crate::dns) &'static str);
+pub struct IncoherentReport(pub(in crate::dns) &'static str);
 
 /// The terminal DNS decision and its accepted response metadata. Private
 /// fields prevent a successful outcome without an accepted transport/header.
@@ -212,7 +213,7 @@ impl Completion {
         fallback_attempted: bool,
         accepted_transport: Option<Transport>,
         response: Option<ResponseMetadata>,
-    ) -> Result<Self, EvidenceError> {
+    ) -> Result<Self, IncoherentReport> {
         let completion = Self {
             outcome,
             fallback_attempted,
@@ -222,22 +223,24 @@ impl Completion {
         completion.validate()?;
         Ok(completion)
     }
-    pub(in crate::dns) fn validate(&self) -> Result<(), EvidenceError> {
+    pub(in crate::dns) fn validate(&self) -> Result<(), IncoherentReport> {
         let accepts = matches!(self.outcome, Outcome::Response | Outcome::Truncated);
         if accepts != self.accepted_transport.is_some() || accepts != self.response.is_some() {
-            return Err(EvidenceError(
+            return Err(IncoherentReport(
                 "an accepted outcome requires a transport and response header",
             ));
         }
         if let Some(response) = &self.response
             && response.truncated != (self.outcome == Outcome::Truncated)
         {
-            return Err(EvidenceError(
+            return Err(IncoherentReport(
                 "response truncation must agree with the outcome",
             ));
         }
         if self.accepted_transport == Some(Transport::Tcp) && self.outcome != Outcome::Response {
-            return Err(EvidenceError("accepted TCP requires a complete response"));
+            return Err(IncoherentReport(
+                "accepted TCP requires a complete response",
+            ));
         }
         Ok(())
     }
@@ -265,37 +268,38 @@ pub struct UndecodedEvidence {
     pub frame: Frame,
 }
 
-/// Collected DNS output. Summary metadata has the same owner as streamed
-/// completion; attempts and records are retained only for an aggregate run.
+/// Every event of one DNS query joined with its [`Report`]: the attempts,
+/// the accepted response's records, and the retained evidence. Private fields
+/// keep the parts coherent with the report's completion.
 #[derive(Clone, Debug)]
-pub struct Report {
-    summary: Summary,
+pub struct Aggregate {
+    report: Report,
     response: Option<ValidatedResponse>,
     attempts: Vec<AttemptEvidence>,
     undecoded: Vec<UndecodedEvidence>,
     diagnostics: Vec<Diagnostic>,
 }
 
-impl Report {
+impl Aggregate {
     pub fn new(
-        summary: Summary,
+        report: Report,
         response: Option<ValidatedResponse>,
         attempts: Vec<AttemptEvidence>,
         undecoded: Vec<UndecodedEvidence>,
         diagnostics: Vec<Diagnostic>,
-    ) -> Result<Self, EvidenceError> {
-        summary.completion.validate()?;
-        if summary.completion.response() != response.as_ref().map(|response| &response.metadata) {
-            return Err(EvidenceError(
+    ) -> Result<Self, IncoherentReport> {
+        report.completion.validate()?;
+        if report.completion.response() != response.as_ref().map(|response| &response.metadata) {
+            return Err(IncoherentReport(
                 "retained response must match the accepted response header",
             ));
         }
-        if summary.completion.accepted_transport() == Some(Transport::Tcp)
+        if report.completion.accepted_transport() == Some(Transport::Tcp)
             && !attempts.iter().any(|attempt| {
                 attempt.transport() == Transport::Tcp && attempt.status == Outcome::Response
             })
         {
-            return Err(EvidenceError(
+            return Err(IncoherentReport(
                 "accepted TCP requires a retained successful TCP attempt",
             ));
         }
@@ -316,27 +320,27 @@ impl Report {
                         && previous.status == Outcome::Truncated
                 });
             if !preceded_by_truncation {
-                return Err(EvidenceError(
+                return Err(IncoherentReport(
                     "TCP fallback requires the same attempt's preceding truncated UDP response",
                 ));
             }
             fallback_attempted = true;
         }
-        if summary.completion.fallback_attempted() != fallback_attempted {
-            return Err(EvidenceError(
+        if report.completion.fallback_attempted() != fallback_attempted {
+            return Err(IncoherentReport(
                 "fallback must agree with retained UDP-to-TCP continuations",
             ));
         }
         Ok(Self {
-            summary,
+            report,
             response,
             attempts,
             undecoded,
             diagnostics,
         })
     }
-    pub fn summary(&self) -> &Summary {
-        &self.summary
+    pub fn report(&self) -> &Report {
+        &self.report
     }
     pub fn response(&self) -> Option<&ValidatedResponse> {
         self.response.as_ref()
@@ -350,19 +354,19 @@ impl Report {
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
-    /// Separates the completed operation from its retained evidence without
+    /// Separates the terminal report from its retained evidence without
     /// copying captured bytes or record collections.
     pub fn into_parts(
         self,
     ) -> (
-        Summary,
+        Report,
         Option<ValidatedResponse>,
         Vec<AttemptEvidence>,
         Vec<UndecodedEvidence>,
         Vec<Diagnostic>,
     ) {
         (
-            self.summary,
+            self.report,
             self.response,
             self.attempts,
             self.undecoded,
@@ -402,11 +406,11 @@ pub enum Event {
     Diagnostic(Diagnostic),
 }
 
-/// Final DNS metadata after every attempt and record event was published.
-/// Diagnostics are not repeated here: each one already reached the caller as
-/// [`Event::Diagnostic`] when it was raised.
+/// The terminal result of one DNS query, returned after every attempt and
+/// record event was published. Diagnostics are not repeated here: each one
+/// already reached the caller as [`Event::Diagnostic`] when it was raised.
 #[derive(Clone, Debug)]
-pub struct Summary {
+pub struct Report {
     pub server: String,
     pub server_port: u16,
     pub resolved_addresses: Vec<IpAddr>,
@@ -417,8 +421,36 @@ pub struct Summary {
     pub stats: Stats,
 }
 
+/// A sink that rebuilds the [`Aggregate`] from published events. Pass a
+/// clone to [`Client::dns`](crate::Client::dns) and [`finish`](Self::finish)
+/// the one kept with the report it returns.
+#[derive(Clone, Default)]
+pub struct Collector(Shared<Observed>);
+
+impl Sink<Event> for Collector {
+    type Ack = ();
+
+    fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
+        self.0.update(|observed| observed.observe(event));
+        Ok(())
+    }
+}
+
+impl Collector {
+    /// Joins the collected events with the query's terminal `report`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::IncoherentReport`] when the events disagree with the
+    /// report.
+    pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        self.0.take().finish(report)
+    }
+}
+
+/// The events of one DNS query, in publication order.
 #[derive(Default)]
-pub(super) struct Collector {
+pub(super) struct Observed {
     attempts: Vec<AttemptEvidence>,
     answers: Vec<Record>,
     authorities: Vec<Record>,
@@ -428,7 +460,7 @@ pub(super) struct Collector {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl Collector {
+impl Observed {
     pub(super) fn observe(&mut self, event: Event) {
         match event {
             Event::Attempt { evidence, .. } => self.attempts.push(evidence),
@@ -445,8 +477,8 @@ impl Collector {
         }
     }
 
-    pub(super) fn finish(self, summary: Summary) -> Result<Report, Error> {
-        let response = summary
+    pub(super) fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        let response = report
             .completion
             .response
             .clone()
@@ -457,8 +489,8 @@ impl Collector {
                 additionals: self.additionals,
                 rejected_records: self.rejected,
             });
-        Report::new(
-            summary,
+        Aggregate::new(
+            report,
             response,
             self.attempts,
             self.undecoded,

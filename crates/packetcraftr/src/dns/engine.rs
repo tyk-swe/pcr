@@ -5,7 +5,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::progress::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 use packetcraftr_core::diagnostic::Diagnostic;
@@ -18,117 +17,120 @@ use crate::execution::Context;
 use crate::execution::evidence::{
     EvidenceSink, EvidenceState, ResponseCandidate, ResponseSelector,
 };
-use crate::execution::{ExchangeEvidenceError, Executor};
-use crate::execution::{Sink, publisher};
+use crate::execution::{ExchangeEvidenceError, ExchangeExecutor, Executor, publisher};
 use crate::policy::Authorizer;
-use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireLimits};
+use crate::policy::{DnsOperation, Operation, WireLimits};
+use crate::providers::Providers;
 use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, approve_operation, resolve_selected};
-use crate::{BoundaryError, Stats, StatsOverflow};
+use crate::{BoundaryError, Client, Sink, Stats, StatsOverflow};
 
 use super::EVIDENCE_DIAGNOSTICS;
 use super::classification::{
     ResponseClassification, candidate_evidence, classify_response, timeout_evidence,
 };
-use super::error::Error;
+use super::error::{Error, EvidenceFault};
 use super::evidence::validate_dns_execution;
+use super::executor::{Exchange, Execution, TcpQuerier};
 use super::plan::{OperationLimits, operation_limits};
-use super::probe::rotated_source_port;
-use super::report::Collector;
+use super::probe::{Probe, rotated_source_port};
 use super::{
-    AttemptEvidence, Event, EventContext, Exchange, Execution, Limits, Outcome, Probe, Record,
-    Report, Request, Section, Summary, TcpExecutor, Transport, TransportMode, UndecodedEvidence,
-    ValidatedResponse,
+    AttemptEvidence, Event, EventContext, Limits, Outcome, Record, Report, Request, Section,
+    Transport, TransportMode, UndecodedEvidence, ValidatedResponse, batch,
 };
 
 mod tcp;
+
+impl<P: Providers, K: Clock> Client<P, K> {
+    /// Runs one bounded DNS query and publishes attempts, accepted and
+    /// rejected records, and retained undecoded evidence as each becomes
+    /// final.
+    ///
+    /// The query's worst-case traffic is authorized before any resolution;
+    /// declared-name authorization, resolution, and resolved-answer
+    /// authorization then repeat before each attempt. Direct TCP and a
+    /// configured fallback reauthorize the selected numeric address, use only
+    /// the time left in that attempt, and query over the client's TCP
+    /// provider. `sink` runs on a one-event worker admitted by the client's
+    /// [`Runtime`](crate::progress::Runtime); `limits.max_duration` bounds
+    /// waiting for it and live I/O, not the sink itself. A sink failure
+    /// prevents later retries, and a sink may finish after this method
+    /// returns while it holds one of the runtime's worker permits.
+    ///
+    /// # Errors
+    ///
+    /// Returns the invalid request, the policy refusal, the executor or
+    /// evidence failure, cancellation, the exhausted duration limit, or the
+    /// sink's failure.
+    pub fn dns<S>(&self, request: Request, sink: S) -> Result<Report, Error>
+    where
+        S: Sink<Event, Ack = ()>,
+    {
+        let mut deadline = self.deadline(request.limits.max_duration);
+        let publish = publisher(&self.runtime, sink, Error::from, |source| Error::Output {
+            source,
+        })?;
+        run(
+            &request,
+            &mut self.admission(),
+            &self.registry,
+            &mut ExchangeExecutor::new(self, send_options(&request), request.collection.clone()),
+            &mut self.clock.clone(),
+            &mut deadline,
+            publish,
+        )
+    }
+
+    /// Runs a bounded batch of DNS questions in input order under one
+    /// deadline, the shortest `limits.max_duration` among them, and publishes
+    /// each question's events tagged with its index.
+    ///
+    /// The combined worst-case traffic of every question is authorized
+    /// before any resolution. Cancellation or deadline exhaustion leaves the
+    /// remaining questions [`Unattempted`](batch::QuestionStatus::Unattempted);
+    /// other question failures are [`Failed`](batch::QuestionStatus::Failed)
+    /// and the batch continues. A sink failure stops the batch.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid batch, the policy refusal of the combined traffic,
+    /// or the sink's failure; question failures are reported in the returned
+    /// [`batch::Report`].
+    pub fn dns_batch<S>(&self, request: batch::Request, sink: S) -> Result<batch::Report, Error>
+    where
+        S: Sink<batch::Event, Ack = ()>,
+    {
+        let mut deadline = self.deadline(request.max_duration()?);
+        let publish = publisher(&self.runtime, sink, Error::from, |source| Error::Output {
+            source,
+        })?;
+        let first = &request.questions[0];
+        batch::run(
+            &request,
+            &mut self.admission(),
+            &self.registry,
+            &mut ExchangeExecutor::new(self, send_options(first), first.collection.clone()),
+            &mut self.clock.clone(),
+            &mut deadline,
+            publish,
+        )
+    }
+}
+
+/// The send settings every DNS exchange runs under: the request's route,
+/// with each attempt's destination set by the attempt itself.
+fn send_options(request: &Request) -> crate::send::Options {
+    crate::send::Options {
+        plan: request.route.clone(),
+        ..crate::send::Options::default()
+    }
+}
 
 /// Executes bounded DNS retries, repeating declared-name authorization,
 /// resolution, and resolved-answer authorization before each attempt. Direct
 /// TCP and configured fallback reauthorize the selected numeric address and
 /// use only the time left in that attempt.
-pub fn run<A, E, C>(
-    request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-) -> Result<Report, Error>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
-    C: Clock,
-{
-    let mut collector = Collector::default();
-    let summary = run_observed(
-        request,
-        authorizer,
-        registry,
-        executor,
-        clock,
-        |event, _| {
-            collector.observe(event);
-            Ok(())
-        },
-    )?;
-    collector.finish(summary)
-}
-
-/// Executes one approved DNS retry sequence and publishes attempts, accepted
-/// and rejected records, and retained undecoded evidence as they become final.
-/// The callback runs on a runtime-budgeted worker. `max_duration` bounds
-/// publisher waiting and live I/O, not arbitrary callback execution. Callback
-/// failure prevents later retries; a callback may finish after this function
-/// returns and holds one runtime worker permit until then.
-pub fn run_with_events<A, E, C, S>(
-    request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-    runtime: &Runtime,
-    sink: S,
-) -> Result<Summary, Error>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
-    C: Clock,
-    S: Sink<Event, Ack = ()>,
-{
-    let observe = publisher(runtime, sink, Error::from, |source| Error::Output {
-        source,
-    })?;
-    run_observed(request, authorizer, registry, executor, clock, observe)
-}
-
-fn run_observed<A, E, C, F>(
-    request: &Request,
-    authorizer: &mut A,
-    registry: &Registry,
-    executor: &mut E,
-    clock: &mut C,
-    emit: F,
-) -> Result<Summary, Error>
-where
-    A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
-    C: Clock,
-    F: FnMut(Event, &Deadline) -> Result<(), Error>,
-{
-    let mut deadline =
-        Deadline::new(request.limits.max_duration).with_cancellation(clock.cancellation());
-    run_observed_with_deadline(
-        request,
-        authorizer,
-        registry,
-        executor,
-        clock,
-        &mut deadline,
-        emit,
-    )
-}
-
-pub(super) fn run_observed_with_deadline<A, E, C, F>(
+pub(super) fn run<A, E, C, F>(
     request: &Request,
     authorizer: &mut A,
     registry: &Registry,
@@ -136,10 +138,10 @@ pub(super) fn run_observed_with_deadline<A, E, C, F>(
     clock: &mut C,
     deadline: &mut Deadline,
     emit: F,
-) -> Result<Summary, Error>
+) -> Result<Report, Error>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
+    E: Executor<Exchange> + TcpQuerier,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
@@ -150,22 +152,22 @@ where
     // admission cannot route through `admit_operation`'s resolve-first order.
     approve_operation(
         authorizer,
-        AuthorizedOperation::Dns(prepared.limits),
+        Operation::Dns(prepared.limits),
         deadline,
         &Attempts,
     )?;
     prepared.execute(authorizer, registry, executor, clock, deadline, emit)?;
-    Ok(prepared.summary)
+    Ok(prepared.report)
 }
 
 /// Validated query and finite cost, prepared without discovery or traffic.
-/// The summary retains confirmed accounting even if execution returns an error.
+/// The report retains confirmed accounting even if execution returns an error.
 pub(super) struct PreparedOperation<'a> {
     request: &'a Request,
     query: Bytes,
     pub(super) delay: Duration,
     pub(super) limits: DnsOperation,
-    pub(super) summary: Summary,
+    pub(super) report: Report,
 }
 
 impl<'a> PreparedOperation<'a> {
@@ -191,7 +193,7 @@ impl<'a> PreparedOperation<'a> {
             query,
             delay,
             limits: DnsOperation::new(WireLimits::new(packet_count, maximum_wire_bytes), tcp)?,
-            summary: Summary {
+            report: Report {
                 server: request.server.to_string(),
                 server_port: request.server_port,
                 resolved_addresses: Vec::new(),
@@ -217,18 +219,18 @@ impl<'a> PreparedOperation<'a> {
     ) -> Result<(), Error>
     where
         A: Authorizer + ResolveTarget,
-        E: Executor<Exchange> + TcpExecutor,
+        E: Executor<Exchange> + TcpQuerier,
         C: Clock,
         F: FnMut(Event, &Deadline) -> Result<(), Error>,
     {
         deadline.enforce()?;
         let context = Arc::new(EventContext {
-            server: Arc::from(self.summary.server.as_str()),
-            server_port: self.summary.server_port,
-            query_name: Arc::from(self.summary.query_name.as_str()),
-            query_type: self.summary.query_type,
+            server: Arc::from(self.report.server.as_str()),
+            server_port: self.report.server_port,
+            query_name: Arc::from(self.report.query_name.as_str()),
+            query_type: self.report.query_type,
         });
-        Operation {
+        Retries {
             request: self.request,
             authorizer,
             registry,
@@ -237,7 +239,7 @@ impl<'a> PreparedOperation<'a> {
             query: self.query.clone(),
             delay: self.delay,
             context,
-            summary: &mut self.summary,
+            report: &mut self.report,
             evidence: EvidenceState::new(self.request.limits.evidence(), EVIDENCE_DIAGNOSTICS),
             emit: &mut emit,
         }
@@ -245,19 +247,21 @@ impl<'a> PreparedOperation<'a> {
     }
 }
 
-struct Operation<'a, A, E, C, F> {
+/// The retry sequence of one query: every attempt, its fallback, and the
+/// events they publish.
+struct Retries<'a, A, E, C, F> {
     request: &'a Request,
     authorizer: &'a mut A,
     registry: &'a Registry,
     executor: &'a mut E,
     /// Owns the operation deadline, retry pacing, and the UDP execution step.
-    /// Its statistics become the summary's when the operation ends, however
+    /// Its statistics become the report's when the operation ends, however
     /// it ends.
     execution: Context<'a, C, Attempts>,
     query: Bytes,
     delay: Duration,
     context: Arc<EventContext>,
-    summary: &'a mut Summary,
+    report: &'a mut Report,
     /// Operation-wide evidence retention and diagnostics, shared by every
     /// attempt.
     evidence: EvidenceState,
@@ -270,16 +274,16 @@ struct ProbeExecution {
     attempt_deadline: Deadline,
 }
 
-impl<A, E, C, F> Operation<'_, A, E, C, F>
+impl<A, E, C, F> Retries<'_, A, E, C, F>
 where
     A: Authorizer + ResolveTarget,
-    E: Executor<Exchange> + TcpExecutor,
+    E: Executor<Exchange> + TcpQuerier,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
 {
     fn execute(mut self) -> Result<(), Error> {
         let result = self.execute_attempts();
-        self.summary.stats = self.execution.into_stats();
+        self.report.stats = self.execution.into_stats();
         result
     }
 
@@ -292,7 +296,7 @@ where
             }
         }
         self.execution.enforce(last_attempt)?;
-        self.summary.completion.validate()?;
+        self.report.completion.validate()?;
         Ok(())
     }
 
@@ -338,7 +342,7 @@ where
                 if udp_status == Outcome::Truncated
                     && self.request.transport == TransportMode::UdpThenTcp =>
             {
-                self.summary.completion.fallback_attempted = true;
+                self.report.completion.fallback_attempted = true;
                 self.query_over_tcp(&probe, &mut attempt_deadline)?
             }
             Some(response) => {
@@ -365,7 +369,7 @@ where
         }
         let response = tcp.response.ok_or(Error::InvalidEvidence {
             attempt: probe.attempt,
-            message: "successful TCP query omitted its validated response".to_owned(),
+            fault: EvidenceFault::TcpResponseMissing,
         })?;
         self.accept_response(probe.attempt, Transport::Tcp, response)?;
         Ok(true)
@@ -375,8 +379,8 @@ where
     /// outcome. An accepted response is recorded by [`Self::accept_response`]
     /// and ends the operation, so it never competes here.
     fn record_failure_outcome(&mut self, candidate: Outcome) {
-        if candidate.retry_rank() > self.summary.completion.outcome.retry_rank() {
-            self.summary.completion.outcome = candidate;
+        if candidate.retry_rank() > self.report.completion.outcome.retry_rank() {
+            self.report.completion.outcome = candidate;
         }
     }
 
@@ -398,15 +402,15 @@ where
         );
         self.execution.enforce(attempt)?;
         let resolved = resolved?;
-        self.summary.server = resolved.declared;
+        self.report.server = resolved.declared;
         let addresses = resolved.addresses;
         FamilyGate::new(self.request.address_family, |family| Error::Family {
             family: family.label(),
         })
         .require(&addresses)?;
         for address in &addresses {
-            if !self.summary.resolved_addresses.contains(address) {
-                self.summary.resolved_addresses.push(*address);
+            if !self.report.resolved_addresses.contains(address) {
+                self.report.resolved_addresses.push(*address);
             }
         }
         let address_index = usize::try_from(attempt)
@@ -428,7 +432,7 @@ where
             server_port: self.request.server_port,
             source_port: rotated_source_port(self.request.source_port, attempt),
             transaction_id: self.request.transaction_id,
-            query_name: self.summary.query_name.clone(),
+            query_name: self.report.query_name.clone(),
             query_type: self.request.query_type,
             query: self.query.clone(),
         })
@@ -486,12 +490,12 @@ where
             additionals,
             rejected_records,
         } = response;
-        self.summary.completion.outcome = if metadata.truncated {
+        self.report.completion.outcome = if metadata.truncated {
             Outcome::Truncated
         } else {
             Outcome::Response
         };
-        self.summary.completion.accepted_transport = Some(transport);
+        self.report.completion.accepted_transport = Some(transport);
         for (section, records) in [
             (Section::Answer, answers),
             (Section::Authority, authorities),
@@ -512,7 +516,7 @@ where
                 },
             )?;
         }
-        self.summary.completion.response = Some(metadata);
+        self.report.completion.response = Some(metadata);
         Ok(())
     }
 
@@ -642,7 +646,7 @@ impl crate::execution::Errors for Attempts {
     }
 
     fn authorization(&self, source: BoundaryError) -> Error {
-        Error::from(source)
+        Error::Authorization(source)
     }
 
     fn duration_limit(&self, _: u32, source: DeadlineExceeded) -> Error {
@@ -664,7 +668,7 @@ impl crate::execution::Errors for Attempts {
     fn invalid_evidence(&self, attempt: u32, source: ExchangeEvidenceError) -> Error {
         Error::InvalidEvidence {
             attempt,
-            message: source.describe("DNS exchange", "DNS"),
+            fault: EvidenceFault::Exchange(source),
         }
     }
 

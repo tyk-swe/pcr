@@ -68,55 +68,53 @@ pub(super) fn run(
         ));
     }
     let queue_limits = arguments.limits.clone().into_limits();
-    let requests = prepare_requests(&arguments, queue_limits)?;
-    let mut providers = execution::prepare(
+    let mut requests = prepare_requests(&arguments, queue_limits)?;
+    let providers = execution::prepare(
         arguments.route,
         arguments.policy,
         requests[0].timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
-    let mut session = providers.session();
+    let executor = &providers.executor;
+    for request in &mut requests {
+        request.route = executor.send.plan.clone();
+        request.collection = executor.collection.clone();
+    }
+    // DNS drives the composed client itself — authorization, cancellation,
+    // and the callback runtime live inside it — so the driver vends no
+    // session state.
+    let client = &executor.client;
     // A lone question keeps the single-query contract: its failure propagates
     // as the command's error rather than reporting as batch evidence.
     if let [request] = requests.as_slice() {
         return execution::run_workflow(
-            &mut session,
+            &mut (),
             format,
             stream,
             crate::cancellation::signal(),
             execution::Hooks {
                 command: output::contract::Command::Dns,
-                run: Box::new(|session| {
-                    packetcraftr::dns::run(
-                        request,
-                        &mut session.authorizer,
-                        session.registry,
-                        session.executor,
-                        &mut session.clock,
-                    )
-                    .map_err(CliError::classified)
+                run: Box::new(|_| {
+                    let collector = packetcraftr::dns::Collector::default();
+                    let report = client
+                        .dns(request.clone(), collector.clone())
+                        .map_err(CliError::classified)?;
+                    collector.finish(report).map_err(CliError::classified)
                 }),
-                run_with_events: Box::new(|session, emit| {
-                    packetcraftr::dns::run_with_events(
-                        request,
-                        &mut session.authorizer,
-                        session.registry,
-                        session.executor,
-                        &mut session.clock,
-                        session.runtime,
-                        emit,
-                    )
-                    .map_err(CliError::classified)
-                }),
-                on_event: rendering::emit_event,
-                into_result: Box::new(|report| {
-                    output::envelope::Published::<output::dns::Report>::try_from(report)
+                run_with_events: Box::new(|_, emit| {
+                    client
+                        .dns(request.clone(), emit)
                         .map_err(CliError::classified)
                 }),
-                render_text: Box::new(|report, _| {
+                on_event: rendering::emit_event,
+                into_result: Box::new(|aggregate| {
+                    output::envelope::Published::<output::dns::Report>::try_from(aggregate)
+                        .map_err(CliError::classified)
+                }),
+                render_text: Box::new(|aggregate, _| {
                     rendering::render_text(
-                        output::envelope::Published::try_from(report)
+                        output::envelope::Published::try_from(aggregate)
                             .map_err(CliError::classified)?,
                     )
                 }),
@@ -124,43 +122,37 @@ pub(super) fn run(
             },
         );
     }
+    let request = packetcraftr::dns::batch::Request {
+        questions: requests,
+    };
     execution::run_workflow(
-        &mut session,
+        &mut (),
         format,
         stream,
         crate::cancellation::signal(),
         execution::Hooks {
             command: output::contract::Command::Dns,
-            run: Box::new(|session| {
-                packetcraftr::dns::run_batch(
-                    &requests,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                )
-                .map_err(CliError::classified)
+            run: Box::new(|_| {
+                let collector = packetcraftr::dns::batch::Collector::default();
+                let report = client
+                    .dns_batch(request.clone(), collector.clone())
+                    .map_err(CliError::classified)?;
+                collector.finish(report).map_err(CliError::classified)
             }),
-            run_with_events: Box::new(|session, emit| {
-                packetcraftr::dns::run_batch_with_events(
-                    &requests,
-                    &mut session.authorizer,
-                    session.registry,
-                    session.executor,
-                    &mut session.clock,
-                    session.runtime,
-                    emit,
-                )
-                .map_err(CliError::classified)
-            }),
-            on_event: rendering::emit_event,
-            into_result: Box::new(|batch| {
-                output::envelope::Published::<output::dns::BatchResult>::try_from(batch)
+            run_with_events: Box::new(|_, emit| {
+                client
+                    .dns_batch(request.clone(), emit)
                     .map_err(CliError::classified)
             }),
-            render_text: Box::new(|batch, _| {
+            on_event: rendering::emit_batch_event,
+            into_result: Box::new(|aggregate| {
+                output::envelope::Published::<output::dns::BatchResult>::try_from(aggregate)
+                    .map_err(CliError::classified)
+            }),
+            render_text: Box::new(|aggregate, _| {
                 rendering::render_batch_text(
-                    output::envelope::Published::try_from(batch).map_err(CliError::classified)?,
+                    output::envelope::Published::try_from(aggregate)
+                        .map_err(CliError::classified)?,
                 )
             }),
             complete: rendering::emit_batch_complete,
@@ -184,12 +176,15 @@ fn prepare_requests(
             packetcraftr::dns::QueryType::PTR,
         )
     }));
-    if questions.len() > packetcraftr::dns::MAX_QUESTIONS {
+    if questions.len() > packetcraftr::dns::batch::MAX_QUESTIONS {
         return Err(CliError::classified(
             packetcraftr::dns::Error::InvalidLimit {
                 field: "questions",
                 value: questions.len() as u64,
-                reason: format!("must be within 1..={}", packetcraftr::dns::MAX_QUESTIONS),
+                reason: format!(
+                    "must be within 1..={}",
+                    packetcraftr::dns::batch::MAX_QUESTIONS
+                ),
             },
         ));
     }
@@ -259,6 +254,10 @@ fn prepare_requests(
                 timeout: arguments.timeout.timeout(),
                 queries_per_second: arguments.rate,
                 limits,
+                // The composed route and collection replace these once the
+                // client is prepared.
+                route: packetcraftr::route::Options::default(),
+                collection: packetcraftr::exchange::Collection::default(),
             })
         })
         .collect()

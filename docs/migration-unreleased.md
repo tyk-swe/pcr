@@ -233,12 +233,12 @@ validation similarly retains its original `SystemError` as a shared
 
 ## Explicit DNS TCP providers
 
-A bare `packetcraftr::probe::ExchangeExecutor` reports unsupported TCP
-execution. Opt in with `.with_dns_tcp(provider)`; the CLI selects
-`packetcraftr_netio::tcp::SystemProvider` explicitly. Injected UDP providers
-therefore cannot silently open a system TCP socket after a truncated response.
+DNS-over-TCP queries run over the client's own TCP provider (the `tcp` field
+of its `ProviderSet`); the CLI composes
+`packetcraftr_netio::tcp::SystemProvider`. A composition that must never open
+a TCP socket fills that field with a provider that refuses connections.
 
-Low-level callers pass a provider to `dns::tcp::exchange(request, &provider)`.
+Low-level callers pass a provider to `dns::tcp::query(request, &provider)`.
 `packetcraftr_netio::tcp::{Provider, Stream}` owns the narrow connection and
 stream capability; `dns::tcp` retains framing, finite deadlines, and evidence.
 The standard-library provider works independently of native packet and route
@@ -489,10 +489,10 @@ the pacing ceiling is `packetcraftr_netio::capture::MAX_TIMEOUT`.
 
 `dns` accepts several `NAME` positionals plus repeatable `--reverse ADDRESS`
 (PTR questions derived by `dns::reverse_name` under `in-addr.arpa`/`ip6.arpa`)
-as one batch bounded by `dns::MAX_QUESTIONS`. `dns::run_batch` and
-`run_batch_with_events` take `&[Request]`, share the minimum
-`limits.max_duration` as a single `Deadline` across questions, and return
-`dns::BatchReport` whose `questions` carry `QuestionStatus` —
+as one batch bounded by `dns::batch::MAX_QUESTIONS`. `client.dns_batch` takes
+a `dns::batch::Request`, shares the minimum `limits.max_duration` as a single
+`Deadline` across questions, and returns `dns::batch::Report` whose
+`questions` carry `QuestionStatus` —
 `completed`/`failed`/`unattempted` — in input order. Single-question
 invocations keep the previous envelope and error semantics; batch aggregates
 add a `questions` array to `dnsResult`, and streamed batches end with a
@@ -1354,7 +1354,7 @@ and capture are separate fields.
 | `client.with_progress_runtime(runtime)`, `client.progress_runtime()` | `client.with_runtime(runtime)`, `client.runtime()` |
 | a clock passed per call (`send_set_driven(.., clock, ..)`) | `client.with_clock(clock)` |
 | `probe::ExchangeExecutor::new(&client, exchange_options)` | `probe::ExchangeExecutor::new(&client, send_options, collection)` |
-| `ExchangeExecutor::with_dns_tcp` on `ExchangeExecutor<'a, R, I>` | the same on `ExchangeExecutor<'a, P, K>` |
+| `ExchangeExecutor::with_dns_tcp(provider)` | the client's `tcp` provider (see [DNS on the client](#dns-on-the-client)) |
 
 A provider the workflow does not use is never called, so a composition may
 fill it with the system provider. Fakes shared between transmit and capture
@@ -1599,3 +1599,53 @@ resolver.
 | `connect::run_with_events(.., &runtime, sink)` with `Sink<connect::Probe>` | `client.scan_connect(request, sink)` with `Sink<connect::Event>` |
 | `connect::Summary` | `connect::Report` |
 | `connect::Report { summary, endpoints }` | `connect::Aggregate { report, endpoints }` |
+
+## DNS on the client
+
+DNS runs as client methods, admitted through the client's policy and
+resolver, so callers no longer pass an authorizer, registry, executor, or
+clock:
+
+```rust
+// Before
+let report = dns::run(&request, &mut authorizer, &registry, &mut executor, &mut clock)?;
+// After
+let collector = dns::Collector::default();
+let report = client.dns(request, collector.clone())?;
+let aggregate = collector.finish(report)?; // attempts, records, and evidence
+```
+
+| Before | After |
+|---|---|
+| `dns::run(..)` | `client.dns(request, collector.clone())` then `collector.finish(report)` |
+| `dns::run_with_events(.., runtime, sink)` | `client.dns(request, sink)`; events publish on the client's runtime |
+| `dns::run_batch(&requests, ..)` | `client.dns_batch(dns::batch::Request { questions }, batch::Collector)` |
+| `dns::run_batch_with_events(.., sink)` | `client.dns_batch(request, sink)` with `S: Sink<dns::batch::Event>` |
+| `dns::Summary` | `dns::Report` (the terminal result) |
+| `dns::Report` (every event joined) | `dns::Aggregate`; `summary()` is `report()` |
+| `dns::BatchReport`, `dns::QuestionOutcome` | `dns::batch::Report`, `dns::batch::Question` (`report` is `result`) |
+| `dns::{MAX_QUESTIONS, QuestionStatus}` | `dns::batch::{MAX_QUESTIONS, QuestionStatus}` |
+| `dns::EvidenceError` | `dns::IncoherentReport` |
+| `dns::tcp::exchange(request, &provider)` | `dns::tcp::query(request, &provider)` |
+| `ExchangeExecutor::with_dns_tcp(provider)`, `TcpExchangeExecutor` | the `tcp` provider of the client's `ProviderSet` |
+
+`dns::Request` gains `route: route::Options` (the UDP exchanges' route; kernel
+TCP accepts only the default) and `collection: exchange::Collection` (the
+capture bounds, which must fit the request's evidence limits). Both are live
+settings that serde skips. A batch's questions must share the server, server
+port, route, and collection. Batch events are `dns::batch::Event { question,
+event }`, tagged with the question's index; `batch::Collector::finish` joins
+each completed question with its events into `dns::batch::Aggregate`, whose
+questions carry `dns::Aggregate` results.
+
+The executor seam is internal: `dns::{Exchange, Execution, TcpExchange,
+TcpExecution, TcpExecutor}` are no longer public. Test DNS against a client
+over fake providers instead of a fake executor. `dns::Probe` and
+`dns::classify_response` stay public for offline response classification.
+
+**Errors.** `dns::Error::Authorization` no longer converts from any
+`BoundaryError`. `InvalidEvidence { attempt, message }` becomes
+`InvalidEvidence { attempt, fault: dns::EvidenceFault }`, and a TCP executor
+that rejects the workflow's own request is `TcpRequestRejected { attempt,
+source }`. `Query` and `TcpExecution` no longer repeat their source in the
+message; the source text moves to the error's causes. Codes are unchanged.

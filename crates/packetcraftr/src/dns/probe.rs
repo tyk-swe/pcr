@@ -1,8 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use std::net::IpAddr;
+
+use bytes::Bytes;
+use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 
 use packetcraftr_core::protocol::{
     application::dns::Dns,
@@ -14,41 +16,63 @@ use packetcraftr_core::{layer::Raw, packet::Packet};
 use crate::correlation::nonzero_ipv4_identification;
 
 use super::DEFAULT_SERVER_PORT;
-use super::Probe;
+use super::request::QueryType;
 
-pub(super) fn probe_packet(probe: &Probe) -> Packet {
-    let mut packet = Packet::new();
-    match probe.server_address {
-        IpAddr::V4(destination) => {
-            packet.push(Ipv4 {
-                destination,
-                identification: nonzero_ipv4_identification(u64::from(probe.attempt)),
-                ..Ipv4::default()
-            });
+/// One attempt's authorized query: the selected server, the rotated source
+/// port, and the exact message bytes every transport carries.
+/// [`classify_response`](super::classify_response) judges captured frames
+/// against it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Probe {
+    pub attempt: u32,
+    pub server_address: IpAddr,
+    pub server_port: u16,
+    pub source_port: u16,
+    pub transaction_id: u16,
+    pub query_name: String,
+    pub query_type: QueryType,
+    pub query: Bytes,
+}
+
+impl Probe {
+    /// Builds the portable IPv4/IPv6 UDP query this already-authorized attempt
+    /// transmits. Route-dependent fields remain unspecified for the client to
+    /// materialize.
+    #[must_use]
+    pub fn packet(&self) -> Packet {
+        let mut packet = Packet::new();
+        match self.server_address {
+            IpAddr::V4(destination) => {
+                packet.push(Ipv4 {
+                    destination,
+                    identification: nonzero_ipv4_identification(u64::from(self.attempt)),
+                    ..Ipv4::default()
+                });
+            }
+            IpAddr::V6(destination) => {
+                packet.push(Ipv6 {
+                    destination,
+                    flow_label: u32::from(self.transaction_id),
+                    ..Ipv6::default()
+                });
+            }
         }
-        IpAddr::V6(destination) => {
-            packet.push(Ipv6 {
-                destination,
-                flow_label: u32::from(probe.transaction_id),
-                ..Ipv6::default()
-            });
-        }
-    }
-    packet.push(Udp {
-        source_port: probe.source_port,
-        destination_port: probe.server_port,
-        ..Udp::default()
-    });
-    if probe.server_port == DEFAULT_SERVER_PORT || probe.source_port == DEFAULT_SERVER_PORT {
-        if let Ok(dns) = Dns::try_from(probe.query.clone()) {
-            packet.push(dns);
+        packet.push(Udp {
+            source_port: self.source_port,
+            destination_port: self.server_port,
+            ..Udp::default()
+        });
+        if self.server_port == DEFAULT_SERVER_PORT || self.source_port == DEFAULT_SERVER_PORT {
+            if let Ok(dns) = Dns::try_from(self.query.clone()) {
+                packet.push(dns);
+            } else {
+                packet.push(Raw::new(self.query.clone()));
+            }
         } else {
-            packet.push(Raw::new(probe.query.clone()));
+            packet.push(Raw::new(self.query.clone()));
         }
-    } else {
-        packet.push(Raw::new(probe.query.clone()));
+        packet
     }
-    packet
 }
 
 /// Rotates the query source port one step per retry, so a retried query is not

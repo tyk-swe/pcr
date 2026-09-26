@@ -222,19 +222,28 @@ pub(super) fn emit_event(
     Ok(stream.emit_published(published)?)
 }
 
+/// A batch question's event publishes as the lone query's event does; the
+/// record itself names the question it belongs to.
+pub(super) fn emit_batch_event(
+    event: packetcraftr::dns::batch::Event,
+    stream: &StreamEncoder,
+) -> Result<(), CliError> {
+    emit_event(event.event, stream)
+}
+
 pub(super) fn emit_complete(
-    summary: packetcraftr::dns::Summary,
+    report: packetcraftr::dns::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(
         stream.complete_published(output::envelope::Published::<output::dns::Event>::from(
-            summary,
+            report,
         ))?,
     )
 }
 
 pub(super) fn emit_batch_complete(
-    batch: packetcraftr::dns::BatchReport,
+    batch: packetcraftr::dns::batch::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(

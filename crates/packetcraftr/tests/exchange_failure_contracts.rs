@@ -324,19 +324,11 @@ fn cartesian_exchange_denies_the_whole_set_before_transmission() {
 #[test]
 fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
     use packetcraftr::{
-        clock::SystemClock,
         dns,
-        policy::PolicyAuthorizer,
-        probe::ExchangeExecutor,
         target::{Family, Target},
     };
 
     let (client, state) = fixture(Fault::None);
-    let policy = Policy::default();
-    let mut authorizer = PolicyAuthorizer::for_packets(&policy);
-    let registry = Arc::clone(client.registry());
-    let mut executor =
-        ExchangeExecutor::new(&client, layer3_send(), exchange::Collection::default());
     let request = dns::Request {
         server: Target::Address("10.0.0.2".parse().unwrap()),
         address_family: Family::Any,
@@ -356,15 +348,12 @@ fn dns_evidence_bounds_narrower_than_the_client_capture_are_refused_up_front() {
             max_undecoded: 1,
             ..dns::Limits::default()
         },
+        route: layer3_send().plan,
+        collection: exchange::Collection::default(),
     };
-    let error = dns::run(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut SystemClock,
-    )
-    .expect_err("narrower DNS evidence bounds are refused");
+    let error = client
+        .dns(request, dns::Collector::default())
+        .expect_err("narrower DNS evidence bounds are refused");
     assert_eq!(error.classification().code, "cli.dns_executor", "{error}");
     assert!(state.lock().unwrap().sent.is_empty());
 }

@@ -1,17 +1,98 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::BoundaryError;
-use crate::correlation::{self, Transport as ProbeTransport};
-use crate::execution::ExchangeExecutor;
-use crate::execution::Executor;
-use crate::execution::{ExecutorFault, WorkflowOverrides};
+//! The DNS executor seam: the capture-armed UDP [`Exchange`] every attempt
+//! runs, and the optional DNS-over-TCP [`TcpQuerier`] capability, both served
+//! by the client's exchange executor.
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use bytes::Bytes;
+use packetcraftr_core::frame::Frame;
+use packetcraftr_core::{decode::DecodedPacket, diagnostic::Diagnostic};
 
 use crate::clock::Clock;
+use crate::correlation::{self, Transport as ProbeTransport};
+use crate::evidence::ExecutionPermit;
+use crate::execution::{ExchangeExecutor, Executor, ExecutorFault, WorkflowOverrides};
 use crate::providers::Providers;
+use crate::{BoundaryError, Stats};
 
+use super::Limits;
 use super::classification::{ResponseClassification, classify_response};
-use super::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
+use super::probe::Probe;
+
+/// One bounded UDP DNS query the executor transmits with capture armed first.
+///
+/// Response retention is bounded by `limits.max_evidence_frames`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Exchange {
+    pub(crate) probe: Probe,
+    pub(crate) timeout: Duration,
+    pub(crate) limits: Limits,
+    pub(crate) permit: ExecutionPermit,
+}
+
+/// The evidence one [`Exchange`] produced, bound to its permit.
+#[derive(Clone, Debug)]
+pub(crate) struct Execution {
+    pub(crate) permit: ExecutionPermit,
+    pub(crate) sent: crate::SentPacket,
+    pub(crate) responses: Vec<crate::exchange::Response>,
+    pub(crate) unsolicited: Vec<DecodedPacket>,
+    pub(crate) undecoded: Vec<Frame>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) stats: Stats,
+}
+
+impl crate::execution::Receipt for Execution {
+    fn permit(&self) -> ExecutionPermit {
+        self.permit
+    }
+
+    fn stats(&self) -> &Stats {
+        &self.stats
+    }
+}
+
+impl crate::execution::Request for Exchange {
+    type Execution = Execution;
+}
+
+/// One authorized DNS-over-TCP query, direct or following validated UDP
+/// truncation. It runs on a kernel socket, so it is a query, not an exchange:
+/// nothing is captured.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TcpQuery {
+    /// Logical retry attempt, shared with UDP when this is a continuation.
+    pub(crate) attempt: u32,
+    /// Already-reauthorized numeric server and DNS port.
+    pub(crate) endpoint: SocketAddr,
+    /// Exact DNS query message without the TCP length prefix.
+    pub(crate) query: Bytes,
+    /// Time remaining in the bounded DNS attempt window.
+    pub(crate) timeout: Duration,
+    /// Maximum response message bytes allowed before allocation.
+    pub(crate) max_message_bytes: usize,
+    pub(crate) permit: ExecutionPermit,
+}
+
+/// The socket evidence one [`TcpQuery`] produced, bound to its permit.
+#[derive(Clone, Debug)]
+pub(crate) struct TcpEvidence {
+    pub(crate) permit: ExecutionPermit,
+    pub(crate) response: super::tcp::Response,
+}
+
+/// The DNS-over-TCP capability an executor provides next to its UDP
+/// [`Executor`] implementation.
+pub(crate) trait TcpQuerier {
+    /// Runs one bounded DNS-over-TCP query. Expected socket and framing
+    /// failures are returned as typed data so the workflow can apply its
+    /// normal retry precedence.
+    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error>;
+}
 
 const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "cli.dns_executor",
@@ -108,44 +189,25 @@ impl<P: Providers, K: Clock> Executor<Exchange> for ExchangeExecutor<'_, P, K> {
     }
 }
 
-/// A client exchange with an explicitly selected DNS TCP provider.
-pub struct TcpExchangeExecutor<'a, P, K, T> {
-    udp: ExchangeExecutor<'a, P, K>,
-    tcp: T,
-}
-
-impl<'a, P, K> ExchangeExecutor<'a, P, K> {
-    /// Enables direct DNS TCP queries and fallback using only the supplied provider.
-    pub fn with_dns_tcp<T>(self, provider: T) -> TcpExchangeExecutor<'a, P, K, T> {
-        TcpExchangeExecutor {
-            udp: self,
-            tcp: provider,
-        }
-    }
-}
-
-// A packet provider alone never implicitly selects system TCP.
-impl<P, K> TcpExecutor for ExchangeExecutor<'_, P, K> {}
-
-impl<P: Providers, K: Clock, T> Executor<Exchange> for TcpExchangeExecutor<'_, P, K, T> {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
-        self.udp.execute(exchange)
-    }
-}
-
-impl<P, K, T: packetcraftr_netio::tcp::Provider> TcpExecutor for TcpExchangeExecutor<'_, P, K, T> {
-    fn execute_tcp(&mut self, exchange: &TcpExchange) -> Result<TcpExecution, super::tcp::Error> {
-        validate_tcp_route_options(&self.udp.send.plan)?;
-        let response = super::tcp::exchange(
+/// Queries over the client's TCP provider. Kernel TCP cannot honor
+/// packet-oriented route overrides, so a query refuses them before any
+/// provider I/O.
+impl<P: Providers, K: Clock> TcpQuerier for ExchangeExecutor<'_, P, K> {
+    fn query(&mut self, query: &TcpQuery) -> Result<TcpEvidence, super::tcp::Error> {
+        validate_tcp_route_options(&self.send.plan)?;
+        let response = super::tcp::query(
             super::tcp::Request {
-                endpoint: exchange.endpoint,
-                query: &exchange.query,
-                timeout: exchange.timeout,
-                max_message_bytes: exchange.max_message_bytes,
+                endpoint: query.endpoint,
+                query: &query.query,
+                timeout: query.timeout,
+                max_message_bytes: query.max_message_bytes,
             },
-            &self.tcp,
+            self.client.providers.tcp(),
         )?;
-        Ok(TcpExecution::new(exchange.permit, response))
+        Ok(TcpEvidence {
+            permit: query.permit,
+            response,
+        })
     }
 }
 
@@ -166,64 +228,35 @@ fn validate_tcp_route_options(plan: &crate::route::Options) -> Result<(), crate:
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use super::validate_tcp_route_options;
-
-    use packetcraftr_core::budget::Deadline;
-
-    struct RefusingTcp(std::sync::atomic::AtomicUsize);
-
-    impl packetcraftr_netio::tcp::Provider for RefusingTcp {
-        type Stream = packetcraftr_netio::tcp::SystemStream;
-
-        fn connect(
-            &self,
-            endpoint: std::net::SocketAddr,
-            deadline: &Deadline,
-        ) -> Result<Self::Stream, packetcraftr_netio::tcp::Error> {
-            let timeout = deadline.remaining().unwrap_or_default();
-            assert_eq!(endpoint, "127.0.0.1:53".parse().unwrap());
-            assert!(!timeout.is_zero());
-            assert!(timeout <= std::time::Duration::from_secs(1));
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(std::io::Error::new(
-                std::io::ErrorKind::ConnectionRefused,
-                "injected TCP refusal",
-            )
-            .into())
-        }
-    }
+    use super::*;
+    use crate::test_support::{Call, fake_client};
 
     #[test]
-    fn tcp_requires_explicit_composition_and_rejects_overrides_before_provider_io() {
-        use super::*;
-        let (client, _providers) = crate::test_support::fake_client();
-        let exchange = TcpExchange {
+    fn tcp_queries_the_client_provider_and_rejects_overrides_before_provider_io() {
+        let (client, providers) = fake_client();
+        let query = TcpQuery {
             attempt: 1,
             endpoint: "127.0.0.1:53".parse().unwrap(),
-            query: bytes::Bytes::from_static(b"query"),
-            timeout: std::time::Duration::from_secs(1),
+            query: Bytes::from_static(b"query"),
+            timeout: Duration::from_secs(1),
             max_message_bytes: 512,
-            permit: crate::evidence::ExecutionPermit::new(),
+            permit: ExecutionPermit::new(),
         };
-        let mut bare = ExchangeExecutor::new(
+        let mut executor = ExchangeExecutor::new(
             &client,
             crate::send::Options::default(),
             crate::exchange::Collection::default(),
         );
-        assert!(matches!(
-            bare.execute_tcp(&exchange),
-            Err(super::super::tcp::Error::Unsupported { .. })
-        ));
-        let mut explicit = bare.with_dns_tcp(RefusingTcp(std::sync::atomic::AtomicUsize::new(0)));
-        let error = explicit.execute_tcp(&exchange).unwrap_err();
+        let error = executor.query(&query).unwrap_err();
         assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
-        assert_eq!(explicit.tcp.0.load(std::sync::atomic::Ordering::SeqCst), 1);
-        explicit.udp.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
+        assert_eq!(providers.calls(), [Call::Connect(query.endpoint)]);
+
+        executor.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
         assert!(matches!(
-            explicit.execute_tcp(&exchange),
+            executor.query(&query),
             Err(super::super::tcp::Error::Unsupported { .. })
         ));
-        assert_eq!(explicit.tcp.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(providers.calls().len(), 1, "no second connect");
     }
 
     #[test]

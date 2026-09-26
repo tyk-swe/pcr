@@ -21,6 +21,9 @@ pub enum Error {
         value: u64,
         reason: Constraint,
     },
+    /// A server-name pattern puts `*` somewhere other than its ends.
+    #[error("SNI pattern '{pattern}' has '*' somewhere other than its start or end")]
+    SniPattern { pattern: String },
     #[error("capture read failed at frame {number}")]
     Capture {
         number: u64,
@@ -143,6 +146,11 @@ impl Classified for Error {
                 "cli.analysis_limit",
                 Kind::Usage,
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
+            ),
+            Self::SniPattern { .. } => Classification::new(
+                "cli.error",
+                Kind::Usage,
+                Some("write '*' only at the start, the end, or both ends of the pattern"),
             ),
             Self::Capture { source, .. } => source.classification(),
             // Refusals for exceeding a configured finite budget are resource

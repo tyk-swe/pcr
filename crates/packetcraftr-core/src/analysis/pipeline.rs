@@ -14,7 +14,6 @@ use crate::decode::{DecodedPacket, Dissector};
 use crate::filter::{Context as FilterContext, DerivedPacket as FilterDerivedPacket};
 use crate::registry::Registry;
 
-use crate::analysis::Error;
 use crate::analysis::adapter::{
     TcpTransport, UdpTransport, ip_fragments, ip_fragments_in_scope, replayed_ip_prefix_layers,
     tcp_segment, transports, udp_flow,
@@ -23,6 +22,7 @@ use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey, Resource as IpResource};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
 use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES, ScopeId};
+use crate::analysis::{Error, StreamTransport};
 use crate::frame::{Frame, LinkType};
 use crate::protocol::transport::Tcp;
 
@@ -481,6 +481,15 @@ where
             && !bounds.contains(Some(timestamp))
         {
             continue;
+        }
+        if let Some(selected) = options.stream {
+            let conversation = match selected.transport {
+                StreamTransport::Tcp => tcp_view.and_then(|view| view.conversation),
+                StreamTransport::Udp => udp_view.and_then(|view| view.conversation),
+            };
+            if conversation.is_none_or(|stream| stream.index != selected.index) {
+                continue;
+            }
         }
         if let Some(filter) = options.filter {
             let filter_derived = derived

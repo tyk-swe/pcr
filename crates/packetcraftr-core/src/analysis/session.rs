@@ -171,8 +171,9 @@ impl<C: Collector> Outcome<C> {
 /// `options.plan` is replaced — the session derives it from the filter's
 /// [`Filter::requirements`] and the collector's [`CollectorNeeds`] — while
 /// `options.tcp_events` and `options.track_sources` are raised to cover the
-/// declared needs. `selector` only feeds the [`Outcome::selected_absent`]
-/// verdict; selection itself is the already-compiled `options.filter`.
+/// declared needs. A `selector` becomes `options.stream`: the pass keeps
+/// only that conversation's frames, and the [`Outcome::selected_absent`]
+/// verdict reports whether it had any.
 pub struct Session<'a, C> {
     collector: C,
     options: Options<'a>,
@@ -199,17 +200,20 @@ impl<'a, C: Collector> Session<'a, C> {
             .filter
             .map_or_else(Requirements::default, Filter::requirements);
         let needs = collector.needs();
+        if selector.is_some() {
+            options.stream = selector;
+        }
         options.plan = Plan::physical(requirements).union(needs.plan());
-        if options.plan.tcp_index || options.plan.udp_index {
+        if options.plan.tcp_index || options.plan.udp_index || options.stream.is_some() {
             options.plan = Plan::default();
         }
         options.tcp_events |= needs.tcp_events;
         options.track_sources |= needs.track_sources;
         Self {
             collector,
+            selector: options.stream,
             options,
             registry,
-            selector,
         }
     }
 
@@ -536,7 +540,6 @@ mod tests {
     #[test]
     fn empty_selector_verdict_arrives_after_the_trailing_drain() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let mut probe = Probe::new(CollectorNeeds::default(), &log, &views);
@@ -546,7 +549,7 @@ mod tests {
             &registry,
             &[udp_frame(&registry, 0)],
             probe,
-            Some(&filter),
+            None,
             Some(StreamRef {
                 transport: StreamTransport::Tcp,
                 index: 42,
@@ -565,11 +568,6 @@ mod tests {
     #[test]
     fn split_phases_let_the_verdict_precede_finish() {
         let registry = builtin::registry();
-        let filter = compile("tcp.stream == 42", &registry);
-        let options = Options {
-            filter: Some(&filter),
-            ..Options::default()
-        };
         let log = Log::default();
         let views = Rc::new(RefCell::new(Vec::new()));
         let probe = Probe::new(CollectorNeeds::default(), &log, &views);
@@ -581,7 +579,7 @@ mod tests {
 
         let pass = Session::new(
             registry,
-            options,
+            Options::default(),
             probe,
             Some(StreamRef {
                 transport: StreamTransport::Tcp,
@@ -678,6 +676,57 @@ mod tests {
             !driven.outcome.run.trailing_tcp_events.is_empty(),
             "the open flow flushes at end of capture"
         );
+    }
+
+    #[test]
+    fn a_stream_selector_keeps_exactly_the_frames_its_filter_text_would() {
+        let registry = builtin::registry();
+        let frames = [
+            tcp_frame(&registry, 0, Tcp::SYN, 100),
+            udp_frame(&registry, 1),
+            tcp_frame(&registry, 2, Tcp::ACK, 101),
+            udp_frame(&registry, 3),
+        ];
+        for (selector, text) in [
+            (
+                StreamRef {
+                    transport: StreamTransport::Tcp,
+                    index: 0,
+                },
+                "tcp.stream == 0",
+            ),
+            (
+                StreamRef {
+                    transport: StreamTransport::Udp,
+                    index: 0,
+                },
+                "udp.stream == 0",
+            ),
+        ] {
+            let matched = |filter: Option<&Filter>, selector: Option<StreamRef>| {
+                let log = Log::default();
+                let views = Rc::new(RefCell::new(Vec::new()));
+                let driven = drive(
+                    &registry,
+                    &frames,
+                    Probe::new(CollectorNeeds::default(), &log, &views),
+                    filter,
+                    selector,
+                )
+                .expect("session runs");
+                assert!(!driven.outcome.selected_absent(), "{text}");
+                driven
+                    .log
+                    .iter()
+                    .filter(|entry| entry.starts_with("observe:"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            let filter = compile(text, &registry);
+            let by_selector = matched(None, Some(selector));
+            assert_eq!(by_selector.len(), 2, "{text}: {by_selector:?}");
+            assert_eq!(by_selector, matched(Some(&filter), None), "{text}");
+        }
     }
 
     #[test]

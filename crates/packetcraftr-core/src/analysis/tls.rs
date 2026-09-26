@@ -58,9 +58,11 @@ use crate::error::BoundaryError;
 use crate::protocol::transport::Tcp;
 
 mod limits;
+mod selector;
 mod session;
 
 pub use limits::{Limits, MAX_DIRECTION_BUFFER};
+pub use selector::{Selector, SniPattern};
 pub use session::{
     ALERT_LEVEL_FATAL, ALERT_LEVEL_WARNING, Alert, ClientSummary, MAX_ALERTS, ServerSummary,
     Session, Status,

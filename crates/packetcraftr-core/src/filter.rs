@@ -58,6 +58,7 @@ mod ast;
 mod comparison;
 mod error;
 mod eval;
+mod frames;
 mod lexer;
 mod literal;
 mod model;
@@ -69,6 +70,7 @@ pub use projection::Projection;
 
 pub use error::Error;
 pub use eval::{Context, DerivedPacket};
+pub use frames::{FrameDecoder, FrameSelector};
 pub use model::Filter;
 pub use parser::{
     DEFAULT_MAX_FILTER_BYTES, MAX_FILTER_NESTING, MAX_FILTER_SET_MEMBERS, MAX_FILTER_TERMS,

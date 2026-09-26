@@ -45,6 +45,7 @@ impl AnalysisSetup {
             track_sources: false,
             cancellation: Some(crate::cancellation::signal().clone()),
             filter: self.filter.as_ref(),
+            stream: None,
             time_bounds: self.time_bounds,
             tcp_events: false,
             ip_overlap: self.ip_overlap,

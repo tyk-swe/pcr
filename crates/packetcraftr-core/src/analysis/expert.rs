@@ -19,7 +19,10 @@ use tcp::DirectionState;
 mod finding;
 mod generation;
 mod observation;
+mod selector;
 mod tcp;
+
+pub use selector::Selector;
 
 const fn tcp_stream_ref(index: u64) -> StreamRef {
     StreamRef {

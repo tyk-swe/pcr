@@ -635,10 +635,11 @@ fn bit_flip(cases: usize) -> packet_fuzz::Request {
     }
 }
 
-/// Short collection windows, so fixture exchanges finish at once.
+/// Short collection windows, so fixture exchanges finish quickly, yet long
+/// enough that preparing each exchange fits inside its window under load.
 fn quick(campaign: packet_fuzz::Request) -> Request {
     Request {
-        timeout: Duration::from_millis(1),
+        timeout: Duration::from_millis(50),
         ..request(campaign)
     }
 }

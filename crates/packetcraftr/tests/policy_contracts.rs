@@ -12,7 +12,6 @@ use std::sync::{
 
 use packetcraftr::Client;
 use packetcraftr::policy;
-use packetcraftr::policy::Authorizer;
 use packetcraftr::target::Hostname;
 use packetcraftr::target::Resolver;
 use packetcraftr::target::Target;
@@ -343,21 +342,20 @@ fn raw_layer3_wire_source_requires_the_spoofing_opt_in() {
     );
 }
 
-/// The workflow seam validated the policy before every operation; the client's
-/// own seam did not, so an unusable resolved-address bound was accepted by
-/// `send` and `exchange` and refused by scan, DNS, traceroute, and fuzz. Both
-/// front doors now refuse it with the same classification.
+/// Every workflow is admitted through the client's one admission path, which
+/// validates the policy before any operation: an unusable resolved-address
+/// bound is refused by `send` exactly as the policy itself refuses it.
 #[test]
-fn both_authorization_seams_refuse_a_malformed_policy_identically() {
+fn the_client_refuses_a_malformed_policy_as_the_policy_does() {
     let malformed = policy::Policy {
         max_resolved_addresses: 0,
         ..policy::Policy::default()
     };
-    let workflow_denial = packetcraftr::policy::PolicyAuthorizer::for_packets(&malformed)
-        .authorize_operation(packetcraftr::policy::Operation::Wire(
+    let policy_denial = malformed
+        .authorize(packetcraftr::policy::Operation::Wire(
             packetcraftr::policy::WireLimits::new(1, 1),
         ))
-        .expect_err("the workflow seam rejects a malformed policy");
+        .expect_err("the policy rejects itself when malformed");
 
     let client = client(FixedRoutes, malformed);
     let client_denial = send_once(
@@ -368,13 +366,13 @@ fn both_authorization_seams_refuse_a_malformed_policy_identically() {
             ..packetcraftr::send::Options::default()
         },
     )
-    .expect_err("the client seam rejects the same malformed policy");
+    .expect_err("the client rejects the same malformed policy");
 
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&client_denial).code,
-        workflow_denial.classification().code
+        policy_denial.classification().code
     );
-    assert_eq!(client_denial.to_string(), workflow_denial.to_string());
+    assert_eq!(client_denial.to_string(), policy_denial.to_string());
     assert_eq!(
         packetcraftr_core::error::Classified::classification(&client_denial).code,
         "cli.live_target"

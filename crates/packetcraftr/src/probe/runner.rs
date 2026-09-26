@@ -23,9 +23,9 @@ use crate::{SentPacket, Stats};
 /// A planned batch of probes executed together: one probe per scan batch,
 /// one hop's probes per traceroute batch. Never empty.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Batch<P> {
-    pub probes: Vec<P>,
-    pub timeout: Duration,
+pub(crate) struct Batch<P> {
+    pub(crate) probes: Vec<P>,
+    pub(crate) timeout: Duration,
     pub(crate) permit: ExecutionPermit,
     /// The first probe's operation-local sequence, recorded by the planner
     /// that built the batch; it names the batch in every error the runner
@@ -44,7 +44,7 @@ impl<P> Batch<P> {
 
 /// Common executor evidence returned by homogeneous probe batches.
 #[derive(Clone, Debug)]
-pub struct Execution {
+pub(crate) struct Execution {
     pub(crate) permit: ExecutionPermit,
     pub(crate) sent: Vec<SentPacket>,
     pub(crate) responses: Vec<crate::exchange::Response>,

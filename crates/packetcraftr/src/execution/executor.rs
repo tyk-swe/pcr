@@ -29,28 +29,28 @@ impl ExecutorFault {
 
 /// One unit of live work a workflow hands to its executor, paired with the
 /// evidence receipt that work produces.
-pub trait Request {
+pub(crate) trait Request {
     type Execution;
 }
 
 /// The executor boundary every live workflow shares: it carries out one
 /// approved request and returns the evidence it produced. Implementations are
 /// keyed by request type, so a scan executor and a DNS executor stay distinct.
-pub trait Executor<Req: Request> {
+pub(crate) trait Executor<Req: Request> {
     fn execute(&mut self, request: &Req) -> Result<Req::Execution, BoundaryError>;
 }
 
 /// Runs each approved workflow step as one capture-ready exchange on a
 /// client, preparing every packet with `send` and collecting under
 /// `collection`.
-pub struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
+pub(crate) struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
     pub(crate) client: &'a crate::Client<P, K>,
     pub(crate) send: crate::send::Options,
     pub(crate) collection: crate::exchange::Collection,
 }
 
 impl<'a, P, K> ExchangeExecutor<'a, P, K> {
-    pub fn new(
+    pub(crate) fn new(
         client: &'a crate::Client<P, K>,
         send: crate::send::Options,
         collection: crate::exchange::Collection,

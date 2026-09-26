@@ -18,7 +18,7 @@ pub(crate) mod validation;
 pub(crate) use admission::Admission;
 pub(crate) use context::{Context, Grant, Paused, Receipt, pause, rate_delay};
 pub(crate) use errors::Errors;
-pub use executor::{ExchangeExecutor, Executor, Request};
+pub(crate) use executor::{ExchangeExecutor, Executor, Request};
 pub(crate) use executor::{ExecutorFault, WorkflowOverrides};
 pub(crate) use shared::Shared;
 pub use sink::Sink;

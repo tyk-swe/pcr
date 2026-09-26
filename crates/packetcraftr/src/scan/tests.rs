@@ -30,7 +30,7 @@ use crate::Sink;
 use crate::clock::Clock;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
-use crate::policy::PolicyAuthorizer;
+use crate::execution::Admission;
 use crate::probe::Batch;
 use crate::probe::{Execution, ProbeStatus, Transport};
 use crate::target::ResolveTarget;
@@ -220,7 +220,7 @@ fn udp_payload_is_budgeted_and_mismatched_sent_payload_is_rejected() {
     let mut executor = TimeoutExecutor::default();
     let error = run(
         &request,
-        &mut PolicyAuthorizer::for_packets(&policy),
+        &mut Admission::new(&policy, &crate::target::SystemResolver),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -374,7 +374,7 @@ fn scan_hostname_policy_denial_precedes_resolution_and_execution() {
         calls: Arc::clone(&executor_calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &tcp_scan_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -406,7 +406,7 @@ fn scan_authorizes_mixed_resolution_answers_before_family_filtering() {
     policy.allow_hostname_resolution = true;
     let mut request = tcp_scan_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
 
     let error = run(
         &request,

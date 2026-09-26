@@ -31,7 +31,7 @@ use crate::clock::Clock;
 use crate::execution::{Errors as _, Executor, publisher};
 use crate::policy::Authorizer;
 use crate::policy::Operation;
-use crate::policy::PolicyAuthorizer;
+use crate::execution::Admission;
 use crate::probe::Batch;
 use crate::probe::{Execution, ProbeEndpoint, ProbeStatus, Transport};
 use crate::target::Authorized;
@@ -377,7 +377,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
         calls: Arc::clone(&calls),
     };
     let policy = private_policy();
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &udp_traceroute_request(Target::Hostname("lab.example".parse().unwrap())),
         &mut authorizer,
@@ -395,7 +395,7 @@ fn traceroute_hostname_policy_precedes_resolution_and_probe_execution() {
     policy.allow_hostname_resolution = true;
     let mut request = udp_traceroute_request(Target::Hostname("mixed.example".parse().unwrap()));
     request.address_family = Family::Ipv6;
-    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut authorizer = Admission::new(&policy, &resolver);
     let error = run(
         &request,
         &mut authorizer,

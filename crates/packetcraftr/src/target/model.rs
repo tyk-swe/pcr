@@ -239,7 +239,7 @@ pub trait Resolver: Send + Sync {
 /// Resolves a declared target and authorizes every address it yields, for a
 /// workflow that takes a declared target (DNS servers, scan and traceroute
 /// targets).
-pub trait ResolveTarget {
+pub(crate) trait ResolveTarget {
     /// Resolves `target` and authorizes each resolved address.
     ///
     /// # Errors

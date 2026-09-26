@@ -1226,7 +1226,7 @@ fn direct_tcp_denials_and_scoped_targets_never_execute_a_probe() {
     };
     let error = run(
         &request,
-        &mut crate::policy::PolicyAuthorizer::for_packets(&policy),
+        &mut crate::execution::Admission::new(&policy, &crate::test_support::ScriptedResolver::new([])),
         &packetcraftr_core::protocol::builtin::registry(),
         &mut executor,
         &mut NoopClock,
@@ -1617,7 +1617,8 @@ fn aggregate_udp_and_socket_budget_is_approved_before_any_io() {
         max_packets_per_operation: 2,
         ..crate::policy::Policy::default()
     };
-    let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+    let resolver = crate::test_support::ScriptedResolver::new([]);
+    let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
     let mut executor = ScriptedExecutor::new([Some(truncated_dns_response())]);
 
     let error = run(
@@ -1658,7 +1659,8 @@ fn the_query_count_overrun_is_classified_the_same_with_and_without_fallback() {
             super::TransportMode::Udp
         };
         request.timeout = Duration::from_secs(1);
-        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let resolver = crate::test_support::ScriptedResolver::new([]);
+        let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
         let mut executor = ScriptedExecutor::new([Some(dns_response())]);
 
         let error = run(
@@ -1988,7 +1990,8 @@ fn added_edns_bytes_can_exceed_policy_before_any_io() {
             udp_payload_size: 1232,
             dnssec_ok: false,
         });
-        let mut authorizer = crate::policy::PolicyAuthorizer::for_packets(&policy);
+        let resolver = crate::test_support::ScriptedResolver::new([]);
+        let mut authorizer = crate::execution::Admission::new(&policy, &resolver);
         let mut executor = ScriptedExecutor::new([]);
         let error = run(
             &request,

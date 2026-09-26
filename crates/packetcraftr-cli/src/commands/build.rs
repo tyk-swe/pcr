@@ -39,7 +39,7 @@ pub(super) fn run(
     let packets = template.expand(maximum).map_err(CliError::classified)?;
     if packets.len() != 1 && matches!(format, BuildFormat::Json | BuildFormat::Raw) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "JSON and raw build output require exactly one packet; use text, hex, or NDJSON for packet sets",
         ));
     }

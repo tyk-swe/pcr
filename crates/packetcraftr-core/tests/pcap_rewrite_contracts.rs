@@ -133,7 +133,7 @@ fn capture_errors_expose_stable_classifications_and_causes() {
         exponent: 2,
     }
     .classification();
-    assert_eq!(cli.kind, Kind::Cli);
+    assert_eq!(cli.kind, Kind::Usage);
     let io = Error::Io(io::Error::other("disk gone"));
     assert_eq!(io.classification().kind, Kind::Io);
     assert_eq!(io.causes(), vec!["disk gone"]);

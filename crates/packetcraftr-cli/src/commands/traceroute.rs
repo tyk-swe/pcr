@@ -31,7 +31,7 @@ pub(super) fn run(
     let request = prepare_request(&arguments, queue_limits)?;
     let max_template_packets = usize::try_from(arguments.attempts).map_err(|_| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "traceroute attempt count exceeds the platform size limit",
         )
     })?;

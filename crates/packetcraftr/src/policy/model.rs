@@ -221,7 +221,7 @@ impl Classified for Error {
         let kind = match self {
             Self::InvalidAddressLimit { .. }
             | Self::InvalidDestinationConstraint { .. }
-            | Self::DestinationConstraintLimit { .. } => Kind::Cli,
+            | Self::DestinationConstraintLimit { .. } => Kind::Usage,
             _ => Kind::Policy,
         };
         Classification::new(code, kind, Some(remediation))

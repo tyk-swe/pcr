@@ -46,7 +46,7 @@ impl ErrorKind {
 impl From<Kind> for ErrorKind {
     fn from(kind: Kind) -> Self {
         match kind {
-            Kind::Cli => Self::Cli,
+            Kind::Usage => Self::Cli,
             Kind::Packet => Self::Packet,
             Kind::Capability => Self::Capability,
             Kind::Io => Self::Io,

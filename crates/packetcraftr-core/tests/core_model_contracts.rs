@@ -220,7 +220,7 @@ fn source_chain_walks_every_link_and_drops_restated_wrappers() {
 fn boundary_constructors_distinguish_validation_from_internal_failures() {
     let validation =
         BoundaryError::execution_validation("bad request", "cli.test", "change the request");
-    assert_eq!(validation.classification().kind, Kind::Cli);
+    assert_eq!(validation.classification().kind, Kind::Usage);
     assert_eq!(validation.classification().code, "cli.test");
     assert_eq!(
         validation.classification().remediation,

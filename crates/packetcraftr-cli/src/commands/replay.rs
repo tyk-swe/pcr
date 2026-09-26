@@ -98,7 +98,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     )?;
     if arguments.interface_maps.len() + arguments.filter_maps.len() > 256 {
         return Err(CliError::new(
-            core::error::Kind::Cli,
+            core::error::Kind::Usage,
             "replay permits at most 256 interface rules",
         ));
     }
@@ -108,13 +108,13 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     for mapping in &arguments.interface_maps {
         let (source, destination) = mapping.split_once('=').ok_or_else(|| {
             CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE",
             )
         })?;
         let source = source.parse::<u32>().map_err(|_| {
             CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "source interface must be an unsigned capture-global ID",
             )
         })?;
@@ -126,7 +126,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     for mapping in &arguments.filter_maps {
         let (expression, destination) = mapping.rsplit_once("=>").ok_or_else(|| {
             CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "--map-filter requires EXPR=>OUTPUT_INTERFACE",
             )
         })?;

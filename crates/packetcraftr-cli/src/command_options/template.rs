@@ -49,7 +49,7 @@ impl TemplateArgs {
         let maximum = self.max_template_packets;
         if maximum == 0 {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--max-template-packets must be non-zero",
             ));
         }
@@ -69,7 +69,7 @@ impl TemplateArgs {
         for source in self.axes {
             let syntax = || {
                 CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "--axis requires LAYER.FIELD=[VALUES] or LAYER.FIELD=START..END[:STEP] with a zero-based layer and a non-empty set",
                 )
             };
@@ -135,7 +135,7 @@ impl TemplateArgs {
 fn parse_range(text: &str) -> Result<NumericRange, CliError> {
     let syntax = || {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--axis range requires START..END[:STEP] with unsigned decimal or 0x-prefixed integers",
         )
     };

@@ -83,13 +83,13 @@ pub(super) fn load(
         return load_assignments(&bytes, registry, checksum_mode);
     }
     let document: Document = serde_json::from_slice(&bytes)
-        .map_err(|source| CliError::new(Kind::Cli, format!("invalid rewrite rules: {source}")))?;
+        .map_err(|source| CliError::new(Kind::Usage, format!("invalid rewrite rules: {source}")))?;
     if document.schema != "packetcraftr.rewrite/v1"
         || document.rules.is_empty()
         || document.rules.len() > 64
     {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules",
         ));
     }
@@ -98,7 +98,7 @@ pub(super) fn load(
         rule.patch.validate().map_err(CliError::classified)?;
         if rule.patch.is_empty() {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "rewrite rules cannot contain empty patches",
             ));
         }
@@ -117,13 +117,13 @@ fn load_assignments(
     checksum_mode: ChecksumMode,
 ) -> Result<Vec<Rule>, CliError> {
     let document: AssignDocument = serde_json::from_slice(bytes)
-        .map_err(|source| CliError::new(Kind::Cli, format!("invalid rewrite rules: {source}")))?;
+        .map_err(|source| CliError::new(Kind::Usage, format!("invalid rewrite rules: {source}")))?;
     if document.schema != "packetcraftr.rewrite/v2"
         || document.rules.is_empty()
         || document.rules.len() > 64
     {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "rewrite rules require schema packetcraftr.rewrite/v1 or /v2 and 1..=64 rules",
         ));
     }
@@ -131,12 +131,12 @@ fn load_assignments(
     for rule in document.rules {
         if rule.assign.is_empty() {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "rewrite rules cannot contain empty assignments",
             ));
         }
         let edits = FieldEdits::compile(&rule.assign, checksum_mode, registry)
-            .map_err(|error| CliError::caused(Kind::Cli, &error))?;
+            .map_err(|error| CliError::caused(Kind::Usage, &error))?;
         rules.push(Rule {
             filter: rule.filter,
             patch: HeaderRewrite::default(),
@@ -150,21 +150,21 @@ fn load_assignments(
 pub(super) fn assignment(value: &str) -> Result<FieldAssignment, CliError> {
     value
         .parse()
-        .map_err(|error| CliError::caused(Kind::Cli, &error))
+        .map_err(|error| CliError::caused(Kind::Usage, &error))
 }
 
 pub(super) fn mac(value: &str) -> Result<[u8; 6], CliError> {
     let parts: Vec<_> = value.split(':').collect();
     if parts.len() != 6 || parts.iter().any(|part| part.len() != 2) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "MAC addresses require six colon-separated hexadecimal bytes",
         ));
     }
     let mut address = [0; 6];
     for (part, byte) in parts.iter().zip(&mut address) {
         *byte = u8::from_str_radix(part, 16)
-            .map_err(|_| CliError::new(Kind::Cli, "invalid hexadecimal MAC address"))?;
+            .map_err(|_| CliError::new(Kind::Usage, "invalid hexadecimal MAC address"))?;
     }
     Ok(address)
 }
@@ -175,7 +175,7 @@ pub(super) fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
         } else {
             value.parse()
         }
-        .map_err(|_| CliError::new(Kind::Cli, "invalid VLAN number"))
+        .map_err(|_| CliError::new(Kind::Usage, "invalid VLAN number"))
     }
     let parts: Vec<_> = value.split(':').collect();
     let tag = match parts.as_slice() {
@@ -190,7 +190,7 @@ pub(super) fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
             let dei = rest.get(1).map(|s| number(s)).transpose()?.unwrap_or(0);
             if priority > 7 || dei > 1 {
                 return Err(CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "VLAN priority must be 0..=7 and DEI 0 or 1",
                 ));
             }
@@ -203,7 +203,7 @@ pub(super) fn vlan(value: &str) -> Result<VlanRewrite, CliError> {
         }
         _ => {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "use VID or TPID:VID[:PRIORITY[:DEI]]",
             ));
         }

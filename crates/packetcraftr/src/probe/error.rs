@@ -263,7 +263,7 @@ impl Classified for Error {
             | ErrorKind::InvalidSourcePort
             | ErrorKind::InvalidTimeout { .. }
             | ErrorKind::InvalidDuration { .. } => {
-                Classification::new(codes.limit, Kind::Cli, Some(codes.limit_remediation))
+                Classification::new(codes.limit, Kind::Usage, Some(codes.limit_remediation))
             }
             ErrorKind::Authorization(source)
             | ErrorKind::PipelineExecution { source }

@@ -596,7 +596,7 @@ mod tests {
             });
             hooks.on_event = |event, stream| {
                 if event == 11 {
-                    return Err(CliError::new(core::error::Kind::Cli, "adapter refused"));
+                    return Err(CliError::new(core::error::Kind::Usage, "adapter refused"));
                 }
                 emit_event(event, stream)
             };

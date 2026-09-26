@@ -28,12 +28,15 @@ pub enum Coordinate {
 }
 
 /// Top-level failure classes shared by API boundaries.
+///
+/// Kinds are neutral: each front end decides how a kind is published and which
+/// exit status it maps to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// A caller or request error: the input or invocation was wrong, not the
     /// packet or environment.
-    Cli,
+    Usage,
     Packet,
     Capability,
     Io,
@@ -44,7 +47,7 @@ pub enum Kind {
 impl Kind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Cli => "cli",
+            Self::Usage => "usage",
             Self::Packet => "packet",
             Self::Capability => "capability",
             Self::Io => "io",
@@ -56,7 +59,7 @@ impl Kind {
 
 display_via_as_str!(Kind);
 
-/// Deterministic machine code, CLI class, and operator guidance for an error.
+/// Deterministic machine code, failure kind, and operator guidance for an error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Classification {

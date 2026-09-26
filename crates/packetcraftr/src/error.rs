@@ -134,7 +134,7 @@ impl Classified for Error {
             ),
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
-                Kind::Cli,
+                Kind::Usage,
                 Some("split the exchange so every packet uses the same interface and link mode"),
             ),
             Self::Template { .. } => Classification::new(
@@ -156,14 +156,14 @@ impl Classified for Error {
             ),
             Self::InvalidExchangeOption { .. } => Classification::new(
                 "cli.exchange_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
                 ),
             ),
             Self::InvalidSendOption { .. } => Classification::new(
                 "cli.send_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite repetition, rate, and expansion limits for one send operation"),
             ),
         }

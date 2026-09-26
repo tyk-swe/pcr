@@ -270,7 +270,7 @@ fn classified(code: &'static str, kind: Kind, remediation: &'static str) -> Clas
 }
 
 fn classified_cli(code: &'static str, remediation: &'static str) -> Classification {
-    classified(code, Kind::Cli, remediation)
+    classified(code, Kind::Usage, remediation)
 }
 
 #[cfg(test)]

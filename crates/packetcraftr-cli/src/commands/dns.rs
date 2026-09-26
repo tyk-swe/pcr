@@ -32,7 +32,7 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     if !arguments.udp_only && !arguments.route.supports_kernel_tcp() {
         return Err(CliError::new(
-            core::error::Kind::Cli,
+            core::error::Kind::Usage,
             "DNS TCP cannot preserve --interface, --source, or --link-mode; remove the route override or select --udp-only",
         ));
     }
@@ -165,7 +165,7 @@ fn prepare_requests(
     }
     if questions.len() > 1 && arguments.transaction_id.is_some() {
         return Err(CliError::new(
-            core::error::Kind::Cli,
+            core::error::Kind::Usage,
             "--transaction-id is only valid for a single-question batch",
         ));
     }

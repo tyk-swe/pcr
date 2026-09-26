@@ -143,7 +143,7 @@ fn unknown_protocol(name: &str) -> CliError {
     CliError::from_classification(
         Classification::new(
             "cli.protocol",
-            Kind::Cli,
+            Kind::Usage,
             Some("run `packetcraftr protocols` to list built-in protocols"),
         ),
         format!("unknown built-in protocol '{name}'"),

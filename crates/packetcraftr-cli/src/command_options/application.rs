@@ -49,7 +49,7 @@ impl ApplicationLimitsArgs {
 pub(crate) fn validate_output_bytes(value: usize) -> Result<(), CliError> {
     if value == 0 || value > 256 * 1024 * 1024 {
         return Err(CliError::new(
-            packetcraftr_core::error::Kind::Cli,
+            packetcraftr_core::error::Kind::Usage,
             "--max-application-output-bytes must be in 1..=268435456",
         ));
     }

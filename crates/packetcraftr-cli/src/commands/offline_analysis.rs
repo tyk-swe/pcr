@@ -155,7 +155,7 @@ pub(super) fn omitted_diagnostic(
 pub(crate) fn parse_stream_selector(spec: &str) -> Result<StreamRef, CliError> {
     let invalid = || {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("invalid --stream '{spec}': expected tcp:INDEX or udp:INDEX"),
         )
     };

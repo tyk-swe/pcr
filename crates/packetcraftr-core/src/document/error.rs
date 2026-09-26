@@ -100,34 +100,34 @@ impl Classified for Error {
             | Self::NestingLimit { .. }
             | Self::ResourceLimit { .. } => Classification::new(
                 "cli.document_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "shrink the packet document to stay inside its finite byte, node, and nesting bounds",
                 ),
             ),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.document_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("lower the configured document limit to at most its stable maximum"),
             ),
             Self::Parse { .. } => Classification::new(
                 "cli.document_syntax",
-                Kind::Cli,
+                Kind::Usage,
                 Some("repair the packet document so it parses as well-formed JSON or YAML"),
             ),
             Self::Schema { .. } => Classification::new(
                 "cli.document_schema",
-                Kind::Cli,
+                Kind::Usage,
                 Some("declare the packet document schema this build supports"),
             ),
             Self::UnknownProtocol { .. } => Classification::new(
                 "cli.document_protocol",
-                Kind::Cli,
+                Kind::Usage,
                 Some("run `packetcraftr protocols` to list the protocol names the registry binds"),
             ),
             Self::Layer { .. } | Self::Field { .. } => Classification::new(
                 "cli.document_field",
-                Kind::Cli,
+                Kind::Usage,
                 Some("correct the layer's field names and values against its reflective schema"),
             ),
         }

@@ -205,7 +205,7 @@ fn policy_validates_address_and_operation_bounds() {
     ));
     // The published CLI contract for this refusal does not move with its home.
     assert_eq!(over_limit.classification().code, "cli.live_target");
-    assert_eq!(over_limit.classification().kind, Kind::Cli);
+    assert_eq!(over_limit.classification().kind, Kind::Usage);
     assert_eq!(
         over_limit.classification().remediation,
         Some("set the resolved-address limit to at least 1 and no more than the supported maximum")
@@ -451,7 +451,7 @@ fn public_errors_retain_stable_policy_and_target_classification() {
                 reason: "fixture",
             }),
             "cli.live_target",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Box::new(TargetError::Resolver {

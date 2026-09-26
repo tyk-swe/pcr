@@ -18,7 +18,7 @@ pub(super) fn read(
 ) -> Result<Bytes, CliError> {
     if (hex.is_some() || path.is_some()) && !matches!(transport, Transport::Udp) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--udp-payload-hex and --udp-payload-file require --transport udp",
         ));
     }
@@ -37,12 +37,12 @@ pub(super) fn read(
                 > MAX_UDP_PAYLOAD_BYTES * 2
         {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "UDP payload exceeds 65507 bytes or its bounded hex representation",
             ));
         }
         return packetcraftr_core::protocol::raw::parse_hex(hex)
-            .map_err(|source| CliError::caused(Kind::Cli, &source));
+            .map_err(|source| CliError::caused(Kind::Usage, &source));
     }
     if let Some(path) = path {
         return read_bounded_file_allow_empty(path, MAX_UDP_PAYLOAD_BYTES, InputKind::Frame)

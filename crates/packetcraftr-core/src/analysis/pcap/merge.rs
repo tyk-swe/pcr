@@ -82,7 +82,7 @@ impl Classified for MergeError {
             Self::Source { source, .. } | Self::Capture(source) => source.classification(),
             Self::Sources { .. } => Classification::new(
                 "cli.capture_merge_sources",
-                Kind::Cli,
+                Kind::Usage,
                 Some("select a bounded set of named capture sources"),
             ),
             Self::ClockRegression { .. } => Classification::new(

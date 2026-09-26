@@ -75,6 +75,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `traceroute::Batch` already was. Executor implementations read the scan
   batch's single probe from the one-element `batch.probes` instead of
   `batch.probe`. See `docs/migration-unreleased.md`.
+- `error::Kind::Cli` is renamed `Kind::Usage` (`as_str` and its serde name
+  become `"usage"`), so library classifications no longer name the CLI. Codes
+  such as `cli.capture_filter` and CLI output are unchanged: the CLI's
+  `output::envelope::Error.kind` is the new CLI-owned `envelope::ErrorKind`,
+  which still publishes a usage failure as `"cli"` with exit code 2. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

@@ -164,7 +164,7 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => Classification::new(
                 "cli.replay_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero replay limits and a valid positive timing value"),
             ),
             Self::Capture { source, .. } => source.classification(),

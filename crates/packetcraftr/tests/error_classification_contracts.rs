@@ -56,7 +56,11 @@ fn assert_message_is_stable(message: &str, variant: &str) {
 fn selection_denial() -> BoundaryError {
     BoundaryError::new(
         "selector refused frame 3",
-        Classification::new("cli.replay_selection", Kind::Cli, Some("narrow the filter")),
+        Classification::new(
+            "cli.replay_selection",
+            Kind::Usage,
+            Some("narrow the filter"),
+        ),
         vec!["frame 3 failed the filter".to_owned()],
     )
 }
@@ -71,7 +75,7 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
                 maximum: Duration::from_secs(60),
             },
             "cli.replay_limit",
-            Kind::Cli,
+            Kind::Usage,
             None,
         ),
         (
@@ -103,7 +107,7 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
                 source: selection_denial(),
             },
             "cli.replay_selection",
-            Kind::Cli,
+            Kind::Usage,
             Some(Coordinate::SourceFrame(3)),
         ),
     ];

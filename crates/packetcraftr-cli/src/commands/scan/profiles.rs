@@ -25,19 +25,19 @@ pub(super) fn load(
     };
     if !matches!(transport, super::arguments::Transport::Udp) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--udp-profiles requires --transport udp",
         ));
     }
     let bytes = crate::input::read_bounded_json_document(path, MAX_PROFILE_BYTES)?;
     let document: Document = serde_json::from_slice(&bytes)
-        .map_err(|error| CliError::new(Kind::Cli, format!("invalid UDP profiles: {error}")))?;
+        .map_err(|error| CliError::new(Kind::Usage, format!("invalid UDP profiles: {error}")))?;
     if document.schema != "packetcraftr.udp-profiles/v1"
         || document.profiles.is_empty()
         || document.profiles.len() > 256
     {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "UDP profiles require schema packetcraftr.udp-profiles/v1 and 1..=256 assignments",
         ));
     }
@@ -47,7 +47,7 @@ pub(super) fn load(
     for assignment in document.profiles {
         if assignment.ports.is_empty() || assignment.ports.len() > MAX_PROFILE_PORTS {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "each UDP profile needs 1..=4096 port entries",
             ));
         }
@@ -59,7 +59,7 @@ pub(super) fn load(
             charged = charged.saturating_add(compiled.storage_bytes());
             if charged > MAX_PROFILE_BYTES {
                 return Err(CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "compiled UDP profiles exceed 1 MiB",
                 ));
             }
@@ -71,14 +71,14 @@ pub(super) fn load(
             if let Some(existing) = profiles.get(&port) {
                 if existing.as_ref() != profile.as_ref() {
                     return Err(CliError::new(
-                        Kind::Cli,
+                        Kind::Usage,
                         format!("conflicting UDP profiles for port {port}"),
                     ));
                 }
             } else {
                 if profiles.len() >= MAX_PROFILE_PORTS {
                     return Err(CliError::new(
-                        Kind::Cli,
+                        Kind::Usage,
                         "UDP profiles exceed 4096 mapped ports",
                     ));
                 }

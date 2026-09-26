@@ -110,7 +110,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     let rules = if let Some(path) = &args.rules_file {
         if !patch.is_empty() || args.filter.is_some() || !args.sets.is_empty() {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--rules-file conflicts with direct edits, --set, and --filter",
             ));
         }
@@ -118,7 +118,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     } else {
         if patch.is_empty() && args.sets.is_empty() {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "rewrite requires a header edit, --set, or --rules-file",
             ));
         }
@@ -128,7 +128,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         } else {
             Some(
                 FieldEdits::compile(&args.sets, checksum_mode, &registry)
-                    .map_err(|error| CliError::caused(Kind::Cli, &error))?,
+                    .map_err(|error| CliError::caused(Kind::Usage, &error))?,
             )
         };
         vec![rules::Rule {
@@ -139,13 +139,13 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     };
     if args.checksum_mode.is_some() && rules.iter().all(|rule| !rule.has_edits()) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--checksum-mode requires field assignments via --set or a v2 rules file",
         ));
     }
     if args.dry_run && rules.iter().any(|rule| !rule.patch.is_empty()) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--dry-run reports field-assignment changes only; it cannot preview header rewrites",
         ));
     }

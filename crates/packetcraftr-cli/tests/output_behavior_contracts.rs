@@ -56,7 +56,7 @@ fn contract_errors_carry_message_code_kind_and_remediation() {
     };
     assert!(unsupported.to_string().contains("choose text, json"));
     assert_eq!(unsupported.classification().code, "cli.output_format");
-    assert_eq!(unsupported.classification().kind, Kind::Cli);
+    assert_eq!(unsupported.classification().kind, Kind::Usage);
 
     for (error, message, code, kind) in [
         (

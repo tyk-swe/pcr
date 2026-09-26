@@ -52,7 +52,7 @@ pub(crate) fn compile(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.filter_unsupported_field",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "use `follow`, `stats`, or `expert` for stream-aware filters, \
                      or filter on header fields instead",

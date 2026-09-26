@@ -55,7 +55,7 @@ impl InputKind {
     fn oversized_error(self, actual: usize, limit: usize) -> CliError {
         match self {
             Self::Recipe | Self::Capture => CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 format!("{} input exceeds {limit} byte limit", self.label()),
             ),
             Self::Frame => {
@@ -67,7 +67,7 @@ impl InputKind {
 
 fn missing_input_error(kind: InputKind) -> CliError {
     CliError::from_classification(
-        Classification::new("cli.input_source", Kind::Cli, Some(kind.remediation())),
+        Classification::new("cli.input_source", Kind::Usage, Some(kind.remediation())),
         format!(
             "{} input is required: provide {}",
             kind.label(),
@@ -118,7 +118,10 @@ fn resolve_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(Kind::Cli, format!("packet document is not UTF-8: {source}"))
+                CliError::new(
+                    Kind::Usage,
+                    format!("packet document is not UTF-8: {source}"),
+                )
             })?;
             (input, Some(path))
         }
@@ -128,7 +131,7 @@ fn resolve_recipe(
                 InputKind::Recipe,
             )?;
             let input = String::from_utf8(bytes).map_err(|source| {
-                CliError::new(Kind::Cli, format!("stdin recipe is not UTF-8: {source}"))
+                CliError::new(Kind::Usage, format!("stdin recipe is not UTF-8: {source}"))
             })?;
             (input, None)
         }
@@ -183,7 +186,7 @@ fn resolve_recipe(
 fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let syntax = || {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "--payload-file requires LAYER.FIELD=PATH with a zero-based layer index",
         )
     };
@@ -197,7 +200,7 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     let packet_len = packet.len();
     let layer = packet.layer_mut(layer_index).ok_or_else(|| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "--payload-file layer index {layer_index} is outside the recipe's {packet_len} layers"
             ),
@@ -205,19 +208,19 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
     })?;
     let current = layer.field_path(&field).ok_or_else(|| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("--payload-file field {field} is unknown on layer {layer_index}"),
         )
     })?;
     let core::field::FieldValue::Bytes(current) = current else {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("--payload-file field {field} on layer {layer_index} is not bytes-typed"),
         ));
     };
     if !current.is_empty() {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "--payload-file field {field} on layer {layer_index} already holds recipe bytes"
             ),
@@ -232,7 +235,7 @@ fn apply_payload_file(packet: &mut Packet, spec: &str) -> Result<(), CliError> {
         .set_field_path(&field, core::field::FieldValue::Bytes(bytes.into()))
         .map_err(|source| {
             CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 format!(
                     "could not set --payload-file field {field} on layer {layer_index}: {source}"
                 ),
@@ -347,7 +350,7 @@ pub(crate) fn read_bounded_json_document(
         .map_err(document_io("read"))?;
     if bytes.len() > max_bytes {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("document {} exceeds {max_bytes} byte limit", path.display()),
         ));
     }
@@ -526,7 +529,7 @@ pub(crate) fn validate_capture_stream_limits(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero capture frame, byte, packet, and interface limits"),
             ),
             "capture stream limits must be non-zero",
@@ -537,7 +540,7 @@ pub(crate) fn validate_capture_stream_limits(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
             ),
             format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),

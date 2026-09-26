@@ -240,7 +240,7 @@ impl Classified for Error {
                 "use distinct writable fields and keep the Cartesian product within the packet limit"
             }
         };
-        Classification::new(code, Kind::Cli, Some(hint))
+        Classification::new(code, Kind::Usage, Some(hint))
     }
 }
 

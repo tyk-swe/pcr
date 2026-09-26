@@ -38,7 +38,7 @@ pub(super) fn run(
     }
     if args.interface.len() > 256 {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "capture accepts at most 256 interface selectors before deduplication",
         ));
     }
@@ -48,7 +48,7 @@ pub(super) fn run(
             CaptureFormat::Text | CaptureFormat::Json | CaptureFormat::Ndjson
         ) {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--write requires text, JSON, or NDJSON reporting",
             ));
         }
@@ -60,13 +60,13 @@ pub(super) fn run(
             || args.retention != Retention::Stop
         {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "capture rotation requires --write",
             ));
         }
         if format == CaptureFormat::Json {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "JSON capture summaries require --write to retain packet data",
             ));
         }
@@ -77,7 +77,7 @@ pub(super) fn run(
         return Err(CliError::from_classification(
             packetcraftr_core::error::Classification::new(
                 "cli.capture_decode_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use --output text or --output ndjson for decoded frame output"),
             ),
             "--dissect and --field require text or NDJSON output",
@@ -154,7 +154,7 @@ pub(super) fn run(
     }
     if format == CaptureFormat::Pcap && interfaces.len() != 1 {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "multiple interfaces require PCAPNG capture output",
         ));
     }

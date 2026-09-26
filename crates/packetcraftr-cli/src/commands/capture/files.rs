@@ -124,7 +124,7 @@ impl Classified for Error {
             Self::Io { .. } | Self::Exists(_) => {
                 Classification::new("io.capture_file", Kind::Io, None)
             }
-            Self::Invalid(_) => Classification::new("cli.capture_files", Kind::Cli, None),
+            Self::Invalid(_) => Classification::new("cli.capture_files", Kind::Usage, None),
             Self::FrameTooLarge { .. } => {
                 Classification::new("policy.capture_file_bytes", Kind::Policy, None)
             }

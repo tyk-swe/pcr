@@ -28,7 +28,7 @@ pub(super) fn run(
     let selector = parse_stream_selector(&arguments.stream)?;
     if format == FollowFormat::Raw && arguments.direction == Direction::Both {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "raw output interleaves both directions indistinguishably; \
              choose --direction client or --direction server",
         ));
@@ -89,7 +89,7 @@ pub(super) fn run(
     // payload. The verdict precedes finishing and publishing, as before.
     if pass.selected_absent() {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "--stream {}:{} is not present",
                 selector.transport.as_str(),

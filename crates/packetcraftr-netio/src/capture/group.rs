@@ -126,7 +126,7 @@ impl Classified for Cause {
         match self {
             Self::Configuration(source) => source.classification(),
             Self::Provider(failure) => failure.source.classification(),
-            Self::Invalid(_) => Classification::new("cli.capture_group", Kind::Cli, None),
+            Self::Invalid(_) => Classification::new("cli.capture_group", Kind::Usage, None),
             Self::Contract { .. } | Self::State => {
                 Classification::new("internal.capture_group", Kind::Internal, None)
             }

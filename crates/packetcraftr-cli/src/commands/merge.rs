@@ -29,7 +29,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
     crate::input::validate_capture_stream_limits(args.limits)?;
     if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "merge accepts at most 64 captures and one stdin source",
         ));
     }

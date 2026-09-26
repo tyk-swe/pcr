@@ -36,7 +36,7 @@ pub(super) fn run(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.input_source",
-                Kind::Cli,
+                Kind::Usage,
                 Some("pipe one capture to stdin and name the other's path"),
             ),
             "ingress and egress cannot both read stdin",

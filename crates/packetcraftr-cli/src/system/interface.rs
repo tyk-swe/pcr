@@ -22,20 +22,20 @@ impl InterfaceSelector {
     /// Validates a selector without consulting a platform provider.
     pub(crate) fn parse(selector: &str) -> Result<Self, CliError> {
         if selector.is_empty() {
-            return Err(CliError::new(Kind::Cli, "--interface cannot be empty"));
+            return Err(CliError::new(Kind::Usage, "--interface cannot be empty"));
         }
         if !selector.bytes().all(|byte| byte.is_ascii_digit()) {
             return Ok(Self::Name(selector.to_owned()));
         }
         let index = selector.parse::<u32>().map_err(|_| {
             CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 format!("--interface index must be within 1..={}", u32::MAX),
             )
         })?;
         NonZeroU32::new(index)
             .map(Self::Index)
-            .ok_or_else(|| CliError::new(Kind::Cli, "--interface index must be non-zero"))
+            .ok_or_else(|| CliError::new(Kind::Usage, "--interface index must be non-zero"))
     }
 
     pub(crate) fn parse_optional(selector: Option<&str>) -> Result<Option<Self>, CliError> {

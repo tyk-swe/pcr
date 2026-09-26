@@ -34,7 +34,7 @@ impl Classified for ProjectionError {
         match self {
             Self::Field(_) => Classification::new(
                 "cli.projection_field",
-                Kind::Cli,
+                Kind::Usage,
                 Some("select registered field paths"),
             ),
             Self::Limit { .. } => Classification::new(

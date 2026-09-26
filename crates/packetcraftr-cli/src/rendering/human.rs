@@ -55,8 +55,23 @@ pub(crate) fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String
     render_optional(value, |value| value.to_string())
 }
 
-pub(crate) fn optional_debug<T: std::fmt::Debug>(value: Option<T>) -> String {
-    render_optional(value, |value| format!("{value:?}"))
+/// A duration in milliseconds to the microsecond, such as `12.345ms`.
+pub(crate) fn duration_text(duration: std::time::Duration) -> String {
+    format!("{:.3}ms", duration.as_secs_f64() * 1_000.0)
+}
+
+pub(crate) fn optional_duration(value: Option<std::time::Duration>) -> String {
+    render_optional(value, duration_text)
+}
+
+/// An encapsulation path, outermost first, such as `vlan:10,vxlan:42`, or
+/// `none` for an unencapsulated scope.
+pub(crate) fn encapsulation_text(path: &[output::analysis::EncapsulationIdentifier]) -> String {
+    if path.is_empty() {
+        "none".to_owned()
+    } else {
+        comma_separated(path)
+    }
 }
 
 /// A unit enum value spelled exactly as the JSON document spells it, so text
@@ -225,6 +240,33 @@ mod tests {
     use packetcraftr_core::error::{Classification, Kind};
 
     use super::*;
+
+    #[test]
+    fn durations_and_encapsulations_render_as_plain_text() {
+        use output::analysis::EncapsulationIdentifier;
+        use std::time::Duration;
+
+        assert_eq!(duration_text(Duration::from_micros(12_345)), "12.345ms");
+        assert_eq!(duration_text(Duration::from_secs(2)), "2000.000ms");
+        assert_eq!(optional_duration(None), "none");
+        assert_eq!(encapsulation_text(&[]), "none");
+        assert_eq!(
+            encapsulation_text(&[
+                EncapsulationIdentifier::Vlan { vlan_id: 10 },
+                EncapsulationIdentifier::Network {
+                    first: "192.0.2.1".parse().expect("address"),
+                    second: "198.51.100.2".parse().expect("address"),
+                },
+                EncapsulationIdentifier::Gre { key: None },
+                EncapsulationIdentifier::Pppoe {
+                    session_id: 7,
+                    endpoints: Some(([2, 0, 0, 0, 0, 1], [2, 0, 0, 0, 0, 2])),
+                },
+            ]),
+            "vlan:10,network:192.0.2.1<->198.51.100.2,gre,\
+             pppoe:7(02:00:00:00:00:01<->02:00:00:00:00:02)"
+        );
+    }
 
     fn plain(error: &CliError) -> String {
         anstream::adapter::strip_str(&render_human_error(error)).to_string()

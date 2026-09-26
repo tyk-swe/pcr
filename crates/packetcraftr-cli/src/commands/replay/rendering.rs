@@ -5,7 +5,7 @@
 
 use crate::errors::CliError;
 use crate::output;
-use crate::rendering::{spaced_hex, write_summary_line};
+use crate::rendering::{duration_text, spaced_hex, write_summary_line};
 
 /// One transmitted frame: where it went and its exact bytes.
 pub(super) fn frame_line(frame: &output::replay::Frame) -> String {
@@ -28,16 +28,18 @@ pub(super) fn render_summary(
 ) -> Result<(), CliError> {
     if filtered {
         write_summary_line(format_args!(
-            "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
+            "replayed {} of {} frame(s), {} byte(s), scheduled delay {}",
             report.frames_transmitted,
             report.frames_read,
             report.bytes_transmitted,
-            report.scheduled_duration
+            duration_text(report.scheduled_duration)
         ))
     } else {
         write_summary_line(format_args!(
-            "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
-            report.frames_transmitted, report.bytes_transmitted, report.scheduled_duration
+            "replayed {} frame(s), {} byte(s), scheduled delay {}",
+            report.frames_transmitted,
+            report.bytes_transmitted,
+            duration_text(report.scheduled_duration)
         ))
     }
 }

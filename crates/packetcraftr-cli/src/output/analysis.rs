@@ -44,6 +44,41 @@ pub enum EncapsulationIdentifier {
     Ah { spi: u32 },
 }
 
+/// The identifier as human text: its kind and the values that identify it,
+/// such as `vlan:10` or `network:192.0.2.1<->198.51.100.2`.
+impl std::fmt::Display for EncapsulationIdentifier {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Vlan { vlan_id } => write!(formatter, "vlan:{vlan_id}"),
+            Self::Vlan8021ad { vlan_id } => write!(formatter, "vlan8021ad:{vlan_id}"),
+            Self::Network { first, second } => write!(formatter, "network:{first}<->{second}"),
+            Self::Vxlan { vni } => write!(formatter, "vxlan:{vni}"),
+            Self::Geneve { vni } => write!(formatter, "geneve:{vni}"),
+            Self::Gre { key: Some(key) } => write!(formatter, "gre:{key}"),
+            Self::Gre { key: None } => formatter.write_str("gre"),
+            Self::Mpls { label } => write!(formatter, "mpls:{label}"),
+            Self::Pppoe {
+                session_id,
+                endpoints,
+            } => {
+                write!(formatter, "pppoe:{session_id}")?;
+                if let Some((first, second)) = endpoints {
+                    write!(
+                        formatter,
+                        "({}<->{})",
+                        packetcraftr_core::packet::MacAddress(*first),
+                        packetcraftr_core::packet::MacAddress(*second)
+                    )?;
+                }
+                Ok(())
+            }
+            Self::L2tpv3 { session_id } => write!(formatter, "l2tpv3:{session_id}"),
+            Self::Erspan { vlan, session_id } => write!(formatter, "erspan:{vlan}/{session_id}"),
+            Self::Ah { spi } => write!(formatter, "ah:{spi:#010x}"),
+        }
+    }
+}
+
 impl TryFrom<scope::EncapsulationIdentifier> for EncapsulationIdentifier {
     type Error = Error;
 

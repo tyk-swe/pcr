@@ -7,7 +7,7 @@ use crate::output;
 
 use crate::errors::CliError;
 use crate::rendering::{
-    captured_frame_text, comma_separated, optional_debug, optional_display,
+    captured_frame_text, comma_separated, optional_display, optional_duration,
     render_diagnostics_text, render_undecoded, write_stdout_line,
 };
 
@@ -42,7 +42,7 @@ pub(super) fn render_text(
                 probe.sent_at,
                 optional_display(probe.received_at),
                 optional_display(probe.responder),
-                optional_debug(probe.latency),
+                optional_duration(probe.latency),
                 optional_display(probe.destination_port),
                 probe.reason,
             ))?;

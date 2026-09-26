@@ -855,6 +855,13 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- Text output no longer shows Rust `Debug` formatting. Durations read as
+  milliseconds to the microsecond (`12.345ms`, `none` when absent) in the
+  `scan`, `traceroute`, `dns`, `replay`, `stats`, `tls`, `expert`, and
+  `follow` text renderers; scopes read `interface 3` or `interface none` and
+  `encapsulation vlan:10,network:192.0.2.1<->198.51.100.2` (or `none`); a UDP
+  profile's validation is spelled as in JSON (`confirmed`); and the stats I/O
+  bucket origin is a Unix timestamp. JSON and NDJSON are unchanged.
 - A `replay` output failure names what failed (`write stdout failed`,
   `write replay record failed`, `write capture output failed`, or `replay
   frame output failed`) and lists the error it carries as its first cause,

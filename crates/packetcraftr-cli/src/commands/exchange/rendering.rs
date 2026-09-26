@@ -10,7 +10,7 @@ use crate::rendering::{
     StreamEncoder, render_diagnostics_text, write_capture_file, write_stdout_line,
 };
 
-pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(), CliError> {
+pub(super) fn render_text(result: &packetcraftr::exchange::Aggregate) -> Result<(), CliError> {
     let mut diagnostics = result.diagnostics.clone();
     for sent in &result.sent {
         diagnostics.extend(sent.built().diagnostics.iter().cloned());
@@ -28,7 +28,7 @@ pub(super) fn render_text(result: &packetcraftr::exchange::Report) -> Result<(),
 }
 
 pub(super) fn render_capture(
-    result: &packetcraftr::exchange::Report,
+    result: &packetcraftr::exchange::Aggregate,
     format: Format,
     compression: crate::command_options::Compression,
 ) -> Result<(), CliError> {
@@ -68,7 +68,7 @@ pub(super) fn emit_event(
 }
 
 pub(super) fn render_complete(
-    summary: packetcraftr::exchange::Summary,
+    summary: packetcraftr::exchange::Report,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     Ok(stream.complete_published(

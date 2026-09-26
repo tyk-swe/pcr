@@ -88,20 +88,32 @@ pub enum PipelineEvent<E> {
     Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
 }
 
-/// Shared client and exchange options for live workflow executors.
-pub struct ExchangeExecutor<'a, R, I> {
-    pub(crate) client: &'a crate::Client<R, I>,
-    pub(crate) options: crate::exchange::Options,
+/// Runs each approved workflow step as one capture-ready exchange on a
+/// client, preparing every packet with `send` and collecting under
+/// `collection`.
+pub struct ExchangeExecutor<'a, P, K = crate::clock::SystemClock> {
+    pub(crate) client: &'a crate::Client<P, K>,
+    pub(crate) send: crate::send::Options,
+    pub(crate) collection: crate::exchange::Collection,
 }
 
-impl<'a, R, I> ExchangeExecutor<'a, R, I> {
-    pub fn new(client: &'a crate::Client<R, I>, options: crate::exchange::Options) -> Self {
-        Self { client, options }
+impl<'a, P, K> ExchangeExecutor<'a, P, K> {
+    pub fn new(
+        client: &'a crate::Client<P, K>,
+        send: crate::send::Options,
+        collection: crate::exchange::Collection,
+    ) -> Self {
+        Self {
+            client,
+            send,
+            collection,
+        }
     }
 }
 
-/// The exchange options one workflow call overrides, and nothing else: every
-/// other bound comes from the executor's own [`crate::exchange::Options`].
+/// The exchange settings one workflow call overrides, and nothing else:
+/// every other bound comes from the executor's own send options and
+/// collection.
 pub(crate) struct WorkflowOverrides {
     pub(crate) timeout: std::time::Duration,
     pub(crate) max_template_packets: usize,
@@ -113,32 +125,36 @@ pub(crate) struct WorkflowOverrides {
     pub(crate) max_responses: Option<usize>,
 }
 
-impl<R, I> ExchangeExecutor<'_, R, I>
+impl<P, K> ExchangeExecutor<'_, P, K>
 where
-    R: packetcraftr_netio::route::Provider,
-    I: packetcraftr_netio::transmit::Provider + packetcraftr_netio::capture::Provider,
+    P: crate::Providers,
+    K: crate::clock::Clock,
 {
     /// Runs one capture-ready exchange for a workflow, with the executor's
-    /// options as the base and `overrides` applied on top.
+    /// settings as the base and `overrides` applied on top.
     pub(crate) fn exchange_for_workflow(
         &self,
-        template: &packetcraftr_core::template::Template,
+        template: packetcraftr_core::template::Template,
         overrides: WorkflowOverrides,
         matches_request: &mut crate::exchange::WorkflowResponseMatcher<'_>,
         stop_after_response: Option<&mut crate::exchange::WorkflowStopPredicate<'_>>,
-    ) -> Result<crate::exchange::Report, crate::BoundaryError> {
-        let mut options = self.options.clone();
-        options.timeout = overrides.timeout;
-        options.max_template_packets = overrides.max_template_packets;
-        options.send.destination = Some(overrides.destination);
+    ) -> Result<crate::exchange::Aggregate, crate::BoundaryError> {
+        let mut send = self.send.clone();
+        send.destination = Some(overrides.destination);
+        let mut collection = self.collection.clone();
         if let Some(max_responses) = overrides.max_responses {
-            options.max_responses = max_responses;
-            options.max_unmatched_frames = options.max_unmatched_frames.min(max_responses);
+            collection.max_responses = max_responses;
+            collection.max_unmatched_frames = collection.max_unmatched_frames.min(max_responses);
         }
         self.client
             .exchange_hooked(
-                template,
-                options,
+                crate::exchange::Request {
+                    template,
+                    send,
+                    timeout: overrides.timeout,
+                    max_template_packets: overrides.max_template_packets,
+                    collection,
+                },
                 Some(matches_request),
                 stop_after_response,
             )

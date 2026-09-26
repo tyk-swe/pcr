@@ -11,6 +11,10 @@ use std::{sync::Arc, time::Duration};
 
 use super::*;
 
+fn closed_window() -> Window {
+    Window::open(&crate::clock::SystemClock, Duration::ZERO, None).expect("fixture window")
+}
+
 fn raw_packet() -> Packet {
     let mut packet = Packet::new();
     packet.push(Raw::new(Bytes::from_static(&[0])));
@@ -109,9 +113,9 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
     let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| false;
     let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = Options {
+    let collection = Collection {
         max_responses: usize::MAX,
-        ..Options::default()
+        ..Collection::default()
     };
 
     assert_eq!(
@@ -121,12 +125,10 @@ fn workflow_deadline_expiry_preserves_unsolicited_order_and_discards_freshness()
                 dissector: &dissector,
                 prepared: &[],
                 sent: &[],
-                // Unambiguously past, independent of how the boundary
-                // instant itself is treated.
-                deadline: Instant::now()
-                    .checked_sub(Duration::from_millis(1))
-                    .expect("fixture deadline"),
-                options: &options,
+                // A closed window, independent of how its boundary instant
+                // itself is treated.
+                window: &closed_window(),
+                collection: &collection,
             },
             &mut matcher,
         ),
@@ -170,18 +172,19 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
             }),
         },
     ];
-    let deadline = Instant::now() + Duration::from_millis(250);
+    let window = Window::open(&crate::clock::SystemClock, Duration::from_millis(250), None)
+        .expect("fixture window");
     let mut matcher_called = false;
     let mut matcher = |_: usize, _: &Packet, _: &DecodedPacket| {
         matcher_called = true;
-        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        std::thread::sleep(window.ends_at().saturating_duration_since(Instant::now()));
         true
     };
     let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = Options {
+    let collection = Collection {
         max_responses: usize::MAX,
-        ..Options::default()
+        ..Collection::default()
     };
 
     assert_eq!(
@@ -191,8 +194,8 @@ fn workflow_matcher_crossing_deadline_expires_and_retains_candidates() {
                 dissector: &dissector,
                 prepared: &prepared,
                 sent: &sent,
-                deadline,
-                options: &options,
+                window: &window,
+                collection: &collection,
             },
             &mut matcher,
         ),
@@ -235,15 +238,17 @@ fn duplicated_ingress_record_cannot_enter_several_evidence_categories() {
     );
     let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = Options::default();
+    let collection = Collection::default();
     let mut accumulator = Accumulator::new(0);
+    let open_window = Window::open(&crate::clock::SystemClock, Duration::from_secs(1), None)
+        .expect("fixture window");
     let context = ProcessContext {
         registry: &registry,
         dissector: &dissector,
         prepared: &[],
         sent: &[],
-        deadline: Instant::now() + Duration::from_secs(1),
-        options: &options,
+        window: &open_window,
+        collection: &collection,
     };
 
     assert_eq!(
@@ -274,18 +279,20 @@ fn duplicate_tracking_is_bounded_to_retained_evidence() {
     );
     let registry = packetcraftr_core::protocol::builtin::registry();
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = Options {
+    let collection = Collection {
         max_unmatched_frames: 1,
-        ..Options::default()
+        ..Collection::default()
     };
     let mut accumulator = Accumulator::new(0);
+    let open_window = Window::open(&crate::clock::SystemClock, Duration::from_secs(1), None)
+        .expect("fixture window");
     let context = ProcessContext {
         registry: &registry,
         dissector: &dissector,
         prepared: &[],
         sent: &[],
-        deadline: Instant::now() + Duration::from_secs(1),
-        options: &options,
+        window: &open_window,
+        collection: &collection,
     };
 
     assert_eq!(

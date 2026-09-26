@@ -8,6 +8,7 @@ use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::sem
 use packetcraftr_core::budget::Deadline;
 use packetcraftr_core::error::Classified;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
+use packetcraftr_netio::interface::Id as InterfaceId;
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, Provider};
 
@@ -196,17 +197,32 @@ fn reject_offline_link_header(packet: &Packet) -> Result<(), Error> {
     Ok(())
 }
 
+/// The interface identity the caller requested, which must already be
+/// resolved.
+fn requested_interface(options: &Options) -> Result<Option<&InterfaceId>, Error> {
+    options
+        .interface
+        .as_ref()
+        .map(|selector| {
+            selector.id().ok_or_else(|| Error::UnresolvedInterface {
+                selector: selector.to_string(),
+            })
+        })
+        .transpose()
+}
+
 fn lookup_route<P: Provider>(
     intent: &PacketIntent,
     options: &Options,
     provider: &P,
     deadline: &Deadline,
 ) -> Result<Decision, Error> {
+    let requested = requested_interface(options)?;
     Ok(match intent.lookup_destination {
         Some(lookup_destination) => provider
             .lookup_with_preferences(
                 lookup_destination,
-                options.interface.as_ref(),
+                requested,
                 options.preferred_source,
                 deadline,
             )
@@ -216,10 +232,7 @@ fn lookup_route<P: Provider>(
                 source: Box::new(source),
             })?,
         None => {
-            let interface = options
-                .interface
-                .as_ref()
-                .ok_or(Error::MissingLayer2Interface)?;
+            let interface = requested.ok_or(Error::MissingLayer2Interface)?;
             provider
                 .lookup_interface(interface, deadline)
                 .map_err(|source| Error::InterfaceLookup {
@@ -235,7 +248,7 @@ fn lookup_route<P: Provider>(
 }
 
 fn validate_route_contract(route: &Decision, options: &Options) -> Result<(), Error> {
-    if let Some(requested) = &options.interface
+    if let Some(requested) = requested_interface(options)?
         && route.interface != *requested
     {
         return Err(Error::InterfaceMismatch {
@@ -383,7 +396,6 @@ mod tests {
         network::{Ipv4, Ipv6},
     };
 
-    use packetcraftr_netio::interface::Id as InterfaceId;
     use packetcraftr_netio::link::Capability;
     use packetcraftr_netio::route::{Scope, SelectionReason};
 
@@ -800,13 +812,27 @@ mod tests {
                 &raw,
                 Some(destination),
                 &Options {
-                    interface: Some(interface()),
+                    interface: Some(interface().into()),
                     ..Options::default()
                 },
                 &routes(Ok(wrong_interface)),
                 &live(),
             ),
             Err(Error::InterfaceMismatch { .. })
+        ));
+
+        assert!(matches!(
+            super::plan(
+                &raw,
+                Some(destination),
+                &Options {
+                    interface: Some(super::super::Interface::Name("fixture0".to_owned())),
+                    ..Options::default()
+                },
+                &routes(Ok(decision(Capability::Layer2AndLayer3))),
+                &live(),
+            ),
+            Err(Error::UnresolvedInterface { .. })
         ));
 
         assert!(matches!(
@@ -841,7 +867,7 @@ mod tests {
 
         let options = Options {
             link_mode: Mode::Layer2,
-            interface: Some(interface()),
+            interface: Some(interface().into()),
             preferred_source: None,
         };
 

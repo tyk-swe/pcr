@@ -15,6 +15,7 @@ use crate::execution::{Sink, publisher};
 use crate::policy::Authorizer;
 use crate::probe::runner::{BatchEvidence, run_batches};
 use crate::probe::{check_probe_count, check_probe_duration};
+use crate::target::ResolveTarget;
 use crate::target::{FamilyGate, admit_operation, wire_limits};
 
 use super::Error;
@@ -38,7 +39,7 @@ pub fn run<A, E, C>(
     clock: &mut C,
 ) -> Result<Report, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Batch>,
     C: Clock,
 {
@@ -73,7 +74,7 @@ pub fn run_with_events<A, E, C, S>(
     sink: S,
 ) -> Result<Summary, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Batch>,
     C: Clock,
     S: Sink<Event, Ack = ()>,
@@ -96,7 +97,7 @@ fn run_observed<A, E, C, F>(
     emit: F,
 ) -> Result<Summary, Error>
 where
-    A: Authorizer,
+    A: Authorizer + ResolveTarget,
     E: Executor<Batch>,
     C: Clock,
     F: FnMut(Event, &Deadline) -> Result<(), Error>,
@@ -189,7 +190,7 @@ struct ApprovedTraceroute {
     destination: IpAddr,
 }
 
-fn approve_traceroute<A: Authorizer>(
+fn approve_traceroute<A: Authorizer + ResolveTarget>(
     request: &Request,
     authorizer: &mut A,
     deadline: &Deadline,

@@ -3,12 +3,7 @@
 
 //! Capture readiness, bounded draining, and post-send collection.
 
-use std::time::Instant;
-
-use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{Error as LiveIoError, capture::Session};
-
-use crate::planning::expired;
 
 use super::transaction::OperationError;
 use super::transaction::Transaction;
@@ -17,22 +12,16 @@ use super::{ProcessContext, ProcessOutcome, WorkflowResponseMatcher, WorkflowSto
 /// Deadline handling for drains before and after the last send.
 #[derive(Clone, Copy)]
 pub(super) enum DrainPolicy {
-    /// Requests remain to be sent, so crossing `deadline` aborts the operation.
-    Enforced(Instant),
-    /// Every request is sent; crossing the deadline just ends correlation.
+    /// Requests remain to be sent, so the window closing aborts the
+    /// operation.
+    Enforced,
+    /// Every request is sent; the window closing just ends correlation.
     BestEffort,
 }
 
 impl DrainPolicy {
-    fn expired(self) -> bool {
-        match self {
-            Self::Enforced(deadline) => expired(deadline),
-            Self::BestEffort => false,
-        }
-    }
-
     const fn is_enforced(self) -> bool {
-        matches!(self, Self::Enforced(_))
+        matches!(self, Self::Enforced)
     }
 }
 
@@ -47,9 +36,12 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         if !self.correlation_stopped {
-            let deadline = crate::deadline::until(self.deadline, self.cancellation.clone());
-            while remaining_before(self.deadline).is_some() {
-                let Some(frame) = self.capture.inner.next_captured_frame(&deadline)? else {
+            while !self.window.expired() {
+                let Some(frame) = self
+                    .capture
+                    .inner
+                    .next_captured_frame(self.window.deadline())?
+                else {
                     break;
                 };
                 match self.process_frame(frame, workflow_matcher, stop_predicate, emit)? {
@@ -79,8 +71,8 @@ impl<C: Session> Transaction<C> {
         F: FnMut(super::Event) -> Result<(), crate::BoundaryError>,
     {
         let queued = crate::deadline::immediate(self.cancellation.clone());
-        for _ in 0..self.options.capture.max_frames {
-            if policy.expired() {
+        for _ in 0..self.collection.capture.max_frames {
+            if policy.is_enforced() && self.window.expired() {
                 return Err(drain_deadline_error().into());
             }
             let Some(frame) = self.capture.inner.next_captured_frame(&queued)? else {
@@ -103,7 +95,7 @@ impl<C: Session> Transaction<C> {
                 "exchange.drain_limit",
                 format!(
                     "zero-time capture drain stopped after the bounded {} frame(s)",
-                    self.options.capture.max_frames
+                    self.collection.capture.max_frames
                 ),
             ));
         self.publish_diagnostics(emit)?;
@@ -125,8 +117,8 @@ impl<C: Session> Transaction<C> {
             dissector: &self.dissector,
             prepared: &self.prepared,
             sent: &self.sent,
-            deadline: self.deadline,
-            options: &self.options,
+            window: &self.window,
+            collection: &self.collection,
         };
         // A duplicated ingress record aborts the operation, so nothing that
         // depends on it — promotion, the stop predicate, event draining —
@@ -202,7 +194,7 @@ fn drain_deadline_error() -> LiveIoError {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use packetcraftr_core::budget::Deadline;
 
@@ -223,7 +215,9 @@ mod tests {
     use packetcraftr_netio::transmit::{Outbound, Report};
 
     use super::*;
-    use crate::exchange::{Event, Prepared, WorkflowResponseMatcher, WorkflowStopPredicate};
+    use crate::exchange::{
+        Event, Prepared, Window, WorkflowResponseMatcher, WorkflowStopPredicate,
+    };
 
     struct CaptureState {
         sends: AtomicUsize,
@@ -332,14 +326,14 @@ mod tests {
             })
             .collect();
         let response_frame = crate::test_support::sent_packet(response).frame().clone();
-        let options = crate::exchange::Options {
+        let collection = crate::exchange::Collection {
             max_responses,
-            ..crate::exchange::Options::default()
+            ..crate::exchange::Collection::default()
         };
-        options.validate().expect("fixture exchange options");
-        let snap_length = options.capture.snap_length;
-        let started = Instant::now();
-        let deadline = started + Duration::from_secs(1);
+        collection.validate().expect("fixture exchange collection");
+        let snap_length = collection.capture.snap_length;
+        let window = Window::open(&crate::clock::SystemClock, Duration::from_secs(1), None)
+            .expect("fixture window");
         let state = Arc::new(CaptureState {
             sends: AtomicUsize::new(0),
             deliver_only_when_blocking,
@@ -361,9 +355,8 @@ mod tests {
         };
         let prepared = Prepared {
             cancellation: None,
-            started,
-            deadline,
-            options,
+            window,
+            collection,
             packets: prepared_packets,
             packet_count: u64::try_from(request_count).expect("bounded fixture"),
             total_bytes: u64::try_from(prepared_evidence.bytes_sent()).expect("bounded fixture")
@@ -487,7 +480,7 @@ mod tests {
         let matcher: &mut WorkflowResponseMatcher<'_> = &mut matcher;
         let mut stop = |_: usize, _: &Packet, _: &DecodedPacket| true;
         let stop: &mut WorkflowStopPredicate<'_> = &mut stop;
-        let mut collector = crate::exchange::Collector::default();
+        let mut collector = crate::exchange::Observed::default();
 
         let summary = transaction
             .execute(&sender, Some(matcher), Some(stop), &mut |event| {

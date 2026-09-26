@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 
-use super::{Family, Target};
+use super::{Family, ResolveTarget, Target};
 use packetcraftr_core::budget::Deadline;
 
 use crate::execution::Errors;
@@ -28,7 +28,7 @@ pub(crate) fn resolve_selected<A, G>(
     gates: &G,
 ) -> Result<SelectedTargets, G::Error>
 where
-    A: Authorizer,
+    A: ResolveTarget,
     G: Errors,
 {
     let check = || check_deadline(deadline, gates);

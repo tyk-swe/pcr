@@ -10,32 +10,28 @@ use packetcraftr::{
     progress::{Runtime, Worker},
 };
 
-fn client() -> Client<FixedRoutes, NeverTransmit> {
+fn client() -> Client<common::FakeProviders<FixedRoutes, NeverTransmit>> {
     Client::new(
         packetcraftr_core::protocol::builtin::registry(),
-        FixedRoutes,
-        NeverTransmit,
         Policy::default(),
+        common::providers(FixedRoutes, NeverTransmit),
     )
 }
 
 #[test]
 fn clients_share_only_the_runtime_selected_by_the_embedder() {
     let runtime = Runtime::new(1);
-    let first = client().with_progress_runtime(runtime.clone());
-    let second = client().with_progress_runtime(runtime.clone());
+    let first = client().with_runtime(runtime.clone());
+    let second = client().with_runtime(runtime.clone());
     let isolated = client();
-    let worker = Worker::<()>::new_in(first.progress_runtime(), |_| Ok(())).unwrap();
-    assert!(Worker::<()>::new_in(second.progress_runtime(), |_| Ok(())).is_err());
+    let worker = Worker::<()>::new_in(first.runtime(), |_| Ok(())).unwrap();
+    assert!(Worker::<()>::new_in(second.runtime(), |_| Ok(())).is_err());
     assert_eq!(runtime.snapshot().active, 1);
-    assert_eq!(second.progress_runtime().snapshot().rejected_admissions, 1);
-    let independent = Worker::<()>::new_in(isolated.progress_runtime(), |_| Ok(())).unwrap();
-    assert_eq!(
-        isolated.progress_runtime().snapshot().rejected_admissions,
-        0
-    );
+    assert_eq!(second.runtime().snapshot().rejected_admissions, 1);
+    let independent = Worker::<()>::new_in(isolated.runtime(), |_| Ok(())).unwrap();
+    assert_eq!(isolated.runtime().snapshot().rejected_admissions, 0);
     drop(first);
-    assert_eq!(second.progress_runtime().snapshot().active, 1);
+    assert_eq!(second.runtime().snapshot().active, 1);
     drop(worker);
     drop(independent);
 }

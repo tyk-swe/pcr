@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::BoundaryError;
+use crate::clock::Clock;
 use crate::execution::{ExchangeExecutor, Executor, PipelineEvent, PipelineOptions};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
 use crate::probe::Execution;
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
+use crate::providers::Providers;
 
 use super::Batch;
 use super::classification::classify_response;
@@ -15,11 +16,7 @@ pub(super) const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use one correlated probe per scan batch and retain at least one response",
 );
 
-impl<R, I> Executor<Batch> for ExchangeExecutor<'_, R, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo + CaptureProvider,
-{
+impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
     fn pipeline_capacity(&self) -> usize {
         1024
     }
@@ -30,9 +27,9 @@ where
         emit: &mut dyn FnMut(PipelineEvent<Execution>) -> Result<(), BoundaryError>,
     ) -> Result<crate::Stats, BoundaryError> {
         let registry = super::registry::configured(self.client.registry(), requests)?;
-        let client = super::registry::client(self.client, registry);
+        let client = self.client.view_with_registry(registry);
         super::pipeline::run(
-            &mut ExchangeExecutor::new(&client, self.options.clone()),
+            &mut ExchangeExecutor::new(&client, self.send.clone(), self.collection.clone()),
             requests,
             options,
             emit,
@@ -41,8 +38,8 @@ where
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let registry =
             super::registry::configured(self.client.registry(), std::slice::from_ref(batch))?;
-        let client = super::registry::client(self.client, registry);
-        let executor = ExchangeExecutor::new(&client, self.options.clone());
+        let client = self.client.view_with_registry(registry);
+        let executor = ExchangeExecutor::new(&client, self.send.clone(), self.collection.clone());
         let first = batch.probe()?;
         let packet = first.packet();
         if !super::probe::sent_probe_matches(first, &packet) {
@@ -63,7 +60,7 @@ where
                     .is_some()
             };
         let exchange = executor.exchange_for_workflow(
-            &template,
+            template,
             WorkflowOverrides {
                 timeout: batch.timeout,
                 max_template_packets: 1,

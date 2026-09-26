@@ -192,7 +192,7 @@ fn domain_failures_preserve_typed_error_context() {
         assert_eq!(value["context"], expected, "{}", error.code);
     }
 
-    let uncoordinated = OutputError::classified(&packetcraftr::Error::HeterogeneousExchangeRoute);
+    let uncoordinated = OutputError::classified(&packetcraftr::exchange::Error::HeterogeneousRoute);
     assert_eq!(uncoordinated.context, None);
     let value = serde_json::to_value(&uncoordinated).expect("error serializes");
     assert!(value.get("context").is_none());

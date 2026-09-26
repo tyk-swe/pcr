@@ -62,7 +62,7 @@ pub(crate) fn pause<C: Clock>(
     deadline
         .start_accounting(delay)
         .map_err(Paused::DurationLimit)?;
-    let slept = clock.sleep(delay);
+    let slept = clock.sleep(delay, deadline);
     deadline.enforce().map_err(Paused::Interrupted)?;
     slept.map_err(|source| Paused::Clock(Box::new(source)))?;
     deadline.account(delay).map_err(Paused::DurationLimit)

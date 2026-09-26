@@ -309,53 +309,70 @@ fn resolution_rejects_empty_and_over_limit_results() {
 }
 
 #[test]
-fn exchange_options_validate_all_aggregate_bounds() {
-    let defaults = exchange::Options::default();
-    defaults.validate().expect("default exchange options");
+fn exchange_requests_validate_all_aggregate_bounds() {
+    let defaults = exchange::Request::new(
+        packetcraftr_core::template::Template::new(packetcraftr_core::packet::Packet::new()),
+        packetcraftr::send::Options::default(),
+    );
+    defaults.validate().expect("default exchange request");
     // The single capture field is exactly what arms the provider, so the
     // aggregate ceilings and the snapshot length cannot drift from each other.
-    assert_eq!(defaults.capture, net::capture::Limits::default());
-    defaults
+    let collection = defaults.collection.clone();
+    assert_eq!(collection.capture, net::capture::Limits::default());
+    collection
         .capture
         .validate()
-        .expect("default exchange options imply valid capture limits");
+        .expect("default exchange collection implies valid capture limits");
 
     let invalid = [
-        exchange::Options {
+        exchange::Request {
             timeout: net::capture::MAX_TIMEOUT + Duration::from_nanos(1),
             ..defaults.clone()
         },
-        exchange::Options {
+        exchange::Request {
             max_template_packets: 0,
             ..defaults.clone()
         },
-        exchange::Options {
-            max_responses: defaults.capture.max_frames + 1,
-            ..defaults.clone()
+    ];
+    for request in invalid {
+        assert!(request.validate().is_err());
+    }
+    let invalid = [
+        exchange::Collection {
+            max_responses: collection.capture.max_frames + 1,
+            ..collection.clone()
         },
-        exchange::Options {
-            max_unmatched_frames: defaults.capture.max_frames + 1,
-            ..defaults.clone()
+        exchange::Collection {
+            max_unmatched_frames: collection.capture.max_frames + 1,
+            ..collection.clone()
         },
-        exchange::Options {
+        exchange::Collection {
             capture: net::capture::Limits {
                 max_frames: 0,
-                ..defaults.capture
+                ..collection.capture
             },
             max_responses: 0,
             max_unmatched_frames: 0,
-            ..defaults.clone()
+            ..collection.clone()
         },
-        exchange::Options {
+        exchange::Collection {
             capture: net::capture::Limits {
                 max_bytes: 1,
-                ..defaults.capture
+                ..collection.capture
             },
-            ..defaults
+            ..collection
         },
     ];
-    for options in invalid {
-        assert!(options.validate().is_err());
+    for collection in invalid {
+        assert!(collection.validate().is_err());
+        assert!(
+            exchange::Request {
+                collection,
+                ..defaults.clone()
+            }
+            .validate()
+            .is_err()
+        );
     }
 }
 
@@ -521,18 +538,18 @@ fn workflow_failures_publish_the_causes_of_the_error_they_carry() {
     );
 
     let snapshot = || {
-        Box::new(packetcraftr_core::error::BoundaryError::new(
+        packetcraftr_core::error::BoundaryError::new(
             "progressive output failed",
             packetcraftr_core::error::Classification::new("io.fixture", Kind::Io, None),
             vec!["fixture disk is full".to_owned()],
-        ))
+        )
     };
-    for workflow in [
-        packetcraftr::Error::SendOutput { source: snapshot() },
-        packetcraftr::Error::ExchangeOutput { source: snapshot() },
-    ] {
-        assert_eq!(workflow.causes(), ["fixture disk is full"], "{workflow}");
-    }
+    let send = packetcraftr::send::Error::Output { source: snapshot() };
+    assert_eq!(send.causes(), ["fixture disk is full"], "{send}");
+    let exchange = exchange::Error::Output {
+        source: Box::new(snapshot()),
+    };
+    assert_eq!(exchange.causes(), ["fixture disk is full"], "{exchange}");
 
     // A hostname lookup keeps the system refusal instead of pasting it into
     // the message, so the message and the cause each say it once.

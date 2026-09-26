@@ -434,7 +434,7 @@ fn plan_case() -> Value {
 }
 
 fn send_case() -> Value {
-    let report = Published::<send_output::Report>::try_from(packetcraftr::send::SetReport {
+    let report = Published::<send_output::Report>::try_from(packetcraftr::send::Aggregate {
         sent: vec![packetcraftr::send::SentFrame {
             pass: 1,
             index: 0,
@@ -457,7 +457,7 @@ fn send_without_neighbor_case() -> Value {
     };
     let sent = packetcraftr::SentPacket::try_new(built, route, report)
         .expect("trusted transmission receipt");
-    let report = Published::<send_output::Report>::try_from(packetcraftr::send::SetReport {
+    let report = Published::<send_output::Report>::try_from(packetcraftr::send::Aggregate {
         sent: vec![packetcraftr::send::SentFrame {
             pass: 1,
             index: 0,
@@ -471,34 +471,36 @@ fn send_without_neighbor_case() -> Value {
 }
 
 fn exchange_case() -> Value {
-    let report = Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Report {
-        sent: vec![Arc::new(sent_packet())],
-        responses: vec![packetcraftr::exchange::Response {
-            request_index: 0,
-            response: decoded_frame(),
-            latency: Duration::from_millis(3),
-        }],
-        unanswered: vec![1],
-        unsolicited: vec![decoded_frame()],
-        undecoded: vec![evidence_frame()],
-        diagnostics: vec![diagnostic()],
-        stats: workflow_stats(),
-    })
-    .expect("in-range exchange evidence converts");
+    let report =
+        Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Aggregate {
+            sent: vec![Arc::new(sent_packet())],
+            responses: vec![packetcraftr::exchange::Response {
+                request_index: 0,
+                response: decoded_frame(),
+                latency: Duration::from_millis(3),
+            }],
+            unanswered: vec![1],
+            unsolicited: vec![decoded_frame()],
+            undecoded: vec![evidence_frame()],
+            diagnostics: vec![diagnostic()],
+            stats: workflow_stats(),
+        })
+        .expect("in-range exchange evidence converts");
     published(Command::Exchange, report)
 }
 
 fn exchange_empty_case() -> Value {
-    let report = Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Report {
-        sent: Vec::new(),
-        responses: Vec::new(),
-        unanswered: Vec::new(),
-        unsolicited: Vec::new(),
-        undecoded: Vec::new(),
-        diagnostics: Vec::new(),
-        stats: packetcraftr::Stats::default(),
-    })
-    .expect("an empty exchange converts");
+    let report =
+        Published::<exchange_output::Report>::try_from(packetcraftr::exchange::Aggregate {
+            sent: Vec::new(),
+            responses: Vec::new(),
+            unanswered: Vec::new(),
+            unsolicited: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: packetcraftr::Stats::default(),
+        })
+        .expect("an empty exchange converts");
     published(Command::Exchange, report)
 }
 

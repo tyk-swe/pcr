@@ -5,20 +5,35 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
+use packetcraftr_core::budget::Deadline;
 use packetcraftr_netio::deadline::POLL_INTERVAL;
 
-/// Injectable delay seam shared by rate-limited and replay workflows.
-pub trait Clock {
+/// The client's source of monotonic time and pacing delays.
+///
+/// A client anchors every workflow deadline and send schedule on its clock, so
+/// a deterministic clock drives a whole run. Capture waits stay on the capture
+/// session: a fake clock must share the real monotonic base with capture
+/// timestamps, starting from [`Instant::now`] and advancing only forward.
+pub trait Clock: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
-    /// Monotonic time used to anchor absolute replay targets. Deterministic
-    /// clocks must advance this value when sleeping or simulating work.
-    fn now(&mut self) -> Instant {
+    /// Current monotonic time. Deterministic clocks must advance this value
+    /// when sleeping or simulating work.
+    fn now(&self) -> Instant {
         Instant::now()
     }
 
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>;
+    /// Waits `delay`, returning early once `deadline`'s cancellation is
+    /// signaled; the caller checks the deadline again afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Returns the clock's own failure while the operation could still
+    /// continue.
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error>;
 
+    /// A cancellation signal the clock carries in addition to the client's.
+    /// Kept for the free workflow entry points until they run on the client.
     fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
         None
     }
@@ -30,9 +45,25 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     type Error = Infallible;
 
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        std::thread::sleep(delay);
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        interruptible_sleep(delay, || deadline.check_cancelled().is_err());
         Ok(())
+    }
+}
+
+/// Sleeps `delay` in slices no longer than [`POLL_INTERVAL`], stopping early
+/// once `stop` reports true.
+fn interruptible_sleep(delay: Duration, stop: impl Fn() -> bool) {
+    let start = Instant::now();
+    loop {
+        if stop() {
+            return;
+        }
+        let remaining = delay.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            return;
+        }
+        std::thread::sleep(remaining.min(POLL_INTERVAL));
     }
 }
 
@@ -56,16 +87,11 @@ pub struct CancellableClock(pub packetcraftr_core::budget::Cancellation);
 
 impl Clock for CancellableClock {
     type Error = packetcraftr_core::budget::Cancelled;
-    fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
-        let start = Instant::now();
-        loop {
-            self.0.check()?;
-            let remaining = delay.saturating_sub(start.elapsed());
-            if remaining.is_zero() {
-                return Ok(());
-            }
-            std::thread::sleep(remaining.min(POLL_INTERVAL));
-        }
+    fn sleep(&self, delay: Duration, deadline: &Deadline) -> Result<(), Self::Error> {
+        interruptible_sleep(delay, || {
+            self.0.is_cancelled() || deadline.check_cancelled().is_err()
+        });
+        self.0.check()
     }
     fn cancellation(&self) -> Option<packetcraftr_core::budget::Cancellation> {
         Some(self.0.clone())
@@ -79,12 +105,15 @@ mod tests {
     #[test]
     fn a_shared_signal_interrupts_a_long_pacing_wait() {
         let signal = packetcraftr_core::budget::Cancellation::default();
-        let mut clock = CancellableClock(signal.clone());
+        let clock = CancellableClock(signal.clone());
         let (started, entered) = std::sync::mpsc::channel();
         let (finished, outcome) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
             started.send(()).unwrap();
-            finished.send(clock.sleep(Duration::from_secs(60))).unwrap();
+            let deadline = Deadline::new(Duration::from_secs(120));
+            finished
+                .send(clock.sleep(Duration::from_secs(60), &deadline))
+                .unwrap();
         });
         entered.recv_timeout(Duration::from_secs(2)).unwrap();
         signal.cancel();
@@ -93,6 +122,17 @@ mod tests {
             Err(packetcraftr_core::budget::Cancelled)
         ));
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn the_system_clock_stops_sleeping_once_the_deadline_is_cancelled() {
+        let signal = packetcraftr_core::budget::Cancellation::default();
+        let deadline =
+            Deadline::new(Duration::from_secs(120)).with_cancellation(Some(signal.clone()));
+        signal.cancel();
+        let started = Instant::now();
+        let Ok(()) = SystemClock.sleep(Duration::from_secs(60), &deadline);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

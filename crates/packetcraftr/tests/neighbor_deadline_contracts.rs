@@ -116,9 +116,8 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
     let attempt_timeout = Duration::from_secs(30);
     let client = Client::new(
         packetcraftr_core::protocol::builtin::registry(),
-        FixedRoutes,
-        link.clone(),
         policy::Policy::default(),
+        common::providers(FixedRoutes, link.clone()),
     )
     .with_neighbor_options(neighbor::Options {
         attempt_timeout,
@@ -130,15 +129,14 @@ fn neighbor_discovery_is_bounded_by_the_exchange_deadline() {
     // Layer 2 framing is what needs the neighbor's MAC address.
     let mut send = packetcraftr::send::Options::default();
     send.plan.link_mode = Mode::Layer2;
-    let options = packetcraftr::exchange::Options {
+    let request = packetcraftr::exchange::Request {
         timeout,
-        send,
-        ..packetcraftr::exchange::Options::default()
+        ..packetcraftr::exchange::Request::new(template(), send)
     };
 
     let started = Instant::now();
     let _error = client
-        .exchange(&template(), options)
+        .exchange(request, packetcraftr::exchange::Collector::default())
         .expect_err("no neighbor answers on the silent link");
     let elapsed = started.elapsed();
 

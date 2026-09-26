@@ -6,7 +6,8 @@ use crate::execution::{ExchangeExecutor, Executor};
 use crate::execution::{ExecutorFault, WorkflowOverrides};
 use crate::probe::{Execution, Transport};
 
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
+use crate::clock::Clock;
+use crate::providers::Providers;
 
 use super::classification::classify_response;
 use super::{Batch, Probe};
@@ -16,17 +17,13 @@ const EXECUTOR_FAULT: ExecutorFault = ExecutorFault::new(
     "use homogeneous bounded hop batches and retain at least one response per probe",
 );
 
-impl<R, I> Executor<Batch> for ExchangeExecutor<'_, R, I>
-where
-    R: packetcraftr_netio::route::Provider,
-    I: PacketIo + CaptureProvider,
-{
+impl<P: Providers, K: Clock> Executor<Batch> for ExchangeExecutor<'_, P, K> {
     fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         let first = validate_batch(batch)?;
-        if self.options.max_responses < batch.probes.len() {
+        if self.collection.max_responses < batch.probes.len() {
             return Err(EXECUTOR_FAULT.invalid(format!(
                 "max_responses={} is smaller than traceroute hop batch size {}",
-                self.options.max_responses,
+                self.collection.max_responses,
                 batch.probes.len()
             )));
         }
@@ -73,7 +70,7 @@ where
                 })
             };
         let exchange = self.exchange_for_workflow(
-            &template,
+            template,
             WorkflowOverrides {
                 timeout: batch.timeout,
                 max_template_packets: batch.probes.len(),

@@ -55,8 +55,11 @@ pub struct Execution {
 }
 
 impl Execution {
-    pub(crate) fn from_exchange(permit: ExecutionPermit, result: crate::exchange::Report) -> Self {
-        let crate::exchange::Report {
+    pub(crate) fn from_exchange(
+        permit: ExecutionPermit,
+        result: crate::exchange::Aggregate,
+    ) -> Self {
+        let crate::exchange::Aggregate {
             sent,
             responses,
             unanswered: _,

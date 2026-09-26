@@ -3,47 +3,15 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
+use packetcraftr_core::decode::DecodedPacket;
+use packetcraftr_core::diagnostic::Diagnostic;
 use packetcraftr_core::frame::Frame;
-use packetcraftr_core::{decode::DecodedPacket, template::DEFAULT_MAX_TEMPLATE_PACKETS};
-use packetcraftr_netio::capture::{
-    Limits as CaptureQueueLimits, MAX_CAPTURE_QUEUE_FRAMES, MAX_TIMEOUT,
-};
 
-use crate::Error;
-use crate::Stats;
+use crate::execution::Shared;
+use crate::{BoundaryError, SentPacket, Sink, Stats};
 
-pub const DEFAULT_MAX_UNMATCHED_FRAMES: usize = MAX_CAPTURE_QUEUE_FRAMES;
-pub const DEFAULT_MAX_RESPONSES: usize = MAX_CAPTURE_QUEUE_FRAMES;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Options {
-    pub send: crate::send::Options,
-    pub timeout: Duration,
-    pub max_template_packets: usize,
-    pub max_unmatched_frames: usize,
-    pub max_responses: usize,
-    /// The one aggregate backend queue bound shared by matched, unsolicited,
-    /// and undecodable capture traffic, including the explicit per-frame
-    /// snapshot length the capture session is armed with.
-    pub capture: CaptureQueueLimits,
-    pub decode: packetcraftr_core::decode::Options,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            send: crate::send::Options::default(),
-            timeout: Duration::from_secs(3),
-            max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
-            max_unmatched_frames: DEFAULT_MAX_UNMATCHED_FRAMES,
-            max_responses: DEFAULT_MAX_RESPONSES,
-            capture: CaptureQueueLimits::default(),
-            decode: packetcraftr_core::decode::Options::default(),
-        }
-    }
-}
+use super::Error;
 
 #[derive(Clone, Debug)]
 pub struct Response {
@@ -52,26 +20,12 @@ pub struct Response {
     pub latency: Duration,
 }
 
-#[derive(Clone, Debug)]
-pub struct Report {
-    /// Trusted receipts for exact provider-accepted transmissions.
-    pub sent: Vec<Arc<crate::SentPacket>>,
-    pub responses: Vec<Response>,
-    pub unanswered: Vec<usize>,
-    pub unsolicited: Vec<DecodedPacket>,
-    /// Captured records whose bytes could not be decoded under the configured
-    /// limits. The complete raw frame is retained for evidence.
-    pub undecoded: Vec<Frame>,
-    pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
-    pub stats: Stats,
-}
-
-/// One exchange outcome published when its classification becomes final.
+/// One exchange outcome, published when its classification becomes final.
 #[derive(Clone, Debug)]
 pub enum Event {
     Sent {
         request_index: usize,
-        sent: Arc<crate::SentPacket>,
+        sent: Arc<SentPacket>,
     },
     Response(Response),
     Unanswered {
@@ -83,34 +37,77 @@ pub enum Event {
     Undecoded {
         frame: Frame,
     },
-    Diagnostic(packetcraftr_core::diagnostic::Diagnostic),
+    Diagnostic(Diagnostic),
 }
 
-/// Final exchange metadata published after capture shutdown and validation.
+/// The terminal result of one exchange, returned after capture shutdown and
+/// validation.
 #[derive(Clone, Debug)]
-pub struct Summary {
+pub struct Report {
     pub unanswered: Vec<usize>,
     /// Diagnostics not already published as [`Event::Diagnostic`]. The
-    /// exchange publishes every diagnostic as an event before its summary, so
-    /// a summary it produces leaves this empty; [`Collector::finish`] appends
+    /// exchange publishes every diagnostic as an event before it returns, so
+    /// a report it produces leaves this empty; [`Collector::finish`] appends
     /// any entries after the observed ones.
-    pub diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
+    pub diagnostics: Vec<Diagnostic>,
     pub stats: Stats,
 }
 
-/// Reconstructs the aggregate exchange result from progressive domain events.
+/// Every event of one exchange, joined with its terminal report.
+#[derive(Clone, Debug)]
+pub struct Aggregate {
+    /// Trusted receipts for exact provider-accepted transmissions.
+    pub sent: Vec<Arc<SentPacket>>,
+    pub responses: Vec<Response>,
+    pub unanswered: Vec<usize>,
+    pub unsolicited: Vec<DecodedPacket>,
+    /// Captured records whose bytes could not be decoded under the configured
+    /// limits. The complete raw frame is retained for evidence.
+    pub undecoded: Vec<Frame>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub stats: Stats,
+}
+
+/// A sink that rebuilds the [`Aggregate`] from published events. Pass a
+/// clone to [`Client::exchange`](crate::Client::exchange) and
+/// [`finish`](Self::finish) the one kept with the report it returns.
+#[derive(Clone, Default)]
+pub struct Collector(Shared<Observed>);
+
+impl Sink<Event> for Collector {
+    type Ack = ();
+
+    fn publish(&mut self, event: Event) -> Result<(), BoundaryError> {
+        self.0.update(|observed| observed.observe(event));
+        Ok(())
+    }
+}
+
+impl Collector {
+    /// Joins the collected events with the exchange's terminal `report`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::IncoherentEvents`] when the events are missing,
+    /// duplicated, or reordered relative to the report.
+    pub fn finish(self, report: Report) -> Result<Aggregate, Error> {
+        self.0.take().finish(report)
+    }
+}
+
+/// The events of one exchange, in publication order.
 #[derive(Default)]
-pub struct Collector {
-    sent: Vec<(usize, Arc<crate::SentPacket>)>,
+pub(crate) struct Observed {
+    sent: Vec<(usize, Arc<SentPacket>)>,
     responses: Vec<Response>,
     unanswered: Vec<usize>,
     unsolicited: Vec<DecodedPacket>,
     undecoded: Vec<Frame>,
-    diagnostics: Vec<packetcraftr_core::diagnostic::Diagnostic>,
+    diagnostics: Vec<Diagnostic>,
 }
 
-impl Collector {
-    pub fn observe(&mut self, event: Event) {
+impl Observed {
+    pub(crate) fn observe(&mut self, event: Event) {
         match event {
             Event::Sent {
                 request_index,
@@ -124,22 +121,22 @@ impl Collector {
         }
     }
 
-    pub fn finish(mut self, summary: Summary) -> Result<Report, crate::Error> {
-        self.validate(&summary)?;
-        self.diagnostics.extend(summary.diagnostics);
-        Ok(Report {
+    pub(crate) fn finish(mut self, report: Report) -> Result<Aggregate, Error> {
+        self.validate(&report)?;
+        self.diagnostics.extend(report.diagnostics);
+        Ok(Aggregate {
             sent: self.sent.into_iter().map(|(_, sent)| sent).collect(),
             responses: self.responses,
             unanswered: self.unanswered,
             unsolicited: self.unsolicited,
             undecoded: self.undecoded,
             diagnostics: self.diagnostics,
-            stats: summary.stats,
+            stats: report.stats,
         })
     }
 
-    fn validate(&self, summary: &Summary) -> Result<(), crate::Error> {
-        if self.unanswered != summary.unanswered {
+    fn validate(&self, report: &Report) -> Result<(), Error> {
+        if self.unanswered != report.unanswered {
             return Err(incoherent("unanswered events disagree with the summary"));
         }
         if self
@@ -163,7 +160,7 @@ impl Collector {
                 "response or unanswered identity has no sent request",
             ));
         }
-        if u64::try_from(sent_count).unwrap_or(u64::MAX) != summary.stats.packets_completed {
+        if u64::try_from(sent_count).unwrap_or(u64::MAX) != report.stats.packets_completed {
             return Err(incoherent(
                 "sent events disagree with completion statistics",
             ));
@@ -172,57 +169,14 @@ impl Collector {
     }
 }
 
-fn incoherent(message: &str) -> crate::Error {
-    crate::Error::InvalidExchangeEvents {
+fn incoherent(message: &str) -> Error {
+    Error::IncoherentEvents {
         message: message.to_owned(),
     }
 }
 
-pub(crate) fn into_sent_packet(sent: Arc<crate::SentPacket>) -> crate::SentPacket {
+pub(crate) fn into_sent_packet(sent: Arc<SentPacket>) -> SentPacket {
     Arc::unwrap_or_clone(sent)
-}
-
-impl Options {
-    /// Validates finite options and retention bounds before live providers run.
-    ///
-    /// Once this returns, [`Options::capture`](Options::capture) is
-    /// exactly the bounded queue configuration a capture provider may be armed
-    /// with, and every retention ceiling fits inside it.
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.timeout > MAX_TIMEOUT {
-            return Err(Error::InvalidExchangeOption {
-                field: "timeout",
-                message: format!("must not exceed {MAX_TIMEOUT:?}"),
-            });
-        }
-        if self.max_template_packets == 0 {
-            return Err(Error::InvalidExchangeOption {
-                field: "max_template_packets",
-                message: "must be greater than zero".to_owned(),
-            });
-        }
-        for (field, value) in [
-            ("max_responses", self.max_responses),
-            ("max_unmatched_frames", self.max_unmatched_frames),
-        ] {
-            if value > self.capture.max_frames {
-                return Err(Error::InvalidExchangeOption {
-                    field,
-                    message: format!(
-                        "{value} exceeds aggregate capture frame ceiling {}",
-                        self.capture.max_frames
-                    ),
-                });
-            }
-        }
-        Instant::now()
-            .checked_add(self.timeout)
-            .ok_or_else(|| Error::InvalidExchangeOption {
-                field: "timeout",
-                message: "cannot be represented by the platform monotonic clock".to_owned(),
-            })?;
-        self.capture.validate().map_err(Error::from)
-    }
 }
 
 #[cfg(test)]
@@ -230,8 +184,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn collector_rejects_summary_without_matching_sent_events() {
-        let summary = Summary {
+    fn collector_rejects_a_report_without_matching_sent_events() {
+        let report = Report {
             unanswered: Vec::new(),
             diagnostics: Vec::new(),
             stats: Stats {
@@ -240,8 +194,8 @@ mod tests {
             },
         };
         assert!(matches!(
-            Collector::default().finish(summary),
-            Err(crate::Error::InvalidExchangeEvents { .. })
+            Collector::default().finish(report),
+            Err(Error::IncoherentEvents { .. })
         ));
     }
 }

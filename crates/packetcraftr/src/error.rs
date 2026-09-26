@@ -8,6 +8,10 @@ use packetcraftr_netio::Error as LiveIoError;
 
 use crate::{policy, target};
 
+/// Why preparing a live packet failed: the operation's cancellation, policy,
+/// packet building and materialization, route planning (including neighbor
+/// resolution), or a provider. Every workflow that transmits prepared packets
+/// wraps it in its own error.
 #[derive(Debug, ThisError)]
 #[non_exhaustive]
 pub enum Error {
@@ -25,30 +29,6 @@ pub enum Error {
     Policy(#[from] policy::Error),
     #[error(transparent)]
     Io(#[from] LiveIoError),
-    /// Boxed because this variant is the only one that carries two complete
-    /// live-I/O failures, and no other workflow failure should make room for
-    /// them.
-    #[error("{operation}; capture shutdown also failed: {shutdown}")]
-    OperationAndCaptureShutdown {
-        operation: Box<LiveIoError>,
-        shutdown: Box<LiveIoError>,
-    },
-    #[error("exchange progressive output failed: {source}")]
-    ExchangeOutput {
-        #[source]
-        source: Box<packetcraftr_core::error::BoundaryError>,
-    },
-    #[error(
-        "exchange progressive output failed: {output}; capture shutdown also failed: {shutdown}"
-    )]
-    ExchangeOutputAndCaptureShutdown {
-        output: Box<packetcraftr_core::error::BoundaryError>,
-        shutdown: LiveIoError,
-    },
-    #[error("exchange events are incoherent: {message}")]
-    InvalidExchangeEvents { message: String },
-    #[error("exchange packets selected different interfaces or link modes")]
-    HeterogeneousExchangeRoute,
     #[error("packet template expansion failed: {message}")]
     Template {
         message: String,
@@ -72,25 +52,8 @@ pub enum Error {
         "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
     )]
     PacketExceedsMtu { actual: usize, mtu: u32 },
-    #[error("invalid exchange option {field}: {message}")]
-    InvalidExchangeOption {
-        field: &'static str,
-        message: String,
-    },
-    #[error("invalid send option {field}: {message}")]
-    InvalidSendOption {
-        field: &'static str,
-        message: String,
-    },
-    #[error("send progressive output failed: {source}")]
-    SendOutput {
-        #[source]
-        source: Box<packetcraftr_core::error::BoundaryError>,
-    },
 }
 
-/// A `cli.*` code means "caller or request error": the request that reached a
-/// workflow was not something the workflow could run.
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
@@ -100,21 +63,6 @@ impl Classified for Error {
             Self::Build(error) => error.classification(),
             Self::Policy(error) => error.classification(),
             Self::Io(error) => error.classification(),
-            Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
-            Self::ExchangeOutput { source } | Self::SendOutput { source } => {
-                source.classification()
-            }
-            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.classification(),
-            Self::InvalidExchangeEvents { .. } => Classification::new(
-                "internal.exchange_event_coherence",
-                Kind::Internal,
-                Some("collect every exchange event once in publication order"),
-            ),
-            Self::HeterogeneousExchangeRoute => Classification::new(
-                "cli.heterogeneous_exchange_route",
-                Kind::Usage,
-                Some("split the exchange so every packet uses the same interface and link mode"),
-            ),
             Self::Template { .. } => Classification::new(
                 "packet.template",
                 Kind::Packet,
@@ -132,18 +80,6 @@ impl Classified for Error {
                 Kind::Packet,
                 Some("reduce the network packet or apply an explicit fragmentation transform"),
             ),
-            Self::InvalidExchangeOption { .. } => Classification::new(
-                "cli.exchange_limit",
-                Kind::Usage,
-                Some(
-                    "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
-                ),
-            ),
-            Self::InvalidSendOption { .. } => Classification::new(
-                "cli.send_limit",
-                Kind::Usage,
-                Some("use finite repetition, rate, and expansion limits for one send operation"),
-            ),
         }
     }
 
@@ -153,26 +89,15 @@ impl Classified for Error {
             Self::Plan(error) => error.context(),
             Self::Policy(error) => error.context(),
             Self::Io(error) => error.context(),
-            Self::OperationAndCaptureShutdown { operation, .. } => operation.context(),
-            Self::ExchangeOutput { source } | Self::SendOutput { source } => source.context(),
-            Self::ExchangeOutputAndCaptureShutdown { output, .. } => output.context(),
             Self::Build(_)
-            | Self::InvalidExchangeEvents { .. }
-            | Self::HeterogeneousExchangeRoute
             | Self::Template { .. }
             | Self::PacketMaterialization { .. }
             | Self::PacketExceedsMtu { .. }
-            | Self::InvalidExchangeOption { .. }
-            | Self::InvalidSendOption { .. }
             | Self::Cancelled(_) => None,
         }
     }
 
-    /// Walks retained sources, delegating transparent errors and
-    /// [`BoundaryError`] snapshots. Paired operation/cleanup failures combine
-    /// both chains.
-    ///
-    /// [`BoundaryError`]: packetcraftr_core::error::BoundaryError
+    /// Walks retained sources, delegating transparent errors.
     fn causes(&self) -> Vec<String> {
         match self {
             Self::Target(error) => error.causes(),
@@ -180,19 +105,6 @@ impl Classified for Error {
             Self::Build(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
-            Self::ExchangeOutput { source } | Self::SendOutput { source } => source.causes(),
-            Self::OperationAndCaptureShutdown {
-                operation,
-                shutdown,
-            } => vec![operation.to_string(), shutdown.to_string()],
-            Self::ExchangeOutputAndCaptureShutdown { output, shutdown } => {
-                let mut causes = output.causes();
-                if causes.is_empty() {
-                    causes.push(output.to_string());
-                }
-                causes.push(shutdown.to_string());
-                causes
-            }
             error => packetcraftr_core::error::source_chain(error),
         }
     }

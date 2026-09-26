@@ -9,6 +9,8 @@ mod selection;
 mod workflow;
 
 pub(crate) use admission::{DeclaredTargets, FamilyGate, admit_operation, admit_selection};
-pub use model::{Authorized, Error, Family, Hostname, Resolver, SystemResolver, Target};
+pub use model::{
+    Authorized, Error, Family, Hostname, ResolveTarget, Resolver, SystemResolver, Target,
+};
 pub use selection::{Network, Selection, SelectionError, Specification};
 pub(crate) use workflow::{approve_operation, resolve_selected, wire_limits};

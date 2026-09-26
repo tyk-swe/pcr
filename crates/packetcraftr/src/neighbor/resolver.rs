@@ -77,10 +77,14 @@ impl State {
         })
     }
 
-    /// Resolves over `io`: capture is armed on it before each request is
-    /// sent through it.
-    pub(crate) fn over<'a, I>(&'a self, io: &'a I) -> Active<'a, I> {
-        Active { io, state: self }
+    /// Resolves over the client's providers: capture is armed on `capture`
+    /// before each request is sent through `transmit`.
+    pub(crate) fn over<'a, T, C>(&'a self, transmit: &'a T, capture: &'a C) -> Active<'a, T, C> {
+        Active {
+            transmit,
+            capture,
+            state: self,
+        }
     }
 }
 
@@ -91,14 +95,16 @@ impl Default for State {
 }
 
 /// Active ARP/NDP resolution over one client's transmit and capture providers.
-pub(crate) struct Active<'a, I> {
-    io: &'a I,
+pub(crate) struct Active<'a, T, C> {
+    transmit: &'a T,
+    capture: &'a C,
     state: &'a State,
 }
 
-impl<I> Resolver for Active<'_, I>
+impl<T, C> Resolver for Active<'_, T, C>
 where
-    I: transmit::Provider + capture::Provider,
+    T: transmit::Provider,
+    C: capture::Provider,
 {
     fn resolve(&self, request: &Request, deadline: &Deadline) -> Result<Resolution, Error> {
         validate_request(request)?;
@@ -124,7 +130,7 @@ where
             native: Default::default(),
         };
         let mut capture = self
-            .io
+            .capture
             .arm_capture(&capture_request, deadline)
             .map_err(|error| map_io_error(request, "arming capture", error))?;
         let primary = self.exchange(
@@ -195,9 +201,10 @@ where
     }
 }
 
-impl<I> Active<'_, I>
+impl<T, C> Active<'_, T, C>
 where
-    I: transmit::Provider + capture::Provider,
+    T: transmit::Provider,
+    C: capture::Provider,
 {
     fn exchange<S: Session>(
         &self,
@@ -236,7 +243,7 @@ where
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
-                .io
+                .transmit
                 .send(transmit::Outbound::Layer2(frame))
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
             validate_neighbor_send(request, request_bytes, &report)?;

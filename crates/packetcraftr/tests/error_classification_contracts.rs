@@ -133,7 +133,7 @@ fn every_unnamed_replay_error_variant_renders_and_classifies_stably() {
 
 #[test]
 fn operation_and_capture_shutdown_reports_the_operation_and_both_causes() {
-    let error = Error::OperationAndCaptureShutdown {
+    let error = packetcraftr::exchange::Error::OperationAndCaptureShutdown {
         operation: Box::new(LiveIoError::PartialSend {
             expected: 60,
             actual: 42,
@@ -248,12 +248,13 @@ impl Transmitter for CountingTransmitter {
     }
 }
 
+#[derive(Clone)]
 struct InstantClock;
 
 impl Clock for InstantClock {
     type Error = Infallible;
 
-    fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
+    fn sleep(&self, _delay: Duration, _deadline: &Deadline) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -348,19 +349,24 @@ fn wire_authorization_refuses_ipv4_whose_malformed_options_may_hide_a_destinatio
     options.plan.link_mode = LinkMode::Layer3;
     let client = Client::new(
         protocol::builtin::registry(),
-        FixedRoutes,
-        NeverTransmit,
         policy::Policy::default(),
+        common::providers(FixedRoutes, NeverTransmit),
     );
 
     let error = client
-        .send(packet, options)
+        .send(
+            send::Request::packet(packet, options),
+            send::Collector::default(),
+        )
         .expect_err("the outer header must not authorize bytes whose options are unreadable");
 
     assert!(
         matches!(
             &error,
-            Error::Policy(policy::Error::InvalidPacketSemantics { reason, .. })
+            send::Error::Preparation(Error::Policy(policy::Error::InvalidPacketSemantics {
+                reason,
+                ..
+            }))
                 if reason.contains("destination cannot be determined")
                     && reason.contains("truncated ipv4 layer")
         ),

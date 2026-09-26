@@ -58,13 +58,13 @@ impl CaptureOutputArgs {
         let Some(capture_format) = captures else {
             if self.link_type.is_some() {
                 return Err(CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "--link-type requires PCAP or PCAPNG output",
                 ));
             }
             if self.timestamp.is_some() {
                 return Err(CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     "--timestamp requires PCAP or PCAPNG output",
                 ));
             }
@@ -72,7 +72,7 @@ impl CaptureOutputArgs {
         };
         let link_type = self.link_type.ok_or_else(|| {
             CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "capture output requires --link-type naming the generated frames' link layer",
             )
         })?;
@@ -123,7 +123,7 @@ impl CaptureOutput {
             )
             .map_err(|source| {
                 CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     format!(
                         "emitted bytes do not decode under link type {}: {source}",
                         self.link_type.0,
@@ -136,7 +136,7 @@ impl CaptureOutput {
             .is_none_or(|first| first.protocol_id() != decoded.layer.protocol_id())
         {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "emitted bytes decode to a different capture root than the recipe",
             ));
         }
@@ -164,21 +164,21 @@ fn validate_link_type(
 ) -> Result<(), CliError> {
     let Some(root) = registry.root_for_link_type(link_type) else {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("link type {} has no built-in decode root", link_type.0),
         ));
     };
     let first = packet
         .layer(0)
         .map(|layer| *layer.protocol_id())
-        .ok_or_else(|| CliError::new(Kind::Cli, "the recipe has no layers"))?;
+        .ok_or_else(|| CliError::new(Kind::Usage, "the recipe has no layers"))?;
     let accepted = first == root
         || registry
             .codec(root.as_str())
             .is_some_and(|codec| codec.accepts_decoded_protocol(&first));
     if !accepted {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "link type {} decodes as {} but the recipe begins with {}",
                 link_type.0,
@@ -206,7 +206,7 @@ fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
     };
     link_type.ok_or_else(|| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("unknown link type {input:?}; use a capture-root name or a decimal number"),
         )
     })
@@ -217,7 +217,7 @@ fn parse_link_type(input: &str) -> Result<LinkType, CliError> {
 pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
     let invalid = || {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "invalid timestamp {input:?}; use non-negative Unix seconds with optional nanosecond fraction"
             ),
@@ -251,7 +251,7 @@ pub(crate) fn parse_timestamp(input: &str) -> Result<SystemTime, CliError> {
     // silently move an inclusive bound or a generated frame's timestamp.
     if timestamp.duration_since(SystemTime::UNIX_EPOCH).ok() != Some(offset) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("timestamp {input:?} has precision this platform cannot represent exactly"),
         ));
     }

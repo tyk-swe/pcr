@@ -52,7 +52,7 @@ impl packetcraftr::replay::Selector for Selector {
                 .is_some_and(|selected| *selected != rule.interface)
             {
                 return Err(CliError::new(
-                    Kind::Cli,
+                    Kind::Usage,
                     format!("replay frame {number} matches conflicting output interfaces"),
                 )
                 .into_boundary_error());
@@ -61,7 +61,7 @@ impl packetcraftr::replay::Selector for Selector {
         }
         if selected.is_none() && !self.fallback {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 format!("replay frame {number} has no output interface mapping"),
             )
             .into_boundary_error());

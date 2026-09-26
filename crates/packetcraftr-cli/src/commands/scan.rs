@@ -27,7 +27,7 @@ pub(super) fn run(
 ) -> Result<(), CliError> {
     if arguments.connect && !matches!(arguments.transport, arguments::Transport::Tcp) {
         return Err(CliError::new(
-            packetcraftr_core::error::Kind::Cli,
+            packetcraftr_core::error::Kind::Usage,
             "--connect requires TCP transport",
         ));
     }

@@ -82,7 +82,7 @@ impl Classified for Error {
             ),
             Self::ReversedTimeBounds { .. } => Classification::new(
                 "cli.reversed_time_bounds",
-                Kind::Cli,
+                Kind::Usage,
                 Some("order the bounds so the earlier time comes first"),
             ),
         }

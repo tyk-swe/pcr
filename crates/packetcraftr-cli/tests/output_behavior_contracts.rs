@@ -11,6 +11,7 @@ use packetcraftr_cli::output::contract::Error as ContractError;
 use packetcraftr_cli::output::contract::Format;
 use packetcraftr_cli::output::envelope::Envelope;
 use packetcraftr_cli::output::envelope::Error as OutputError;
+use packetcraftr_cli::output::envelope::ErrorKind;
 use packetcraftr_cli::output::frame::Captured;
 use packetcraftr_cli::output::frame::Timestamp;
 use packetcraftr_cli::output::frame::Wire;
@@ -55,7 +56,7 @@ fn contract_errors_carry_message_code_kind_and_remediation() {
     };
     assert!(unsupported.to_string().contains("choose text, json"));
     assert_eq!(unsupported.classification().code, "cli.output_format");
-    assert_eq!(unsupported.classification().kind, Kind::Cli);
+    assert_eq!(unsupported.classification().kind, Kind::Usage);
 
     for (error, message, code, kind) in [
         (
@@ -128,7 +129,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
 
     let classified = OutputError::classified(&ContractError::TimestampOutOfRange);
     assert_eq!(classified.code, "packet.timestamp_range");
-    assert_eq!(classified.kind, Kind::Packet);
+    assert_eq!(classified.kind, ErrorKind::Packet);
     assert!(classified.remediation.is_some());
 
     let aggregate = Envelope::error(Some(Command::Build), classified.clone());

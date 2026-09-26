@@ -83,7 +83,7 @@ impl Classified for Error {
         match self {
             Self::Analysis(error) => error.classification(),
             Self::Limit { .. } => Classification::new("policy.export_limit", Kind::Policy, None),
-            Self::Selection => Classification::new("cli.export_selection", Kind::Cli, None),
+            Self::Selection => Classification::new("cli.export_selection", Kind::Usage, None),
             Self::Sources { .. } => {
                 Classification::new("internal.export_sources", Kind::Internal, None)
             }

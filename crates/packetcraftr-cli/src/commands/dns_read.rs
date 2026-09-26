@@ -93,7 +93,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         )
         .map_err(CliError::classified)?;
     if outcome.selected_absent() {
-        return Err(CliError::new(Kind::Cli, "selected stream is not present"));
+        return Err(CliError::new(Kind::Usage, "selected stream is not present"));
     }
     let run = outcome.run;
     let scopes = outcome.scopes;

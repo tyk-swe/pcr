@@ -72,7 +72,7 @@ fn authorize_expanded_destinations(
         .map_err(CliError::classified)?
         .ok_or_else(|| {
             CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "packet set must contain at least one packet",
             )
         })?;

@@ -24,7 +24,7 @@ impl Compression {
             )
         {
             return Err(CliError::new(
-                packetcraftr_core::error::Kind::Cli,
+                packetcraftr_core::error::Kind::Usage,
                 "--compression requires PCAP or PCAPNG output",
             ));
         }

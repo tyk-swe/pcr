@@ -139,7 +139,7 @@ impl Classified for Error {
             | Self::InvalidTimeout { .. }
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.dns_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "use a valid query and finite non-zero DNS attempt, timeout, rate, message, record, and evidence limits",
                 ),

@@ -41,7 +41,7 @@ impl Projector {
             Format::Text | Format::Json | Format::Ndjson | Format::Csv | Format::Tsv
         ) {
             return Err(CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "--field requires text, JSON, NDJSON, CSV, or TSV output",
             ));
         }
@@ -49,7 +49,7 @@ impl Projector {
             .map_err(CliError::classified)?;
         if command == Command::Capture && projection.requirements().stream_index {
             return Err(CliError::new(
-                core::error::Kind::Cli,
+                core::error::Kind::Usage,
                 "capture --field cannot select stream indices; save the capture and use read --field",
             ));
         }
@@ -229,7 +229,7 @@ fn quoted(writer: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
 /// selections; each command applies it to the formats it declared projected.
 pub(super) fn missing_fields_error() -> CliError {
     CliError::new(
-        core::error::Kind::Cli,
+        core::error::Kind::Usage,
         "this output format requires --field selections",
     )
 }

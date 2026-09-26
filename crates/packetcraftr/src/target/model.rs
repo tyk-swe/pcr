@@ -191,7 +191,7 @@ impl Classified for Error {
         match self {
             Self::InvalidHostname { .. } => Classification::new(
                 "cli.live_target",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use a valid IP address or bounded ASCII DNS hostname"),
             ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(

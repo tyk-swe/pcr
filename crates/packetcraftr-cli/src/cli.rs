@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 use clap::{Parser, ValueEnum};
 use packetcraftr_cli::output::contract::Format;
+use packetcraftr_cli::output::envelope::ErrorKind;
 
 use crate::commands::Command;
 use crate::errors::{CANCELLED_EXIT_CODE, KINDS, exit_code_description, exit_code_for};
@@ -43,7 +44,7 @@ fn root_after_help() -> String {
             help,
             "  {:<3} {}: {}",
             exit_code_for(kind),
-            kind.as_str(),
+            ErrorKind::from(kind).as_str(),
             exit_code_description(kind)
         );
     }

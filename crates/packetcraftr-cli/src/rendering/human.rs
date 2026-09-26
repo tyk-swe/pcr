@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn classified_errors_render_causes_and_remediation_in_order() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Kind::Usage, Some("try again")),
             "primary failure",
             vec!["first cause".to_owned(), "second cause".to_owned()],
         );
@@ -345,7 +345,7 @@ mod tests {
         let error = CliError::from_classification(
             Classification::new(
                 "cli.\u{202e}code\x1b",
-                Kind::Cli,
+                Kind::Usage,
                 Some("help:\t\u{2066}now\r\n"),
             ),
             "primary\n\t\u{200f}\x1bmessage",
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn identical_primary_causes_are_not_rendered_twice() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, None),
+            Classification::new("cli.fixture", Kind::Usage, None),
             "same message",
             vec![
                 "same message".to_owned(),
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn disabled_or_noninteractive_streams_strip_renderer_styles() {
         let error = CliError::from_classification(
-            Classification::new("cli.fixture", Kind::Cli, Some("try again")),
+            Classification::new("cli.fixture", Kind::Usage, Some("try again")),
             "primary failure",
             vec!["cause".to_owned()],
         );

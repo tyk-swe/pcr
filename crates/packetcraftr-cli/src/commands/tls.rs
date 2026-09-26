@@ -83,7 +83,7 @@ impl SniPattern {
         };
         if literal.contains('*') {
             return Err(CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 format!(
                     "invalid --sni '{pattern}': '*' is supported only at the start, \
                      the end, or both"
@@ -179,7 +179,7 @@ pub(super) fn run(
         && outcome.selected_absent()
     {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!("--stream tcp:{index} is not present"),
         ));
     }
@@ -224,7 +224,7 @@ fn parse_tcp_stream_selector(spec: &str) -> Result<u64, CliError> {
     match selected.transport {
         StreamTransport::Tcp => Ok(selected.index),
         StreamTransport::Udp => Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             format!(
                 "invalid --stream '{spec}': TLS sessions are assembled from TCP streams only; \
                  UDP port 443 is QUIC, which this command does not read"

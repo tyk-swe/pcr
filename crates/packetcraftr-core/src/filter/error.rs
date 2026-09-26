@@ -89,7 +89,7 @@ impl Classified for Error {
 }
 
 fn cli_filter(remediation: &'static str) -> Classification {
-    Classification::new("cli.filter", Kind::Cli, Some(remediation))
+    Classification::new("cli.filter", Kind::Usage, Some(remediation))
 }
 
 #[cfg(test)]
@@ -121,7 +121,7 @@ mod tests {
         ] {
             let classification = error.classification();
             assert_eq!(classification.code, "cli.filter");
-            assert_eq!(classification.kind, Kind::Cli);
+            assert_eq!(classification.kind, Kind::Usage);
             assert!(
                 classification
                     .remediation

@@ -12,7 +12,7 @@ fn analysis_errors_keep_policy_packet_and_boundary_classifications_distinct() {
         value: 0,
         reason: "must be non-zero",
     };
-    assert_eq!(invalid.classification().kind, Kind::Cli);
+    assert_eq!(invalid.classification().kind, Kind::Usage);
     let stream = Error::StreamLimit {
         number: 2,
         limit: 1,

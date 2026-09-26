@@ -50,7 +50,7 @@ pub(super) fn run(
         .is_some_and(|projector| projector.projection.requirements().stream_index)
     {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "dissect cannot assign stream indexes; use read with --field",
         ));
     }
@@ -64,7 +64,7 @@ pub(super) fn run(
         .transpose()?;
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => core::protocol::raw::parse_hex(&value)
-            .map_err(|source| CliError::caused(Kind::Cli, &source))?
+            .map_err(|source| CliError::caused(Kind::Usage, &source))?
             .to_vec(),
         (None, Some(path)) => read_bounded_file(&path, max_packet_size, InputKind::Frame)?,
         (None, None) => read_stdin_bounded(max_packet_size, InputKind::Frame)?,

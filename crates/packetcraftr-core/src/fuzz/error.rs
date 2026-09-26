@@ -57,7 +57,7 @@ impl Classified for Error {
             | Self::InvalidDuration { .. }
             | Self::InvalidTarget { .. } => Classification::new(
                 "cli.fuzz_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some(
                     "use valid layer.field targets and finite non-zero case, byte, field, list, shrink, and duration limits",
                 ),

@@ -101,7 +101,7 @@ impl Classified for Error {
             ),
             Self::InvalidLimit { .. } => Classification::new(
                 "cli.analysis_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero analysis frame, byte, flow, and duration limits"),
             ),
             Self::Capture { source, .. } => source.classification(),

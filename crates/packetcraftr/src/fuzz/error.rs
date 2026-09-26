@@ -66,7 +66,7 @@ impl Classified for Error {
             Self::Campaign(error) => error.classification(),
             Self::InvalidLimit { .. } | Self::InvalidTimeout { .. } => Classification::new(
                 "cli.fuzz_limit",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use finite non-zero rate, timeout, evidence, and duration limits"),
             ),
             Self::DurationLimit { .. } => Classification::new(

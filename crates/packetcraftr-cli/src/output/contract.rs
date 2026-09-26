@@ -359,7 +359,7 @@ impl Classified for Error {
         match self {
             Self::UnsupportedFormat { .. } => Classification::new(
                 "cli.output_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("choose one of the formats listed for this command"),
             ),
             Self::TimestampOutOfRange => Classification::new(

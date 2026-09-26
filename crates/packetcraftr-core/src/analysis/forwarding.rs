@@ -760,7 +760,7 @@ impl Classified for Error {
             },
             Self::ObservationContract { .. } => Classification::new(
                 "analysis.verify_observation_contract",
-                Kind::Cli,
+                Kind::Usage,
                 Some("collect both sides, in capture order, with the same compiled Rules instance"),
             ),
             Self::ScratchBudget { .. } => Classification::new(
@@ -771,7 +771,7 @@ impl Classified for Error {
             Self::CaptureLocal { .. } | Self::ExpectationSyntax { .. } | Self::RuleBudget => {
                 Classification::new(
                     "cli.verify_rule",
-                    Kind::Cli,
+                    Kind::Usage,
                     Some(
                         "declare identity, preservation, and expectation rules over packet fields",
                     ),

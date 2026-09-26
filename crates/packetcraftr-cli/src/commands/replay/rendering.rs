@@ -294,7 +294,7 @@ fn classic_writer<R: Read + std::io::Seek, W: Write>(
     let interface = reader.interfaces()[0].clone();
     let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "capture snap length exceeds the platform size limit",
         )
     })?;

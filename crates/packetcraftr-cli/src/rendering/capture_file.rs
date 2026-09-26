@@ -38,7 +38,7 @@ fn write_capture_file_with<S: Read + Write + Seek, D: Write>(
     let mut frames = frames.into_iter();
     let first = frames.next().ok_or_else(|| {
         CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "capture-file output requires at least one captured or transmitted frame",
         )
     })?;

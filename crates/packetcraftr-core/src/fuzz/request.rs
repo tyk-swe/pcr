@@ -95,7 +95,7 @@ impl Classified for TargetParseError {
     fn classification(&self) -> Classification {
         Classification::new(
             "cli.fuzz_limit",
-            Kind::Cli,
+            Kind::Usage,
             Some("use LAYER.FIELD targets naming a layer index and a reflective field path"),
         )
     }

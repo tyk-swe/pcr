@@ -98,7 +98,7 @@ fn route_errors_keep_stable_classes_for_every_public_failure_variant() {
         (
             RouteError::MissingLayer2Interface,
             "cli.interface_required",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             RouteError::InterfaceLookupUnsupported {
@@ -387,7 +387,7 @@ fn neighbor_errors_keep_stable_classes_and_ordered_provider_causes() {
                 message: "fixture".to_owned(),
             },
             "cli.neighbor_limit",
-            Kind::Cli,
+            Kind::Usage,
             NO_CAUSES,
         ),
         (
@@ -559,7 +559,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 maximum: capture::MAX_TIMEOUT,
             },
             "cli.capture_timeout",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::InvalidTransmissionFrame {
@@ -582,7 +582,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 message: "fixture".to_owned(),
             },
             "cli.capture_filter",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::CaptureFilterInstallation {
@@ -613,7 +613,7 @@ fn live_io_errors_keep_stable_classes_for_every_public_failure_variant() {
                 reason: "fixture",
             },
             "cli.capture_limit",
-            Kind::Cli,
+            Kind::Usage,
         ),
         (
             Error::CaptureQueueOverflow {

@@ -51,7 +51,7 @@ pub(crate) fn run() -> ExitCode {
         && !cli.force_binary_stdout
     {
         let error = CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "refusing binary output to a terminal; redirect stdout to a file or pipe, or pass --force-binary-stdout",
         );
         let _ = emit_stderr_error(&error);
@@ -93,7 +93,7 @@ pub(crate) fn run() -> ExitCode {
             format,
             command,
             CliError::new(
-                Kind::Cli,
+                Kind::Usage,
                 "--resource-diagnostics requires --output json or ndjson",
             ),
             &stream,
@@ -103,7 +103,7 @@ pub(crate) fn run() -> ExitCode {
         return command_failure(
             format,
             command,
-            CliError::new(Kind::Cli, "--output-timeout-ms requires --output ndjson"),
+            CliError::new(Kind::Usage, "--output-timeout-ms requires --output ndjson"),
             &stream,
         );
     }
@@ -151,7 +151,11 @@ fn parse_error_exit(context: &Context, error: &clap::Error) -> ExitCode {
     {
         // clap exits 2 for usage errors; anything else is unexpected.
         // The process exit code stays clap's either way.
-        let kind = if code == 2 { Kind::Cli } else { Kind::Internal };
+        let kind = if code == 2 {
+            Kind::Usage
+        } else {
+            Kind::Internal
+        };
         let error = CliError::new(kind, message);
         let emitted = match format {
             MachineFormat::Json => emit_json(&output::envelope::Envelope::<()>::error(

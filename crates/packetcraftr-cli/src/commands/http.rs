@@ -54,7 +54,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         .transpose()?;
     if selector.is_some_and(|selected| selected.transport != analysis::StreamTransport::Tcp) {
         return Err(CliError::new(
-            Kind::Cli,
+            Kind::Usage,
             "HTTP/1 inspection requires --stream tcp:INDEX",
         ));
     }
@@ -89,7 +89,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         )
         .map_err(CliError::classified)?;
     if outcome.selected_absent() {
-        return Err(CliError::new(Kind::Cli, "selected stream is not present"));
+        return Err(CliError::new(Kind::Usage, "selected stream is not present"));
     }
     let run = outcome.run;
     let scopes = outcome.scopes;

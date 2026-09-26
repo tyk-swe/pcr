@@ -46,7 +46,7 @@ impl packetcraftr_core::error::Classified for ConnectError {
             Self::Cancelled(source) => source.classification(),
             Self::Timeout => Classification::new(
                 "cli.tcp_connect_timeout",
-                Kind::Cli,
+                Kind::Usage,
                 Some("choose a finite nonzero connection timeout"),
             ),
             Self::Capacity { .. } => Classification::new(

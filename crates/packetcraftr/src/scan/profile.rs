@@ -95,7 +95,7 @@ pub struct UdpProfile {
 pub struct Error(pub &'static str);
 impl Classified for Error {
     fn classification(&self) -> Classification {
-        Classification::new("cli.udp_profile", Kind::Cli, None)
+        Classification::new("cli.udp_profile", Kind::Usage, None)
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

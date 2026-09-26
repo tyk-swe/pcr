@@ -563,6 +563,16 @@ authorization, send-execution, DNS-classification, and capture-output
 failures. `fuzz::CaseFailure` implements `Error`. `CliError` implements
 `std::error::Error`; `rules::vlan`/`mac` return it directly.
 
+## Neutral classification kinds
+
+`packetcraftr_core::error::Kind::Cli` is renamed `Kind::Usage`; replace every
+`Kind::Cli` match arm and constructor. `Kind::Usage.as_str()` and its serde
+name are `"usage"`. Classification codes keep their frozen strings (for example
+`cli.capture_filter`), and machine output still publishes a usage failure as
+`"kind": "cli"` with exit code 2. In the CLI crate,
+`output::envelope::Error.kind` is now the CLI-owned `envelope::ErrorKind`;
+convert with `ErrorKind::from(kind)`.
+
 ## Filter timestamp failures
 
 A display filter that reads `frame.time_epoch` on a frame without a timestamp

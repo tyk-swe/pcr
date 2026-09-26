@@ -79,7 +79,7 @@ pub(super) fn run(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_normalize_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use --normalize with --output pcapng"),
             ),
             "--normalize requires PCAPNG output",
@@ -142,7 +142,7 @@ fn validate_dissect_format(dissect: bool, format: ReadFormat) -> Result<(), CliE
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.dissect_unsupported_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("use --output text or --output ndjson to show the layer stack"),
             ),
             format!("--dissect has no effect on {format} output"),
@@ -184,7 +184,7 @@ fn validate_rewrite_format(
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_rewrite_format",
-                Kind::Cli,
+                Kind::Usage,
                 Some("select the capture output format matching the input capture"),
             ),
             format!(

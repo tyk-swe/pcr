@@ -79,6 +79,12 @@ All notable changes to PacketcraftR are documented here. The format follows
   `dyn Any` and provides `is`, `downcast_ref`, and `downcast_mut` directly.
   Hand-written `Layer` implementations delete both methods. See
   `docs/migration-unreleased.md`.
+- `error::Kind::Cli` is renamed `Kind::Usage` (`as_str` and its serde name
+  become `"usage"`), so library classifications no longer name the CLI. Codes
+  such as `cli.capture_filter` and CLI output are unchanged: the CLI's
+  `output::envelope::Error.kind` is the new CLI-owned `envelope::ErrorKind`,
+  which still publishes a usage failure as `"cli"` with exit code 2. See
+  `docs/migration-unreleased.md`.
 
 ### Added
 

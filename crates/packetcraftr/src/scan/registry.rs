@@ -50,7 +50,7 @@ pub(super) fn configured(
                     error.to_string(),
                     packetcraftr_core::error::Classification::new(
                         "cli.udp_profile",
-                        packetcraftr_core::error::Kind::Cli,
+                        packetcraftr_core::error::Kind::Usage,
                         None,
                     ),
                     Vec::new(),
@@ -62,7 +62,7 @@ pub(super) fn configured(
             error.to_string(),
             packetcraftr_core::error::Classification::new(
                 "cli.udp_profile",
-                packetcraftr_core::error::Kind::Cli,
+                packetcraftr_core::error::Kind::Usage,
                 None,
             ),
             Vec::new(),

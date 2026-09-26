@@ -11,6 +11,7 @@ use packetcraftr_cli::output::contract::Error as ContractError;
 use packetcraftr_cli::output::contract::Format;
 use packetcraftr_cli::output::envelope::Envelope;
 use packetcraftr_cli::output::envelope::Error as OutputError;
+use packetcraftr_cli::output::envelope::ErrorKind;
 use packetcraftr_cli::output::frame::Captured;
 use packetcraftr_cli::output::frame::Timestamp;
 use packetcraftr_cli::output::frame::Wire;
@@ -128,7 +129,7 @@ fn envelopes_convert_diagnostics_errors_and_statistics() {
 
     let classified = OutputError::classified(&ContractError::TimestampOutOfRange);
     assert_eq!(classified.code, "packet.timestamp_range");
-    assert_eq!(classified.kind, Kind::Packet);
+    assert_eq!(classified.kind, ErrorKind::Packet);
     assert!(classified.remediation.is_some());
 
     let aggregate = Envelope::error(Some(Command::Build), classified.clone());

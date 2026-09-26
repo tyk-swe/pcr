@@ -14,10 +14,52 @@ use packetcraftr_core::error::{Classification, Classified, Coordinate, Kind};
 
 use super::contract::{Command, Mode, SCHEMA_V6};
 
+/// The failure class an `error` object publishes.
+///
+/// The CLI's name for each neutral [`Kind`]: a usage failure is published as
+/// `"cli"`, the frozen v6 vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorKind {
+    Cli,
+    Packet,
+    Capability,
+    Io,
+    Policy,
+    Internal,
+}
+
+impl ErrorKind {
+    /// The published name, as it appears in `error.kind`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Packet => "packet",
+            Self::Capability => "capability",
+            Self::Io => "io",
+            Self::Policy => "policy",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+impl From<Kind> for ErrorKind {
+    fn from(kind: Kind) -> Self {
+        match kind {
+            Kind::Cli => Self::Cli,
+            Kind::Packet => Self::Packet,
+            Kind::Capability => Self::Capability,
+            Kind::Io => Self::Io,
+            Kind::Policy => Self::Policy,
+            Kind::Internal => Self::Internal,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Error {
     pub code: String,
-    pub kind: Kind,
+    pub kind: ErrorKind,
     pub message: String,
     pub causes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,7 +80,7 @@ impl Error {
     ) -> Self {
         Self {
             code: classification.code.to_owned(),
-            kind: classification.kind,
+            kind: classification.kind.into(),
             message: message.into(),
             causes,
             context: None,

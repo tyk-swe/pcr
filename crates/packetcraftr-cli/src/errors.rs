@@ -198,19 +198,24 @@ mod tests {
     #[test]
     fn kinds_map_to_stable_exit_codes_and_classifications() {
         let cases = [
-            (Kind::Cli, 2, "cli.error"),
-            (Kind::Packet, 3, "packet.error"),
-            (Kind::Capability, 4, "capability.unavailable"),
-            (Kind::Io, 5, "io.runtime"),
-            (Kind::Policy, 6, "policy.denied"),
-            (Kind::Internal, 70, "internal.error"),
+            (Kind::Cli, 2, "cli.error", "cli"),
+            (Kind::Packet, 3, "packet.error", "packet"),
+            (Kind::Capability, 4, "capability.unavailable", "capability"),
+            (Kind::Io, 5, "io.runtime", "io"),
+            (Kind::Policy, 6, "policy.denied", "policy"),
+            (Kind::Internal, 70, "internal.error", "internal"),
         ];
 
-        for (kind, exit_code, code) in cases {
+        for (kind, exit_code, code, published) in cases {
             let error = CliError::new(kind, "failure");
             assert_eq!(error.exit_code(), exit_code, "kind {kind:?}");
             assert_eq!(error.classification.kind, kind, "kind {kind:?}");
             assert_eq!(error.classification.code, code, "kind {kind:?}");
+            assert_eq!(
+                error.output_error().kind.as_str(),
+                published,
+                "kind {kind:?}"
+            );
         }
     }
 

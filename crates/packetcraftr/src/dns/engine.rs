@@ -13,6 +13,7 @@ use packetcraftr_core::frame::Frame;
 use packetcraftr_core::registry::Registry;
 
 use crate::clock::Clock;
+use crate::deadline::DeadlineExt as _;
 use crate::execution::Context;
 use crate::policy::Authorizer;
 use crate::policy::{DnsOperation, Operation as AuthorizedOperation, WireBudget};

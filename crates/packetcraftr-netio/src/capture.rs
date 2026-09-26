@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use super::Error;
 use super::interface::Id as InterfaceId;
-use packetcraftr_core::budget::Cancellation;
+use crate::deadline::POLL_INTERVAL;
 use packetcraftr_core::frame::{Frame as CaptureFrame, LinkType};
 
 /// Aggregate backend capture-queue frame ceiling; also the value
@@ -187,7 +187,7 @@ impl<C: Session> Session for Cancellable<C> {
             self.check()?;
             let poll_started = Instant::now();
             let remaining = timeout.saturating_sub(poll_started.duration_since(start));
-            let poll_timeout = remaining.min(Cancellation::POLL_INTERVAL);
+            let poll_timeout = remaining.min(POLL_INTERVAL);
             let frame = self.inner.next_captured_frame(poll_timeout)?;
             self.check()?;
             if frame.is_none() {

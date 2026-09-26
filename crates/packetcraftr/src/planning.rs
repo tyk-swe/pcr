@@ -4,8 +4,8 @@
 use std::net::IpAddr;
 use std::time::Instant;
 
-use packetcraftr_core::budget::remaining_before;
 use packetcraftr_core::packet::Packet;
+use packetcraftr_netio::deadline::remaining_before;
 use packetcraftr_netio::{
     Error as LiveIoError, route::plan as plan_route, transmit::Sender as PacketIo,
 };

@@ -104,4 +104,4 @@ impl Classified for Error {
     }
 }
 
-crate::deadline_error_conversions!(Error);
+crate::budget::deadline_error_conversions!(Error);

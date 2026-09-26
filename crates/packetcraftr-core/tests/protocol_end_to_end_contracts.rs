@@ -1112,7 +1112,7 @@ fn assert_ipv4_strict_and_permissive_modes(builder: &build::Builder) {
             },
         )
         .expect("permissive build preserves reserved bit with warning");
-    assert!(permissive.requires_live_opt_in);
+    assert_eq!(permissive.mode, codec::Mode::Permissive);
     assert!(
         permissive
             .diagnostics

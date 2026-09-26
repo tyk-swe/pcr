@@ -12,7 +12,7 @@ use crate::protocol::BuiltinProtocol;
 
 pub(super) const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
 
-/// Enumerates every address that can affect a live destination. Unknown
+/// Enumerates every address that can determine where the packet is routed. Unknown
 /// protocols cannot opt into route semantics by imitating reflective names.
 pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
     let mut destinations = Vec::new();
@@ -86,7 +86,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Error> {
 }
 
 // Keep this match exhaustive so every newly added built-in protocol must make
-// an explicit live-authorization decision.
+// an explicit decision about whether its malformed form can hide a destination.
 fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
     match protocol {
         BuiltinProtocol::Ah

@@ -573,6 +573,26 @@ name are `"usage"`. Classification codes keep their frozen strings (for example
 `output::envelope::Error.kind` is now the CLI-owned `envelope::ErrorKind`;
 convert with `ErrorKind::from(kind)`.
 
+## Live-policy vocabulary out of core
+
+Core keeps packet facts; `packetcraftr` owns what they mean for live traffic.
+
+| Before | After |
+| --- | --- |
+| `build::BuiltPacket.requires_live_opt_in` | `packetcraftr::policy::requires_live_opt_in(&built)` |
+| `packetcraftr_core::budget::remaining_before` | `packetcraftr_netio::deadline::remaining_before` |
+| `budget::Cancellation::POLL_INTERVAL` | `packetcraftr_netio::deadline::POLL_INTERVAL` |
+| `Deadline::bounded_timeout`, `Deadline::for_wait` | `packetcraftr::deadline::DeadlineExt` methods (import the trait) |
+| `Cancelled::into_boundary_error` | removed; build `BoundaryError::with_source(c.to_string(), c.classification(), Vec::new(), c)` |
+| `packetcraftr_core::deadline_error_conversions!` | removed; implement `From<DeadlineExceeded>` and `From<Interrupted>` (via `Interrupted::into_error`) |
+
+`BuiltPacket` now records the codec `mode` it was built with and exposes
+`contains_malformed()` and `contains_network_trailer()`; the published
+`requires_live_opt_in` output field is unchanged. `Deadline` gains `limit()`
+and `cancellation()` getters. `packet::semantics::Error` messages now read
+"destination cannot be determined because …"; match on the variant, not the
+text.
+
 ## Filter timestamp failures
 
 A display filter that reads `frame.time_epoch` on a frame without a timestamp

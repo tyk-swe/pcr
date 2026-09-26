@@ -17,6 +17,7 @@ use std::time::Duration;
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded, Interrupted};
 
 use crate::clock::Clock;
+use crate::deadline::DeadlineExt as _;
 use crate::evidence::ExecutionPermit;
 use crate::{BoundaryError, Stats, StatsOverflow};
 

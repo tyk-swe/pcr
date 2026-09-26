@@ -791,7 +791,7 @@ fn a_permissive_live_campaign_is_denied_by_the_authorizer_before_any_transmissio
         offline.cases.iter().any(|case| {
             case.built
                 .as_ref()
-                .is_some_and(|built| built.requires_live_opt_in)
+                .is_some_and(crate::policy::requires_live_opt_in)
         }),
         "the fixture must build at least one case that needs the live opt-in"
     );

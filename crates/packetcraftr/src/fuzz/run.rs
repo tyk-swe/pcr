@@ -231,7 +231,7 @@ fn prepare_campaign(
         case.prepared
             .built
             .as_ref()
-            .is_some_and(|built| built.requires_live_opt_in)
+            .is_some_and(crate::policy::requires_live_opt_in)
     });
 
     Ok(PreparedCampaign {

@@ -313,7 +313,9 @@ fn convert_case(
         ..
     } = case;
     let frame = built.as_ref().map(|built| Wire::new(built.bytes.clone()));
-    let requires_live_opt_in = built.as_ref().map(|built| built.requires_live_opt_in);
+    let requires_live_opt_in = built
+        .as_ref()
+        .map(packetcraftr::policy::requires_live_opt_in);
     let decoded = decoded
         .as_ref()
         .map(|decoded| packetcraftr_core::document::Packet::from_packet(&decoded.packet));

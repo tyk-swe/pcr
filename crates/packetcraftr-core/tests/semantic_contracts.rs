@@ -335,8 +335,11 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
         });
 
     let cases = [
-        (ipv4_fragment, "non-atomic ipv4 fragment"),
-        (ipv6_fragment, "non-atomic ipv6_fragment fragment"),
+        (ipv4_fragment, "the ipv4 layer is a non-atomic fragment"),
+        (
+            ipv6_fragment,
+            "the ipv6_fragment layer is a non-atomic fragment",
+        ),
         (
             [Malformed::new(
                 Some("ipv4".to_owned()),
@@ -345,7 +348,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
             )]
             .into_iter()
             .collect(),
-            "malformed ipv4 layer may hide a live destination",
+            "the ipv4 layer is malformed",
         ),
         (
             [SegmentRoutingHeader::default()].into_iter().collect(),
@@ -357,7 +360,7 @@ fn ambiguous_live_route_state_is_rejected_at_the_trust_boundary() {
             }]
             .into_iter()
             .collect(),
-            "unknown protocol route_mimic exposes route-bearing field destination",
+            "destination cannot be determined because unknown protocol route_mimic carries route-bearing field destination",
         ),
     ];
 

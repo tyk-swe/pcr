@@ -89,6 +89,30 @@ pub(crate) struct Args {
     #[command(flatten)]
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }
+
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(self.max_duration_ms))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_duration_ms: Milliseconds @ Operation]);
+        self.limits.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
     let checksum_mode = args

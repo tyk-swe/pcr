@@ -15,6 +15,19 @@ use self::arguments::Args;
 use crate::errors::CliError;
 use crate::rendering::{emit_aggregate, write_stdout_line};
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::AggregateFormat;
+    const CANCELLATION: bool = false;
+
+    fn run(
+        self,
+        format: Self::Format,
+        _stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     match arguments.protocol {
         Some(name) => describe_protocol(&name, format),

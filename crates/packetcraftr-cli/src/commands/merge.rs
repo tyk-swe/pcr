@@ -25,6 +25,24 @@ pub(crate) struct Args {
     pub(crate) limits: OfflineCaptureLimitsArgs,
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.limits.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Result<(), CliError> {
     crate::input::validate_capture_stream_limits(args.limits)?;
     if args.paths.len() > 64 || args.paths.iter().filter(|p| *p == Path::new("-")).count() > 1 {

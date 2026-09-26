@@ -29,6 +29,19 @@ pub(crate) struct Args {
     pub(crate) timestamp_types: bool,
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::AggregateFormat;
+    const CANCELLATION: bool = false;
+
+    fn run(
+        self,
+        format: Self::Format,
+        _stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let selector = InterfaceSelector::parse_optional(arguments.interface.as_deref())?;
     let interfaces = select_interfaces(&net::interface::SystemProvider, selector.as_ref())?;

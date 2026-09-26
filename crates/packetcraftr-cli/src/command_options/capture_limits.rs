@@ -20,12 +20,29 @@ pub(crate) struct CaptureLimitsArgs {
     overflow_policy: OverflowPolicy,
 }
 
+impl CaptureLimitsArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            max_queue_frames: Count @ NativeCapture,
+            max_captured_bytes: Bytes @ NativeCapture,
+            snap_length: Bytes @ NativeCapture,
+            overflow_policy: Policy @ NativeCapture,
+        ]);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum OverflowPolicy {
     #[default]
     Fail,
     DropNewest,
     DropOldest,
+}
+
+impl crate::resources::SettingValue for OverflowPolicy {
+    fn setting_value(&self) -> Option<crate::output::resources::Value> {
+        crate::resources::policy_value(self)
+    }
 }
 
 impl From<OverflowPolicy> for net::capture::OverflowPolicy {

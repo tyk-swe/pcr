@@ -20,6 +20,37 @@ use crate::rendering::StreamEncoder;
 use analysis::follow::{Chunk, Collector};
 use rendering::State;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::FollowFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(
+            self.limits.max_duration_ms,
+        ))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_application_output_bytes: Bytes @ ResultRetention]);
+        // A UDP conversation never runs TCP reassembly.
+        let tcp = !self.stream.starts_with("udp:");
+        self.limits.resources(
+            settings,
+            crate::command_options::AnalysisStages::with_tcp(tcp),
+        );
+        settings.retained_result_items(self.limits.capture.max_frames);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: FollowFormat,

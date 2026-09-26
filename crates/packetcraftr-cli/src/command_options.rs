@@ -8,7 +8,7 @@ pub(crate) use capture_limits::CaptureLimitsArgs;
 pub(crate) use decode::DecodeArgs;
 pub(crate) use epoch_bounds::EpochBoundsArgs;
 pub(crate) use offline_limits::{
-    CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
+    AnalysisStages, CaptureReaderBoundsArgs, OfflineCaptureLimitsArgs, OfflineLimitsArgs,
 };
 pub(crate) use packet_budget::PacketBudgetArgs;
 pub(crate) use policy::{

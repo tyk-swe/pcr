@@ -8,6 +8,8 @@ mod context;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
+use clap::ArgMatches;
+
 use crate::output;
 
 use self::context::{Context, MachineFormat, from_env};
@@ -16,7 +18,8 @@ use super::rendering::{
     OUTPUT_TIMEOUT_MS, StreamEncoder, emit_json, emit_stderr_document, emit_stderr_error,
     emit_stdout_document, stdout_stream, terminal_document, write_unattributed_error,
 };
-use crate::commands;
+use crate::commands::{self, Spec};
+use crate::presets::Preset;
 
 pub(crate) fn run() -> ExitCode {
     let context = from_env();
@@ -26,117 +29,149 @@ pub(crate) fn run() -> ExitCode {
         Err(error) => return parse_error_exit(&context, &error),
     };
     cli.color.write_global();
-    // Documentation generates files rather than contract output, so it has no
-    // command kind; dispatch it before the stream setup that requires one.
-    if let commands::Command::Documentation(arguments) = &cli.command {
-        return match commands::documentation::run(arguments) {
+    cli.command.start(Launch {
+        format: output::contract::Format::from(cli.format),
+        resource_diagnostics: cli.resource_diagnostics,
+        resource_preset: cli.resource_preset,
+        output_timeout_ms: cli.output_timeout_ms,
+        force_binary_stdout: cli.force_binary_stdout,
+        matches: &matches,
+    })
+}
+
+/// The global options a selected command starts under.
+pub(crate) struct Launch<'a> {
+    format: output::contract::Format,
+    resource_diagnostics: bool,
+    resource_preset: Option<Preset>,
+    output_timeout_ms: Option<u64>,
+    force_binary_stdout: bool,
+    matches: &'a ArgMatches,
+}
+
+impl Launch<'_> {
+    /// Generates documentation files. They are not contract output, so no
+    /// output stream, diagnostics, or cancellation is set up, and failures
+    /// report on stderr.
+    pub(crate) fn generate(self, arguments: commands::documentation::Args) -> ExitCode {
+        match commands::documentation::run(&arguments) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 let _ = emit_stderr_error(&error);
                 ExitCode::from(error.exit_code())
             }
-        };
+        }
     }
-    let format = output::contract::Format::from(cli.format);
-    if matches!(
-        format,
-        output::contract::Format::Raw
-            | output::contract::Format::Pcap
-            | output::contract::Format::PcapNg
-    ) && cli
-        .command
-        .kind()
-        .is_some_and(|kind| kind.formats().contains(&format))
-        && std::io::stdout().is_terminal()
-        && !cli.force_binary_stdout
-    {
-        let error = CliError::new(
-            Kind::Usage,
-            "refusing binary output to a terminal; redirect stdout to a file or pipe, or pass --force-binary-stdout",
-        );
-        let _ = emit_stderr_error(&error);
-        return ExitCode::from(error.exit_code());
-    }
-    let command = cli
-        .command
-        .kind()
-        .expect("documentation returned before stream setup");
-    if cli.resource_diagnostics
-        && matches!(
+
+    /// Runs a contract command and publishes its result, or its failure,
+    /// through the selected output format.
+    pub(crate) fn publish<T: Spec>(
+        self,
+        command: output::contract::Command,
+        arguments: T,
+    ) -> ExitCode {
+        let format = self.format;
+        if matches!(
             format,
-            output::contract::Format::Json | output::contract::Format::Ndjson
-        )
-    {
-        crate::resources::configure(&matches, command, format);
-    }
-    let stream = match if format == output::contract::Format::Ndjson {
-        stdout_stream(
-            command,
-            std::time::Duration::from_millis(cli.output_timeout_ms.unwrap_or(OUTPUT_TIMEOUT_MS)),
-        )
-    } else {
-        Ok(StreamEncoder::new(command, std::io::stdout()))
-    } {
-        Ok(stream) => stream,
-        Err(error) => {
+            output::contract::Format::Raw
+                | output::contract::Format::Pcap
+                | output::contract::Format::PcapNg
+        ) && command.formats().contains(&format)
+            && std::io::stdout().is_terminal()
+            && !self.force_binary_stdout
+        {
+            let error = CliError::new(
+                Kind::Usage,
+                "refusing binary output to a terminal; redirect stdout to a file or pipe, or pass --force-binary-stdout",
+            );
             let _ = emit_stderr_error(&error);
             return ExitCode::from(error.exit_code());
         }
-    };
-    if cli.resource_diagnostics
-        && !matches!(
-            format,
-            output::contract::Format::Json | output::contract::Format::Ndjson
-        )
-    {
-        return command_failure(
-            format,
-            command,
-            CliError::new(
-                Kind::Usage,
-                "--resource-diagnostics requires --output json or ndjson",
-            ),
-            &stream,
-        );
-    }
-    if cli.output_timeout_ms.is_some() && format != output::contract::Format::Ndjson {
-        return command_failure(
-            format,
-            command,
-            CliError::new(Kind::Usage, "--output-timeout-ms requires --output ndjson"),
-            &stream,
-        );
-    }
-    let stream = if cli.resource_diagnostics {
-        stream.with_resource_diagnostics(|| {
-            crate::resources::snapshot().expect("diagnostics configured")
-        })
-    } else {
-        stream
-    };
-    if cli.command.supports_cancellation()
-        && let Err(error) = crate::cancellation::install()
-    {
-        return command_failure(format, command, error, &stream);
-    }
-    match cli.command.run(format, &stream) {
-        Ok(exit) => {
-            if let Err(error) = crate::cancellation::check() {
-                if format == output::contract::Format::Json {
-                    // The aggregate document has already been published. A
-                    // late interrupt changes the exit status, but a second
-                    // stdout document would invalidate the completed JSON.
-                    let _ = emit_stderr_error(&error);
-                    return ExitCode::from(CANCELLED_EXIT_CODE);
-                }
-                return command_failure(format, command, error, &stream);
-            }
-            match require_success_terminal(format, &stream) {
-                Ok(()) => ExitCode::from(exit.get()),
-                Err(error) => command_failure(format, command, error, &stream),
-            }
+        if self.resource_diagnostics
+            && matches!(
+                format,
+                output::contract::Format::Json | output::contract::Format::Ndjson
+            )
+        {
+            crate::resources::configure(
+                self.matches,
+                &arguments,
+                self.resource_preset,
+                self.output_timeout_ms,
+                format,
+            );
         }
-        Err(error) => command_failure(format, command, error, &stream),
+        let stream = match if format == output::contract::Format::Ndjson {
+            stdout_stream(
+                command,
+                std::time::Duration::from_millis(
+                    self.output_timeout_ms.unwrap_or(OUTPUT_TIMEOUT_MS),
+                ),
+            )
+        } else {
+            Ok(StreamEncoder::new(command, std::io::stdout()))
+        } {
+            Ok(stream) => stream,
+            Err(error) => {
+                let _ = emit_stderr_error(&error);
+                return ExitCode::from(error.exit_code());
+            }
+        };
+        if self.resource_diagnostics
+            && !matches!(
+                format,
+                output::contract::Format::Json | output::contract::Format::Ndjson
+            )
+        {
+            return command_failure(
+                format,
+                command,
+                CliError::new(
+                    Kind::Usage,
+                    "--resource-diagnostics requires --output json or ndjson",
+                ),
+                &stream,
+            );
+        }
+        if self.output_timeout_ms.is_some() && format != output::contract::Format::Ndjson {
+            return command_failure(
+                format,
+                command,
+                CliError::new(Kind::Usage, "--output-timeout-ms requires --output ndjson"),
+                &stream,
+            );
+        }
+        let stream = if self.resource_diagnostics {
+            stream.with_resource_diagnostics(|| {
+                crate::resources::snapshot().expect("diagnostics configured")
+            })
+        } else {
+            stream
+        };
+        if T::CANCELLATION
+            && let Err(error) = crate::cancellation::install()
+        {
+            return command_failure(format, command, error, &stream);
+        }
+        match commands::execute(command, arguments, format, &stream) {
+            Ok(exit) => {
+                if let Err(error) = crate::cancellation::check() {
+                    if format == output::contract::Format::Json {
+                        // The aggregate document has already been published. A
+                        // late interrupt changes the exit status, but a second
+                        // stdout document would invalidate the completed JSON.
+                        let _ = emit_stderr_error(&error);
+                        return ExitCode::from(CANCELLED_EXIT_CODE);
+                    }
+                    return command_failure(format, command, error, &stream);
+                }
+                match require_success_terminal(format, &stream) {
+                    Ok(()) => ExitCode::from(exit.get()),
+                    Err(error) => command_failure(format, command, error, &stream),
+                }
+            }
+            Err(error) => command_failure(format, command, error, &stream),
+        }
     }
 }
 

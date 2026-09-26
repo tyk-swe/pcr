@@ -24,6 +24,24 @@ use crate::rendering::{
     write_plain_line, write_raw, write_stdout_line, write_summary_line,
 };
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::DissectFormat;
+    const CANCELLATION: bool = false;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_projection_bytes: Bytes @ ResultRetention]);
+        self.budget.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: DissectFormat,

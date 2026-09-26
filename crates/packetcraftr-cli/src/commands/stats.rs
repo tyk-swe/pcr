@@ -20,6 +20,34 @@ use crate::input::open_capture;
 use crate::output::stats::Table;
 use crate::rendering::emit_aggregate;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::AggregateFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(
+            self.limits.max_duration_ms,
+        ))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [top: Count @ ResultRetention]);
+        self.limits.resources(
+            settings,
+            crate::command_options::AnalysisStages::with_tcp(false),
+        );
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        _stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let table = Table::from(arguments.table);
     // Stats assigns conversation indices, so stream-aware filters like

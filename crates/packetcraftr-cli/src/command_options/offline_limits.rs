@@ -5,6 +5,9 @@ use clap::{Args, ValueEnum};
 use packetcraftr_core::analysis;
 use packetcraftr_core::capture_file as capture;
 
+use crate::output::resources::Value;
+use crate::resources::{Enabled, SettingValue, Settings, declare, policy_value};
+
 /// How conflicting bytes in overlapping IP fragments are handled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub(crate) enum IpOverlap {
@@ -24,6 +27,12 @@ impl From<IpOverlap> for analysis::reassembly::ip::OverlapPolicy {
             IpOverlap::First => Self::First,
             IpOverlap::Last => Self::Last,
         }
+    }
+}
+
+impl SettingValue for IpOverlap {
+    fn setting_value(&self) -> Option<Value> {
+        policy_value(self)
     }
 }
 
@@ -71,11 +80,53 @@ pub(crate) struct CaptureReaderBoundsArgs {
     pub(crate) max_interfaces: usize,
 }
 
+impl CaptureReaderBoundsArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [
+            max_encoded_bytes: Bytes @ PhysicalInput,
+            max_decoded_bytes: Bytes @ PhysicalInput,
+            max_frame_bytes: Bytes @ PhysicalInput,
+            max_interfaces: Count @ IndexedMetadata,
+        ]);
+    }
+}
+
 impl OfflineCaptureLimitsArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>) {
+        declare!(settings, self, [
+            max_frames: Count @ PhysicalInput,
+            max_bytes: Bytes @ PhysicalInput,
+        ]);
+        self.reader.resources(settings);
+    }
+
     /// The ceiling on what an aggregate JSON document retains: the run's frame
     /// budget, so the document is bounded by a caller-set limit.
     pub(crate) fn retention_ceiling(self) -> usize {
         usize::try_from(self.max_frames).unwrap_or(usize::MAX)
+    }
+}
+
+/// Which optional analysis stages an offline command runs, for its resource
+/// diagnostics.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AnalysisStages {
+    /// TCP stream reassembly.
+    pub(crate) tcp: bool,
+    /// The capture-global conversation index and IP reassembly.
+    pub(crate) index: Enabled,
+    /// Physical-frame provenance retention.
+    pub(crate) provenance: bool,
+}
+
+impl AnalysisStages {
+    /// Indexing and provenance always run; TCP reassembly as given.
+    pub(crate) const fn with_tcp(tcp: bool) -> Self {
+        Self {
+            tcp,
+            index: Enabled::Fixed(true),
+            provenance: true,
+        }
     }
 }
 
@@ -147,4 +198,32 @@ pub(crate) struct OfflineLimitsArgs {
     /// Maximum analysis run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
     pub(crate) max_duration_ms: u64,
+}
+
+impl OfflineLimitsArgs {
+    pub(crate) fn resources(&self, settings: &mut Settings<'_>, stages: AnalysisStages) {
+        let AnalysisStages {
+            tcp,
+            index,
+            provenance,
+        } = stages;
+        self.capture.resources(settings);
+        declare!(settings, self, [
+            max_provenance_bytes: Bytes @ IndexedMetadata if provenance,
+            max_flows: Count @ IndexedMetadata if index,
+            max_scope_bytes: Bytes @ IndexedMetadata if index,
+            max_tcp_bytes_per_flow: Bytes @ ActiveState if tcp,
+            max_tcp_reassembly_bytes: Bytes @ ActiveState if tcp,
+            max_tcp_segments_per_flow: Count @ ActiveState if tcp,
+            tcp_idle_expiry_ms: Milliseconds @ ActiveState if tcp,
+            ip_overlap: Policy @ ActiveState if index,
+            max_ip_datagrams: Count @ ActiveState if index,
+            max_ip_fragments_per_datagram: Count @ ActiveState if index,
+            max_ip_bytes_per_datagram: Bytes @ ActiveState if index,
+            max_ip_reassembly_bytes: Bytes @ ActiveState if index,
+            max_ip_outcomes: Count @ ResultRetention if index,
+            ip_idle_expiry_ms: Milliseconds @ ActiveState if index,
+            max_duration_ms: Milliseconds @ Operation,
+        ]);
+    }
 }

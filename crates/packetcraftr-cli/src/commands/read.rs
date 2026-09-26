@@ -48,6 +48,25 @@ struct StreamState {
     captured_bytes_read: u64,
 }
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ReadFormat;
+    const CANCELLATION: bool = true;
+    const OFFLINE: bool = true;
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [max_projection_bytes: Bytes @ ResultRetention]);
+        self.limits.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ReadFormat,

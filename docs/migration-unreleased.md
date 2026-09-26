@@ -607,9 +607,9 @@ command; update scripts that match either code for this case.
 `require_format::<F>(format) -> Result<F, contract::Error>` narrows `Format`
 to one of the per-command proof enums (`AggregateFormat`, `ToolFormat`,
 `BuildFormat`, `CaptureFormat`, `DissectFormat`, `SendFormat`,
-`ExchangeFormat`, `ReadFormat`, `FollowFormat`). Each exposes `FORMATS`,
-`as_format()`, `From` into `Format`, `TryFrom<Format, Error = Format>`, and
-`Display`. Shared helpers accept `impl Into<Format>`, and dead rendering arms
+`ExchangeFormat`, `ReadFormat`, `FollowFormat`). Each exposes
+`FormatSubset::FORMATS`, `as_format()`, `From` into `Format`,
+`TryFrom<Format, Error = Format>`, and `Display`. Shared helpers accept `impl Into<Format>`, and dead rendering arms
 surface typed `internal` errors instead of panicking.
 
 ## Canonical probe APIs
@@ -695,3 +695,25 @@ behavior, flags, exit codes, and output documents are unchanged.
 `output::capture::Retention` are plain output types and no longer implement
 `clap::ValueEnum`. Code that parsed them with clap declares its own value enum
 and converts it with `From`, as the CLI does.
+
+## One command declaration
+
+`output::contract::Command` is generated from the same declaration as the
+CLI's command line, so its variants, serialized names, and `formats()` cannot
+drift from the commands the binary accepts. Serialized names and each
+command's formats are unchanged. `Command::ALL` now lists commands in `--help`
+order; code that relied on the previous canonical order sorts by
+`Command::as_str()` instead.
+
+The per-command format enums (`AggregateFormat`, `ToolFormat`, and the others)
+implement `output::contract::FormatSubset`. Their `FORMATS` constant moved from
+an inherent item to that trait, so import the trait to read it:
+
+```rust
+use packetcraftr_cli::output::contract::{FormatSubset as _, ToolFormat};
+
+let formats = ToolFormat::FORMATS;
+```
+
+`Command::require_format::<F>` requires `F: FormatSubset` instead of
+`F: TryFrom<Format, Error = Format>`.

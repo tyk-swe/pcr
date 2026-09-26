@@ -25,6 +25,39 @@ use crate::rendering::StreamEncoder;
 /// only ever needs room for one packet template.
 const MAX_TEMPLATE_PACKETS: usize = 1;
 
+impl super::Spec for Args {
+    type Format = crate::output::contract::ToolFormat;
+    const CANCELLATION: bool = true;
+
+    fn publication_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_millis(self.max_duration_ms))
+    }
+
+    fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        crate::resources::declare!(settings, self, [
+            timeout_ms: Milliseconds @ Operation,
+            max_duration_ms: Milliseconds @ Operation,
+            max_message_bytes: Bytes @ Operation,
+            max_records: Count @ Operation,
+            max_name_pointers: Count @ Operation,
+            max_txt_strings: Count @ Operation,
+            max_txt_bytes: Bytes @ Operation,
+            max_rejected_records: Count @ ResultRetention,
+            max_undecoded: Count @ ResultRetention,
+        ]);
+        self.limits.resources(settings);
+        self.policy.resources(settings);
+    }
+
+    fn run(
+        self,
+        format: Self::Format,
+        stream: &crate::rendering::StreamEncoder,
+    ) -> Result<super::CommandExit, CliError> {
+        run(self, format, stream).map(|()| super::CommandExit::SUCCESS)
+    }
+}
+
 pub(super) fn run(
     arguments: Args,
     format: ToolFormat,

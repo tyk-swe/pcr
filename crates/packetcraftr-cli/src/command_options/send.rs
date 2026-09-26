@@ -22,3 +22,9 @@ pub(crate) struct SendArgs {
     #[command(flatten)]
     pub(crate) policy: SendPolicyArgs,
 }
+
+impl SendArgs {
+    pub(crate) fn resources(&self, settings: &mut crate::resources::Settings<'_>) {
+        self.policy.resources(settings);
+    }
+}

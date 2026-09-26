@@ -13,8 +13,29 @@ Phase 3.
 
 **Blocked by:** 25
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Replay has no public authorizer or transmitter type.
-- [ ] Replay error classification and the CLI replay tests pass unchanged.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] Replay has no public authorizer or transmitter type.
+- [x] Replay error classification and the CLI replay tests pass unchanged.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Final-wire authorization is the internal `replay::admission::FinalWire`
+  trait; resolve-and-authorize was split in 25 (decision round 2 a).
+- The frame authorizer is the internal `FrameAdmission`, built over
+  `client.admission()` (limits) and the client's registry. It lives in
+  `replay/admission.rs`, a replay-specific concept beside the fixed roles
+  (`request`, `plan`, `engine`, `executor`, `evidence`, `report`, `error`).
+- The request keeps a source-independent `replay::Options` (plus
+  `allow_permissive_live`) so the CLI still validates it before opening the
+  capture; `Request { source, selector, options }`.
+- The CLI JSON path converts each frame in its own sink, not
+  `replay::Collector`, so an unrepresentable frame still stops the replay at
+  that frame. The capture path's sink owns the capture writer; the command
+  keeps the compressor and finishes it after the replay.
+- Replay now registers the `client_progress` runtime in the `resources`
+  report (it had no runtime before); recorded under Changed.
+- CLI replay unit tests use a client over fake interface/route/transmit
+  providers; the policy-denial fixture is now `policy.packet_limit` instead
+  of a scripted `policy.fixture_replay`.

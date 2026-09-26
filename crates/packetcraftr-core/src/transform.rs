@@ -29,7 +29,7 @@ pub use fields::{
     ChangeOrigin, ChecksumMode, FieldAssignment, FieldChange, FieldEdit, FieldEditOutcome,
     FieldEdits, MAX_FIELD_ASSIGNMENTS,
 };
-pub use fragment::{FragmentOptions, fragment};
+pub use fragment::{FragmentOptions, fragment, fragment_link_type};
 pub use rewrite::{HeaderRewrite, RewriteLimits, VlanRewrite, rewrite};
 pub use rules::{
     MAX_REWRITE_DOCUMENT_BYTES, MAX_REWRITE_RULES, REWRITE_SCHEMA_V1, REWRITE_SCHEMA_V2, Rule,

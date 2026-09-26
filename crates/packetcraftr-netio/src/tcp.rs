@@ -144,14 +144,15 @@ pub fn start_connect<P>(
     cancellation: Option<packetcraftr_core::budget::Cancellation>,
 ) -> Result<PendingConnect<P::Stream>, ConnectError>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
 {
     connect::start(provider, endpoint, timeout, cancellation).map(|inner| PendingConnect { inner })
 }
 
 /// A connected byte stream with endpoint evidence and per-call time bounds.
-pub trait Stream: Read + Write {
+/// Streams are owned by one caller at a time but may move between threads.
+pub trait Stream: Read + Write + Send {
     fn peer_addr(&self) -> io::Result<SocketAddr>;
     fn local_addr(&self) -> io::Result<SocketAddr>;
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
@@ -159,7 +160,7 @@ pub trait Stream: Read + Write {
 }
 
 /// Opens the exact numeric endpoint within the supplied nonzero time bound.
-pub trait Provider {
+pub trait Provider: Send + Sync {
     type Stream: Stream;
 
     fn connect(&self, endpoint: SocketAddr, timeout: Duration) -> io::Result<Self::Stream>;

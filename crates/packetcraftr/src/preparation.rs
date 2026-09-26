@@ -148,11 +148,12 @@ impl PreparedPacket {
         check: impl FnOnce() -> Result<(), E>,
     ) -> Result<SentPacket, E>
     where
-        I: transmit::Sender + ?Sized,
+        I: transmit::Provider + ?Sized,
         E: From<LiveIoError>,
     {
         let report = {
-            let frame = transmit::Frame::try_new(&self.built.bytes, self.route.transmit_route())?;
+            let frame =
+                transmit::Outbound::try_new(&self.built.bytes, self.route.transmit_route())?;
             check()?;
             io.send(frame)?
         };
@@ -285,7 +286,7 @@ struct Stages<'c, R, I> {
 impl<'c, R, I> Stages<'c, R, I>
 where
     R: RouteProvider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     fn new(
         client: &'c Client<R, I>,
@@ -427,7 +428,7 @@ pub(crate) struct Admission<'c, R, I> {
 impl<'c, R, I> Admission<'c, R, I>
 where
     R: RouteProvider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     /// Checks cancellation and the operation deadline between packets.
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -495,7 +496,7 @@ pub(crate) struct Discovery<'c, R, I> {
 impl<R, I> Discovery<'_, R, I>
 where
     R: RouteProvider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     pub(crate) fn materialize(&self, admitted: Admitted) -> Result<PreparedPacket, Error> {
         self.stages.materialize(admitted)
@@ -551,7 +552,7 @@ pub(crate) struct Streaming<'c, R, I> {
 impl<R, I> Streaming<'_, R, I>
 where
     R: RouteProvider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     /// Checks the client's and the operation's cancellation signals.
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -577,7 +578,7 @@ where
 impl<R, I> Client<R, I>
 where
     R: RouteProvider,
-    I: transmit::Sender + capture::Provider,
+    I: transmit::Provider + capture::Provider,
 {
     /// Starts an all-before-discovery preparation of `packets` packets,
     /// authorizing the count-only budget first.
@@ -669,8 +670,8 @@ mod tests {
 
     struct NoTransmit;
 
-    impl transmit::Sender for NoTransmit {
-        fn send(&self, _: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+    impl transmit::Provider for NoTransmit {
+        fn send(&self, _: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
             panic!("preparation never transmits on its own")
         }
     }

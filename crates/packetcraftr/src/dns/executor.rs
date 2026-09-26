@@ -6,7 +6,7 @@ use crate::probe::ExchangeExecutor;
 use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
 use crate::probe::{self, Executor, Transport as ProbeTransport};
 
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
 use super::classification::{ResponseClassification, classify_response};
 use super::{Exchange, Execution, TcpExchange, TcpExecution, TcpExecutor};
@@ -174,7 +174,7 @@ mod tests {
 
     use super::validate_tcp_route_options;
 
-    struct RefusingTcp(std::cell::Cell<usize>);
+    struct RefusingTcp(std::sync::atomic::AtomicUsize);
 
     impl packetcraftr_netio::tcp::Provider for RefusingTcp {
         type Stream = packetcraftr_netio::tcp::SystemStream;
@@ -187,7 +187,7 @@ mod tests {
             assert_eq!(endpoint, "127.0.0.1:53".parse().unwrap());
             assert!(!timeout.is_zero());
             assert!(timeout <= std::time::Duration::from_secs(1));
-            self.0.set(self.0.get() + 1);
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Err(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 "injected TCP refusal",
@@ -220,16 +220,16 @@ mod tests {
             bare.execute_tcp(&exchange),
             Err(super::super::tcp::Error::Unsupported { .. })
         ));
-        let mut explicit = bare.with_dns_tcp(RefusingTcp(std::cell::Cell::new(0)));
+        let mut explicit = bare.with_dns_tcp(RefusingTcp(std::sync::atomic::AtomicUsize::new(0)));
         let error = explicit.execute_tcp(&exchange).unwrap_err();
         assert!(matches!(error, super::super::tcp::Error::Connect { .. }));
-        assert_eq!(explicit.tcp.0.get(), 1);
+        assert_eq!(explicit.tcp.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         explicit.udp.options.send.plan.preferred_source = Some("192.0.2.1".parse().unwrap());
         assert!(matches!(
             explicit.execute_tcp(&exchange),
             Err(super::super::tcp::Error::Unsupported { .. })
         ));
-        assert_eq!(explicit.tcp.0.get(), 1);
+        assert_eq!(explicit.tcp.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]

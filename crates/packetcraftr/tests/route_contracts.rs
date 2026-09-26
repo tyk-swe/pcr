@@ -6,7 +6,6 @@
 
 use std::convert::Infallible;
 use std::fmt;
-use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 
 use packetcraftr::neighbor::Error as NeighborError;
@@ -346,7 +345,7 @@ fn route_planning_retains_semantic_failures_before_provider_io() {
 
     struct NoIo;
     impl Provider for NoIo {
-        type Error = io::Error;
+        type Error = Infallible;
         fn lookup_with_preferences(
             &self,
             _: IpAddr,

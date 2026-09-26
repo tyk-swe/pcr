@@ -55,8 +55,8 @@ fn injected() -> Error {
         source: None,
     }
 }
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, Error> {
         let mut state = self.state.lock().unwrap();
         assert!(state.ready, "capture must be ready before any transmission");
         assert!(

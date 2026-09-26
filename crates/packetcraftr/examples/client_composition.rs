@@ -6,8 +6,8 @@
 //! explicit `Policy` carrying a destination allowlist and finite
 //! per-operation budgets. Nothing touches the network.
 //!
-//! Production composition swaps in the `SystemProvider`/`SystemLayer*`/
-//! `PacketIo` adapters behind the `native-*` features, and the client
+//! Production composition swaps in each capability's `SystemProvider`, joined
+//! by `PacketIo`, behind the `native-*` features, and the client
 //! resolves neighbors over that I/O; the policy and budget contract is
 //! identical either way.
 //!
@@ -72,8 +72,8 @@ struct RecordingSender {
     sent: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
-impl transmit::Sender for RecordingSender {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for RecordingSender {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         self.sent
             .lock()
             .expect("sent lock")

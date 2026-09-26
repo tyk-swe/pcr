@@ -6,7 +6,7 @@ use std::time::Instant;
 use packetcraftr_core::{packet::Packet, template::Template};
 use packetcraftr_netio::{
     capture::{Provider as CaptureProvider, Statistics},
-    transmit::Sender as PacketIo,
+    transmit::Provider as PacketIo,
 };
 
 use crate::Client;

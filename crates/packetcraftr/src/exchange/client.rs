@@ -9,7 +9,7 @@ use packetcraftr_core::error::{BoundaryError, Classification, Kind};
 use packetcraftr_core::template;
 use packetcraftr_netio::{
     capture::{Provider as CaptureProvider, Request as CaptureRequest},
-    transmit::Sender as PacketIo,
+    transmit::Provider as PacketIo,
 };
 
 use packetcraftr_netio::{route, transmit};
@@ -181,7 +181,7 @@ pub(crate) struct Prepared {
 impl<R, I> Client<R, I>
 where
     R: route::Provider,
-    I: transmit::Sender + CaptureProvider,
+    I: transmit::Provider + CaptureProvider,
 {
     pub(super) fn prepare_exchange(
         &self,

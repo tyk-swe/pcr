@@ -5,7 +5,7 @@ use crate::BoundaryError;
 use crate::probe::ExchangeExecutor;
 use crate::probe::Executor;
 use crate::probe::executor::ExecutorFault;
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
 use super::execution::{Execution, ExecutionCase};
 

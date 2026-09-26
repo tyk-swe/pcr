@@ -4,7 +4,7 @@
 use crate::BoundaryError;
 use crate::probe::executor::{ExecutorFault, WorkflowOverrides};
 use crate::probe::{ExchangeExecutor, Execution, Executor};
-use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Sender as PacketIo};
+use packetcraftr_netio::{capture::Provider as CaptureProvider, transmit::Provider as PacketIo};
 
 use super::Batch;
 use super::classification::classify_response;

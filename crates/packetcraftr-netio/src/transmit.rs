@@ -1,7 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Typed Layer 2 and Layer 3 transmission contracts; callers own policy authorization.
+//! The transmission contract: a [`Provider`] sends one routed Layer 2 frame or
+//! Layer 3 packet, and the native [`SystemProvider`] dispatches each to the
+//! backend compiled in for its layer. Callers own policy authorization.
 
 use bytes::Bytes;
 use std::net::IpAddr;
@@ -71,15 +73,16 @@ impl<'a> Layer3Frame<'a> {
     }
 }
 
-/// Mode-tagged transmission input used by the high-level client.
+/// One routed transmission: a Layer 2 frame or a Layer 3 packet, tagged by the
+/// link mode its route resolved to.
 #[derive(Clone, Copy, Debug)]
-pub enum Frame<'a> {
+pub enum Outbound<'a> {
     Layer2(Layer2Frame<'a>),
     Layer3(Layer3Frame<'a>),
 }
 
-impl<'a> Frame<'a> {
-    /// Selects the typed provider boundary from the route's resolved mode.
+impl<'a> Outbound<'a> {
+    /// Selects the layer from the route's resolved mode.
     pub fn try_new(bytes: &'a Bytes, route: Route<'a>) -> Result<Self, Error> {
         match route.mode {
             Mode::Layer2 => Layer2Frame::try_new(bytes, route).map(Self::Layer2),
@@ -263,81 +266,44 @@ impl Report {
     }
 }
 
-/// Unified packet-I/O seam used by the root client and injected providers.
-pub trait Sender: Send + Sync {
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error>;
+/// Sends one routed Layer 2 frame or Layer 3 packet and reports the bytes the
+/// backend accepted.
+pub trait Provider: Send + Sync {
+    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error>;
 }
 
-/// Native or injected Layer 2 transmission implementation.
-pub trait Layer2Sender: Send + Sync {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error>;
-}
-
-/// Target-selected native Layer 2 provider; requires `native-layer2`.
+/// Transmission provider backed by the native backend for each layer: Layer 2
+/// injection with `native-layer2` and raw IP with `native-layer3`. A layer
+/// that isn't compiled in fails with a classified capability error.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SystemLayer2;
+pub struct SystemProvider;
 
-impl Layer2Sender for SystemLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
-        // A renamed, removed, or recreated interface must not receive the frame.
-        #[cfg(native_layer2)]
-        super::platform::verify_interface_identity(&frame.route().decision.interface)?;
-        super::platform::send_layer2(frame)
-    }
-}
-
-/// Native or injected raw Layer 3 transmission implementation.
-pub trait Layer3Sender: Send + Sync {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error>;
-}
-
-/// Target-selected native Layer 3 provider; requires `native-layer3`.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SystemLayer3;
-
-impl Layer3Sender for SystemLayer3 {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
-        // A renamed, removed, or recreated interface must not receive the packet.
-        #[cfg(native_layer3)]
-        super::platform::verify_interface_identity(&frame.route().decision.interface)?;
-        super::platform::send_layer3(frame)
-    }
-}
-
-/// Composes independently owned Layer 2 and Layer 3 providers into one
-/// [`Sender`] that dispatches on the frame's link mode.
-#[derive(Clone, Copy, Debug)]
-pub struct ModeSender<L2, L3> {
-    layer2: L2,
-    layer3: L3,
-}
-
-impl<L2, L3> ModeSender<L2, L3> {
-    pub fn new(layer2: L2, layer3: L3) -> Self {
-        Self { layer2, layer3 }
-    }
-}
-
-impl<L2, L3> Sender for ModeSender<L2, L3>
-where
-    L2: Layer2Sender,
-    L3: Layer3Sender,
-{
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        match frame {
-            Frame::Layer2(frame) => self.layer2.send_layer2(frame),
-            Frame::Layer3(frame) => self.layer3.send_layer3(frame),
+impl Provider for SystemProvider {
+    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
+        match outbound {
+            Outbound::Layer2(frame) => {
+                // A renamed, removed, or recreated interface must not receive the frame.
+                #[cfg(native_layer2)]
+                super::platform::verify_interface_identity(&frame.route().decision.interface)?;
+                super::platform::send_layer2(frame)
+            }
+            Outbound::Layer3(packet) => {
+                // A renamed, removed, or recreated interface must not receive the packet.
+                #[cfg(native_layer3)]
+                super::platform::verify_interface_identity(&packet.route().decision.interface)?;
+                super::platform::send_layer3(packet)
+            }
         }
     }
 }
 
-impl<S, C> Sender for crate::PacketIo<S, C>
+impl<S, C> Provider for crate::PacketIo<S, C>
 where
-    S: Sender,
+    S: Provider,
     C: Send + Sync,
 {
-    fn send(&self, frame: Frame<'_>) -> Result<Report, Error> {
-        self.sender.send(frame)
+    fn send(&self, outbound: Outbound<'_>) -> Result<Report, Error> {
+        self.sender.send(outbound)
     }
 }
 

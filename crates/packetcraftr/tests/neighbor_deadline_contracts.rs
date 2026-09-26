@@ -29,8 +29,8 @@ struct SilentLink {
     waits: Arc<Mutex<Vec<Duration>>>,
 }
 
-impl transmit::Sender for SilentLink {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for SilentLink {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         let bytes = frame.bytes();
         Ok(transmit::Submission::start().complete(bytes.len(), bytes.clone()))
     }

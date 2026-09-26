@@ -63,8 +63,8 @@ fn wire(packet: Packet) -> Frame {
     Frame::new(SystemTime::now(), LinkType::RAW, built.bytes).expect("fixture frame")
 }
 
-impl transmit::Sender for Io {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, net::Error> {
+impl transmit::Provider for Io {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, net::Error> {
         let decoded = Dissector::new(builtin::registry())
             .decode(
                 Frame::new(SystemTime::now(), LinkType::RAW, frame.bytes().clone())

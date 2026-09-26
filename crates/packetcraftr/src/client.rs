@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::progress::Runtime;
 use packetcraftr_core::registry::Registry;
-use packetcraftr_netio::transmit::Sender as PacketIo;
+use packetcraftr_netio::transmit::Provider as PacketIo;
 
 use crate::Error;
 use crate::neighbor;

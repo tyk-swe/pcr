@@ -99,8 +99,8 @@ pub fn run<P, A, C>(
     clock: &mut C,
 ) -> Result<Report, Error>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
     A: Authorizer,
     C: Clock,
 {
@@ -141,8 +141,8 @@ pub fn run_with_events<P, A, C, F>(
     emit: F,
 ) -> Result<Summary, Error>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
     A: Authorizer,
     C: Clock,
     F: FnMut(Probe) -> Result<(), BoundaryError> + Send + 'static,
@@ -309,8 +309,8 @@ fn admit_next<P, A, C>(
     clock: &mut C,
 ) -> Result<Option<Active<P::Stream>>, Error>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
     A: Authorizer,
     C: Clock,
 {
@@ -401,8 +401,8 @@ fn run_observed<P, A, C, F>(
     mut emit: F,
 ) -> Result<Summary, Error>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
     A: Authorizer,
     C: Clock,
     F: FnMut(Probe, &Deadline) -> Result<(), Error>,

@@ -254,8 +254,24 @@ All notable changes to PacketcraftR are documented here. The format follows
   codes (`capability.unsupported`, `io.interface_discovery`) match the old
   variants, and `From<interface::Error> for packetcraftr_netio::Error` keeps
   `?` working. See `docs/migration-unreleased.md`.
+- netio providers share one shape: each capability is `<capability>::Provider`
+  plus `<capability>::SystemProvider`, and every provider trait requires
+  `Send + Sync`. Transmission is one `transmit::Provider` with
+  `send(Outbound)`; `transmit::SystemProvider` sends Layer 2 or Layer 3
+  through the backend built for that layer and returns
+  `capability.unsupported` for a layer this build lacks. `transmit::Sender`,
+  `Layer2Sender`, `Layer3Sender`, `SystemLayer2`, `SystemLayer3`, and
+  `ModeSender` are removed, and `transmit::Frame` is renamed
+  `transmit::Outbound`. `route::Provider::classify_error` is removed: the
+  provider's `Error` must implement `Classified`, which the planner and route
+  errors now read. `tcp::Provider` requires `Send + Sync` and `tcp::Stream`
+  requires `Send`. See `docs/migration-unreleased.md`.
 
 ### Added
+
+- `packetcraftr_core::error::Classified` is implemented for
+  `std::convert::Infallible`, so a provider that cannot fail satisfies a
+  `Classified` error bound.
 
 - `packetcraftr::fuzz::Totals` checks a live or offline campaign's case counts
   and cases for coherence (`TryFrom<&Report>`, `TryFrom<&Stats>`, and their

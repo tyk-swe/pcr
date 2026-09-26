@@ -5,6 +5,7 @@ use std::net::IpAddr;
 
 use packetcraftr_core::{packet::Packet, protocol::BuiltinProtocol, protocol::semantics};
 
+use packetcraftr_core::error::Classified;
 use packetcraftr_core::packet::{MacAddress, VlanTag};
 use packetcraftr_netio::link::Mode;
 use packetcraftr_netio::route::{Decision, Provider};
@@ -206,7 +207,7 @@ fn lookup_route<P: Provider>(
             )
             .map_err(|source| Error::RouteLookup {
                 destination: lookup_destination,
-                failure: provider.classify_error(&source),
+                failure: source.classification(),
                 source: Box::new(source),
             })?,
         None => {
@@ -218,7 +219,7 @@ fn lookup_route<P: Provider>(
                 .lookup_interface(interface)
                 .map_err(|source| Error::InterfaceLookup {
                     interface: interface.name.clone(),
-                    failure: provider.classify_error(&source),
+                    failure: source.classification(),
                     source: Box::new(source),
                 })?
                 .ok_or_else(|| Error::InterfaceLookupUnsupported {
@@ -391,6 +392,16 @@ mod tests {
     }
 
     impl std::error::Error for RouteFailure {}
+
+    impl Classified for RouteFailure {
+        fn classification(&self) -> packetcraftr_core::error::Classification {
+            packetcraftr_core::error::Classification::new(
+                "io.route",
+                packetcraftr_core::error::Kind::Io,
+                None,
+            )
+        }
+    }
 
     /// Records how the planner reached the provider so tests can assert that
     /// rejected input never causes a lookup.

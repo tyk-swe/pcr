@@ -73,8 +73,8 @@ impl Provider for FixedRoutes {
 /// Neighbor discovery transmits, so it never runs over this I/O either.
 pub(crate) struct NeverTransmit;
 
-impl transmit::Sender for NeverTransmit {
-    fn send(&self, _frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for NeverTransmit {
+    fn send(&self, _frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         unreachable!("a refused wire must not reach transmission")
     }
 }
@@ -149,8 +149,8 @@ impl RecordingTransmit {
     }
 }
 
-impl transmit::Sender for RecordingTransmit {
-    fn send(&self, frame: transmit::Frame<'_>) -> Result<transmit::Report, LiveIoError> {
+impl transmit::Provider for RecordingTransmit {
+    fn send(&self, frame: transmit::Outbound<'_>) -> Result<transmit::Report, LiveIoError> {
         let bytes = frame.bytes();
         let report = transmit::Submission::start().complete(bytes.len(), bytes.clone());
         match arp_reply(bytes) {

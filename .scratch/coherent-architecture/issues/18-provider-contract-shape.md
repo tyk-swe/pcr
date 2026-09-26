@@ -11,9 +11,17 @@ Phase 2. See `CONTEXT.md` **Provider**, **System provider**.
 
 **Blocked by:** 17
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] All providers share naming and bounds, and the test-support fakes implement the new traits.
-- [ ] A test covers the transmit `SystemProvider` returning the capability error for a layer that isn't built. Run it under `--no-default-features` plus one layer feature.
-- [ ] `[Unreleased]` and the migration note list the trait changes.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] All providers share naming and bounds, and the test-support fakes implement the new traits.
+- [x] A test covers the transmit `SystemProvider` returning the capability error for a layer that isn't built. Run it under `--no-default-features` plus one layer feature.
+- [x] `[Unreleased]` and the migration note list the trait changes.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- `transmit::Frame` is now `transmit::Outbound`; `Layer2Frame`/`Layer3Frame` keep their names.
+- C10: core implements `Classified` for `Infallible`; the `io::Error` route fake became `Infallible`, and the planner/cache fixtures implement `Classified` themselves.
+- `tcp::Stream` also gained `Send`, like `capture::Session`, so `P::Stream: Send` bounds dropped to `'static`.
+- The capability test is `packetcraftr-netio/tests/transmit_contracts.rs`, compiled only when a layer is missing. It passes under `--no-default-features` plus `native-layer2` or `native-layer3`, and under plain `--no-default-features`.
+- The `ModeSender` dispatch test became an `Outbound::try_new` layer-selection test, since fakes can no longer be put behind the system dispatch.

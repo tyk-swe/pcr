@@ -82,10 +82,6 @@ impl<R: packetcraftr_netio::route::Provider> packetcraftr_netio::route::Provider
             self.inner.lookup_interface(interface)
         })
     }
-
-    fn classify_error(&self, error: &Self::Error) -> packetcraftr_core::error::Classification {
-        self.inner.classify_error(error)
-    }
 }
 
 #[cfg(test)]
@@ -95,7 +91,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
-    use packetcraftr_core::error::{Classification, Kind};
+    use packetcraftr_core::error::{Classification, Classified, Kind};
     use packetcraftr_core::frame::LinkType;
     use packetcraftr_core::packet::MacAddress;
     use packetcraftr_netio::link::Capability;
@@ -111,6 +107,12 @@ mod tests {
     }
 
     impl std::error::Error for FixtureError {}
+
+    impl Classified for FixtureError {
+        fn classification(&self) -> Classification {
+            Classification::new("capability.fixture", Kind::Capability, None)
+        }
+    }
 
     struct CountingProvider {
         lookups: AtomicUsize,
@@ -160,10 +162,6 @@ mod tests {
             } else {
                 Ok(self.interface_result.clone())
             }
-        }
-
-        fn classify_error(&self, _error: &Self::Error) -> Classification {
-            Classification::new("capability.fixture", Kind::Capability, None)
         }
     }
 
@@ -250,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_errors_are_not_cached_and_classification_is_delegated() {
+    fn provider_errors_are_not_cached_and_keep_their_classification() {
         let provider = CountingProvider::new(None);
         provider.fail.store(true, Ordering::SeqCst);
         let cache = CachedProvider::new(&provider);
@@ -260,14 +258,12 @@ mod tests {
                 .lookup_with_preferences(destination, None, None)
                 .is_err()
         );
-        assert!(
-            cache
-                .lookup_with_preferences(destination, None, None)
-                .is_err()
-        );
+        let error = cache
+            .lookup_with_preferences(destination, None, None)
+            .expect_err("errors are not cached");
         assert_eq!(provider.lookups.load(Ordering::SeqCst), 2);
         assert_eq!(
-            cache.classify_error(&FixtureError),
+            error.classification(),
             Classification::new("capability.fixture", Kind::Capability, None)
         );
     }

@@ -142,8 +142,8 @@ pub(super) fn start<P>(
     cancellation: Option<Cancellation>,
 ) -> Result<Pending<P::Stream>, ConnectError>
 where
-    P: Provider + Send + Sync + 'static,
-    P::Stream: Send + 'static,
+    P: Provider + 'static,
+    P::Stream: 'static,
 {
     if timeout.is_zero() || timeout > crate::capture::MAX_TIMEOUT {
         return Err(ConnectError::Timeout);

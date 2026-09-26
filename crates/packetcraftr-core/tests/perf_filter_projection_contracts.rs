@@ -395,8 +395,8 @@ fn missing_timestamp_fails_the_whole_filter_before_any_short_circuit() {
         ("frame.number == 7 || (frame.time_epoch == 0 && udp)", true),
     ] {
         assert_eq!(
-            compiled(source).matches(&context(&tunnelled())),
-            Ok(expected),
+            compiled(source).matches(&context(&tunnelled())).ok(),
+            Some(expected),
             "{source}"
         );
     }
@@ -450,7 +450,11 @@ const LEAVES: &[&str] = &[
 fn assert_on_all(source: &str, expected: bool, contexts: &[(&str, Context<'_>)]) {
     let filter = compiled(source);
     for (name, context) in contexts {
-        assert_eq!(filter.matches(context), Ok(expected), "{source} on {name}");
+        assert_eq!(
+            filter.matches(context).ok(),
+            Some(expected),
+            "{source} on {name}"
+        );
     }
 }
 
@@ -491,8 +495,8 @@ fn two_leaf_combinations_match_per_leaf_semantics() {
                 ];
                 for (source, expected) in forms {
                     assert_eq!(
-                        compiled(&source).matches(context),
-                        Ok(expected),
+                        compiled(&source).matches(context).ok(),
+                        Some(expected),
                         "{source} on {name}"
                     );
                 }
@@ -529,8 +533,8 @@ fn three_leaf_combinations_match_per_leaf_semantics() {
                 ];
                 for (source, expected) in forms {
                     assert_eq!(
-                        compiled(&source).matches(&context),
-                        Ok(expected),
+                        compiled(&source).matches(&context).ok(),
+                        Some(expected),
                         "{source}"
                     );
                 }
@@ -606,8 +610,8 @@ fn seeded_deep_expressions_match_per_leaf_semantics() {
         for case in 0..400 {
             let (source, expected) = generated(&mut rng, &leaves, 4);
             assert_eq!(
-                compiled(&source).matches(context),
-                Ok(expected),
+                compiled(&source).matches(context).ok(),
+                Some(expected),
                 "generated case {case} on {name}: {source}"
             );
         }
@@ -643,17 +647,23 @@ fn parser_limits_long_chains_and_nested_not_hold() {
     ] {
         let source = format!("{}ipv4", "!".repeat(count));
         assert_eq!(
-            compiled(&source).matches(&context(&tunnelled)),
-            Ok(expected),
+            compiled(&source).matches(&context(&tunnelled)).ok(),
+            Some(expected),
             "{count} negations"
         );
     }
 
     // A long chain of the same operator stays left-associative and correct.
     let ors = vec!["ipv6"; 500].join(" || ");
-    assert_eq!(compiled(&ors).matches(&context(&tunnelled)), Ok(false));
+    assert_eq!(
+        compiled(&ors).matches(&context(&tunnelled)).ok(),
+        Some(false)
+    );
     let mixed = format!("{} || ipv4", vec!["ipv6"; 500].join(" || "));
-    assert_eq!(compiled(&mixed).matches(&context(&tunnelled)), Ok(true));
+    assert_eq!(
+        compiled(&mixed).matches(&context(&tunnelled)).ok(),
+        Some(true)
+    );
 
     for malformed in [
         "(",
@@ -723,17 +733,26 @@ fn repeated_layers_occurrences_inequality_and_derived_packets_hold() {
     // The UDP layer exists only on the derived packet; the suppressed ipv4
     // prefix means `ipv4.source` still reads the physical header's address.
     assert_eq!(
-        compiled("udp.dstport == 9 && ipv4.source == 192.0.2.1").matches(&context),
-        Ok(false)
-    );
-    assert_eq!(compiled("udp.dstport == 9").matches(&context), Ok(true));
-    assert_eq!(
-        compiled("ipv4.source == 192.0.2.1 || udp.dstport == 9").matches(&context),
-        Ok(true)
+        compiled("udp.dstport == 9 && ipv4.source == 192.0.2.1")
+            .matches(&context)
+            .ok(),
+        Some(false)
     );
     assert_eq!(
-        compiled("udp.stream == 11 && udp.dstport == 9").matches(&context),
-        Ok(true)
+        compiled("udp.dstport == 9").matches(&context).ok(),
+        Some(true)
+    );
+    assert_eq!(
+        compiled("ipv4.source == 192.0.2.1 || udp.dstport == 9")
+            .matches(&context)
+            .ok(),
+        Some(true)
+    );
+    assert_eq!(
+        compiled("udp.stream == 11 && udp.dstport == 9")
+            .matches(&context)
+            .ok(),
+        Some(true)
     );
 }
 
@@ -757,8 +776,8 @@ fn missing_fields_and_flag_semantics_are_unchanged() {
     ];
     for (source, expected) in cases {
         assert_eq!(
-            compiled(source).matches(&context(&ipv6_tcp)),
-            Ok(*expected),
+            compiled(source).matches(&context(&ipv6_tcp)).ok(),
+            Some(*expected),
             "{source}"
         );
     }

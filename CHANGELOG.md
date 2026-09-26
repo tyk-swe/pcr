@@ -499,6 +499,28 @@ All notable changes to PacketcraftR are documented here. The format follows
   converts from `BoundaryError`.
 
   See `docs/migration-unreleased.md`.
+- Selectors live beside what they select. Core `filter::{FrameDecoder,
+  FrameSelector}` decode and select complete frames under one byte budget;
+  `filter::Error` adds `Decode` (the decoder's own error and classification)
+  and `StreamIndexUnavailable`, and no longer implements `PartialEq`/`Eq`.
+  `analysis::Options` adds `stream`, the conversation `Session::new` now
+  selects directly instead of through a `tcp.stream == N` filter.
+  `analysis::tls::{Selector, SniPattern}` select assembled sessions and
+  `analysis::expert::Selector` selects findings; `analysis::Error` adds
+  `SniPattern`. A `replay::Request` carries its selection as data: an
+  optional `filter` (`FrameSelector`, set with `with_filter`) and a
+  `replay::Routing` of `replay::Rule`s (`Condition::Source` or
+  `Condition::Filter`, each naming a `route::Interface`) with an optional
+  fallback, at most `replay::MAX_RULES`. `Rule::parse_source` and
+  `Rule::parse_filter` parse `SOURCE_ID=INTERFACE` and `EXPR=>INTERFACE`
+  rules and refuse with `replay::RuleError`. `replay::{Selector, AllFrames}`,
+  `Request::with_selector`, and `replay::Options::interface` are removed.
+  `replay::Error::Selection` carries a `filter::Error`, and
+  `ConflictingInterfaces` and `Unmapped` (`cli.error`) replace
+  `InvalidLimit { field: "interface" }` for a frame routed two ways or
+  nowhere.
+
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -805,6 +827,15 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Changed
 
+- A `replay` frame that matches `--map-interface` or `--map-filter` rules
+  naming different interfaces now reports `replay frame N matches conflicting
+  output interfaces` as its message, and a frame no rule maps without an
+  `--interface` fallback reports `replay frame N has no output interface
+  mapping`, instead of `replay frame selection failed at source index N-1`
+  with that sentence as its only cause. A refused `--sni` pattern or
+  `--map-interface`/`--map-filter` rule keeps its message and now lists the
+  library's refusal in `causes`. Codes, exit codes, and coordinates are
+  unchanged.
 - Workflow failures no longer repeat the text of the error they carry: the
   message names what failed and the carried error is the first cause. For
   example a refused scan reads `scan authorization failed` with the policy

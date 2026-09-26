@@ -6,7 +6,6 @@
 pub(super) mod arguments;
 mod conversion;
 mod rendering;
-mod selection;
 #[cfg(test)]
 mod tests;
 
@@ -16,8 +15,8 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::Providers;
 use packetcraftr::clock::Clock;
-use packetcraftr::replay::{Event, FrameEvidence, Request, Selector, Source};
-use packetcraftr_core as core;
+use packetcraftr::replay::{self, Event, FrameEvidence, Request, Routing, Rule, RuleError, Source};
+use packetcraftr::route;
 use packetcraftr_core::capture_file as capture;
 use packetcraftr_core::capture_file::{Format, Limits, Reader, Writer, compression};
 use packetcraftr_core::error::{BoundaryError, Kind};
@@ -25,7 +24,7 @@ use packetcraftr_core::error::{BoundaryError, Kind};
 use self::arguments::Args;
 use crate::command_options::OfflineCaptureLimitsArgs;
 use crate::errors::CliError;
-use crate::filtering::FrameSelector;
+use crate::filtering;
 use crate::input::{open_capture_file, validate_capture_stream_limits};
 use crate::output::{self, contract::ExchangeFormat, stream::EncodeError};
 use crate::rendering::{
@@ -39,7 +38,7 @@ use conversion::timing;
 /// validated capture snapshot.
 struct ReplayRun {
     client: crate::system::Client,
-    request: Request<std::fs::File, selection::Selector>,
+    request: Request<std::fs::File>,
     filtered: bool,
 }
 
@@ -113,60 +112,35 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     validate_capture_stream_limits(capture_limits)?;
     let timing = timing(arguments)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let filter = FrameSelector::compile_optional(
+    let max_frame_bytes = arguments.reader.max_frame_bytes;
+    let filter = filtering::optional_frame_selector(
         arguments.filter.as_deref(),
         &registry,
-        arguments.reader.max_frame_bytes,
+        max_frame_bytes,
     )?;
-    if arguments.interface_maps.len() + arguments.filter_maps.len() > 256 {
-        return Err(CliError::new(
-            core::error::Kind::Usage,
-            "replay permits at most 256 interface rules",
-        ));
+    let rule_count = arguments.interface_maps.len() + arguments.filter_maps.len();
+    if rule_count > replay::MAX_RULES {
+        return Err(RuleError::TooMany { count: rule_count }.into());
     }
-    let requested_interface = arguments
+    let fallback = arguments
         .interface
         .as_ref()
         .map(crate::command_options::Selector::get)
         .transpose()?
-        .map(InterfaceSelector::into_id);
-    let mut rules = Vec::new();
+        .map(route::Interface::from);
+    let interface = |text: &str| InterfaceSelector::parse(text).map(route::Interface::from);
+    let mut rules = Vec::with_capacity(rule_count);
     for mapping in &arguments.interface_maps {
-        let (source, destination) = mapping.split_once('=').ok_or_else(|| {
-            CliError::new(
-                core::error::Kind::Usage,
-                "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE",
-            )
-        })?;
-        let source = source.parse::<u32>().map_err(|_| {
-            CliError::new(
-                core::error::Kind::Usage,
-                "source interface must be an unsigned capture-global ID",
-            )
-        })?;
-        rules.push(selection::Rule {
-            condition: selection::Match::Source(source),
-            interface: InterfaceSelector::parse(destination)?.into_id(),
-        });
+        rules.push(Rule::parse_source(mapping, interface)?);
     }
     for mapping in &arguments.filter_maps {
-        let (expression, destination) = mapping.rsplit_once("=>").ok_or_else(|| {
-            CliError::new(
-                core::error::Kind::Usage,
-                "--map-filter requires EXPR=>OUTPUT_INTERFACE",
-            )
-        })?;
-        let condition = FrameSelector::compile_optional(
-            Some(expression),
-            &registry,
-            arguments.reader.max_frame_bytes,
-        )?
-        .expect("explicit filter");
-        rules.push(selection::Rule {
-            condition: selection::Match::Filter(condition),
-            interface: InterfaceSelector::parse(destination)?.into_id(),
-        });
+        rules.push(Rule::parse_filter(
+            mapping,
+            |expression| filtering::frame_selector(expression, &registry, max_frame_bytes),
+            interface,
+        )?);
     }
+    let routing = Routing::new(rules, fallback)?;
     policy.validate().map_err(CliError::classified)?;
     let limits = packetcraftr::replay::Limits::from_policy(
         &policy,
@@ -175,7 +149,6 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
     );
     limits.validate().map_err(CliError::classified)?;
     let options = packetcraftr::replay::Options {
-        interface: requested_interface.clone(),
         repeat: arguments.repeat,
         inter_pass_delay: Duration::from_millis(arguments.inter_pass_delay_ms),
         link_mode: arguments.link_mode.into(),
@@ -194,16 +167,39 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         },
     )?;
     let filtered = filter.is_some();
-    let selector = selection::Selector {
-        filter,
-        rules,
-        fallback: requested_interface.is_some(),
-    };
+    let mut request = Request::new(Source::seekable(reader), routing, options);
+    request.filter = filter;
     Ok(ReplayRun {
         client: crate::system::client(registry, policy, crate::system::Runtime::Client),
-        request: Request::new(Source::seekable(reader), options).with_selector(selector),
+        request,
         filtered,
     })
+}
+
+/// A refused interface rule, in its option's own words.
+impl From<RuleError> for CliError {
+    fn from(error: RuleError) -> Self {
+        let message = match &error {
+            RuleError::SourceSyntax => "--map-interface requires SOURCE_ID=OUTPUT_INTERFACE".into(),
+            RuleError::FilterSyntax => "--map-filter requires EXPR=>OUTPUT_INTERFACE".into(),
+            RuleError::SourceId { .. } => {
+                "source interface must be an unsigned capture-global ID".into()
+            }
+            RuleError::TooMany { .. } => {
+                format!(
+                    "replay permits at most {} interface rules",
+                    replay::MAX_RULES
+                )
+            }
+            _ => return Self::classified(error),
+        };
+        Self::refused_option(message, &error)
+    }
+}
+
+/// The fallback interface as the caller named it, which the report publishes.
+fn requested_interface<R>(request: &Request<R>) -> Option<route::Interface> {
+    request.routing.fallback().cloned()
 }
 
 struct CaptureSettings {
@@ -212,23 +208,22 @@ struct CaptureSettings {
 }
 
 /// Runs `request` on `client`, publishing each confirmed frame to `sink`.
-fn drive<P, K, R, S>(
+fn drive<P, K, R>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
     sink: impl packetcraftr::Sink<Event, Ack = ()>,
 ) -> Result<packetcraftr::replay::Report, CliError>
 where
     P: Providers,
     K: Clock,
     R: Read,
-    S: Selector,
 {
     client.replay(request, sink).map_err(CliError::classified)
 }
 
-fn replay_text<P: Providers, K: Clock, R: Read, S: Selector>(
+fn replay_text<P: Providers, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
     filtered: bool,
 ) -> Result<(), CliError> {
     // The sink runs on a runtime worker, outside this thread's dispatch
@@ -241,12 +236,12 @@ fn replay_text<P: Providers, K: Clock, R: Read, S: Selector>(
     rendering::render_summary(&report, filtered)
 }
 
-fn replay_aggregate<P: Providers, K: Clock, R: Read, S: Selector>(
+fn replay_aggregate<P: Providers, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
 ) -> Result<(), CliError> {
     let started = Instant::now();
-    let requested_interface = request.options.interface.clone();
+    let requested_interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
     // Each frame converts as it is published, so a frame the output cannot
     // represent stops the replay before the next one is sent.
@@ -267,13 +262,13 @@ fn replay_aggregate<P: Providers, K: Clock, R: Read, S: Selector>(
     emit_aggregate_with_stats(output::contract::Command::Replay, result, Vec::new(), stats)
 }
 
-fn replay_stream<P: Providers, K: Clock, R: Read, S: Selector>(
+fn replay_stream<P: Providers, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
     let started = Instant::now();
-    let interface = request.options.interface.clone();
+    let interface = requested_interface(&request);
     let link_mode = request.options.link_mode;
     let records = stream.clone();
     let report = drive(client, request, move |Event::Frame(evidence): Event| {
@@ -285,9 +280,9 @@ fn replay_stream<P: Providers, K: Clock, R: Read, S: Selector>(
     Ok(stream.complete_with_stats(result, Vec::new(), stats)?)
 }
 
-fn replay_capture<P: Providers, K: Clock, R: Read, S: Selector>(
+fn replay_capture<P: Providers, K: Clock, R: Read>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
     settings: CaptureSettings,
 ) -> Result<(), CliError> {
     replay_capture_to(client, request, settings, io::stdout())
@@ -331,9 +326,9 @@ impl<W: Write> Write for Shared<W> {
     }
 }
 
-fn replay_capture_to<P, K, R, S, W>(
+fn replay_capture_to<P, K, R, W>(
     client: &packetcraftr::Client<P, K>,
-    request: Request<R, S>,
+    request: Request<R>,
     settings: CaptureSettings,
     destination: W,
 ) -> Result<(), CliError>
@@ -341,7 +336,6 @@ where
     P: Providers,
     K: Clock,
     R: Read,
-    S: Selector,
     W: Write + Send + 'static,
 {
     // Rejected before the destination is wrapped, so no compressed container is written.

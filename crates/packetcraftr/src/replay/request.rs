@@ -7,13 +7,14 @@ use std::time::Duration;
 use packetcraftr_core::capture_file::{
     DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
 };
+use packetcraftr_core::filter::FrameSelector;
 use packetcraftr_core::frame::{DEFAULT_SIZE_LIMIT, Frame};
-use packetcraftr_netio::{
-    capture::MAX_TIMEOUT, interface::Id as InterfaceId, link::Mode as LinkMode,
-};
+use packetcraftr_netio::{capture::MAX_TIMEOUT, link::Mode as LinkMode};
 use serde::{Deserialize, Serialize};
 
 use super::error::Error;
+use super::routing::Routing;
+use crate::route::Interface;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -133,8 +134,6 @@ impl Limits {
 /// before it opens one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Options {
-    /// Fallback when the selector supplies no per-frame interface.
-    pub interface: Option<InterfaceId>,
     pub repeat: u32,
     pub inter_pass_delay: Duration,
     pub link_mode: LinkMode,
@@ -213,89 +212,81 @@ impl<R> Source<R> {
     }
 }
 
-/// Selects a one-based capture frame before byte accounting, authorization, delay,
-/// or transmission.
-///
-/// Skipped frames consume the read-side frame budget only; they affect neither
-/// policy totals nor timing. Selected frames retain capture spacing.
-pub trait Selector {
-    /// Decides whether this frame proceeds to authorization and transmission.
-    fn select(
-        &mut self,
-        number: u64,
-        frame: &Frame,
-    ) -> Result<bool, packetcraftr_core::error::BoundaryError>;
-    /// Selects an output interface after filtering. None uses the explicit fallback.
-    fn interface(
-        &mut self,
-        _number: u64,
-        _frame: &Frame,
-    ) -> Result<Option<InterfaceId>, packetcraftr_core::error::BoundaryError> {
-        Ok(None)
-    }
+/// The engine's selection seam: whether each frame proceeds, and where it
+/// goes. [`Selection`] is the request's; the engine's tests script their own.
+pub(super) trait Selector {
+    /// Decides whether the frame at `source_index` proceeds to authorization
+    /// and transmission.
+    fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error>;
+    /// The output interface for a selected frame.
+    fn interface(&mut self, source_index: u64, frame: &Frame) -> Result<Interface, Error>;
 }
 
 impl<T: Selector + ?Sized> Selector for &mut T {
-    fn select(
-        &mut self,
-        number: u64,
-        frame: &Frame,
-    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
-        (**self).select(number, frame)
+    fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error> {
+        (**self).select(source_index, frame)
     }
 
-    fn interface(
-        &mut self,
-        number: u64,
-        frame: &Frame,
-    ) -> Result<Option<InterfaceId>, packetcraftr_core::error::BoundaryError> {
-        (**self).interface(number, frame)
+    fn interface(&mut self, source_index: u64, frame: &Frame) -> Result<Interface, Error> {
+        (**self).interface(source_index, frame)
     }
 }
 
-/// Selects every frame and maps none, so each uses the fallback interface.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AllFrames;
+/// A request's filter and routing, as the engine consults them.
+pub(super) struct Selection {
+    filter: Option<FrameSelector>,
+    routing: Routing,
+}
 
-impl Selector for AllFrames {
-    fn select(
-        &mut self,
-        _number: u64,
-        _frame: &Frame,
-    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
-        Ok(true)
+impl Selector for Selection {
+    fn select(&mut self, source_index: u64, frame: &Frame) -> Result<bool, Error> {
+        let Some(filter) = &self.filter else {
+            return Ok(true);
+        };
+        filter
+            .keep(source_index.saturating_add(1), frame)
+            .map_err(|source| Error::Selection {
+                source_index,
+                source,
+            })
+    }
+
+    fn interface(&mut self, source_index: u64, frame: &Frame) -> Result<Interface, Error> {
+        self.routing.interface(source_index, frame)
     }
 }
 
-/// One replay: the capture, the frames selected from it, and how they are
-/// sent.
-pub struct Request<R, S = AllFrames> {
+/// One replay: the capture, the frames selected from it, where each goes,
+/// and how they are sent.
+pub struct Request<R> {
     pub source: Source<R>,
-    pub selector: S,
+    /// Keeps only the frames it selects. A skipped frame consumes the
+    /// read-side frame budget only: it is never authorized or transmitted,
+    /// and it affects neither policy totals nor timing, while selected frames
+    /// keep their capture spacing.
+    pub filter: Option<FrameSelector>,
+    /// Where each selected frame is sent, decided after the filter.
+    pub routing: Routing,
     pub options: Options,
 }
 
 impl<R> Request<R> {
-    /// Replays every frame of `source` under `options`.
+    /// Replays every frame of `source` through `routing` under `options`.
     #[must_use]
-    pub fn new(source: Source<R>, options: Options) -> Self {
+    pub fn new(source: Source<R>, routing: Routing, options: Options) -> Self {
         Self {
             source,
-            selector: AllFrames,
+            filter: None,
+            routing,
             options,
         }
     }
-}
 
-impl<R, S> Request<R, S> {
-    /// Replays only the frames `selector` selects, on the interfaces it maps.
+    /// Replays only the frames `filter` keeps.
     #[must_use]
-    pub fn with_selector<T: Selector>(self, selector: T) -> Request<R, T> {
-        Request {
-            source: self.source,
-            selector,
-            options: self.options,
-        }
+    pub fn with_filter(mut self, filter: FrameSelector) -> Self {
+        self.filter = Some(filter);
+        self
     }
 
     /// Validates the options, and that only a seekable source repeats,
@@ -305,14 +296,39 @@ impl<R, S> Request<R, S> {
     ///
     /// Returns the first invalid bound.
     pub fn validate(&self) -> Result<(), Error> {
-        self.options.validate()?;
-        if self.options.repeat != 1 && self.source.rewind.is_none() {
-            return Err(Error::InvalidLimit {
-                field: "repeat",
-                value: u64::from(self.options.repeat),
-                reason: "repetition requires a stable seekable capture source",
-            });
-        }
-        Ok(())
+        validate(&self.source, &self.options)
     }
+
+    /// The request as the engine runs it.
+    pub(super) fn into_parts(self) -> Parts<R, Selection> {
+        Parts {
+            source: self.source,
+            selector: Selection {
+                filter: self.filter,
+                routing: self.routing,
+            },
+            options: self.options,
+        }
+    }
+}
+
+/// What the engine runs: a capture, the seam that selects and routes its
+/// frames, and the options they are sent under.
+pub(super) struct Parts<R, S> {
+    pub(super) source: Source<R>,
+    pub(super) selector: S,
+    pub(super) options: Options,
+}
+
+/// Validates `options`, and that only a seekable `source` repeats.
+pub(super) fn validate<R>(source: &Source<R>, options: &Options) -> Result<(), Error> {
+    options.validate()?;
+    if options.repeat != 1 && source.rewind.is_none() {
+        return Err(Error::InvalidLimit {
+            field: "repeat",
+            value: u64::from(options.repeat),
+            reason: "repetition requires a stable seekable capture source",
+        });
+    }
+    Ok(())
 }

@@ -51,6 +51,19 @@ impl CliError {
         )
     }
 
+    /// A refused option: the option's own usage message, with the library's
+    /// refusal and its sources as the causes.
+    pub(crate) fn refused_option(
+        message: impl Into<String>,
+        source: &(impl std::error::Error + ?Sized),
+    ) -> Self {
+        let mut error = Self::new(Kind::Usage, message);
+        error.causes = std::iter::once(source.to_string())
+            .chain(packetcraftr_core::error::source_chain(source))
+            .collect();
+        error
+    }
+
     pub(crate) fn from_classification(
         classification: Classification,
         message: impl Into<String>,

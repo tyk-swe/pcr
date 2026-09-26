@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use packetcraftr::replay as library;
-use packetcraftr_netio::{interface::Id as NetworkInterfaceId, link::Mode as NetworkLinkMode};
+use packetcraftr_netio::link::Mode as NetworkLinkMode;
 
 use super::contract::Error;
 use super::envelope::Stats;
@@ -90,20 +90,15 @@ pub struct Report {
 
 /// A replay summary with the interface and link mode the caller requested
 /// and the per-frame evidence retained for the aggregate.
-impl
-    TryFrom<(
-        library::Report,
-        Option<NetworkInterfaceId>,
-        NetworkLinkMode,
-        Vec<Frame>,
-    )> for Report
+impl<I: Into<InterfaceId>> TryFrom<(library::Report, Option<I>, NetworkLinkMode, Vec<Frame>)>
+    for Report
 {
     type Error = Error;
 
     fn try_from(
         (summary, requested_interface, requested_link_mode, frames): (
             library::Report,
-            Option<NetworkInterfaceId>,
+            Option<I>,
             NetworkLinkMode,
             Vec<Frame>,
         ),

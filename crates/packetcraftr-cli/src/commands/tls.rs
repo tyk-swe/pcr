@@ -21,90 +21,8 @@ use crate::input::open_capture;
 use crate::rendering::StreamEncoder;
 
 use analysis::StreamTransport;
-use analysis::tls::{Collector, Limits as TlsLimits, Status};
+use analysis::tls::{Collector, Limits as TlsLimits, Selector, SniPattern, Status};
 use rendering::State;
-
-/// Which assembled sessions the command reports.
-///
-/// Every selector here runs on a finished session rather than on a frame. A
-/// frame filter would drop the ServerHello and turn each session into
-/// `client_only`, which is why the command has no `--filter` and why only
-/// `--stream` — stream-preserving by construction — is pushed down to the
-/// frame level.
-struct Selector {
-    sni: Option<SniPattern>,
-    server_port: Option<u16>,
-    statuses: Vec<Status>,
-}
-
-impl Selector {
-    fn matches(&self, session: &analysis::tls::Session) -> bool {
-        if let Some(port) = self.server_port
-            && session.server_endpoint.port != port
-        {
-            return false;
-        }
-        if !self.statuses.is_empty() && !self.statuses.contains(&session.status) {
-            return false;
-        }
-        if let Some(pattern) = &self.sni {
-            let name = session
-                .client
-                .as_ref()
-                .and_then(|client| client.sni.as_deref());
-            return name.is_some_and(|name| pattern.matches(name));
-        }
-        true
-    }
-}
-
-/// A `--sni` pattern: a literal compared case-insensitively, optionally
-/// anchored loosely at either end by `*`.
-///
-/// `*` at the start, the end, or both is the whole vocabulary; it is not a
-/// glob dialect.
-struct SniPattern {
-    literal: String,
-    leading: bool,
-    trailing: bool,
-}
-
-impl SniPattern {
-    fn parse(pattern: &str) -> Result<Self, CliError> {
-        let (leading, rest) = match pattern.strip_prefix('*') {
-            Some(rest) => (true, rest),
-            None => (false, pattern),
-        };
-        let (trailing, literal) = match rest.strip_suffix('*') {
-            Some(literal) => (true, literal),
-            None => (false, rest),
-        };
-        if literal.contains('*') {
-            return Err(CliError::new(
-                Kind::Usage,
-                format!(
-                    "invalid --sni '{pattern}': '*' is supported only at the start, \
-                     the end, or both"
-                ),
-            ));
-        }
-        Ok(Self {
-            literal: literal.to_lowercase(),
-            leading,
-            trailing,
-        })
-    }
-
-    fn matches(&self, name: &str) -> bool {
-        let name = name.to_lowercase();
-        match (self.leading, self.trailing) {
-            (true, true) => name.contains(&self.literal),
-            (true, false) => name.ends_with(&self.literal),
-            (false, true) => name.starts_with(&self.literal),
-            (false, false) => name == self.literal,
-        }
-    }
-}
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -146,12 +64,11 @@ pub(super) fn run(
         .as_ref()
         .map(tcp_stream_index)
         .transpose()?;
+    // Selection runs on finished sessions: a frame filter would drop the
+    // ServerHello and turn each session into `client_only`, which is why the
+    // command has no `--filter` and only `--stream` narrows the frames.
     let selector = Selector {
-        sni: arguments
-            .sni
-            .as_deref()
-            .map(SniPattern::parse)
-            .transpose()?,
+        sni: arguments.sni.as_deref().map(sni_pattern).transpose()?,
         server_port: arguments.server_port,
         statuses: arguments
             .statuses
@@ -169,12 +86,11 @@ pub(super) fn run(
     }
     let collector = Collector::new(tls_limits).map_err(CliError::classified)?;
 
-    // The stream filter narrows reassembly to one conversation while indices
-    // stay capture-global, so the index reported is the one asked for.
-    let source = selected_stream.map(|index| format!("tcp.stream == {index}"));
-    let prepared = prepare(arguments.limits, source.as_deref(), &arguments.decode)?;
+    let prepared = prepare(arguments.limits, None, &arguments.decode)?;
     // Assembly consumes the reassembler's in-order deliveries; the session
-    // raises the pipeline flags from the collector's declared needs.
+    // raises the pipeline flags from the collector's declared needs. The
+    // stream selector narrows reassembly to one conversation while indices
+    // stay capture-global, so the index reported is the one asked for.
     let session = analysis::Session::new(
         prepared.registry.clone(),
         prepared.options(),
@@ -230,6 +146,19 @@ fn buffer_floor_error(value: usize) -> CliError {
         field: "--max-tls-buffer-bytes",
         value: u64::try_from(value).unwrap_or(u64::MAX),
         reason: analysis::Constraint::AtLeastTlsDirectionBuffer,
+    })
+}
+
+/// The `--sni` pattern, refused in the option's own words.
+fn sni_pattern(pattern: &str) -> Result<SniPattern, CliError> {
+    pattern.parse().map_err(|error: analysis::Error| {
+        CliError::refused_option(
+            format!(
+                "invalid --sni '{pattern}': '*' is supported only at the start, \
+                 the end, or both"
+            ),
+            &error,
+        )
     })
 }
 

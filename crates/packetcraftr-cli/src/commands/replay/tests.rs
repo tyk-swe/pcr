@@ -106,16 +106,14 @@ fn client(max_packets: u64) -> packetcraftr::Client<impl packetcraftr::Providers
     )
 }
 
-struct OnlyFrame(u64);
-
-impl packetcraftr::replay::Selector for OnlyFrame {
-    fn select(
-        &mut self,
-        number: u64,
-        _frame: &Frame,
-    ) -> Result<bool, packetcraftr_core::error::BoundaryError> {
-        Ok(number == self.0)
-    }
+/// Selects only the one-based frame `number`.
+fn only_frame(number: u64) -> packetcraftr_core::filter::FrameSelector {
+    filtering::frame_selector(
+        &format!("frame.number == {number}"),
+        &packetcraftr_core::protocol::builtin::registry(),
+        1_500,
+    )
+    .expect("frame-number filter")
 }
 
 struct FailingWriter;
@@ -141,7 +139,6 @@ fn interface() -> net::interface::Id {
 
 fn options() -> packetcraftr::replay::Options {
     packetcraftr::replay::Options {
-        interface: Some(interface()),
         repeat: 1,
         inter_pass_delay: Duration::ZERO,
         link_mode: net::link::Mode::Auto,
@@ -184,11 +181,15 @@ fn reader(frame_count: usize) -> Reader<Cursor<Vec<u8>>> {
 }
 
 fn request(reader: Reader<Cursor<Vec<u8>>>) -> Request<Cursor<Vec<u8>>> {
-    Request::new(Source::seekable(reader), options())
+    Request::new(
+        Source::seekable(reader),
+        Routing::from(route::Interface::Id(interface())),
+        options(),
+    )
 }
 
-fn render_fixture<S: packetcraftr::replay::Selector>(
-    request: Request<Cursor<Vec<u8>>, S>,
+fn render_fixture(
+    request: Request<Cursor<Vec<u8>>>,
     max_packets: u64,
     stream: &StreamEncoder,
 ) -> Result<(), CliError> {
@@ -228,7 +229,7 @@ fn replay_domain_failure_after_two_records_uses_position_two() {
 fn replay_output_failure_retains_source_frame_context_and_remediation() {
     let stream = StreamEncoder::new(output::contract::Command::Replay, FailingWriter);
     let error = render_fixture(
-        request(reader(43)).with_selector(OnlyFrame(43)),
+        request(reader(43)).with_filter(only_frame(43)),
         100,
         &stream,
     )

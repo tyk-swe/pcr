@@ -1,13 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::sync::Arc;
+
 use thiserror::Error;
 
 use crate::error::{Classification, Classified, Kind};
 
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone)]
 #[non_exhaustive]
 pub enum Error {
+    /// A frame the filter was to judge could not be dissected; the refusal
+    /// is the decoder's own, so a budget stays a resource limit.
+    #[error(transparent)]
+    Decode(Arc<crate::decode::Error>),
+    /// The filter reads `tcp.stream` or `udp.stream`, but its caller judges
+    /// frames one at a time and assigns no conversation index.
+    #[error(
+        "display filter reads a conversation index, which frame-at-a-time selection does not assign"
+    )]
+    StreamIndexUnavailable,
     #[error("display filter requires frame.time_epoch, but the frame has no timestamp")]
     TimestampUnavailable,
     #[error("display filter is empty")]
@@ -63,9 +75,21 @@ pub enum Error {
     ProjectionLimit { field: &'static str, limit: usize },
 }
 
+impl From<crate::decode::Error> for Error {
+    fn from(source: crate::decode::Error) -> Self {
+        Self::Decode(Arc::new(source))
+    }
+}
+
 impl Classified for Error {
     fn classification(&self) -> Classification {
         match self {
+            Self::Decode(source) => source.classification(),
+            Self::StreamIndexUnavailable => Classification::new(
+                "cli.filter_unsupported_field",
+                Kind::Usage,
+                Some("select by conversation with an analysis pass, or filter on header fields"),
+            ),
             Self::ProjectionField { .. } => Classification::new(
                 "cli.projection_field",
                 Kind::Usage,

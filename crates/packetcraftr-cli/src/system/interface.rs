@@ -39,18 +39,6 @@ impl InterfaceSelector {
             .map(Self::Index)
             .ok_or_else(|| CliError::new(Kind::Usage, "--interface index must be non-zero"))
     }
-
-    /// The identity this selector describes before any provider confirms it:
-    /// only the selected half is filled in.
-    pub(crate) fn into_id(self) -> net::interface::Id {
-        match self {
-            Self::Name(name) => net::interface::Id { name, index: 0 },
-            Self::Index(index) => net::interface::Id {
-                name: String::new(),
-                index: index.get(),
-            },
-        }
-    }
 }
 
 /// The library selector the client resolves after admission.
@@ -175,20 +163,6 @@ mod tests {
         let by_name = InterfaceSelector::parse("eth0").unwrap();
         assert_eq!(by_index.to_string(), "7");
         assert_eq!(by_name.to_string(), "eth0");
-        assert_eq!(
-            by_index.into_id(),
-            net::interface::Id {
-                name: String::new(),
-                index: 7
-            }
-        );
-        assert_eq!(
-            by_name.into_id(),
-            net::interface::Id {
-                name: "eth0".to_owned(),
-                index: 0
-            }
-        );
     }
 
     struct FixtureProvider;

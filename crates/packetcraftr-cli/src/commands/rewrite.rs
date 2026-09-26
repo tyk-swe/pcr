@@ -16,7 +16,7 @@ use crate::output::{
 use crate::{
     commands::offline_analysis::Retained,
     errors::CliError,
-    filtering::FrameSelector,
+    filtering,
     rendering::{StreamEncoder, emit_aggregate},
 };
 use packetcraftr_core::{
@@ -111,7 +111,7 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
         ));
     }
     let rules = rules.try_map_filters(|filter| {
-        FrameSelector::compile(&filter, &registry, args.limits.reader.max_frame_bytes)
+        filtering::frame_selector(&filter, &registry, args.limits.reader.max_frame_bytes)
     })?;
     let growth = rules.maximum_growth();
     let mut staged = if args.dry_run {
@@ -157,9 +157,9 @@ pub(crate) fn run(args: Args, format: ToolFormat, stream: &StreamEncoder) -> Res
                     max_output_bytes: args.limits.reader.max_frame_bytes,
                 },
                 |filter| {
-                    filter
-                        .keep(number, frame)
-                        .map_err(CliError::into_boundary_error)
+                    filter.keep(number, frame).map_err(|error| {
+                        filtering::frame_error(number, error).into_boundary_error()
+                    })
                 },
                 |index, applied| {
                     for change in applied {

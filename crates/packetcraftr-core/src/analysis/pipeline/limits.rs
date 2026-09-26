@@ -270,6 +270,12 @@ pub struct Options<'a> {
     /// or SNI selection to completed sessions instead. Matching observations may
     /// first expose stream indices out of numerical order.
     pub filter: Option<&'a Filter>,
+    /// Keeps only the frames of one conversation, applied with the filter
+    /// and matching exactly what `tcp.stream == N` or `udp.stream == N`
+    /// matches. Indices are assigned before selection, so the plan must
+    /// index the selected transport; [`Session`](crate::analysis::Session) derives
+    /// such a plan from its selector.
+    pub stream: Option<crate::analysis::StreamRef>,
     /// Inclusive capture-time bounds applied with the filter. Comparison uses
     /// the timestamp's full precision and assumes nothing about ordering, so
     /// regressing clocks still select by value. Like the filter, bounds apply

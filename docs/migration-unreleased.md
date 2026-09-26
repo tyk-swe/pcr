@@ -398,10 +398,11 @@ without changing the caller's registry. UDP profile documents use independent
 
 ## Replay mapping and repetition
 
-Wrap the old `replay::Options::interface` value in `Some` for a fixed fallback,
-and add `repeat: 1` and `inter_pass_delay: Duration::ZERO` for one pass.
-`Selector::interface` may return an output interface for each selected frame;
-its default uses the fallback. Replay readers now require `Read + Seek` so the
+Route every frame through the old `replay::Options::interface` value with
+`replay::Routing::from(route::Interface::Id(interface))`, and add `repeat: 1`
+and `inter_pass_delay: Duration::ZERO` for one pass. Routing rules may send
+each selected frame through its own interface (see
+[Selectors and replay routing](#selectors-and-replay-routing)). Replay readers now require `Read + Seek` so the
 engine can rewind between passes. The CLI snapshots and validates the complete
 capture before live work, including compressed inputs.
 
@@ -1520,11 +1521,11 @@ authorizer and transmitter arguments are gone.
 
 | Before | After |
 |---|---|
-| `replay::run_with_selector(&mut reader, &options, selector, &mut authorizer, &mut transmitter, &mut clock, emit)` | `client.replay(replay::Request::new(replay::Source::stream(reader), options).with_selector(selector), sink)` |
+| `replay::run_with_selector(&mut reader, &options, selector, &mut authorizer, &mut transmitter, &mut clock, emit)` | `client.replay(replay::Request::new(replay::Source::stream(reader), routing, options).with_filter(filter), sink)` |
 | `replay::run_repeated_with_selector(..)` over a `Read + Seek` reader | the same with `replay::Source::seekable(reader)`; only a seekable source may set `repeat > 1` |
 | `SystemAuthorizer::new(registry, policy, allow_malformed_live)` | the client's registry and policy, and `options.allow_permissive_live` |
 | `SystemTransmitter::new()`, a custom `replay::Transmitter` | the client's `Providers`; tests compose fake interface, route, and transmit providers |
-| a `None` selector | `replay::AllFrames` (the `Request::new` default) |
+| a `None` selector | no filter (the `Request::new` default) |
 | `emit: FnMut(FrameEvidence) -> Result<(), replay::Error>` | `S: Sink<replay::Event, Ack = ()>`; events are `Event::Frame(FrameEvidence)` |
 | `replay::Summary` | `replay::Report` (serialized names unchanged) |
 | every frame plus the summary | `replay::Collector`, finished into `replay::Aggregate { frames, report }` |
@@ -1532,8 +1533,7 @@ authorizer and transmitter arguments are gone.
 
 A sink whose `BoundaryError` has a `Cancelled`, `DeadlineExceeded`, or
 `Interrupted` source stops the replay as `Error::Cancelled` or
-`Error::DurationLimit` rather than as an output failure. `&mut S` is a
-`Selector` whenever `S` is, so a caller can keep its selector.
+`Error::DurationLimit` rather than as an output failure.
 
 `policy::Authorizer::authorize_final_wire` is removed; only replay checked
 the final wire, and it now does so internally.
@@ -1708,8 +1708,6 @@ of fake executors or authorizers.
 | `scan::connect::Probe` | `scan::connect::ProbeEvidence` |
 | `fuzz::Error::from(boundary_error)` | `fuzz::Error::Authorization(boundary_error)` |
 
-`replay::Selector` stays public: a replay request carries it.
-
 **Error messages.** A workflow failure no longer repeats the text of the error
 it carries. The message names what failed and the carried error is the first
 entry of `causes()`; for a `BoundaryError` source the boundary's message comes
@@ -1728,3 +1726,34 @@ assert!(error.causes()[0].contains("public destination"));
 Scan and traceroute cancellation and target-selection failures report the
 carried error's own message, without a `scan:` or `traceroute:` prefix. Codes,
 exit codes, and coordinates are unchanged.
+
+## Selectors and replay routing
+
+The frame, session, and finding selectors the CLI kept privately are library
+types beside what they select, and a replay request carries its selection as
+data.
+
+| Before | After |
+|---|---|
+| a frame-at-a-time decode and `--filter` loop | `packetcraftr_core::filter::FrameDecoder::new(registry, Some(filter), max_frame_bytes)?` and `decode_selected(number, &frame)` |
+| a boolean frame filter | `filter::FrameSelector::new(registry, filter, max_frame_bytes)?` and `keep(number, &frame)` |
+| `analysis::Session::new(.., Some(stream))` plus the filter `tcp.stream == N` | `Session::new(.., Some(stream))` alone; `analysis::Options::stream` selects the conversation |
+| TLS session filtering by SNI, port, and status | `analysis::tls::Selector { sni, server_port, statuses }.matches(&session)`; `"*.example.test".parse::<analysis::tls::SniPattern>()` |
+| finding filtering by severity and code | `analysis::expert::Selector { min_severity, codes }.matches(&finding)` |
+| `impl replay::Selector for S`, `Request::with_selector(s)`, `replay::AllFrames` | `Request::new(source, routing, options).with_filter(frame_selector)` |
+| `replay::Options { interface: Some(id), .. }` | `replay::Routing::from(route::Interface::Id(id))`, or `Routing::new(rules, Some(fallback))?` |
+| a selector's `interface(number, frame)` | `replay::Rule { condition: replay::Condition::{Source(id), Filter(selector)}, interface }`, at most `replay::MAX_RULES` |
+| parsing `SOURCE_ID=IF` and `EXPR=>IF` by hand | `Rule::parse_source(text, parse_interface)` and `Rule::parse_filter(text, compile, parse_interface)`, refusing with `replay::RuleError` |
+
+`FrameDecoder::new` and `FrameSelector::new` refuse a filter that reads
+`tcp.stream` or `udp.stream` with `filter::Error::StreamIndexUnavailable`,
+because frames judged one at a time have no conversation index. A frame that
+cannot be dissected fails with `filter::Error::Decode`, which keeps the
+decoder's own message and classification. `filter::Error` no longer implements
+`PartialEq`/`Eq`; match it with `matches!`.
+
+A replay frame whose rules name different interfaces fails with
+`replay::Error::ConflictingInterfaces`, and one no rule matches without a
+fallback fails with `replay::Error::Unmapped` (replacing `InvalidLimit {
+field: "interface" }`); both are `cli.error`. `replay::Error::Selection`
+carries the `filter::Error` that stopped the request's filter or a filter rule.

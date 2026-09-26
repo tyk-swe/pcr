@@ -176,21 +176,6 @@ fn classify_destination(address: IpAddr) -> Scope {
     }
 }
 
-pub(crate) fn validate_preferred_source_family(
-    destination: IpAddr,
-    preferred_source: Option<IpAddr>,
-) -> Result<(), SystemError> {
-    if let Some(source) = preferred_source
-        && source.is_ipv4() != destination.is_ipv4()
-    {
-        return Err(SystemError::SourceFamilyMismatch {
-            preferred_source: source,
-            destination,
-        });
-    }
-    Ok(())
-}
-
 fn validate_interface_hint(
     requested: &InterfaceId,
     actual: &InterfaceId,

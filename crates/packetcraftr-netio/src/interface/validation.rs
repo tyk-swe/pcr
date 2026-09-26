@@ -27,7 +27,7 @@ pub(crate) fn validate_native_interface(interface: &interface::Info) -> Result<(
     Ok(())
 }
 
-pub(crate) fn validate_native_interfaces(
+pub(super) fn validate_native_interfaces(
     interfaces: Vec<interface::Info>,
 ) -> Result<Vec<interface::Info>, SystemError> {
     let mut identities = std::collections::HashSet::with_capacity(interfaces.len());

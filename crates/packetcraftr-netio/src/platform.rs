@@ -23,7 +23,10 @@ mod layer3;
 #[cfg(native_route)]
 mod route;
 
-pub(crate) use dispatch::{
-    capture_timestamp_types, system_capture, system_interface_route, system_interfaces,
-    system_route, system_send_layer2, system_send_layer3,
-};
+#[cfg(not(native_layer2))]
+pub(crate) use dispatch::unsupported;
+#[cfg(native_send)]
+pub(crate) use dispatch::verify_interface_identity;
+#[cfg(native_layer2)]
+pub(crate) use dispatch::{current_interface, open_capture, timestamp_types};
+pub(crate) use dispatch::{interface_route, interfaces, route, send_layer2, send_layer3};

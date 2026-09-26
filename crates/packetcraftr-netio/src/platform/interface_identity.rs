@@ -20,7 +20,7 @@ use crate::{Error, interface::Id as InterfaceId};
 pub(in crate::platform) fn validate_current_interface_identity(
     expected: &InterfaceId,
 ) -> Result<crate::interface::Info, Error> {
-    let mut interfaces = super::system_interfaces()?;
+    let mut interfaces = crate::interface::Provider::interfaces(&crate::interface::SystemProvider)?;
     if let Some(position) = interfaces
         .iter()
         .position(|interface| interface.id == *expected)

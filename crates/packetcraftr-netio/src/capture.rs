@@ -4,10 +4,11 @@
 //! Owned live-capture sessions and bounded queue configuration.
 
 #[cfg(native_layer2)]
-pub(crate) mod filter;
+mod filter;
 pub mod group;
 #[cfg(native_layer2)]
 pub(crate) mod live;
+mod system;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -600,11 +601,11 @@ impl Provider for SystemProvider {
     type Capture = SystemSession;
 
     fn arm_capture(&self, request: &Request) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(request)
+        system::open(request)
     }
 
     fn timestamp_types(&self, interface: &InterfaceId) -> Result<Vec<TimestampType>, Error> {
-        super::platform::capture_timestamp_types(interface)
+        system::timestamp_types(interface)
     }
 }
 

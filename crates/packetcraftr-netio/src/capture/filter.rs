@@ -5,7 +5,7 @@
 
 use crate::{Error, interface::Id as InterfaceId};
 
-pub(crate) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {
+pub(super) fn validate(interface: &InterfaceId, source: &str) -> Result<(), Error> {
     if has_symbolic_operand(source) {
         return Err(Error::InvalidCaptureFilter {
             interface: interface.name.clone(),

@@ -23,8 +23,8 @@ impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
     const CANCELLATION: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.duration)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

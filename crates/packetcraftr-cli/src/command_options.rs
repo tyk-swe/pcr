@@ -41,8 +41,8 @@ pub(crate) use compression::{
 
 mod duration;
 pub(crate) use duration::{
-    MAX_MILLISECONDS as MAX_DURATION_MILLISECONDS, MaxDurationArgs, ProbeWindow, Probing, RunTime,
-    TimeoutArgs, Window,
+    Bounded, MAX_MILLISECONDS as MAX_DURATION_MILLISECONDS, MaxDurationArgs, ProbeWindow, Probing,
+    RunTime, TimeoutArgs, Window,
 };
 
 mod stream;

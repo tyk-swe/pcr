@@ -208,6 +208,12 @@ impl RunTime for Analysis {
     const HELP: &'static str = "Maximum analysis run time in milliseconds";
 }
 
+impl super::Bounded for OfflineLimitsArgs {
+    fn max_duration(&self) -> std::time::Duration {
+        self.duration.max_duration()
+    }
+}
+
 impl OfflineLimitsArgs {
     pub(crate) fn resources(&self, settings: &mut Settings<'_>, stages: AnalysisStages) {
         let AnalysisStages {

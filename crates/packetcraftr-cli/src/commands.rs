@@ -31,6 +31,7 @@ use serde::Serialize;
 use crate::output;
 use clap::Subcommand;
 
+use crate::command_options::Bounded;
 use crate::errors::CliError;
 use crate::rendering::{StreamEncoder, emit_aggregate, write_stdout_line};
 use crate::resources::Settings;
@@ -88,10 +89,16 @@ pub(crate) trait Spec: Sized {
     /// are physical-input settings rather than operation settings.
     const OFFLINE: bool = false;
 
+    /// The argument group whose `--max-duration-ms` bounds the command's run
+    /// time, if the command has one.
+    fn run_time(&self) -> Option<&dyn Bounded> {
+        None
+    }
+
     /// The operation deadline the invocation publishes under, if the command
     /// bounds its run time.
     fn publication_duration(&self) -> Option<Duration> {
-        None
+        self.run_time().map(Bounded::max_duration)
     }
 
     /// Declares the command's resource settings for `--resource-diagnostics`.

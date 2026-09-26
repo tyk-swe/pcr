@@ -31,8 +31,8 @@ impl super::Spec for Args {
     const CANCELLATION: bool = true;
     const OFFLINE: bool = true;
 
-    fn publication_duration(&self) -> Option<std::time::Duration> {
-        Some(self.limits.duration.max_duration())
+    fn run_time(&self) -> Option<&dyn crate::command_options::Bounded> {
+        Some(&self.limits)
     }
 
     fn resources(&self, settings: &mut crate::resources::Settings<'_>) {

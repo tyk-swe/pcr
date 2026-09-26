@@ -19,7 +19,7 @@ pub(crate) fn client(
     Client::new(registry, policy, SystemProviders)
         .with_runtime(crate::resources::runtime(
             runtime,
-            packetcraftr::progress::MAX_WORKER_CAPACITY,
+            packetcraftr::runtime::MAX_WORKER_CAPACITY,
         ))
         .with_cancellation(crate::cancellation::signal().clone())
 }

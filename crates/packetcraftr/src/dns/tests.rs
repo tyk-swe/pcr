@@ -12,7 +12,7 @@ use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::thread;
 use std::time::Instant;
 
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use bytes::Bytes;
 use packetcraftr_core::error::{Classification, Kind};
 use packetcraftr_core::layer::Raw;

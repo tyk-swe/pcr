@@ -39,8 +39,8 @@ pub struct Worker {
 }
 
 /// A callback runtime's admission sample, under its assembly owner's name.
-impl From<(&str, packetcraftr::progress::RuntimeSnapshot)> for Worker {
-    fn from((name, snapshot): (&str, packetcraftr::progress::RuntimeSnapshot)) -> Self {
+impl From<(&str, packetcraftr::runtime::RuntimeSnapshot)> for Worker {
+    fn from((name, snapshot): (&str, packetcraftr::runtime::RuntimeSnapshot)) -> Self {
         Self {
             name: name.to_owned(),
             supported: true,

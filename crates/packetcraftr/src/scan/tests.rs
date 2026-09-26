@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use super::Error;
 use crate::probe::test_support::{ProgressiveExecutor, private_policy};
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use crate::test_support::decoded_packet;
 use packetcraftr_core::error::{Classification as ErrorClassification, Kind};
 use packetcraftr_core::protocol::{

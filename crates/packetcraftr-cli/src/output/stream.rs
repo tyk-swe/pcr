@@ -9,7 +9,7 @@ use packetcraftr_core::budget::{Cancelled, Deadline, Interrupted};
 use packetcraftr_core::error::BoundaryError;
 
 use packetcraftr::deadline::DeadlineExt as _;
-use packetcraftr::progress::{Runtime, Worker};
+use packetcraftr::runtime::{Runtime, Worker};
 
 use serde::Serialize;
 

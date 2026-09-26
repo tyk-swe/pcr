@@ -28,7 +28,7 @@ pub(super) struct Providers {
     /// The capture bounds every exchange of the workflow collects under.
     pub(super) collection: packetcraftr::exchange::Collection,
     /// Admits the one callback worker NDJSON streaming publishes through.
-    pub(super) runtime: packetcraftr::progress::Runtime,
+    pub(super) runtime: packetcraftr::runtime::Runtime,
 }
 
 /// Validates the policy and interface selector, then composes the client and
@@ -63,7 +63,7 @@ pub(super) fn prepare(
         collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
         runtime: crate::resources::runtime(
             "workflow_progress",
-            packetcraftr::progress::MAX_WORKER_CAPACITY,
+            packetcraftr::runtime::MAX_WORKER_CAPACITY,
         ),
     })
 }

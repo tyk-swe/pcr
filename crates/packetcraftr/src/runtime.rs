@@ -227,7 +227,7 @@ impl<T: Send + 'static, A: Send + 'static> Worker<T, A> {
         // needed. Its permit remains owned by Worker until cleanup finishes.
         drop(
             thread::Builder::new()
-                .name("packetcraftr-progress".to_owned())
+                .name("packetcraftr-worker".to_owned())
                 .spawn(move || worker.run(receiver, outcomes))
                 .map_err(|source| {
                     BoundaryError::with_source(

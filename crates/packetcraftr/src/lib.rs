@@ -10,7 +10,7 @@
 //! `packetcraftr-netio` owns provider contracts and native resources.
 //!
 //! Live workflows run on a [`Client`]. It holds the [`policy::Policy`], the
-//! protocol registry, a [`clock::Clock`], the [`progress::Runtime`] that
+//! protocol registry, a [`clock::Clock`], the [`runtime::Runtime`] that
 //! admits event workers, and the [`Providers`] every workflow reaches the
 //! network through ([`SystemProviders`] is the native set). Each
 //! workflow is admitted by the client's policy, with finite resource limits,
@@ -66,10 +66,10 @@ mod planning;
 pub mod policy;
 mod preparation;
 pub mod probe;
-pub mod progress;
 mod providers;
 pub mod replay;
 pub mod route;
+pub mod runtime;
 pub mod scan;
 pub mod send;
 mod stats;

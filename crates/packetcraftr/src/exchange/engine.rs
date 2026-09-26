@@ -29,7 +29,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// before later requests, capture evidence when its classification is
     /// final, and unanswered requests after capture shutdown. `sink` runs on
     /// a one-event worker admitted by the client's
-    /// [`Runtime`](crate::progress::Runtime); a failure aborts later work. The
+    /// [`Runtime`](crate::runtime::Runtime); a failure aborts later work. The
     /// timeout bounds waiting for the sink, not the sink itself: once for the
     /// collection window and once more for the events published after it
     /// closes. A sink may finish after this method returns and holds one of

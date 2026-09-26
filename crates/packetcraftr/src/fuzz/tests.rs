@@ -16,7 +16,7 @@ use packetcraftr_netio::capture::MAX_CAPTURE_QUEUE_BYTES;
 use crate::clock::Clock;
 use crate::execution::{Executor, publisher};
 use crate::policy::{Authorizer, Operation, Policy};
-use crate::progress::Runtime;
+use crate::runtime::Runtime;
 use crate::test_support::{Call, FakeProviders, NoopClock};
 use crate::{BoundaryError, Client, Sink, Stats};
 

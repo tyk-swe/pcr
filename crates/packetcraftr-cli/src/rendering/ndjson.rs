@@ -6,7 +6,7 @@
 use std::io;
 use std::time::Duration;
 
-use packetcraftr::progress::{EmitError, Runtime, Worker};
+use packetcraftr::runtime::{EmitError, Runtime, Worker};
 use packetcraftr_core::budget::Deadline;
 
 use crate::errors::CliError;

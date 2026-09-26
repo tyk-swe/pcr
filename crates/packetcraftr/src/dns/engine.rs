@@ -52,7 +52,7 @@ impl<P: Providers, K: Clock> Client<P, K> {
     /// configured fallback reauthorize the selected numeric address, use only
     /// the time left in that attempt, and query over the client's TCP
     /// provider. `sink` runs on a one-event worker admitted by the client's
-    /// [`Runtime`](crate::progress::Runtime); `limits.max_duration` bounds
+    /// [`Runtime`](crate::runtime::Runtime); `limits.max_duration` bounds
     /// waiting for it and live I/O, not the sink itself. A sink failure
     /// prevents later retries, and a sink may finish after this method
     /// returns while it holds one of the runtime's worker permits.

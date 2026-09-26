@@ -301,13 +301,13 @@ fn publish_offline(
     emit: execution::Emit<core::fuzz::Case>,
 ) -> Result<core::fuzz::Summary, core::fuzz::Error> {
     let runtime =
-        crate::resources::runtime("fuzz_progress", packetcraftr::progress::MAX_WORKER_CAPACITY);
-    let worker = packetcraftr::progress::Worker::new_in(&runtime, emit)
+        crate::resources::runtime("fuzz_progress", packetcraftr::runtime::MAX_WORKER_CAPACITY);
+    let worker = packetcraftr::runtime::Worker::new_in(&runtime, emit)
         .map_err(|source| core::fuzz::Error::Output { source })?;
     core::fuzz::run_observed(request, packet, registry, |case, deadline| {
         worker.emit(case, deadline).map_err(|error| match error {
-            packetcraftr::progress::EmitError::Deadline(error) => error.into(),
-            packetcraftr::progress::EmitError::Output(source) => {
+            packetcraftr::runtime::EmitError::Deadline(error) => error.into(),
+            packetcraftr::runtime::EmitError::Output(source) => {
                 core::fuzz::Error::Output { source }
             }
             // A publication failure this command does not know yet.

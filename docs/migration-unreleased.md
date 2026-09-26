@@ -323,7 +323,7 @@ Pointer against the containing top-level field description before traversing its
 children. This only compacts discovery output; reflective paths keep their bounds.
 
 Live capture orchestration now lives in `packetcraftr::capture`, over
-`packetcraftr_netio::capture::group`. `capture::run` owns activation through cleanup,
+`packetcraftr_netio::capture::Group`. `capture::run` owns activation through cleanup,
 charges the shared `CaptureBudget` before selection, and reports per-source evidence.
 The CLI accepts repeated `--interface` flags. Live `frame.interface_id` and emitted
 frame interface values are capture IDs (0-based selected-interface order); completion
@@ -1088,3 +1088,45 @@ implements `Classified` for it. A provider with its own error type implements
 before; the old default was `io.route` (`Kind::Io`). A fake whose error was
 `std::io::Error` needs a local error type, because `Classified` is a core
 trait. A TCP fake that counted calls in a `Cell` uses an atomic instead.
+
+## Capture groups as sessions
+
+`capture::Group` is a composite `capture::Session`, so single and grouped
+capture share one contract. The `capture::group` module is private.
+
+| Before | After |
+|---|---|
+| `capture::group::{Request, Source, Phase, MAX_SOURCES}` | `capture::{GroupRequest, Source, Phase, MAX_SOURCES}` |
+| `Group::arm(&provider, &request, cancellation)?` | `let mut group = Group::new(&request, cancellation)?; group.arm(&provider)?;` |
+| `group.next_record(timeout)` returning `Record { source, captured }` | `group.next_captured_frame(timeout)` (`capture::Session`); the record's `source` field is the source index |
+| `group.shutdown()` returning `Vec<Source>` | `group.shutdown()` returning `()`, then `group.snapshot()` |
+| `group.shutdown_attempted()` | none; `shutdown` is safe to call after a failure and repeats its outcome |
+| `group::Error { sources, .. }` | `group.snapshot()`, readable after any failure, including an arming failure |
+| `group::Error { cleanup, .. }` | the `Err` of the following `group.shutdown()` |
+| `group::Cause::Invalid(reason)` | `Error::InvalidCaptureGroup { reason }` (`cli.capture_group`) |
+| `group::Cause::Configuration(error)` | `error` itself |
+| `group::Cause::Provider(Failure { index, interface, phase, source })` | `Error::CaptureSource { index, interface, phase, source }` |
+| `group::Cause::Contract { index, message }` | `Error::CaptureSourceContract { index, reason }` (`internal.capture_group`) |
+| `group::Cause::State` | `Error::CaptureGroupState` (`internal.capture_group`) |
+
+`Error` is `packetcraftr_netio::Error`. When stopping fails for more than one
+source, `shutdown` returns `Error::CaptureCleanup { first, remaining }`,
+classified as `first`, whose `causes()` list every failure. A group source
+failure's message names the source and phase; the source's own failure is its
+`#[source]` and decides the classification.
+
+`capture::Session` gains `source_count` (default 1) and `source_metadata`
+(default: `metadata()` for source 0), and `Captured` gains a public `source`
+field, set to 0 by its constructors. Existing single-source session fakes need
+no change. A group reports its first source through `metadata()`.
+
+`capture::Request::validate` checks limits, native settings, and the
+`capture::MAX_FILTER_BYTES` (64 KiB) filter limit. `capture::SystemProvider`
+runs it before opening an interface, and groups apply the same limit, so an
+oversized filter fails with `Error::CaptureFilterTooLong`
+(`cli.capture_filter`) either way.
+
+In `packetcraftr`, `capture::Cause::Native` holds `packetcraftr_netio::Error`
+(was `Box<group::Error>`), `capture::Error::cleanup` is
+`Vec<packetcraftr_netio::Error>` (was `Vec<group::Failure>`), and
+`scan::PipelineError::cleanup` is `Option<Box<packetcraftr_netio::Error>>`.

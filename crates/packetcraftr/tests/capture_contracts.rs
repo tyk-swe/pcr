@@ -10,7 +10,7 @@ use packetcraftr_core::{
 };
 use packetcraftr_netio::{
     self as net,
-    capture::{self as native, group::Request},
+    capture::{self as native, GroupRequest},
     interface::Id,
 };
 use std::{
@@ -50,6 +50,7 @@ struct Provider {
     stats: Vec<native::Statistics>,
     stops: Vec<Arc<AtomicUsize>>,
     opened: AtomicUsize,
+    fail_arm: Option<usize>,
 }
 impl Provider {
     fn new(count: usize) -> Self {
@@ -71,6 +72,7 @@ impl Provider {
             stats: vec![native::Statistics::default(); 2],
             stops: (0..2).map(|_| Arc::new(AtomicUsize::new(0))).collect(),
             opened: AtomicUsize::new(0),
+            fail_arm: None,
         }
     }
 }
@@ -78,6 +80,12 @@ impl native::Provider for Provider {
     type Capture = Session;
     fn arm_capture(&self, request: &native::Request) -> Result<Session, net::Error> {
         let index = self.opened.fetch_add(1, Ordering::SeqCst);
+        if self.fail_arm == Some(index) {
+            return Err(net::Error::Capture {
+                message: "fixture arm failure".to_owned(),
+                source: None,
+            });
+        }
         Ok(Session {
             metadata: native::Metadata {
                 interface: request.interface.clone(),
@@ -91,8 +99,8 @@ impl native::Provider for Provider {
         })
     }
 }
-fn request() -> Request {
-    Request {
+fn request() -> GroupRequest {
+    GroupRequest {
         interfaces: vec![
             Id {
                 index: 7,
@@ -267,4 +275,38 @@ fn each_interface_reports_its_own_loss_and_consumer_failure_stops_every_source()
             .iter()
             .all(|stop| stop.load(Ordering::SeqCst) == 1)
     );
+}
+#[test]
+fn an_arming_failure_reports_every_admitted_source_after_its_shutdown() {
+    let mut provider = Provider::new(1);
+    provider.fail_arm = Some(1);
+    let mut started = false;
+    let error = capture::run(
+        &provider,
+        &request(),
+        options(8, 64),
+        |_, _| Ok(true),
+        |_| {
+            started = true;
+            Ok(Control::Continue)
+        },
+    )
+    .unwrap_err();
+    assert!(!started, "a failed group never starts delivery");
+    assert_eq!(error.classification().code, "io.capture");
+    assert_eq!(
+        error.causes(),
+        ["capture failed: fixture arm failure"],
+        "the source's own failure survives the group failure"
+    );
+    assert_eq!(error.report.stop, StopReason::Failure);
+    assert_eq!(error.report.requested_interfaces.len(), 2);
+    let [admitted] = error.report.sources.as_slice() else {
+        panic!("only the first source was admitted");
+    };
+    assert_eq!(admitted.capture.metadata.interface.index, 7);
+    assert!(admitted.capture.shutdown_confirmed && admitted.capture.statistics_valid);
+    assert!(!error.report.capture_statistics_complete);
+    assert_eq!(provider.stops[0].load(Ordering::SeqCst), 1);
+    assert!(error.cleanup.is_empty());
 }

@@ -8,7 +8,7 @@ use crate::{
 };
 use packetcraftr_core::{field::FieldValue, packet::Packet};
 use packetcraftr_netio::{
-    capture::{self, group::MAX_SOURCES},
+    capture::{self, MAX_SOURCES},
     interface, route, transmit,
 };
 use std::{

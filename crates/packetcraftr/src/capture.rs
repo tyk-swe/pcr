@@ -13,7 +13,7 @@ use packetcraftr_core::{
     frame::Frame,
 };
 use packetcraftr_netio::{
-    capture::{self as native, group},
+    capture::{self as native, Group, GroupRequest, Session as _},
     interface::Id,
 };
 use std::time::{Duration, Instant};
@@ -40,7 +40,7 @@ pub enum Control {
 }
 #[derive(Clone, Debug)]
 pub struct Source {
-    pub capture: group::Source,
+    pub capture: native::Source,
     pub admitted_frames: u64,
     pub matched_frames: u64,
     pub emitted_frames: u64,
@@ -61,7 +61,7 @@ pub struct Report {
 pub enum Event {
     /// All admitted source metadata is available before the first frame. The
     /// zero-window case has activated metadata but does not claim readiness.
-    Started { sources: Vec<group::Source> },
+    Started { sources: Vec<native::Source> },
     Frame {
         source_frame: u64,
         source: usize,
@@ -73,7 +73,7 @@ pub enum Event {
 #[non_exhaustive]
 pub enum Cause {
     #[error(transparent)]
-    Native(Box<group::Error>),
+    Native(packetcraftr_netio::Error),
     #[error(transparent)]
     Budget(#[from] crate::policy::Error),
     #[error(transparent)]
@@ -94,7 +94,7 @@ pub enum Cause {
 impl Classified for Cause {
     fn classification(&self) -> Classification {
         match self {
-            Self::Native(error) => error.classification(),
+            Self::Native(error) | Self::Loss { error, .. } => error.classification(),
             Self::Budget(error) => error.classification(),
             Self::Cancelled(error) => error.classification(),
             Self::Consumer(error) => error.classification(),
@@ -102,7 +102,6 @@ impl Classified for Cause {
             Self::Statistics => {
                 Classification::new("internal.capture_statistics", Kind::Internal, None)
             }
-            Self::Loss { error, .. } => error.classification(),
         }
     }
 }
@@ -112,7 +111,8 @@ pub struct Error {
     #[source]
     pub cause: Box<Cause>,
     pub report: Box<Report>,
-    pub cleanup: Vec<group::Failure>,
+    /// Capture shutdown failures that followed the primary failure.
+    pub cleanup: Vec<packetcraftr_netio::Error>,
     pub source_frame: Option<u64>,
 }
 impl Classified for Error {
@@ -127,9 +127,13 @@ impl Classified for Error {
             // A boundary error carries a captured causes snapshot that its own
             // source chain no longer holds.
             Cause::Consumer(error) => error.causes(),
+            Cause::Native(error) => error.causes(),
             _ => packetcraftr_core::error::source_chain(self),
         };
-        causes.extend(self.cleanup.iter().map(ToString::to_string));
+        for failure in &self.cleanup {
+            causes.push(failure.to_string());
+            causes.extend(failure.causes());
+        }
         causes
     }
 }
@@ -139,7 +143,7 @@ impl Classified for Error {
 /// A pre-spent budget remains shared; report statistics are deltas for this run.
 pub fn run<P, S, F>(
     provider: &P,
-    request: &group::Request,
+    request: &GroupRequest,
     options: Options,
     mut select: S,
     mut emit: F,
@@ -186,12 +190,12 @@ where
             report.stop = StopReason::Window;
             break;
         };
-        let record = match group.next_record(remaining.min(Duration::from_millis(50))) {
+        let record = match group.next_captured_frame(remaining.min(Duration::from_millis(50))) {
             Ok(Some(record)) => record,
             Ok(None) => continue,
             Err(error) => {
                 source_frame = report.frames_delivered.checked_add(1);
-                primary = Some(Cause::Native(Box::new(error)));
+                primary = Some(Cause::Native(error));
                 break;
             }
         };
@@ -207,7 +211,7 @@ where
             source_frame = None;
             break;
         }
-        let mut frame = record.captured.frame;
+        let mut frame = record.frame;
         frame.interface = Some(record.source as u32);
         if let Err(error) = report.budget.account(u64::from(frame.captured_length())) {
             primary = Some(Cause::Budget(error));
@@ -247,27 +251,18 @@ where
             }
         }
     }
+    // A group failure already shut every source down; this reports that
+    // cleanup, or performs it after any other exit.
     let mut cleanup = Vec::new();
-    if let Some(Cause::Native(error)) = &primary {
-        // Group failures already completed the entire shutdown attempt.
-        replace_sources(&mut report, &error.sources);
-    } else {
-        match group.shutdown() {
-            Ok(sources) => replace_sources(&mut report, &sources),
-            Err(error) => {
-                replace_sources(&mut report, &error.sources);
-                if primary.is_none() {
-                    primary = Some(Cause::Native(Box::new(error)));
-                    source_frame = None;
-                } else {
-                    if let group::Cause::Provider(failure) = *error.cause {
-                        cleanup.push(failure);
-                    }
-                    cleanup.extend(error.cleanup);
-                }
-            }
+    if let Err(error) = group.shutdown() {
+        if primary.is_none() {
+            primary = Some(Cause::Native(error));
+            source_frame = None;
+        } else {
+            cleanup.push(error);
         }
     }
+    replace_sources(&mut report, &group.snapshot());
     if !finish_stats(&mut report, initial, started) && primary.is_none() {
         primary = Some(Cause::Statistics);
     }
@@ -303,27 +298,28 @@ where
         Ok(report)
     }
 }
-/// The capture after activation: the armed group, the report skeleton, the
-/// capture deadline, and the first activation failure if `wait_ready` or the
-/// window produced one.
+/// The capture after activation: the group, the report skeleton, the
+/// capture deadline, and the first activation failure if arming,
+/// `wait_ready`, or the window produced one.
 struct Armed<C: native::Session> {
-    group: group::Group<C>,
+    group: Group<C>,
     report: Report,
     deadline: Instant,
     primary: Option<Cause>,
 }
 
 /// Validates the request, builds the report skeleton, arms the capture
-/// group, and waits for it to become ready. Every failure path already
-/// carries the partially built report inside its error.
+/// group, and waits for it to become ready. A failure before the group
+/// exists carries the report skeleton inside its error; a later one becomes
+/// the primary failure of the returned group.
 fn armed<P: native::Provider>(
     provider: &P,
-    request: &group::Request,
+    request: &GroupRequest,
     options: &Options,
     started: Instant,
 ) -> Result<Armed<P::Capture>, Error> {
     let validated = request.validate();
-    let mut report = Report {
+    let report = Report {
         requested_interfaces: if validated.is_ok() {
             request.interfaces.clone()
         } else {
@@ -338,7 +334,7 @@ fn armed<P: native::Provider>(
         diagnostics: Vec::new(),
     };
     if let Err(error) = validated {
-        return Err(failure(Cause::Native(Box::new(error)), report, None));
+        return Err(failure(Cause::Native(error), report, None));
     }
     if options.window > native::MAX_TIMEOUT || started.checked_add(options.window).is_none() {
         return Err(failure(
@@ -352,24 +348,20 @@ fn armed<P: native::Provider>(
     {
         return Err(failure(Cause::Cancelled(error), report, None));
     }
-    let mut group = match group::Group::arm(provider, request, options.cancellation.clone()) {
+    let mut group = match Group::new(request, options.cancellation.clone()) {
         Ok(group) => group,
-        Err(error) => {
-            replace_sources(&mut report, &error.sources);
-            finish_stats(&mut report, options.budget, started);
-            return Err(failure(Cause::Native(Box::new(error)), report, None));
-        }
+        Err(error) => return Err(failure(Cause::Native(error), report, None)),
     };
     let deadline = started + options.window;
-    let mut primary = None;
-    if !options.window.is_zero() {
+    let mut primary = group.arm(provider).err().map(Cause::Native);
+    if primary.is_none() && !options.window.is_zero() {
         match deadline
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
         {
             Some(remaining) => {
                 if let Err(error) = group.wait_ready(remaining) {
-                    primary = Some(Cause::Native(Box::new(error)));
+                    primary = Some(Cause::Native(error));
                 }
             }
             None => primary = Some(Cause::Invalid("capture window expired during activation")),
@@ -391,7 +383,7 @@ fn failure(cause: Cause, report: Report, source_frame: Option<u64>) -> Error {
         source_frame,
     }
 }
-fn replace_sources(report: &mut Report, sources: &[group::Source]) {
+fn replace_sources(report: &mut Report, sources: &[native::Source]) {
     for source in sources {
         if let Some(existing) = report.sources.get_mut(source.index) {
             existing.capture = source.clone();

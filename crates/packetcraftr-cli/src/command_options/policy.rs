@@ -240,7 +240,7 @@ mod tests {
     use clap::Parser as _;
 
     use crate::cli::Cli;
-    use crate::commands::Command;
+    use crate::commands::CommandLine;
 
     #[test]
     fn destination_allowlists_parse_and_reject_malformed_entries() {
@@ -256,7 +256,7 @@ mod tests {
             "2001:db8::1",
         ])
         .expect("allowlist entries parse");
-        let Command::Scan(scan) = cli.command else {
+        let CommandLine::Scan(scan) = cli.command else {
             panic!("scan command")
         };
         assert_eq!(scan.policy.into_policy().allowed_destinations.len(), 2);
@@ -288,7 +288,7 @@ mod tests {
             "7",
         ])
         .expect("replay defaults parse");
-        let Command::Replay(default) = default.command else {
+        let CommandLine::Replay(default) = default.command else {
             panic!("replay command")
         };
         assert!(!default.policy.into_policy().allow_source_spoofing);
@@ -302,7 +302,7 @@ mod tests {
             "--allow-source-spoofing",
         ])
         .expect("replay source-spoofing opt-in parses");
-        let Command::Replay(opted_in) = opted_in.command else {
+        let CommandLine::Replay(opted_in) = opted_in.command else {
             panic!("replay command")
         };
         assert!(opted_in.policy.into_policy().allow_source_spoofing);

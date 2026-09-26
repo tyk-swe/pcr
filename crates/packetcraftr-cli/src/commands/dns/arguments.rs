@@ -109,13 +109,13 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
-    use crate::commands::Command;
+    use crate::commands::CommandLine;
 
     fn dns_args(extra: &[&str]) -> Args {
         let mut command = vec!["packetcraftr", "dns", "192.0.2.53", "example.test"];
         command.extend_from_slice(extra);
         let parsed = Cli::try_parse_from(command).expect("DNS arguments parse");
-        let Command::Dns(arguments) = parsed.command else {
+        let CommandLine::Dns(arguments) = parsed.command else {
             panic!("fixture must select DNS")
         };
         arguments

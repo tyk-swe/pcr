@@ -419,9 +419,7 @@ fn text_record_with(
     let result = output_frame(evidence)?;
     write_line(format_args!("{}", rendering::frame_line(&result))).map_err(|source| match source {
         HumanWriteError::Interrupted(interrupted) => BoundaryError::from_error(interrupted),
-        HumanWriteError::Write(source) => {
-            output_failure("write stdout failed", source)
-        }
+        HumanWriteError::Write(source) => output_failure("write stdout failed", source),
     })
 }
 

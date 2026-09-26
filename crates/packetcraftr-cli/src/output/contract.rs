@@ -18,7 +18,7 @@ pub const SCHEMA_V6: &str = "packetcraftr.output/v6";
 /// [`Command::formats`] come from the one command declaration in the CLI's
 /// command module, so the published vocabulary and the parsed command line
 /// cannot drift apart.
-pub use crate::commands::Kind as Command;
+pub use crate::commands::Command;
 
 impl Command {
     /// Rejects unsupported combinations before a command performs I/O,

@@ -230,7 +230,7 @@ mod tests {
 
     use super::*;
     use crate::cli::Cli;
-    use crate::commands::Command;
+    use crate::commands::CommandLine;
 
     const INVALID_RECIPE: &str = "ipv4(dst=192.0.2.1";
 
@@ -238,8 +238,8 @@ mod tests {
         let cli = Cli::try_parse_from(["packetcraftr", command, "--packet", INVALID_RECIPE])
             .expect("arguments parse");
         match cli.command {
-            Command::Send(arguments) => (arguments.send, arguments.template),
-            Command::Exchange(arguments) => (arguments.send, arguments.template),
+            CommandLine::Send(arguments) => (arguments.send, arguments.template),
+            CommandLine::Exchange(arguments) => (arguments.send, arguments.template),
             _ => panic!("live command"),
         }
     }

@@ -25,7 +25,7 @@
 use std::time::Duration;
 
 use crate::output::contract::{Format, FormatSubset};
-use packetcraftr_core::error::Kind as ErrorKind;
+use packetcraftr_core::error::Kind;
 use serde::Serialize;
 
 use crate::output;
@@ -104,7 +104,7 @@ pub(crate) trait Spec: Sized {
 /// Declares every command once, in `--help` order.
 ///
 /// A variant with a published name is an output-contract command: it gets a
-/// [`Kind`] variant serialized under that name, which is also its
+/// [`Command`] variant serialized under that name, which is also its
 /// command-line name, and startup publishes it through the contract. A
 /// variant without one (`documentation`) writes files instead of contract
 /// output, so it has no kind.
@@ -115,7 +115,7 @@ macro_rules! commands {
         $launch.generate($arguments)
     };
     (@start $launch:ident, $arguments:ident, $variant:ident, $name:literal) => {
-        $launch.publish(Kind::$variant, $arguments)
+        $launch.publish(Command::$variant, $arguments)
     };
     // Expands to `$item`; naming `$name` makes the item repeat once per
     // published command only.
@@ -126,8 +126,9 @@ macro_rules! commands {
             $variant:ident($arguments:ty) $(= $name:literal)?,
         )*
     ) => {
+        /// The parsed subcommand with its arguments.
         #[derive(Debug, Subcommand)]
-        pub(crate) enum Command {
+        pub(crate) enum CommandLine {
             $(
                 $(#[$attribute])*
                 $(#[command(name = $name)])?
@@ -135,7 +136,7 @@ macro_rules! commands {
             )*
         }
 
-        impl Command {
+        impl CommandLine {
             /// Whether `--resource-preset` applies to this command.
             pub(crate) const fn offline(&self) -> bool {
                 match self {
@@ -156,13 +157,14 @@ macro_rules! commands {
         }
 
         /// CLI command identifier frozen into the output schema: every command
-        /// that publishes through the output contract.
+        /// that publishes through the output contract. The output contract
+        /// publishes it as `output::contract::Command`.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-        pub enum Kind {
+        pub enum Command {
             $( $( #[serde(rename = $name)] $variant, )? )*
         }
 
-        impl Kind {
+        impl Command {
             /// Complete command vocabulary, in `--help` order.
             pub const ALL: &'static [Self] = &[
                 $( $( commands!(@published $name, Self::$variant), )? )*
@@ -284,7 +286,7 @@ commands! {
 /// Runs one contract command: enters its publication deadline, rejects an
 /// unsupported output format before any work, and dispatches.
 pub(crate) fn execute<T: Spec>(
-    kind: Kind,
+    kind: Command,
     arguments: T,
     format: Format,
     stream: &StreamEncoder,
@@ -342,7 +344,7 @@ fn render_aggregate_rows<T, R: serde::Serialize>(
 fn increment_counter(value: u64, counter: &'static str) -> Result<u64, CliError> {
     value
         .checked_add(1)
-        .ok_or_else(|| CliError::new(ErrorKind::Internal, format!("{counter} overflowed")))
+        .ok_or_else(|| CliError::new(Kind::Internal, format!("{counter} overflowed")))
 }
 
 #[cfg(test)]
@@ -500,7 +502,7 @@ mod tests {
             .iter()
             .map(|(argv, _)| argv[0])
             .collect::<BTreeSet<_>>();
-        let published = Kind::ALL
+        let published = Command::ALL
             .iter()
             .map(|kind| kind.as_str())
             .collect::<BTreeSet<_>>();
@@ -513,12 +515,12 @@ mod tests {
         let cli = <Cli as clap::Parser>::try_parse_from(arguments)
             .expect("command must parse with defaults");
         let policy = match cli.command {
-            Command::Send(send) => send.send.policy.into_policy(),
-            Command::Exchange(exchange) => exchange.send.policy.into_policy(),
-            Command::Scan(scan) => scan.policy.into_policy(),
-            Command::Fuzz(fuzz) => fuzz.policy.into_policy(),
-            Command::Replay(replay) => replay.policy.into_policy(),
-            Command::Capture(capture) => capture.budgets.into_policy(),
+            CommandLine::Send(send) => send.send.policy.into_policy(),
+            CommandLine::Exchange(exchange) => exchange.send.policy.into_policy(),
+            CommandLine::Scan(scan) => scan.policy.into_policy(),
+            CommandLine::Fuzz(fuzz) => fuzz.policy.into_policy(),
+            CommandLine::Replay(replay) => replay.policy.into_policy(),
+            CommandLine::Capture(capture) => capture.budgets.into_policy(),
             other => panic!("unbudgeted command {other:?}"),
         };
         (

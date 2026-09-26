@@ -2,7 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use crate::analysis::Constraint;
+
+/// An idle expiry the monotonic clock cannot add to the present, which could
+/// never be scheduled, with the value to report.
+pub(super) fn violation(expiry: Duration) -> Option<(u64, Constraint)> {
+    Instant::now().checked_add(expiry).is_none().then(|| {
+        (
+            u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
+            Constraint::WithinClockRange,
+        )
+    })
+}
 
 /// Deadlines paired one-for-one with retained reassembly states.
 #[derive(Debug)]

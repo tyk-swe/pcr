@@ -21,6 +21,7 @@ pub use model::{
 
 mod engine;
 mod limits;
+pub(crate) use limits::Field;
 pub use limits::Limits;
 
 // This deliberately coarse reservation covers the hash-table key/state and
@@ -233,7 +234,7 @@ mod tests {
         let now = Instant::now();
         let later = ipv6_fragment(1, b"ijklmnop");
         let first = ipv6_fragment(0, b"abcdefgh");
-        let mut roomy = Reassembler::new(Limits::default(), OverlapPolicy::Reject);
+        let mut roomy = Reassembler::new(Limits::default(), OverlapPolicy::Reject).unwrap();
         roomy.push(later.clone(), now).expect("later fragment fits");
         // The offset-zero prefix is copied while the provisional one is still
         // retained, beside the one merged range and its 16-byte union.
@@ -246,7 +247,8 @@ mod tests {
                     ..Limits::default()
                 },
                 OverlapPolicy::Reject,
-            );
+            )
+            .unwrap();
             reassembler
                 .push(later.clone(), now)
                 .expect("later fragment fits");

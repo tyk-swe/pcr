@@ -35,8 +35,10 @@ fuzz_target!(|data: &[u8]| {
             Bytes::copy_from_slice(payload),
         ) {
             let options = DecodeOptions {
-                max_layers: 16,
-                max_packet_size: 64 * 1024,
+                limits: packetcraftr_core::packet::Limits {
+                    max_layers: 16,
+                    max_packet_size: 64 * 1024,
+                },
             };
             if let Ok(decoded) = dissector.decode(frame, options) {
                 // Reflective field access on every decoded layer must not panic

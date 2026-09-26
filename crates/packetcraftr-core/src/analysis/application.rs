@@ -17,7 +17,8 @@ use crate::{
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Copy, Debug)]
+/// Ceilings for one DNS or HTTP application-analysis run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Distinct application messages the collector may count across all
     /// streams over the whole run: HTTP counts a message when its first byte
@@ -97,7 +98,9 @@ impl Classified for Error {
     }
 }
 impl Limits {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    /// Rejects a zero limit and one above its fixed ceiling. The DNS and
+    /// HTTP collectors call it before reading input.
+    pub fn validate(&self) -> Result<(), Error> {
         for (field, value, maximum) in [
             ("max_messages", self.max_messages, 100_000),
             ("max_streams", self.max_streams, 100_000),

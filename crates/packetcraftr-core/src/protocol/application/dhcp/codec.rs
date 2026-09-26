@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
-use super::{Error, Limit, Limits};
+use super::{Error, Limit, Limits, MAX_MESSAGE_BYTES};
 use crate::{
     codec::{DecodedLayer, EncodedLayer, LayerEncodeContext},
     field::FieldValue,
@@ -38,7 +38,8 @@ pub(super) fn encode<M: Message>(
     let layer = typed_layer::<M>(M::NAME, layer)?;
     let wire = layer
         .encode_wire(Limits {
-            max_message_bytes: context.remaining_packet_bytes,
+            // The packet may have room for more than one DHCP message can use.
+            max_message_bytes: context.remaining_packet_bytes.min(MAX_MESSAGE_BYTES),
             ..Default::default()
         })
         .map_err(|error| rejected(M::NAME, error))?;
@@ -93,12 +94,10 @@ pub(super) struct Budget {
     options: usize,
 }
 impl Budget {
+    /// A budget for one message of `length` bytes, after
+    /// [`Limits::validate`] accepts `limits`.
     pub(super) fn new(limits: Limits, length: usize) -> Result<Self, Error> {
-        let limits = Limits {
-            max_message_bytes: limits.max_message_bytes.min(65_535),
-            max_options: limits.max_options.min(4096),
-            max_nesting: limits.max_nesting.min(8),
-        };
+        limits.validate()?;
         if length > limits.max_message_bytes {
             return Err(Error::Limit(Limit::MessageBytes));
         }

@@ -27,7 +27,10 @@ fn budget_reduced_derived_layer_limit_keeps_resource_classification() {
         registry,
         &Options {
             limits: Limits {
-                max_ip_reassembly_bytes: 10_000,
+                ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+                    max_aggregate_bytes: 10_000,
+                    ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+                },
                 ..Limits::default()
             },
             ..Options::default()
@@ -77,8 +80,11 @@ fn idle_expiry_is_delivered_before_a_failing_fragment_push() {
         ),
     ];
     let limits = Limits {
-        max_ip_bytes_per_datagram: 8,
-        ip_idle_expiry: Duration::from_secs(1),
+        ip: packetcraftr_core::analysis::reassembly::ip::Limits {
+            max_bytes_per_datagram: 8,
+            idle_expiry: Duration::from_secs(1),
+            ..packetcraftr_core::analysis::reassembly::ip::Limits::default()
+        },
         ..Limits::default()
     };
     let mut capture = reader_with_link_type(LinkType::IPV4, &frames);

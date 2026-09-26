@@ -70,7 +70,7 @@ pub(super) fn run(
     let request = prepare_request(&arguments)?;
     let live = prepare_live(&arguments, &request)?;
     let registry = packetcraftr_core::protocol::builtin::registry();
-    let packet = read_recipe(arguments.recipe, &registry, request.build.max_layers)?;
+    let packet = read_recipe(arguments.recipe, &registry, request.build.limits.max_layers)?;
     execute_and_render(request, packet, registry, live, format, stream)
 }
 
@@ -97,8 +97,10 @@ fn prepare_request(arguments: &Args) -> Result<core::fuzz::Request, CliError> {
         targets,
         build: core::build::Options {
             mode: arguments.mode.into(),
-            max_packet_size: arguments.max_packet_bytes,
-            ..core::build::Options::default()
+            limits: core::packet::Limits {
+                max_packet_size: arguments.max_packet_bytes,
+                ..core::packet::Limits::default()
+            },
         },
         limits: core::fuzz::Limits {
             max_cases: arguments.max_cases,

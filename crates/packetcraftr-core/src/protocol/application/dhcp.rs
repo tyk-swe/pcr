@@ -16,19 +16,55 @@ pub use v4::{Dhcpv4, Option4, Value4};
 pub(crate) use v6::Dhcpv6Codec;
 pub use v6::{Dhcpv6, Duid, Option6, Value6};
 
-#[derive(Clone, Copy, Debug)]
+/// Largest accepted [`Limits::max_message_bytes`]: one UDP payload.
+pub const MAX_MESSAGE_BYTES: usize = 65_535;
+/// Largest accepted [`Limits::max_options`].
+pub const MAX_OPTIONS: usize = 4_096;
+/// Largest accepted [`Limits::max_nesting`].
+pub const MAX_NESTING: usize = 8;
+
+/// Ceilings for decoding or encoding one DHCP message. Each is at most its
+/// `MAX_*` constant; [`Limits::validate`] refuses a larger one rather than
+/// lowering it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// At most [`MAX_MESSAGE_BYTES`].
     pub max_message_bytes: usize,
+    /// Options counted across every nesting level, at most [`MAX_OPTIONS`].
     pub max_options: usize,
+    /// Encapsulated option and relay depth, at most [`MAX_NESTING`].
     pub max_nesting: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_message_bytes: 65_535,
+            max_message_bytes: MAX_MESSAGE_BYTES,
             max_options: 512,
-            max_nesting: 8,
+            max_nesting: MAX_NESTING,
         }
+    }
+}
+impl Limits {
+    /// Rejects a ceiling above its `MAX_*` constant.
+    pub fn validate(&self) -> Result<(), Error> {
+        for (limit, value, maximum) in [
+            (
+                Limit::MessageBytes,
+                self.max_message_bytes,
+                MAX_MESSAGE_BYTES,
+            ),
+            (Limit::OptionCount, self.max_options, MAX_OPTIONS),
+            (Limit::OptionNesting, self.max_nesting, MAX_NESTING),
+        ] {
+            if value > maximum {
+                return Err(Error::InvalidLimit {
+                    limit,
+                    value,
+                    maximum,
+                });
+            }
+        }
+        Ok(())
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -44,6 +80,13 @@ pub enum Error {
     },
     #[error("invalid DHCP value: {0}")]
     Invalid(&'static str),
+    /// A configured [`Limits`] field above its ceiling.
+    #[error("DHCP {limit} limit {value} exceeds the maximum of {maximum}")]
+    InvalidLimit {
+        limit: Limit,
+        value: usize,
+        maximum: usize,
+    },
 }
 /// The DHCP bound an [`Error::Limit`] exceeds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,7 +123,9 @@ impl crate::error::Classified for Error {
     fn classification(&self) -> crate::error::Classification {
         use crate::error::{Classification, Kind};
         match self {
-            Self::Limit(_) => Classification::new("policy.dhcp_limit", Kind::Policy, None),
+            Self::Limit(_) | Self::InvalidLimit { .. } => {
+                Classification::new("policy.dhcp_limit", Kind::Policy, None)
+            }
             _ => Classification::new("packet.dhcp", Kind::Packet, None),
         }
     }

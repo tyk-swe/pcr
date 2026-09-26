@@ -9,7 +9,7 @@ use packetcraftr_core::{
     layer::{Layer, Malformed, Raw},
     packet::Packet,
     protocol::{
-        application::dns::{DecodeLimits, Dns, Error as DecodeError, Name, RecordValue},
+        application::dns::{self, DecodeLimits, Dns, Error as DecodeError, Name, RecordValue},
         builtin,
         network::Ipv4,
         transport::Udp,
@@ -358,17 +358,55 @@ fn every_message_record_name_and_txt_bound_is_enforced() {
         Name::from_labels(std::iter::repeat(Bytes::from_static(b"a"))),
         Err(DecodeError::NameTooLong)
     ));
-    let unbounded = DecodeLimits {
-        max_message_bytes: usize::MAX,
-        ..defaults
-    };
-    assert!(matches!(
-        Dns::from_wire_with_limits(vec![0; 65_536], unbounded),
-        Err(DecodeError::MessageTooLarge {
-            maximum: 65_535,
-            ..
-        })
-    ));
+    // A limit above its ceiling is refused, never lowered to the ceiling.
+    for (field, limits) in [
+        (
+            "max_message_bytes",
+            DecodeLimits {
+                max_message_bytes: dns::MAX_MESSAGE_BYTES + 1,
+                ..defaults
+            },
+        ),
+        (
+            "max_records",
+            DecodeLimits {
+                max_records: dns::MAX_RECORDS + 1,
+                ..defaults
+            },
+        ),
+        (
+            "max_name_pointers",
+            DecodeLimits {
+                max_name_pointers: dns::MAX_NAME_POINTERS + 1,
+                ..defaults
+            },
+        ),
+        (
+            "max_txt_strings",
+            DecodeLimits {
+                max_txt_strings: dns::MAX_RECORDS + 1,
+                ..defaults
+            },
+        ),
+        (
+            "max_txt_bytes",
+            DecodeLimits {
+                max_txt_bytes: dns::MAX_MESSAGE_BYTES + 1,
+                ..defaults
+            },
+        ),
+    ] {
+        let refused = Dns::from_wire_with_limits(response(), limits).unwrap_err();
+        assert!(
+            matches!(&refused, DecodeError::InvalidLimit { field: actual, .. } if *actual == field),
+            "{refused:?}"
+        );
+        assert_eq!(limits.validate(), Err(refused.clone()));
+        assert_eq!(
+            packetcraftr_core::error::Classified::classification(&refused).code,
+            "policy.dns_limit"
+        );
+    }
 }
 
 #[test]

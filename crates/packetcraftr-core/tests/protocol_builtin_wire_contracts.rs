@@ -192,8 +192,10 @@ fn dissection_limits_reject_before_parsing() {
         .decode(
             frame,
             decode::Options {
-                max_packet_size: 19,
-                ..decode::Options::default()
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 19,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
             },
         )
         .expect_err("oversized input must be rejected before codec traversal");

@@ -34,10 +34,17 @@ pub fn options() -> analysis::Options<'static> {
             max_flows: 16,
             max_scope_bytes: 1024 * 1024,
             max_provenance_bytes: 2 * 1024 * 1024,
-            max_tcp_bytes_per_flow: 64 * 1024,
-            max_tcp_reassembly_bytes: 1024 * 1024,
-            max_tcp_segments_per_flow: 512,
-            max_ip_reassembly_bytes: 1024 * 1024,
+            tcp: analysis::reassembly::tcp::Limits {
+                max_flows: 32,
+                max_bytes_per_flow: 64 * 1024,
+                max_aggregate_bytes: 1024 * 1024,
+                max_segments_per_flow: 512,
+                ..analysis::reassembly::tcp::Limits::default()
+            },
+            ip: analysis::reassembly::ip::Limits {
+                max_aggregate_bytes: 1024 * 1024,
+                ..analysis::reassembly::ip::Limits::default()
+            },
             max_duration: Duration::from_secs(1),
             ..analysis::Limits::default()
         },

@@ -94,7 +94,11 @@ impl HeaderRewrite {
         Ok(())
     }
 }
-#[derive(Clone, Copy, Debug)]
+/// Ceilings for one [`rewrite`].
+///
+/// Every value is honored as given, so there is nothing to validate: a frame
+/// longer than `max_output_bytes` is refused, and zero refuses every frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RewriteLimits {
     pub max_output_bytes: usize,
 }

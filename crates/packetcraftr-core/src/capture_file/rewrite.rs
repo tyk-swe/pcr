@@ -3,7 +3,9 @@
 
 use std::io::{Read, Write};
 
-use super::{Error, Limits, MetadataBlockKind, Reader, RecordKind, RewriteReport, SelectionReport};
+use super::{
+    Budget, Error, Limits, MetadataBlockKind, Reader, RecordKind, RewriteReport, SelectionReport,
+};
 use crate::{error::BoundaryError, frame::Frame};
 
 /// Rewrites a capture without changing its format or dropping source records.
@@ -58,6 +60,7 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
     selecting: bool,
     mut predicate: impl FnMut(u64, &Frame) -> Result<bool, E>,
 ) -> Result<(W, SelectionReport), E> {
+    let mut budget = Budget::new(limits)?;
     let mut report = SelectionReport {
         format: reader.format(),
         frames_read: 0,
@@ -76,11 +79,9 @@ fn copy_records<R: Read, W: Write, E: From<Error>>(
     }
     while let Some(record) = reader.next_record()? {
         if let Some(frame) = record.frame.as_ref() {
-            (report.frames_read, report.captured_bytes_read) = limits.advance(
-                report.frames_read,
-                report.captured_bytes_read,
-                frame.captured_length(),
-            )?;
+            budget.charge(frame.captured_length())?;
+            (report.frames_read, report.captured_bytes_read) =
+                (budget.frames(), budget.captured_bytes());
             if !predicate(report.frames_read, frame)? {
                 continue;
             }

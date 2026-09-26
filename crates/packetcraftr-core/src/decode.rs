@@ -33,13 +33,13 @@ impl Dissector {
     }
 
     pub fn decode(&self, frame: Frame, options: Options) -> Result<DecodedPacket, Error> {
-        if options.max_layers == 0 {
+        if options.limits.max_layers == 0 {
             return Err(Error::LayerLimit { limit: 0 });
         }
-        if frame.bytes().len() > options.max_packet_size {
+        if frame.bytes().len() > options.limits.max_packet_size {
             return Err(Error::PacketSizeLimit {
                 actual: frame.bytes().len(),
-                limit: options.max_packet_size,
+                limit: options.limits.max_packet_size,
             });
         }
         let Some(root) = self.registry.root_for_link_type(frame.link_type) else {

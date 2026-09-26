@@ -6,8 +6,8 @@ use super::wire::{
     PCAPNG_OPTION_END, PCAPNG_OPTION_IF_FCSLEN, PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL,
 };
 use super::{
-    CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption, Reader,
-    RecordKind, Writer,
+    Budget, CaptureHeader, Error, Format, Interface, Limits, MetadataBlockKind, PcapNgOption,
+    Reader, RecordKind, Writer,
 };
 use crate::{error::BoundaryError, frame::Frame};
 use std::io::{Read, Write};
@@ -36,6 +36,7 @@ pub fn map_frames<R: Read, W: Write, F>(
 where
     F: FnMut(u64, &Frame) -> Result<Frame, BoundaryError>,
 {
+    let mut budget = Budget::new(limits)?;
     if output.format() != Format::PcapNg {
         return Err(Error::WrongWriterFormat {
             expected: Format::PcapNg,
@@ -96,11 +97,9 @@ where
                 let frame = record
                     .frame
                     .ok_or(Error::TransformMetadata("packet record without frame"))?;
-                (report.frames_read, report.captured_bytes_read) = limits.advance(
-                    report.frames_read,
-                    report.captured_bytes_read,
-                    frame.captured_length(),
-                )?;
+                budget.charge(frame.captured_length())?;
+                (report.frames_read, report.captured_bytes_read) =
+                    (budget.frames(), budget.captured_bytes());
                 let mut changed =
                     map(report.frames_read, &frame).map_err(|source| Error::Transform {
                         number: report.frames_read,

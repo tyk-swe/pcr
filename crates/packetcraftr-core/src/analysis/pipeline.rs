@@ -22,7 +22,7 @@ use crate::analysis::adapter::{
 use crate::analysis::conversation_index::StreamIndex;
 use crate::analysis::reassembly::ip::{CompletedDatagram, DatagramKey, Resource as IpResource};
 use crate::analysis::reassembly::tcp::{Event as TcpEvent, ScopedFlowKey};
-use crate::analysis::scope::{Interner, Limits as ScopeLimits, ScopeId};
+use crate::analysis::scope::{Interner, Limits as ScopeLimits, MAX_SCOPES, ScopeId};
 use crate::frame::{Frame, LinkType};
 use crate::protocol::transport::Tcp;
 
@@ -249,8 +249,9 @@ pub struct Summary {
 /// Dispatches matched frames to `sink`: dissects under
 /// `limits.max_frame_bytes`, updates capture-global IP state and conversation
 /// indices, filters, then drives TCP reassembly. Enforces aggregate frame,
-/// byte, flow, and processing-duration budgets; reader options bound individual
-/// frames and interfaces.
+/// byte, flow, and processing-duration limits; the reader's own
+/// [`ReaderLimits`](crate::capture_file::ReaderLimits) bound individual frames
+/// and interfaces.
 ///
 /// Reassembly idle expiry follows capture timestamps, independent of wall-clock
 /// time.
@@ -340,37 +341,39 @@ where
     // TCP and one UDP analysis scope. Tying the persistent interner to the
     // input frame budget avoids changing the meaning of the per-transport
     // flow and concurrent-datagram ceilings.
-    let scope_limit = usize::try_from(limits.max_frames)
+    // The identity space bounds the table no matter how many frames the
+    // input may carry, so the derived count stops there.
+    let max_scopes = usize::try_from(limits.max_frames)
         .unwrap_or(usize::MAX)
-        .saturating_mul(3);
+        .saturating_mul(3)
+        .min(MAX_SCOPES);
     let mut scopes = Interner::with_limits(ScopeLimits {
-        limit: scope_limit,
+        max_scopes,
         max_bytes: limits.max_scope_bytes,
-    });
-    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits);
-    let mut ip_dispatch = IpDispatch::new(limits.ip_reassembly(), options.ip_overlap);
+    })
+    .map_err(|source| Error::Scope { number: 0, source })?;
+    let mut reassembly_dispatch = ReassemblyDispatch::new(options.tcp_events, limits)?;
+    let mut ip_dispatch = IpDispatch::new(limits.ip.clone(), options.ip_overlap)?;
     let mut provenance = options
         .track_sources
         .then(|| {
             crate::analysis::provenance::Tracker::new(
                 limits.max_provenance_bytes,
-                limits.max_ip_outcomes,
+                limits.ip.max_retained_outcomes,
             )
         })
         .transpose()?;
     let stage = FrameStage {
         decoder: &decoder,
         deadline: &deadline,
-        max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+        max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
     };
 
-    let mut frames_read = 0_u64;
+    let mut input = limits.capture_budget()?;
     let mut frames_matched = 0_u64;
-    let mut bytes_read = 0_u64;
     loop {
         enforce_deadline(&deadline)?;
-        let Some((number, frame)) = next_frame(reader, &mut frames_read, &mut bytes_read, limits)?
-        else {
+        let Some((number, frame)) = next_frame(reader, &mut input)? else {
             break;
         };
         let timestamp = match frame.timestamp {
@@ -382,8 +385,10 @@ where
             .decode(
                 frame,
                 crate::decode::Options {
-                    max_packet_size: limits.max_frame_bytes,
-                    ..crate::decode::Options::default()
+                    limits: crate::packet::Limits {
+                        max_packet_size: limits.max_frame_bytes,
+                        ..crate::packet::Limits::default()
+                    },
                 },
             )
             .map_err(|source| Error::Decode { number, source })?;
@@ -528,6 +533,7 @@ where
     }
 
     enforce_deadline(&deadline)?;
+    let (frames_read, bytes_read) = (input.frames(), input.captured_bytes());
     for event in ip_dispatch.flush() {
         enforce_deadline(&deadline)?;
         ip_sink(IpEventRecord {
@@ -749,8 +755,10 @@ fn decode_derived(
         .decode(
             frame,
             crate::decode::Options {
-                max_layers,
-                max_packet_size: datagram.bytes.len(),
+                limits: crate::packet::Limits {
+                    max_layers,
+                    max_packet_size: datagram.bytes.len(),
+                },
             },
         )
         .map_err(|source| {
@@ -779,29 +787,23 @@ fn decode_derived(
     })
 }
 
-/// Reads one physical frame and charges it against the aggregate frame and
-/// captured-byte ceilings, which the capture reader's own
-/// [`capture_file::Limits`](crate::capture_file::Limits) enforces.
+/// Reads one physical frame and charges it against the input
+/// [`capture_file::Budget`](crate::capture_file::Budget).
 fn next_frame<R: Read>(
     reader: &mut Reader<R>,
-    frames_read: &mut u64,
-    bytes_read: &mut u64,
-    limits: &Limits,
+    input: &mut crate::capture_file::Budget,
 ) -> Result<Option<(u64, crate::frame::Frame)>, Error> {
-    let number = frames_read.saturating_add(1);
+    let number = input.frames().saturating_add(1);
     let Some(frame) = reader
         .next_frame()
         .map_err(|source| Error::Capture { number, source })?
     else {
         return Ok(None);
     };
-    let (number, bytes) = limits
-        .capture()
-        .advance(*frames_read, *bytes_read, frame.captured_length())
+    input
+        .charge(frame.captured_length())
         .map_err(|source| Error::Capture { number, source })?;
-    *frames_read = number;
-    *bytes_read = bytes;
-    Ok(Some((number, frame)))
+    Ok(Some((input.frames(), frame)))
 }
 
 fn enforce_deadline(deadline: &Deadline) -> Result<(), Error> {
@@ -886,14 +888,15 @@ mod tests {
             Self {
                 decoder: Dissector::new(builtin::registry()),
                 deadline: Deadline::new(limits.max_duration),
-                dispatch: IpDispatch::new(limits.ip_reassembly(), OverlapPolicy::default()),
+                dispatch: IpDispatch::new(limits.ip.clone(), OverlapPolicy::default())
+                    .expect("default limits are valid"),
                 scopes: Interner::new(),
                 provenance: Some(
-                    Tracker::new(limits.max_provenance_bytes, limits.max_ip_outcomes)
+                    Tracker::new(limits.max_provenance_bytes, limits.ip.max_retained_outcomes)
                         .expect("tracker"),
                 ),
                 max_frame_bytes: limits.max_frame_bytes,
-                max_ip_reassembly_bytes: limits.max_ip_reassembly_bytes,
+                max_ip_reassembly_bytes: limits.ip.max_aggregate_bytes,
             }
         }
 
@@ -911,8 +914,10 @@ mod tests {
                 .decode(
                     frame,
                     crate::decode::Options {
-                        max_packet_size: self.max_frame_bytes,
-                        ..crate::decode::Options::default()
+                        limits: crate::packet::Limits {
+                            max_packet_size: self.max_frame_bytes,
+                            ..crate::packet::Limits::default()
+                        },
                     },
                 )
                 .expect("frame decodes");

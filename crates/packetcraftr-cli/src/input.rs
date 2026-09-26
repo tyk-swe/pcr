@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use packetcraftr_core as core;
 use packetcraftr_core::capture_file::Reader;
-use packetcraftr_core::capture_file::ReaderOptions;
+use packetcraftr_core::capture_file::ReaderLimits;
 use packetcraftr_core::error::Classification;
 use packetcraftr_core::error::Kind;
 use packetcraftr_core::packet::Packet;
@@ -436,9 +436,9 @@ pub(crate) fn snapshot_capture<R: Read>(
         .map_err(capture_file::Error::from)
         .map_err(CliError::classified)?;
     crate::cancellation::check()?;
-    Reader::with_options(
+    Reader::with_limits(
         snapshot,
-        ReaderOptions {
+        ReaderLimits {
             max_size: bounds.max_frame_bytes,
             max_interfaces_per_section: bounds.max_interfaces,
             ..Default::default()
@@ -466,12 +466,12 @@ fn capture_reader<R: Read + 'static>(
         )
         .map_err(CliError::classified)?,
     );
-    let reader = Reader::with_options(
+    let reader = Reader::with_limits(
         source,
-        ReaderOptions {
+        ReaderLimits {
             max_size: bounds.max_frame_bytes,
             max_interfaces_per_section: bounds.max_interfaces,
-            ..ReaderOptions::default()
+            ..ReaderLimits::default()
         },
     )
     .map_err(CliError::classified)?;

@@ -181,15 +181,20 @@ impl Reassembler {
         })
     }
 
-    #[must_use]
-    pub fn new(limits: Limits, overlap_policy: OverlapPolicy) -> Self {
-        Self {
+    /// A reassembler bounded by `limits`, after [`Limits::validate`]
+    /// accepts them.
+    pub fn new(
+        limits: Limits,
+        overlap_policy: OverlapPolicy,
+    ) -> Result<Self, crate::analysis::Error> {
+        limits.validate()?;
+        Ok(Self {
             limits,
             overlap_policy,
             datagrams: Default::default(),
             expiry: Default::default(),
             retained: Retained::default(),
-        }
+        })
     }
 
     /// Admits one physical fragment and returns its classification, attaching

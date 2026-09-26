@@ -16,21 +16,39 @@ pub enum Format {
     Zstd,
 }
 
+/// Smallest accepted [`Limits::max_window_log`], the Zstd format minimum.
+pub const MIN_WINDOW_LOG: u32 = 10;
+/// Largest accepted [`Limits::max_window_log`], a 64 MiB decoding window.
+pub const MAX_WINDOW_LOG: u32 = 26;
+
+/// Ceilings for decoding one compressed capture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Encoded source bytes, bounding empty members and Zstd skippable frames.
     pub max_encoded_bytes: u64,
     /// All decoded container bytes, including headers and metadata.
     pub max_decoded_bytes: u64,
-    /// Base-two logarithm of the maximum Zstd window; accepted range 10..=26.
+    /// Base-two logarithm of the maximum Zstd window, within
+    /// [`MIN_WINDOW_LOG`]`..=`[`MAX_WINDOW_LOG`].
     pub max_window_log: u32,
+}
+impl Limits {
+    /// Rejects a window outside the range the decoder can honor.
+    pub fn validate(&self) -> Result<(), Error> {
+        if !(MIN_WINDOW_LOG..=MAX_WINDOW_LOG).contains(&self.max_window_log) {
+            return Err(Error::WindowLimit {
+                value: self.max_window_log,
+            });
+        }
+        Ok(())
+    }
 }
 impl Default for Limits {
     fn default() -> Self {
         Self {
             max_encoded_bytes: super::DEFAULT_STREAM_BYTES,
             max_decoded_bytes: super::DEFAULT_STREAM_BYTES,
-            max_window_log: 26,
+            max_window_log: MAX_WINDOW_LOG,
         }
     }
 }
@@ -136,17 +154,13 @@ pub struct Input<R: Read> {
 impl<R: Read> Input<R> {
     /// Detects compression by magic without requiring seek or a file extension.
     pub fn new(source: R, limits: Limits) -> Result<Self, Error> {
+        limits.validate()?;
         let mut source = EncodedInput {
             inner: source,
             remaining: limits.max_encoded_bytes,
             limit: limits.max_encoded_bytes,
             exceeded: false,
         };
-        if !(10..=26).contains(&limits.max_window_log) {
-            return Err(Error::WindowLimit {
-                value: limits.max_window_log,
-            });
-        }
         let mut prefix = vec![0; 4];
         let mut filled = 0;
         while filled < prefix.len() {

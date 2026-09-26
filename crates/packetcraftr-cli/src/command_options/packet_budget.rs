@@ -28,13 +28,18 @@ impl PacketBudgetArgs {
     pub(crate) fn build_options(self, mode: core::codec::Mode) -> core::build::Options {
         core::build::Options {
             mode,
-            max_layers: self.max_layers,
-            max_packet_size: self.max_packet_size,
+            limits: self.limits(),
         }
     }
 
     pub(crate) fn decode_options(self) -> core::decode::Options {
         core::decode::Options {
+            limits: self.limits(),
+        }
+    }
+
+    fn limits(self) -> core::packet::Limits {
+        core::packet::Limits {
             max_layers: self.max_layers,
             max_packet_size: self.max_packet_size,
         }

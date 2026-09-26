@@ -43,7 +43,8 @@ All notable changes to PacketcraftR are documented here. The format follows
   removed. Registry bindings take the `LinkType` newtype and
   `impl Into<Discriminator>` instead of bare integers, `Frame` length
   constructors take `Lengths { captured, original }`, and
-  `analysis::scope::Interner::with_limits` takes `Limits { limit, max_bytes }`.
+  `analysis::scope::Interner::with_limits` takes
+  `Limits { max_scopes, max_bytes }`.
   `Malformed::new` takes `Option<String>`, analysis HTTP/DNS collectors take
   `impl IntoIterator<Item = u16>`, `transform::VlanTag` is renamed
   `VlanRewrite` (with `From<link::VlanTag>`), `analysis::follow::Direction` is
@@ -174,6 +175,27 @@ All notable changes to PacketcraftR are documented here. The format follows
   is `output::dns_read`, `output::forwarding` is `output::verify_forwarding`,
   and `output::scan_connect` is `output::scan::connect`. The types and their
   JSON are unchanged. See `docs/migration-unreleased.md`.
+- Core limits follow one convention: a configured ceiling is a `…Limits` type
+  whose `validate()` runs where it is accepted, and a running allowance is a
+  `…Budget`. `capture_file::ReaderOptions` is `ReaderLimits` and
+  `Reader::with_options` is `Reader::with_limits`. `capture_file::Limits::advance`
+  is replaced by `capture_file::Budget` (`new`, `charge`, `after`, `frames`,
+  `captured_bytes`). `capture_file::Limits`, `MergeLimits` (whose source
+  ceiling is the new `capture_file::MAX_MERGE_SOURCES`), `compression::Limits`, `scope::Limits`, the IP and TCP reassembly `Limits`,
+  `dhcp::Limits`, and `dns::DecodeLimits` gain `validate()`, and
+  `application::Limits::validate` is public. Writers, `rewrite`, `select`,
+  `map_frames`, and `merge` refuse a zero stream limit with
+  `capture_file::Error::InvalidLimit` (`cli.capture_limit`).
+  `ip::Reassembler::new`, `tcp::Reassembler::new`, and
+  `scope::Interner::with_limits` validate and return a `Result`;
+  `tcp::Resource::InvalidWindowLimit` is removed because an oversized window is
+  refused at construction. `scope::Limits::limit` is `max_scopes`, at most the
+  new `scope::MAX_SCOPES`. `analysis::Limits` holds `tcp` and `ip` reassembly
+  limits instead of ten flat `max_tcp_*`/`max_ip_*`/`*_idle_expiry` fields,
+  and `tcp.max_flows` (concurrent directional flows) is now set directly
+  rather than derived from `max_flows`. `decode::Options` and `build::Options`
+  hold their `max_layers` and `max_packet_size` in a shared `packet::Limits`.
+  See `docs/migration-unreleased.md`.
 
 ### Added
 
@@ -673,6 +695,14 @@ All notable changes to PacketcraftR are documented here. The format follows
 
 ### Fixed
 
+- DHCP limits above 65535 message bytes, 4096 options, or nesting depth 8 are
+  refused with `dhcp::Error::InvalidLimit` (`policy.dhcp_limit`) instead of
+  being silently lowered to those ceilings, which are now public as
+  `dhcp::{MAX_MESSAGE_BYTES, MAX_OPTIONS, MAX_NESTING}`.
+- DNS decode limits above 65535 message or TXT bytes, 4096 records or TXT
+  strings, or 128 name pointers are refused with `dns::Error::InvalidLimit`
+  (`policy.dns_limit`) instead of being silently tightened, and the ceilings
+  are public as `dns::{MAX_MESSAGE_BYTES, MAX_RECORDS, MAX_NAME_POINTERS}`.
 - A strict build accepts link padding inside a packet rooted at `vlan` or
   `vlan8021ad`, as decoding already produces it, instead of failing with
   `PaddingWithoutLinkLayer`.

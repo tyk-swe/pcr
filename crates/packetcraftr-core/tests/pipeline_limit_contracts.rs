@@ -17,37 +17,47 @@ use packetcraftr_core::protocol::transport::Tcp;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+/// The default limits with one edit applied.
+fn with(edit: impl FnOnce(&mut Limits)) -> Limits {
+    let mut limits = Limits::default();
+    edit(&mut limits);
+    limits
+}
+
 #[test]
 fn limits_validate_each_finite_budget_before_input_is_read() {
     // Every ceiling the two reassembly engines enforce is reachable from
     // this type, so every one of them is refused at zero before a single
     // frame is read.
     type ZeroOne = fn(&mut Limits);
-    let zeroed: [(&str, ZeroOne); 12] = [
+    let zeroed: [(&str, ZeroOne); 13] = [
         ("max_frames", |limits| limits.max_frames = 0),
         ("max_bytes", |limits| limits.max_bytes = 0),
         ("max_frame_bytes", |limits| limits.max_frame_bytes = 0),
         ("max_flows", |limits| limits.max_flows = 0),
+        ("max_tcp_flows", |limits| limits.tcp.max_flows = 0),
         ("max_tcp_bytes_per_flow", |limits| {
-            limits.max_tcp_bytes_per_flow = 0;
+            limits.tcp.max_bytes_per_flow = 0;
         }),
         ("max_tcp_reassembly_bytes", |limits| {
-            limits.max_tcp_reassembly_bytes = 0;
+            limits.tcp.max_aggregate_bytes = 0;
         }),
         ("max_tcp_segments_per_flow", |limits| {
-            limits.max_tcp_segments_per_flow = 0;
+            limits.tcp.max_segments_per_flow = 0;
         }),
-        ("max_ip_datagrams", |limits| limits.max_ip_datagrams = 0),
+        ("max_ip_datagrams", |limits| limits.ip.max_datagrams = 0),
         ("max_ip_fragments_per_datagram", |limits| {
-            limits.max_ip_fragments_per_datagram = 0;
+            limits.ip.max_fragments_per_datagram = 0;
         }),
         ("max_ip_bytes_per_datagram", |limits| {
-            limits.max_ip_bytes_per_datagram = 0;
+            limits.ip.max_bytes_per_datagram = 0;
         }),
         ("max_ip_reassembly_bytes", |limits| {
-            limits.max_ip_reassembly_bytes = 0;
+            limits.ip.max_aggregate_bytes = 0;
         }),
-        ("max_ip_outcomes", |limits| limits.max_ip_outcomes = 0),
+        ("max_ip_outcomes", |limits| {
+            limits.ip.max_retained_outcomes = 0;
+        }),
     ];
     for (field, zero) in zeroed {
         let mut limits = Limits::default();
@@ -67,17 +77,11 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
     for (field, zero) in [
         (
             "tcp_idle_expiry",
-            Limits {
-                tcp_idle_expiry: Duration::ZERO,
-                ..Limits::default()
-            },
+            with(|limits| limits.tcp.idle_expiry = Duration::ZERO),
         ),
         (
             "ip_idle_expiry",
-            Limits {
-                ip_idle_expiry: Duration::ZERO,
-                ..Limits::default()
-            },
+            with(|limits| limits.ip.idle_expiry = Duration::ZERO),
         ),
     ] {
         assert!(
@@ -92,23 +96,16 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
     // half-space a retransmission and a wrapped future segment stop being
     // distinguishable, and the engine refuses to run at all.
     assert!(matches!(
-        Limits {
-            max_tcp_bytes_per_flow: tcp::MAX_BYTES_PER_FLOW + 1,
-            ..Limits::default()
-        }
-        .validate(),
+        with(|limits| limits.tcp.max_bytes_per_flow = tcp::MAX_BYTES_PER_FLOW + 1).validate(),
         Err(Error::InvalidLimit {
             field: "max_tcp_bytes_per_flow",
             ..
         })
     ));
     assert!(
-        Limits {
-            max_tcp_bytes_per_flow: tcp::MAX_BYTES_PER_FLOW,
-            ..Limits::default()
-        }
-        .validate()
-        .is_ok()
+        with(|limits| limits.tcp.max_bytes_per_flow = tcp::MAX_BYTES_PER_FLOW)
+            .validate()
+            .is_ok()
     );
     assert!(matches!(
         Limits {
@@ -134,22 +131,14 @@ fn limits_validate_each_finite_budget_before_input_is_read() {
         })
     ));
     assert!(matches!(
-        Limits {
-            ip_idle_expiry: Duration::MAX,
-            ..Limits::default()
-        }
-        .validate(),
+        with(|limits| limits.ip.idle_expiry = Duration::MAX).validate(),
         Err(Error::InvalidLimit {
             field: "ip_idle_expiry",
             ..
         })
     ));
     assert!(matches!(
-        Limits {
-            tcp_idle_expiry: Duration::MAX,
-            ..Limits::default()
-        }
-        .validate(),
+        with(|limits| limits.tcp.idle_expiry = Duration::MAX).validate(),
         Err(Error::InvalidLimit {
             field: "tcp_idle_expiry",
             ..
@@ -353,17 +342,11 @@ fn analysis_limits_reach_every_tcp_reassembly_budget() {
     // caller set, which is only possible if that value reached it.
     let bounded: [(Limits, tcp::Error); 2] = [
         (
-            Limits {
-                max_tcp_bytes_per_flow: 4,
-                ..Limits::default()
-            },
+            with(|limits| limits.tcp.max_bytes_per_flow = 4),
             tcp::Resource::FlowByteLimit { limit: 4 }.into(),
         ),
         (
-            Limits {
-                max_tcp_reassembly_bytes: 8,
-                ..Limits::default()
-            },
+            with(|limits| limits.tcp.max_aggregate_bytes = 8),
             tcp::Resource::AggregateByteLimit { limit: 8 }.into(),
         ),
     ];
@@ -388,10 +371,7 @@ fn analysis_limits_reach_every_tcp_reassembly_budget() {
     };
     assert_eq!(evictions(Limits::default()), 0);
     assert_eq!(
-        evictions(Limits {
-            max_tcp_segments_per_flow: 1,
-            ..Limits::default()
-        }),
+        evictions(with(|limits| limits.tcp.max_segments_per_flow = 1)),
         1
     );
 }
@@ -418,10 +398,7 @@ fn tcp_idle_expiry_follows_the_configured_capture_time_interval() {
             Arc::clone(&registry),
             &Options {
                 tcp_events: true,
-                limits: Limits {
-                    tcp_idle_expiry,
-                    ..Limits::default()
-                },
+                limits: with(|limits| limits.tcp.idle_expiry = tcp_idle_expiry),
                 ..Options::default()
             },
             |record| {

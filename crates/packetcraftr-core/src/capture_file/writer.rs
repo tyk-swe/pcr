@@ -11,8 +11,8 @@ use crate::frame::{Frame, LinkType};
 use super::classic::{write_pcap_frame, write_pcap_header};
 use super::error::Error;
 use super::model::{
-    DEFAULT_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, PcapNgOptions, PcapOptions,
-    TimestampPrecision, TimestampResolution,
+    Budget, DEFAULT_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, PcapNgOptions,
+    PcapOptions, TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
     interface_description_base_length, select_interface, validate_new_interface,
@@ -41,8 +41,7 @@ pub(super) enum WriterState {
 struct FramePlan {
     encoding: FrameEncoding,
     encoded_size: usize,
-    next_frames: u64,
-    next_bytes: u64,
+    budget: Budget,
 }
 
 enum FrameEncoding {
@@ -140,9 +139,7 @@ pub struct Writer<W> {
     pub(super) state: WriterState,
     max_size: usize,
     max_interfaces: usize,
-    stream_limits: Limits,
-    frames_written: u64,
-    captured_bytes_written: u64,
+    budget: Budget,
     output_failure: Option<OutputFailure>,
 }
 
@@ -185,6 +182,7 @@ impl<W: Write> Writer<W> {
             max_size,
             stream_limits,
         } = options;
+        let budget = Budget::new(stream_limits)?;
         if link_type.0 > u16::MAX as u32 {
             return Err(Error::LinkTypeOutOfRange {
                 link_type: link_type.0,
@@ -218,7 +216,7 @@ impl<W: Write> Writer<W> {
             },
             max_size,
             DEFAULT_INTERFACE_LIMIT,
-            stream_limits,
+            budget,
         ))
     }
 
@@ -235,6 +233,7 @@ impl<W: Write> Writer<W> {
             max_interfaces,
             stream_limits,
         } = options;
+        let budget = Budget::new(stream_limits)?;
         if max_size < 28 {
             return Err(Error::SizeLimitExceeded {
                 kind: "pcapng section header",
@@ -251,7 +250,7 @@ impl<W: Write> Writer<W> {
             },
             max_size,
             max_interfaces,
-            stream_limits,
+            budget,
         ))
     }
 
@@ -260,16 +259,14 @@ impl<W: Write> Writer<W> {
         state: WriterState,
         max_size: usize,
         max_interfaces: usize,
-        stream_limits: Limits,
+        budget: Budget,
     ) -> Self {
         Self {
             inner,
             state,
             max_size,
             max_interfaces,
-            stream_limits,
-            frames_written: 0,
-            captured_bytes_written: 0,
+            budget,
             output_failure: None,
         }
     }
@@ -294,10 +291,10 @@ impl<W: Write> Writer<W> {
     }
 
     /// The aggregate ceilings this writer was opened under. They are fixed
-    /// at construction: a stream's budget cannot be raised part-way through
+    /// at construction: a stream's limits cannot be raised part-way through
     /// the output it already committed.
     pub fn stream_limits(&self) -> Limits {
-        self.stream_limits
+        self.budget.limits()
     }
 
     /// Frames committed to the output so far.
@@ -306,11 +303,11 @@ impl<W: Write> Writer<W> {
     /// mismatch, or an output failure — commits neither a frame nor a byte,
     /// and this pair is how a caller observes that.
     pub fn frames_written(&self) -> u64 {
-        self.frames_written
+        self.budget.frames()
     }
 
     pub fn captured_bytes_written(&self) -> u64 {
-        self.captured_bytes_written
+        self.budget.captured_bytes()
     }
 
     /// Adds a PCAPNG interface using the writer's configured size limit as
@@ -446,19 +443,14 @@ impl<W: Write> Writer<W> {
                 })?;
             }
         }
-        self.frames_written = plan.next_frames;
-        self.captured_bytes_written = plan.next_bytes;
+        self.budget = plan.budget;
         Ok(())
     }
 
     fn prepare_frame(&self, frame: &Frame) -> Result<FramePlan, Error> {
         self.ensure_output_available()?;
         validate_frame_size(frame, self.max_size)?;
-        let (next_frames, next_bytes) = self.stream_limits.advance(
-            self.frames_written,
-            self.captured_bytes_written,
-            frame.captured_length(),
-        )?;
+        let budget = self.budget.after(frame.captured_length())?;
         let (encoding, record_size, prefix_size) = match &self.state {
             WriterState::Pcap {
                 precision,
@@ -524,8 +516,7 @@ impl<W: Write> Writer<W> {
         Ok(FramePlan {
             encoding,
             encoded_size,
-            next_frames,
-            next_bytes,
+            budget,
         })
     }
 
@@ -682,7 +673,7 @@ mod tests {
                 .unwrap(),
             };
             let before = writer.get_ref().clone();
-            writer.frames_written = u64::MAX;
+            writer.budget = Budget::charged(limits, u64::MAX, 0);
             for error in [
                 writer.encoded_frame_size(&frame).unwrap_err(),
                 writer.write_frame(&frame).unwrap_err(),
@@ -695,9 +686,8 @@ mod tests {
                     }
                 ));
             }
-            assert_eq!(writer.frames_written, u64::MAX);
-            writer.frames_written = 0;
-            writer.captured_bytes_written = u64::MAX;
+            assert_eq!(writer.frames_written(), u64::MAX);
+            writer.budget = Budget::charged(limits, 0, u64::MAX);
             for error in [
                 writer.encoded_frame_size(&frame).unwrap_err(),
                 writer.write_frame(&frame).unwrap_err(),
@@ -710,8 +700,8 @@ mod tests {
                     }
                 ));
             }
-            assert_eq!(writer.captured_bytes_written, u64::MAX);
-            assert_eq!(writer.frames_written, 0);
+            assert_eq!(writer.captured_bytes_written(), u64::MAX);
+            assert_eq!(writer.frames_written(), 0);
             assert_eq!(writer.get_ref(), &before);
             assert!(writer.output_failure.is_none());
         }

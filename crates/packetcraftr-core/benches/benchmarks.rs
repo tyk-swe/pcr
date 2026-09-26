@@ -18,7 +18,7 @@ use packetcraftr_core::analysis::reassembly::tcp::Limits as ReassemblyLimits;
 use packetcraftr_core::analysis::reassembly::tcp::{FlowKey, Reassembler, ScopedFlowKey, Segment};
 use packetcraftr_core::analysis::scope::Interner;
 use packetcraftr_core::build::{Builder, Options as BuildOptions};
-use packetcraftr_core::capture_file::{Reader, ReaderOptions, Writer};
+use packetcraftr_core::capture_file::{Reader, ReaderLimits, Writer};
 use packetcraftr_core::codec::Context;
 use packetcraftr_core::decode::{Dissector, Options as DecodeOptions};
 use packetcraftr_core::document::{DocumentLimits, Format, Packet as DocPacket};
@@ -191,7 +191,7 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
     c.bench_function("capture_read_pcap_frames", |b| {
         b.iter(|| {
             let mut reader =
-                Reader::with_options(Cursor::new(black_box(&pcap_data)), ReaderOptions::default())
+                Reader::with_limits(Cursor::new(black_box(&pcap_data)), ReaderLimits::default())
                     .expect("reader");
             let mut count = 0_usize;
             while let Some(f) = reader.next_frame().expect("valid benchmark PCAP frame") {
@@ -206,9 +206,9 @@ fn bench_capture_processing_and_encoding(c: &mut Criterion) {
 
     c.bench_function("capture_read_pcapng_records", |b| {
         b.iter(|| {
-            let mut reader = Reader::with_options(
+            let mut reader = Reader::with_limits(
                 Cursor::new(black_box(&pcapng_data)),
-                ReaderOptions::default(),
+                ReaderLimits::default(),
             )
             .expect("reader");
             let mut count = 0_usize;
@@ -310,7 +310,7 @@ fn bench_tcp_reassembly(c: &mut Criterion) {
                 max_aggregate_bytes: 64 * 1024,
                 ..Default::default()
             };
-            let mut reassembler = Reassembler::new(limits);
+            let mut reassembler = Reassembler::new(limits).unwrap();
             let now = Instant::now();
             for seg in &segments {
                 let events = reassembler.push(black_box(seg.clone()), now).expect("push");
@@ -440,7 +440,7 @@ fn bench_ip_reassembly(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     let reassembler =
-                        IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject);
+                        IpReassembler::new(IpReassemblyLimits::default(), OverlapPolicy::Reject).unwrap();
                     (reassembler, fragments.clone(), Instant::now())
                 },
                 |(mut reassembler, fragments, now)| {

@@ -14,7 +14,7 @@ use crate::capture_file::pcapng::{
 use crate::capture_file::{
     error::Error,
     model::{
-        CaptureRecord, Format, Interface, MetadataBlockKind, PacketBlockKind, ReaderOptions,
+        CaptureRecord, Format, Interface, MetadataBlockKind, PacketBlockKind, ReaderLimits,
         RecordKind,
     },
     wire::{
@@ -27,14 +27,14 @@ pub(super) fn decode(
     block: FramedBlock<'_>,
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
     match block.block_type {
         PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
-            decode_interface(block.body, block.raw, state, all_interfaces, options)
+            decode_interface(block.body, block.raw, state, all_interfaces, limits)
         }
         block_type => match packet_block_kind(block_type) {
-            Some(kind) => decode_packet(kind, block.body, block.raw, state, options),
+            Some(kind) => decode_packet(kind, block.body, block.raw, state, limits),
             None => decode_metadata(block_type, block.body, block.raw, state),
         },
     }
@@ -45,7 +45,7 @@ fn decode_interface(
     raw: Bytes,
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
     let description = parse_interface_description(body, state.endianness)?;
     let option_bytes = body.get(8..).ok_or(Error::InvalidData {
@@ -54,9 +54,9 @@ fn decode_interface(
     })?;
     let parsed_options = parse_options(option_bytes, state.endianness, "pcapng interface options")?;
     let local_id = u32::try_from(state.interfaces.len()).map_err(|_| Error::InterfaceLimit {
-        limit: options.max_interfaces_per_section,
+        limit: limits.max_interfaces_per_section,
     })?;
-    let global_id = state.add_interface(all_interfaces, description.clone(), options)?;
+    let global_id = state.add_interface(all_interfaces, description.clone(), limits)?;
     Ok(record(
         RecordKind::Metadata(MetadataBlockKind::InterfaceDescription {
             section: state.section_index,
@@ -75,7 +75,7 @@ fn decode_packet(
     body: &[u8],
     raw: Bytes,
     state: &mut PcapNgState,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
 ) -> Result<CaptureRecord, Error> {
     let parse = match kind {
         PacketBlockKind::Enhanced => parse_enhanced_packet,
@@ -88,7 +88,7 @@ fn decode_packet(
         state.endianness,
         &state.interfaces,
         state.interface_base,
-        options.max_size,
+        limits.max_size,
     )?;
     let parsed_options = parse_options(parsed.options, state.endianness, "pcapng packet options")?;
     state.reset_metadata();

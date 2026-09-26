@@ -15,9 +15,18 @@ pub(crate) use codec::DnsCodec;
 pub use codec::{decode_name, name, read_u16};
 pub use model::{Dns, Edns, EdnsOption, Name, Question, Record, RecordValue};
 
-/// Per-message resource bounds. Absolute ceilings remain 65,535 message/TXT
-/// bytes, 4,096 records/TXT strings, 128 name pointers, and 64 questions.
-/// Larger supplied limits are tightened to these ceilings; zero permits none.
+/// Largest accepted [`DecodeLimits::max_message_bytes`] and
+/// [`DecodeLimits::max_txt_bytes`]: one DNS message.
+pub const MAX_MESSAGE_BYTES: usize = 65_535;
+/// Largest accepted [`DecodeLimits::max_records`] and
+/// [`DecodeLimits::max_txt_strings`].
+pub const MAX_RECORDS: usize = 4_096;
+/// Largest accepted [`DecodeLimits::max_name_pointers`].
+pub const MAX_NAME_POINTERS: usize = 128;
+
+/// Per-message resource bounds. Each is at most its `MAX_*` constant, and a
+/// message may carry at most 64 questions. [`DecodeLimits::validate`] refuses
+/// a larger limit rather than lowering it; zero permits none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecodeLimits {
     pub max_message_bytes: usize,
@@ -26,10 +35,39 @@ pub struct DecodeLimits {
     pub max_txt_strings: usize,
     pub max_txt_bytes: usize,
 }
+impl DecodeLimits {
+    /// Rejects a limit above its `MAX_*` constant.
+    pub fn validate(&self) -> Result<(), Error> {
+        for (field, value, maximum) in [
+            (
+                "max_message_bytes",
+                self.max_message_bytes,
+                MAX_MESSAGE_BYTES,
+            ),
+            ("max_records", self.max_records, MAX_RECORDS),
+            (
+                "max_name_pointers",
+                self.max_name_pointers,
+                MAX_NAME_POINTERS,
+            ),
+            ("max_txt_strings", self.max_txt_strings, MAX_RECORDS),
+            ("max_txt_bytes", self.max_txt_bytes, MAX_MESSAGE_BYTES),
+        ] {
+            if value > maximum {
+                return Err(Error::InvalidLimit {
+                    field,
+                    value,
+                    maximum,
+                });
+            }
+        }
+        Ok(())
+    }
+}
 impl Default for DecodeLimits {
     fn default() -> Self {
         Self {
-            max_message_bytes: 65_535,
+            max_message_bytes: MAX_MESSAGE_BYTES,
             max_records: 512,
             max_name_pointers: 32,
             max_txt_strings: 256,
@@ -106,6 +144,13 @@ pub enum Error {
     TxtByteLimit { limit: usize },
     #[error("DNS message has {remaining} trailing byte(s) after declared sections")]
     TrailingBytes { remaining: usize },
+    /// A configured [`DecodeLimits`] field above its ceiling.
+    #[error("DNS limit {field}={value} exceeds the maximum of {maximum}")]
+    InvalidLimit {
+        field: &'static str,
+        value: usize,
+        maximum: usize,
+    },
     /// The message could not be encoded under the strict DNS wire rules.
     #[error("DNS message cannot be encoded")]
     Encode(#[source] crate::codec::Error),
@@ -121,7 +166,8 @@ impl crate::error::Classified for Error {
             | Self::TxtStringLimit { .. }
             | Self::TxtByteLimit { .. }
             | Self::PointerLimit { .. }
-            | Self::MessageTooLarge { .. } => Classification::new(
+            | Self::MessageTooLarge { .. }
+            | Self::InvalidLimit { .. } => Classification::new(
                 "policy.dns_limit",
                 Kind::Policy,
                 Some("raise the finite DNS decode limit or inspect the oversized message"),

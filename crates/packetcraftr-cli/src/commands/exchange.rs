@@ -63,7 +63,7 @@ pub(super) fn run(
         capture: limits,
         ..packetcraftr::exchange::Options::default()
     };
-    options.decode.max_packet_size = limits.snap_length;
+    options.decode.limits.max_packet_size = limits.snap_length;
     let preparation::Prepared {
         template,
         options,

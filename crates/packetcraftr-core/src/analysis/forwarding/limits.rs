@@ -9,9 +9,13 @@ use std::io::{self, Write};
 
 use super::evaluate::{AmbiguousGroup, Evidence, Match, UnkeyedObservation, Violation};
 
-/// Finite comparison budgets. Input observations have their own collection
-/// budget; these ceilings account for the additional index and report work.
-#[derive(Clone, Copy, Debug)]
+/// Finite comparison limits. Input observations have their own collection
+/// limits; these ceilings account for the additional index and report work.
+///
+/// Every value is honored as given, so there is nothing to validate: zero
+/// `max_details` or `max_detail_bytes` retains no details, and zero
+/// `max_scratch_bytes` refuses any comparison that needs scratch space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerifyLimits {
     pub max_details: usize,
     /// Conservative JSON-sized charge over all retained detail categories.

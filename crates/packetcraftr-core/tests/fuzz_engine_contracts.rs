@@ -101,7 +101,10 @@ fn fuzz_bounded_resource_rejection_precedes_unbounded_case_growth() {
             strategies: vec![Strategy::BitFlip],
             targets: vec!["2.bytes".parse().unwrap()],
             build: Options {
-                max_packet_size: 64,
+                limits: packetcraftr_core::packet::Limits {
+                    max_packet_size: 64,
+                    ..packetcraftr_core::packet::Limits::default()
+                },
                 ..Options::default()
             },
             limits: Limits {
@@ -166,7 +169,10 @@ fn offline_fuzz_late_limit_failure_preserves_earlier_cases() {
         strategies: vec![Strategy::BitFlip],
         targets: vec!["0.bytes".parse().unwrap()],
         build: Options {
-            max_packet_size: 32,
+            limits: packetcraftr_core::packet::Limits {
+                max_packet_size: 32,
+                ..packetcraftr_core::packet::Limits::default()
+            },
             ..Options::default()
         },
         limits: Limits {

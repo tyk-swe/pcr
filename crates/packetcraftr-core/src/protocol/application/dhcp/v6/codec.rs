@@ -252,7 +252,7 @@ fn encode_options(
 }
 fn encode_value(option: &Option6, budget: &mut Budget, depth: usize) -> Result<Vec<u8>, Error> {
     let mut output = Vec::new();
-    let maximum = budget.limits.max_message_bytes.min(65_535);
+    let maximum = budget.limits.max_message_bytes;
     match (&option.value, option.code) {
         (Value6::Identifier(duid), 1 | 2) => {
             extend(&mut output, &duid.kind.to_be_bytes(), maximum)?;

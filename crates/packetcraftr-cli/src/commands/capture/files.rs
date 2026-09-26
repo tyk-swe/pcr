@@ -166,14 +166,12 @@ struct Active {
 }
 pub(super) struct Files {
     options: Options,
-    limits: capture_file::Limits,
+    budget: capture_file::Budget,
     sources: Vec<Source>,
     slots: Vec<Slot>,
     active: Option<Active>,
     header_bytes: u64,
     generation: u64,
-    total_frames: u64,
-    total_bytes: u64,
     discarded_files: u64,
     discarded_frames: u64,
     discarded_bytes: u64,
@@ -185,14 +183,12 @@ impl Files {
         options.validate()?;
         Ok(Self {
             options,
-            limits,
+            budget: capture_file::Budget::new(limits)?,
             sources: Vec::new(),
             slots: Vec::new(),
             active: None,
             header_bytes: 0,
             generation: 0,
-            total_frames: 0,
-            total_bytes: 0,
             discarded_files: 0,
             discarded_frames: 0,
             discarded_bytes: 0,
@@ -212,7 +208,7 @@ impl Files {
             },
             capture_file::Format::PcapNg,
             &self.sources,
-            self.limits,
+            self.budget.limits(),
         )?;
         self.header_bytes = preview.into_inner().bytes;
         if let Some(limit) = self.options.rotate_bytes
@@ -240,9 +236,7 @@ impl Files {
             return Err(Error::ElapsedRegressed);
         }
         self.last_elapsed = elapsed;
-        let (next_frames, next_bytes) =
-            self.limits
-                .advance(self.total_frames, self.total_bytes, frame.captured_length())?;
+        let budget = self.budget.after(frame.captured_length())?;
         let active = self.active.as_ref().ok_or(Error::State)?;
         let frame_bytes = active.writer.encoded_frame_size(frame)? as u64;
         let required = self
@@ -288,8 +282,7 @@ impl Files {
         report.first_source_frame.get_or_insert(source_frame);
         report.last_source_frame = Some(source_frame);
         let capture_bytes = report.capture_bytes;
-        self.total_frames = next_frames;
-        self.total_bytes = next_bytes;
+        self.budget = budget;
         // Stop exactly at a full final slot when possible; otherwise a later
         // boundary reports its one matched but unpublished frame explicitly.
         if self.options.retention == Retention::Stop
@@ -378,7 +371,7 @@ impl Files {
             output,
             capture_file::Format::PcapNg,
             &self.sources,
-            self.limits,
+            self.budget.limits(),
         )?;
         self.header_bytes = writer.get_ref().bytes;
         file.report.capture_bytes = self.header_bytes;
@@ -456,8 +449,8 @@ impl Files {
                 .map(|duration| duration.as_millis() as u64),
             maximum_files: self.options.max_files,
             files,
-            frames_written: self.total_frames,
-            captured_bytes_written: self.total_bytes,
+            frames_written: self.budget.frames(),
+            captured_bytes_written: self.budget.captured_bytes(),
             discarded_files: self.discarded_files,
             discarded_frames: self.discarded_frames,
             discarded_capture_bytes: self.discarded_bytes,

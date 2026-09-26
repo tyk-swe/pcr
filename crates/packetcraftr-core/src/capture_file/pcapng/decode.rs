@@ -7,7 +7,7 @@ use super::section::{SectionHeader, read_pcapng_block_header, read_section_heade
 use crate::capture_file::{
     error::Error,
     model::{
-        CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, ReaderOptions, RecordKind,
+        CaptureRecord, Endianness, Format, Interface, MetadataBlockKind, ReaderLimits, RecordKind,
         Section,
     },
     wire::PCAPNG_SECTION_HEADER,
@@ -76,19 +76,19 @@ impl PcapNgState {
         }
     }
 
-    fn account_metadata(&mut self, length: usize, options: &ReaderOptions) -> Result<(), Error> {
+    fn account_metadata(&mut self, length: usize, limits: &ReaderLimits) -> Result<(), Error> {
         self.metadata_blocks = self.metadata_blocks.saturating_add(1);
-        if self.metadata_blocks > options.max_metadata_blocks_per_frame {
+        if self.metadata_blocks > limits.max_metadata_blocks_per_frame {
             return Err(Error::MetadataBlockLimit {
-                limit: options.max_metadata_blocks_per_frame,
+                limit: limits.max_metadata_blocks_per_frame,
             });
         }
         self.metadata_bytes = self
             .metadata_bytes
             .checked_add(length)
-            .filter(|actual| *actual <= options.max_metadata_bytes_per_frame)
+            .filter(|actual| *actual <= limits.max_metadata_bytes_per_frame)
             .ok_or(Error::MetadataByteLimit {
-                limit: options.max_metadata_bytes_per_frame,
+                limit: limits.max_metadata_bytes_per_frame,
             })?;
         Ok(())
     }
@@ -102,21 +102,21 @@ impl PcapNgState {
         &mut self,
         all_interfaces: &mut Vec<Interface>,
         description: Interface,
-        options: &ReaderOptions,
+        limits: &ReaderLimits,
     ) -> Result<u32, Error> {
-        if self.interfaces.len() >= options.max_interfaces_per_section {
+        if self.interfaces.len() >= limits.max_interfaces_per_section {
             return Err(Error::InterfaceLimit {
-                limit: options.max_interfaces_per_section,
+                limit: limits.max_interfaces_per_section,
             });
         }
-        if all_interfaces.len() >= options.max_total_interfaces {
+        if all_interfaces.len() >= limits.max_total_interfaces {
             return Err(Error::TotalInterfaceLimit {
-                limit: options.max_total_interfaces,
+                limit: limits.max_total_interfaces,
             });
         }
         let global_id =
             u32::try_from(all_interfaces.len()).map_err(|_| Error::TotalInterfaceLimit {
-                limit: options.max_total_interfaces,
+                limit: limits.max_total_interfaces,
             })?;
         self.interfaces.push(description.clone());
         all_interfaces.push(description);
@@ -128,7 +128,7 @@ fn read_section_record<R: Read>(
     reader: &mut R,
     raw_header: [u8; 8],
     state: &mut PcapNgState,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
     scratch: &mut Vec<u8>,
 ) -> Result<CaptureRecord, Error> {
     if let Some(remaining) = state
@@ -140,12 +140,12 @@ fn read_section_record<R: Read>(
     let header = read_section_header_with_length(
         reader,
         raw_header[4..8].try_into().expect("four-byte slice"),
-        options.max_size,
-        Some((state.metadata_bytes, options.max_metadata_bytes_per_frame)),
+        limits.max_size,
+        Some((state.metadata_bytes, limits.max_metadata_bytes_per_frame)),
         scratch,
     )?;
-    state.account_metadata(header.block_length, options)?;
-    state.start_section(&header, options.max_interfaces_per_section)?;
+    state.account_metadata(header.block_length, limits)?;
+    state.start_section(&header, limits.max_interfaces_per_section)?;
     Ok(CaptureRecord {
         kind: RecordKind::Metadata(MetadataBlockKind::Section(Section {
             index: state.section_index,
@@ -166,7 +166,7 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
     reader: &mut R,
     state: &mut PcapNgState,
     all_interfaces: &mut Vec<Interface>,
-    options: &ReaderOptions,
+    limits: &ReaderLimits,
     scratch: &mut Vec<u8>,
 ) -> Result<Option<CaptureRecord>, Error> {
     let remaining_in_section = state.remaining_in_section;
@@ -184,8 +184,8 @@ pub(in crate::capture_file) fn read_next_pcapng_record<R: Read>(
     };
 
     if raw_header[..4] == PCAPNG_SECTION_HEADER {
-        return read_section_record(reader, raw_header, state, options, scratch).map(Some);
+        return read_section_record(reader, raw_header, state, limits, scratch).map(Some);
     }
-    let block = framing::read(reader, raw_header, state, options, scratch)?;
-    record::decode(block, state, all_interfaces, options).map(Some)
+    let block = framing::read(reader, raw_header, state, limits, scratch)?;
+    record::decode(block, state, all_interfaces, limits).map(Some)
 }

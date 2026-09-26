@@ -108,8 +108,6 @@ pub enum Resource {
     AggregateByteLimit { limit: usize },
     #[error("could not allocate {requested} bytes for TCP reassembly")]
     AllocationFailed { requested: usize },
-    #[error("TCP per-flow window {limit} reaches or exceeds the serial-number half-space")]
-    InvalidWindowLimit { limit: usize },
 }
 
 /// Mutually inconsistent stream input.

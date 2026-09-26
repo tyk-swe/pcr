@@ -66,19 +66,19 @@ impl Builder {
         if packet.is_empty() {
             return Err(Error::EmptyPacket);
         }
-        if packet.len() > options.max_layers {
+        if packet.len() > options.limits.max_layers {
             return Err(Error::LayerLimit {
                 actual: packet.len(),
-                limit: options.max_layers,
+                limit: options.limits.max_layers,
             });
         }
         // Only pass-through bytes are a safe pre-encoding lower bound; other fields might not
         // reach the wire.
         let pass_through_bytes = validation::pass_through_byte_length(packet)?;
-        if pass_through_bytes > options.max_packet_size {
+        if pass_through_bytes > options.limits.max_packet_size {
             return Err(Error::PacketSizeLimit {
                 actual: pass_through_bytes,
-                limit: options.max_packet_size,
+                limit: options.limits.max_packet_size,
             });
         }
 
@@ -172,7 +172,11 @@ impl Builder {
                 fields,
             });
 
-            bytes.wrap(&encoded.prefix, &encoded.suffix, options.max_packet_size)?;
+            bytes.wrap(
+                &encoded.prefix,
+                &encoded.suffix,
+                options.limits.max_packet_size,
+            )?;
             layers.push(encoded.materialized);
             diagnostics.extend(encoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
@@ -217,10 +221,11 @@ impl Builder {
 
 fn remaining_packet_bytes(bytes: &PacketBuffer, options: &Options) -> Result<usize, Error> {
     options
+        .limits
         .max_packet_size
         .checked_sub(bytes.len())
         .ok_or(Error::PacketSizeLimit {
             actual: bytes.len(),
-            limit: options.max_packet_size,
+            limit: options.limits.max_packet_size,
         })
 }

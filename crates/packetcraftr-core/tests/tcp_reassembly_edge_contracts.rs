@@ -10,6 +10,8 @@ use packetcraftr_core::analysis::reassembly::tcp::{
     Reassembler as TcpReassembler, Resource as TcpResource, ScopedFlowKey, Segment,
 };
 use packetcraftr_core::analysis::scope::ScopeId;
+use packetcraftr_core::analysis::{Constraint, Error as AnalysisError};
+use packetcraftr_core::error::Classified;
 
 fn scope() -> ScopeId {
     packetcraftr_core::analysis::scope::Interner::new()
@@ -75,7 +77,7 @@ fn equal_deadline_expiry_events_use_stable_keys() {
     let now = Instant::now();
     let higher = flow(20_000);
     let lower = flow(10_000);
-    let mut tcp = TcpReassembler::new(Limits::default());
+    let mut tcp = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut tcp, higher.clone(), 0, now).expect("higher flow opens");
     open(&mut tcp, lower.clone(), 0, now).expect("lower flow opens");
     let events = tcp.expire(now + Limits::default().idle_expiry);
@@ -92,7 +94,7 @@ fn equal_deadline_expiry_events_use_stable_keys() {
 fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
     let now = Instant::now();
     let key = flow(10_000);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     assert!(
         reassembler
             .push(segment(key.clone(), 1, b"", false, false, false), now)
@@ -101,24 +103,22 @@ fn tcp_empty_ack_is_ignored_and_invalid_window_is_rejected() {
     );
     assert_eq!(reassembler.flow_count(), 0);
 
-    let mut invalid = TcpReassembler::new(Limits {
+    let invalid = Limits {
         max_bytes_per_flow: 1usize << 31,
         ..Limits::default()
-    });
+    };
+    let expected = AnalysisError::InvalidLimit {
+        field: "max_bytes_per_flow",
+        value: 1 << 31,
+        reason: Constraint::BelowSerialHalfSpace,
+    };
     assert_eq!(
-        open(&mut invalid, key.clone(), 1, now),
-        Err(TcpResource::InvalidWindowLimit {
-            limit: 1usize << 31
-        }
-        .into())
+        invalid.validate().unwrap_err().to_string(),
+        expected.to_string()
     );
-    assert_eq!(
-        invalid.push(segment(key, 1, b"x", false, false, false), now),
-        Err(TcpResource::InvalidWindowLimit {
-            limit: 1usize << 31
-        }
-        .into())
-    );
+    let refused = TcpReassembler::new(invalid).unwrap_err();
+    assert_eq!(refused.to_string(), expected.to_string());
+    assert_eq!(refused.classification().code, "cli.analysis_limit");
 }
 
 #[test]
@@ -129,7 +129,8 @@ fn tcp_flow_opening_replacement_and_limits_have_stable_queries() {
     let mut reassembler = TcpReassembler::new(Limits {
         max_flows: 1,
         ..Limits::default()
-    });
+    })
+    .unwrap();
     open(&mut reassembler, first.clone(), 100, now).expect("first flow opens");
     open(
         &mut reassembler,
@@ -168,7 +169,8 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
     let mut reassembler = TcpReassembler::new(Limits {
         max_aggregate_bytes: 256,
         ..Limits::default()
-    });
+    })
+    .unwrap();
 
     open(&mut reassembler, first.clone(), 100, now)
         .expect("one empty flow state fits the aggregate budget");
@@ -211,7 +213,8 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
     let mut zero_budget = TcpReassembler::new(Limits {
         max_aggregate_bytes: 0,
         ..Limits::default()
-    });
+    })
+    .unwrap();
     assert_eq!(
         zero_budget
             .push(segment(reset.clone(), 300, b"", false, false, true), now)
@@ -242,7 +245,7 @@ fn tcp_flow_state_metadata_is_bounded_and_only_charged_while_retained() {
 fn tcp_direct_delivery_and_retransmission_history_are_byte_exact() {
     let now = Instant::now();
     let key = flow(10_003);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     let events = reassembler
         .push(segment(key.clone(), 10, b"abc", false, false, false), now)
         .expect("first data anchors and delivers");
@@ -299,7 +302,7 @@ fn tcp_direct_delivery_and_retransmission_history_are_byte_exact() {
 fn tcp_retransmission_ranges_report_each_actual_overlap() {
     let now = Instant::now();
     let key = flow(10_004);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
 
     // A clean gap fill overlapping nothing reports no retransmission.
@@ -323,7 +326,7 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
 
     // A fill whose suffix repeats pending data reports only the shared span.
     let key = flow(10_104);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
     reassembler
         .push(segment(key.clone(), 104, b"efgh", false, false, false), now)
@@ -353,7 +356,7 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
     // Two pending intervals overlapped by one fill produce two ranges, and
     // conflicting pending content wins the emitted stream.
     let key = flow(10_204);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
     reassembler
         .push(segment(key.clone(), 102, b"CD", false, false, false), now)
@@ -387,7 +390,7 @@ fn tcp_retransmission_ranges_report_each_actual_overlap() {
 fn tcp_retransmission_ranges_wrap_the_sequence_space() {
     let now = Instant::now();
     let key = flow(10_304);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), u32::MAX - 1, now).expect("flow opens");
     reassembler
         .push(segment(key.clone(), 2, b"efgh", false, false, false), now)
@@ -421,7 +424,7 @@ fn tcp_retransmission_ranges_wrap_the_sequence_space() {
 fn tcp_out_of_order_merging_keeps_first_and_delivers_one_contiguous_stream() {
     let now = Instant::now();
     let key = flow(10_004);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, key.clone(), 100, now).expect("flow opens");
     assert!(
         reassembler
@@ -465,7 +468,8 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     let mut segment_limit = TcpReassembler::new(Limits {
         max_segments_per_flow: 1,
         ..Limits::default()
-    });
+    })
+    .unwrap();
     open(&mut segment_limit, key.clone(), 100, now).expect("flow opens");
     segment_limit
         .push(segment(key.clone(), 104, b"a", false, false, false), now)
@@ -479,7 +483,8 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     let mut window = TcpReassembler::new(Limits {
         max_bytes_per_flow: 4,
         ..Limits::default()
-    });
+    })
+    .unwrap();
     open(&mut window, key.clone(), 100, now).expect("flow opens");
     assert_eq!(
         window.push(segment(key.clone(), 105, b"x", false, false, false), now),
@@ -497,7 +502,8 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
     let mut aggregate = TcpReassembler::new(Limits {
         max_aggregate_bytes: 0,
         ..Limits::default()
-    });
+    })
+    .unwrap();
     assert_eq!(
         aggregate.push(segment(key, 100, b"x", false, false, false), now),
         Err(TcpResource::AggregateByteLimit { limit: 0 }.into())
@@ -510,7 +516,7 @@ fn tcp_segment_window_and_aggregate_limits_fail_without_mutating_delivery() {
 fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
     let now = Instant::now();
     let key = flow(10_006);
-    let mut complete = TcpReassembler::new(Limits::default());
+    let mut complete = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut complete, key.clone(), 100, now).expect("flow opens");
     let events = complete
         .push(segment(key.clone(), 100, b"abc", false, true, false), now)
@@ -537,7 +543,7 @@ fn tcp_fin_and_reset_close_generations_and_final_sequence_is_immutable() {
     ));
     assert_eq!(complete.flow_count(), 0);
 
-    let mut bounded = TcpReassembler::new(Limits::default());
+    let mut bounded = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut bounded, key.clone(), 100, now).expect("flow opens");
     bounded
         .push(segment(key.clone(), 105, b"", false, true, false), now)
@@ -563,7 +569,8 @@ fn tcp_syn_payload_wraps_sequence_and_expiry_emits_gap_then_eviction() {
     let mut reassembler = TcpReassembler::new(Limits {
         idle_expiry: Duration::from_secs(2),
         ..Limits::default()
-    });
+    })
+    .unwrap();
     let events = reassembler
         .push(
             segment(wrapped.clone(), u32::MAX, b"ab", true, false, false),
@@ -626,7 +633,7 @@ fn tcp_flush_is_directionally_sorted_and_reverse_is_an_involution() {
     let higher = flow(20_000);
     let lower = flow(10_000);
     assert_eq!(higher.reverse().reverse(), higher);
-    let mut reassembler = TcpReassembler::new(Limits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default()).unwrap();
     open(&mut reassembler, higher.clone(), 1, now).expect("higher flow opens");
     open(&mut reassembler, lower.clone(), 1, now).expect("lower flow opens");
     let events = reassembler.flush();

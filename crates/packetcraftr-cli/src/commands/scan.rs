@@ -17,6 +17,7 @@ use self::arguments::Args;
 use super::execution;
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
+use crate::system::{Runtime, prepare_workflow};
 
 impl super::Spec for Args {
     type Format = crate::output::contract::ToolFormat;
@@ -143,26 +144,19 @@ pub(super) fn run(
     if connect {
         return connect::run(&request, policy, format, stream);
     }
-    let execution::Providers {
-        client,
-        route,
-        collection,
-        runtime,
-    } = execution::prepare(
-        route,
-        policy,
+    let workflow = prepare_workflow(
+        &route,
+        policy.into_policy(),
         request.timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
+    let client = workflow.client(Runtime::Workflow);
     let request = packetcraftr::scan::Request {
-        route,
-        collection,
+        route: workflow.route,
+        collection: workflow.collection,
         ..request
     };
-    // Events publish on the workflow runtime, as they did before scan ran
-    // on the client, so the `resources` report keeps its rows.
-    let client = client.with_runtime(runtime);
     execution::run_workflow(
         &mut (),
         format,

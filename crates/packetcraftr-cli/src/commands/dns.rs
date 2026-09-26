@@ -18,6 +18,7 @@ use super::execution;
 use crate::errors::CliError;
 use crate::input::parse_target;
 use crate::rendering::StreamEncoder;
+use crate::system::{Runtime, prepare_workflow};
 
 /// A DNS exchange puts exactly one query on the wire per attempt, so the probe
 /// only ever needs room for one packet template.
@@ -69,21 +70,21 @@ pub(super) fn run(
     }
     let queue_limits = arguments.limits.clone().into_limits();
     let mut requests = prepare_requests(&arguments, queue_limits)?;
-    let providers = execution::prepare(
-        arguments.route,
-        arguments.policy,
+    let workflow = prepare_workflow(
+        &arguments.route,
+        arguments.policy.into_policy(),
         requests[0].timeout,
         MAX_TEMPLATE_PACKETS,
         queue_limits,
     )?;
     for request in &mut requests {
-        request.route = providers.route.clone();
-        request.collection = providers.collection.clone();
+        request.route = workflow.route.clone();
+        request.collection = workflow.collection.clone();
     }
     // DNS drives the composed client itself — authorization, cancellation,
     // and the callback runtime live inside it — so the driver vends no
     // session state.
-    let client = &providers.client;
+    let client = &workflow.client(Runtime::Workflow);
     // A lone question keeps the single-query contract: its failure propagates
     // as the command's error rather than reporting as batch evidence.
     if let [request] = requests.as_slice() {

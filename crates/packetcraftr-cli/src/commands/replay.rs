@@ -200,7 +200,7 @@ fn prepare(arguments: &Args) -> Result<ReplayRun, CliError> {
         fallback: requested_interface.is_some(),
     };
     Ok(ReplayRun {
-        client: crate::system::client(Arc::clone(&registry), policy, "client_progress"),
+        client: crate::system::client(registry, policy, crate::system::Runtime::Client),
         request: Request::new(Source::seekable(reader), options).with_selector(selector),
         filtered,
     })

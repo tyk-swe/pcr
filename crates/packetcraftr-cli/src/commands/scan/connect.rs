@@ -4,7 +4,7 @@
 use packetcraftr::scan::connect;
 
 use crate::output::{self, contract::ToolFormat};
-use crate::system::{Client, client};
+use crate::system::{Client, Runtime, client};
 use crate::{errors::CliError, rendering::StreamEncoder};
 
 pub(super) fn run(
@@ -18,7 +18,7 @@ pub(super) fn run(
     let mut client: Client = client(
         packetcraftr_core::protocol::builtin::registry(),
         policy,
-        "scan_connect",
+        Runtime::ScanConnect,
     );
     crate::commands::execution::run_workflow(
         &mut client,

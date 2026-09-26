@@ -1,72 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Live workflow orchestration shared by the probe-driven commands:
-//! provider composition ([`prepare`]/[`Providers`]) and [`run_workflow`], the
-//! one driver deciding between the streaming and collecting engine entry
-//! points under the negotiated output format. The client resolves the
-//! interface selector after it admits each exchange.
+//! [`run_workflow`], the one driver deciding between the streaming and
+//! collecting engine entry points of a workflow command under the negotiated
+//! output format.
 
-use crate::command_options::{HostnamePolicyArgs, RouteSelectionArgs};
 use crate::output;
-use crate::system::{client, exchange};
 use packetcraftr_core as core;
-use packetcraftr_netio as net;
-use std::sync::Arc;
-use std::time::Duration;
 
 use crate::errors::CliError;
 use crate::rendering::StreamEncoder;
-use crate::system::Client;
-
-/// The client a probe-driven workflow runs on, with the route and capture
-/// bounds its requests carry.
-pub(super) struct Providers {
-    pub(super) client: Client,
-    /// The route every exchange of the workflow plans on.
-    pub(super) route: packetcraftr::route::Options,
-    /// The capture bounds every exchange of the workflow collects under.
-    pub(super) collection: packetcraftr::exchange::Collection,
-    /// Admits the one callback worker NDJSON streaming publishes through.
-    pub(super) runtime: packetcraftr::runtime::Runtime,
-}
-
-/// Validates the policy and interface selector, then composes the client and
-/// the requested route. The client resolves the selector only after it admits
-/// each exchange, so a denied target never enumerates interfaces.
-///
-/// `max_template_packets` is how many packets one exchange may hold: one query
-/// for `dns`, one probe for `scan`, one attempt per hop for `traceroute`.
-pub(super) fn prepare(
-    route: RouteSelectionArgs,
-    policy: HostnamePolicyArgs,
-    timeout: Duration,
-    max_template_packets: usize,
-    queue_limits: net::capture::Limits,
-) -> Result<Providers, CliError> {
-    let policy = Arc::new(policy.into_policy());
-    policy.validate().map_err(CliError::classified)?;
-    let interface = route
-        .interface
-        .as_ref()
-        .map(crate::command_options::Selector::get)
-        .transpose()?
-        .map(Into::into);
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    Ok(Providers {
-        client: client(registry, policy, "client_progress"),
-        route: packetcraftr::route::Options {
-            link_mode: route.link_mode.into(),
-            interface,
-            preferred_source: route.source,
-        },
-        collection: exchange::collection(timeout, max_template_packets, queue_limits)?,
-        runtime: crate::resources::runtime(
-            "workflow_progress",
-            packetcraftr::runtime::MAX_WORKER_CAPACITY,
-        ),
-    })
-}
 
 /// The event sink a streaming engine entry point receives. Engines publish
 /// through a runtime-budgeted worker, so the sink is `Send` and `'static`.

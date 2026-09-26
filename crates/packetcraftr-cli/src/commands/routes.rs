@@ -9,8 +9,6 @@ use crate::output::contract::AggregateFormat;
 
 use crate::output;
 use packetcraftr_netio as net;
-use packetcraftr_netio::interface::Provider as _;
-use packetcraftr_netio::route::Provider as _;
 
 use crate::errors::CliError;
 
@@ -34,19 +32,13 @@ impl super::Spec for Args {
 }
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
-    let interfaces = net::interface::SystemProvider
-        .interfaces(&crate::invocation::passive_lookup())
-        .map_err(CliError::classified)?;
-    let provider = net::route::SystemProvider;
+    let interfaces = crate::system::interfaces(None)?;
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
         .filter(|interface| arguments.includes(interface))
     {
-        let route = provider
-            .lookup_interface(&interface.id, &crate::invocation::passive_lookup())
-            .map_err(CliError::classified)?;
-        if let Some(route) = route {
+        if let Some(route) = crate::system::interface_route(&interface.id)? {
             routes.push(route);
         }
     }

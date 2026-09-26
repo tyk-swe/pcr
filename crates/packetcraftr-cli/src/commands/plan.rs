@@ -6,14 +6,12 @@ mod rendering;
 
 use crate::output::contract::AggregateFormat;
 
-use std::sync::Arc;
-
 use crate::output;
 
 use self::arguments::Args;
 use crate::errors::CliError;
 use crate::rendering::emit_aggregate;
-use crate::system::{client, prepare_route};
+use crate::system::prepare_plan;
 
 impl super::Spec for Args {
     type Format = crate::output::contract::AggregateFormat;
@@ -34,14 +32,13 @@ impl super::Spec for Args {
 
 pub(super) fn run(arguments: Args, format: AggregateFormat) -> Result<(), CliError> {
     let Args { route, policy } = arguments;
-    let registry = packetcraftr_core::protocol::builtin::registry();
-    let request = prepare_route(route, policy.into_policy(), &registry)?;
-    let client = client(Arc::clone(&registry), request.policy, "client_progress");
-    let route = client
+    let plan = prepare_plan(route, policy.into_policy())?;
+    let route = plan
+        .client
         .plan(
-            &request.packet,
-            request.destination,
-            &request.options,
+            &plan.packet,
+            plan.destination,
+            &plan.route,
             &crate::invocation::passive_lookup(),
         )
         .map_err(CliError::classified)?;

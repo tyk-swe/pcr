@@ -149,9 +149,10 @@ All notable changes to PacketcraftR are documented here. The format follows
   edits or inspects bytes a codec round trip would not reproduce uses it
   instead of parsing headers by hand (ADR 0004); `transform::rewrite` and
   `transform::fragment` now share it, and field edits use it for checksum
-  coverage. `transform::Error::Header` carries its typed error, classified as
-  before (`packet.transform_input`, `packet.transform_unsupported` for a
-  jumbogram, `policy.transform_limit` for VLAN or extension depth).
+  coverage. `protocol::headers::Error` implements `Classified`, and
+  `transform::Error::Header` carries it with the same codes as before
+  (`packet.transform_input`, `packet.transform_unsupported` for a jumbogram,
+  `policy.transform_limit` for VLAN or extension depth).
   `packet::link::VlanTag::{from_tci, tci}`, `VlanKind::from_ether_type`, and
   the `ip_protocol::{ESP, ICMPV6, NO_NEXT_HEADER}` numbers support it.
 

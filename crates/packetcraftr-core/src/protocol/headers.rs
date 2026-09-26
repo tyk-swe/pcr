@@ -47,6 +47,7 @@
 use std::fmt;
 use std::ops::Range;
 
+use crate::error::{Classification, Classified, Kind};
 use crate::frame::LinkType;
 use crate::packet::link::{MacAddress, VlanKind, VlanTag};
 
@@ -119,6 +120,34 @@ pub enum Error {
     /// datagram; its length lives in a Jumbo Payload option (RFC 2675).
     #[error("IPv6 jumbograms are not walked")]
     Jumbogram,
+}
+
+/// Header walks run on packet-transform input, so their failures classify as
+/// transform failures: a jumbogram is unsupported, an exceeded depth bound is
+/// a limit, and everything else is malformed input.
+impl Classified for Error {
+    fn classification(&self) -> Classification {
+        match self {
+            Self::Jumbogram => Classification::new(
+                "packet.transform_unsupported",
+                Kind::Packet,
+                Some("inspect the documented transform boundaries"),
+            ),
+            Self::Depth { .. } => Classification::new(
+                "policy.transform_limit",
+                Kind::Policy,
+                Some("raise a finite transform limit or reduce the input"),
+            ),
+            Self::Truncated(_)
+            | Self::Length(_)
+            | Self::UnknownIpVersion(_)
+            | Self::IpVersionMismatch { .. } => Classification::new(
+                "packet.transform_input",
+                Kind::Packet,
+                Some("supply a complete supported datagram"),
+            ),
+        }
+    }
 }
 
 /// The link framing in front of a network header.
@@ -994,6 +1023,30 @@ mod tests {
         assert_eq!(
             header.extensions()[0].options(&ip).collect::<Vec<_>>(),
             [Err(Error::Length(Header::Ipv6Option))]
+        );
+    }
+
+    #[test]
+    fn walk_failures_classify_as_transform_failures() {
+        let code = |error: Error| error.classification().code;
+        assert_eq!(code(Error::Jumbogram), "packet.transform_unsupported");
+        assert_eq!(
+            code(Error::Depth {
+                header: Header::Vlan,
+                limit: MAX_VLAN_DEPTH
+            }),
+            "policy.transform_limit"
+        );
+        assert_eq!(
+            code(Error::Truncated(Header::Ipv4)),
+            "packet.transform_input"
+        );
+        assert_eq!(
+            code(Error::IpVersionMismatch {
+                expected: 4,
+                found: 6
+            }),
+            "packet.transform_input"
         );
     }
 }

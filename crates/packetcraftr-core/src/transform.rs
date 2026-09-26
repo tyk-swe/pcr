@@ -55,17 +55,18 @@ impl Classified for Error {
         match self {
             Self::Frame(source) => source.classification(),
             Self::Decode(source) => source.classification(),
-            Self::Unsupported(_) | Self::Header(headers::Error::Jumbogram) => Classification::new(
+            Self::Header(source) => source.classification(),
+            Self::Unsupported(_) => Classification::new(
                 "packet.transform_unsupported",
                 Kind::Packet,
                 Some("inspect the documented transform boundaries"),
             ),
-            Self::Limit { .. } | Self::Header(headers::Error::Depth { .. }) => Classification::new(
+            Self::Limit { .. } => Classification::new(
                 "policy.transform_limit",
                 Kind::Policy,
                 Some("raise a finite transform limit or reduce the input"),
             ),
-            Self::Invalid(_) | Self::Header(_) => Classification::new(
+            Self::Invalid(_) => Classification::new(
                 "packet.transform_input",
                 Kind::Packet,
                 Some("supply a complete supported datagram"),

@@ -553,9 +553,8 @@ constructors must supply the field.
 ## Typed error sources
 
 Errors keep typed sources instead of display strings.
-`document::Error::Parse.source` is now
-`Box<dyn std::error::Error + Send + Sync>` (was `String`); construct it with
-the parser's error or a message-boxing helper rather than `.to_string()`.
+`document::Error::Parse.source` is now an `error::Source` (was `String`);
+construct it with `Source::new(error)` rather than `.to_string()`.
 probe `ErrorKind` implements `std::error::Error` and `Error::source()`
 delegates to it, so `source().downcast_ref::<SelectionError>()` (and similar)
 recovers the original cause through worker-reaper, route materialization,
@@ -724,7 +723,7 @@ Error types of the wire APIs:
   variants; an encoding failure is `dns::Error::Encode`, whose source is the
   codec error. Code that matched `codec::Error::Truncated` on a DNS
   conversion matches `dns::Error::MessageTooShort`, `TruncatedField`, or
-  `Name(name::Error::Truncated*)` instead.
+  `TruncatedLabelLength`/`TruncatedPointer`/`TruncatedLabel` instead.
 - `Http::try_from(&[u8])` returns `http::Error`; an incomplete or trailing
   header block is `http::Error::Invalid`.
 - `Tls::try_from` (from `&[u8]` and `Hello`), `Hello::to_wire`,
@@ -733,3 +732,53 @@ Error types of the wire APIs:
   message displays exactly as the former `codec::Error::Invalid` did, and a
   hello that exceeds an encoder bound is `tls::Error::Encode` with the codec
   error as source.
+
+## Core error convention
+
+Each core module has one `Error`, used module-qualified. Errors keep typed
+sources, their messages no longer repeat the source's text, and every public
+error implements `Classified`. Classification codes are unchanged.
+
+| Removed | Use instead |
+|---|---|
+| `packet::PacketError` | `packet::Error` |
+| `layer::FieldError` | `field::Error` |
+| `field::PathError` | `field::Error::InvalidPath` |
+| `layer::ReflectiveFieldError` | `layer::Refusal` (a reason, not an error) |
+| `capture_file::SelectionError::Predicate` | `capture_file::Error::Predicate` |
+| `capture_file::MapError::{Transform, Metadata, Identity}` | `capture_file::Error::{Transform, TransformMetadata, TransformIdentity}` |
+| `capture_file::MergeError::{Sources, Source, ClockRegression, Metadata}` | `capture_file::Error::{MergeSources, MergeSource, MergeClockRegression, MergeMetadata}` |
+| `analysis::SessionError::{Run, Collector}` | `analysis::Error` itself, and `analysis::Error::Collector` |
+| `filter::ProjectionError::{Field, Limit}` | `filter::Error::{ProjectionField, ProjectionLimit}` |
+| `fuzz::TargetParseError::{MissingSeparator, InvalidLayer, InvalidField}` | `fuzz::Error::{TargetSeparator, TargetLayer, TargetField}` |
+| `dns::name::Error::*` and `dns::Error::Name(..)` | the same variants directly on `dns::Error` |
+| `reassembly::{ip, tcp}::{ResourceError, MalformedError}` | `reassembly::{ip, tcp}::{Resource, Malformed}` |
+
+The former `…::Capture(error)` wrapper variants are gone: `select`,
+`map_frames`, and `merge` return `capture_file::Error`, `Session` returns
+`analysis::Error`, and `Projection::compile`/`values` return `filter::Error`.
+A merge input failure is `MergeSource { source: Box<Error>, .. }`.
+
+Typed sources and reasons:
+
+- `codec::Error::Rejected { protocol, source }` reports a protocol model's
+  typed refusal (for example a `dns::Error` or `dhcp::Error` from a codec) and
+  displays as "invalid <protocol> layer"; `source()` downcasts to the original
+  error. Build one with `codec::Error::rejected(protocol, error)`.
+  `codec::Error`, `dns::Error`, and `tls::Error` keep `PartialEq` but drop
+  `Eq`; a `Rejected` source compares by its rendered chain.
+- `error::Source` is core's one type-erased source handle (it is `Clone`, and a
+  `#[source]` field of this type exposes the wrapped error). `BoundaryError`,
+  `document::Error::Parse`, and `fuzz::CaseFailure::with_source` use it.
+- `dhcp::Error::Limit` holds `dhcp::Limit` and `http::Error::Limit` holds
+  `http::Limit` instead of a string; their messages are unchanged.
+  `analysis::Error::InvalidLimit.reason` is an `analysis::Constraint`.
+  `forwarding::Error::ExpectationSyntax` splits into `ExpectationSeparator`
+  and `ExpectationEmptySide`.
+- `error::render(&error)` joins an error and its sources into one line for text
+  records such as diagnostics and malformed-layer reasons.
+
+Messages that ended in `: {source}` now end before it, and the source
+appears in `Classified::causes()` (and the published `causes`). Code that
+searched `to_string()` for a source's text reads `causes()` or
+`error::source_chain`, or `error::render` for one line.

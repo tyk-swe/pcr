@@ -10,9 +10,18 @@ Cycles inside the model layer are acceptable. Phase 1.
 
 **Blocked by:** 04, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] No module imports from a higher layer. Add a short layer map to core's crate docs.
-- [ ] A custom protocol registered with the padding property behaves like the built-in link protocols. Add a contract test in `runtime_registry_contracts.rs`.
-- [ ] Decode and build matrix tests pass unchanged.
-- [ ] fmt, clippy and the workspace tests pass.
+- [x] No module imports from a higher layer. Add a short layer map to core's crate docs.
+- [x] A custom protocol registered with the padding property behaves like the built-in link protocols. Add a contract test in `runtime_registry_contracts.rs`.
+- [x] Decode and build matrix tests pass unchanged.
+- [x] fmt, clippy and the workspace tests pass.
+
+## Comments
+
+- Per decisions.md, the root `matcher` (`ResponseMatcher`, `Match`) stays in the model layer beside the registry; the built-in matcher impls stay in `protocol/matcher`. Moving `packet::semantics` to `protocol::semantics` breaks both cycles.
+- Raw, Padding and Malformed models, codecs and `parse_hex` now live in `layer/opaque.rs`; `protocol::raw` is removed and `parse_hex` is `layer::parse_hex`.
+- The padding property is `registry::Builder::allow_trailing_padding(protocol)`, called beside the codec registration (a separate builder call, like `register_matcher`, so `register_codec`'s signature is unchanged); `build` rejects an unregistered protocol. `Registry::allows_trailing_padding` reads it.
+- Build link-padding validation now uses the same property as decode, so VLAN/QinQ count as link protocols there too. A strict build of a VLAN-rooted packet with link padding now succeeds (it used to fail although decode produced it); recorded under Fixed.
+- `build/validation.rs` keeps its protocol-specific boundary lists (IPv4/IPv6/UDP/ARP/PPPoE, Ethernet ether_type length); engines may depend on protocols. Only the Raw/Padding/Malformed cases moved to model identity.
+- `#[cfg(test)]` code in `protocol/transport/udp.rs` (build + expression) and the TLS parse tests (`fuzz::rng`) still reach higher layers; they are unit tests, not module dependencies.

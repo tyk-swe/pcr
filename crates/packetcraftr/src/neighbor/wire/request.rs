@@ -20,7 +20,7 @@ use packetcraftr_core::protocol::network::{Ipv6, ndp};
 
 /// Shortest Ethernet frame without its frame check sequence.
 const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
-pub(super) const ARP_REQUEST: u16 = 1;
+const ARP_REQUEST: u16 = 1;
 /// Hop limit RFC 4861 requires on every Neighbor Discovery message.
 pub(super) const NDP_HOP_LIMIT: u8 = 255;
 
@@ -119,7 +119,7 @@ fn finish(
     Ok(build_packet(packet)?.bytes)
 }
 
-fn push_vlan(packet: &mut Packet, tag: VlanTag) {
+pub(super) fn push_vlan(packet: &mut Packet, tag: VlanTag) {
     let VlanTag {
         kind,
         priority,

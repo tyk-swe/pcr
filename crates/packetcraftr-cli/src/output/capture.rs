@@ -225,27 +225,26 @@ fn overflow_policy_name(policy: native::OverflowPolicy) -> &'static str {
 }
 impl From<&packetcraftr::capture::Source> for Source {
     fn from(source: &packetcraftr::capture::Source) -> Self {
-        let native = &source.capture;
         Self {
-            capture_id: native.index as u32,
-            native_interface: native.metadata.interface.clone().into(),
-            link_type: native.metadata.link_type.0,
-            snap_length: native.metadata.snap_length,
-            capture_settings: native
+            capture_id: source.index as u32,
+            native_interface: source.metadata.interface.clone().into(),
+            link_type: source.metadata.link_type.0,
+            snap_length: source.metadata.snap_length,
+            capture_settings: source
                 .metadata
                 .native
                 .reported()
-                .then(|| native.metadata.native.into()),
-            queue_frames: native.limits.max_frames,
-            queue_bytes: native.limits.max_bytes,
-            overflow_policy: overflow_policy_name(native.limits.overflow_policy).to_owned(),
-            metadata_valid: native.metadata_valid,
-            ready: native.ready,
-            shutdown_confirmed: native.shutdown_confirmed,
-            statistics_valid: native.statistics_valid,
-            statistics: native.statistics.into(),
-            delivered_frames: native.delivered_frames,
-            delivered_bytes: native.delivered_bytes,
+                .then(|| source.metadata.native.into()),
+            queue_frames: source.limits.max_frames,
+            queue_bytes: source.limits.max_bytes,
+            overflow_policy: overflow_policy_name(source.limits.overflow_policy).to_owned(),
+            metadata_valid: source.metadata_valid,
+            ready: source.ready,
+            shutdown_confirmed: source.shutdown_confirmed,
+            statistics_valid: source.statistics_valid,
+            statistics: source.statistics.into(),
+            delivered_frames: source.delivered_frames,
+            delivered_bytes: source.delivered_bytes,
             admitted_frames: source.admitted_frames,
             matched_frames: source.matched_frames,
             emitted_frames: source.emitted_frames,

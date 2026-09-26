@@ -1870,7 +1870,7 @@ fn rewrite_case() -> Value {
 }
 
 fn capture_case() -> Value {
-    use packetcraftr_netio::capture::{Limits, Metadata, OverflowPolicy, Source};
+    use packetcraftr_netio::capture::{Limits, Metadata, OverflowPolicy};
     let sources = [
         OverflowPolicy::Fail,
         OverflowPolicy::DropNewest,
@@ -1880,29 +1880,27 @@ fn capture_case() -> Value {
     .enumerate()
     .map(|(index, overflow_policy)| {
         let source = packetcraftr::capture::Source {
-            capture: Source {
-                index,
-                metadata: Metadata {
-                    interface: packetcraftr_netio::interface::Id {
-                        name: format!("fixture{index}"),
-                        index: u32::try_from(index + 1).expect("fixture index fits"),
-                    },
-                    link_type: LinkType::ETHERNET,
-                    snap_length: 65_535,
-                    native: Default::default(),
+            index,
+            metadata: Metadata {
+                interface: packetcraftr_netio::interface::Id {
+                    name: format!("fixture{index}"),
+                    index: u32::try_from(index + 1).expect("fixture index fits"),
                 },
-                limits: Limits {
-                    overflow_policy,
-                    ..Limits::default()
-                },
-                metadata_valid: true,
-                ready: true,
-                shutdown_confirmed: true,
-                statistics_valid: true,
-                statistics: CaptureStats::default(),
-                delivered_frames: 0,
-                delivered_bytes: 0,
+                link_type: LinkType::ETHERNET,
+                snap_length: 65_535,
+                native: Default::default(),
             },
+            limits: Limits {
+                overflow_policy,
+                ..Limits::default()
+            },
+            metadata_valid: true,
+            ready: true,
+            shutdown_confirmed: true,
+            statistics_valid: true,
+            statistics: CaptureStats::default(),
+            delivered_frames: 0,
+            delivered_bytes: 0,
             admitted_frames: 0,
             matched_frames: 0,
             emitted_frames: 0,
